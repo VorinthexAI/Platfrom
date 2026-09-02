@@ -38,6 +38,11 @@ describe('personal assistant service capabilities', () => {
     expect(capabilities.find(({ definition }) => definition.name === 'place.list')?.definition.description).toBe('List saved and recently opened places.');
   });
 
+  test('describes app.search as the cross-resource semantic retrieval path', () => {
+    const description = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'app.search')!.definition.description;
+    for (const guidance of ['Standard semantic search for any user resource', 'audio books', 'collection slug "books"', 'multiple slugs', 'Infer limit']) expect(description).toContain(guidance);
+  });
+
   test('keeps inbox and tone mutation model inputs strict and non-empty', () => {
     const signal = defaultAssistantCapabilityRegistry.resolve('signal-workspace');
     for (const name of ['inbox.refresh', 'inbox.sort', 'inbox.update', 'email.thread.favorite', 'email.thread.read-state', 'email.thread.trash', 'email.trash.clear', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.list', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete', 'email.draft.delete']) {

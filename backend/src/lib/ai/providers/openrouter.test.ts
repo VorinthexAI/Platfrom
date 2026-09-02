@@ -26,14 +26,27 @@ describe('OpenRouter provider', () => {
     expect(result).toMatchObject({ output: { toolCalls: [{ id: 'call-1', name: 'weather', arguments: { city: 'Oslo' } }], stopReason: 'tool_use' }, usage: { totalTokens: 6 }, costUsd: 0.001, providerId: 'openrouter' });
   });
 
-  test('normalizes grounded web annotations and enables the web plugin', async () => {
+  test('pins the flash-lite text model to its upstream provider without fallbacks and leaves other models unpinned', async () => {
+    const bodies: any[] = [];
+    const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return Response.json({ choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
+    }) as typeof fetch);
+    await provider.execute(request('text', chatInput, 'google/gemini-3.1-flash-lite'));
+    await provider.execute(request('text', chatInput, 'vendor/model'));
+    expect(bodies[0]).toMatchObject({ model: 'google/gemini-3.1-flash-lite', provider: { order: ['google-vertex/us'], allow_fallbacks: false } });
+    expect(bodies[1].provider).toBeUndefined();
+  });
+
+  test('normalizes grounded web annotations and enables bounded native server search', async () => {
     let body: any;
     const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
       body = JSON.parse(String(init?.body));
       return Response.json({ choices: [{ message: { content: 'Current answer', annotations: [{ type: 'url_citation', url_citation: { url: 'https://example.com/news', title: 'News' } }] }, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 } });
     }) as typeof fetch);
     const result = await provider.execute(request('web', { prompt: 'What changed?' }));
-    expect(body).toMatchObject({ model: 'vendor/model', plugins: [{ id: 'web', engine: 'exa', max_results: 5 }] });
+    expect(body).toMatchObject({ model: 'vendor/model', tools: [{ type: 'openrouter:web_search', parameters: { engine: 'native', max_results: 5, max_uses: 2, max_total_results: 10 } }], max_tool_calls: 2 });
+    expect(body.plugins).toBeUndefined();
     expect(result.output).toEqual({ text: 'Current answer', citations: [{ title: 'News', url: 'https://example.com/news' }], sources: ['https://example.com/news'] });
   });
 

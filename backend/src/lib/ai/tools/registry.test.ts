@@ -9,10 +9,10 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(176);
-    expect(MODEL_TOOL_NAMES).toHaveLength(173);
-    expect(TOOL_DEFINITIONS).toHaveLength(173);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 128);
+    expect(TOOL_NAMES).toHaveLength(177);
+    expect(MODEL_TOOL_NAMES).toHaveLength(174);
+    expect(TOOL_DEFINITIONS).toHaveLength(174);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 129);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...MODEL_TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -23,6 +23,9 @@ describe('unified tool registry', () => {
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'image.caption')).toHaveLength(1);
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'image.create-visual-identity')).toHaveLength(1);
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'image.search')).toHaveLength(1);
+    expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'web.search')).toHaveLength(1);
+    expect(toolInputSchemas['web.search'].parse({ query: 'latest Gemini release' })).toEqual({ query: 'latest Gemini release' });
+    for (const field of ['organizationKey', 'scopeKey', 'userKey', 'model', 'provider', 'engine', 'apiKey']) expect(() => toolInputSchemas['web.search'].parse({ query: 'latest Gemini release', [field]: 'forged' })).toThrow('Unrecognized key');
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'app.search')).toHaveLength(1);
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['app.enhance', 'app.translate', 'app.speech']));
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'app.speech')).toHaveLength(1);
@@ -151,6 +154,21 @@ describe('unified tool registry', () => {
     await runTool('conversation.message.send', '', { conversationKey, message: 'hello' }, { contentContext, conversationService: conversations, requestKey: 'trusted-request' });
     await runTool('agent.query', '', { query: 'prior' }, { contentContext, conversationService: conversations });
     expect(calls).toEqual([{ conversationKey, message: 'hello', requestKey: 'trusted-request' }, { query: 'prior', limit: 20 }]);
+  });
+
+  test('dispatches web search through the canonical action with trusted routing context', async () => {
+    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
+    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const calls: unknown[] = [];
+    const result = await runTool('web.search', '', { query: 'current information' }, {
+      contentContext,
+      executeSearch: async (trustedOrganization, input, options) => {
+        calls.push({ trustedOrganization, input, providers: options.providers });
+        return { output: { text: 'Grounded answer', citations: [{ title: 'Source', url: 'https://example.com/source' }], sources: ['https://example.com/source'] }, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' };
+      },
+    });
+    expect(calls).toEqual([{ trustedOrganization: organizationKey, input: { prompt: 'current information' }, providers: ['web.primary'] }]);
+    expect(result).toMatchObject({ text: 'Grounded answer', citations: [{ url: 'https://example.com/source' }] });
   });
 
   test('dispatches the unique agents.core tool through the canonical lazy agent adapter', async () => {
@@ -305,11 +323,13 @@ describe('unified tool registry', () => {
     await expect(runTool('folder.list', '', { scopeKey: newId() }, { contentContext, executeWorkspaceContent: executeWorkspaceContent as any })).rejects.toThrow('Unrecognized key');
     await expect(runTool('document.search-all', '', { organizationKey: newId(), query: 'roadmap' }, { contentContext, executeWorkspaceContent: executeWorkspaceContent as any })).rejects.toThrow('Unrecognized key');
     await runTool('folder.list', '', {}, { contentContext, executeWorkspaceContent: executeWorkspaceContent as any });
+    await runTool('folder.list', '', {}, { contentContext, requestKey: 'read-request-key', executeWorkspaceContent: executeWorkspaceContent as any });
     await runTool('folder.create', '', { folders: [{ name: 'Plans' }] }, { contentContext, executeWorkspaceContent: executeWorkspaceContent as any });
     await runTool('document.search-all', '', { query: 'roadmap' }, { contentContext, executeWorkspaceContent: executeWorkspaceContent as any });
     await runTool('folder.create', '', { folders: [{ name: 'Idempotent' }] }, { contentContext, requestKey: 'agent-request-key', executeWorkspaceContent: executeWorkspaceContent as any });
 
     expect(calls).toEqual([
+      ['folder.list', { scopeKey }, contentContext, expect.any(Object)],
       ['folder.list', { scopeKey }, contentContext, expect.any(Object)],
       ['folder.create', { folders: [{ scopeKey, name: 'Plans' }] }, contentContext, expect.any(Object)],
       ['document.search-all', { organizationKey, query: 'roadmap' }, contentContext, expect.any(Object)],

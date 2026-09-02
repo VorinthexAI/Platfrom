@@ -28,7 +28,22 @@ Tools execute only through canonical `runTool` adapters with trusted
 `ToolContext` and hashed per-call request keys. Tool failures become safe failed
 statuses so the model can recover. Arguments, context, results, and errors are
 bounded and treated as untrusted data; oversized successful results are
-reported as failures rather than truncated. The public `agents.core` tool has
+reported with an omission marker rather than truncated. The public `agents.core` tool has
 one strict model input and lazily imports Core so `agents -> tools -> agents`
 does not create an eager initialization cycle. Its adapter injects the system
 prompt, current ISO date, request key, identity, organization, and scope.
+
+## Live E2E
+
+With the local API and its dependencies running, execute:
+
+```bash
+bun run --cwd backend test:e2e:core-agent-live
+```
+
+The opt-in suite uses the configured live text provider through the public
+conversation HTTP and SSE flow. It checks a direct answer plus folder list,
+create, update, and delete turns, verifies mutations through canonical Content
+endpoints, checks persisted history, and removes its folder and conversation in
+`finally`. It refuses non-local API hosts unless
+`CORE_AGENT_E2E_DANGEROUS_REMOTE=true` is explicitly set.

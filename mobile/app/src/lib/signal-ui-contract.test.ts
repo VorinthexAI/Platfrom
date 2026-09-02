@@ -245,7 +245,7 @@ test("Signal exposes Core with the Archive root-search focus gate", () => {
 
 test("Signal routes exact connector keys and opens tones in their editor", () => {
   expect(route).toContain("connectorKey?: string");
-  expect(route).toContain('<EmailWorkspace initialConnectorKey={params.connectorKey} initialMessageKey={params.signalMessageKey} initialThreadKey={params.signalThreadKey} navigatedFromRoot={params.signalReturn === "root"} openAttachments={params.openSignalAttachments === "1"}');
+  expect(route).toContain('<EmailWorkspace initialConnectorKey={params.connectorKey} initialDraftKey={params.draftKey} initialMessageKey={params.signalMessageKey} initialThreadKey={params.signalThreadKey} initialToneKey={params.toneKey} navigatedFromRoot={params.signalReturn === "root"} openAttachments={params.openSignalAttachments === "1"}');
   expect(workspace).toContain('else router.push({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: account.connectorKey, signalReturn: "root" } })');
   expect(workspace).toContain("onPress={() => openToneEdit(record)}");
   expect(workspace).not.toContain('params: { slug: "archive", documentKey: record.key }');
@@ -816,7 +816,8 @@ test("Signal attachment navigation restores the exact reader and sheet from Arch
 test("routed restore survives connector initialization ordering and attachment loads retain source ownership", () => {
   const initialization = workspace.slice(workspace.indexOf("useEffect(() => {\n    overviewRequest.current"), workspace.indexOf("useEffect(() => {\n    const generation = ++operationGeneration.current"));
   expect(initialization).toContain("if (!initialThreadKey) clearSelectedThreadFromEffect()");
-  expect(workspace).toContain('${initialThreadKey ?? "inbox"}:${initialMessageKey ?? "latest"}:${openAttachments ? "attachments" : "reader"}');
+  expect(workspace).toContain('${initialThreadKey ?? "inbox"}:${initialMessageKey ?? "latest"}:${initialDraftKey ?? ""}:${initialToneKey ?? ""}');
+  expect(workspace).toContain('${openAttachments ? "attachments" : "reader"}');
   const attachments = workspace.slice(workspace.indexOf("async function openReceivedAttachments"), workspace.indexOf("function toggleRootInboxSelection"));
   expect(attachments).toContain("const request = ++receivedAttachmentsRequest.current");
   expect(attachments).toContain("request === receivedAttachmentsRequest.current");
@@ -1246,8 +1247,8 @@ test("inbox Trash is scoped to the selected connector and clears with partial fa
 });
 
 test("context changes synchronously remount and cancel a clean new-email session", () => {
-  expect(workspace).toContain('const sessionKey = `${emailContext.organizationKey}:${emailContext.scopeKey}:${initialConnectorKey ?? "root"}:${initialThreadKey ?? "inbox"}:${initialMessageKey ?? "latest"}:${openAttachments ? "attachments" : "reader"}`');
-  expect(workspace).toContain('<EmailWorkspaceSession emailContext={emailContext} initialConnectorKey={initialConnectorKey} initialMessageKey={initialMessageKey} initialThreadKey={initialThreadKey} key={sessionKey} navigatedFromRoot={navigatedFromRoot} openAttachments={openAttachments} />');
+  expect(workspace).toContain('const sessionKey = `${emailContext.organizationKey}:${emailContext.scopeKey}:${initialConnectorKey ?? "root"}:${initialThreadKey ?? "inbox"}:${initialMessageKey ?? "latest"}:${initialDraftKey ?? ""}:${initialToneKey ?? ""}:${initialCollectionKind ?? ""}:${initialSearchQuery ?? ""}:${openAttachments ? "attachments" : "reader"}`');
+  expect(workspace).toContain('<EmailWorkspaceSession emailContext={emailContext} initialCollectionKind={initialCollectionKind} initialConnectorKey={initialConnectorKey} initialDraftKey={initialDraftKey} initialMessageKey={initialMessageKey} initialSearchQuery={initialSearchQuery} initialThreadKey={initialThreadKey} initialToneKey={initialToneKey} key={sessionKey} navigatedFromRoot={navigatedFromRoot} openAttachments={openAttachments} />');
   for (const initialState of ['useState("")', 'useState<string[]>([])', 'useState<NewEmailAlternative[]>([])', 'useState(false)']) expect(workspace).toContain(initialState);
   expect(workspace).toContain("newEmailGeneration.current += 1");
   expect(workspace).toContain("request.controller.abort()");

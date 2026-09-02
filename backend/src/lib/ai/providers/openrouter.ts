@@ -43,6 +43,13 @@ export type OpenRouterProviderConfig = z.input<typeof openRouterProviderConfigSc
 const PROVIDER_ID = 'openrouter' as ProviderId;
 const SPEECH_CHARACTER_LIMIT = 15_000;
 
+const UPSTREAM_PROVIDER_ROUTING: Readonly<Record<string, { order: readonly string[]; allow_fallbacks: boolean }>> = {
+  'google/gemini-3.1-flash-lite': { order: ['google-vertex/us'], allow_fallbacks: false },
+};
+function upstreamRouting(model: string) {
+  return (UPSTREAM_PROVIDER_ROUTING as Record<string, { order: readonly string[]; allow_fallbacks: boolean } | undefined>)[model];
+}
+
 const usageSchema = z.object({
   prompt_tokens: z.number().optional(), completion_tokens: z.number().optional(), total_tokens: z.number().optional(), cost: z.number().nullable().optional(),
 }).passthrough();
@@ -154,9 +161,11 @@ function chatMessages(chat: ChatInput) {
 }
 
 function chatBody(chat: ChatInput, model: string, stream = false) {
+  const routing = upstreamRouting(model);
   return {
     model,
     messages: chatMessages(chat),
+    ...(routing ? { provider: routing } : {}),
     ...(chat.tools?.length ? { tools: chat.tools.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.inputSchema } })) } : {}),
     ...(chat.responseFormat ? { response_format: { type: 'json_schema', json_schema: { name: chat.responseFormat.name, strict: true, schema: chat.responseFormat.schema } } } : {}),
     ...(chat.options?.temperature !== undefined ? { temperature: chat.options.temperature } : {}),
@@ -188,7 +197,9 @@ async function executeWeb<TInput, TOutput>(fetcher: typeof fetch, config: z.outp
   const result = await post(fetcher, config, '/chat/completions', {
     model: request.externalModelId,
     messages: [{ role: 'user', content: value.prompt }],
-    plugins: [{ id: 'web', engine: 'exa', max_results: 5 }],
+    ...(upstreamRouting(request.externalModelId) ? { provider: upstreamRouting(request.externalModelId) } : {}),
+    tools: [{ type: 'openrouter:web_search', parameters: { engine: 'native', max_results: 5, max_uses: 2, max_total_results: 10 } }],
+    max_tool_calls: 2,
     ...(value.responseFormat ? { response_format: { type: 'json_schema', json_schema: { name: value.responseFormat.name, strict: true, schema: value.responseFormat.schema } } } : {}),
   }, request, 'web request');
   const raw = response(chatResponseSchema, await result.json().catch(() => undefined), 'web');

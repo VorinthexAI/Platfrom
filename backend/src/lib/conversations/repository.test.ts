@@ -4,7 +4,7 @@ import { createConversationRepository } from './repository';
 import type { ConversationMessage } from './schemas';
 
 const timestamp = '2026-09-01T00:00:00.000Z';
-const turnMessage = (role: 'USER' | 'ASSISTANT', overrides: Partial<ConversationMessage> = {}): ConversationMessage => ({ key: newId(), conversationKey: newId(), organizationKey: 'organization', scopeKey: newId(), userKey: newId(), turnKey: 'request', requestHash: 'a'.repeat(64), role, status: role === 'USER' ? 'COMPLETED' : 'PENDING', content: role === 'USER' ? 'question' : 'Pending', createdAt: timestamp, ...(role === 'USER' ? { completedAt: timestamp } : {}), ...overrides });
+const turnMessage = (role: 'USER' | 'ASSISTANT', overrides: Partial<ConversationMessage> = {}): ConversationMessage => ({ key: newId(), conversationKey: newId(), organizationKey: 'organization', scopeKey: newId(), userKey: newId(), turnKey: 'request', requestHash: 'a'.repeat(64), role, status: role === 'USER' ? 'COMPLETED' : 'PENDING', content: role === 'USER' ? 'question' : 'Pending', retrievals: [], createdAt: timestamp, ...(role === 'USER' ? { completedAt: timestamp } : {}), ...overrides });
 const raw = ({ key, ...value }: ConversationMessage) => ({ _key: key, ...value });
 
 describe('conversation repository boundaries', () => {
@@ -106,9 +106,11 @@ describe('conversation repository boundaries', () => {
     const assistant = turnMessage('ASSISTANT'); let query = ''; let bindings: any;
     const database: any = { query: async (value: string, bind: unknown) => { query = value; bindings = bind; return { next: async () => ({ completed: raw({ ...assistant, status: 'COMPLETED', content: 'answer', completedAt: timestamp }), nameApplied: false }) }; } };
     const repository = createConversationRepository(database, (operation) => operation(database));
-    const result = await repository.completeTurn({ organizationKey: assistant.organizationKey, scopeKey: assistant.scopeKey, userKey: assistant.userKey }, assistant.conversationKey, assistant.key, 'answer', [1], timestamp, 'Generated name');
+    const retrievals = [{ query: 'roadmap', limit: 10, minimumScore: 0.55, groups: [{ collectionSlug: 'documents' as const, results: [{ key: newId(), label: 'Roadmap' }] }] }];
+    const result = await repository.completeTurn({ organizationKey: assistant.organizationKey, scopeKey: assistant.scopeKey, userKey: assistant.userKey }, assistant.conversationKey, assistant.key, 'answer', [1], retrievals, timestamp, 'Generated name');
     expect(result).toMatchObject({ nameApplied: false, message: { content: 'answer' } });
     expect(query).toContain('conversation.name == @defaultName'); expect(query).toContain('priorCompleted == 0');
+    expect(query).toContain('retrievals: @retrievals'); expect(bindings.retrievals).toEqual(retrievals);
     expect(bindings.defaultName).toBe('New chat');
   });
 });

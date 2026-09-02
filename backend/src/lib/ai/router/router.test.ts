@@ -12,17 +12,17 @@ const adapters = { openrouter: unavailableAdapter };
 describe('action-definition router', () => {
   test('selects the only declared OpenRouter text route deterministically', async () => {
     await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'text' }, { adapters })).resolves.toMatchObject({
-      modelSlug: 'google.gemini-3.1-flash-lite-preview', providerSlug: 'openrouter', providerModelId: 'google/gemini-3.1-flash-lite-preview',
+      modelSlug: 'google.gemini-3.1-flash-lite', providerSlug: 'openrouter', providerModelId: 'google/gemini-3.1-flash-lite',
     });
   });
 
   test('filters model and fixed modes to exact declared registry bindings', async () => {
-    await expect(selectRoute({ mode: 'model', organizationKey, actionSlug: 'text', modelSlug: 'google.gemini-3.1-flash-lite-preview' }, { adapters })).resolves.toMatchObject({ providerSlug: 'openrouter' });
+    await expect(selectRoute({ mode: 'model', organizationKey, actionSlug: 'text', modelSlug: 'google.gemini-3.1-flash-lite' }, { adapters })).resolves.toMatchObject({ providerSlug: 'openrouter' });
     await expect(selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'text', modelSlug: 'google.gemini-3.1-flash-lite-image', providerSlug: 'openrouter' }, { adapters })).rejects.toBeInstanceOf(NoEligibleRouteError);
   });
 
   test('makes malformed or missing environment configuration unavailable', async () => {
-    const request = { mode: 'fixed' as const, organizationKey, actionSlug: 'text' as const, modelSlug: 'google.gemini-3.1-flash-lite-preview' as const, providerSlug: 'openrouter' as const };
+    const request = { mode: 'fixed' as const, organizationKey, actionSlug: 'text' as const, modelSlug: 'google.gemini-3.1-flash-lite' as const, providerSlug: 'openrouter' as const };
     await expect(selectRoute(request, { env: {} })).rejects.toBeInstanceOf(NoEligibleRouteError);
     await expect(selectRoute(request, { env: { OPENROUTER_API_KEY: '' } })).rejects.toBeInstanceOf(NoEligibleRouteError);
     await expect(selectRoute(request, { env: { OPENROUTER_API_KEY: 'key' } })).resolves.toMatchObject({ providerSlug: 'openrouter' });
@@ -41,9 +41,9 @@ describe('action-definition router', () => {
     await executeAsk(organizationKey, { ...input, mode: 'deep' }, options);
     await executeWebSearch(organizationKey, { prompt: 'Current facts' }, options);
     expect(calls.map(({ model }) => model)).toEqual([
-      'google.gemini-3.1-flash-lite-preview',
-      'google.gemini-3.1-flash-lite-preview',
-      'google.gemini-3.1-flash-lite-preview',
+      'google.gemini-3.1-flash-lite',
+      'google.gemini-3.1-flash-lite',
+      'google.gemini-3.1-flash-lite',
     ]);
     expect(calls.every(({ input: value }) => !('mode' in (value as Record<string, unknown>)))).toBe(true);
   });

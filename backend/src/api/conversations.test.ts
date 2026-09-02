@@ -10,7 +10,10 @@ describe('conversation HTTP contract', () => {
     expect(conversationStartEventSchema.parse({ type: 'start', correlationKey, conversationKey, userMessageKey, assistantMessageKey })).toHaveProperty('correlationKey', correlationKey);
     expect(conversationDeltaEventSchema.parse({ type: 'delta', correlationKey, assistantMessageKey, text: 'hello' })).toHaveProperty('text', 'hello');
     const message = { key: assistantMessageKey, conversationKey, turnKey: 'request', role: 'ASSISTANT', status: 'COMPLETED', content: 'hello', createdAt: '2026-09-01T00:00:00.000Z', completedAt: '2026-09-01T00:00:01.000Z' };
-    expect(conversationDoneEventSchema.parse({ type: 'done', correlationKey, conversationKey, message, replayed: false })).toHaveProperty('message.content', 'hello');
+    expect(conversationDoneEventSchema.parse({ type: 'done', correlationKey, conversationKey, message, replayed: false })).toMatchObject({ message: { content: 'hello', retrievals: [] } });
+    const retrieval = { query: 'roadmap', limit: 3, minimumScore: 0.55, groups: [{ collectionSlug: 'documents', results: [{ key: newId(), label: 'Roadmap' }] }] };
+    expect(conversationDoneEventSchema.parse({ type: 'done', correlationKey, conversationKey, message: { ...message, retrievals: [retrieval] }, replayed: false })).toHaveProperty('message.retrievals', [retrieval]);
+    expect(() => conversationDoneEventSchema.parse({ type: 'done', correlationKey, conversationKey, message: { ...message, retrievals: [{ ...retrieval, rawOutput: true }] }, replayed: false })).toThrow('Unrecognized key');
     expect(conversationErrorEventSchema.parse({ type: 'error', correlationKey, code: 'FAILED', message: 'failed' })).toHaveProperty('code', 'FAILED');
     expect(() => conversationDoneEventSchema.parse({ type: 'done', correlationKey, conversationKey, message: { ...message, userKey: newId() }, replayed: false })).toThrow('Unrecognized key');
     expect(() => conversationDeltaEventSchema.parse({ type: 'delta', correlationKey, assistantMessageKey, text: 'hello', secret: true })).toThrow('Unrecognized key');
@@ -51,5 +54,21 @@ describe('conversation HTTP contract', () => {
     expect(response.status).toBe(200); expect(calls).toEqual([{ input: { name: 'Private' }, selected: context }]); expect(published).toEqual([[userKey, 'conversation.changed']]);
     const list = await app.request('/conversations/list', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, favoriteOnly: true, limit: 10 }) });
     expect(list.status).toBe(200); expect(calls.at(-1)).toEqual({ input: { favoriteOnly: true, limit: 10 }, selected: context });
+  });
+
+  test('does not emit a second terminal SSE event when change publication fails after done', async () => {
+    const organizationKey = 'organization', scopeKey = newId(), userKey = newId(), conversationKey = newId(), correlationKey = newId();
+    const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const handlers = createConversationHandlers({
+      getIdentity: async () => ({ identityType: 'user', key: userKey }) as never,
+      authorize: async () => ({ input: { organizationKey, scopeKey }, context }),
+      createTurnService: () => ({ turn: async (_input: unknown, _context: ToolContext, onEvent: (event: unknown) => Promise<void>) => onEvent({ type: 'done', correlationKey, conversationKey, message: { key: newId(), conversationKey, turnKey: 'request', role: 'ASSISTANT', status: 'COMPLETED', content: 'answer', retrievals: [], createdAt: '2026-09-01T00:00:00.000Z', completedAt: '2026-09-01T00:00:01.000Z' }, replayed: false }) }) as never,
+      publishChanged: async () => { throw new Error('unavailable'); },
+    });
+    const app = new Hono(); app.post('/conversations/:conversationKey/turn/stream', handlers.turn);
+    const response = await app.request(`/conversations/${conversationKey}/turn/stream`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, message: 'Find it', requestKey: 'request' }) });
+    const stream = await response.text();
+    expect(stream).toContain('event: done');
+    expect(stream).not.toContain('event: error');
   });
 });

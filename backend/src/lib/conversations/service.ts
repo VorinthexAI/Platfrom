@@ -7,6 +7,7 @@ import type { AgentRuntimeDependencies } from '@/lib/ai/agents';
 import type { ExecuteActionOptions } from '@/lib/ai/router';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { getDefaultUserSearchService, type UserSearchService } from '@/lib/user-searches/service';
+import { appSearchRetrievalSchema, projectAppSearchRetrieval, type AppSearchRetrieval } from '@/lib/app-search/service';
 import { getDefaultConversationRepository, type ConversationRepository } from './repository';
 import {
   agentQueryInputSchema, conversationCreateInputSchema, conversationFavoriteInputSchema, conversationKeyInputSchema,
@@ -17,7 +18,7 @@ import {
 
 const conversationCursorSchema = z.object({ favorite: z.boolean(), updatedAt: z.string().datetime(), key: z.string().cuid() }).strict();
 const messageCursorSchema = z.object({ createdAt: z.string().datetime(), key: z.string().cuid() }).strict();
-const queryResultSchema = z.object({ messages: z.array(z.object({ key: z.string().cuid(), conversationKey: z.string().cuid(), role: z.enum(['USER', 'ASSISTANT']), content: z.string(), createdAt: z.string().datetime(), similarity: z.number().min(-1).max(1) }).strict()) }).strict();
+const queryResultSchema = z.object({ messages: z.array(z.object({ key: z.string().cuid(), conversationKey: z.string().cuid(), role: z.enum(['USER', 'ASSISTANT']), content: z.string(), retrievals: z.array(appSearchRetrievalSchema).max(4), createdAt: z.string().datetime(), similarity: z.number().min(-1).max(1) }).strict()) }).strict();
 
 export type ConversationTurnEvent =
   | { type: 'start'; correlationKey: string; conversationKey: string; userMessageKey: string; assistantMessageKey: string }
@@ -53,13 +54,16 @@ export function estimateConservativeTokens(text: string) { return Buffer.byteLen
 
 export function trimConversationQueryResults(rows: Array<{ message: ConversationMessage; similarity: number }>, maxTokens = 10_000, countTokens = estimateConservativeTokens) {
   const chronological = [...rows].sort((left, right) => left.message.createdAt.localeCompare(right.message.createdAt) || left.message.key.localeCompare(right.message.key));
-  const project = ({ message, similarity }: (typeof chronological)[number]) => ({ key: message.key, conversationKey: message.conversationKey, role: message.role, content: message.content, createdAt: message.createdAt, similarity });
+  const project = ({ message, similarity }: (typeof chronological)[number]) => ({ key: message.key, conversationKey: message.conversationKey, role: message.role, content: message.content, retrievals: message.retrievals, createdAt: message.createdAt, similarity });
   while (chronological.length && countTokens(JSON.stringify({ messages: chronological.map(project) })) > maxTokens) chronological.shift();
   return queryResultSchema.parse({ messages: chronological.map(project) });
 }
 
 function recentAgentContext(messages: ConversationMessage[]) {
-  const context = messages.map((item) => ({ role: item.role.toLowerCase() as 'user' | 'assistant', content: item.content, createdAt: item.createdAt }));
+  const context = messages.map((item) => {
+    const retrievalContext = item.retrievals.length ? `\n\nHistorical retrieval references (re-run app.search before relying on current resource state): ${JSON.stringify(item.retrievals)}` : '';
+    return { role: item.role.toLowerCase() as 'user' | 'assistant', content: item.content.length + retrievalContext.length <= 100_000 ? item.content + retrievalContext : item.content, createdAt: item.createdAt };
+  });
   while (context.length && Buffer.byteLength(JSON.stringify(context), 'utf8') > 250_000) context.shift();
   return context;
 }
@@ -113,8 +117,8 @@ export function createConversationService(dependencies: ConversationServiceDepen
       const assistantAt = new Date(new Date(at).getTime() + 1).toISOString();
       const requestHash = createHash('sha256').update(JSON.stringify({ conversationKey: input.conversationKey, message: input.message })).digest('hex');
       const started = await repository.beginTurn(ownership, input.conversationKey,
-        { key: id(), ...ownership, conversationKey: input.conversationKey, turnKey: input.requestKey, requestHash, role: 'USER', status: 'COMPLETED', content: input.message, createdAt: at, completedAt: at },
-        { key: id(), ...ownership, conversationKey: input.conversationKey, turnKey: input.requestKey, requestHash, role: 'ASSISTANT', status: 'PENDING', content: 'Pending', createdAt: assistantAt });
+        { key: id(), ...ownership, conversationKey: input.conversationKey, turnKey: input.requestKey, requestHash, role: 'USER', status: 'COMPLETED', content: input.message, retrievals: [], createdAt: at, completedAt: at },
+        { key: id(), ...ownership, conversationKey: input.conversationKey, turnKey: input.requestKey, requestHash, role: 'ASSISTANT', status: 'PENDING', content: 'Pending', retrievals: [], createdAt: assistantAt });
       if (!started) throw new ConversationError('NOT_FOUND', 'Conversation not found.');
       if (started.state === 'idempotency-conflict') throw new ConversationError('CONFLICT', 'The request key was already used for a different message.');
       if (started.state === 'busy') throw new ConversationError('CONFLICT', 'Another turn is already in progress for this conversation.');
@@ -131,6 +135,7 @@ export function createConversationService(dependencies: ConversationServiceDepen
         const latest = await repository.latestCompletedMessages(ownership, input.conversationKey, 51);
         if (!latest) throw new ConversationError('NOT_FOUND', 'Conversation not found.');
         const recent = latest.filter(({ key }) => key !== started.user.key).slice(-50);
+        const retrievals: AppSearchRetrieval[] = [];
         const response = await core({
           systemPrompt: coreAgent.systemPrompt,
           context: recentAgentContext(recent),
@@ -138,10 +143,15 @@ export function createConversationService(dependencies: ConversationServiceDepen
         }, {
           toolContext: context, conversationService: service,
           onDelta: async (text) => { await onEvent({ type: 'delta', correlationKey, assistantMessageKey: started.assistant.key, text }); },
+          onToolSucceeded: (slug, arguments_, result) => {
+            if (slug !== 'app.search' || retrievals.length >= 4) return;
+            const retrieval = projectAppSearchRetrieval(arguments_, result);
+            if (retrieval) retrievals.push(retrieval);
+          },
         }, agentDependencies);
         await persistUserEmbedding;
         const embedding = await embed({ text: response.message, purpose: 'document', signal: agentDependencies.router?.signal, timeoutMs: agentDependencies.router?.timeoutMs }).catch(() => undefined);
-        const completed = await repository.completeTurn(ownership, input.conversationKey, started.assistant.key, response.message, embedding, now(), response.name);
+        const completed = await repository.completeTurn(ownership, input.conversationKey, started.assistant.key, response.message, embedding, retrievals, now(), response.name);
         if (!completed) throw new ConversationError('CONFLICT', 'Conversation changed before the answer completed.');
         await onEvent({ type: 'done', correlationKey, conversationKey: input.conversationKey, message: projectConversationMessage(completed.message), ...(completed.nameApplied && response.name ? { name: response.name } : {}), replayed: false });
       } catch (error) {

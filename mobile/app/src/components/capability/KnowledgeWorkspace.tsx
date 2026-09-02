@@ -303,7 +303,7 @@ function ProcessingDocumentButton({ name }: { name: string }) {
   return <Skeleton accessibilityLabel={`Processing ${name}`} accessibilityRole="progressbar" style={styles.documentSkeleton} />;
 }
 
-export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, returnSignalConnectorKey, returnSignalMessageKey, returnSignalThreadKey, returnTripKey, returnTripName }: { initialDocumentKey?: string; initialFolderKey?: string; returnSignalConnectorKey?: string; returnSignalMessageKey?: string; returnSignalThreadKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
+export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, initialFolderKey, initialSearchQuery, returnSignalConnectorKey, returnSignalMessageKey, returnSignalThreadKey, returnTripKey, returnTripName }: { initialCollectionKind?: string; initialDocumentKey?: string; initialFolderKey?: string; initialSearchQuery?: string; returnSignalConnectorKey?: string; returnSignalMessageKey?: string; returnSignalThreadKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -371,7 +371,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
   const [rootDocuments, setRootDocuments] = useState<ContentDocument[]>([]);
   const [folderStack, setFolderStack] = useState<ContentFolder[]>(cachedInitialStack);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(cachedInitialFolder ? "folder" : "folders");
-  const [folderContentTab, setFolderContentTab] = useState<FolderContentTab>("folders");
+  const [folderContentTab, setFolderContentTab] = useState<FolderContentTab>(initialCollectionKind === "documents" || initialCollectionKind === "files" ? initialCollectionKind : "folders");
   const [similarContentTab, setSimilarContentTab] = useState<FolderContentTab>("folders");
   const [similarResults, setSimilarResults] = useState<ContentNeighbors>();
   const [similarLoading, setSimilarLoading] = useState(false);
@@ -426,7 +426,7 @@ export function KnowledgeWorkspace({ initialDocumentKey, initialFolderKey, retur
   const [libraryQuery, setLibraryQuery] = useState("");
   const [librarySearchResults, setLibrarySearchResults] = useState<ContentSearchResponse>();
   const [librarySearching, setLibrarySearching] = useState(false);
-  const [rootSearchQuery, setRootSearchQuery] = useState("");
+  const [rootSearchQuery, setRootSearchQuery] = useState(() => initialSearchQuery?.slice(0, 500) ?? "");
   const [rootSearchResults, setRootSearchResults] = useState<ContentSearchResponse>();
   const [rootSearching, setRootSearching] = useState(false);
   const [rootSearchRevision, setRootSearchRevision] = useState(0);

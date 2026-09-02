@@ -96,7 +96,10 @@
         }
       ],
       "@config-plugins/react-native-pdf",
-      "@config-plugins/react-native-blob-util"
+      "@config-plugins/react-native-blob-util",
+      "expo-asset",
+      "expo-font",
+      "expo-image"
     ],
     "experiments": {
       "typedRoutes": true,

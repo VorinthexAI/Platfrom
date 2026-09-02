@@ -4,8 +4,8 @@ import type { ToolContext } from '@/lib/ai/tools';
 import type { ConversationRepository } from './repository';
 import { createConversationService, estimateConservativeTokens, trimConversationQueryResults } from './service';
 import {
-  agentQueryInputSchema, conversationListInputSchema, conversationModelSendInputSchema, conversationSearchInputSchema,
-  conversationSendInputSchema, encodeCursor, projectConversationMessage, type ConversationMessage,
+  agentQueryInputSchema, conversationListInputSchema, conversationMessageListInputSchema, conversationModelSendInputSchema, conversationSearchInputSchema,
+  conversationMessageSchema, conversationSendInputSchema, encodeCursor, projectConversationMessage, type ConversationMessage,
 } from './schemas';
 
 const organizationKey = newId(), scopeKey = newId(), userKey = newId(), conversationKey = newId();
@@ -14,7 +14,7 @@ const owner = { organizationKey, scopeKey, userKey };
 const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
 const message = (overrides: Partial<ConversationMessage> = {}): ConversationMessage => ({
   key: newId(), conversationKey, organizationKey, scopeKey, userKey, turnKey: 'request-1', requestHash: 'a'.repeat(64),
-  role: 'ASSISTANT', status: 'COMPLETED', content: 'answer', createdAt: at, completedAt: at, ...overrides,
+  role: 'ASSISTANT', status: 'COMPLETED', content: 'answer', retrievals: [], createdAt: at, completedAt: at, ...overrides,
 });
 
 type RepositoryOverrides = Partial<ConversationRepository> & { first?: boolean; recent?: ConversationMessage[] };
@@ -23,7 +23,7 @@ function repositoryMock(overrides: RepositoryOverrides = {}) {
   const repository = {
     beginTurn: async (_owner: typeof owner, _conversationKey: string, user: ConversationMessage, assistant: ConversationMessage) => ({ state: 'created' as const, user, assistant: { ...assistant, key: pending.key }, first: overrides.first ?? false }),
     latestCompletedMessages: async () => overrides.recent ?? [], setMessageEmbedding: async () => true,
-    completeTurn: async (_owner: typeof owner, _conversation: string, _key: string, content: string, embedding: number[], completedAt: string, generatedName?: string) => ({ message: { ...pending, status: 'COMPLETED' as const, content, embedding, completedAt }, nameApplied: Boolean(generatedName) }),
+    completeTurn: async (_owner: typeof owner, _conversation: string, _key: string, content: string, embedding: number[], retrievals: any[], completedAt: string, generatedName?: string) => ({ message: { ...pending, status: 'COMPLETED' as const, content, embedding, retrievals, completedAt }, nameApplied: Boolean(generatedName) }),
     failTurn: async () => { failed += 1; }, ...overrides,
   } as unknown as ConversationRepository;
   return { repository, failed: () => failed };
@@ -37,6 +37,9 @@ describe('private conversations', () => {
     expect(() => conversationSendInputSchema.parse({ conversationKey, message: 'x', requestKey: 'r', extra: true })).toThrow('Unrecognized key');
     expect(() => conversationModelSendInputSchema.parse({ conversationKey, message: 'x', requestKey: 'forged' })).toThrow('Unrecognized key');
     expect(projectConversationMessage(message({ embedding: [1] }))).not.toHaveProperty('embedding');
+    const { retrievals: _retrievals, ...legacy } = message();
+    expect(conversationMessageSchema.parse(legacy)).toHaveProperty('retrievals', []);
+    expect(() => conversationMessageSchema.parse({ ...message(), unexpected: true })).toThrow('Unrecognized key');
     let embeds = 0;
     await expect(createConversationService({ repository: {} as ConversationRepository, embed: async () => { embeds += 1; return [1]; } }).query({ ...context, organizationKey: newId() }, { query: 'secret' })).rejects.toThrow('Membership does not belong');
     expect(embeds).toBe(0);
@@ -50,8 +53,10 @@ describe('private conversations', () => {
   });
 
   test('orders and conservatively bounds semantic results', () => {
-    const rows = [{ message: message({ content: 'old', createdAt: '2026-01-01T00:00:00.000Z' }), similarity: 0.8 }, { message: message({ content: 'new', createdAt: '2026-02-01T00:00:00.000Z' }), similarity: 0.9 }];
+    const retrieval = { query: 'roadmap', limit: 1, minimumScore: 0.55, groups: [{ collectionSlug: 'documents' as const, results: [{ key: newId(), label: 'Roadmap' }] }] };
+    const rows = [{ message: message({ content: 'old', retrievals: [retrieval], createdAt: '2026-01-01T00:00:00.000Z' }), similarity: 0.8 }, { message: message({ content: 'new', createdAt: '2026-02-01T00:00:00.000Z' }), similarity: 0.9 }];
     expect(trimConversationQueryResults(rows).messages.map(({ content }) => content)).toEqual(['old', 'new']);
+    expect(trimConversationQueryResults(rows).messages[0]!.retrievals).toEqual([retrieval]);
     expect(trimConversationQueryResults(rows, 1, (value) => value.includes('old') ? 2 : 1).messages.map(({ content }) => content)).toEqual(['new']);
     expect(estimateConservativeTokens('abc')).toBe(3); expect(estimateConservativeTokens('😀')).toBe(4);
   });
@@ -81,7 +86,7 @@ describe('private conversations', () => {
 
   test('streams Core deltas, applies first name, persists both embeddings, and preserves done SSE', async () => {
     const embeddings: unknown[] = []; const events: any[] = []; let savedName: string | undefined;
-    const { repository } = repositoryMock({ first: true, completeTurn: async (_owner, _conversation, _key, content, embedding, _completed, name) => { savedName = name; return { message: message({ content, embedding }), nameApplied: true }; } });
+    const { repository } = repositoryMock({ first: true, completeTurn: async (_owner, _conversation, _key, content, embedding, _retrievals, _completed, name) => { savedName = name; return { message: message({ content, embedding }), nameApplied: true }; } });
     await createConversationService({
       repository, now: () => at, embed: async (input) => { embeddings.push(input); return [1]; },
       core: async (request, execution) => { expect(request).toMatchObject({ currentDate: at, generateName: true, requestKey: 'first' }); await execution.onDelta?.('Hello '); await execution.onDelta?.('there'); return { message: 'Hello there', name: 'Introductions', tools: [] }; },
@@ -90,11 +95,30 @@ describe('private conversations', () => {
     expect(savedName).toBe('Introductions'); expect(embeddings.map((input: any) => input.text)).toEqual(['Hello', 'Hello there']);
   });
 
+  test('captures successful app.search projections atomically and exposes them in done and replay messages', async () => {
+    const resultKey = newId(); let persisted: unknown[] = []; const events: any[] = [];
+    const { repository } = repositoryMock({ completeTurn: async (_owner, _conversation, _key, content, embedding, retrievals, completedAt) => { persisted = retrievals; return { message: message({ content, embedding, retrievals, completedAt }), nameApplied: false }; } });
+    await createConversationService({
+      repository, now: () => at, embed: async () => [1],
+      core: async (_request, execution) => {
+        execution.onToolSucceeded?.('app.search', { query: ' roadmap ', collectionSlugs: ['folders'], limit: 3 }, { query: 'roadmap', groups: [{ collectionSlug: 'folders', results: [{ key: resultKey, scopeKey, name: 'Roadmap', isFavorite: false, score: 0.9 }] }] });
+        execution.onToolSucceeded?.('folder.list', {}, { folders: [] });
+        return { message: 'Found it', tools: [] };
+      },
+    }).turn({ conversationKey, message: 'Find roadmap', requestKey: 'retrieval' }, context, (event) => { events.push(event); });
+    expect(persisted).toEqual([{ query: 'roadmap', limit: 3, minimumScore: 0.55, groups: [{ collectionSlug: 'folders', results: [{ key: resultKey, label: 'Roadmap' }] }] }]);
+    expect(events.at(-1)).toMatchObject({ type: 'done', replayed: false, message: { retrievals: persisted } });
+
+    const replayEvents: any[] = [];
+    await createConversationService({ repository: { beginTurn: async () => ({ state: 'replay', user: message({ role: 'USER' }), assistant: message({ content: 'Found it', retrievals: persisted as never }), first: false }) } as unknown as ConversationRepository }).turn({ conversationKey, message: 'Find roadmap', requestKey: 'retrieval' }, context, (event) => { replayEvents.push(event); });
+    expect(replayEvents.at(-1)).toMatchObject({ type: 'done', replayed: true, message: { retrievals: persisted } });
+  });
+
   test('keeps a completed agent answer successful when semantic indexing fails', async () => {
     const events: any[] = []; let completedEmbedding: number[] | undefined | null = null;
     const { repository, failed } = repositoryMock({
       setMessageEmbedding: async () => { throw new Error('user indexing unavailable'); },
-      completeTurn: async (_owner, _conversation, _key, content, embedding, completedAt) => { completedEmbedding = embedding; return { message: message({ content, embedding, completedAt }), nameApplied: false }; },
+      completeTurn: async (_owner, _conversation, _key, content, embedding, _retrievals, completedAt) => { completedEmbedding = embedding; return { message: message({ content, embedding, completedAt }), nameApplied: false }; },
     });
     await createConversationService({ repository, embed: async () => { throw new Error('indexing unavailable'); }, core: async (_request, execution) => { await execution.onDelta?.('answer'); return { message: 'answer', tools: [] }; } }).turn({ conversationKey, message: 'question', requestKey: 'index-failure' }, context, (event) => { events.push(event); });
     expect(events.map(({ type }) => type)).toEqual(['start', 'delta', 'done']);
@@ -122,7 +146,7 @@ describe('private conversations', () => {
     expect(records).toBe(1); expect(listInputs[1]).toMatchObject({ favoriteOnly: true, cursor: { key: firstKey } });
     const page = await service.messages({ conversationKey, limit: 1, cursor: encodeCursor({ createdAt: at, key: newId() }) }, context);
     expect(page.items[0]!.key).toBe(newer.key); expect(page.nextCursor).not.toBeNull();
-    expect(conversationListInputSchema.parse({})).toEqual({ limit: 25, favoriteOnly: false }); expect(conversationSearchInputSchema.parse({ query: 'roadmap' })).toMatchObject({ recordHistory: true });
+    expect(conversationListInputSchema.parse({})).toEqual({ limit: 25, favoriteOnly: false }); expect(conversationSearchInputSchema.parse({ query: 'roadmap' })).toMatchObject({ recordHistory: true }); expect(conversationMessageListInputSchema.parse({ conversationKey })).toMatchObject({ limit: 10 });
   });
 
   test('propagates AbortSignal through Core and both embeddings', async () => {

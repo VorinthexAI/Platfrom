@@ -4,7 +4,8 @@ import { subscribeUserSearchHistoryAppends } from "./user-search-history-events"
 const calls: { method: string; path: string; body?: unknown; config?: unknown }[] = [];
 const timestamp = "2026-09-01T10:00:00.000Z";
 const serverConversation = { key: "conversation-key", organizationKey: "org", scopeKey: "scope", userKey: "user", name: "Planning", isFavorite: false, createdAt: timestamp, updatedAt: timestamp };
-const serverMessage = { key: "assistant-key", conversationKey: serverConversation.key, turnKey: "request", role: "ASSISTANT", status: "COMPLETED", content: "Answer", createdAt: timestamp, completedAt: timestamp };
+const retrieval = { query: "roadmap", limit: 10, minimumScore: 0.55, groups: [{ collectionSlug: "documents", results: [{ key: "document-key", label: "Roadmap" }] }] };
+const serverMessage = { key: "assistant-key", conversationKey: serverConversation.key, turnKey: "request", role: "ASSISTANT", status: "COMPLETED", content: "Answer", retrievals: [retrieval], createdAt: timestamp, completedAt: timestamp };
 let response: unknown;
 
 mock.module("./api-client", () => ({
@@ -24,9 +25,22 @@ beforeEach(() => { calls.length = 0; response = undefined; });
 
 test("strictly parses owner-projected conversations and retains safe-message lifecycle fields", () => {
   expect(client.conversationSchema.parse(serverConversation)).toEqual({ key: serverConversation.key, name: "Planning", isFavorite: false, createdAt: timestamp, updatedAt: timestamp });
-  expect(client.conversationMessageSchema.parse(serverMessage)).toEqual({ key: "assistant-key", conversationKey: serverConversation.key, turnKey: "request", role: "assistant", status: "COMPLETED", content: "Answer", createdAt: timestamp, completedAt: timestamp });
+  expect(client.conversationMessageSchema.parse(serverMessage)).toEqual({ key: "assistant-key", conversationKey: serverConversation.key, turnKey: "request", role: "assistant", status: "COMPLETED", content: "Answer", retrievals: [retrieval], createdAt: timestamp, completedAt: timestamp });
   expect(() => client.conversationSchema.parse({ ...serverConversation, unknown: true })).toThrow();
   expect(() => client.conversationMessageSchema.parse({ ...serverMessage, role: "assistant" })).toThrow();
+});
+
+test("requires strict bounded retrievals on list messages and SSE completions", async () => {
+  response = { success: true, data: { items: [serverMessage], nextCursor: null } };
+  expect((await client.listConversationMessages(context, serverConversation.key)).messages[0]?.retrievals).toEqual([retrieval]);
+  expect(client.parseConversationTurnEvent(done)).toMatchObject({ type: "done", message: { retrievals: [retrieval] } });
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, retrievals: undefined })).toThrow();
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, retrievals: [{ ...retrieval, unknown: true }] })).toThrow();
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, retrievals: [{ ...retrieval, filters: { unknown: true } }] })).toThrow();
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, retrievals: [{ ...retrieval, groups: [{ ...retrieval.groups[0], results: [{ ...retrieval.groups[0]!.results[0], unknown: true }] }] }] })).toThrow();
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, retrievals: [{ ...retrieval, groups: [] }] })).toThrow();
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, retrievals: [{ ...retrieval, limit: 51 }] })).toThrow();
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, retrievals: Array.from({ length: 5 }, () => retrieval) })).toThrow();
 });
 
 test("sends favorite and history selectors only to corrected conversation endpoints", async () => {
@@ -66,7 +80,8 @@ test("passes abort signals through create, update, favorite, and delete mutation
 test("uses exact backend bounds for names, turns, and message pages", async () => {
   response = { success: true, data: { items: [serverMessage], nextCursor: null } };
   await client.listConversationMessages(context, serverConversation.key, "older");
-  expect(calls[0]?.body).toEqual({ organizationKey: "org", scopeKey: "scope", cursor: "older", limit: 25 });
+  expect(calls[0]?.body).toEqual({ organizationKey: "org", scopeKey: "scope", cursor: "older", limit: 10 });
+  expect(client.CONVERSATION_MESSAGE_PAGE_SIZE).toBe(10);
   expect(client.CONVERSATION_NAME_MAX_LENGTH).toBe(200);
   expect(client.CONVERSATION_MESSAGE_MAX_LENGTH).toBe(20_000);
 });

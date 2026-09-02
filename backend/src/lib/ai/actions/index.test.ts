@@ -23,7 +23,7 @@ describe('action registry', () => {
     expect(ACTION_DEFINITIONS.filter((action) => action.modelPolicy === 'none').map((action) => action.id))
       .toEqual(['file', 'upload', 'queue', 'traverse', 'read', 'insert', 'upsert', 'update', 'delete']);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'text')?.models)
-      .toEqual([{ slot: 'primary', provider: 'openrouter', model: 'google.gemini-3.1-flash-lite-preview', priority: 100 }]);
+      .toEqual([{ slot: 'primary', provider: 'openrouter', model: 'google.gemini-3.1-flash-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'image')?.models)
       .toEqual([{ slot: 'primary', provider: 'openrouter', model: 'google.gemini-3.1-flash-lite-image', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'speech')?.models)

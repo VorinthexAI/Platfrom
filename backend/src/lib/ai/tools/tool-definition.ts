@@ -1,4 +1,4 @@
-import { CONTENT_TOOL_DEFINITIONS, contentToolModelInputSchemas, hasPrimaryModelScope } from './content-registry';
+import { CONTENT_TOOL_DEFINITIONS, contentToolModelInputSchemas, hasContentIdempotencyKey, hasPrimaryModelScope } from './content-registry';
 import { runContentTool, type ContentToolDependencies } from './content-runtime';
 import type { ContentToolName } from './content-schemas';
 import type { ToolContext } from './tool-context';
@@ -30,7 +30,7 @@ export function createPublicToolDefinition<Name extends ContentToolName>(name: N
           : hasPrimaryModelScope(name)
             ? { scopeKey: dependencies.context.runtimeScopeKey, ...input }
             : input;
-      const trustedInput = dependencies.requestKey ? { ...canonicalInput, idempotencyKey: dependencies.requestKey } : canonicalInput;
+      const trustedInput = dependencies.requestKey && hasContentIdempotencyKey(name) ? { ...canonicalInput, idempotencyKey: dependencies.requestKey } : canonicalInput;
       return (dependencies.executeContent ?? runContentTool)(name, trustedInput as never, dependencies.context, dependencies.content);
     },
   };

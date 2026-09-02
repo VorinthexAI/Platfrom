@@ -166,7 +166,7 @@ export function formatGuideDate(value: string) {
 
 const wait = (duration: number) => new Promise((resolve) => setTimeout(resolve, duration));
 
-export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTripAssets = false }: { initialTripKey?: string; openTripAssets?: boolean } = {}) {
+export function TravelWorkspace({ initialCollectionKind, initialCountryCode, initialPlaceKey, initialSearchQuery, initialTripKey, openTripAssets: shouldOpenTripAssets = false }: { initialCollectionKind?: string; initialCountryCode?: string; initialPlaceKey?: string; initialSearchQuery?: string; initialTripKey?: string; openTripAssets?: boolean } = {}) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const { showToast } = useToast();
@@ -174,11 +174,11 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
   const contentContext = useMemo(() => getContentContext(), []);
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
-  const [rootView, setRootView] = useState<RootView>("globe");
+  const [rootView, setRootView] = useState<RootView>(initialCollectionKind === "places" || initialCollectionKind === "trips" ? "table" : "globe");
   const [tripView, setTripView] = useState<RootView>("globe");
-  const [tableTab, setTableTab] = useState<TableTab>("places");
+  const [tableTab, setTableTab] = useState<TableTab>(initialCollectionKind === "trips" ? "trips" : "places");
   const [tableGridWidth, setTableGridWidth] = useState(0);
-  const [placeTableQuery, setPlaceTableQuery] = useState("");
+  const [placeTableQuery, setPlaceTableQuery] = useState(() => initialCollectionKind === "places" || initialCollectionKind === "trips" ? initialSearchQuery?.slice(0, 500) ?? "" : "");
   const [tableSearchTerm, setTableSearchTerm] = useState("");
   const [placeSearchHistory, setPlaceSearchHistory] = useState<ContentSearchHistoryItem[]>([]);
   const [placeHistoryLoading, setPlaceHistoryLoading] = useState(false);
@@ -201,10 +201,10 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
   const [selectedPlaceReference, setSelectedPlaceReference] = useState<PlaceReference>();
   const [placeReferenceGenerating, setPlaceReferenceGenerating] = useState(false);
   const [tripGridWidth, setTripGridWidth] = useState(0);
-  const [selectedCountry, setSelectedCountry] = useState<CountryProperties>();
+  const [selectedCountry, setSelectedCountry] = useState<CountryProperties | undefined>(() => initialCountryCode ? COUNTRIES.features.find(({ properties }) => properties.countryCode.toLocaleUpperCase() === initialCountryCode.toLocaleUpperCase())?.properties : undefined);
   const [selectedCity, setSelectedCity] = useState<GeneratedCity>();
   const [detailSource, setDetailSource] = useState<DetailSource>("globe");
-  const [countryDetailOpen, setCountryDetailOpen] = useState(false);
+  const [countryDetailOpen, setCountryDetailOpen] = useState(Boolean(initialCountryCode));
   const [cityDetailOpen, setCityDetailOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [createPlaceOpen, setCreatePlaceOpen] = useState(false);
@@ -253,10 +253,10 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
   const [assetsLoading, setAssetsLoading] = useState(false);
   const [imageViewerKey, setImageViewerKey] = useState<string>();
   const [pendingPlaceSaves, setPendingPlaceSaves] = useState<string[]>([]);
-  const [countryQuery, setCountryQuery] = useState("");
+  const [countryQuery, setCountryQuery] = useState(() => initialCollectionKind === "countries" ? initialSearchQuery?.slice(0, 500) ?? "" : "");
   const [searchFocus, setSearchFocus] = useState<NonNullable<CountrySearchResult>>();
   const [globeFocusTarget, setGlobeFocusTarget] = useState<NonNullable<CountrySearchResult>>();
-  const [lastOpenedCountryCode, setLastOpenedCountryCode] = useState<string>();
+  const [lastOpenedCountryCode, setLastOpenedCountryCode] = useState<string | undefined>(initialCountryCode);
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [countrySearchFocusBlocked, setCountrySearchFocusBlocked] = useState(false);
@@ -288,6 +288,7 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
   const sheetTransitionTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const assetsGeneration = useRef(0);
   const initialAssetsOpened = useRef(false);
+  const initialPlaceOpened = useRef(false);
   const assetLongPress = useRef<string | undefined>(undefined);
   const tripGuideGeneratingRef = useRef(false);
   const placeReferenceGeneratingRef = useRef(false);
@@ -504,11 +505,11 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
   }, [places]);
 
   useEffect(() => {
-    if (!shouldOpenTripAssets || initialAssetsOpened.current || !initialTripKey) return;
+    if (initialAssetsOpened.current || !initialTripKey) return;
     const trip = trips.find(({ key }) => key === initialTripKey);
     if (!trip) return;
     initialAssetsOpened.current = true;
-    const timer = setTimeout(() => { setTripView("globe"); setSelectedTripKey(trip.key); beginAssetSelection(trip); }, 0);
+    const timer = setTimeout(() => { setTripView("globe"); setSelectedTripKey(trip.key); if (shouldOpenTripAssets) beginAssetSelection(trip); }, 0);
     return () => clearTimeout(timer);
     // The route restoration is intentionally consumed once for the matching trip.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -555,6 +556,16 @@ export function TravelWorkspace({ initialTripKey, openTripAssets: shouldOpenTrip
     setSelectedPlaceSnapshot(place);
     setSelectedPlaceKey(place.key);
   }
+  useEffect(() => {
+    if (initialPlaceOpened.current || !initialPlaceKey) return;
+    const place = places.find(({ key }) => key === initialPlaceKey);
+    if (!place) return;
+    initialPlaceOpened.current = true;
+    const timer = setTimeout(() => openSavedPlace(place), 0);
+    return () => clearTimeout(timer);
+    // The route restoration is intentionally consumed once for the matching place.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPlaceKey, places]);
 
   function openSelectedPlaceOnWeb() {
     if (!selectedPlace) return;

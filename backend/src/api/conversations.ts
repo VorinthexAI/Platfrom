@@ -77,10 +77,15 @@ export function createConversationHandlers(dependencies: ConversationHandlerDepe
             correlationKey = event.correlationKey;
             const schema = event.type === 'start' ? conversationStartEventSchema : event.type === 'delta' ? conversationDeltaEventSchema : conversationDoneEventSchema;
             const parsed = schema.parse(event); await stream.writeSSE({ event: event.type, data: JSON.stringify(parsed), id: event.correlationKey });
-            if (event.type === 'done' && context.principal.kind === 'member') await (dependencies.publishChanged ?? publishUserEvent)(context.principal.user.key, 'conversation.changed');
+            if (event.type === 'done' && context.principal.kind === 'member') {
+              await (dependencies.publishChanged ?? publishUserEvent)(context.principal.user.key, 'conversation.changed').catch((error) => {
+                console.error('conversation change publication failed', { conversationKey: input.conversationKey, correlationKey, error });
+              });
+            }
           });
         } catch (error) {
           if (!abort.active()) return;
+          console.error('conversation turn failed', { conversationKey: input.conversationKey, correlationKey, error });
           const event = conversationErrorEventSchema.parse({ type: 'error', correlationKey, code: error instanceof ConversationError ? error.code : 'FAILED', message: error instanceof ConversationError ? error.message : 'Conversation turn failed.' });
           await stream.writeSSE({ event: 'error', data: JSON.stringify(event), id: correlationKey });
         } finally { abort.dispose(); }

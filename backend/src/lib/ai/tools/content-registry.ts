@@ -29,6 +29,12 @@ export function hasPrimaryModelScope(name: ContentToolName) {
   return PRIMARY_SCOPE_TOOLS.has(name);
 }
 
+export function hasContentIdempotencyKey(name: ContentToolName) {
+  let schema: z.ZodTypeAny = contentToolContracts[name].input;
+  while (schema instanceof z.ZodEffects) schema = schema.innerType();
+  return schema instanceof z.ZodObject && Object.prototype.hasOwnProperty.call(schema.shape, 'idempotencyKey');
+}
+
 function modelInputSchema(name: ContentToolName): z.ZodTypeAny {
   if (name === 'folder.create') {
     const canonical = contentToolContracts[name].input;

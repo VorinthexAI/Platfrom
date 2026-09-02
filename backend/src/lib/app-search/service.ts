@@ -87,6 +87,57 @@ export const appSearchGroupSchema = z.discriminatedUnion('collectionSlug', [
 export const appSearchOutputSchema = z.object({ query: z.string(), groups: z.array(appSearchGroupSchema) }).strict();
 export type AppSearchOutput = z.infer<typeof appSearchOutputSchema>;
 
+export const MAX_APP_SEARCH_RETRIEVAL_RESULTS = 100;
+export const appSearchRetrievalResultSchema = z.object({
+  key: z.string().trim().min(1).max(255),
+  label: z.string().trim().min(1).max(200),
+  destinationKey: z.string().trim().min(1).max(255).optional(),
+}).strict();
+export const appSearchRetrievalGroupSchema = z.object({
+  collectionSlug: appSearchCollectionSlugSchema,
+  results: z.array(appSearchRetrievalResultSchema).min(1).max(50),
+}).strict();
+export const appSearchRetrievalSchema = z.object({
+  query: appSearchInputSchema.shape.query,
+  limit: z.number().int().min(1).max(50),
+  minimumScore: z.number().min(-1).max(1),
+  filters: appSearchInputSchema.shape.filters,
+  groups: z.array(appSearchRetrievalGroupSchema).min(1).max(10),
+}).strict().superRefine(({ groups }, context) => {
+  if (groups.reduce((count, group) => count + group.results.length, 0) > MAX_APP_SEARCH_RETRIEVAL_RESULTS) context.addIssue({ code: z.ZodIssueCode.custom, path: ['groups'], message: `Retrievals may contain at most ${MAX_APP_SEARCH_RETRIEVAL_RESULTS} results.` });
+});
+export type AppSearchRetrievalResult = z.infer<typeof appSearchRetrievalResultSchema>;
+export type AppSearchRetrievalGroup = z.infer<typeof appSearchRetrievalGroupSchema>;
+export type AppSearchRetrieval = z.infer<typeof appSearchRetrievalSchema>;
+
+function retrievalLabel(value: string, fallback: string) {
+  return value.trim().slice(0, 200) || fallback;
+}
+
+export function projectAppSearchRetrieval(rawInput: unknown, rawOutput: unknown): AppSearchRetrieval | null {
+  const input = appSearchInputSchema.parse(rawInput);
+  const output = appSearchOutputSchema.parse(rawOutput);
+  let remaining = MAX_APP_SEARCH_RETRIEVAL_RESULTS;
+  const groups = output.groups.flatMap((group): AppSearchRetrievalGroup[] => {
+    if (remaining === 0) return [];
+    let results: AppSearchRetrievalResult[];
+    switch (group.collectionSlug) {
+      case 'countries': results = group.results.map((result) => ({ key: result.countryCode, label: retrievalLabel(result.name, 'Country') })); break;
+      case 'images': results = group.results.map((result) => ({ key: result.key, label: retrievalLabel(result.caption.trim() || result.filename, 'Image') })); break;
+      case 'inboxes': results = group.results.map((result) => ({ key: result.key, destinationKey: result.connectorKey, label: retrievalLabel(result.name || result.email, 'Inbox') })); break;
+      case 'email-messages': results = group.results.map((result) => ({ key: result.key, label: retrievalLabel(result.subject, 'Email message') })); break;
+      case 'email-drafts': results = group.results.map((result) => ({ key: result.key, label: result.variant === 'new' ? retrievalLabel(result.subject, 'Email draft') : 'Reply draft' })); break;
+      case 'books': results = group.results.map((result) => ({ key: result.key, label: retrievalLabel(result.title, 'Audio book') })); break;
+      default: results = group.results.map((result) => ({ key: result.key, label: retrievalLabel(result.name, group.collectionSlug === 'trips' ? 'Trip' : 'Resource') }));
+    }
+    results = results.slice(0, remaining);
+    remaining -= results.length;
+    return results.length ? [{ collectionSlug: group.collectionSlug, results }] : [];
+  });
+  if (!groups.length) return null;
+  return appSearchRetrievalSchema.parse({ query: input.query, limit: input.limit, minimumScore: input.minimumScore, ...(input.filters ? { filters: input.filters } : {}), groups });
+}
+
 const embeddingCache = new Map<string, { embedding: number[]; expiresAt: number }>();
 const EMBEDDING_CACHE_TTL_MS = 5 * 60_000;
 const EMBEDDING_CACHE_LIMIT = 500;

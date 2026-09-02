@@ -63,6 +63,8 @@ test("waits for the keyboard to hide and restores the workspace composer without
   expect(core).toContain("if (!Keyboard.isVisible()) finishClose()");
   expect(core).toContain('!pageOpen ? <View pointerEvents="box-none"');
   expect(core).not.toContain("collapsedVisible");
+  expect(core).toContain("if (editable) return;");
+  expect(core).toContain("inputRef.current?.blur();");
 });
 
 test("delays focus by 100ms and keeps the horizontal page inset above the keyboard", () => {
@@ -71,9 +73,11 @@ test("delays focus by 100ms and keeps the horizontal page inset above the keyboa
   expect(core).not.toContain("isNavigationBarTranslucentAndroid");
   expect(core).toContain("KeyboardState.OPENING");
   expect(core).toContain("const keyboardLift = Math.max(0, keyboard.height.value - bottomInset)");
-  expect(core).toContain("keyboardMoving ? keyboardLift + Math.min(spacing.md, keyboardLift) : 0");
+  expect(core).toContain("Math.max(bottomInset, spacing.sm) + (keyboardMoving ? keyboardLift + Math.min(spacing.md, keyboardLift) : 0)");
   expect(core).toContain("}, CORE_FOCUS_DELAY_MS)");
-  expect(core).toContain('{composer}\n        <Reanimated.View pointerEvents="none" style={keyboardSpacerStyle} />');
+  expect(core).toContain("<Reanimated.View style={[styles.pageContent, style, keyboardInsetStyle");
+  expect(core).toContain("<View>{composer}</View>");
+  expect(core).not.toContain("keyboardSpacerStyle");
   expect(core).not.toContain("KeyboardAvoidingView");
   expect(core).not.toContain("withTiming");
 });

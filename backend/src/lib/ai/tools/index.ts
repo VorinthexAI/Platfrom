@@ -21,6 +21,7 @@ import { CONVERSATION_TOOL_DEFINITIONS } from './conversation-tool-definitions';
 import type { AgentRuntimeDependencies } from '@/lib/ai/agents';
 import { AGENT_TOOL_DEFINITIONS } from './agent-tool-definitions';
 import type { AgentToolDependencies } from './agent-tool-definitions';
+import { webSearchTool, type WebSearchToolDependencies } from './web-search';
 
 /** A tool name has exactly one registry entry. */
 export const TOOL_NAMES = UNIFIED_TOOL_DEFINITIONS.map(({ name }) => name) as [string, ...string[]];
@@ -39,7 +40,7 @@ export const toolInputSchemas: Record<string, z.ZodTypeAny> = Object.fromEntries
 );
 
 export const TOOL_DEFINITIONS = PUBLIC_TOOL_DEFINITIONS.map(({ providerDefinition }) => providerDefinition);
-export interface ToolDependencies extends RouterDependencies, DocumentParseDependencies, Pick<ImageCaptionToolDependencies, 'executeImageCaption'>, Pick<ImageCreateVisualIdentityToolDependencies, 'executeDescription'> {
+export interface ToolDependencies extends RouterDependencies, DocumentParseDependencies, Pick<ImageCaptionToolDependencies, 'executeImageCaption'>, Pick<ImageCreateVisualIdentityToolDependencies, 'executeDescription'>, Pick<WebSearchToolDependencies, 'executeSearch'> {
   signal?: AbortSignal;
   organizationKey?: string;
   contentContext?: ToolContext;
@@ -71,6 +72,14 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
   if (toolName === imageCaptionTool.name) return imageCaptionTool.execute(rawInput, dependencies);
   if (toolName === imageCreateVisualIdentityTool.name) return imageCreateVisualIdentityTool.execute(rawInput, dependencies);
   if (!dependencies.contentContext) throw new Error(`Tool ${toolName} requires contentContext.`);
+  if (toolName === webSearchTool.name) return webSearchTool.execute(rawInput, {
+    organizationKey: dependencies.contentContext.organizationKey,
+    executeSearch: dependencies.executeSearch,
+    adapters: dependencies.adapters,
+    env: dependencies.env,
+    signal: dependencies.signal,
+    timeoutMs: dependencies.timeoutMs,
+  });
   const agentDefinition = agentToolDefinitionsByName.get(toolName);
   if (agentDefinition) return agentDefinition.execute(rawInput, { context: dependencies.contentContext, conversations: dependencies.conversationService, requestKey: dependencies.requestKey, agentDependencies: dependencies.agentDependencies });
   const conversationDefinition = conversationToolDefinitionsByName.get(toolName);
@@ -123,6 +132,7 @@ export async function runTrustedTool(name: TrustedEmailToolName, rawInput: unkno
 export { sanitizeAgentInput, sanitizedAgentMessageSchema } from './input-sanitizer';
 export { retrievalTool, retrievalInputSchema, retrievalFiltersSchema, retrieveNodeDocuments } from './retrieval';
 export { imageCaptionTool, imageCreateVisualIdentityTool };
+export { webSearchInputSchema, webSearchTool } from './web-search';
 export { imageSearchTool } from './image-search';
 export { imageSearchInputSchema } from './image-search';
 export { imageSimilarityOutputSchema } from './image-similarity';

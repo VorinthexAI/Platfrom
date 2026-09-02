@@ -227,7 +227,7 @@ function ChapterReading({ chapter }: { chapter?: BookChapter }) {
   );
 }
 
-export function AscendWorkspace() {
+export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initialBookKey?: string; initialSearchQuery?: string } = {}) {
   const queryClient = useQueryClient();
   const playback = useBookPlayback();
   const context = getBooksContext();
@@ -249,7 +249,7 @@ export function AscendWorkspace() {
   const [contextPickerOpen, setContextPickerOpen] = useState(false);
   const [contextLabels, setContextLabels] = useState<EmailAttachmentLabels>({});
   const [contextGridWidth, setContextGridWidth] = useState(0);
-  const [selectedBookKey, setSelectedBookKey] = useState<string>();
+  const [selectedBookKey, setSelectedBookKey] = useState<string | undefined>(initialBookKey);
   const [readerChapterKey, setReaderChapterKey] = useState<string>();
   const [readingChapterKey, setReadingChapterKey] = useState<string>();
   const [playbackScrubValue, setPlaybackScrubValue] = useState<number>();
@@ -257,9 +257,9 @@ export function AscendWorkspace() {
   const [sharingBook, setSharingBook] = useState<Book>();
   const [selectedBookKeys, setSelectedBookKeys] = useState<string[]>([]);
   const [bulkLoading, setBulkLoading] = useState(false);
-  const [bookPageOpen, setBookPageOpen] = useState(false);
+  const [bookPageOpen, setBookPageOpen] = useState(Boolean(initialBookKey));
   const [reducedChapterMotion, setReducedChapterMotion] = useState(false);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => initialSearchQuery?.slice(0, 500) ?? "");
   const [searchTerm, setSearchTerm] = useState("");
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [rootSearchFocusable, setRootSearchFocusable] = useState(true);

@@ -6,6 +6,7 @@ import { publishUserSearchHistoryAppend } from "./user-search-history-events";
 import type { ServerSentEvent } from "./sse";
 
 export const CONVERSATION_PAGE_SIZE = 25;
+export const CONVERSATION_MESSAGE_PAGE_SIZE = 10;
 export const CONVERSATION_NAME_MAX_LENGTH = 200;
 export const CONVERSATION_MESSAGE_MAX_LENGTH = 20_000;
 
@@ -36,6 +37,28 @@ export const conversationSchema = z.strictObject({
 }).transform(({ organizationKey: _organizationKey, scopeKey: _scopeKey, userKey: _userKey, ...conversation }) => conversation);
 export type Conversation = z.infer<typeof conversationSchema>;
 
+export const conversationRetrievalCollectionSlugSchema = z.enum(["folders", "documents", "files", "collections", "images", "inboxes", "email-tones", "email-messages", "email-drafts", "places", "trips", "countries", "books"]);
+export const conversationRetrievalFiltersSchema = z.strictObject({
+  folderKey: z.string().cuid().optional(),
+  includeDescendants: z.boolean().optional(),
+  collectionKey: z.string().cuid().optional(),
+  connectorKey: z.string().cuid().optional(),
+  readState: z.enum(["read", "unread"]).optional(),
+  emailFacets: z.array(z.enum(["urgent", "important", "filtered", "favorite"])).max(4).optional(),
+});
+export const conversationRetrievalSchema = z.strictObject({
+  query: z.string().trim().min(1).max(500),
+  limit: z.number().int().min(1).max(50),
+  minimumScore: z.number().min(-1).max(1),
+  filters: conversationRetrievalFiltersSchema.optional(),
+  groups: z.array(z.strictObject({
+    collectionSlug: conversationRetrievalCollectionSlugSchema,
+    results: z.array(z.strictObject({ key: z.string().trim().min(1).max(255), label: z.string().trim().min(1).max(200), destinationKey: z.string().trim().min(1).max(255).optional() })).min(1).max(50),
+  })).min(1).max(10),
+}).refine(({ groups }) => groups.reduce((count, group) => count + group.results.length, 0) <= 100, "Retrievals may contain at most 100 results.");
+export type ConversationRetrieval = z.infer<typeof conversationRetrievalSchema>;
+export type ConversationRetrievalCollectionSlug = z.infer<typeof conversationRetrievalCollectionSlugSchema>;
+
 const serverConversationMessageSchema = z.strictObject({
   key: z.string().min(1),
   conversationKey: z.string().min(1),
@@ -43,6 +66,7 @@ const serverConversationMessageSchema = z.strictObject({
   role: z.enum(["USER", "ASSISTANT"]),
   status: z.enum(["PENDING", "COMPLETED", "FAILED"]),
   content: z.string().min(1).max(100_000),
+  retrievals: z.array(conversationRetrievalSchema).max(4),
   createdAt: z.string().datetime(),
   completedAt: z.string().datetime().optional(),
 }).transform(({ role, ...message }) => ({ ...message, role: role === "USER" ? "user" as const : "assistant" as const }));
@@ -52,7 +76,7 @@ export type ConversationMessage = z.infer<typeof conversationMessageSchema>;
 const cursorSchema = z.string().min(1).nullable().optional();
 export const conversationPageSchema = z.strictObject({ items: z.array(conversationSchema), nextCursor: cursorSchema })
   .transform(({ items, nextCursor }) => ({ conversations: items, cursor: nextCursor }));
-export const conversationMessagePageSchema = z.strictObject({ items: z.array(serverConversationMessageSchema).max(CONVERSATION_PAGE_SIZE), nextCursor: cursorSchema })
+export const conversationMessagePageSchema = z.strictObject({ items: z.array(serverConversationMessageSchema).max(CONVERSATION_MESSAGE_PAGE_SIZE), nextCursor: cursorSchema })
   .transform(({ items, nextCursor }) => ({ messages: items, cursor: nextCursor }));
 export type ConversationPage = z.infer<typeof conversationPageSchema>;
 export type ConversationMessagePage = z.infer<typeof conversationMessagePageSchema>;
@@ -83,7 +107,7 @@ export async function listConversations(context: ConversationContext, input: Con
 export async function listConversationMessages(context: ConversationContext, conversationKey: string, cursor?: string, signal?: AbortSignal) {
   const key = z.string().min(1).parse(conversationKey);
   const parsedCursor = z.string().min(1).max(1_000).optional().parse(cursor);
-  const response = await apiClient.post(`/conversations/${encodeURIComponent(key)}/messages/list`, { ...selectors(context), ...(parsedCursor ? { cursor: parsedCursor } : {}), limit: CONVERSATION_PAGE_SIZE }, { signal });
+  const response = await apiClient.post(`/conversations/${encodeURIComponent(key)}/messages/list`, { ...selectors(context), ...(parsedCursor ? { cursor: parsedCursor } : {}), limit: CONVERSATION_MESSAGE_PAGE_SIZE }, { signal });
   return unwrap(conversationEnvelope(conversationMessagePageSchema).parse(response.data));
 }
 

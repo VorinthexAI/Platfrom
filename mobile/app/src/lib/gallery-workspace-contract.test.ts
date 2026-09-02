@@ -805,9 +805,10 @@ test("gates member editing to owners and keeps removal inside one shared pill", 
   expect(sharingSource).toContain('view === "member" && selectedMember && owner && selectedMember.role !== "owner"');
   expect(sharingSource).toContain('view === "member" ? selectedMember?.name ?? "Member"');
   expect(sharingSource).toContain('Joined {dateTime(selectedMember.joinedAt)}');
-  expect(actionPillSource).toContain('style={styles.action} variant="secondary">{action}</Button>');
+  expect(actionPillSource).toContain('style={[styles.action, compact && styles.compactAction]} variant="secondary">{action}</Button>');
   expect(actionPillSource).toContain('marginRight: 6');
   expect(actionPillSource).toContain('borderRadius: 999');
+  expect(actionPillSource).toContain('alignItems: "center", justifyContent: "flex-start"');
 });
 
 test("keeps pending-invite rejection inside the shared pill", () => {

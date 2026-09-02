@@ -1,16 +1,22 @@
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type ComponentProps, type ComponentRef } from "react";
-import { FlatList, Keyboard, StyleSheet, Text, View, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
+import { useRouter } from "expo-router";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ComponentRef } from "react";
+import { FlatList, Keyboard, StyleSheet, Text, View, type ListRenderItem, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
+import { ActionPill } from "@vorinthex/shared/ui/action-pill";
+import { Badge } from "@vorinthex/shared/ui/badge";
 import { Button } from "@vorinthex/shared/ui/button";
+import { ChromeIcon } from "@vorinthex/shared/ui/chrome-icon";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
+import { LoadingText } from "@vorinthex/shared/ui/loading-text";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Switch } from "@vorinthex/shared/ui/switch";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
-import { ChatBubbleIcon, CloseIcon, FilterIcon, MoreHorizontalIcon, PlusIcon, SearchIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { CloseIcon, FilterIcon, MoreHorizontalIcon, PlusIcon, SearchIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import { SearchHistorySheet } from "@/components/SearchHistorySheet";
+import { ConversationRetrievalSheet } from "@/components/ConversationRetrievalSheet";
 import {
   addConversationToUnfilteredLists,
   conversationMessages,
@@ -32,39 +38,50 @@ import {
   streamConversationTurn,
   updateConversation,
   type Conversation,
+  type ConversationRetrieval,
 } from "@/lib/conversation-client";
+import { formatConversationRetrievalSummary, mergeConversationRetrievalResults, type ConversationRetrievalResult } from "@/lib/conversation-retrievals";
 import { deleteContentSearchHistory, type ContentSearchHistoryItem } from "@/lib/content-client";
+import { readConversationSelection, writeConversationSelection } from "@/lib/conversation-selection-vault";
 import { getUserSearchHistory, promoteCachedUserSearchHistory, removeCachedUserSearchHistory, userSearchHistoryQueryKey } from "@/lib/user-search-history-cache";
 import { useAuthStore } from "@/state/auth";
+import { assistantIconSource } from "@/data/capability-icons";
 import { palette, radii, spacing } from "@/theme/tokens";
 
 type CoreComposerProps = ComponentProps<typeof CoreComposer>;
-type Sheet = "plus" | "chats" | "filter" | "history" | "current" | "edit" | "delete";
+type Sheet = "plus" | "chats" | "filter" | "history" | "current" | "edit" | "delete" | "retrievals";
 type CreateOperation = { identity: string; optimistic: Conversation; promise: Promise<Conversation> };
 
 const now = () => new Date().toISOString();
 const clientKey = (kind: string) => `optimistic-${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-function MessageRow({ message }: { message: OptimisticMessage }) {
+const MessageRow = memo(function MessageRow({ message, onOpenRetrievals }: { message: OptimisticMessage; onOpenRetrievals: (message: OptimisticMessage) => void }) {
   const user = message.role === "user";
   const pending = message.status === "PENDING" && (!message.optimistic || !message.content);
   const failed = message.status === "FAILED";
+  const retrievalResults = !user && message.status === "COMPLETED" ? mergeConversationRetrievalResults(message.retrievals) : [];
   return <View style={[styles.messageRow, user ? styles.userRow : styles.assistantRow]}>
-    {pending ? <Skeleton accessibilityLabel="Core is responding" accessibilityRole="progressbar" style={[styles.messageSkeleton, styles.assistantSkeleton]} /> : <View style={[styles.messageBox, user ? styles.userMessage : styles.assistantMessage, failed && styles.failedMessage]}>
+    {!user ? <ChromeIcon glow={0.35} size={20} source={assistantIconSource} style={styles.assistantMark} /> : null}
+    <View style={[styles.messageContent, user ? styles.userMessage : styles.assistantMessage]}>{pending ? <LoadingText style={styles.thinkingText} text="Thinking..." /> : <View style={[styles.messageBox, failed && styles.failedMessage]}>
       <Text selectable={!failed} style={styles.messageText}>{failed ? "This response could not be completed." : message.content}</Text>
     </View>}
+    {retrievalResults.length ? <ActionPill compact onPress={() => onOpenRetrievals(message)} pressLabel="Open search results"><Text numberOfLines={1} style={styles.retrievalSummary}>{formatConversationRetrievalSummary(retrievalResults)}</Text></ActionPill> : null}</View>
   </View>;
-}
+});
 
 function OlderMessageSkeletons() {
   return <View accessibilityLabel="Loading older messages" accessibilityRole="progressbar" style={styles.olderSkeletons}>
-    <View style={[styles.messageRow, styles.assistantRow]}><Skeleton style={[styles.messageSkeleton, styles.assistantSkeleton]} /></View>
-    <View style={[styles.messageRow, styles.userRow]}><Skeleton style={[styles.messageSkeleton, styles.userSkeleton]} /></View>
+    <View style={[styles.messageRow, styles.assistantRow]}><Skeleton style={[styles.messageSkeleton, styles.assistantSkeleton, styles.skeletonCard]} /></View>
+    <View style={[styles.messageRow, styles.userRow]}><Skeleton style={[styles.messageSkeleton, styles.userSkeleton, styles.skeletonCard]} /></View>
   </View>;
 }
 
+const messageKey = ({ key }: OptimisticMessage) => key;
+const conversationKey = ({ key }: Conversation) => key;
+
 export function PersistentCoreComposer(props: CoreComposerProps) {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const { showToast } = useToast();
   const userKey = useAuthStore((state) => state.user?.key ?? "");
   const organizationKey = useAuthStore((state) => String(state.organization?.key ?? ""));
@@ -82,13 +99,14 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
   const [pendingMessages, setPendingMessages] = useState<OptimisticMessage[]>([]);
   const [turnError, setTurnError] = useState<string>();
   const [editName, setEditName] = useState("");
-  const [mutating, setMutating] = useState(false);
+  const [editFavorite, setEditFavorite] = useState(false);
   const [turning, setTurning] = useState(false);
   const [creating, setCreating] = useState(false);
   const [history, setHistory] = useState<ContentSearchHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string>();
   const [removingHistoryQuery, setRemovingHistoryQuery] = useState<string>();
+  const [activeRetrievals, setActiveRetrievals] = useState<{ fresh: boolean; messageKey: string; retrievals: readonly ConversationRetrieval[] }>();
   const contextRef = useRef(context);
   const identityRef = useRef(identity);
   const selectedRef = useRef<Conversation | undefined>(undefined);
@@ -102,6 +120,37 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
   const createOperation = useRef<CreateOperation | undefined>(undefined);
   const historyController = useRef<AbortController | undefined>(undefined);
   const operationControllers = useRef(new Set<AbortController>());
+  const mutationKeys = useRef(new Set<string>());
+  const selectionRestoreIdentity = useRef("");
+  const deltaBuffer = useRef<{ key: string; text: string }>({ key: "", text: "" });
+  const deltaFrame = useRef<number | undefined>(undefined);
+  const scrollFrame = useRef<number | undefined>(undefined);
+  const autoOpenedCompletions = useRef(new Set<string>());
+
+  const openMessageRetrievals = useCallback((message: OptimisticMessage) => {
+    if (!mergeConversationRetrievalResults(message.retrievals).length) return;
+    Keyboard.dismiss();
+    setActiveRetrievals({ fresh: false, messageKey: message.key, retrievals: message.retrievals });
+    setSheet("retrievals");
+  }, []);
+  const closeRetrievals = useCallback(() => { setSheet(undefined); setActiveRetrievals(undefined); }, []);
+  const navigateRetrievalResult = useCallback((result: ConversationRetrievalResult) => {
+    const { collectionSlug, destinationKey, key, retrieval } = result;
+    closeRetrievals();
+    if (collectionSlug === "folders") router.push({ pathname: "/capability/[slug]", params: { slug: "archive", assetKey: key } });
+    else if (collectionSlug === "documents" || collectionSlug === "files") router.push({ pathname: "/capability/[slug]", params: { slug: "archive", documentKey: key } });
+    else if (collectionSlug === "collections") router.push({ pathname: "/capability/[slug]", params: { slug: "gallery", assetKey: key } });
+    else if (collectionSlug === "images") router.push({ pathname: "/capability/[slug]", params: { slug: "gallery", ...(retrieval.filters?.collectionKey ? { assetKey: retrieval.filters.collectionKey } : {}), imageKey: key } });
+    else if (collectionSlug === "email-messages" && retrieval.filters?.connectorKey) router.push({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: retrieval.filters.connectorKey, signalThreadKey: key } });
+    else if (collectionSlug === "trips") router.push({ pathname: "/capability/[slug]", params: { slug: "compass", tripKey: key } });
+    else if (collectionSlug === "inboxes" && destinationKey) router.push({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: destinationKey, signalReturn: "root" } });
+    else if (collectionSlug === "email-tones") router.push({ pathname: "/capability/[slug]", params: { slug: "signal", toneKey: key } });
+    else if (collectionSlug === "email-drafts" && retrieval.filters?.connectorKey) router.push({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: retrieval.filters.connectorKey, draftKey: key } });
+    else if (collectionSlug === "places") router.push({ pathname: "/capability/[slug]", params: { slug: "compass", placeKey: key } });
+    else if (collectionSlug === "countries") router.push({ pathname: "/capability/[slug]", params: { slug: "compass", countryCode: key } });
+    else if (collectionSlug === "books") router.push({ pathname: "/capability/[slug]", params: { slug: "ascend", bookKey: key } });
+    else router.push({ pathname: "/capability/[slug]", params: { slug: "signal" } });
+  }, [closeRetrievals, router]);
 
   const listFilter = useMemo(() => ({ query: committedQuery, favoriteOnly }), [committedQuery, favoriteOnly]);
   const chatsQuery = useInfiniteQuery({
@@ -111,7 +160,7 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
     getNextPageParam: ({ cursor }) => cursor ?? undefined,
     enabled: configured && sheet === "chats" && !searchPending,
   });
-  const conversations = chatsQuery.data?.pages.flatMap(({ conversations: page }) => page) ?? [];
+  const conversations = useMemo(() => chatsQuery.data?.pages.flatMap(({ conversations: page }) => page) ?? [], [chatsQuery.data]);
   const messagesQuery = useInfiniteQuery({
     queryKey: conversationQueryKeys.messages(context, selected?.key ?? ""),
     queryFn: ({ pageParam, signal }) => listConversationMessages(context, selected!.key, pageParam, signal),
@@ -119,7 +168,9 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
     getNextPageParam: ({ cursor }) => cursor ?? undefined,
     enabled: configured && Boolean(selected && !selected.key.startsWith("optimistic-")),
   });
-  const messages = [...conversationMessages(messagesQuery.data), ...pendingMessages];
+  const persistedMessages = useMemo(() => conversationMessages(messagesQuery.data), [messagesQuery.data]);
+  const messages = useMemo(() => [...persistedMessages, ...pendingMessages], [pendingMessages, persistedMessages]);
+  const renderMessage = useCallback<ListRenderItem<OptimisticMessage>>(({ item }) => <MessageRow message={item} onOpenRetrievals={openMessageRetrievals} />, [openMessageRetrievals]);
 
   useEffect(() => { selectedRef.current = selected; }, [selected]);
 
@@ -129,24 +180,26 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
     const controllers = operationControllers.current;
     identityRef.current = identity;
     contextRef.current = context;
-    turnGeneration.current += 1;
-    turnController.current?.abort();
-    historyController.current?.abort();
-    controllers.forEach((controller) => controller.abort());
-    controllers.clear();
-    turnController.current = undefined;
-    historyController.current = undefined;
-    createOperation.current = undefined;
-    turnBusy.current = false;
-    if (previousIdentity === identity) return;
-    void queryClient.cancelQueries({ queryKey: conversationQueryKeys.all(previousContext) });
-    queueMicrotask(() => {
-      if (identityRef.current !== identity) return;
-      setSheet(undefined); setSelected(undefined); setInput(""); setQuery(""); setCommittedQuery(""); setFavoriteOnly(false);
-      setSearchPending(false); setPendingMessages([]); setTurnError(undefined); setEditName(""); setMutating(false); setTurning(false); setCreating(false);
-      setHistory([]); setHistoryLoading(false); setHistoryError(undefined); setRemovingHistoryQuery(undefined);
-      selectedRef.current = undefined; nearBottom.current = true; initialScrollPending.current = true;
-    });
+    if (previousIdentity !== identity) {
+      turnGeneration.current += 1;
+      turnController.current?.abort();
+      historyController.current?.abort();
+      controllers.forEach((controller) => controller.abort());
+      controllers.clear();
+      turnController.current = undefined;
+      historyController.current = undefined;
+      createOperation.current = undefined;
+      turnBusy.current = false;
+      void queryClient.cancelQueries({ queryKey: conversationQueryKeys.all(previousContext) });
+      queueMicrotask(() => {
+        if (identityRef.current !== identity) return;
+        setSheet(undefined); setSelected(undefined); setInput(""); setQuery(""); setCommittedQuery(""); setFavoriteOnly(false);
+        setSearchPending(false); setPendingMessages([]); setTurnError(undefined); setEditName(""); setEditFavorite(false); setTurning(false); setCreating(false);
+        setHistory([]); setHistoryLoading(false); setHistoryError(undefined); setRemovingHistoryQuery(undefined);
+        setActiveRetrievals(undefined); autoOpenedCompletions.current.clear();
+        selectedRef.current = undefined; nearBottom.current = true; initialScrollPending.current = true; selectionRestoreIdentity.current = "";
+      });
+    }
     return () => {
       turnGeneration.current += 1;
       turnController.current?.abort();
@@ -157,6 +210,11 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
       turnBusy.current = false;
     };
   }, [context, identity, queryClient]);
+
+  useEffect(() => () => {
+    if (deltaFrame.current !== undefined) cancelAnimationFrame(deltaFrame.current);
+    if (scrollFrame.current !== undefined) cancelAnimationFrame(scrollFrame.current);
+  }, []);
 
   useEffect(() => {
     const timeout = setTimeout(() => { setCommittedQuery(query.trim()); setSearchPending(false); }, 300);
@@ -180,13 +238,48 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
     return () => clearTimeout(timeout);
   }, [sheet]);
 
+  function rememberConversation(conversation?: Conversation, capturedContext = context) { void writeConversationSelection(capturedContext, conversation).catch(() => undefined); }
+  async function restoreConversationSelection() {
+    if (!configured || selectedRef.current || selectionRestoreIdentity.current === identity) return;
+    selectionRestoreIdentity.current = identity;
+    const capturedIdentity = identity; const capturedContext = context;
+    try {
+      const stored = await readConversationSelection(capturedContext);
+      if (!isConversationContextCurrent(capturedIdentity, identityRef) || selectedRef.current) return;
+      if (stored) { clearConversationState(); setSelected(stored); selectedRef.current = stored; return; }
+      const page = await listConversations(capturedContext, { favoriteOnly: false, recordHistory: false });
+      if (!isConversationContextCurrent(capturedIdentity, identityRef) || selectedRef.current) return;
+      const latest = page.conversations.reduce<Conversation | undefined>((current, candidate) => !current || candidate.updatedAt > current.updatedAt ? candidate : current, undefined);
+      if (latest) { clearConversationState(); setSelected(latest); selectedRef.current = latest; rememberConversation(latest, capturedContext); }
+    } catch { if (isConversationContextCurrent(capturedIdentity, identityRef)) selectionRestoreIdentity.current = ""; }
+  }
+  function handleCoreFocusChange(focused: boolean) { props.onFocusChange?.(focused); if (focused) void restoreConversationSelection(); }
   function openSheet(next?: Sheet) { Keyboard.dismiss(); setSheet(next); }
   function clearConversationState() { setPendingMessages([]); setTurnError(undefined); nearBottom.current = true; initialScrollPending.current = true; }
   function operationController() { const controller = new AbortController(); operationControllers.current.add(controller); return controller; }
+  function discardBufferedDelta() {
+    if (deltaFrame.current !== undefined) cancelAnimationFrame(deltaFrame.current);
+    deltaFrame.current = undefined; deltaBuffer.current = { key: "", text: "" };
+  }
+  function queueDelta(key: string, text: string) {
+    if (deltaBuffer.current.key && deltaBuffer.current.key !== key) discardBufferedDelta();
+    deltaBuffer.current = { key, text: deltaBuffer.current.text + text };
+    if (deltaFrame.current !== undefined) return;
+    deltaFrame.current = requestAnimationFrame(() => {
+      deltaFrame.current = undefined;
+      const buffered = deltaBuffer.current; deltaBuffer.current = { key: "", text: "" };
+      if (!buffered.text) return;
+      setPendingMessages((current) => current.map((message) => message.key === buffered.key ? { ...message, content: message.content + buffered.text } : message));
+    });
+  }
+  function scheduleScrollToEnd(animated: boolean) {
+    if (scrollFrame.current !== undefined) return;
+    scrollFrame.current = requestAnimationFrame(() => { scrollFrame.current = undefined; listRef.current?.scrollToEnd({ animated }); });
+  }
 
   function selectConversation(conversation?: Conversation) {
     turnGeneration.current += 1; turnController.current?.abort(); turnController.current = undefined; turnBusy.current = false;
-    setTurning(false); clearConversationState(); setSelected(conversation); selectedRef.current = conversation; openSheet(undefined);
+    discardBufferedDelta(); setTurning(false); clearConversationState(); setSelected(conversation); selectedRef.current = conversation; rememberConversation(conversation); setActiveRetrievals(undefined); openSheet(undefined);
   }
 
   function beginConversationCreation() {
@@ -206,6 +299,7 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
       addConversationToUnfilteredLists(queryClient, capturedContext, created);
       void invalidateConversationSearches(queryClient, capturedContext);
       setSelected((value) => value?.key === optimistic.key ? created : value); selectedRef.current = selectedRef.current?.key === optimistic.key ? created : selectedRef.current;
+      rememberConversation(created, capturedContext);
       return created;
     }).catch((error) => {
       removeConversationFromLists(queryClient, capturedContext, optimistic.key);
@@ -233,8 +327,8 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
     const operation = !existing || existing.key.startsWith("optimistic-") ? beginConversationCreation() : undefined;
     const pendingConversationKey = existing?.key ?? operation?.optimistic.key ?? "pending";
     setPendingMessages((current) => [...current,
-      { key: optimisticUserKey, conversationKey: pendingConversationKey, turnKey: requestKey, role: "user", status: "COMPLETED", content, createdAt: now(), optimistic: true },
-      { key: optimisticAssistantKey, conversationKey: pendingConversationKey, turnKey: requestKey, role: "assistant", status: "PENDING", content: "", createdAt: now(), optimistic: true },
+      { key: optimisticUserKey, conversationKey: pendingConversationKey, turnKey: requestKey, role: "user", status: "COMPLETED", content, retrievals: [], createdAt: now(), optimistic: true },
+      { key: optimisticAssistantKey, conversationKey: pendingConversationKey, turnKey: requestKey, role: "assistant", status: "PENDING", content: "", retrievals: [], createdAt: now(), optimistic: true },
     ]);
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
     let userMessageKey = optimisticUserKey; let assistantMessageKey = optimisticAssistantKey; let activeConversation: Conversation | undefined;
@@ -250,17 +344,27 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
           userMessageKey = event.userMessageKey; assistantMessageKey = event.assistantMessageKey;
           setPendingMessages((current) => current.map((message) => message.key === optimisticUserKey ? { ...message, key: userMessageKey } : message.key === optimisticAssistantKey ? { ...message, key: assistantMessageKey } : message));
         } else if (event.type === "delta") {
-          setPendingMessages((current) => current.map((message) => message.key === assistantMessageKey ? { ...message, content: message.content + event.text } : message));
+          queueDelta(assistantMessageKey, event.text);
         } else if (event.type === "done") {
-          const updated = { ...active, ...(event.name ? { name: event.name } : {}), updatedAt: event.message.completedAt ?? event.message.createdAt };
-          const completedUser: OptimisticMessage = { key: userMessageKey, conversationKey: active.key, turnKey: requestKey, role: "user", status: "COMPLETED", content, createdAt: now() };
+          discardBufferedDelta();
+          const currentConversation = selectedRef.current?.key === active.key ? selectedRef.current : active;
+          const updated = { ...currentConversation, ...(event.name ? { name: event.name } : {}), updatedAt: event.message.completedAt ?? event.message.createdAt };
+          const completedUser: OptimisticMessage = { key: userMessageKey, conversationKey: active.key, turnKey: requestKey, role: "user", status: "COMPLETED", content, retrievals: [], createdAt: now() };
           setSelected(updated); selectedRef.current = updated; replaceConversationInMatchingLists(queryClient, capturedContext, updated);
+          rememberConversation(updated, capturedContext);
           queryClient.setQueryData(conversationQueryKeys.messages(capturedContext, active.key), (data: typeof messagesQuery.data) => data ? { ...data, pages: data.pages.map((page, index) => index === 0 ? { ...page, messages: [...page.messages.filter(({ key }) => key !== completedUser.key && key !== event.message.key), completedUser, event.message] } : page) } : { pages: [{ messages: [completedUser, event.message], cursor: undefined }], pageParams: [undefined] });
           setPendingMessages((current) => current.filter(({ key }) => ![optimisticUserKey, optimisticAssistantKey, userMessageKey, assistantMessageKey, event.message.key].includes(key)));
+          if (!event.replayed && mergeConversationRetrievalResults(event.message.retrievals).length && !autoOpenedCompletions.current.has(event.message.key)) {
+            autoOpenedCompletions.current.add(event.message.key);
+            Keyboard.dismiss();
+            setActiveRetrievals({ fresh: true, messageKey: event.message.key, retrievals: event.message.retrievals });
+            setSheet("retrievals");
+          }
         }
       }, controller.signal);
       if (generation === turnGeneration.current && isConversationContextCurrent(capturedIdentity, identityRef)) { await invalidateConversationSearches(queryClient, capturedContext); void queryClient.invalidateQueries({ queryKey: conversationQueryKeys.messages(capturedContext, active.key), refetchType: "none" }); }
     } catch (error) {
+      discardBufferedDelta();
       if (generation !== turnGeneration.current || !isConversationContextCurrent(capturedIdentity, identityRef) || (error instanceof Error && error.name === "AbortError")) return;
       const message = error instanceof Error ? error.message : "Core could not complete this response.";
       setTurnError(message); setInput(content);
@@ -273,52 +377,63 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
     }
   }
 
-  async function mutateConversation(action: "favorite" | "edit") {
-    const current = selectedRef.current; if (!current || current.key.startsWith("optimistic-") || mutating) return;
-    const capturedIdentity = identity; const capturedContext = context; const previous = current;
-    const controller = operationController();
-    const optimistic = action === "favorite" ? { ...current, isFavorite: !current.isFavorite, updatedAt: now() } : current;
-    if (action === "favorite") { setSelected(optimistic); selectedRef.current = optimistic; replaceConversationInMatchingLists(queryClient, capturedContext, optimistic); openSheet(undefined); }
-    setMutating(true);
-    try {
-      const updated = await updateConversation(capturedContext, current.key, action === "favorite" ? { isFavorite: optimistic.isFavorite } : { name: editName.trim() }, controller.signal);
-      if (!isConversationContextCurrent(capturedIdentity, identityRef)) return;
-      setSelected(updated); selectedRef.current = updated; replaceConversationInMatchingLists(queryClient, capturedContext, updated); openSheet(undefined);
-      await invalidateConversationSearches(queryClient, capturedContext);
-      await queryClient.invalidateQueries({ queryKey: conversationQueryKeys.lists(capturedContext), refetchType: "active" });
-    } catch (error) {
-      if (!isConversationContextCurrent(capturedIdentity, identityRef)) return;
-      setSelected(previous); selectedRef.current = previous; replaceConversationInMatchingLists(queryClient, capturedContext, previous);
-      showToast({ title: error instanceof Error ? error.message : "Chat could not be updated.", duration: 2_000 });
-    } finally { operationControllers.current.delete(controller); if (isConversationContextCurrent(capturedIdentity, identityRef)) setMutating(false); }
+  function mutateConversation(action: "favorite" | "edit") {
+    const current = selectedRef.current; if (!current || current.key.startsWith("optimistic-") || mutationKeys.current.has(current.key)) return;
+    const capturedIdentity = identity; const capturedContext = context; const controller = operationController();
+    const nextName = action === "edit" ? editName.trim() : current.name;
+    const nextFavorite = action === "favorite" ? !current.isFavorite : editFavorite;
+    const optimistic = { ...current, name: nextName, isFavorite: nextFavorite, updatedAt: now() };
+    mutationKeys.current.add(current.key);
+    setSelected(optimistic); selectedRef.current = optimistic; replaceConversationInMatchingLists(queryClient, capturedContext, optimistic); rememberConversation(optimistic, capturedContext); openSheet(undefined);
+    void (async () => {
+      let canonical = current;
+      try {
+        if (nextName !== current.name) canonical = await updateConversation(capturedContext, current.key, { name: nextName }, controller.signal);
+        if (nextFavorite !== current.isFavorite) canonical = await updateConversation(capturedContext, current.key, { isFavorite: nextFavorite }, controller.signal);
+        if (!isConversationContextCurrent(capturedIdentity, identityRef)) return;
+        setSelected((value) => value?.key === current.key ? canonical : value);
+        if (selectedRef.current?.key === current.key) selectedRef.current = canonical;
+        replaceConversationInMatchingLists(queryClient, capturedContext, canonical); rememberConversation(canonical, capturedContext);
+        await invalidateConversationSearches(queryClient, capturedContext);
+        await queryClient.invalidateQueries({ queryKey: conversationQueryKeys.lists(capturedContext), refetchType: "active" });
+      } catch (error) {
+        if (!isConversationContextCurrent(capturedIdentity, identityRef)) return;
+        setSelected((value) => value?.key === current.key ? canonical : value);
+        if (selectedRef.current?.key === current.key) selectedRef.current = canonical;
+        replaceConversationInMatchingLists(queryClient, capturedContext, canonical); rememberConversation(canonical, capturedContext);
+        showToast({ title: error instanceof Error ? error.message : "Chat could not be updated.", duration: 2_000 });
+      } finally { mutationKeys.current.delete(current.key); operationControllers.current.delete(controller); }
+    })();
   }
 
-  async function confirmDelete() {
-    const deleted = selectedRef.current; if (!deleted || mutating) return;
+  function confirmDelete() {
+    const deleted = selectedRef.current; if (!deleted || mutationKeys.current.has(deleted.key)) return;
     const capturedIdentity = identity; const capturedContext = context;
     const controller = operationController();
-    turnGeneration.current += 1; turnController.current?.abort(); turnController.current = undefined; turnBusy.current = false; setTurning(false); setMutating(true);
-    removeConversationFromLists(queryClient, capturedContext, deleted.key); setSelected(undefined); selectedRef.current = undefined; openSheet(undefined);
-    try { await deleteConversation(capturedContext, deleted.key, controller.signal); }
-    catch (error) {
-      operationControllers.current.delete(controller);
-      if (!isConversationContextCurrent(capturedIdentity, identityRef)) return;
-      addConversationToUnfilteredLists(queryClient, capturedContext, deleted); setSelected(deleted); selectedRef.current = deleted; setMutating(false);
-      if (!(error instanceof Error) || error.name !== "AbortError") showToast({ title: error instanceof Error ? error.message : "Chat could not be deleted.", duration: 2_000 });
-      return;
-    }
-    operationControllers.current.delete(controller);
-    try {
-      const fallbackPage = await listConversations(capturedContext, { favoriteOnly: false, recordHistory: false });
-      if (!isConversationContextCurrent(capturedIdentity, identityRef)) return;
-      queryClient.setQueryData(conversationQueryKeys.list(capturedContext, { query: "", favoriteOnly: false }), { pages: [fallbackPage], pageParams: [undefined] });
-      const fallback = fallbackPage.conversations[0]; setSelected(fallback); selectedRef.current = fallback;
-      await invalidateConversationSearches(queryClient, capturedContext);
-    } catch (error) {
-      if (!isConversationContextCurrent(capturedIdentity, identityRef)) return;
-      void queryClient.invalidateQueries({ queryKey: conversationQueryKeys.lists(capturedContext), refetchType: "active" });
-      showToast({ title: error instanceof Error ? `Chat deleted, but refresh failed: ${error.message}` : "Chat deleted, but chats could not be refreshed.", duration: 2_000 });
-    } finally { if (isConversationContextCurrent(capturedIdentity, identityRef)) setMutating(false); }
+    mutationKeys.current.add(deleted.key);
+    turnGeneration.current += 1; turnController.current?.abort(); turnController.current = undefined; turnBusy.current = false; discardBufferedDelta(); setTurning(false);
+    removeConversationFromLists(queryClient, capturedContext, deleted.key); setSelected(undefined); selectedRef.current = undefined; rememberConversation(undefined, capturedContext); setActiveRetrievals(undefined); openSheet(undefined);
+    void (async () => {
+      let deletedPersisted = false;
+      try {
+        await deleteConversation(capturedContext, deleted.key, controller.signal);
+        deletedPersisted = true;
+        const fallbackPage = await listConversations(capturedContext, { favoriteOnly: false, recordHistory: false });
+        if (!isConversationContextCurrent(capturedIdentity, identityRef)) return;
+        queryClient.setQueryData(conversationQueryKeys.list(capturedContext, { query: "", favoriteOnly: false }), { pages: [fallbackPage], pageParams: [undefined] });
+        const fallback = fallbackPage.conversations.reduce<Conversation | undefined>((current, candidate) => !current || candidate.updatedAt > current.updatedAt ? candidate : current, undefined);
+        setSelected(fallback); selectedRef.current = fallback; rememberConversation(fallback, capturedContext);
+        await invalidateConversationSearches(queryClient, capturedContext);
+      } catch (error) {
+        if (!isConversationContextCurrent(capturedIdentity, identityRef)) return;
+        if (!deletedPersisted) {
+          addConversationToUnfilteredLists(queryClient, capturedContext, deleted); setSelected(deleted); selectedRef.current = deleted; rememberConversation(deleted, capturedContext);
+        } else {
+          void queryClient.invalidateQueries({ queryKey: conversationQueryKeys.lists(capturedContext), refetchType: "active" });
+        }
+        if (!(error instanceof Error) || error.name !== "AbortError") showToast({ title: deletedPersisted ? `Chat deleted, but refresh failed: ${error instanceof Error ? error.message : "unknown error"}` : error instanceof Error ? error.message : "Chat could not be deleted.", duration: 2_000 });
+      } finally { mutationKeys.current.delete(deleted.key); operationControllers.current.delete(controller); }
+    })();
   }
 
   async function openSearchHistory() {
@@ -354,28 +469,37 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
   const pageActions = <View style={styles.headerActions}><Button accessibilityLabel="Core new menu" contentMode="raw" onPress={() => openSheet("plus")} size="xs" variant="icon"><PlusIcon size="sm" /></Button>{selected && !selected.key.startsWith("optimistic-") ? <Button accessibilityLabel="Current chat menu" contentMode="raw" onPress={() => openSheet("current")} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : null}</View>;
   const chatsInitialError = chatsQuery.isError && !chatsQuery.data;
   const chatsMoreError = chatsQuery.isError && Boolean(chatsQuery.data);
-  const conversation = <View style={styles.conversation}>{turnError ? <Text accessibilityRole="alert" style={styles.error}>{turnError}</Text> : null}<FlatList contentContainerStyle={styles.messageList} data={messages} keyExtractor={({ key }) => key} ListHeaderComponent={messagesQuery.isPending || messagesQuery.isFetchingNextPage ? <OlderMessageSkeletons /> : messagesQuery.isFetchNextPageError ? <Button onPress={() => void messagesQuery.fetchNextPage()} size="sm" variant="secondary">Retry older messages</Button> : null} maintainVisibleContentPosition={{ minIndexForVisible: 0 }} onContentSizeChange={() => { if (initialScrollPending.current && !messagesQuery.isPending) { initialScrollPending.current = false; listRef.current?.scrollToEnd({ animated: false }); } else if (nearBottom.current) listRef.current?.scrollToEnd({ animated: true }); }} onScroll={handleMessageScroll} ref={listRef} renderItem={({ item }) => <MessageRow message={item} />} scrollEventThrottle={80} showsVerticalScrollIndicator={false} />{messagesQuery.isError && !messagesQuery.data ? <View style={styles.centerError}><Text style={styles.error}>Messages could not be loaded.</Text><Button onPress={() => void messagesQuery.refetch()} size="sm" variant="secondary">Retry</Button></View> : null}</View>;
+  const chatsLoading = searchPending || (configured && chatsQuery.isPending && chatsQuery.isFetching);
+  const persistedSelection = Boolean(selected && !selected.key.startsWith("optimistic-"));
+  const messagesLoading = persistedSelection && messagesQuery.isPending && messagesQuery.isFetching;
+  const messagesInitialError = persistedSelection && messagesQuery.isError && !messagesQuery.data;
+  const messageEmpty = !messagesLoading && !messagesInitialError && messages.length === 0;
+  const conversation = <View style={styles.conversation}>
+    {turnError ? <Text accessibilityRole="alert" style={styles.error}>{turnError}</Text> : null}
+    {messagesLoading ? <OlderMessageSkeletons /> : messagesInitialError ? <View style={styles.centerError}><Text accessibilityRole="alert" style={styles.error}>Messages could not be loaded.</Text><Button onPress={() => void messagesQuery.refetch()} size="sm" variant="secondary">Retry</Button></View> : messageEmpty ? <View style={styles.emptyMessages} /> : <FlatList contentContainerStyle={styles.messageList} data={messages} initialNumToRender={10} keyExtractor={messageKey} ListHeaderComponent={messagesQuery.isFetchingNextPage ? <OlderMessageSkeletons /> : messagesQuery.isFetchNextPageError ? <Button onPress={() => void messagesQuery.fetchNextPage()} size="sm" variant="secondary">Retry older messages</Button> : null} maintainVisibleContentPosition={{ minIndexForVisible: 0 }} maxToRenderPerBatch={10} onContentSizeChange={() => { if (initialScrollPending.current) { initialScrollPending.current = false; listRef.current?.scrollToEnd({ animated: false }); } else if (nearBottom.current) scheduleScrollToEnd(!turning); }} onLayout={() => { if (nearBottom.current && !initialScrollPending.current) scheduleScrollToEnd(false); }} onScroll={handleMessageScroll} ref={listRef} renderItem={renderMessage} scrollEventThrottle={80} showsVerticalScrollIndicator={false} updateCellsBatchingPeriod={50} windowSize={5} />}
+  </View>;
 
   return <>
-    <CoreComposer {...props} disabled={!configured || turning} editable={configured && !turning} loading={turning} maxLength={CONVERSATION_MESSAGE_MAX_LENGTH} message={conversation} onChangeText={setInput} onSubmit={() => void submit()} pageActions={pageActions} value={input} />
-    <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "plus"} title=""><BottomSheetMenu><BottomSheetItem onPress={() => openSheet("chats")} variant="secondary"><ChatBubbleIcon size="sm" />Chats</BottomSheetItem></BottomSheetMenu></BottomSheet>
-    <BottomSheet footer={<View style={styles.footer}><Button disabled={creating} onPress={openNewChat} size="md" variant="primary">New chat</Button><Button onPress={() => openSheet(undefined)} size="md" style={styles.footerSecondary} variant="secondary">Close</Button></View>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "chats"} title="Chats">
+    <CoreComposer {...props} disabled={!configured || turning} editable={configured && !turning && !sheet} loading={turning} maxLength={CONVERSATION_MESSAGE_MAX_LENGTH} message={conversation} onChangeText={setInput} onFocusChange={handleCoreFocusChange} onSubmit={() => void submit()} pageActions={pageActions} value={input} />
+    <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "plus"} title=""><BottomSheetMenu><BottomSheetItem onPress={() => openSheet("chats")} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Chats</BottomSheetItem></BottomSheetMenu></BottomSheet>
+    <BottomSheet footer={<><Button disabled={creating} onPress={openNewChat} size="md" variant="primary">New chat</Button><Button onPress={() => openSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "chats"} title="Chats">
       <View style={styles.searchActions}><View style={styles.search}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search chats" maxLength={500} onChangeText={changeQuery} placeholder="Search..." style={styles.searchInput} value={query} />{query ? <Button accessibilityLabel="Clear chat search" contentMode="raw" iconOnly onPress={() => changeQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}</View><Button accessibilityLabel="Filter chats" contentMode="raw" onPress={() => openSheet("filter")} size="md" variant="icon"><FilterIcon size="sm" variant={favoriteOnly ? "accent" : "default"} /></Button></View>
-      {searchPending || chatsQuery.isPending ? <View accessibilityLabel={query ? "Searching chats" : "Loading chats"} accessibilityRole="progressbar" style={styles.chatList}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={styles.chatSkeletonPill}><Skeleton style={styles.chatNameSkeleton} /></View>)}</View> : chatsInitialError ? <View style={styles.centerError}><Text style={styles.error}>Chats could not be loaded.</Text><Button onPress={() => void chatsQuery.refetch()} size="sm" variant="secondary">Retry</Button></View> : <FlatList contentContainerStyle={styles.chatList} data={conversations} keyExtractor={({ key }) => key} ListFooterComponent={chatsMoreError ? <Button onPress={() => void chatsQuery.fetchNextPage()} size="sm" variant="secondary">Retry more chats</Button> : null} onEndReached={() => { if (chatsQuery.hasNextPage && !chatsQuery.isFetchingNextPage) void chatsQuery.fetchNextPage(); }} onEndReachedThreshold={0.4} renderItem={({ item }) => <Button accessibilityLabel={`Open ${item.name}`} contentMode="raw" onPress={() => selectConversation(item)} shape="pill" size="md" style={styles.chatPill} variant="secondary"><Text numberOfLines={1} style={styles.chatName}>{item.name}</Text>{item.isFavorite ? <Text style={styles.favoriteMark}>Favorite</Text> : null}</Button>} />}
+      {chatsLoading ? <View accessibilityLabel={query ? "Searching chats" : "Loading chats"} accessibilityRole="progressbar" style={styles.chatList}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.chatSkeleton, styles.skeletonCard]} />)}</View> : chatsInitialError ? <View style={styles.centerError}><Text accessibilityRole="alert" style={styles.error}>Chats could not be loaded.</Text><Button onPress={() => void chatsQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : <FlatList contentContainerStyle={[styles.chatList, conversations.length === 0 && styles.emptyChatList]} data={conversations} keyExtractor={conversationKey} ListEmptyComponent={<Text style={styles.emptyText}>{committedQuery ? "No chats matched this search." : favoriteOnly ? "No favorite chats." : "No chats yet."}</Text>} ListFooterComponent={chatsMoreError ? <Button onPress={() => void chatsQuery.fetchNextPage()} size="md" variant="secondary">Retry more chats</Button> : null} onEndReached={() => { if (chatsQuery.hasNextPage && !chatsQuery.isFetchingNextPage) void chatsQuery.fetchNextPage(); }} onEndReachedThreshold={0.4} renderItem={({ item }) => <ActionPill compact onPress={() => selectConversation(item)} pressLabel={`Open ${item.name}`}><View style={styles.chatPillContent}><Text numberOfLines={1} style={styles.chatName}>{item.name}</Text>{item.isFavorite ? <Badge><Text style={styles.favoriteMark}>Favorite</Text></Badge> : null}</View></ActionPill>} />}
     </BottomSheet>
     <BottomSheet hideHeading onOpenChange={(open) => { if (!open) openSheet("chats"); }} open={sheet === "filter"} title=""><View style={styles.filterContent}><View style={styles.filterRow}><Switch accessibilityLabel="Show favorite chats only" checked={favoriteOnly} onCheckedChange={(checked) => { setFavoriteOnly(checked); openSheet("chats"); }} /><Text style={styles.filterLabel}>Favorites</Text></View><Button onPress={() => void openSearchHistory()} size="md" variant="secondary">Search history</Button></View></BottomSheet>
     <SearchHistorySheet error={historyError} history={history} loading={historyLoading} onClose={() => openSheet("chats")} onRemove={(item) => void removeHistoryQuery(item)} onSelect={useHistoryQuery} open={sheet === "history"} removingQuery={removingHistoryQuery} />
-    <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "current"} title=""><BottomSheetMenu><BottomSheetItem onPress={() => { setEditName(selected?.name ?? ""); openSheet("edit"); }} variant="secondary">Edit</BottomSheetItem><BottomSheetItem onPress={() => void mutateConversation("favorite")} variant="secondary">{selected?.isFavorite ? "Unfavorite" : "Favorite"}</BottomSheetItem><BottomSheetItem onPress={() => openSheet("delete")} variant="secondary">Delete</BottomSheetItem></BottomSheetMenu></BottomSheet>
-    <BottomSheet focusKey="editConversation" footer={<View style={styles.footer}><Button disabled={!editName.trim() || mutating} loading={mutating} onPress={() => void mutateConversation("edit")} size="md" variant="primary">Save</Button><Button disabled={mutating} onPress={() => openSheet(undefined)} size="md" style={styles.footerSecondary} variant="secondary">Close</Button></View>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "edit"} title="Edit chat"><View style={styles.editForm}><TextInput accessibilityLabel="Chat name" maxLength={CONVERSATION_NAME_MAX_LENGTH} onChangeText={setEditName} placeholder="Chat name" ref={editInput} value={editName} /></View></BottomSheet>
-    <BottomSheet dismissible={!mutating} footer={<View style={styles.footer}><Button disabled={mutating} loading={mutating} onPress={() => void confirmDelete()} size="md" variant="primary">Delete</Button><Button disabled={mutating} onPress={() => openSheet(undefined)} size="md" style={styles.footerSecondary} variant="secondary">Close</Button></View>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "delete"} title="Delete chat?" />
+    <ConversationRetrievalSheet contextIdentity={identity} fresh={activeRetrievals?.fresh ?? false} onClose={closeRetrievals} onNavigate={navigateRetrievalResult} open={sheet === "retrievals" && Boolean(activeRetrievals)} retrievals={activeRetrievals?.retrievals ?? []} />
+    <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "current"} title=""><BottomSheetMenu><BottomSheetItem onPress={() => { setEditName(selected?.name ?? ""); setEditFavorite(Boolean(selected?.isFavorite)); openSheet("edit"); }} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Edit</BottomSheetItem><BottomSheetItem onPress={() => mutateConversation("favorite")} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">{selected?.isFavorite ? "Unfavorite" : "Favorite"}</BottomSheetItem><BottomSheetItem onPress={() => openSheet("delete")} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Delete</BottomSheetItem></BottomSheetMenu></BottomSheet>
+    <BottomSheet focusKey="editConversation" footer={<><Button disabled={!editName.trim()} onPress={() => mutateConversation("edit")} size="md" variant="primary">Save</Button><Button onPress={() => openSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "edit"} title="Edit chat"><View style={styles.editForm}><TextInput accessibilityLabel="Chat name" maxLength={CONVERSATION_NAME_MAX_LENGTH} onChangeText={setEditName} placeholder="Chat name" ref={editInput} value={editName} /><View style={styles.favoriteRow}><Switch accessibilityLabel="Favorite chat" checked={editFavorite} onCheckedChange={setEditFavorite} /><Text style={styles.favoriteLabel}>Favorite</Text></View></View></BottomSheet>
+    <BottomSheet footer={<><Button onPress={confirmDelete} size="md" variant="primary">Delete</Button><Button onPress={() => openSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "delete"} title="Delete chat?" />
   </>;
 }
 
 const styles = StyleSheet.create({
-  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.xs }, conversation: { flex: 1, minHeight: 0 }, messageList: { flexGrow: 1, justifyContent: "flex-end", paddingVertical: spacing.sm, gap: spacing.sm },
-  messageRow: { width: "100%", flexDirection: "row" }, assistantRow: { justifyContent: "flex-start", paddingRight: 52 }, userRow: { justifyContent: "flex-end", paddingLeft: 52 }, messageBox: { maxWidth: "100%", borderRadius: radii.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm }, assistantMessage: { backgroundColor: palette.surface }, userMessage: { backgroundColor: palette.hairlineBright }, failedMessage: { borderWidth: 1, borderColor: palette.danger }, messageText: { color: palette.text, fontSize: 14, lineHeight: 20 },
-  olderSkeletons: { gap: spacing.sm }, messageSkeleton: { height: 54, borderRadius: radii.md }, assistantSkeleton: { width: "76%" }, userSkeleton: { width: "62%" }, error: { color: palette.danger, fontSize: 12, marginBottom: spacing.xs }, centerError: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm },
-  footer: { flexDirection: "row", gap: spacing.sm }, footerSecondary: { flex: 1 }, searchActions: { flexDirection: "row", alignItems: "center", gap: spacing.xs }, search: { minHeight: 44, flex: 1, flexDirection: "row", alignItems: "center", gap: 7, paddingLeft: 12, paddingRight: 8, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.page }, searchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 13 },
-  chatList: { gap: spacing.sm, paddingTop: spacing.md, paddingBottom: spacing.lg }, chatPill: { width: "100%", justifyContent: "space-between" }, chatName: { flex: 1, color: palette.text, textAlign: "left" }, favoriteMark: { color: palette.muted, fontSize: 11 }, chatSkeletonPill: { width: "100%", height: 44, justifyContent: "center", borderRadius: 999, backgroundColor: palette.surface, paddingHorizontal: spacing.md }, chatNameSkeleton: { width: "58%", height: 12, borderRadius: 999 },
-  filterContent: { gap: spacing.md }, filterRow: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: spacing.sm }, filterLabel: { color: palette.text, fontSize: 13 }, editForm: { paddingTop: spacing.sm },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.xs }, conversation: { flex: 1, minHeight: 0, paddingTop: spacing.md }, messageList: { flexGrow: 1, paddingBottom: spacing.sm, gap: spacing.md },
+  messageRow: { width: "100%", flexDirection: "row", alignItems: "flex-start" }, assistantRow: { justifyContent: "flex-start", paddingRight: spacing.lg, gap: spacing.sm }, userRow: { justifyContent: "flex-end", paddingLeft: 52 }, assistantMark: { marginTop: 4 }, messageContent: { minWidth: 0, gap: spacing.xs }, messageBox: { maxWidth: "100%", borderRadius: radii.md, paddingVertical: 4 }, assistantMessage: { minWidth: 0, flex: 1, backgroundColor: "transparent" }, userMessage: { backgroundColor: "transparent" }, failedMessage: { borderWidth: 1, borderColor: palette.danger, paddingHorizontal: spacing.sm }, messageText: { color: palette.text, fontSize: 14, lineHeight: 20 }, retrievalSummary: { minWidth: 0, flex: 1, color: palette.muted, fontSize: 12 },
+  olderSkeletons: { gap: spacing.md }, messageSkeleton: { height: 18, marginTop: 3, borderRadius: radii.sm }, assistantSkeleton: { width: "76%" }, userSkeleton: { width: "62%" }, thinkingText: { flex: 1, marginTop: 3 }, skeletonCard: { borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.hairlineBright, opacity: 0.72, overflow: "hidden" }, error: { color: palette.danger, fontSize: 12, marginBottom: spacing.xs }, centerError: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm }, emptyMessages: { flex: 1 }, emptyText: { color: palette.muted, fontSize: 13, textAlign: "center" },
+  searchActions: { flexDirection: "row", alignItems: "center", gap: spacing.xs }, search: { minHeight: 44, flex: 1, flexDirection: "row", alignItems: "center", gap: 7, paddingLeft: 12, paddingRight: 8, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.page }, searchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 13 },
+  chatList: { flexGrow: 1, gap: spacing.xs, paddingTop: spacing.md, paddingBottom: spacing.lg }, emptyChatList: { justifyContent: "center" }, chatPillContent: { minWidth: 0, minHeight: 32, flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm }, chatName: { minWidth: 0, flex: 1, color: palette.text, lineHeight: 18, textAlign: "left", textAlignVertical: "center" }, favoriteMark: { color: palette.muted, fontSize: 10 }, chatSkeleton: { width: "100%", height: 38, borderRadius: 999 }, sheetAction: { justifyContent: "center" }, sheetActionText: { width: "100%", textAlign: "center" },
+  filterContent: { gap: spacing.md }, filterRow: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: spacing.sm }, filterLabel: { color: palette.text, fontSize: 13 }, editForm: { paddingTop: spacing.sm, gap: spacing.md }, favoriteRow: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: spacing.sm }, favoriteLabel: { color: palette.muted, fontSize: 13 },
 });

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { appSearchRetrievalSchema } from '@/lib/app-search/service';
 
 export const conversationSchema = z.object({
   key: z.string().cuid(), organizationKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(),
@@ -13,6 +14,7 @@ export const conversationMessageSchema = z.object({
   requestHash: z.string().regex(/^[a-f0-9]{64}$/),
   role: z.enum(['USER', 'ASSISTANT']), status: z.enum(['PENDING', 'COMPLETED', 'FAILED']),
   content: z.string().min(1).max(100_000), embedding: z.array(z.number().finite()).optional(),
+  retrievals: z.array(appSearchRetrievalSchema).max(4).default([]),
   createdAt: z.string().datetime(), completedAt: z.string().datetime().optional(),
 }).strict();
 export type ConversationMessage = z.infer<typeof conversationMessageSchema>;
@@ -23,7 +25,7 @@ export const conversationSearchInputSchema = conversationListInputSchema.extend(
 export const conversationKeyInputSchema = z.object({ conversationKey: z.string().cuid() }).strict();
 export const conversationRenameInputSchema = conversationKeyInputSchema.extend({ name: z.string().trim().min(1).max(200) }).strict();
 export const conversationFavoriteInputSchema = conversationKeyInputSchema.extend({ isFavorite: z.boolean() }).strict();
-export const conversationMessageListInputSchema = conversationKeyInputSchema.extend({ cursor: z.string().min(1).max(1_000).optional(), limit: z.number().int().min(1).max(100).default(25) }).strict();
+export const conversationMessageListInputSchema = conversationKeyInputSchema.extend({ cursor: z.string().min(1).max(1_000).optional(), limit: z.number().int().min(1).max(100).default(10) }).strict();
 export const conversationModelSendInputSchema = conversationKeyInputSchema.extend({ message: z.string().trim().min(1).max(20_000) }).strict();
 export const conversationSendInputSchema = conversationModelSendInputSchema.extend({ requestKey: z.string().trim().min(1).max(180) }).strict();
 export const agentQueryInputSchema = z.object({ query: z.string().trim().min(1).max(20_000), limit: z.number().int().min(1).max(20).default(20) }).strict();

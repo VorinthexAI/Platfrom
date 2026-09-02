@@ -46,12 +46,12 @@ export const orchestratorResponseRuntime = {
     const chatInput = await prepareChatInput(skill, rawInput, dependencies);
     const organizationKey = dependencies.organizationKey ?? 'nexus';
     if (dependencies.stream) {
-      yield* validateStream(dependencies.stream(organizationKey, chatInput), 'google.gemini-3.1-flash-lite-preview', 'openrouter');
+      yield* validateStream(dependencies.stream(organizationKey, chatInput), 'google.gemini-3.1-flash-lite', 'openrouter');
       return;
     }
     const select = dependencies.selectRoute ?? selectRoute;
     const stream = dependencies.streamRoute ?? streamRoute;
-    const routes = [{ modelSlug: 'google.gemini-3.1-flash-lite-preview', providerSlug: 'openrouter' }] as const;
+    const routes = [{ modelSlug: 'google.gemini-3.1-flash-lite', providerSlug: 'openrouter' }] as const;
     let lastError: unknown;
     for (const { modelSlug, providerSlug } of routes) {
       if (dependencies.signal?.aborted) throw dependencies.signal.reason ?? new DOMException('The operation was aborted', 'AbortError');

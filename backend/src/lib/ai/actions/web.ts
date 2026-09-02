@@ -15,4 +15,4 @@ export const webOutputSchema = z.object({
   sources: z.array(httpsUrlSchema).max(100),
 }).strict();
 export type WebOutput = z.infer<typeof webOutputSchema>;
-export const webAction: ActionDefinition = { id: 'web', modelPolicy: 'required', models: [{ slot: 'primary', provider: 'openrouter', model: 'google.gemini-3.1-flash-lite-preview', priority: 100 }] };
+export const webAction: ActionDefinition = { id: 'web', modelPolicy: 'required', models: [{ slot: 'primary', provider: 'openrouter', model: 'google.gemini-3.1-flash-lite', priority: 100 }] };

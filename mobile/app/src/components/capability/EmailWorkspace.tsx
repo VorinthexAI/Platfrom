@@ -240,16 +240,16 @@ function formatEmailTimestamp(value: string) {
     hour12: false,
   }).format(new Date(value)).replace(",", "");
 }
-export function EmailWorkspace({ initialConnectorKey, initialMessageKey, initialThreadKey, navigatedFromRoot = false, openAttachments = false }: { initialConnectorKey?: string; initialMessageKey?: string; initialThreadKey?: string; navigatedFromRoot?: boolean; openAttachments?: boolean }) {
+export function EmailWorkspace({ initialCollectionKind, initialConnectorKey, initialDraftKey, initialMessageKey, initialSearchQuery, initialThreadKey, initialToneKey, navigatedFromRoot = false, openAttachments = false }: { initialCollectionKind?: string; initialConnectorKey?: string; initialDraftKey?: string; initialMessageKey?: string; initialSearchQuery?: string; initialThreadKey?: string; initialToneKey?: string; navigatedFromRoot?: boolean; openAttachments?: boolean }) {
   const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "");
   const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
   if (!organizationKey || !scopeKey) return null;
   const emailContext = { organizationKey, scopeKey };
-  const sessionKey = `${emailContext.organizationKey}:${emailContext.scopeKey}:${initialConnectorKey ?? "root"}:${initialThreadKey ?? "inbox"}:${initialMessageKey ?? "latest"}:${openAttachments ? "attachments" : "reader"}`;
-  return <EmailWorkspaceSession emailContext={emailContext} initialConnectorKey={initialConnectorKey} initialMessageKey={initialMessageKey} initialThreadKey={initialThreadKey} key={sessionKey} navigatedFromRoot={navigatedFromRoot} openAttachments={openAttachments} />;
+  const sessionKey = `${emailContext.organizationKey}:${emailContext.scopeKey}:${initialConnectorKey ?? "root"}:${initialThreadKey ?? "inbox"}:${initialMessageKey ?? "latest"}:${initialDraftKey ?? ""}:${initialToneKey ?? ""}:${initialCollectionKind ?? ""}:${initialSearchQuery ?? ""}:${openAttachments ? "attachments" : "reader"}`;
+  return <EmailWorkspaceSession emailContext={emailContext} initialCollectionKind={initialCollectionKind} initialConnectorKey={initialConnectorKey} initialDraftKey={initialDraftKey} initialMessageKey={initialMessageKey} initialSearchQuery={initialSearchQuery} initialThreadKey={initialThreadKey} initialToneKey={initialToneKey} key={sessionKey} navigatedFromRoot={navigatedFromRoot} openAttachments={openAttachments} />;
 }
 
-function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessageKey, initialThreadKey, navigatedFromRoot, openAttachments }: { emailContext: ReturnType<typeof getEmailContext>; initialConnectorKey?: string; initialMessageKey?: string; initialThreadKey?: string; navigatedFromRoot: boolean; openAttachments: boolean }) {
+function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialConnectorKey, initialDraftKey, initialMessageKey, initialSearchQuery, initialThreadKey, initialToneKey, navigatedFromRoot, openAttachments }: { emailContext: ReturnType<typeof getEmailContext>; initialCollectionKind?: string; initialConnectorKey?: string; initialDraftKey?: string; initialMessageKey?: string; initialSearchQuery?: string; initialThreadKey?: string; initialToneKey?: string; navigatedFromRoot: boolean; openAttachments: boolean }) {
   const queryClient = useQueryClient();
   const navigation = useNavigation();
   const router = useRouter();
@@ -288,6 +288,8 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
   const loadingMoreThread = useRef(false);
   const restoredSignalReader = useRef(false);
   const restoredSignalAttachments = useRef(false);
+  const restoredInitialDraft = useRef(false);
+  const restoredInitialTone = useRef(false);
   const receivedAttachmentsRequest = useRef(0);
   const metadataRequests = useRef(new Map<string, number>());
   const operationGeneration = useRef(0);
@@ -328,15 +330,15 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
   const metadataInFlight = useRef(false);
   const deleteToneInFlight = useRef(false);
   const metadataFormContext = useRef<typeof emailContext | undefined>(undefined);
-  const committedInboxQuery = useRef<EmailOverviewQuery>(defaultInboxQuery());
+  const committedInboxQuery = useRef<EmailOverviewQuery>({ ...defaultInboxQuery(), search: initialConnectorKey && initialSearchQuery ? initialSearchQuery.slice(0, 500) : "" });
   const requestedInboxQuery = useRef<EmailOverviewQuery>(committedInboxQuery.current);
   const allowNavigation = useRef(false);
   const [inboxView, setInboxView] = useState<{ overview?: EmailOverview; query: EmailOverviewQuery }>(() => ({ query: committedInboxQuery.current }));
   const { overview, query: inboxQuery } = inboxView;
   const [inboxControlsQuery, setInboxControlsQuery] = useState<EmailOverviewQuery>(requestedInboxQuery.current);
-  const [inboxTab, setInboxTab] = useState<InboxTab>(requestedInboxQuery.current.readState);
-  const [rootQuery, setRootQuery] = useState("");
-  const [rootTab, setRootTab] = useState<RootTab>("inboxes");
+  const [inboxTab, setInboxTab] = useState<InboxTab>(initialCollectionKind === "email-drafts" ? "drafts" : requestedInboxQuery.current.readState);
+  const [rootQuery, setRootQuery] = useState(() => !initialConnectorKey && initialSearchQuery ? initialSearchQuery.slice(0, 500) : "");
+  const [rootTab, setRootTab] = useState<RootTab>(initialCollectionKind === "email-tones" ? "tones" : "inboxes");
   const [rootFavoritesOnly, setRootFavoritesOnly] = useState(false);
   const [rootSearchFocusable, setRootSearchFocusable] = useState(true);
   const [rootSearchResults, setRootSearchResults] = useState<{ tab: RootTab; inboxes?: EmailConnector[]; tones?: EmailToneRecord[] }>();
@@ -358,7 +360,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
   const [assistantResponse, setAssistantResponse] = useState<EmailAssistantResponse>();
   const [assistantError, setAssistantError] = useState<string>();
   const [assistantBusy, setAssistantBusy] = useState(false);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => initialConnectorKey && initialSearchQuery ? initialSearchQuery.slice(0, 500) : "");
   const [selected, setSelected] = useState<{
     thread: EmailThread;
     messages: EmailMessage[];
@@ -447,7 +449,7 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
   const [newEmailSkipped, setNewEmailSkipped] = useState(false);
   const [newEmailSending, setNewEmailSending] = useState(false);
   const [newEmailError, setNewEmailError] = useState<string>();
-  const [selectedInboxDraftKey, setSelectedInboxDraftKey] = useState<string>();
+  const [selectedInboxDraftKey, setSelectedInboxDraftKey] = useState<string | undefined>(initialDraftKey);
   const [draftBody, setDraftBody] = useState("");
   const [draftSending, setDraftSending] = useState(false);
   const [draftSearchResults, setDraftSearchResults] = useState<{ connectorKey: string; query: string; drafts: EmailDraft[] }>();
@@ -494,6 +496,11 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
   const activeDraftSearchResults = draftSearchResults && draftSearchResults.connectorKey === initialConnectorKey && draftSearchResults.query === normalizedInboxSearch ? draftSearchResults : undefined;
   const visibleInboxDrafts = normalizedInboxSearch && activeDraftSearchResults ? activeDraftSearchResults.drafts : inboxDrafts;
   const selectedInboxDraft = draftDetailQuery.data;
+  useEffect(() => {
+    if (restoredInitialDraft.current || !initialDraftKey || selectedInboxDraft?.key !== initialDraftKey) return;
+    restoredInitialDraft.current = true;
+    setDraftBody(selectedInboxDraft.finalContent ?? selectedInboxDraft.generatedContent);
+  }, [initialDraftKey, selectedInboxDraft]);
   const newEmailOpen = newEmailRecipientsOpen || newEmailContentOpen || newEmailAlternativesOpen || newEmailReviewOpen || newEmailAttachmentsOpen;
   const newEmailAlternativeError = newEmailError ?? newEmailAlternatives.find(({ status }) => status === "failed")?.error;
   const newEmailPendingAlternativeCount = newEmailAlternatives.filter(({ status }) => status === "pending").length;
@@ -1183,6 +1190,15 @@ function EmailWorkspaceSession({ emailContext, initialConnectorKey, initialMessa
     setSheet("toneEdit");
     setSheetOpen(true);
   }
+  useEffect(() => {
+    if (restoredInitialTone.current || !initialToneKey) return;
+    const tone = toneRecords.find(({ key }) => key === initialToneKey);
+    if (!tone) return;
+    restoredInitialTone.current = true;
+    openToneEdit(tone);
+    // The route restoration is intentionally consumed once for the matching tone.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialToneKey, toneRecords]);
   function closeForm() {
     setEditingTone(undefined);
     setSheetOpen(false);

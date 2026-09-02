@@ -174,10 +174,10 @@ type CorePageProps = {
 
 function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, message, pageActions, pageIdentity, releaseSelection, rightInset, style, topInset }: CorePageProps) {
   const keyboard = useAnimatedKeyboard();
-  const keyboardSpacerStyle = useAnimatedStyle(() => {
+  const keyboardInsetStyle = useAnimatedStyle(() => {
     const keyboardMoving = [KeyboardState.OPENING, KeyboardState.OPEN, KeyboardState.CLOSING].includes(keyboard.state.value);
     const keyboardLift = Math.max(0, keyboard.height.value - bottomInset);
-    return { height: keyboardMoving ? keyboardLift + Math.min(spacing.md, keyboardLift) : 0 };
+    return { paddingBottom: Math.max(bottomInset, spacing.sm) + (keyboardMoving ? keyboardLift + Math.min(spacing.md, keyboardLift) : 0) };
   }, [bottomInset]);
 
   useEffect(() => {
@@ -203,8 +203,7 @@ function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, messa
       paddingLeft: Math.max(leftInset, spacing.md),
       paddingRight: Math.max(rightInset, spacing.md),
     }]}>{pageIdentity(closePage)}</View>
-    <View style={[styles.pageContent, style, {
-      paddingBottom: Math.max(bottomInset, spacing.sm),
+    <Reanimated.View style={[styles.pageContent, style, keyboardInsetStyle, {
       paddingLeft: Math.max(leftInset, spacing.md),
       paddingRight: Math.max(rightInset, spacing.md),
     }]}>
@@ -214,11 +213,8 @@ function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, messa
         {pageActions ?? <View style={styles.pageTitleSpacer} />}
       </View>
       <View style={styles.pageConversation}>{message}</View>
-      <View>
-        {composer}
-        <Reanimated.View pointerEvents="none" style={keyboardSpacerStyle} />
-      </View>
-    </View>
+      <View>{composer}</View>
+    </Reanimated.View>
   </View>;
 }
 
@@ -325,6 +321,12 @@ export function CoreComposer({
     closeSubscriptionRef.current?.remove();
     if (closeFallbackRef.current) clearTimeout(closeFallbackRef.current);
   }, []);
+
+  useEffect(() => {
+    if (editable) return;
+    inputRef.current?.blur();
+    Keyboard.dismiss();
+  }, [editable]);
 
   useEffect(() => {
     if (value.length !== 0) return;
