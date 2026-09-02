@@ -31,6 +31,7 @@ RUN apt-get update \
 # clean retry succeeds every time this has been seen.
 FROM base AS deps
 COPY package.json bun.lock ./
+COPY patches ./patches
 COPY backend/package.json ./backend/package.json
 COPY mobile/app/package.json ./mobile/app/package.json
 COPY shared/package.json ./shared/package.json
@@ -47,6 +48,7 @@ FROM base AS dev
 WORKDIR /app
 ENV NODE_ENV=development
 COPY package.json bun.lock ./
+COPY patches ./patches
 COPY backend/package.json ./backend/package.json
 COPY mobile/app/package.json ./mobile/app/package.json
 COPY shared/package.json ./shared/package.json
