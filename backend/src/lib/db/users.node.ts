@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { aql } from 'arangojs';
 import { db, withTransaction } from './client';
-import { createNodeHelpers, withArangoKey } from './base';
+import { buildEmbeddingText, createNodeHelpers, withArangoKey } from './base';
+import { embedText, embeddingMetadata } from '@/lib/embeddings';
 
 export const USERS_COLLECTION = 'users';
 
@@ -30,6 +31,7 @@ export const userSchema = z.object({
   countryCode: countryCodeSchema.default('SE'),
   name: z.string().nullable().default(null),
   profileUrl: z.string().nullable().default(null),
+  profileStorageKey: z.string().nullable().default(null),
   alias: z.string().nullable().default(null),
   alias_slug: z.string().regex(/^[a-z]{4}-[a-z0-9]+(?:-[a-z0-9]+)*$/).nullable().default(null),
   isVerified: z.boolean().default(false),
@@ -60,11 +62,23 @@ export const insertUser = helpers.insert;
 export const getUserById = helpers.getById;
 export const updateUser = helpers.updateById;
 export async function deleteUser(userKey: string): Promise<void> {
-  await withTransaction(['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages'], async (transaction) => {
+  await withTransaction(['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages', 'ticketVotes', 'tickets', 'events', 'storageDeletionJobs'], async (transaction) => {
     await transaction.query('FOR hidden IN userHiddens FILTER hidden.userKey == @userKey REMOVE hidden IN userHiddens', { userKey });
     await transaction.query('FOR generation IN userGenerations FILTER generation.userKey == @userKey REMOVE generation IN userGenerations', { userKey });
     await transaction.query('FOR message IN conversationMessages FILTER message.userKey == @userKey REMOVE message IN conversationMessages', { userKey });
     await transaction.query('FOR conversation IN conversations FILTER conversation.userKey == @userKey REMOVE conversation IN conversations', { userKey });
+    await transaction.query(`
+      LET authoredTicketKeys = (FOR ticket IN tickets FILTER ticket.userKey == @userKey RETURN ticket._key)
+      LET votedTicketKeys = UNIQUE(FOR vote IN ticketVotes FILTER vote.userKey == @userKey RETURN vote.ticketKey)
+      LET removedVotes = (FOR vote IN ticketVotes FILTER vote.userKey == @userKey || vote.ticketKey IN authoredTicketKeys REMOVE vote IN ticketVotes RETURN 1)
+      FOR ticket IN tickets
+        FILTER ticket._key IN MINUS(votedTicketKeys, authoredTicketKeys) && ticket.type == "feedback"
+        LET counts = FIRST(FOR vote IN ticketVotes FILTER vote.ticketKey == ticket._key COLLECT AGGREGATE upvotes = SUM(vote.vote == "up" ? 1 : 0), downvotes = SUM(vote.vote == "down" ? 1 : 0) RETURN { upvotes, downvotes })
+        UPDATE ticket WITH counts IN tickets
+    `, { userKey });
+    await transaction.query('FOR ticket IN tickets FILTER ticket.userKey == @userKey REMOVE ticket IN tickets', { userKey });
+    await transaction.query('FOR event IN events FILTER event.userId == @userKey REMOVE event IN events', { userKey });
+    await transaction.query('LET user = DOCUMENT(users, @userKey) FILTER user != null && IS_STRING(user.profileStorageKey) UPSERT { storageKey: user.profileStorageKey } INSERT { storageKey: user.profileStorageKey, createdAt: @now } UPDATE {} IN storageDeletionJobs', { userKey, now: new Date().toISOString() });
     const cursor = await transaction.query('REMOVE @userKey IN users RETURN OLD._key', { userKey });
     if (await cursor.next() === undefined) throw new Error(`User ${userKey} was not found.`);
   });
@@ -72,6 +86,32 @@ export async function deleteUser(userKey: string): Promise<void> {
 export const upsertUserByKey = helpers.upsertByKey;
 export const getAllUsersChunked = helpers.getAllChunked;
 export const listUsersPage = helpers.listPage;
+
+type UserDatabase = Pick<typeof db, 'query'>;
+
+export async function initializeUserNameIfMissing(
+  userKey: string,
+  name: string,
+  updatedAt: string,
+  options: { database?: UserDatabase; getUser?: typeof getUserById; embed?: typeof embedText } = {},
+): Promise<User | null> {
+  const normalizedKey = z.string().trim().min(1).parse(userKey);
+  const normalizedName = z.string().trim().min(1).max(200).parse(name);
+  const timestamp = z.string().datetime().parse(updatedAt);
+  const getUser = options.getUser ?? getUserById;
+  const current = await getUser(normalizedKey);
+  if (!current || current.name !== null) return current;
+  const text = buildEmbeddingText(usersEmbedKeys.options, { ...current, name: normalizedName });
+  const embedding = text ? await (options.embed ?? embedText)({ text }) : [];
+  const cursor = await (options.database ?? db).query(`
+    FOR user IN users
+      FILTER user._key == @userKey && user.name == null
+      UPDATE user WITH { name: @name, updatedAt: @updatedAt, embedding: @embedding, embeddingProvider: @embeddingProvider, embeddingModel: @embeddingModel, embeddingDimensions: @embeddingDimensions } IN users
+      RETURN NEW
+  `, { userKey: normalizedKey, name: normalizedName, updatedAt: timestamp, embedding, ...embeddingMetadata() });
+  const updated = await cursor.next();
+  return updated ? userSchema.parse(withArangoKey(updated as Record<string, unknown>)) : getUser(normalizedKey);
+}
 
 export async function getUserByEmail(email: string): Promise<User | null> {
   const cursor = await db.query(aql`

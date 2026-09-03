@@ -436,7 +436,7 @@ test("searches a folder while listing global user history", async () => {
   expect((await listContentSearchHistory())[0]?.query).toBe("roadmap");
   expect(calls[0]?.url).toBe("/app/search");
   expect(calls[1]?.url).toContain("/content.search-history.list");
-  expect(calls[0]?.body).toEqual({ organizationKey: "org-authenticated", scopeKey: "scope-authenticated", query: "roadmap", collectionSlugs: ["folders", "documents", "files"], recordHistory: true, limit: 50, minimumScore: 0.55, filters: { folderKey: "folder", includeDescendants: true } });
+  expect(calls[0]?.body).toEqual({ organizationKey: "org-authenticated", scopeKey: "scope-authenticated", query: "roadmap", collectionSlugs: ["folders", "documents", "files"], recordHistory: true, limit: 50, filters: { folderKey: "folder", includeDescendants: true } });
   expect(calls[1]?.body.input).toEqual({ scopeKey: "scope-authenticated", allLocations: true, limit: 50 });
 });
 
@@ -466,7 +466,8 @@ test("runs fast combined search without summaries", async () => {
 
   expect(await searchContentMatches("roadmap")).toMatchObject({ folders: [{ key: "folder" }], documents: [{ documentKey: "document", extension: "docx" }] });
   expect(calls[0]?.url).toBe("/app/search");
-  expect(calls[0]?.body).toMatchObject({ query: "roadmap", collectionSlugs: ["folders", "documents", "files"], minimumScore: 0.55 });
+  expect(calls[0]?.body).toMatchObject({ query: "roadmap", collectionSlugs: ["folders", "documents", "files"] });
+  expect(calls[0]?.body).not.toHaveProperty("minimumScore");
 });
 
 test("can search without recording history", async () => {
@@ -479,8 +480,9 @@ test("can search without recording history", async () => {
 test("can request up to ten semantic matches without a score cutoff", async () => {
   responseForTool = () => ({ data: { success: true, data: { query: "roadmap", groups: [{ collectionSlug: "folders", results: [] }, { collectionSlug: "documents", results: [] }, { collectionSlug: "files", results: [] }] } } });
 
-  await searchContentMatches("roadmap", undefined, undefined, false, { limit: 10, minimumScore: -1 });
-  expect(calls[0]?.body).toMatchObject({ query: "roadmap", recordHistory: false, limit: 10, minimumScore: -1 });
+  await searchContentMatches("roadmap", undefined, undefined, false, { limit: 10 });
+  expect(calls[0]?.body).toMatchObject({ query: "roadmap", recordHistory: false, limit: 10 });
+  expect(calls[0]?.body).not.toHaveProperty("minimumScore");
 });
 
 test("finds semantic neighbors from exactly one Content source", async () => {
@@ -522,7 +524,6 @@ test("scopes fast semantic search to a folder and its descendants", async () => 
     collectionSlugs: ["folders", "documents", "files"],
     recordHistory: true,
     limit: 50,
-    minimumScore: 0.55,
     filters: { folderKey: "folder", includeDescendants: true },
   });
 });

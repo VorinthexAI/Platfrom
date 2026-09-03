@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { stageLegacyDocumentShares } from './content-migration';
-import { collections, migrateContainerPresentations, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateMinimalPlacesAndRetireTrips, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireMomentumScope, retireUserSettings } from './arango-migrate';
+import { collections, migrateContainerPresentations, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateManagedGeneratedMedia, migrateMinimalPlacesAndRetireTrips, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTicketTypes, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireMomentumScope, retireUserSettings } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, LEGACY_EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 import { emailArchiveRootFolderKey, emailMediaCollectionKey } from '../lib/email-inbox/export-container-keys';
@@ -51,6 +51,18 @@ describe('Arango migration indexes', () => {
     expect(queries[2]!.query).toContain('collection.purpose == "email-media" ? "communication"');
     expect(queries[2]!.bindVars?.communicationCollectionKeys).toEqual([emailMediaCollectionKey(scopeKey)]);
     expect(queries.slice(1).every(({ query }) => query.includes('presentation != null') && query.includes('presentation != presentation'))).toBe(true);
+  });
+
+  test('renames the generated-media collection and makes its generated images user-mutable', async () => {
+    const queries: string[] = [];
+    await migrateManagedGeneratedMedia({ query: async (query: string) => { queries.push(query); return { all: async () => [] }; } } as never);
+    expect(queries).toHaveLength(3);
+    expect(queries[0]).toContain('collection.name == "Generated media"');
+    expect(queries[0]).toContain('{ name: "Core" }');
+    expect(queries[1]).toContain('collection.purpose == "generated-media"');
+    expect(queries[1]).toContain('{ mutationPolicy: "user" }');
+    expect(queries[2]).toContain('collection.purpose == "generated-media"');
+    expect(queries[2]).toContain('{ mutationPolicy: "user" }');
   });
 
   test('regenerates only malformed exact semantic vectors', () => {
@@ -141,6 +153,15 @@ describe('Arango migration indexes', () => {
     ]));
     const registry = await Bun.file(new URL('../lib/db/registry.ts', import.meta.url)).text();
     expect(registry).not.toContain('userHiddens:');
+  });
+  test('backfills legacy ticket types and declares private feedback vote indexes', async () => {
+    const calls: string[] = [];
+    await migrateTicketTypes({ query: async (query: string) => { calls.push(query); return {} as never; } } as never);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('type: HAS(ticket, "type") ? ticket.type : "issue"');
+    expect(calls[0]).toContain('ticket.type == "feedback"');
+    expect(collections.find(({ name }) => name === 'tickets')?.indexes).toContainEqual({ fields: ['organizationKey', 'scopeKey', 'type', 'createdAt'] });
+    expect(collections.find(({ name }) => name === 'ticketVotes')).toEqual({ name: 'ticketVotes', skipEmbedding: true, indexes: [{ fields: ['ticketKey', 'userKey'], unique: true }, { fields: ['scopeKey', 'ticketKey'] }, { fields: ['userKey'] }] });
   });
   test('physically retires the legacy settings blob when users already exist', async () => {
     const calls: string[] = [];
@@ -284,6 +305,18 @@ describe('Arango migration indexes', () => {
   test('declares exact managed audiobook folder ownership uniqueness', () => {
     expect(collections.find(({ name }) => name === 'folders')?.indexes).toContainEqual({ fields: ['scopeKey', 'managedPurpose', 'managedOwnerKey'], unique: true, sparse: true });
   });
+  test('declares private ticket idempotency and canonical profile storage indexes', () => {
+    expect(collections.find(({ name }) => name === 'tickets')).toEqual({
+      name: 'tickets',
+      embedKeys: ['message'],
+      indexes: [
+        { fields: ['organizationKey', 'scopeKey', 'type', 'createdAt'] },
+        { fields: ['organizationKey', 'scopeKey', 'userKey', 'createdAt'] },
+        { fields: ['organizationKey', 'userKey', 'idempotencyKey'], unique: true },
+      ],
+    });
+    expect(collections.find(({ name }) => name === 'users')?.indexes).toContainEqual({ fields: ['profileStorageKey'], unique: true, sparse: true });
+  });
   test('retains minimal places and private ordered trips and declares book-generation collection indexes', async () => {
     expect(collections.filter(({ name }) => ['places', 'generatedDocumentBindings', 'trips', 'tripCreationReceipts', 'tripPlaces', 'tripAttachments', 'placeVisits'].includes(name)).map(({ name }) => name)).toEqual(['places', 'generatedDocumentBindings', 'trips', 'tripCreationReceipts', 'tripPlaces', 'tripAttachments']);
     expect(collections.find(({ name }) => name === 'places')).toEqual({
@@ -327,6 +360,10 @@ describe('Arango migration indexes', () => {
   });
   test('declares private user generation history indexes', () => {
     expect(collections.find(({ name }) => name === 'userGenerations')).toEqual({ name: 'userGenerations', skipEmbedding: true, indexes: [{ fields: ['userKey', 'type', 'normalizedPrompt'], unique: true }, { fields: ['userKey', 'type', 'generatedAt'] }] });
+  });
+  test('backfills typed conversation messages as text', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source).toContain('FILTER !HAS(message, "type") UPDATE message WITH { type: "TEXT" }');
   });
   test('reverse-backfills private Signal rows after canonical collections exist', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
@@ -964,7 +1001,12 @@ describe('Arango migration indexes', () => {
     expect(source).toContain('isWaitlistApproved: null');
     expect(source).toContain('IN users OPTIONS { keepNull: false }');
     expect(source).toContain("name: 'events'");
-    expect(source).toContain("{ fields: ['distinctId', 'createdAt'] }");
+    expect(source).toContain("{ fields: ['appKey', 'createdAt'] }");
+    expect(source).toContain("{ fields: ['scopeId', 'createdAt'], sparse: true }");
+    expect(isLegacyIndex('events', ['distinctId', 'createdAt'], [['appKey', 'createdAt']])).toBe(true);
+    expect(isLegacyIndex('events', ['domain', 'createdAt'], [['appKey', 'createdAt']])).toBe(true);
+    expect(source).toContain('OR HAS(event, "distinctId")');
+    expect(source).toContain('OR HAS(event, "embedding")');
   });
 
   test('retires inbox rows only after canonical Signal backfill', async () => {

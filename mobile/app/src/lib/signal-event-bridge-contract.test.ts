@@ -31,3 +31,10 @@ test("successful recorded searches invalidate the singleton user history cache",
   expect(bridge).toContain("userSearchHistoryQueryKey(userKey)");
   expect(bridge).toContain('refetchType: "none"');
 });
+
+test("workspace events and reconnects refresh active canonical search retrievals", () => {
+  expect(appSearch).toContain('appSearchQueryRoot = ["app-search"]');
+  expect(bridge).toContain("queryKey: appSearchQueryRoot");
+  expect(bridge.match(/invalidateAppSearch\(\)/g)?.length).toBeGreaterThanOrEqual(3);
+  expect(bridge).toContain('refetchType: "active"');
+});

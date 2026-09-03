@@ -9,6 +9,13 @@ export type CoreComposerProps = {
   accessibilityLabel: string;
   disabled?: boolean;
   editable?: boolean;
+  expandedAccessory?: ReactNode;
+  expandedPrompts?: readonly string[];
+  focusRequest?: number;
+  expandedLeading?: ReactNode;
+  expandedLeadingAccessibilityLabel?: string;
+  expandedLeadingDisabled?: boolean;
+  expandedFooter?: ReactNode;
   leading: ReactNode;
   leadingAccessibilityLabel?: string;
   leadingDisabled?: boolean;
@@ -17,6 +24,7 @@ export type CoreComposerProps = {
   message?: ReactNode;
   onChangeText: (value: string) => void;
   onFocusChange?: (focused: boolean) => void;
+  onExpandedLeadingPress?: () => void;
   onLeadingPress?: () => void;
   onSubmit: () => void;
   pageActions?: ReactNode;
@@ -31,6 +39,7 @@ export function CoreComposer({
   accessibilityLabel,
   disabled,
   editable = true,
+  expandedFooter,
   leading,
   leadingAccessibilityLabel,
   leadingDisabled,
@@ -69,6 +78,7 @@ export function CoreComposer({
         />
         <Button aria-label="Send to Core" disabled={disabled || !value.trim()} loading={loading} onClick={onSubmit} size="sm" variant="primary">{sendIcon}</Button>
       </div>
+      {expandedFooter}
     </div>
   );
 }

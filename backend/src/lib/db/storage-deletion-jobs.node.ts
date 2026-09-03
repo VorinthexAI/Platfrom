@@ -52,6 +52,7 @@ export async function renewStorageDeletionClaim(key: string, storageKey: string,
 }
 
 const storageReferenceAql = `
+  LENGTH(FOR user IN users FILTER user.profileStorageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
   LENGTH(FOR book IN books FILTER book.coverStorageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
   LENGTH(FOR chapter IN bookChapters FILTER chapter.audioStorageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
   LENGTH(FOR attachment IN emailAttachments FILTER attachment.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||

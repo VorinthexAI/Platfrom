@@ -15,6 +15,7 @@ export const LEGACY_INDEX_FIELDS: Readonly<Record<string, readonly (readonly str
   documentVersions: [['scopeKey'], ['documentKey'], ['storageKey']],
   documentShares: [['scopeKey'], ['token']],
   contentSearchQueries: [['actorKey', 'scopeKey', 'normalizedQuery'], ['actorKey', 'scopeKey', 'contextDomain', 'normalizedQuery', 'folderKey', 'includeDescendants'], ['actorKey', 'scopeKey', 'contextDomain', 'searchedAt'], ['expiresAt']],
+  events: [['distinctId', 'createdAt'], ['domain', 'createdAt']],
   places: [['scopeKey', 'isWishlist'], ['scopeKey', 'isFavorite'], ['scopeKey', 'countryCode', 'name']],
   organizationConnectors: [['organizationKey', 'scopeKey', 'provider']],
 };

@@ -6,6 +6,9 @@ import { isResendWebhookPath } from './resend';
 import { isGmailWebhookPath } from './email-webhook';
 import { strictObject } from './validation';
 import { refreshAccessToken, refreshTokenMatchesIdentity, verifyAccessToken, type AuthIdentity, type SessionTokens } from './auth';
+import { runWithEventApp, TOOL_APP_KEY_HEADER } from '@/lib/ai/events/runtime';
+import { APP_KEYS } from '@/lib/apps/registry';
+import { appKeySchema, appsRepository } from '@/lib/db/apps.node';
 
 export const ACCESS_COOKIE = 'vorinthex_access';
 export const REFRESH_COOKIE = 'vorinthex_refresh';
@@ -31,6 +34,20 @@ const PUBLIC_AUTH_PATHS = new Set([
 ]);
 const isProviderWebhookPath = (path: string) => isResendWebhookPath(path) || isGmailWebhookPath(path);
 export const isPublicBookSharePath = (path: string) => /^\/api\/v1\/public\/books\/shares\/(read|stream)\/?$/.test(path);
+
+export function createBindEventApp(appExists: (appKey: string) => Promise<boolean> = async (appKey) => Boolean(await appsRepository.getByKey(appKey))): MiddlewareHandler {
+  return async (c, next) => {
+    const exempt = /^\/api\/v1\/(health|apps)\/?$/.test(c.req.path);
+    const rawAppKey = c.req.header(TOOL_APP_KEY_HEADER);
+    const appKey = rawAppKey === undefined ? APP_KEYS.CORE : rawAppKey.trim();
+    const parsed = appKeySchema.safeParse(appKey);
+    if (!parsed.success) return c.json({ error: 'invalid app key' }, 400);
+    if (rawAppKey !== undefined && !exempt && !await appExists(parsed.data)) return c.json({ error: 'unknown app key' }, 400);
+    return runWithEventApp(parsed.data, next);
+  };
+}
+
+export const bindEventApp = createBindEventApp();
 
 export function isPublicFounderAuthPath(path: string) {
   return PUBLIC_AUTH_PATHS.has(path.replace(/\/$/, ''))

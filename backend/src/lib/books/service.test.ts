@@ -50,7 +50,7 @@ describe('book service asynchronous lifecycle', () => {
     const repository: any = { authorize: async () => {}, findByGenerationRequest: async () => null, detail: async () => current };
     const generator: any = { create: async (nextInput: unknown) => { generationInput = nextInput; current = row(); return bookKey; }, write: async () => { throw new Error('must be background'); } };
     const result = await createBookService({ repository, generator, detach: (run) => { detached.push(run); }, signUrl: async () => 'signed', publishChanged: async () => {} }).create(input, userKey);
-    expect(result).toMatchObject({ key: bookKey, status: 'queued', isFavorite: false, generationProgressPercent: 0 });
+    expect(result).toMatchObject({ key: bookKey, status: 'queued', isFavorite: false, generationProgressPercent: 0, createdAt: now, updatedAt: now });
     expect(generationInput).toMatchObject({ chapterCount: 10 });
     expect(detached).toHaveLength(1);
   });

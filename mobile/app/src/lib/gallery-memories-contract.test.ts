@@ -4,13 +4,15 @@ import { join } from "node:path";
 
 const workspace = readFileSync(join(import.meta.dir, "../components/capability/GalleryWorkspace.tsx"), "utf8");
 const memories = readFileSync(join(import.meta.dir, "../components/capability/GalleryMemories.tsx"), "utf8");
+const normalize = (source: string) => source.replace(/\s+/g, "").replace(/,([}\]])/g, "$1").replace(/\?\((?=<)/g, "?");
 
 test("places Memories first in the member-visible collection AI menu", () => {
-  const start = workspace.indexOf('{activeSheet === "cleanupMenu" ? <BottomSheetMenu>');
-  const menu = workspace.slice(start, workspace.indexOf('activeSheet === "imageActions"', start));
-  expect(menu.indexOf(">Memories</BottomSheetItem>")).toBeGreaterThan(0);
-  expect(menu.indexOf(">Memories</BottomSheetItem>")).toBeLessThan(menu.indexOf(">Highlights</BottomSheetItem>"));
-  expect(menu.indexOf(">Highlights</BottomSheetItem>")).toBeLessThan(menu.indexOf("{isCollectionOwner ?"));
+  const normalizedWorkspace = normalize(workspace);
+  const start = normalizedWorkspace.indexOf(normalize('{activeSheet === "cleanupMenu" ? <BottomSheetMenu>'));
+  const menu = normalizedWorkspace.slice(start, normalizedWorkspace.indexOf(normalize('activeSheet === "imageActions"'), start));
+  expect(menu.indexOf(normalize(">Memories</BottomSheetItem>"))).toBeGreaterThan(0);
+  expect(menu.indexOf(normalize(">Memories</BottomSheetItem>"))).toBeLessThan(menu.indexOf(normalize(">Highlights</BottomSheetItem>")));
+  expect(menu.indexOf(normalize(">Highlights</BottomSheetItem>"))).toBeLessThan(menu.indexOf(normalize("{isCollectionOwner ?")));
   expect(workspace).toContain("setMemoriesOpen(true)");
 });
 
@@ -43,7 +45,9 @@ test("guards auto-open and preserves typing across zoom and event refresh", () =
   expect(memories).toContain('style={[styles.detailImageStage, imageStageStyle]}');
   expect(memories).toContain('style={[styles.detailThumbnailLayer, compactImageStyle]}');
   expect(memories).toContain('thumbnailImageClip: { width: "100%", height: "100%", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.sm');
-  expect(memories).toContain('style={[styles.detailImage, styles.expandedDetailImage]}');
+  expect(memories).toContain('fitContainedMediaSize(detail.image, { width: detailImageWidth, height: expandedImageHeight })');
+  expect(memories).toContain('style={[expandedImageSize, styles.expandedDetailImage]}');
+  expect(memories).toContain('expandedImageLayer: { alignItems: "center", justifyContent: "center" }');
   expect(memories).toContain('expandedDetailImage: { borderRadius: radii.lg }');
   expect(memories).toContain('const expandedImageHeight = Math.max(120, detailViewportHeight - spacing.lg * 2)');
   expect(memories).toContain('onLayout={({ nativeEvent }) => setDetailViewportHeight(nativeEvent.layout.height)}');
@@ -85,7 +89,7 @@ test("uses the global memory projection without collection membership or unsafe 
   const start = client.indexOf("export type GalleryMemory = {");
   const projection = client.slice(start, client.indexOf("};", start) + 2);
   expect(projection).not.toContain("collectionKey");
-  expect(projection).toContain("image: { key: string; url: string }");
+  expect(projection).toContain("image: { key: string; url: string; width: number; height: number }");
   expect(projection).not.toContain("GalleryImage");
   expect(client).toContain("createGalleryCollectionMemory(collectionKey: string, imageKey?: string)");
   expect(client).toContain("listGalleryCollectionMemories(collectionKey: string)");

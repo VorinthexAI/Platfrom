@@ -42,6 +42,15 @@ export class BottomSheetFocusCoordinator {
     this.resetCycle(sheet, cycleKey);
   }
 
+  restart(sheetId: symbol, cycleKey: string) {
+    const sheet = this.ensureSheet(sheetId, cycleKey);
+    if (!sheet.active) {
+      sheet.active = true;
+      this.stack.push(sheetId);
+    }
+    this.resetCycle(sheet, cycleKey, true);
+  }
+
   setCycle(sheetId: symbol, cycleKey: string) {
     const sheet = this.sheets.get(sheetId);
     if (!sheet || sheet.cycleKey === cycleKey) return;
@@ -93,8 +102,8 @@ export class BottomSheetFocusCoordinator {
     return sheet;
   }
 
-  private resetCycle(sheet: Sheet, cycleKey: string) {
-    if (sheet.deadline && sheet.cycleKey === cycleKey) return;
+  private resetCycle(sheet: Sheet, cycleKey: string, force = false) {
+    if (!force && sheet.deadline && sheet.cycleKey === cycleKey) return;
     this.cancelTimer(sheet);
     sheet.claimed = false;
     sheet.cycleKey = cycleKey;

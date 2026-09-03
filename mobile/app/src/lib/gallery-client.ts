@@ -12,7 +12,7 @@ export type GalleryCollection = {
   key: string;
   name: string;
   description: string | null;
-  purpose: "place-media" | "email-media" | null;
+  purpose: "place-media" | "email-media" | "generated-media" | null;
   mutationPolicy: "user" | "system-only";
   isFavorite: boolean;
   count: number;
@@ -84,6 +84,7 @@ export type GalleryImage = {
   url: string;
   score?: number;
   createdByKey?: string | null;
+  collections?: { key: string; name: string }[];
 };
 
 export type GalleryImageOrigin = "uploaded" | "generated";
@@ -113,7 +114,7 @@ export type GalleryOverview = {
 const galleryCollectionRoleSchema = z.enum(["owner", "collaborator", "viewer"]);
 const galleryCollectionAccessSchema = z.strictObject({ canRead: z.boolean(), canContribute: z.boolean(), canManage: z.boolean() });
 export const galleryCollectionSchema = z.strictObject({
-  key: z.string().min(1), name: z.string().min(1), description: z.string().nullable(), purpose: z.enum(["place-media", "email-media"]).nullable(), mutationPolicy: z.enum(["user", "system-only"]),
+  key: z.string().min(1), name: z.string().min(1), description: z.string().nullable(), purpose: z.enum(["place-media", "email-media", "generated-media"]).nullable(), mutationPolicy: z.enum(["user", "system-only"]),
   isFavorite: z.boolean(), count: z.number().int().nonnegative(), coverUrl: z.string().min(1).nullable(), presentation: z.enum(["travel", "communication", "learning"]).optional(), memberKey: z.string().min(1), isOwned: z.boolean().optional(),
   role: galleryCollectionRoleSchema, access: galleryCollectionAccessSchema, createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(), score: z.number().optional(),
 });
@@ -123,6 +124,7 @@ export const galleryImageSchema = z.strictObject({
   countryCode: z.string().length(2).nullable(), latitude: z.number().finite().min(-90).max(90).nullable(), longitude: z.number().finite().min(-180).max(180).nullable(),
   locationSource: z.enum(["exif", "supplied", "place"]).nullable(), origin: z.enum(["uploaded", "generated"]), mutationPolicy: z.enum(["user", "system-only"]), isFavorite: z.boolean(),
   createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(), url: z.string().min(1), score: z.number().optional(), createdByKey: z.string().min(1).nullable(),
+  collections: z.array(z.strictObject({ key: z.string().min(1), name: z.string().min(1) })).optional(),
 });
 const galleryOverviewSchema = z.strictObject({ collections: z.array(galleryCollectionSchema), images: z.array(galleryImageSchema), nextCursor: z.string().nullable(), canCreateCollections: z.boolean() });
 const galleryGenerationHistoryItemSchema = z.strictObject({ type: z.literal("image"), prompt: z.string().trim().min(1).max(8_000), normalizedPrompt: z.string().trim().min(1).max(8_000), usageCount: z.number().int().positive(), generatedAt: z.iso.datetime() });
@@ -153,7 +155,7 @@ export type GalleryMemory = {
   key: string;
   imageKey: string;
   text: string;
-  image: { key: string; url: string };
+  image: { key: string; url: string; width: number; height: number };
   createdByKey: string;
   createdAt: string;
   updatedAt: string;
@@ -533,16 +535,16 @@ export function fetchGalleryUploadStatus(uploadKeys: string[], timeout = 60_000)
   );
 }
 
-export function searchGalleryImages(input: { query?: string; imageKey?: string; identityKey?: string; duplicates?: true; collectionKey?: string; recordHistory?: boolean; limit?: number; minimumScore?: number }, signal?: AbortSignal) {
+export function searchGalleryImages(input: { query?: string; imageKey?: string; identityKey?: string; duplicates?: true; collectionKey?: string; recordHistory?: boolean; limit?: number }, signal?: AbortSignal) {
   if (input.query !== undefined) {
-    return searchApp({ query: input.query, collectionSlugs: ["images"], recordHistory: input.recordHistory ?? true, limit: Math.min(input.limit ?? 10, 50), ...(input.minimumScore !== undefined ? { minimumScore: input.minimumScore } : {}), ...(input.collectionKey ? { filters: { collectionKey: input.collectionKey } } : {}) }, signal)
+    return searchApp({ query: input.query, collectionSlugs: ["images"], recordHistory: input.recordHistory ?? true, limit: Math.min(input.limit ?? 10, 50), ...(input.collectionKey ? { filters: { collectionKey: input.collectionKey } } : {}) }, signal)
       .then((output) => ({ images: appSearchResults(output, "images", galleryImageSchema) }));
   }
   return postGallery<unknown>("/gallery/images/search", input, 4 * 60_000, signal).then((value) => z.strictObject({ images: z.array(galleryImageSchema) }).parse(value));
 }
 
 export function searchGalleryCollections(query: string, recordHistory = true, signal?: AbortSignal) {
-  return searchApp({ query, collectionSlugs: ["collections"], recordHistory, limit: 50, minimumScore: -1 }, signal)
+  return searchApp({ query, collectionSlugs: ["collections"], recordHistory, limit: 50 }, signal)
     .then((output) => ({ collections: appSearchResults(output, "collections", galleryCollectionSchema) }));
 }
 

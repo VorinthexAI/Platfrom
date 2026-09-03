@@ -4,6 +4,7 @@ export type AuthUser = {
   name?: string;
   firstName?: string;
   alias?: string;
+  avatarUrl?: string;
   countryCode?: string;
   isOnboarded: boolean;
 };
@@ -87,6 +88,7 @@ export function normalizeAuthContext(value: unknown): AuthContext {
     name: stringValue(rawUser, "name", "display_name"),
     firstName: stringValue(rawUser, "firstName", "first_name"),
     alias: stringValue(rawUser, "alias"),
+    avatarUrl: stringValue(rawUser, "avatarUrl", "avatar_url"),
     countryCode: stringValue(rawUser, "countryCode", "country_code"),
     isOnboarded: booleanValue(rawUser, "isOnboarded", "is_onboarded"),
   } : null;
@@ -108,6 +110,11 @@ export function hasCompleteAuthContext(context: AuthContext | null) {
 export function firstNameFor(user: AuthUser | null) {
   const candidate = user?.firstName ?? user?.name ?? user?.alias ?? user?.email?.split("@")[0];
   return candidate?.trim().split(/\s+/)[0] || "there";
+}
+
+export function profileInitial(user: AuthUser | null) {
+  const candidate = user?.firstName ?? user?.name ?? user?.alias ?? user?.email?.split("@")[0];
+  return (candidate?.trim().slice(0, 1) || "?").toLocaleUpperCase();
 }
 
 export function languageForCountryCode(countryCode?: string) {

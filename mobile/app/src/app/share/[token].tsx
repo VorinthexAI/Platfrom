@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Button } from "@vorinthex/shared/ui/button";
 import { Spinner } from "@vorinthex/shared/ui/spinner";
@@ -10,6 +10,7 @@ import { activateGalleryShare, fetchGalleryOverview, getGalleryContext } from "@
 import { clearPendingReturnRoute } from "@/lib/pending-return-route";
 import { galleryQueryKeys, setCachedGalleryCollections } from "@/lib/workspace-query-cache";
 import { useAuthStore } from "@/state/auth";
+import { useAppsStore } from "@/state/apps";
 import { fonts, palette, spacing } from "@/theme/tokens";
 
 export default function GalleryShareActivationRoute() {
@@ -21,6 +22,8 @@ export default function GalleryShareActivationRoute() {
   const isOnboarded = useAuthStore((state) => state.user?.isOnboarded === true);
   const processing = useRef<string | undefined>(undefined);
   const [error, setError] = useState<string>();
+  const enterWorkspace = useAppsStore((state) => state.enterWorkspace);
+  useLayoutEffect(() => enterWorkspace("gallery"), [enterWorkspace]);
 
   const activate = () => {
     if (!token || status !== "authenticated" || !isOnboarded || processing.current === token) return;

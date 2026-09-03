@@ -35,6 +35,13 @@ export type CoreComposerProps = {
   accessibilityLabel: string;
   disabled?: boolean;
   editable?: boolean;
+  expandedAccessory?: ReactNode;
+  expandedPrompts?: readonly string[];
+  focusRequest?: number;
+  expandedLeading?: ReactNode;
+  expandedLeadingAccessibilityLabel?: string;
+  expandedLeadingDisabled?: boolean;
+  expandedFooter?: ReactNode;
   leading: ReactNode;
   leadingAccessibilityLabel?: string;
   leadingDisabled?: boolean;
@@ -43,6 +50,7 @@ export type CoreComposerProps = {
   message?: ReactNode;
   onChangeText: (value: string) => void;
   onFocusChange?: (focused: boolean) => void;
+  onExpandedLeadingPress?: () => void;
   onLeadingPress?: () => void;
   onSubmit: () => void;
   openRequest?: number;
@@ -59,6 +67,7 @@ const INPUT_LINE_HEIGHT = 18;
 const INPUT_VERTICAL_PADDING = 10;
 const MAX_INPUT_HEIGHT = INPUT_LINE_HEIGHT * 6 + INPUT_VERTICAL_PADDING * 2;
 const CORE_FOCUS_DELAY_MS = 100;
+const CORE_EDIT_FOCUS_DELAY_MS = 300;
 const CORE_PAGE_PROMPTS = ["Ask anything"] as const;
 
 function useReducedMotion() {
@@ -224,6 +233,13 @@ export function CoreComposer({
   accessibilityLabel,
   disabled = false,
   editable = true,
+  expandedAccessory,
+  expandedPrompts = CORE_PAGE_PROMPTS,
+  focusRequest = 0,
+  expandedLeading,
+  expandedLeadingAccessibilityLabel,
+  expandedLeadingDisabled,
+  expandedFooter,
   leading,
   leadingAccessibilityLabel,
   leadingDisabled = false,
@@ -232,6 +248,7 @@ export function CoreComposer({
   message,
   onChangeText,
   onFocusChange,
+  onExpandedLeadingPress,
   onLeadingPress,
   onSubmit,
   openRequest = 0,
@@ -252,6 +269,7 @@ export function CoreComposer({
   const closingRef = useRef(false);
   const inputRef = useRef<NativeTextInput>(null);
   const intentionalFocus = useRef(false);
+  const handledFocusRequestRef = useRef(0);
   const onFocusChangeRef = useRef(onFocusChange);
   const pageWasOpenRef = useRef(false);
   const valueRef = useRef(value);
@@ -317,6 +335,13 @@ export function CoreComposer({
     setPageOpen(true);
   }, [openRequest]);
 
+  useEffect(() => {
+    if (focusRequest <= handledFocusRequestRef.current || !pageOpen || !editable) return;
+    handledFocusRequestRef.current = focusRequest;
+    const timeout = setTimeout(() => inputRef.current?.focus(), CORE_EDIT_FOCUS_DELAY_MS);
+    return () => clearTimeout(timeout);
+  }, [editable, focusRequest, pageOpen]);
+
   useEffect(() => () => {
     closeSubscriptionRef.current?.remove();
     if (closeFallbackRef.current) clearTimeout(closeFallbackRef.current);
@@ -338,27 +363,36 @@ export function CoreComposer({
   }, [value]);
 
   function submit() {
-    if (!disabled && editable && value.trim()) onSubmit();
+    if (disabled || !editable || !value.trim()) return;
+    inputRef.current?.blur();
+    Keyboard.dismiss();
+    onSubmit();
   }
 
   const composer = (expanded: boolean) => {
     const multiline = expanded && inputHeight > COLLAPSED_INPUT_HEIGHT;
     const inputValue = expanded ? value : (value.split(/\r?\n/)[0] ?? "");
-    return <View style={[styles.composer, multiline && styles.composerOpen]}>
-    {onLeadingPress ? (
+    const activeLeading = expanded && expandedLeading !== undefined ? expandedLeading : leading;
+    const activeLeadingPress = expanded ? onExpandedLeadingPress : onLeadingPress;
+    const activeLeadingLabel = expanded ? expandedLeadingAccessibilityLabel : leadingAccessibilityLabel;
+    const activeLeadingDisabled = expanded ? expandedLeadingDisabled : leadingDisabled;
+    return <View style={expanded && (expandedAccessory || expandedFooter) ? styles.expandedComposer : undefined}>
+      {expanded ? expandedAccessory : null}
+      <View style={[styles.composer, multiline && styles.composerOpen]}>
+    {activeLeadingPress ? (
       <Button
-        accessibilityLabel={leadingAccessibilityLabel ?? "Core actions"}
+        accessibilityLabel={activeLeadingLabel ?? "Core actions"}
         contentMode="raw"
-        disabled={leadingDisabled}
-        onPress={onLeadingPress}
+        disabled={activeLeadingDisabled}
+        onPress={activeLeadingPress}
         size="sm"
         style={multiline ? styles.leadingTop : undefined}
         variant="icon"
       >
-        {leading}
+        {activeLeading}
       </Button>
     ) : (
-      <View style={[styles.leading, multiline && styles.leadingTop]}>{leading}</View>
+      <View style={[styles.leading, multiline && styles.leadingTop]}>{activeLeading}</View>
     )}
     <View style={[styles.inputArea, { height: expanded ? inputHeight : COLLAPSED_INPUT_HEIGHT }]}>
       {expanded && value.length > 0 ? <Text
@@ -380,7 +414,7 @@ export function CoreComposer({
           pointerEvents="none"
           style={styles.prompt}
         >
-          <RotatingPrompt key={expanded ? "core-page" : "workspace"} prompts={expanded ? CORE_PAGE_PROMPTS : prompts} />
+          <RotatingPrompt key={expanded ? "core-page" : "workspace"} prompts={expanded ? expandedPrompts : prompts} />
         </View>
       ) : null}
       <TextInput
@@ -432,7 +466,9 @@ export function CoreComposer({
     >
       {sendIcon}
     </Button>
-  </View>;
+      </View>
+      {expanded ? expandedFooter : null}
+    </View>;
   };
 
   return (
@@ -455,6 +491,7 @@ const styles = StyleSheet.create({
     gap: 6,
     zIndex: 20,
   },
+  expandedComposer: { gap: 6 },
   page: {
     bottom: 0,
     backgroundColor: colors.page,

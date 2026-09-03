@@ -10,13 +10,23 @@ The AI runtime routes generic actions through models and providers. Product beha
 
 1. Run `git-crypt unlock` at the repo root so `.github/environments.json` decrypts.
 2. Run `bun install`.
-3. Start local dev with `bun start`. This brings up Docker Compose infra, applies dev migrations, and starts the API.
+3. Start local dev with `bun start` from `backend/`. This brings up the Docker Compose infra (ArangoDB, Redis, LocalStack, Mailpit), applies dev migrations, and starts the API natively with hot reload.
 4. Reset local dev data with `bun reset`. This runs `docker compose down -v`.
 
 You can still run pieces manually with `bun run dev:infra`, `bun run db:migrate:dev`, and `bun run dev`.
 
 Docker Desktop or another ArangoDB/Redis environment must be running for migrations and DB-backed tests.
 Mailpit is included in the dev infra at `localhost:8025` with SMTP on `localhost:1025`.
+
+### Infra in Docker, backend native
+
+This is the supported dev layout: everything in `backend/docker-compose.yml` except `app` and `render` runs as containers, and the backend runs natively via Bun so `bun --hot` picks up edits instantly.
+
+Do not develop against the `app` and `render` Compose services (`bun run dev:services`). They exist to exercise the container image, not for day-to-day development: on Windows and macOS, file-change events do not cross the Docker mount into the container, so `bun --hot` silently never sees edits — changes appear to have no effect until the container is restarted. If you do use them, restart `app` (and `render`) after every edit:
+
+```bash
+docker compose --profile services restart app render
+```
 
 Run the live content release gate with `bun run test:e2e:content`. It starts the required Compose services without stopping existing containers, waits on their host HTTP/TCP endpoints, recreates only the default isolated `content_e2e` database, migrates it, and runs the gated test. Environment variables supplied by CI override all isolated defaults; no env file is written.
 

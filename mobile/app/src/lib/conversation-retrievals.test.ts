@@ -36,4 +36,26 @@ describe("conversation retrieval presentation", () => {
     expect(appSearchResultIdentity("countries", { key: "wrong", countryCode: "SE" })).toBe("SE");
     expect(filterConversationRetrievalResults(mergeConversationRetrievalResults([stored]), new Map([[stored, valid]])).map(({ key }) => key)).toEqual(["SE", "doc-1"]);
   });
+
+  test("validates projected container pills against the fresh canonical projection", () => {
+    const stored = retrieval([{ collectionSlug: "folders", results: [{ key: "folder-1", label: "Dogs", destinationCollectionSlug: "documents" }] }]);
+    const output = {
+      query: "find it",
+      groups: [{ collectionSlug: "documents" as const, results: [{ key: "document-1" }] }],
+      retrieval: retrieval([{ collectionSlug: "folders", results: [{ key: "folder-1", label: "Dogs", destinationCollectionSlug: "documents" }] }]),
+    };
+    const valid = validConversationRetrievalIdentities(stored, output);
+    expect([...valid]).toEqual(["folders:folder-1"]);
+  });
+
+  test("merges query-free tool result retrievals alongside search retrievals", () => {
+    const listTool = { source: "results" as const, limit: 10, minimumScore: 0.55, groups: [{ collectionSlug: "collections" as const, results: [{ key: "col-1", label: "City After Rain" }, { key: "col-2", label: "Coastal Days" }] }] } as ConversationRetrieval;
+    const search = retrieval([{ collectionSlug: "collections", results: [{ key: "col-2", label: "Coastal Days" }, { key: "col-3", label: "Exhibition Selects" }] }]);
+    expect(mergeConversationRetrievalResults([listTool, search]).map(({ key, label }) => ({ key, label }))).toEqual([
+      { key: "col-1", label: "City After Rain" },
+      { key: "col-2", label: "Coastal Days" },
+      { key: "col-3", label: "Exhibition Selects" },
+    ]);
+    expect(mergeConversationRetrievalResults([listTool])).toHaveLength(2);
+  });
 });

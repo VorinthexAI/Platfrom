@@ -37,7 +37,9 @@ import { executeAsk } from '@/lib/ai/router/execute-route';
 import type { ChatOutput } from '@/lib/ai/providers';
 import { performance } from 'node:perf_hooks';
 
-const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional(), origin: z.enum(['uploaded', 'generated']).optional(), maxCaptionScore: z.number().int().min(1).max(100).optional(), ...cursorPaginationInputShape });
+const creationDateRangeShape = { createdFrom: z.string().datetime().optional(), createdTo: z.string().datetime().optional() } as const;
+const validCreationDateRange = (value: { createdFrom?: string; createdTo?: string }) => value.createdFrom === undefined || value.createdTo === undefined || Date.parse(value.createdFrom) <= Date.parse(value.createdTo);
+const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional(), origin: z.enum(['uploaded', 'generated']).optional(), maxCaptionScore: z.number().int().min(1).max(100).optional(), ...creationDateRangeShape, ...cursorPaginationInputShape }).refine(validCreationDateRange, { message: 'createdFrom must be before or equal to createdTo.', path: ['createdTo'] });
 const collectionCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), isFavorite: z.boolean().default(false) });
 const collectionUpdateSchema = strictObject({ collectionKey: z.string().cuid(), name: z.string().trim().min(1).max(120), isFavorite: z.boolean(), coverImageKey: z.string().cuid().nullable().optional() });
 const collectionDeleteSchema = strictObject({ collectionKey: z.string().cuid() });
@@ -58,7 +60,7 @@ const uploadFileSchema = strictObject({ clientKey: z.string().min(1).max(120), f
 const presignSchema = strictObject({ collectionKey: z.string().cuid().nullable().optional(), files: z.array(uploadFileSchema).min(1).max(20) }).refine(({ files }) => new Set(files.map(({ clientKey }) => clientKey)).size === files.length, 'Upload client keys must be unique.');
 const completeSchema = strictObject({ uploadKeys: z.array(z.string().cuid()).min(1).max(20) }).refine(({ uploadKeys }) => new Set(uploadKeys).size === uploadKeys.length, 'Upload keys must be unique.');
 const searchSchema = imageSearchInputSchema;
-const collectionSearchSchema = strictObject({ query: z.string().trim().min(1).max(500), minimumScore: z.number().min(-1).max(1).default(0.55), limit: z.number().int().min(1).max(50).default(10) });
+export const galleryCollectionSearchInputSchema = strictObject({ query: z.string().trim().min(1).max(500), minimumScore: z.number().min(-1).max(1).default(0.55), limit: z.number().int().min(1).max(50).default(10), ...creationDateRangeShape }).refine(validCreationDateRange, { message: 'createdFrom must be before or equal to createdTo.', path: ['createdTo'] });
 const statusSchema = strictObject({ uploadKeys: z.array(z.string().cuid()).min(1).max(20) });
 const favoriteSchema = strictObject({ imageKey: z.string().cuid(), isFavorite: z.boolean() });
 const deleteImagesSchema = strictObject({ imageKeys: z.array(z.string().cuid()).min(1).max(100) }).refine(({ imageKeys }) => new Set(imageKeys).size === imageKeys.length, 'Image keys must be unique');
@@ -110,6 +112,8 @@ export interface GalleryOperationContext {
   insertUploads?: typeof repository.insertUploads;
   signUpload?: (upload: z.infer<typeof galleryUploadSchema>) => Promise<string>;
   canManageScope?: typeof repository.canManageScope;
+  listOverview?: typeof repository.listOverview;
+  searchAccessibleCollections?: typeof repository.searchAccessibleCollections;
   canMutateImage?: typeof repository.canMutateImage;
   getCollectionRole?: typeof repository.getCollectionRole;
   deleteCollection?: typeof repository.deleteCollection;
@@ -250,7 +254,7 @@ async function safeHighlight(highlight: ImageCollectionHighlight, images: Array<
 }
 
 async function safeMemory(memory: ImageCollectionMemory, image: z.infer<typeof imageSchema>) {
-  return { key: memory.key, imageKey: memory.imageKey, text: memory.text, image: { key: image.key, url: await imageUrl(image.storageKey) }, createdByKey: memory.createdByKey, createdAt: memory.createdAt, updatedAt: memory.updatedAt };
+  return { key: memory.key, imageKey: memory.imageKey, text: memory.text, image: { key: image.key, url: await imageUrl(image.storageKey), width: image.width, height: image.height }, createdByKey: memory.createdByKey, createdAt: memory.createdAt, updatedAt: memory.updatedAt };
 }
 
 export function selectMemoryCandidate<T extends { captionScore: number }>(candidates: T[], random: () => number = Math.random): T | undefined {
@@ -286,8 +290,8 @@ async function overview(rawInput: unknown, context: GalleryOperationContext) {
     const input = { ...overviewSchema.parse(rawInput), ...context };
     const membership = await authorize(context);
     if (input.collectionKey && !await repository.getCollectionRole(input.scopeKey, input.collectionKey, membership.key)) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
-    const { collections, images } = await repository.listOverview({ scopeKey: input.scopeKey, actorKey: membership.key, collectionKey: input.collectionKey, origin: input.origin, maxCaptionScore: input.maxCaptionScore, cursor: input.cursor, limit: input.limit });
-    const canCreateCollections = await repository.canManageScope(input.scopeKey, membership.key);
+    const { collections, images } = await (context.listOverview ?? repository.listOverview)({ scopeKey: input.scopeKey, actorKey: membership.key, collectionKey: input.collectionKey, origin: input.origin, maxCaptionScore: input.maxCaptionScore, createdFrom: input.createdFrom, createdTo: input.createdTo, cursor: input.cursor, limit: input.limit });
+    const canCreateCollections = await (context.canManageScope ?? repository.canManageScope)(input.scopeKey, membership.key);
     return {
       collections: await Promise.all(collections.map(async ({ collection, count, cover, role, isOwned }) => projectGalleryCollection(collection, count, cover ? await imageUrl(cover.storageKey) : null, membership.key, role, isOwned))),
       images: await Promise.all(images.items.map((image) => safeImage(image)),),
@@ -414,12 +418,16 @@ async function search(rawInput: unknown, context: GalleryOperationContext) {
     const toolInput = searchSchema.parse(rawInput);
     const resolvedImages = new Map<string, z.infer<typeof imageSchema>>();
     if (sourceImage) resolvedImages.set(sourceImage.key, sourceImage);
+    const collectionsByImageKey = new Map<string, Array<{ key: string; name: string }>>();
     const output = await imageSearchTool.execute(toolInput, {
       context: { organizationKey: input.organizationKey, runtimeScopeKey: input.scopeKey, principal: { kind: 'member', user: { key: membership.userId }, userOrganization: membership, scopeMember: null } as never },
       queryEmbedding: context.queryEmbedding,
       searchImages: async (searchInput) => {
         const results = await repository.searchAccessibleImages(searchInput);
-        for (const result of results) resolvedImages.set(result.image.key, result.image);
+        for (const result of results) {
+          resolvedImages.set(result.image.key, result.image);
+          if (result.collections.length) collectionsByImageKey.set(result.image.key, result.collections);
+        }
         return results;
       },
       listMatchingVisualIdentities: (scopeKey, query) => repository.listMatchingIdentityNames(scopeKey, query, membership.key),
@@ -444,16 +452,20 @@ async function search(rawInput: unknown, context: GalleryOperationContext) {
       if (!image) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
       return { image, score };
     }));
-    const images = await Promise.all(matches.map(({ image, score }) => safeImage(image, score)));
+    if (sourceImage) matches = [{ image: sourceImage }, ...matches].slice(0, 'limit' in input ? input.limit : 50);
+    const images = await Promise.all(matches.map(async ({ image, score }) => {
+      const collections = collectionsByImageKey.get(image.key);
+      return { ...(await safeImage(image, score)), ...(collections ? { collections } : {}) };
+    }));
     if ('query' in input && input.recordHistory) await (context.recordUserSearch ?? getDefaultUserSearchService().record)(membership.userId, input.query);
     return { images };
 }
 
 export async function searchGalleryCollections(rawInput: unknown, context: GalleryOperationContext) {
-    const input = { ...collectionSearchSchema.parse(rawInput), ...context };
+    const input = { ...galleryCollectionSearchInputSchema.parse(rawInput), ...context };
     const membership = await authorize(context);
     const queryEmbedding = currentEmbeddingSchema.parse(context.queryEmbedding ?? await embedText({ text: input.query }));
-    const rows = await repository.searchAccessibleCollections({ scopeKey: input.scopeKey, actorKey: membership.key, embedding: queryEmbedding, minimumScore: input.minimumScore, limit: input.limit });
+    const rows = await (context.searchAccessibleCollections ?? repository.searchAccessibleCollections)({ scopeKey: input.scopeKey, actorKey: membership.key, embedding: queryEmbedding, minimumScore: input.minimumScore, createdFrom: input.createdFrom, createdTo: input.createdTo, limit: input.limit });
     return {
       collections: await Promise.all(rows.map(async ({ collection, count, cover, role, isOwned, score }) => ({
         ...projectGalleryCollection(collection, count, cover ? await imageUrl(cover.storageKey) : null, membership.key, role, isOwned),

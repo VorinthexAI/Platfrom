@@ -1,6 +1,6 @@
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { useLocalSearchParams } from "expo-router";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "@vorinthex/shared/ui/button";
@@ -14,6 +14,7 @@ import { useBookPlayback } from "@/lib/book-playback";
 import { BookClientError, fetchPublicBookShare, publicBookShareReadRequestSchema, type BookChapter, type BookDetail } from "@/lib/books-client";
 import { subscribePublicBookShareAccess } from "@/lib/public-book-share-stream";
 import { fonts, palette, spacing } from "@/theme/tokens";
+import { useAppsStore } from "@/state/apps";
 
 const COLUMNS = 3;
 const GRID_GAP = 8;
@@ -24,6 +25,8 @@ function isUnavailable(error: unknown) {
 }
 
 export default function PublicBookShareRoute() {
+  const enterWorkspace = useAppsStore((state) => state.enterWorkspace);
+  useLayoutEffect(() => enterWorkspace("ascend"), [enterWorkspace]);
   const params = useLocalSearchParams<{ token?: string | string[] }>();
   const tokenResult = publicBookShareReadRequestSchema.shape.token.safeParse(Array.isArray(params.token) ? params.token[0] : params.token);
   const token = tokenResult.success ? tokenResult.data : undefined;

@@ -4,7 +4,7 @@ import { createConversationRepository } from './repository';
 import type { ConversationMessage } from './schemas';
 
 const timestamp = '2026-09-01T00:00:00.000Z';
-const turnMessage = (role: 'USER' | 'ASSISTANT', overrides: Partial<ConversationMessage> = {}): ConversationMessage => ({ key: newId(), conversationKey: newId(), organizationKey: 'organization', scopeKey: newId(), userKey: newId(), turnKey: 'request', requestHash: 'a'.repeat(64), role, status: role === 'USER' ? 'COMPLETED' : 'PENDING', content: role === 'USER' ? 'question' : 'Pending', retrievals: [], createdAt: timestamp, ...(role === 'USER' ? { completedAt: timestamp } : {}), ...overrides });
+const turnMessage = (role: 'USER' | 'ASSISTANT', overrides: Partial<ConversationMessage> = {}): ConversationMessage => ({ key: newId(), conversationKey: newId(), organizationKey: 'organization', scopeKey: newId(), userKey: newId(), turnKey: 'request', requestHash: 'a'.repeat(64), type: 'TEXT', role, status: role === 'USER' ? 'COMPLETED' : 'PENDING', content: role === 'USER' ? 'question' : 'Pending', retrievals: [], createdAt: timestamp, ...(role === 'USER' ? { completedAt: timestamp } : {}), ...overrides });
 const raw = ({ key, ...value }: ConversationMessage) => ({ _key: key, ...value });
 
 describe('conversation repository boundaries', () => {
@@ -72,11 +72,31 @@ describe('conversation repository boundaries', () => {
     expect(vars).toMatchObject({ ...owner, embedding: [1, 0] });
   });
 
+  test('binds both collections when recovering pending image turns', async () => {
+    let query = ''; let vars: any;
+    const database: any = { query: async (value: string, bind: unknown) => { query = value; vars = bind; return { all: async () => [] }; } };
+
+    await createConversationRepository(database).listPendingImageTurns();
+
+    expect(query).toContain('DOCUMENT(@@conversations, message.conversationKey)');
+    expect(vars).toEqual({ '@conversations': 'conversations', '@messages': 'conversationMessages' });
+  });
+
   test('declares transactional hard deletion of messages before the conversation', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     expect(source).toContain('transact(async (trx)');
     expect(source.indexOf('REMOVE message IN @@messages')).toBeLessThan(source.indexOf('REMOVE conversation IN @@conversations'));
     expect(source).not.toContain('deletedAt');
+  });
+
+  test('hard-deletes the owned paired turn selected by either message', async () => {
+    let query = ''; let vars: any;
+    const owner = { organizationKey: 'organization', scopeKey: newId(), userKey: newId() }, conversationKey = newId(), messageKey = newId(), deletedKeys = [messageKey, newId()];
+    const database: any = { query: async (value: string, bind: unknown) => { query = value; vars = bind; return { next: async () => deletedKeys }; } };
+    await expect(createConversationRepository(database, (operation) => operation(database)).deleteMessageTurn(owner, conversationKey, messageKey, timestamp)).resolves.toEqual(deletedKeys);
+    for (const filter of ['conversation != null', 'selected != null', 'selected.conversationKey == conversation._key', 'selected.organizationKey == @organizationKey', 'message.turnKey == selected.turnKey', 'message.status == "PENDING"', 'REMOVE message IN @@messages']) expect(query).toContain(filter);
+    expect(query).toContain('UPDATE conversation WITH { updatedAt: @updatedAt }');
+    expect(vars).toEqual({ '@conversations': 'conversations', '@messages': 'conversationMessages', ...owner, conversationKey, messageKey, updatedAt: timestamp });
   });
 
   test('atomically claims the first turn and serializes a distinct pending turn', async () => {
@@ -89,6 +109,8 @@ describe('conversation repository boundaries', () => {
 
     const busyDb: any = { query: async () => ({ next: async () => ({ existingUser: null, existingAssistant: null, active: newId(), first: false }) }) };
     expect(await createConversationRepository(busyDb, (operation) => operation(busyDb)).beginTurn({ organizationKey: user.organizationKey, scopeKey: user.scopeKey, userKey: user.userKey }, user.conversationKey, user, assistant)).toEqual({ state: 'busy' });
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    expect(source).toContain('message.type == "TEXT" && message.role == "ASSISTANT" && message.status == "PENDING"');
   });
 
   test('turn unique-claim loser becomes a deterministic replay or payload conflict', async () => {

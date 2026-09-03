@@ -27,6 +27,7 @@
     "test:e2e:place-guide": "bun run load-local-env && bun --env-file=.env.local run scripts/place-guide-live.ts",
     "test:e2e:rag-live": "bun run scripts/rag-live-e2e.ts",
     "test:ai-providers:live": "bun run load-local-env && bun --env-file=.env.local run scripts/ai-providers-live.ts",
+    "test:embeddings:multilingual-live": "bun run load-local-env && bun --env-file=.env.local run scripts/multilingual-embedding-live.ts",
     "test:e2e:ascend-book-live": "bun run load-local-env && bun --env-file=.env.local run scripts/ascend-book-live-e2e.ts",
     "test:document-scan-live": "bun run scripts/document-scan-live.ts",
     "db:migrate": "bun run load-local-env && bun --env-file=.env.local src/db/arango-migrate.ts",

@@ -6,6 +6,7 @@ export type ConversationRetrievalResult = {
   key: string;
   label: string;
   destinationKey?: string;
+  destinationCollectionSlug?: ConversationRetrievalCollectionSlug;
   retrieval: ConversationRetrieval;
 };
 
@@ -34,7 +35,7 @@ export function mergeConversationRetrievalResults(retrievals: readonly Conversat
         const identity = `${group.collectionSlug}:${result.key}`;
         if (seen.has(identity)) continue;
         seen.add(identity);
-        merged.push({ collectionSlug: group.collectionSlug, key: result.key, label: result.label, ...(result.destinationKey ? { destinationKey: result.destinationKey } : {}), retrieval });
+        merged.push({ collectionSlug: group.collectionSlug, key: result.key, label: result.label, ...(result.destinationKey ? { destinationKey: result.destinationKey } : {}), ...(result.destinationCollectionSlug ? { destinationCollectionSlug: result.destinationCollectionSlug } : {}), retrieval });
       }
     }
   }
@@ -58,6 +59,10 @@ export function appSearchResultIdentity(collectionSlug: ConversationRetrievalCol
 }
 
 export function validConversationRetrievalIdentities(retrieval: ConversationRetrieval, output: AppSearchOutput) {
+  if (output.retrieval) {
+    const current = new Set(mergeConversationRetrievalResults([output.retrieval]).map((result) => `${result.collectionSlug}:${result.key}`));
+    return new Set(mergeConversationRetrievalResults([retrieval]).filter((result) => current.has(`${result.collectionSlug}:${result.key}`)).map((result) => `${result.collectionSlug}:${result.key}`));
+  }
   const valid = new Set<string>();
   for (const group of output.groups) {
     for (const result of group.results) {

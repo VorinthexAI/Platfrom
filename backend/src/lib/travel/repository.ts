@@ -17,7 +17,8 @@ import { ensureGeneratedDocumentFolders } from '@/lib/generated-documents/folder
 import { z } from 'zod';
 
 export interface TravelAccessContext { organizationKey: string; scopeKey: string; userKey: string }
-export interface PlacePresentationRecord { place: Place; heroStorageKey?: string }
+export interface TravelCreationDateRange { createdFrom?: string; createdTo?: string }
+export interface PlacePresentationRecord { place: Place; heroStorageKey?: string; trips?: Array<{ key: string; name: string }> }
 export interface TripPresentationRecord { trip: Trip; places: Place[]; placeHeroStorageKeys: Array<string | null>; attachments: TripAttachment[]; accessibleCoverImageKey?: string; coverStorageKey?: string }
 export interface TripGuideSource { trip: Trip; places: Place[] }
 export interface GeneratedDocumentRecord { document: Document; binding: GeneratedDocumentBinding }
@@ -60,14 +61,14 @@ export interface TravelRepository {
   create(context: TravelAccessContext, place: Place): Promise<Place>;
   updatePlace(context: TravelAccessContext, placeKey: string, patch: { status?: 'wishlist' | 'visited'; isFavorite?: boolean }): Promise<PlacePresentationRecord>;
   deletePlace(context: TravelAccessContext, placeKey: string, updatedAt: string): Promise<{ placeKey: string }>;
-  searchPlaces(context: TravelAccessContext, embedding: number[]): Promise<PlacePresentationRecord[]>;
+  searchPlaces(context: TravelAccessContext, embedding: number[], dateRange?: TravelCreationDateRange): Promise<PlacePresentationRecord[]>;
   createTrip(context: TravelAccessContext, trip: Trip, relations: TripPlace[], receipt: TripCreationReceipt): Promise<TripPresentationRecord>;
   tripSemanticSourceForUpdate(context: TravelAccessContext, tripKey: string): Promise<{ name: string; description?: string }>;
   updateTrip(context: TravelAccessContext, tripKey: string, patch: { name?: string; description?: string | null; coverImageKey?: string | null; isFavorite?: boolean; status?: 'planned' | 'completed'; embedding?: number[]; embeddingContentVersion?: 1 }, relations: TripPlace[] | undefined, updatedAt: string): Promise<TripPresentationRecord>;
   deleteTrip(context: TravelAccessContext, tripKey: string): Promise<{ tripKey: string }>;
   setTripAttachments(context: TravelAccessContext, tripKey: string, attachments: TripAttachment[], updatedAt: string): Promise<TripPresentationRecord>;
   listTrips(context: TravelAccessContext): Promise<TripPresentationRecord[]>;
-  searchTrips(context: TravelAccessContext, embedding: number[]): Promise<TripPresentationRecord[]>;
+  searchTrips(context: TravelAccessContext, embedding: number[], dateRange?: TravelCreationDateRange): Promise<TripPresentationRecord[]>;
   prepareTripGuide(context: TravelAccessContext, guideKey: string, tripKey: string, requestHash: string): Promise<{ existing?: TripGuide; source?: TripGuideSource }>;
   preparePlaceReference(context: TravelAccessContext, referenceKey: string, placeKey: string, kind: 'brief' | 'accommodations' | 'restaurants' | 'activities', requestHash: string): Promise<{ existing?: PlaceReference; place?: Place }>;
   persistGeneratedContent(context: TravelAccessContext, record: TravelGeneratedRecord): Promise<TravelGeneratedRecord>;
@@ -259,7 +260,7 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
       if (result !== 'deleted') throw new TravelRepositoryError('forbidden');
       return { placeKey };
     },
-    async searchPlaces(context, embedding) {
+    async searchPlaces(context, embedding, dateRange = {}) {
       const cursor = await database.query(`
         LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
         LET scope = DOCUMENT(scopes, @scopeKey)
@@ -268,15 +269,23 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
         FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member", "viewer"]
         FOR place IN places
           FILTER place.scopeKey == @scopeKey && place.userKey == @userKey && place.saved == true
+          FILTER @createdFrom == null || place.createdAt >= @createdFrom
+          FILTER @createdTo == null || place.createdAt <= @createdTo
           FILTER IS_ARRAY(place.embedding) && LENGTH(place.embedding) == @dimensions && LENGTH(place.embedding[* FILTER !IS_NUMBER(CURRENT)]) == 0
           LET score = COSINE_SIMILARITY(place.embedding, @embedding)
           SORT score DESC, place._key ASC
           LET heroStorageKey = FIRST(FOR media IN placeHeroMedia FILTER media.scopeKey == @scopeKey && media.userKey == @userKey && media.placeKey == place._key LIMIT 1 RETURN media.storageKey)
-          RETURN { place, heroStorageKey }
-      `, { ...context, embedding, dimensions: embedding.length });
+          LET parentTrips = (FOR relation IN tripPlaces
+            FILTER relation.scopeKey == @scopeKey && relation.placeKey == place._key
+            FOR trip IN trips
+              FILTER trip._key == relation.tripKey && trip.scopeKey == @scopeKey && trip.userKey == @userKey
+              SORT trip.name ASC, trip._key ASC
+              RETURN { key: trip._key, name: trip.name })
+          RETURN { place, heroStorageKey, trips: parentTrips }
+      `, { ...context, embedding, dimensions: embedding.length, createdFrom: dateRange.createdFrom ?? null, createdTo: dateRange.createdTo ?? null });
       return (await cursor.all()).map((raw) => {
-        const row = z.object({ place: z.record(z.unknown()), heroStorageKey: z.string().trim().min(1).nullable().optional() }).parse(raw);
-        return { place: placeSchema.parse(withArangoKey(row.place)), ...(row.heroStorageKey ? { heroStorageKey: row.heroStorageKey } : {}) };
+        const row = z.object({ place: z.record(z.unknown()), heroStorageKey: z.string().trim().min(1).nullable().optional(), trips: z.array(z.object({ key: z.string().cuid(), name: z.string().trim().min(1) }).strict()).default([]) }).parse(raw);
+        return { place: placeSchema.parse(withArangoKey(row.place)), ...(row.heroStorageKey ? { heroStorageKey: row.heroStorageKey } : {}), ...(row.trips.length ? { trips: row.trips } : {}) };
       });
     },
     async createTrip(context, trip, relations, receipt) {
@@ -532,7 +541,7 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
       `, { ...context });
       return (await cursor.all()).map(parseTripPresentation);
     },
-    async searchTrips(context, embedding) {
+    async searchTrips(context, embedding, dateRange = {}) {
       const cursor = await database.query(`
         LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
         LET scope = DOCUMENT(scopes, @scopeKey)
@@ -541,11 +550,13 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
         FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member", "viewer"]
         FOR trip IN trips
           FILTER trip.scopeKey == @scopeKey && trip.userKey == @userKey
+          FILTER @createdFrom == null || trip.createdAt >= @createdFrom
+          FILTER @createdTo == null || trip.createdAt <= @createdTo
           FILTER IS_ARRAY(trip.embedding) && LENGTH(trip.embedding) == @dimensions && LENGTH(trip.embedding[* FILTER !IS_NUMBER(CURRENT)]) == 0
           LET score = COSINE_SIMILARITY(trip.embedding, @embedding)
           SORT score DESC, trip._key ASC
           RETURN trip._key
-      `, { ...context, embedding, dimensions: embedding.length });
+      `, { ...context, embedding, dimensions: embedding.length, createdFrom: dateRange.createdFrom ?? null, createdTo: dateRange.createdTo ?? null });
       const rankedKeys = (await cursor.all()).map(String);
       if (rankedKeys.length === 0) return [];
       const byKey = new Map((await repository.listTrips(context)).map((record) => [record.trip.key, record]));

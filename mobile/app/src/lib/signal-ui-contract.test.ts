@@ -372,7 +372,7 @@ test("selected Signal operations propagate connector selectors and reset account
   expect(workspace).toContain("detailGeneration.current += 1");
   expect(workspace.match(/clearSelectedThread\(\)/g)?.length).toBeGreaterThanOrEqual(6);
   expect(workspace).toMatch(/function clearSelectedThread\(preserveTrashOperation = false\) \{\s*detailGeneration\.current \+= 1;\s*receivedAttachmentsRequest\.current \+= 1;\s*readerGeneration\.current \+= 1;[\s\S]*?setSelected\(undefined\);/);
-  expect(workspace).toMatch(/committedInboxQuery\.current = defaultInboxQuery\(\);[\s\S]*?setInboxView\(\{ query: committedInboxQuery\.current \}\);[\s\S]*?clearSelectedThreadFromEffect\(\);[\s\S]*?setQuery\(""\);/);
+  expect(workspace).toMatch(/committedInboxQuery\.current = \{ \.\.\.defaultInboxQuery\(\), search: initialConnectorKey && initialSearchQuery \? initialSearchQuery\.slice\(0, 500\) : "" \};[\s\S]*?setInboxView\(\{ query: committedInboxQuery\.current \}\);[\s\S]*?clearSelectedThreadFromEffect\(\);[\s\S]*?setQuery\(committedInboxQuery\.current\.search\);/);
   expect(workspace).toMatch(/const generation = \+\+detailGeneration\.current;[\s\S]*?fetchEmailThread[\s\S]*?generation === detailGeneration\.current/);
   expect(workspace).toContain('router.replace({ pathname: "/capability/[slug]", params: { slug: "signal" } })');
   expect(workspace).not.toContain('router.push({ pathname: "/capability/[slug]", params: { slug: "signal" } })');
@@ -647,8 +647,8 @@ test("every Signal search runs after 300ms and records history after 800ms", () 
   expect(workspace).toContain('}, 800)');
   expect(workspace).toContain('onSubmitEditing={() => void search(query, false)}');
   expect(picker).toContain('query.trim() ? 300 : 0');
-  expect(picker).toContain('searchContentMatches(value, controller.signal, undefined, true, { limit: MAX_VISIBLE_RESULTS, minimumScore: -1 })');
-  expect(picker).toContain('searchGalleryImages({ query: value, recordHistory: true, limit: GALLERY_CANDIDATE_LIMIT, minimumScore: -1 }, controller.signal)');
+  expect(picker).toContain('searchContentMatches(value, controller.signal, undefined, true, { limit: MAX_VISIBLE_RESULTS })');
+  expect(picker).toContain('searchGalleryImages({ query: value, recordHistory: true, limit: GALLERY_CANDIDATE_LIMIT }, controller.signal)');
   expect(picker).toContain('}, 800)');
 });
 
@@ -678,8 +678,8 @@ test("attachment picker loads and searches both real stores with persistent mult
   expect(picker).toContain('listContentDocumentsAtLocation(undefined, operation.signal)');
   expect(picker).toContain('fetchGalleryOverview(undefined, undefined, GALLERY_CANDIDATE_LIMIT, undefined, operation.signal)');
   expect(picker).toContain('useState<EmailAttachmentRef[]>(() => selection)');
-  expect(picker).toContain('searchContentMatches(value, operation.signal, undefined, false, { limit: MAX_VISIBLE_RESULTS, minimumScore: -1 })');
-  expect(picker).toContain('searchGalleryImages({ query: value, recordHistory: false, limit: GALLERY_CANDIDATE_LIMIT, minimumScore: -1 }, operation.signal)');
+  expect(picker).toContain('searchContentMatches(value, operation.signal, undefined, false, { limit: MAX_VISIBLE_RESULTS })');
+  expect(picker).toContain('searchGalleryImages({ query: value, recordHistory: false, limit: GALLERY_CANDIDATE_LIMIT }, operation.signal)');
   expect(picker).toContain('<ButtonSizeProvider overrideParent size="xs"><Button accessibilityLabel="Clear attachment search"');
   expect(picker).not.toContain('searchClearButton:');
   expect(picker).toContain('style={styles.searchHistoryOption} variant="secondary">Search history</Button>');

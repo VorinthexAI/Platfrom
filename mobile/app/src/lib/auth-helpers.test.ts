@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { extractSessionTokens, firstNameFor, hasCompleteAuthContext, languageForCountryCode, normalizeApiPath, normalizeAuthContext } from "./auth-helpers";
+import { extractSessionTokens, firstNameFor, hasCompleteAuthContext, languageForCountryCode, normalizeApiPath, normalizeAuthContext, profileInitial } from "./auth-helpers";
 
 describe("mobile auth helpers", () => {
   test("normalizes every request beneath the API version", () => {
@@ -50,5 +50,12 @@ describe("mobile auth helpers", () => {
     expect(languageForCountryCode("se")).toBe("Swedish");
     expect(languageForCountryCode("ES")).toBe("Spanish");
     expect(languageForCountryCode()).toBe("English");
+  });
+
+  test("derives a stable uppercase profile initial from the best identity field", () => {
+    expect(profileInitial({ firstName: "  ada ", name: "Wrong", isOnboarded: true })).toBe("A");
+    expect(profileInitial({ alias: "nova", isOnboarded: true })).toBe("N");
+    expect(profileInitial({ email: "grace@example.com", isOnboarded: true })).toBe("G");
+    expect(profileInitial({ isOnboarded: true })).toBe("?");
   });
 });

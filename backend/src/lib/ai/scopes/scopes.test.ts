@@ -153,14 +153,14 @@ describe('scope repository', () => {
   test('hard-deletes managed place media and queues permanent object deletion during scope teardown', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     const teardown = source.slice(source.indexOf('async removeScope(scopeKey)'), source.indexOf('async addScopeRelation'));
-    for (const collection of ['generatedDocumentBindings', 'tripAttachments', 'tripCreationReceipts', 'tripGuides', 'placeReferences', 'placeHeroMedia', 'placeImages', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'collectionInvites', 'collectionMembers', 'tagAssignments', 'shares', 'userHiddens', 'places', 'images', 'imageCaptions', 'collections', 'documentSummaryAudio', 'documentSummaries', 'documentAudioVersions', 'documentVersions', 'documentShares', 'emailAttachmentBindings', 'emailAttachments', 'emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'folders', 'scopeScopes', 'scopeMembers', 'scopes']) expect(teardown).toContain(collection);
+    for (const collection of ['generatedDocumentBindings', 'ticketVotes', 'tickets', 'tripAttachments', 'tripCreationReceipts', 'tripGuides', 'placeReferences', 'placeHeroMedia', 'placeImages', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'collectionInvites', 'collectionMembers', 'tagAssignments', 'shares', 'userHiddens', 'places', 'images', 'imageCaptions', 'collections', 'documentSummaryAudio', 'documentSummaries', 'documentAudioVersions', 'documentVersions', 'documentShares', 'emailAttachmentBindings', 'emailAttachments', 'emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'events', 'folders', 'scopeScopes', 'scopeMembers', 'scopes']) expect(teardown).toContain(collection);
     expect(teardown).toContain('folder.managedPurpose IN ["mail-attachment", "mail-inbox", "mail-inbox-files", "mail-thread"]');
     expect(teardown).not.toContain('FOR inbox IN inboxes');
     expect(teardown.indexOf('LET cleanupMailVersions')).toBeLessThan(teardown.indexOf('LET cleanupMailDocuments'));
     expect(teardown).toContain('FOR storageKey IN UNIQUE(UNION(mailStorageKeys');
     expect(teardown).toContain('UPSERT { storageKey }');
     expect(teardown).toContain('storageDeletionJobs');
-    expect(teardown).toContain('collection.purpose IN ["place-media", "email-media"] && collection.mutationPolicy == "system-only"');
+    expect(teardown).toContain('collection.purpose IN ["place-media", "email-media", "generated-media"] && collection.mutationPolicy == "system-only"');
     expect(teardown).toContain('LET canonicalStorageKeys = UNIQUE(UNION(');
     expect(teardown).toContain('LET ordinaryStorageKeys = UNIQUE(UNION(');
     expect(teardown).not.toContain('decodeEmailTone');
@@ -173,6 +173,10 @@ describe('scope repository', () => {
     expect(teardown).toContain('audio.summaryKey IN mailSummaryKeys');
     expect(teardown.indexOf('LET mailDeletionJobs')).toBeLessThan(teardown.indexOf('LET cleanupMailDocuments'));
     expect(teardown).toContain('FOR folder IN folders FILTER folder.scopeKey == @scopeKey && folder.coverImageKey IN imageKeys');
+    expect(teardown).toContain('FOR item IN tickets FILTER item.scopeKey == @scopeKey REMOVE item IN tickets');
+    expect(teardown).toContain('FOR item IN ticketVotes FILTER item.scopeKey == @scopeKey REMOVE item IN ticketVotes');
+    expect(teardown.indexOf('REMOVE item IN ticketVotes')).toBeLessThan(teardown.indexOf('REMOVE item IN tickets'));
+    expect(teardown).toContain('FOR item IN events FILTER item.scopeId == @scopeKey REMOVE item IN events');
     expect(teardown.indexOf('LET cleanupFolderCovers')).toBeLessThan(teardown.indexOf('LET cleanupImages'));
   });
   test('does not eagerly create Compass or Signal export folders with a scope', async () => {

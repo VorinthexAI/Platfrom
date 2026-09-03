@@ -41,10 +41,10 @@ describe('MediaLibrary repository transactions', () => {
     const repository = createMediaLibraryRepository(database, async (operation) => operation(database));
     await repository.canAccessCollection(newId(), newId(), newId());
     await repository.canAccessImage(newId(), newId(), newId());
-    expect(queries[0]).toContain('collection.purpose == "email-media"');
+    expect(queries[0]).toContain('collection.purpose IN ["email-media", "generated-media"]');
     expect(queries[0]).toContain('collection.mutationPolicy == "system-only" && scoped');
     expect(queries[0]).toContain('collection.mutationPolicy != "system-only" && LENGTH');
-    expect(queries[1]).toContain('collection.purpose == "email-media"');
+    expect(queries[1]).toContain('collection.purpose IN ["email-media", "generated-media"]');
     expect(queries[1]).toContain('? scoped : collection.mutationPolicy != "system-only"');
   });
 
@@ -80,7 +80,7 @@ describe('MediaLibrary image similarity search', () => {
       async query(value, variables) {
         query = value;
         bindVars = variables ?? {};
-        return { async all() { return [{ image: { _key: imageKey, scopeKey, filename: 'image.jpg', caption: 'Caption', storageKey: 'private/image.jpg', mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding, origin: 'uploaded', isFavorite: false, createdAt: now, updatedAt: now }, score: 0.9 }]; } };
+        return { async all() { return [{ image: { _key: imageKey, scopeKey, filename: 'image.jpg', caption: 'Caption', storageKey: 'private/image.jpg', mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding, origin: 'uploaded', isFavorite: false, createdAt: now, updatedAt: now }, score: 0.9, collections: [{ key: collectionKey, name: 'Coastal Days' }] }]; } };
       },
     };
 
@@ -90,7 +90,7 @@ describe('MediaLibrary image similarity search', () => {
     expect(query).toContain('actorScope.organizationKey == @organizationKey');
     expect(query).toContain('FILTER privileged || (image.createdByKey == @actorKey && relationCount == 0) || collectionAccess');
     expect(query).toContain('collectionImage.collectionKey == @collectionKey');
-    expect(query).toContain('LET managedViewer = collection.purpose == "email-media" && collection.mutationPolicy == "system-only" && scoped');
+    expect(query).toContain('LET managedViewer = collection.purpose IN ["email-media", "generated-media"] && collection.mutationPolicy == "system-only" && scoped');
     expect(query).toContain('LET member = collection.mutationPolicy == "system-only" ? null : FIRST(');
     expect(query).toContain('FILTER managedViewer || member != null');
     expect(query).not.toContain('FILTER collection.purpose == "email-media" && collection.mutationPolicy == "system-only" ? scoped');
@@ -99,8 +99,13 @@ describe('MediaLibrary image similarity search', () => {
     expect(query).toContain('FILTER @threshold == null || score >= @threshold');
     expect(query).toContain('SORT score DESC, image._key ASC');
     expect(query).toContain('LIMIT @limit');
-    expect(bindVars).toMatchObject({ organizationKey, scopeKey, actorKey, collectionKey, dimensions: EMBEDDING_DIMENSIONS, threshold: null, limit: 50 });
-    expect(results).toEqual([{ image: expect.objectContaining({ key: imageKey, filename: 'image.jpg' }), score: 0.9 }]);
+    expect(bindVars).toMatchObject({ organizationKey, scopeKey, actorKey, collectionKey, dimensions: EMBEDDING_DIMENSIONS, threshold: null, limit: 50, createdFrom: null, createdTo: null });
+    expect(query).toContain('FILTER @createdFrom == null || image.createdAt >= @createdFrom');
+    expect(query).toContain('FILTER @createdTo == null || image.createdAt <= @createdTo');
+    expect(query.indexOf('FILTER @createdFrom == null')).toBeLessThan(query.indexOf('SORT score DESC'));
+    expect(query.indexOf('FILTER @createdTo == null')).toBeLessThan(query.indexOf('LIMIT @limit'));
+    expect(query).toContain('RETURN { image, score, collections: accessibleCollections }');
+    expect(results).toEqual([{ image: expect.objectContaining({ key: imageKey, filename: 'image.jpg' }), score: 0.9, collections: [{ key: collectionKey, name: 'Coastal Days' }] }]);
     expect(results[0]?.image).not.toHaveProperty('_key');
   });
 

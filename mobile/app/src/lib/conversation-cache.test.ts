@@ -35,7 +35,7 @@ test("matches server list membership and favorite-first updatedAt ordering", () 
 });
 
 test("flattens multipage messages into chronological display order", () => {
-  const message = (key: string) => ({ key, conversationKey: "one", turnKey: key, role: "assistant" as const, status: "COMPLETED" as const, content: key, createdAt: at });
+  const message = (key: string) => ({ key, conversationKey: "one", turnKey: key, kind: "text" as const, role: "assistant" as const, status: "COMPLETED" as const, content: key, retrievals: [], createdAt: at });
   expect(conversationMessages({ pages: [{ messages: [message("latest")] }, { messages: [message("older")] }], pageParams: [undefined, "older"] }).map(({ key }) => key)).toEqual(["older", "latest"]);
 });
 
@@ -93,8 +93,8 @@ test("invalidates search caches without invalidating unfiltered lists or other i
 
 test("reconciles optimistic turn pairs with retained statuses and no duplicate server keys", () => {
   const optimistic = [
-    { key: "optimistic-user", conversationKey: "one", turnKey: "turn", role: "user" as const, status: "COMPLETED" as const, content: "Q", createdAt: at, optimistic: true as const },
-    { key: "optimistic-assistant", conversationKey: "one", turnKey: "turn", role: "assistant" as const, status: "PENDING" as const, content: "", createdAt: at, optimistic: true as const },
+    { key: "optimistic-user", conversationKey: "one", turnKey: "turn", kind: "image" as const, role: "user" as const, status: "COMPLETED" as const, content: "Q", retrievals: [], createdAt: at, optimistic: true as const },
+    { key: "optimistic-assistant", conversationKey: "one", turnKey: "turn", kind: "image" as const, role: "assistant" as const, status: "PENDING" as const, content: "Generating image...", retrievals: [], createdAt: at, optimistic: true as const },
   ];
   const user = { ...optimistic[0], key: "user", optimistic: undefined };
   const assistant = { ...optimistic[1], key: "assistant", status: "COMPLETED" as const, content: "A", optimistic: undefined };

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createSystemEmailService, emailDraftCreateIfNeededInputSchema, type EmailService } from '@/lib/email-inbox/service';
 import type { ToolContext } from './tool-context';
 import { ToolExecutionError } from './tool-context';
+import type { ToolEventRecorder } from '@/lib/ai/events/service';
 
 export const inboxSyncInputSchema = z.object({ connectorKey: z.string().cuid() }).strict();
 export const inboxSubscribeInputSchema = z.object({
@@ -12,6 +13,7 @@ export const inboxSubscribeInputSchema = z.object({
 export interface TrustedEmailToolDependencies {
   context: ToolContext;
   email?: EmailService;
+  recordEvent?: ToolEventRecorder;
 }
 
 function systemActor(context: ToolContext) {

@@ -9,6 +9,7 @@ import { selectRoutes } from './select-route';
 import type { RouteRequestInput } from './route-request';
 import type { RouteDecision, RouterDependencies } from './types';
 import { coreChatInputSchema, type CoreChatInput } from '@/lib/ai/actions/core-chat';
+import { addToolTokenUsage } from '@/lib/ai/events/runtime';
 
 export interface ExecuteRouteOptions<TInput> {
   decision: RouteDecision;
@@ -66,6 +67,7 @@ export async function executeRoute<TInput, TOutput>(options: ExecuteRouteOptions
       signal: options.signal,
     });
     const endedAtMs = Date.now();
+    addToolTokenUsage(response.usage);
     await options.onAttempt?.({ ...attemptBase, callKey, status: 'completed', usage: response.usage, ...(response.costUsd !== undefined ? { costUsd: response.costUsd } : {}), endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs });
     return response;
   } catch (error) {
@@ -154,7 +156,10 @@ export async function* streamRoute<TInput>(options: ExecuteRouteOptions<TInput>)
   const adapter = await resolveAdapter(options.decision, options.adapters, options.env);
   if (!adapter?.stream) throw new ProviderExecutionError(options.decision.actionSlug, [{ modelId: options.decision.modelSlug, providerId: options.decision.providerSlug, externalModelId: options.decision.providerModelId, code: 'adapter_unavailable', message: 'provider streaming adapter is unavailable' }]);
   try {
-    yield* adapter.stream({ actionId: options.decision.actionSlug, modelId: options.decision.modelSlug, externalModelId: options.decision.providerModelId, input: options.input, organizationKey: options.decision.organizationKey, timeoutMs: options.timeoutMs, signal: options.signal });
+    for await (const chunk of adapter.stream({ actionId: options.decision.actionSlug, modelId: options.decision.modelSlug, externalModelId: options.decision.providerModelId, input: options.input, organizationKey: options.decision.organizationKey, timeoutMs: options.timeoutMs, signal: options.signal })) {
+      if (chunk.type === 'usage') addToolTokenUsage(chunk.usage);
+      yield chunk;
+    }
   } catch (error) {
     const normalized = normalizeProviderError(options.decision.providerSlug, error);
     throw new ProviderExecutionError(options.decision.actionSlug, [{ modelId: options.decision.modelSlug, providerId: options.decision.providerSlug, externalModelId: options.decision.providerModelId, code: normalized.code, message: normalized.message }], { cause: normalized });

@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
 import { PersistentCoreComposer as CoreComposer } from "@/components/PersistentCoreComposer";
+import { ProfileHeaderRight } from "@/components/ProfileAvatarButton";
 import { BrainIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon, CloseIcon, FilterIcon, FolderIcon, GlobeIcon, GlobeViewIcon, LocationPinIcon, MoreHorizontalIcon, PlusIcon, SearchIcon, SendIcon, StarIcon, TableViewIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { LoadingText } from "@vorinthex/shared/ui/loading-text";
 import { PullToRefresh } from "@vorinthex/shared/ui/pull-to-refresh";
@@ -1310,7 +1311,7 @@ export function TravelWorkspace({ initialCollectionKind, initialCountryCode, ini
   const availableTripAddPlaces = selectedTrip ? places.filter((place) => !selectedTrip.places.some(({ key }) => key === place.key)) : [];
   const selectTripGlobePlace = (key: string) => { setTripGlobePlaceKey(key); setTripGlobeFocusRequest((current) => current + 1); };
   return <View style={styles.root}>
-    <View style={[styles.header, { paddingTop: insets.top + 6, paddingLeft: Math.max(insets.left, spacing.md), paddingRight: Math.max(insets.right, spacing.md) }]}><WorkspaceAppSwitcher active="compass" /></View>
+    <View style={[styles.header, { paddingTop: insets.top + 6, paddingLeft: Math.max(insets.left, spacing.md), paddingRight: Math.max(insets.right, spacing.md) }]}><WorkspaceAppSwitcher active="compass" /><ProfileHeaderRight /></View>
     <View style={[styles.workspaceViewport, { paddingLeft: Math.max(insets.left, spacing.md), paddingRight: Math.max(insets.right, spacing.md) }]}>
       {selectedPlace ? <>
         <View style={styles.titleRow}><Button accessibilityLabel={selectedTrip ? `Back to ${selectedTrip.name}` : "Back to Places"} contentMode="raw" onPress={() => { setSelectedPlaceKey(undefined); setSelectedPlaceSnapshot(undefined); }} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button><Text numberOfLines={1} style={styles.workspaceTitle}>{selectedPlace.name}</Text><Button accessibilityLabel="Place menu" contentMode="raw" onPress={() => setPlaceMenuOpen(true)} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button></View>

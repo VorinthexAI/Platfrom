@@ -13,6 +13,7 @@ import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared
 import { Badge } from "@vorinthex/shared/ui/badge";
 import { Button } from "@vorinthex/shared/ui/button";
 import { PersistentCoreComposer as CoreComposer } from "@/components/PersistentCoreComposer";
+import { ProfileHeaderRight } from "@/components/ProfileAvatarButton";
 import { FileViewer } from "@vorinthex/shared/ui/file-viewer";
 import { LoadingText } from "@vorinthex/shared/ui/loading-text";
 import { PullToRefresh } from "@vorinthex/shared/ui/pull-to-refresh";
@@ -375,7 +376,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   const [similarContentTab, setSimilarContentTab] = useState<FolderContentTab>("folders");
   const [similarResults, setSimilarResults] = useState<ContentNeighbors>();
   const [similarLoading, setSimilarLoading] = useState(false);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => initialFolderKey ? initialSearchQuery?.slice(0, 500) ?? "" : "");
   const [locationLoading, setLocationLoading] = useState(!cachedInitialLocation);
   const [openingDocumentKey, setOpeningDocumentKey] = useState<string>();
   const initialDocumentOpened = useRef<string | undefined>(undefined);
@@ -426,7 +427,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   const [libraryQuery, setLibraryQuery] = useState("");
   const [librarySearchResults, setLibrarySearchResults] = useState<ContentSearchResponse>();
   const [librarySearching, setLibrarySearching] = useState(false);
-  const [rootSearchQuery, setRootSearchQuery] = useState(() => initialSearchQuery?.slice(0, 500) ?? "");
+  const [rootSearchQuery, setRootSearchQuery] = useState(() => !initialFolderKey && !initialDocumentKey ? initialSearchQuery?.slice(0, 500) ?? "" : "");
   const [rootSearchResults, setRootSearchResults] = useState<ContentSearchResponse>();
   const [rootSearching, setRootSearching] = useState(false);
   const [rootSearchRevision, setRootSearchRevision] = useState(0);
@@ -3814,7 +3815,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   const rootSearchEmpty = Boolean(rootSearchQuery.trim() && !rootSearching && rootSearchResults && (folderContentTab === "folders" ? rootSearchFolders.length === 0 : rootSearchDocuments.length === 0));
   return (
     <View style={styles.root}>
-      <View style={[styles.header, { paddingTop: insets.top + 6 }]}><WorkspaceAppSwitcher active="archive" /></View>
+      <View style={[styles.header, { paddingTop: insets.top + 6 }]}><WorkspaceAppSwitcher active="archive" /><ProfileHeaderRight /></View>
       {workspaceMode === "viewer" ? <FileViewer
         error={filePreviewError}
         loading={!filePreviewError && !filePreviewUri}
@@ -4374,7 +4375,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.page },
-  header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.md, justifyContent: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1 },
+  header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.md, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomColor: palette.hairline, borderBottomWidth: 1 },
   workspaceViewport: { flex: 1, minHeight: 0 },
   scrollView: { flex: 1 },
   scroll: { flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },

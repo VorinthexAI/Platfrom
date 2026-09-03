@@ -22,6 +22,7 @@ import {
 import { AiTextEditor } from "@vorinthex/shared/ui/ai-text-editor";
 import { Button, ButtonSizeProvider } from "@vorinthex/shared/ui/button";
 import { PersistentCoreComposer as CoreComposer } from "@/components/PersistentCoreComposer";
+import { ProfileHeaderRight } from "@/components/ProfileAvatarButton";
 import {
   BrainIcon,
   ChatBubbleIcon,
@@ -336,9 +337,9 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const [inboxView, setInboxView] = useState<{ overview?: EmailOverview; query: EmailOverviewQuery }>(() => ({ query: committedInboxQuery.current }));
   const { overview, query: inboxQuery } = inboxView;
   const [inboxControlsQuery, setInboxControlsQuery] = useState<EmailOverviewQuery>(requestedInboxQuery.current);
-  const [inboxTab, setInboxTab] = useState<InboxTab>(initialCollectionKind === "email-drafts" ? "drafts" : requestedInboxQuery.current.readState);
+  const [inboxTab, setInboxTab] = useState<InboxTab>(initialCollectionKind === "email-drafts" || initialDraftKey ? "drafts" : requestedInboxQuery.current.readState);
   const [rootQuery, setRootQuery] = useState(() => !initialConnectorKey && initialSearchQuery ? initialSearchQuery.slice(0, 500) : "");
-  const [rootTab, setRootTab] = useState<RootTab>(initialCollectionKind === "email-tones" ? "tones" : "inboxes");
+  const [rootTab, setRootTab] = useState<RootTab>(initialCollectionKind === "email-tones" || initialToneKey ? "tones" : "inboxes");
   const [rootFavoritesOnly, setRootFavoritesOnly] = useState(false);
   const [rootSearchFocusable, setRootSearchFocusable] = useState(true);
   const [rootSearchResults, setRootSearchResults] = useState<{ tab: RootTab; inboxes?: EmailConnector[]; tones?: EmailToneRecord[] }>();
@@ -772,7 +773,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       }
     }
   }
-  const loadLatest = useEffectEvent(() => load());
+  const loadLatest = useEffectEvent((nextQuery: EmailOverviewQuery) => load(nextQuery));
   const notifyLatest = useEffectEvent((title: string) => notify(title));
   function operationIsCurrent(generation: number, context: typeof emailContext) {
     if (generation !== operationGeneration.current) return false;
@@ -874,12 +875,12 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     repairPendingThreadFields.current.clear();
     selectionGeneration.current += 1;
     void Promise.resolve().then(() => {
-      committedInboxQuery.current = defaultInboxQuery();
+      committedInboxQuery.current = { ...defaultInboxQuery(), search: initialConnectorKey && initialSearchQuery ? initialSearchQuery.slice(0, 500) : "" };
       requestedInboxQuery.current = committedInboxQuery.current;
       setInboxView({ query: committedInboxQuery.current });
       setInboxControlsQuery(committedInboxQuery.current);
       if (!initialThreadKey) clearSelectedThreadFromEffect();
-      setQuery("");
+      setQuery(committedInboxQuery.current.search);
       setLoadError(undefined);
       setLoading(true);
       setOpeningThreadKey(undefined);
@@ -890,9 +891,9 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       setSelectionNotice(undefined);
       setTrashGroups([]);
       setTrashRootError(undefined);
-      void loadLatest();
+      void loadLatest(initialCollectionKind === "email-drafts" || initialDraftKey ? { ...committedInboxQuery.current, search: "" } : committedInboxQuery.current);
     });
-  }, [emailContext.organizationKey, emailContext.scopeKey, initialConnectorKey]);
+  }, [emailContext.organizationKey, emailContext.scopeKey, initialCollectionKind, initialConnectorKey, initialDraftKey, initialSearchQuery, initialThreadKey]);
   useEffect(() => {
     const generation = ++operationGeneration.current;
     const activeReadOperations = readInFlight.current;
@@ -3086,6 +3087,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
           active="signal"
           onBeforeSelect={(slug) => requestExit(slug)}
         />
+        <ProfileHeaderRight />
       </View>
       {initialConnectorKey ? <View style={[styles.localHeader, !selected && styles.inboxHeader]}>
           <Button
@@ -3944,7 +3946,9 @@ const styles = StyleSheet.create({
     minHeight: 64,
     paddingHorizontal: spacing.md,
     paddingBottom: 7,
-    justifyContent: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     borderBottomWidth: 1,
     borderBottomColor: palette.hairline,
     backgroundColor: palette.page,

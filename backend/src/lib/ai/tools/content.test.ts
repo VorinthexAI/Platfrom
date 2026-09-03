@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import {
-  CONTENT_ERROR_CODES,
   CONTENT_TOOL_DEFINITIONS,
   CONTENT_TOOL_NAMES,
-  contentBatchOutputSchema,
   contentToolInputSchemas,
   contentToolModelInputSchemas,
   contentToolOutputSchemas,
   isContentToolName,
-} from './index';
+} from './content-registry';
+import { CONTENT_ERROR_CODES } from './content-errors';
+import { contentBatchOutputSchema } from './content-schemas';
 
 const expectedNames = [
   'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.delete',
@@ -105,6 +105,16 @@ describe('Content input contracts', () => {
     expect(() => contentToolInputSchemas['document.find'].parse({ documentKeys: [key], unexpected: true })).toThrow();
     expect(() => contentToolInputSchemas['document.search'].parse({ scopeKey: key, query: 'roadmap', filters: { unexpected: true } })).toThrow();
     expect(() => contentToolInputSchemas['document.delete'].parse({ documentKeys: [key], deleteVersions: true })).toThrow();
+    for (const [name, input] of [
+      ['folder.list', { scopeKey: key }],
+      ['document.list', { scopeKey: key }],
+      ['content.search', { scopeKey: key, query: 'roadmap' }],
+    ] as const) {
+      const result = contentToolInputSchemas[name].safeParse({ ...input, createdFrom: '2026-07-23T00:00:00.000Z', createdTo: '2026-07-22T00:00:00.000Z' });
+      expect(result.success, name).toBe(false);
+      if (!result.success) expect(result.error.issues.map((issue) => issue.path.join('.'))).toContain('createdTo');
+      expect(contentToolModelInputSchemas[name].safeParse({ ...(name === 'content.search' ? { query: 'roadmap' } : {}), createdFrom: '2026-07-23T00:00:00.000Z', createdTo: '2026-07-22T00:00:00.000Z' }).success, `${name} model input`).toBe(false);
+    }
   });
 
   test('enforces non-empty arrays for every batch-first contract', () => {

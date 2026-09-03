@@ -52,10 +52,12 @@ describe('dedicated inbox repository', () => {
     const connectorKey = newId();
     let call: { query: string; bindVars: Record<string, unknown> } | undefined;
     const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return { all: async () => [] }; } };
-    expect(await createInboxRepository(database as never).search('organization', scopeKey, [connectorKey], embedding, '  Leadership  ', 0.55, 10)).toEqual([]);
+    expect(await createInboxRepository(database as never).search('organization', scopeKey, [connectorKey], embedding, '  Leadership  ', 0.55, 10, { createdFrom: now, createdTo: now })).toEqual([]);
     expect(call?.query).toContain('inbox.organizationKey == @organizationKey && inbox.scopeKey == @scopeKey');
     expect(call?.query).toContain('connector.provider == "gmail" && connector.status != "revoked"');
     expect(call?.query).toContain('FOR inbox IN @@inboxes');
-    expect(call?.bindVars).toMatchObject({ '@inboxes': 'emailInboxes', connectorKeys: [connectorKey], query: 'leadership' });
+    expect(call?.bindVars).toMatchObject({ '@inboxes': 'emailInboxes', connectorKeys: [connectorKey], query: 'leadership', createdFrom: now, createdTo: now });
+    expect(call!.query.indexOf('inbox.createdAt >= @createdFrom')).toBeLessThan(call!.query.indexOf('COSINE_SIMILARITY'));
+    expect(call!.query.indexOf('inbox.createdAt <= @createdTo')).toBeLessThan(call!.query.indexOf('LIMIT @limit'));
   });
 });

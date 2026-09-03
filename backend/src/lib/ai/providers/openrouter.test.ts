@@ -38,6 +38,22 @@ describe('OpenRouter provider', () => {
     expect(bodies[1].provider).toBeUndefined();
   });
 
+  test('converts provider-neutral image bytes to an inline OpenRouter image part', async () => {
+    let body: any;
+    const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
+      body = JSON.parse(String(init?.body));
+      return Response.json({ choices: [{ message: { content: 'seen' }, finish_reason: 'stop' }] });
+    }) as typeof fetch);
+    await provider.execute(request('text', { messages: [{ role: 'user', content: [
+      { type: 'text', text: 'Describe this image.' },
+      { type: 'image', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]) },
+    ] }] }));
+    expect(body.messages[0].content).toEqual([
+      { type: 'text', text: 'Describe this image.' },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,AQID' } },
+    ]);
+  });
+
   test('normalizes grounded web annotations and enables bounded native server search', async () => {
     let body: any;
     const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
@@ -81,6 +97,7 @@ describe('OpenRouter provider', () => {
     const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
       const body = JSON.parse(String(init?.body));
       expect(body.model).toBe('google/image');
+      expect(body).toMatchObject({ max_tokens: 2_048, temperature: 0 });
       expect(body.messages[0].content[0].text).toContain('Respond with only valid JSON');
       expect(body.messages[0].content).toContainEqual({ type: 'image_url', image_url: { url: 'https://example.com/image.png' } });
       return Response.json({ choices: [{ message: { content: '```json\n{"results":[{"caption":"A red square","score":90}]}\n```' }, finish_reason: 'stop' }] });

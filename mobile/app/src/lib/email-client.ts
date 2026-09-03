@@ -70,7 +70,7 @@ export const emailToneRecordSchema = z.strictObject({
   updatedAt: dateSchema,
 });
 export type EmailToneRecord = z.infer<typeof emailToneRecordSchema>;
-const emailSemanticSearchInputSchema = z.strictObject({ query: z.string().trim().min(1).max(500), minimumScore: z.number().min(-1).max(1).default(0.55), limit: z.number().int().min(1).max(50).default(50), recordHistory: z.boolean().default(true) });
+const emailSemanticSearchInputSchema = z.strictObject({ query: z.string().trim().min(1).max(500), limit: z.number().int().min(1).max(50).default(50), recordHistory: z.boolean().default(true) });
 export const emailReplyContextSchema = z.strictObject({
   key: keySchema,
   name: z.string().min(1).max(255),

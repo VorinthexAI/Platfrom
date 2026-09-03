@@ -1,11 +1,12 @@
 import { beforeEach, expect, mock, test } from "bun:test";
+import { z } from "zod";
 
 const calls: { method: string; path: string; body: unknown; config?: unknown }[] = [];
 let lifecycleFailure = false;
 let favoriteDeleteFailure = false;
 let publicFailure = false;
 const authState: { organization: { key: string } | null; scope: { key: string } | null } = { organization: { key: "org-key" }, scope: { key: "scope-key" } };
-const book = { key: "book-key", title: "A Better Practice", subtitle: "Small systems, durable change", description: "A practical guide.", status: "ready", isFavorite: false, isExtending: false, estimatedMinutes: 45, chapterCount: 1, progressPercent: 25, currentChapterKey: "chapter-key" };
+const book = { key: "book-key", title: "A Better Practice", subtitle: "Small systems, durable change", description: "A practical guide.", status: "ready", isFavorite: false, isExtending: false, estimatedMinutes: 45, chapterCount: 1, progressPercent: 25, currentChapterKey: "chapter-key", createdAt: "2026-08-28T09:00:00.000Z", updatedAt: "2026-08-28T10:00:00.000Z" };
 const chapter = { key: "chapter-key", title: "Begin", description: "Start with the useful part.", content: "Chapter body", position: 1, estimatedMinutes: 8, audioUrl: "https://example.com/chapter.mp3", audioDurationSeconds: 480, progressSeconds: 120, isCompleted: false };
 const share = { key: "share-key", url: "https://vorinthex.com/share/books/token", active: true, createdAt: "2026-08-28T10:00:00.000Z", updatedAt: "2026-08-28T10:00:00.000Z" };
 
@@ -36,6 +37,7 @@ mock.module("@/lib/public-api-client", () => ({ publicApiClient: {
 } }));
 
 const client = await import("./books-client");
+const appSearchClient = await import("./app-search-client");
 beforeEach(() => { calls.splice(0); lifecycleFailure = false; favoriteDeleteFailure = false; publicFailure = false; authState.organization = { key: "org-key" }; authState.scope = { key: "scope-key" }; });
 
 test("sends strictly scoped overview, creation, detail, and progress requests", async () => {
@@ -53,7 +55,40 @@ test("sends strictly scoped overview, creation, detail, and progress requests", 
 test("searches books through app.search without recording history for result refreshes", async () => {
   const controller = new AbortController();
   expect(await client.searchBooks("practice", controller.signal, false)).toEqual([book]);
-  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", query: "practice", collectionSlugs: ["books"], recordHistory: false, limit: 50, minimumScore: 0.55 }, config: { signal: controller.signal, timeout: 15_000 } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", query: "practice", collectionSlugs: ["books"], recordHistory: false, limit: 50 }, config: { signal: controller.signal, timeout: 15_000 } });
+});
+
+test("strictly parses app.search retrieval destinations and rejects unsafe metadata", () => {
+  const result = appSearchClient.appSearchOutputSchema.parse({
+    query: "roadmap",
+    groups: [{ collectionSlug: "documents", results: [{ key: "document-key", name: "Roadmap" }] }],
+    retrieval: { query: "roadmap", limit: 10, searchCollectionSlugs: ["documents"], groups: [{ collectionSlug: "folders", results: [{ key: "folder-key", label: "Plans", destinationCollectionSlug: "documents" }] }] },
+  });
+  expect(result.retrieval?.groups[0]?.results[0]).toEqual({ key: "folder-key", label: "Plans", destinationCollectionSlug: "documents" });
+  for (const data of [
+    { query: "roadmap", groups: [], unexpected: true },
+    { query: "roadmap", groups: [], retrieval: { query: "roadmap", limit: 10, groups: [{ collectionSlug: "documents", results: Array.from({ length: 51 }, (_, index) => ({ key: String(index), label: String(index) })) }] } },
+    { query: "roadmap", groups: [], retrieval: { query: "roadmap", limit: 10, groups: [{ collectionSlug: "documents", results: [{ key: "key", label: "Label", internalPath: "secret" }] }] } },
+    { query: "roadmap", groups: [], retrieval: { limit: 10, groups: [{ collectionSlug: "documents", results: [{ key: "key", label: "Label" }] }] } },
+  ]) expect(appSearchClient.appSearchOutputSchema.safeParse(data).success).toBe(false);
+});
+
+test("builds stable app.search query keys and strictly parses requested groups", () => {
+  expect(appSearchClient.appSearchQueryKey("member:scope", { query: " roadmap ", collectionSlugs: ["documents"] })).toEqual(["app-search", "member:scope", { query: "roadmap", collectionSlugs: ["documents"], recordHistory: false, limit: 10 }]);
+  expect(() => appSearchClient.appSearchQueryKey("member:scope", { query: "roadmap", collectionSlugs: ["documents", "documents"] })).toThrow();
+  const output = { query: "roadmap", groups: [{ collectionSlug: "documents" as const, results: [{ key: "document-key", name: "Roadmap" }] }] };
+  expect(appSearchClient.appSearchResults(output, "documents", z.strictObject({ key: z.string(), name: z.string() }))).toEqual([{ key: "document-key", name: "Roadmap" }]);
+  expect(() => appSearchClient.appSearchResults(output, "files", z.unknown())).toThrow("omitted files");
+  expect(() => appSearchClient.appSearchResults(output, "documents", z.strictObject({ key: z.string() }))).toThrow("Unrecognized key");
+});
+
+test("accepts normalized creation ranges for every timestamped app.search collection", () => {
+  const createdFrom = "2026-08-01T02:00:00+02:00";
+  for (const collectionSlug of appSearchClient.appSearchCollectionSlugSchema.options.filter((slug) => slug !== "countries")) {
+    expect(appSearchClient.appSearchInputSchema.parse({ query: "recent", collectionSlugs: [collectionSlug], filters: { createdFrom } }).filters?.createdFrom, collectionSlug).toBe("2026-08-01T00:00:00.000Z");
+  }
+  expect(appSearchClient.appSearchInputSchema.safeParse({ query: "recent", collectionSlugs: ["countries"], filters: { createdFrom } }).success).toBe(false);
+  expect(appSearchClient.appSearchInputSchema.safeParse({ query: "recent", collectionSlugs: ["books"], filters: { createdFrom: "2026-08-02T00:00:00.000Z", createdTo: "2026-08-01T00:00:00.000Z" } }).success).toBe(false);
 });
 
 test("requests ten fresh topic suggestions with exclusions", async () => {
@@ -94,6 +129,9 @@ test("parses the final lifecycle and media DTO strictly", () => {
   expect(client.bookSchema.parse({ ...book, status: "cancelled" }).status).toBe("cancelled");
   expect(client.bookChapterSchema.safeParse({ ...chapter, imageUrl: "https://example.com/chapter.jpg" }).success).toBe(false);
   expect(client.bookSchema.safeParse({ ...book, narrator: { key: "unknown", name: "Unknown" } }).success).toBe(false);
+  expect(client.bookSchema.safeParse({ ...book, createdAt: "not-a-date" }).success).toBe(false);
+  const { createdAt: _createdAt, ...withoutCreatedAt } = book;
+  expect(client.bookSchema.safeParse(withoutCreatedAt).success).toBe(false);
   expect(client.chapterProgressRequestSchema.safeParse({ organizationKey: "org", scopeKey: "scope", progressSeconds: 1.5, isCompleted: false }).success).toBe(false);
 });
 

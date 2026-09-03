@@ -4,12 +4,16 @@ const gallery = await Bun.file(new URL("../components/capability/GalleryWorkspac
 const archive = await Bun.file(new URL("../components/capability/KnowledgeWorkspace.tsx", import.meta.url)).text();
 const auth = await Bun.file(new URL("../state/auth.ts", import.meta.url)).text();
 const authHelpers = await Bun.file(new URL("./auth-helpers.ts", import.meta.url)).text();
+const normalize = (source: string) => source.replace(/\s+/g, "").replace(/,([}\]])/g, "$1").replace(/\?\((?=<)/g, "?");
 
 test("keeps independent favorite and hidden filters local to each workspace", () => {
   for (const source of [gallery, archive]) {
     expect(source).toContain('useState<HiddenViewFilters>({ favoritesOnly: false, showHidden: false })');
-    expect(source).toContain('({ ...current, favoritesOnly: checked })');
-    expect(source).toContain('({ ...current, showHidden: checked })');
+    const normalizedSource = source === gallery ? normalize(source) : source;
+    const expectedFavorites = source === gallery ? normalize('({ ...current, favoritesOnly: checked })') : '({ ...current, favoritesOnly: checked })';
+    const expectedHidden = source === gallery ? normalize('({ ...current, showHidden: checked })') : '({ ...current, showHidden: checked })';
+    expect(normalizedSource).toContain(expectedFavorites);
+    expect(normalizedSource).toContain(expectedHidden);
   }
   expect(auth).not.toContain("ShowOnlyFavorites");
   expect(auth).not.toContain("/auth/me/settings");
@@ -29,13 +33,14 @@ test("uses one wrapping Gallery-style active badge row in all filtered surfaces"
 });
 
 test("places hide and reveal immediately before destructive Gallery actions", () => {
-  const collectionMenuStart = gallery.lastIndexOf('{activeSheet === "collectionMenu"');
-  const collectionMenu = gallery.slice(collectionMenuStart, gallery.indexOf('{activeSheet === "cleanupMenu"', collectionMenuStart));
-  expect(collectionMenu.indexOf('? "Reveal" : "Hide"')).toBeLessThan(collectionMenu.indexOf('>Delete collection</BottomSheetItem>'));
-  expect(collectionMenu.indexOf('? "Reveal" : "Hide"')).toBeLessThan(collectionMenu.indexOf('>Leave</BottomSheetItem>'));
-  const imageMenuStart = gallery.lastIndexOf('{activeSheet === "imageActions" && selectedImage');
-  const imageMenu = gallery.slice(imageMenuStart, gallery.indexOf('{activeSheet === "imageEdit"', imageMenuStart));
-  expect(imageMenu.indexOf('? "Reveal" : "Hide"')).toBeLessThan(imageMenu.indexOf('>Delete image</BottomSheetItem>'));
+  const normalizedGallery = normalize(gallery);
+  const collectionMenuStart = normalizedGallery.lastIndexOf(normalize('{activeSheet === "collectionMenu"'));
+  const collectionMenu = normalizedGallery.slice(collectionMenuStart, normalizedGallery.indexOf(normalize('{activeSheet === "cleanupMenu"'), collectionMenuStart));
+  expect(collectionMenu.indexOf(normalize('? "Reveal" : "Hide"'))).toBeLessThan(collectionMenu.indexOf(normalize('>Delete collection</BottomSheetItem>')));
+  expect(collectionMenu.indexOf(normalize('? "Reveal" : "Hide"'))).toBeLessThan(collectionMenu.indexOf(normalize('>Leave</BottomSheetItem>')));
+  const imageMenuStart = normalizedGallery.lastIndexOf(normalize('{activeSheet === "imageActions" && selectedImage'));
+  const imageMenu = normalizedGallery.slice(imageMenuStart, normalizedGallery.indexOf(normalize('{activeSheet === "imageEdit"'), imageMenuStart));
+  expect(imageMenu.indexOf(normalize('? "Reveal" : "Hide"'))).toBeLessThan(imageMenu.indexOf(normalize('>Delete image</BottomSheetItem>')));
   expect(imageMenu).toContain('setHiddenOptimistically("image"');
 });
 

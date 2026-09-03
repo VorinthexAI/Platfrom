@@ -145,7 +145,12 @@ export const travelPlaceReferenceGenerateInputSchema = strictObject({
   kind: travelPlaceReferenceKindSchema,
   idempotencyKey: z.string().trim().min(1).max(200),
 });
-export const travelTripSearchInputSchema = strictObject({ ...requestContextShape, query: z.string().trim().min(2).max(500), recordHistory: z.boolean().default(true) });
+const creationDateRangeShape = { createdFrom: z.string().datetime().optional(), createdTo: z.string().datetime().optional() };
+const validateCreationDateRange = (input: { createdFrom?: string; createdTo?: string }, context: z.RefinementCtx) => {
+  if (input.createdFrom && input.createdTo && Date.parse(input.createdFrom) > Date.parse(input.createdTo)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['createdTo'], message: 'createdTo must not precede createdFrom.' });
+};
+const travelTripSearchInputObject = strictObject({ ...requestContextShape, query: z.string().trim().min(2).max(500), recordHistory: z.boolean().default(true), ...creationDateRangeShape });
+export const travelTripSearchInputSchema = Object.assign(travelTripSearchInputObject.superRefine(validateCreationDateRange), { omit: travelTripSearchInputObject.omit.bind(travelTripSearchInputObject) });
 export const travelTripCreateInputSchema = strictObject({
   ...requestContextShape,
   name: z.string().trim().min(1).max(255),
@@ -183,7 +188,8 @@ export const travelTripAttachmentSetInputSchema = strictObject({
     if (new Set(references).size !== references.length) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Trip attachments must be distinct.' });
   }),
 });
-export const travelPlaceSearchInputSchema = strictObject({ ...requestContextShape, query: z.string().trim().min(2).max(500), recordHistory: z.boolean().default(true) });
+const travelPlaceSearchInputObject = strictObject({ ...requestContextShape, query: z.string().trim().min(2).max(500), recordHistory: z.boolean().default(true), ...creationDateRangeShape });
+export const travelPlaceSearchInputSchema = Object.assign(travelPlaceSearchInputObject.superRefine(validateCreationDateRange), { omit: travelPlaceSearchInputObject.omit.bind(travelPlaceSearchInputObject) });
 export const travelPlaceFindResultSchema = z.object({
   kind: z.enum(['country', 'city']), name: boundedText(160), country: boundedText(160), countryCode: placeCountryCodeSchema,
   continent: boundedText(80), summary: boundedText(1_200), lat: z.number().finite().min(-90).max(90), long: z.number().finite().min(-180).max(180),
@@ -201,6 +207,7 @@ export const travelTripPlaceDtoSchema = z.object({
   key: z.string().cuid(), kind: z.enum(['country', 'place']), name: z.string().trim().min(1), summary: z.string(), countryCode: placeCountryCodeSchema,
   latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180), status: z.enum(['wishlist', 'visited']), isFavorite: z.boolean(), createdAt: z.string().datetime(), coverUrl: z.string().url().optional(),
 }).strict();
+export const travelPlaceSearchResultSchema = travelTripPlaceDtoSchema.extend({ trips: z.array(z.object({ key: z.string().cuid(), name: z.string().trim().min(1).max(255) }).strict()).optional() });
 export const travelTripSchema = z.object({
   key: z.string().cuid(), name: z.string().trim().min(1).max(255), description: z.string().trim().min(1).max(10_000).optional(), status: z.enum(['planned', 'completed']), isFavorite: z.boolean(), coverImageKey: z.string().cuid().optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
   places: z.array(travelTripPlaceDtoSchema).max(100), attachments: z.array(travelTripAttachmentReferenceSchema).max(100), coverUrl: z.string().url().optional(),
@@ -222,7 +229,7 @@ export const travelPlaceReferenceSchema = z.object({
 }).strict();
 export const travelPlaceReferenceGenerateResponseSchema = z.object({ reference: travelPlaceReferenceSchema }).strict();
 export const travelPlaceReferenceListResponseSchema = z.object({ references: z.array(travelPlaceReferenceSchema).max(100) }).strict();
-export const travelPlaceSearchResponseSchema = z.object({ places: z.array(travelTripPlaceDtoSchema) }).strict();
+export const travelPlaceSearchResponseSchema = z.object({ places: z.array(travelPlaceSearchResultSchema) }).strict();
 export const travelPlaceUpdateResponseSchema = z.object({ place: travelTripPlaceDtoSchema }).strict();
 export const travelPlaceDeleteResponseSchema = z.object({ placeKey: z.string().cuid() }).strict();
 const travelGuideModelDetailSchema = z.object({
@@ -516,8 +523,8 @@ export function createTravelService(options: { repository?: TravelRepository; ex
       await repository.authorizeRead(access(input, userKey));
       if (input.recordHistory) await (options.userSearches ?? getDefaultUserSearchService()).record(userKey, input.query);
       const queryEmbedding = execution.queryEmbedding ?? await (options.embed ?? embedText)({ text: input.query, signal: execution.signal, timeoutMs: execution.timeoutMs });
-      const places = await repository.searchPlaces(access(input, userKey), queryEmbedding);
-      return travelPlaceSearchResponseSchema.parse({ places: await Promise.all(places.map(projectPlace)) });
+      const places = await repository.searchPlaces(access(input, userKey), queryEmbedding, { createdFrom: input.createdFrom, createdTo: input.createdTo });
+      return travelPlaceSearchResponseSchema.parse({ places: await Promise.all(places.map(async (record) => ({ ...(await projectPlace(record)), ...(record.trips?.length ? { trips: record.trips } : {}) }))) });
     },
     async listTrips(raw: unknown, userKey: string) {
       const input = travelTripListInputSchema.parse(raw);
@@ -529,7 +536,7 @@ export function createTravelService(options: { repository?: TravelRepository; ex
       await repository.authorizeRead(access(input, userKey));
       if (input.recordHistory) await (options.userSearches ?? getDefaultUserSearchService()).record(userKey, input.query);
       const queryEmbedding = execution.queryEmbedding ?? await (options.embed ?? embedText)({ text: input.query, signal: execution.signal, timeoutMs: execution.timeoutMs });
-      const trips = await repository.searchTrips(access(input, userKey), queryEmbedding);
+      const trips = await repository.searchTrips(access(input, userKey), queryEmbedding, { createdFrom: input.createdFrom, createdTo: input.createdTo });
       return travelTripSearchResponseSchema.parse({ trips: await Promise.all(trips.map(projectTrip)) });
     },
     async generateTripGuide(raw: unknown, userKey: string, execution: Pick<ExecuteActionOptions, 'signal' | 'timeoutMs'> = {}) {

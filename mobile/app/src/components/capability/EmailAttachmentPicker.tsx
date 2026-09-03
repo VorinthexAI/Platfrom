@@ -101,7 +101,7 @@ export function EmailAttachmentPicker({ archiveOnly = false, galleryOnly = false
     try {
       if (targetTab === "archive") {
         const result = value
-          ? (await searchContentMatches(value, operation.signal, undefined, false, { limit: MAX_VISIBLE_RESULTS, minimumScore: -1 })).documents.filter(isSelectableEmailDocument).map((document) => ({ key: document.documentKey, name: document.name, extension: document.extension, folderKey: document.folderKey, isFavorite: document.isFavorite, updatedAt: "" }))
+          ? (await searchContentMatches(value, operation.signal, undefined, false, { limit: MAX_VISIBLE_RESULTS })).documents.filter(isSelectableEmailDocument).map((document) => ({ key: document.documentKey, name: document.name, extension: document.extension, folderKey: document.folderKey, isFavorite: document.isFavorite, updatedAt: "" }))
           : (await listContentDocumentsAtLocation(undefined, operation.signal)).filter(isSelectableEmailDocument);
         if (searchOwner.isCurrent(operation.generation)) {
           setDocuments(result);
@@ -109,7 +109,7 @@ export function EmailAttachmentPicker({ archiveOnly = false, galleryOnly = false
         }
       } else {
         const result = (value
-          ? (await searchGalleryImages({ query: value, recordHistory: false, limit: GALLERY_CANDIDATE_LIMIT, minimumScore: -1 }, operation.signal)).images
+          ? (await searchGalleryImages({ query: value, recordHistory: false, limit: GALLERY_CANDIDATE_LIMIT }, operation.signal)).images
           : (await fetchGalleryOverview(undefined, undefined, GALLERY_CANDIDATE_LIMIT, undefined, operation.signal)).images).filter((image) => !isManagedGalleryImage(image));
         if (searchOwner.isCurrent(operation.generation)) {
           setImages(result);
@@ -142,8 +142,8 @@ export function EmailAttachmentPicker({ archiveOnly = false, galleryOnly = false
     const controller = new AbortController();
     const historyTimer = setTimeout(() => {
       const request = activeTab === "archive"
-        ? searchContentMatches(value, controller.signal, undefined, true, { limit: MAX_VISIBLE_RESULTS, minimumScore: -1 })
-        : searchGalleryImages({ query: value, recordHistory: true, limit: GALLERY_CANDIDATE_LIMIT, minimumScore: -1 }, controller.signal);
+        ? searchContentMatches(value, controller.signal, undefined, true, { limit: MAX_VISIBLE_RESULTS })
+        : searchGalleryImages({ query: value, recordHistory: true, limit: GALLERY_CANDIDATE_LIMIT }, controller.signal);
       void request.catch(() => undefined);
     }, 800);
     return () => { clearTimeout(historyTimer); controller.abort(); };

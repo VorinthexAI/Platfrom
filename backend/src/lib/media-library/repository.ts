@@ -57,11 +57,14 @@ export interface AccessibleImageSearchInput {
   embedding: number[];
   threshold?: number;
   limit: number;
+  createdFrom?: string;
+  createdTo?: string;
 }
 
 export interface AccessibleImageSearchResult {
   image: Image;
   score: number;
+  collections: Array<{ key: string; name: string }>;
 }
 
 export async function searchAccessibleImages(
@@ -109,7 +112,7 @@ export async function searchAccessibleImages(
           LET collection = DOCUMENT(collections, relation.collectionKey)
           FILTER collection != null
           FILTER collection.scopeKey == @scopeKey
-          LET managedViewer = collection.purpose == "email-media" && collection.mutationPolicy == "system-only" && scoped
+          LET managedViewer = collection.purpose IN ["email-media", "generated-media"] && collection.mutationPolicy == "system-only" && scoped
           LET member = collection.mutationPolicy == "system-only" ? null : FIRST(
             FOR item IN collectionMembers
               FILTER item.scopeKey == @scopeKey
@@ -129,9 +132,32 @@ export async function searchAccessibleImages(
       LET score = COSINE_SIMILARITY(image.embedding, @embedding)
       FILTER IS_NUMBER(score)
       FILTER @threshold == null || score >= @threshold
+      FILTER @createdFrom == null || image.createdAt >= @createdFrom
+      FILTER @createdTo == null || image.createdAt <= @createdTo
+      LET accessibleCollections = (
+        FOR relation IN collectionImages
+          FILTER relation.scopeKey == @scopeKey
+          FILTER relation.imageKey == image._key
+          LET collection = DOCUMENT(collections, relation.collectionKey)
+          FILTER collection != null
+          FILTER collection.scopeKey == @scopeKey
+          LET managedViewer = collection.purpose IN ["email-media", "generated-media"] && collection.mutationPolicy == "system-only" && scoped
+          LET member = collection.mutationPolicy == "system-only" ? null : FIRST(
+            FOR item IN collectionMembers
+              FILTER item.scopeKey == @scopeKey
+              FILTER item.collectionKey == relation.collectionKey
+              FILTER item.memberKey == @actorKey
+              LIMIT 1
+              RETURN item
+          )
+          FILTER managedViewer || member != null
+          SORT relation.createdAt ASC
+          LIMIT 3
+          RETURN { key: collection._key, name: collection.name }
+      )
       SORT score DESC, image._key ASC
       LIMIT @limit
-      RETURN { image, score }
+      RETURN { image, score, collections: accessibleCollections }
   `, {
     organizationKey: input.organizationKey,
     scopeKey: input.scopeKey,
@@ -140,12 +166,15 @@ export async function searchAccessibleImages(
     embedding: input.embedding,
     dimensions: input.embedding.length,
     threshold: input.threshold ?? null,
+    createdFrom: input.createdFrom ?? null,
+    createdTo: input.createdTo ?? null,
     limit: input.limit,
   });
   return (await cursor.all()).map((value) => {
-    const row = value as { image?: unknown; score?: unknown };
+    const row = value as { image?: unknown; score?: unknown; collections?: unknown };
     if (typeof row.score !== 'number' || !Number.isFinite(row.score)) throw new Error('Image similarity query returned an invalid score.');
-    return { image: parse(imageSchema, row.image), score: row.score };
+    const collections = Array.isArray(row.collections) ? row.collections as Array<{ key: string; name: string }> : [];
+    return { image: parse(imageSchema, row.image), score: row.score, collections };
   });
 }
 
@@ -163,8 +192,8 @@ export function createMediaLibraryRepository(database: MediaLibraryDatabase = db
     async getImage(scopeKey, imageKey) { const value = await one(database, 'FOR image IN images FILTER image._key == @imageKey && image.scopeKey == @scopeKey LIMIT 1 RETURN image', { scopeKey, imageKey }); return value ? parse(imageSchema, value) : null; },
     async getCollection(scopeKey, collectionKey) { const value = await one(database, 'FOR collection IN collections FILTER collection._key == @collectionKey && collection.scopeKey == @scopeKey LIMIT 1 RETURN collection', { scopeKey, collectionKey }); return value ? parse(collectionSchema, value) : null; },
     ownsImage: (scopeKey, imageKey, ownerKey) => owns('image', scopeKey, imageKey, ownerKey),
-    canAccessImage: async (scopeKey, imageKey, actorKey) => Boolean(await one(database, `LET image = DOCUMENT(images, @imageKey) ${activeActor} LET privileged = elevated || scopedRole IN ["owner", "admin"] FILTER image != null && image.scopeKey == @scopeKey LET relationCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey RETURN 1) FILTER privileged || (image.createdByKey == @actorKey && relationCount == 0) || LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null FILTER collection.purpose == "email-media" && collection.mutationPolicy == "system-only" ? scoped : collection.mutationPolicy != "system-only" && LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == relation.collectionKey && member.memberKey == @actorKey LIMIT 1 RETURN 1) > 0 RETURN 1) > 0 RETURN true`, { scopeKey, imageKey, actorKey })),
-    canAccessCollection: async (scopeKey, collectionKey, actorKey) => Boolean(await one(database, `LET collection = DOCUMENT(collections, @collectionKey) ${activeActor} LET privileged = elevated || scopedRole IN ["owner", "admin"] FILTER collection != null && collection.scopeKey == @scopeKey LET managedViewer = collection.purpose == "email-media" && collection.mutationPolicy == "system-only" && scoped FILTER privileged || managedViewer || (collection.mutationPolicy != "system-only" && LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == @collectionKey && member.memberKey == @actorKey LIMIT 1 RETURN 1) > 0) RETURN true`, { scopeKey, collectionKey, actorKey })),
+    canAccessImage: async (scopeKey, imageKey, actorKey) => Boolean(await one(database, `LET image = DOCUMENT(images, @imageKey) ${activeActor} LET privileged = elevated || scopedRole IN ["owner", "admin"] FILTER image != null && image.scopeKey == @scopeKey LET relationCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey RETURN 1) FILTER privileged || (image.createdByKey == @actorKey && relationCount == 0) || LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null FILTER collection.purpose IN ["email-media", "generated-media"] && collection.mutationPolicy == "system-only" ? scoped : collection.mutationPolicy != "system-only" && LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == relation.collectionKey && member.memberKey == @actorKey LIMIT 1 RETURN 1) > 0 RETURN 1) > 0 RETURN true`, { scopeKey, imageKey, actorKey })),
+    canAccessCollection: async (scopeKey, collectionKey, actorKey) => Boolean(await one(database, `LET collection = DOCUMENT(collections, @collectionKey) ${activeActor} LET privileged = elevated || scopedRole IN ["owner", "admin"] FILTER collection != null && collection.scopeKey == @scopeKey LET managedViewer = collection.purpose IN ["email-media", "generated-media"] && collection.mutationPolicy == "system-only" && scoped FILTER privileged || managedViewer || (collection.mutationPolicy != "system-only" && LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == @collectionKey && member.memberKey == @actorKey LIMIT 1 RETURN 1) > 0) RETURN true`, { scopeKey, collectionKey, actorKey })),
     canManageScope: async (scopeKey, actorKey) => Boolean(await one(database, `${activeActor} FILTER writable || elevated RETURN true`, { scopeKey, actorKey })),
     ownsCollection: (scopeKey, collectionKey, ownerKey) => owns('collection', scopeKey, collectionKey, ownerKey),
     addImageToCollection: add, copyImageToCollection: add,

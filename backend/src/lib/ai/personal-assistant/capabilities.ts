@@ -13,8 +13,12 @@ import type { ImageGenerationService } from '@/lib/image-generation/service';
 import type { AppSearchService } from '@/lib/app-search/service';
 import type { AppTransformationService } from '@/lib/app-transformation/service';
 import type { AppSpeechService } from '@/lib/app-speech/service';
-import { appSpeechCapability, appEnhanceCapability, appSearchCapability, appTranslateCapability, archiveCapabilities, ascendCapabilities, compassCapabilities, hiddenListCapability, signalCapabilities } from './service-capabilities';
-import { galleryAssistantCapabilities, galleryAssistantCapabilityNames } from './gallery-capabilities';
+import type { AccountProfileService } from '@/lib/account-profile/service';
+import type { TicketService } from '@/lib/tickets/service';
+import { APP_SEARCH_OVERLAPPING_TOOL_NAME_SET } from '@/lib/ai/tools/search-routing-policy';
+import { appSpeechCapability, appEnhanceCapability, appSearchCapability, appTranslateCapability, archiveCapabilities, ascendCapabilities, compassCapabilities, hiddenListCapability, platformCapabilities, signalCapabilities } from './service-capabilities';
+import { galleryAssistantCapabilities } from './gallery-capabilities';
+import { ASSISTANT_RAW_RESULT } from './capability-result';
 
 export const assistantSurfaceSchema = z.enum(['knowledge-workspace', 'media-workspace', 'book-workspace', 'travel-workspace', 'signal-workspace']);
 export type AssistantSurface = z.infer<typeof assistantSurfaceSchema>;
@@ -26,7 +30,7 @@ export const assistantSourceSchema = z.object({
 export type AssistantSource = z.infer<typeof assistantSourceSchema>;
 
 export type AssistantCapabilityResult =
-  | { kind: 'continue'; result: unknown; sources?: AssistantSource[] }
+  | { kind: 'continue'; result: unknown; [ASSISTANT_RAW_RESULT]?: unknown; sources?: AssistantSource[] }
   | { kind: 'note'; content: string; message: string };
 
 export interface AssistantCapabilityContext {
@@ -50,6 +54,8 @@ export interface AssistantCapabilityContext {
   appSearch?: AppSearchService;
   appTransformation?: AppTransformationService;
   appSpeech?: AppSpeechService;
+  accountProfile?: AccountProfileService;
+  tickets?: TicketService;
 }
 
 export type MutationWorkspace = 'archive' | 'gallery' | 'signal' | 'compass' | 'ascend';
@@ -109,12 +115,14 @@ const writeNoteCapability: AssistantCapability = {
 
 export const defaultAssistantCapabilityRegistry = new AssistantCapabilityRegistry();
 
-for (const item of [appSearchCapability, appEnhanceCapability, appTranslateCapability, appSpeechCapability, hiddenListCapability, ...archiveCapabilities, ...galleryAssistantCapabilities, ...compassCapabilities, ...signalCapabilities, ...ascendCapabilities]) defaultAssistantCapabilityRegistry.register(item);
+const appSearchOnly = (capabilities: readonly AssistantCapability[]) => capabilities.filter(({ definition }) => !APP_SEARCH_OVERLAPPING_TOOL_NAME_SET.has(definition.name));
+
+for (const item of [appSearchCapability, appEnhanceCapability, appTranslateCapability, appSpeechCapability, hiddenListCapability, ...platformCapabilities, ...archiveCapabilities, ...galleryAssistantCapabilities, ...compassCapabilities, ...signalCapabilities, ...ascendCapabilities]) defaultAssistantCapabilityRegistry.register(item);
 
 defaultAssistantCapabilityRegistry
   .register(writeNoteCapability)
-  .registerSurface('knowledge-workspace', ['app.search', 'app.enhance', 'app.translate', 'app.speech', 'content.hidden.list', ...archiveCapabilities.map(({ definition }) => definition.name), 'note.write'])
-  .registerSurface('media-workspace', ['app.search', 'content.hidden.list', ...galleryAssistantCapabilityNames])
-  .registerSurface('book-workspace', ['app.search', ...ascendCapabilities.map(({ definition }) => definition.name)])
-  .registerSurface('travel-workspace', ['app.search', ...compassCapabilities.filter(({ definition }) => !['country.search', 'place.search', 'trip.search'].includes(definition.name)).map(({ definition }) => definition.name)])
-  .registerSurface('signal-workspace', ['app.search', 'app.enhance', 'app.translate', ...signalCapabilities.filter(({ definition }) => !['inbox.search', 'email.tone.search'].includes(definition.name)).map(({ definition }) => definition.name)]);
+  .registerSurface('knowledge-workspace', ['app.search', 'app.enhance', 'app.translate', 'app.speech', 'content.hidden.list', ...platformCapabilities.map(({ definition }) => definition.name), ...appSearchOnly(archiveCapabilities).map(({ definition }) => definition.name), 'note.write'])
+  .registerSurface('media-workspace', ['app.search', 'content.hidden.list', ...platformCapabilities.map(({ definition }) => definition.name), ...appSearchOnly(galleryAssistantCapabilities).map(({ definition }) => definition.name)])
+  .registerSurface('book-workspace', ['app.search', ...platformCapabilities.map(({ definition }) => definition.name), ...appSearchOnly(ascendCapabilities).map(({ definition }) => definition.name)])
+  .registerSurface('travel-workspace', ['app.search', ...platformCapabilities.map(({ definition }) => definition.name), ...appSearchOnly(compassCapabilities).map(({ definition }) => definition.name)])
+  .registerSurface('signal-workspace', ['app.search', 'app.enhance', 'app.translate', ...platformCapabilities.map(({ definition }) => definition.name), ...appSearchOnly(signalCapabilities).map(({ definition }) => definition.name)]);

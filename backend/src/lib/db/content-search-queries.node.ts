@@ -3,7 +3,7 @@ import { db } from './client';
 import { toArangoDoc, withArangoKey } from './base';
 
 export const CONTENT_SEARCH_QUERIES_COLLECTION = 'contentSearchQueries';
-export const CONTENT_SEARCH_CACHE_VERSION = 4;
+export const CONTENT_SEARCH_CACHE_VERSION = 6;
 
 export const contentSearchQuerySchema = z.object({
   key: z.string().cuid(),

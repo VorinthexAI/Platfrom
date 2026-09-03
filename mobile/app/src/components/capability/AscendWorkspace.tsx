@@ -24,6 +24,7 @@ import {
 import { AiTextEditor } from "@vorinthex/shared/ui/ai-text-editor";
 import { Button, ButtonSizeProvider } from "@vorinthex/shared/ui/button";
 import { PersistentCoreComposer as CoreComposer } from "@/components/PersistentCoreComposer";
+import { ProfileHeaderRight } from "@/components/ProfileAvatarButton";
 import { LoadingText } from "@vorinthex/shared/ui/loading-text";
 import { PullToRefresh } from "@vorinthex/shared/ui/pull-to-refresh";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
@@ -374,6 +375,7 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
       requestKey: string;
     }) => createBook(input, requestKey),
     onMutate: ({ input, requestKey }) => {
+      const timestamp = new Date().toISOString();
       const book: Book = {
         key: `pending-${requestKey}`,
         title: input.topic,
@@ -386,6 +388,8 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
         estimatedMinutes: 10,
         chapterCount: 10,
         progressPercent: 0,
+        createdAt: timestamp,
+        updatedAt: timestamp,
         generationProgressPercent: 0,
       };
       const pending = { book, input, requestKey };
@@ -1030,6 +1034,7 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
             !(creating && dirty)
           }
         />
+        <ProfileHeaderRight />
       </View>
       <View style={styles.localHeader}>
         {bookPageOpen ? <Button accessibilityLabel="Back to audio books" contentMode="raw" onPress={() => { setBookPageOpen(false); setSelectedBookKey(undefined); }} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button> : <WorkspaceAppSwitcher active="ascend" trigger="back" />}
@@ -1332,7 +1337,9 @@ const styles = StyleSheet.create({
   globalHeader: {
     minHeight: 64,
     paddingBottom: 8,
-    justifyContent: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     borderBottomColor: palette.hairline,
     borderBottomWidth: 1,
     backgroundColor: palette.page,

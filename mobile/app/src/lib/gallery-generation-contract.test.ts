@@ -6,6 +6,7 @@ const history = await Bun.file(new URL("../components/capability/GalleryGenerati
 const picker = await Bun.file(new URL("../components/capability/EmailAttachmentPicker.tsx", import.meta.url)).text();
 const editorMobile = await Bun.file(new URL("../../../../shared/packages/ui/components/ai-text-editor/ai-text-editor.mobile.tsx", import.meta.url)).text();
 const editorWeb = await Bun.file(new URL("../../../../shared/packages/ui/components/ai-text-editor/ai-text-editor.web.tsx", import.meta.url)).text();
+const normalize = (source: string) => source.replace(/\s+/g, "").replace(/,([}\]])/g, "$1").replace(/\?\((?=<)/g, "?");
 
 test("generation is contribution-gated and uses independent optimistic skeleton requests", () => {
   expect(workspace).toContain("Generate images");
@@ -15,7 +16,7 @@ test("generation is contribution-gated and uses independent optimistic skeleton 
   expect(workspace).toContain('const visibleGenerationPlaceholders = imageOrigin === "generated"');
   expect(workspace).toContain('accessibilityLabel={`Generate images in ${activeCollection.name}`}');
   expect(workspace).toContain('onPress={() => setGenerationOpen(true)}');
-  expect(workspace).toContain('&& visibleGenerationPlaceholders.length === 0 ? <View accessibilityLabel=');
+  expect(normalize(workspace)).toContain(normalize('&& visibleGenerationPlaceholders.length === 0 ? <View accessibilityLabel='));
   expect(workspace).toContain("visibleGenerationPlaceholders.length === 0 && normalCollectionView");
   expect(workspace).toContain("removeGalleryGenerationPlaceholder(current, requestKey)");
   expect(workspace).toContain('const message = errorMessage(error);\n        setStatus(message);\n        notify(message);');
@@ -24,6 +25,8 @@ test("generation is contribution-gated and uses independent optimistic skeleton 
 
 test("composer exposes count, prompt history, and eight image-only context references", () => {
   expect(composer).toContain("([1, 2, 3] as const)");
+  expect(composer).toContain('countTabs: { width: "100%"');
+  expect(composer).toContain('countTab: { flex: 1 }');
   expect(composer).toContain("MAX_GALLERY_GENERATION_REFERENCES");
   expect(composer).toContain("<AiTextEditor");
   expect(composer).toContain("onOpenHistory");

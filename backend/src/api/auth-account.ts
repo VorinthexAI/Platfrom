@@ -9,17 +9,20 @@ import { hashUserEmail, upsertUserByEmail } from './users';
 import { camelSessionTokenPayload, clearSessionCookies, getSelectedRefreshToken, REFRESH_COOKIE, setSessionForRequest } from './middleware';
 import { parseJson, strictObject } from './validation';
 import { z } from 'zod';
+import { signProfileAvatarUrl, trySignProfileAvatarUrl } from '@/lib/account-profile/avatar-url';
 
-export function buildAuthAccountResponse(
+export async function buildAuthAccountResponse(
   user: NonNullable<Awaited<ReturnType<typeof getUserById>>>,
   context: NonNullable<Awaited<ReturnType<typeof getPersonalAuthContext>>>,
+  signAvatar: typeof signProfileAvatarUrl = signProfileAvatarUrl,
 ) {
+  const avatarUrl = user.profileStorageKey ? await trySignProfileAvatarUrl(user.profileStorageKey, signAvatar) : null;
   return {
     user: {
       key: user.key,
       email: user.email,
       name: user.name,
-      profile_url: user.profileUrl,
+      avatar_url: avatarUrl,
       alias: user.alias,
       alias_slug: user.alias_slug,
       country_code: user.countryCode,
@@ -68,7 +71,7 @@ export async function bootstrapGuestAuth(c: Context) {
   const tokens = await issueUserTokens(user);
   setSessionForRequest(c, tokens);
   return c.json({
-    ...buildAuthAccountResponse(user, context),
+    ...await buildAuthAccountResponse(user, context),
     ...camelSessionTokenPayload(c, tokens),
   }, 201);
 }
@@ -84,7 +87,7 @@ export async function patchAuthAccount(c: Context) {
     isOnboarded: body.isOnboarded,
     updatedAt: new Date().toISOString(),
   });
-  return c.json(buildAuthAccountResponse(user, context));
+  return c.json(await buildAuthAccountResponse(user, context));
 }
 
 export const patchAuthAccountSchema = strictObject({ isOnboarded: z.literal(true) });
@@ -95,7 +98,7 @@ export async function getAuthAccount(c: Context) {
   const user = await getUserById(identity.key);
   if (!user?.isVerified) return c.json({ error: 'verified authentication required' }, 403);
   const context = await getPersonalAuthContext(user.key) ?? await provisionPersonalAuthContext(user);
-  return c.json(buildAuthAccountResponse(user, context));
+  return c.json(await buildAuthAccountResponse(user, context));
 }
 
 export async function logoutAuthAccount(c: Context) {

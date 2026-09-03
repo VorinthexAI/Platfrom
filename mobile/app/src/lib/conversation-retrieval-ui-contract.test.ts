@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 const read = (path: string) => Bun.file(new URL(path, import.meta.url)).text();
-const [composer, sheet, route, archive, signal, compass, books] = await Promise.all([
+const [composer, sheet, route, archive, signal, compass, books, richText] = await Promise.all([
   read("../components/PersistentCoreComposer.tsx"),
   read("../components/ConversationRetrievalSheet.tsx"),
   read("../app/capability/[slug].tsx"),
@@ -9,6 +9,7 @@ const [composer, sheet, route, archive, signal, compass, books] = await Promise.
   read("../components/capability/EmailWorkspace.tsx"),
   read("../components/capability/TravelWorkspace.tsx"),
   read("../components/capability/AscendWorkspace.tsx"),
+  read("../../../../shared/packages/ui/components/rich-text/rich-text.mobile.tsx"),
 ]);
 
 test("renders one compact shared retrieval pill through the memoized message row", () => {
@@ -29,14 +30,31 @@ test("uses a full-height shared results sheet and validates without recording hi
   expect(sheet).toContain("validConversationRetrievalIdentities");
   expect(sheet).toContain("Some results could not be checked.");
   expect(sheet).toContain(">Retry</Button>");
+  expect(sheet).not.toContain("footer=");
 });
 
-test("auto-opens only fresh non-replayed completions and closes on state boundaries", () => {
-  expect(composer).toContain("!event.replayed && mergeConversationRetrievalResults(event.message.retrievals).length");
-  expect(composer).toContain("autoOpenedCompletions.current.has(event.message.key)");
-  expect(composer).toContain("setActiveRetrievals({ fresh: true");
-  expect(composer).toContain("setActiveRetrievals({ fresh: false");
-  expect(composer).toContain("setActiveRetrievals(undefined); autoOpenedCompletions.current.clear()");
+test("renders shared rich-text headings bold without increasing body size", () => {
+  expect(richText).toContain('paragraph: { color: colors.text, fontSize: 14, lineHeight: 20 }');
+  expect(richText).toContain('heading: { fontSize: 14, lineHeight: 20, fontWeight: "700" }');
+  expect(richText).toContain("overrides.heading");
+  expect(richText).not.toContain("heading1:");
+  expect(richText).not.toContain("heading2:");
+  expect(richText).not.toContain("heading3:");
+});
+
+test("renders tool result retrievals directly and re-runs only search retrievals", () => {
+  expect(sheet).toContain('retrieval.source !== "results"');
+  expect(sheet).toContain("retrieval.searchCollectionSlugs ??");
+  expect(sheet).toContain("mergeConversationRetrievalResults(retrievals)");
+});
+
+test("opens retrieval results only from the completed-message pill", () => {
+  expect(composer).toContain("setActiveRetrievals(message.retrievals)");
+  expect(composer).toContain('setSheet("retrievals")');
+  expect(composer).not.toContain("autoOpenedCompletions");
+  expect(composer).not.toContain("setActiveRetrievals({ fresh:");
+  expect(composer).not.toContain("!event.replayed && mergeConversationRetrievalResults");
+  expect(sheet).not.toContain("fresh:");
   expect(composer).toContain('editable={configured && !turning && !sheet}');
 });
 
@@ -54,4 +72,19 @@ test("routes each persisted resource identity to its established workspace", () 
   expect(compass).toContain("initialCountryCode");
   expect(compass).toContain("setSelectedTripKey(trip.key); if (shouldOpenTripAssets)");
   expect(books).toContain("Boolean(initialBookKey)");
+});
+
+test("reuses the retrieval query as the destination workspace search and opens matched collections", () => {
+  expect(composer).toContain("const searchParams = retrieval.query ? { initialQuery: retrieval.query } : {};");
+  expect(composer).toContain('params: { slug: "gallery", assetKey: key, ...searchParams }');
+  expect(route).toContain("initialSearchQuery={params.initialQuery}");
+  expect(route).toContain('key={`${params.assetKey ?? "root"}:${params.imageKey ?? ""}:${params.initialQuery ?? ""}`}');
+  expect(route).toContain('key={`${params.assetKey ?? "root"}:${params.documentKey ?? ""}:${params.collectionKind ?? ""}:${params.initialQuery ?? ""}`}');
+  expect(composer).toContain('collectionKind: destinationCollectionSlug');
+  expect(archive).toContain('initialFolderKey ? initialSearchQuery?.slice(0, 500) ?? "" : ""');
+  for (const kind of ['collectionKind: "places"', 'collectionKind: "trips"', 'collectionKind: "countries"', 'collectionKind: "email-tones"']) expect(composer).toContain(kind);
+  expect(composer).toContain('collectionKind: destinationCollectionSlug, ...searchParams');
+  expect(route).toContain('key={`${params.placeKey ?? ""}:${params.tripKey ?? ""}:${params.countryCode ?? ""}:${params.collectionKind ?? ""}:${params.initialQuery ?? ""}:${params.openTripAssets ?? ""}`}');
+  expect(route).toContain('key={`${params.bookKey ?? "root"}:${params.initialQuery ?? ""}`}');
+  expect(signal).toContain('search: initialConnectorKey && initialSearchQuery ? initialSearchQuery.slice(0, 500) : ""');
 });

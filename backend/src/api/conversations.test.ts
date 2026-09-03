@@ -29,7 +29,7 @@ describe('conversation HTTP contract', () => {
 
   test('registers CRUD, pagination, and turn-scoped streaming separately from invalidation SSE', async () => {
     const routes = await Bun.file(new URL('./routes.ts', import.meta.url)).text();
-    for (const route of ['/conversations', '/conversations/list', '/conversations/search', '/conversations/:conversationKey/messages/list', '/conversations/:conversationKey/turn/stream']) expect(routes).toContain(route);
+    for (const route of ['/conversations', '/conversations/list', '/conversations/search', '/conversations/:conversationKey/messages/list', '/conversations/:conversationKey/messages/:messageKey', '/conversations/:conversationKey/turn/stream']) expect(routes).toContain(route);
     expect(routes).toContain("app.get('/events/stream', streamEvents)");
     expect(routes).toContain("app.post('/conversations/:conversationKey/turn/stream', conversationHandlers.turn)");
   });
@@ -54,6 +54,30 @@ describe('conversation HTTP contract', () => {
     expect(response.status).toBe(200); expect(calls).toEqual([{ input: { name: 'Private' }, selected: context }]); expect(published).toEqual([[userKey, 'conversation.changed']]);
     const list = await app.request('/conversations/list', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, favoriteOnly: true, limit: 10 }) });
     expect(list.status).toBe(200); expect(calls.at(-1)).toEqual({ input: { favoriteOnly: true, limit: 10 }, selected: context });
+  });
+
+  test('deletes a message turn through the canonical service and publishes invalidation', async () => {
+    const organizationKey = 'organization', scopeKey = newId(), userKey = newId(), conversationKey = newId(), messageKey = newId(); const calls: unknown[] = []; const published: unknown[] = [];
+    const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const handlers = createConversationHandlers({ getIdentity: async () => ({ identityType: 'user', key: userKey }) as never, authorize: async () => ({ context }), service: { deleteMessage: async (...args: unknown[]) => { calls.push(args); return { deletedKeys: [messageKey] }; } } as any, publishChanged: async (...args: unknown[]) => { published.push(args); } });
+    const app = new Hono(); app.delete('/conversations/:conversationKey/messages/:messageKey', handlers.deleteMessage);
+    const response = await app.request(`/conversations/${conversationKey}/messages/${messageKey}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey }) });
+    expect(response.status).toBe(200); expect(await response.json()).toEqual({ success: true, data: { deletedKeys: [messageKey] } });
+    expect(calls).toEqual([[{ conversationKey, messageKey }, context]]); expect(published).toEqual([[userKey, 'conversation.changed']]);
+    expect((await app.request(`/conversations/${conversationKey}/messages/${messageKey}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, userKey }) })).status).toBe(400);
+  });
+
+  test('strictly enqueues an image turn through the canonical service and returns accepted', async () => {
+    const organizationKey = 'organization', scopeKey = newId(), userKey = newId(), conversationKey = newId(); const calls: unknown[] = []; const published: unknown[] = [];
+    const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const handlers = createConversationHandlers({ getIdentity: async () => ({ identityType: 'user', key: userKey }) as never, authorize: async () => ({ context }), service: { enqueueImageTurn: async (...args: unknown[]) => { calls.push(args); return { queued: true }; } } as any, publishChanged: async (...args: unknown[]) => { published.push(args); } });
+    const app = new Hono(); app.post('/conversations/:conversationKey/image-turns', handlers.imageTurn);
+    const body = { organizationKey, scopeKey, prompt: 'A moonlit harbor', requestKey: 'image-request' };
+    const response = await app.request(`/conversations/${conversationKey}/image-turns`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    expect(response.status).toBe(202);
+    expect(calls).toEqual([[{ conversationKey, prompt: body.prompt, requestKey: body.requestKey, referenceImageKeys: [], size: '1024x1024', quality: 'medium', mode: 'default' }, context]]);
+    expect(published).toEqual([[userKey, 'conversation.changed']]);
+    expect((await app.request(`/conversations/${conversationKey}/image-turns`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, count: 2 }) })).status).toBe(400);
   });
 
   test('does not emit a second terminal SSE event when change publication fails after done', async () => {

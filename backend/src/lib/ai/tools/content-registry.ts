@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { contentToolContracts, type ContentToolName } from './content-schemas';
+import { contentToolContracts, validateCreationDateRange, type ContentToolName } from './content-schemas';
 import { contentZodToJsonSchema } from './content-json-schema';
 
 export const CONTENT_TOOL_NAMES = Object.freeze(Object.keys(contentToolContracts) as ContentToolName[]);
@@ -45,7 +45,10 @@ function modelInputSchema(name: ContentToolName): z.ZodTypeAny {
   if (hasPrimaryModelScope(name)) {
     const canonical: z.ZodTypeAny = contentToolContracts[name].input;
     const object = canonical instanceof z.ZodEffects ? canonical.innerType() : canonical;
-    return (object as z.AnyZodObject).omit({ scopeKey: true });
+    const model = (object as z.AnyZodObject).omit({ scopeKey: true });
+    return ['folder.list', 'document.list', 'content.search'].includes(name)
+      ? model.superRefine((value, context) => validateCreationDateRange(value, context))
+      : model;
   }
   return contentToolContracts[name].input;
 }

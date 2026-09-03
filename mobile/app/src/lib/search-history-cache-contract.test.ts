@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
 const read = (path: string) => Bun.file(new URL(path, import.meta.url)).text();
+const normalize = (source: string) => source.replace(/\s+/g, "").replace(/,([}\]])/g, "$1").replace(/\?\((?=<)/g, "?");
 const [archive, gallery, signal, compass, ascend, attachmentPicker, appSearch] = await Promise.all([
   read("../components/capability/KnowledgeWorkspace.tsx"),
   read("../components/capability/GalleryWorkspace.tsx"),
@@ -27,7 +28,9 @@ test("every filter-sheet Search history option matches the sheet background", ()
   const workspaces = [archive, gallery, signal, compass, ascend, attachmentPicker];
   const expectedCounts = [1, 2, 2, 1, 1, 1];
   for (const [index, workspace] of workspaces.entries()) {
-    expect(workspace.match(/style=\{styles\.searchHistoryOption\} variant="secondary">Search history<\/Button>/g)).toHaveLength(expectedCounts[index]!);
+    const source = workspace === gallery ? normalize(workspace) : workspace;
+    const pattern = workspace === gallery ? /style=\{styles\.searchHistoryOption\}variant="secondary">Searchhistory<\/Button>/g : /style=\{styles\.searchHistoryOption\} variant="secondary">Search history<\/Button>/g;
+    expect(source.match(pattern)).toHaveLength(expectedCounts[index]!);
     expect(workspace).toContain("searchHistoryOption: { backgroundColor: palette.page }");
   }
 });

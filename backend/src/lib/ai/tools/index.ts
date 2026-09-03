@@ -22,6 +22,9 @@ import type { AgentRuntimeDependencies } from '@/lib/ai/agents';
 import { AGENT_TOOL_DEFINITIONS } from './agent-tool-definitions';
 import type { AgentToolDependencies } from './agent-tool-definitions';
 import { webSearchTool, type WebSearchToolDependencies } from './web-search';
+import { observeToolExecution } from '@/lib/ai/events/runtime';
+import { APP_KEYS } from '@/lib/apps/registry';
+import type { ToolEventRecorder } from '@/lib/ai/events/service';
 
 /** A tool name has exactly one registry entry. */
 export const TOOL_NAMES = UNIFIED_TOOL_DEFINITIONS.map(({ name }) => name) as [string, ...string[]];
@@ -58,8 +61,13 @@ export interface ToolDependencies extends RouterDependencies, DocumentParseDepen
   appSearchService?: AppSearchService;
   appTransformationService?: AppTransformationService;
   appSpeechService?: AppSpeechService;
+  accountProfileService?: WorkspaceToolDependencies['accountProfile'];
+  ticketService?: WorkspaceToolDependencies['tickets'];
   conversationService?: AgentToolDependencies['conversations'];
+  currentConversationKey?: string;
+  currentReferenceImageKeys?: string[];
   agentDependencies?: AgentRuntimeDependencies;
+  recordEvent?: ToolEventRecorder;
 }
 
 /** Executes one of the capabilities exposed by the unified tool registry. */
@@ -69,64 +77,70 @@ export function runTool<Name extends ContentToolName>(name: Name, skill: string,
 export function runTool(name: string, skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<unknown>;
 export async function runTool(name: string, skill: string, rawInput: unknown, dependencies: ToolDependencies = {}): Promise<unknown> {
   const toolName = modelToolNameSchema.parse(name);
-  if (toolName === imageCaptionTool.name) return imageCaptionTool.execute(rawInput, dependencies);
-  if (toolName === imageCreateVisualIdentityTool.name) return imageCreateVisualIdentityTool.execute(rawInput, dependencies);
-  if (!dependencies.contentContext) throw new Error(`Tool ${toolName} requires contentContext.`);
-  if (toolName === webSearchTool.name) return webSearchTool.execute(rawInput, {
-    organizationKey: dependencies.contentContext.organizationKey,
-    executeSearch: dependencies.executeSearch,
-    adapters: dependencies.adapters,
-    env: dependencies.env,
-    signal: dependencies.signal,
-    timeoutMs: dependencies.timeoutMs,
-  });
-  const agentDefinition = agentToolDefinitionsByName.get(toolName);
-  if (agentDefinition) return agentDefinition.execute(rawInput, { context: dependencies.contentContext, conversations: dependencies.conversationService, requestKey: dependencies.requestKey, agentDependencies: dependencies.agentDependencies });
-  const conversationDefinition = conversationToolDefinitionsByName.get(toolName);
-  if (conversationDefinition) return conversationDefinition.execute(rawInput, { context: dependencies.contentContext, conversations: dependencies.conversationService, requestKey: dependencies.requestKey });
-  const workspaceDefinition = workspaceToolDefinitionsByName.get(toolName);
-  if (workspaceDefinition) return workspaceDefinition.execute(rawInput, {
-    context: dependencies.contentContext,
-    requestKey: dependencies.requestKey,
-    executeContent: dependencies.executeWorkspaceContent,
-    travel: dependencies.travelService,
-    countries: dependencies.countrySearchService,
-    email: dependencies.emailService,
-    books: dependencies.bookService,
-    userHiddens: dependencies.userHiddenService,
-    gallery: dependencies.gallery,
-    images: dependencies.images,
-    appSearch: dependencies.appSearchService,
-    appTransformation: dependencies.appTransformationService,
-    appSpeech: dependencies.appSpeechService,
-    signal: dependencies.signal,
-    timeoutMs: dependencies.timeoutMs,
-    content: {
+  toolInputSchemas[toolName]!.parse(rawInput);
+  return observeToolExecution(toolName, dependencies.contentContext, async () => {
+    if (toolName === imageCaptionTool.name) return imageCaptionTool.execute(rawInput, dependencies);
+    if (toolName === imageCreateVisualIdentityTool.name) return imageCreateVisualIdentityTool.execute(rawInput, dependencies);
+    if (!dependencies.contentContext) throw new Error(`Tool ${toolName} requires contentContext.`);
+    if (toolName === webSearchTool.name) return webSearchTool.execute(rawInput, {
+      organizationKey: dependencies.contentContext.organizationKey,
+      executeSearch: dependencies.executeSearch,
       adapters: dependencies.adapters,
       env: dependencies.env,
-      ...dependencies.contentDependencies,
-      ingestion: { ...dependencies, ...dependencies.contentDependencies?.ingestion },
-    },
-  });
-  const definition = publicToolDefinitionsByName.get(toolName)!;
-  return (definition.execute as (input: unknown, dependencies: PublicToolDependencies) => Promise<unknown>)(rawInput, {
-    context: dependencies.contentContext,
-    requestKey: dependencies.requestKey,
-    executeContent: dependencies.executeWorkspaceContent,
-    content: {
-      adapters: dependencies.adapters,
-      env: dependencies.env,
-      ...dependencies.contentDependencies,
-      ingestion: { ...dependencies, ...dependencies.contentDependencies?.ingestion },
-    },
-  });
+      signal: dependencies.signal,
+      timeoutMs: dependencies.timeoutMs,
+    });
+    const agentDefinition = agentToolDefinitionsByName.get(toolName);
+    if (agentDefinition) return agentDefinition.execute(rawInput, { context: dependencies.contentContext, conversations: dependencies.conversationService, requestKey: dependencies.requestKey, agentDependencies: dependencies.agentDependencies });
+    const conversationDefinition = conversationToolDefinitionsByName.get(toolName);
+    if (conversationDefinition) return conversationDefinition.execute(rawInput, { context: dependencies.contentContext, conversations: dependencies.conversationService, requestKey: dependencies.requestKey, currentConversationKey: dependencies.currentConversationKey, currentReferenceImageKeys: dependencies.currentReferenceImageKeys });
+    const workspaceDefinition = workspaceToolDefinitionsByName.get(toolName);
+    if (workspaceDefinition) return workspaceDefinition.execute(rawInput, {
+      context: dependencies.contentContext,
+      requestKey: dependencies.requestKey,
+      executeContent: dependencies.executeWorkspaceContent,
+      travel: dependencies.travelService,
+      countries: dependencies.countrySearchService,
+      email: dependencies.emailService,
+      books: dependencies.bookService,
+      userHiddens: dependencies.userHiddenService,
+      gallery: dependencies.gallery,
+      images: dependencies.images,
+      appSearch: dependencies.appSearchService,
+      appTransformation: dependencies.appTransformationService,
+      appSpeech: dependencies.appSpeechService,
+      accountProfile: dependencies.accountProfileService,
+      tickets: dependencies.ticketService,
+      signal: dependencies.signal,
+      timeoutMs: dependencies.timeoutMs,
+      content: {
+        adapters: dependencies.adapters,
+        env: dependencies.env,
+        ...dependencies.contentDependencies,
+        ingestion: { ...dependencies, ...dependencies.contentDependencies?.ingestion },
+      },
+    });
+    const definition = publicToolDefinitionsByName.get(toolName)!;
+    return (definition.execute as (input: unknown, dependencies: PublicToolDependencies) => Promise<unknown>)(rawInput, {
+      context: dependencies.contentContext,
+      requestKey: dependencies.requestKey,
+      executeContent: dependencies.executeWorkspaceContent,
+      content: {
+        adapters: dependencies.adapters,
+        env: dependencies.env,
+        ...dependencies.contentDependencies,
+        ingestion: { ...dependencies, ...dependencies.contentDependencies?.ingestion },
+      },
+    });
+  }, { recorder: dependencies.recordEvent });
 }
 
 /** Executes a system-only tool without exposing it to Core or model providers. */
 export async function runTrustedTool(name: TrustedEmailToolName, rawInput: unknown, dependencies: TrustedEmailToolDependencies): Promise<unknown> {
   const definition = trustedToolDefinitionsByName.get(name);
   if (!definition) throw new Error(`Unknown trusted tool ${name}`);
-  return definition.execute(rawInput, dependencies);
+  definition.inputSchema.parse(rawInput);
+  return observeToolExecution(name, dependencies.context, () => (definition.execute as (input: unknown, dependencies: TrustedEmailToolDependencies) => Promise<unknown>)(rawInput, dependencies), { appKey: APP_KEYS.SIGNAL, recorder: dependencies.recordEvent });
 }
 
 export { sanitizeAgentInput, sanitizedAgentMessageSchema } from './input-sanitizer';

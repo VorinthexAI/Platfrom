@@ -41,15 +41,20 @@ and reducing provider input to trusted server selectors. Gmail OAuth schedules
 ingestion tools and the model-visible `inbox.sort` operation converge on the same
 canonical thread sorter and persistence path.
 
-`app.search` is the canonical cross-collection text search. The older
-`content.search`, `image.search`, `inbox.search`, `email.tone.search`,
-`place.search`, `trip.search`, and `country.search` entries remain temporarily
-for product-specific callers and should be removed once those callers migrate.
-They must continue to delegate to the same domain services rather than gaining
-separate search behavior. Selected-inbox message search uses the
-`email-messages` collection with an authorized connector selector; saved-draft
-search uses `email-drafts` with the same connector boundary. Read state and
-inbox facets remain email-domain boundaries.
+`app.search` is the canonical collection-aware workspace query. Its registered
+collection adapters declare their supported `search`, `list`, `count`, `sum`, `get`,
+and `summarize` operations, accepted filters, public fields, and valid status
+values. Core uses this one capability
+for workspace resource retrieval; HTTP and product-specific adapters converge
+on the same domain services. Exact counts and sums must come from canonical totals or
+exhaustive cursor pagination, never from a truncated result page. Selected-inbox
+message and draft queries require an authorized connector selector. Document
+summaries requested through `app.search` are bounded, non-persisting previews.
+Only explicitly registered additive public fields may be summed. The model must
+never aggregate arbitrary fields or bounded search/list examples.
+Specialized tools remain separate for similarity and duplicate detection,
+signed downloads, persisted generated artifacts, conversation history, and
+other semantics that are not ordinary resource queries.
 
 Generated travel references use the same canonical travel service from HTTP
 and Core. `trip.guide.generate/list` and the parameterized

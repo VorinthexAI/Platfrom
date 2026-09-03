@@ -17,7 +17,7 @@ const definitions: Array<{
   schema: z.ZodTypeAny;
   mutation?: boolean;
 }> = [
-  { operation: 'overview', name: 'collection.list', description: 'List Gallery collections and a cursor page of recent images, optionally within one collection and filtered by maximum compatible caption score; legacy migration placeholder scores are excluded.', schema: galleryOperationInputSchemas.overview },
+  { operation: 'overview', name: 'collection.list', description: 'List Gallery collections and a cursor page of recent images, optionally within one collection and filtered by maximum compatible caption score; legacy migration placeholder scores are excluded. Use only for total counts, exhaustive inventories, or listing metadata; when the user wants to find or show specific collections, use app.search with the "collections" slug instead.', schema: galleryOperationInputSchemas.overview },
   { operation: 'createCollection', name: 'collection.create', description: 'Create a Gallery collection.', schema: galleryOperationInputSchemas.createCollection, mutation: true },
   { operation: 'updateCollection', name: 'collection.update', description: 'Update a Gallery collection name, favorite state, and optional custom cover.', schema: galleryOperationInputSchemas.updateCollection, mutation: true },
   { operation: 'deleteCollection', name: 'collection.delete', description: 'Delete a non-favorite Gallery collection without deleting images that remain in Gallery. Favorite collections must be unfavorited first.', schema: galleryOperationInputSchemas.deleteCollection, mutation: true },

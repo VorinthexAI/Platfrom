@@ -36,9 +36,10 @@ describe('personal assistant runtime', () => {
       'app.search',
       'app.enhance', 'app.translate', 'app.speech',
       'content.hidden.list',
+      'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote',
       'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal',
-      'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy',
-      'document.list', 'document.find', 'document.create', 'document.update',
+      'folder.create', 'folder.update', 'folder.move', 'folder.copy',
+      'document.create', 'document.update',
       'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear',
       'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'note.write', 'assistant.unsupported',
     ]);
@@ -76,7 +77,8 @@ describe('personal assistant runtime', () => {
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
       'app.search',
       'content.hidden.list',
-      'collection.list', 'collection.create', 'collection.update', 'collection.delete',
+      'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote',
+      'collection.create', 'collection.update', 'collection.delete',
       'collection.member.list', 'collection.invite.pending.list', 'collection.invite.create', 'collection.invite.accept', 'collection.invite.reject', 'collection.invite.revoke',
       'collection.member.role.update', 'collection.member.remove', 'collection.leave', 'collection.share.list', 'collection.share.create', 'collection.share.update', 'collection.share.revoke', 'collection.share.activate',
       'image.search', 'image.favorite', 'image.update', 'image.delete',
@@ -88,6 +90,11 @@ describe('personal assistant runtime', () => {
     ]);
     expect(chatInput.systemPrompt).toContain('Use app.search with collectionSlugs ["images"]');
     expect(chatInput.systemPrompt).toContain('duplicates true plus collectionKey');
+    expect(chatInput.systemPrompt).toContain('any language, code-switching, ordinary misspellings, inflection, synonyms, paraphrases');
+    expect(chatInput.systemPrompt).toContain('narrowest canonical collectionSlugs');
+    expect(chatInput.systemPrompt).toContain('ask a concise clarification rather than guessing');
+    expect(chatInput.systemPrompt).toContain('database or storage structure');
+    expect(chatInput.systemPrompt).toContain('use assistant.unsupported');
     expect(chatInput.messages[0].content[0].text).toContain('"workspace":"Gallery"');
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Gallery. Core can search your images.', sources: [] });
   });
@@ -118,7 +125,7 @@ describe('personal assistant runtime', () => {
       },
     });
 
-    expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual(['app.search', 'place.find', 'place.list', 'place.reference.generate', 'place.reference.list', 'trip.list', 'trip.guide.generate', 'trip.guide.list', 'trip.create', 'trip.update', 'trip.delete', 'trip.attachment.set', 'place.guide.find', 'place.find-city', 'place.find-children', 'place.create', 'place.update', 'place.delete', 'place.open', 'assistant.unsupported']);
+    expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual(['app.search', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote', 'place.reference.generate', 'place.reference.list', 'trip.guide.generate', 'trip.guide.list', 'trip.create', 'trip.update', 'trip.delete', 'trip.attachment.set', 'place.guide.find', 'place.find-city', 'place.find-children', 'place.create', 'place.update', 'place.delete', 'place.open', 'assistant.unsupported']);
     expect(chatInput.systemPrompt).toContain('operating inside Compass');
     expect(chatInput.messages[0].content[0].text).toContain('"workspace":"Compass"');
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Compass. Core can search your saved knowledge for travel context.', sources: [] });
@@ -140,7 +147,7 @@ describe('personal assistant runtime', () => {
       } } as any,
     });
 
-    expect(searchInput).toEqual({ query: 'red dog in snow', collectionSlugs: ['images'], recordHistory: true, limit: 10, minimumScore: 0.55 });
+    expect(searchInput).toEqual({ query: 'red dog in snow', collectionSlugs: ['images'], recordHistory: true, limit: 10 });
     expect(modelCalls).toBe(2);
     expect(result).toEqual({ type: 'answer', message: 'I found one matching image of a red dog in snow.', sources: [] });
   });
@@ -161,7 +168,7 @@ describe('personal assistant runtime', () => {
       } } as any,
     });
 
-    expect(searchInput).toEqual({ query: 'roadmap', collectionSlugs: ['documents'], recordHistory: true, limit: 10, minimumScore: 0.55 });
+    expect(searchInput).toEqual({ query: 'roadmap', collectionSlugs: ['documents'], recordHistory: true, limit: 10 });
     expect(modelCalls).toBe(2);
     expect(result).toEqual({ type: 'answer', message: 'The launch is in October.', sources: [{ documentKey, name: 'Roadmap' }] });
   });
@@ -242,7 +249,7 @@ describe('personal assistant runtime', () => {
       execute: async (_request, nextInput) => {
         modelCalls += 1;
         if (modelCalls === 1) {
-          expect(nextInput.tools?.map(({ name }) => name)).toEqual(['app.search', 'book.list', 'book.topic.suggest', 'book.goal.suggest', 'book.detail', 'book.extend', 'book.share.detail', 'book.share.update', 'book.chapter.progress', 'book.create', 'book.generation.retry', 'book.generation.cancel', 'book.favorite', 'book.delete', 'assistant.unsupported']);
+          expect(nextInput.tools?.map(({ name }) => name)).toEqual(['app.search', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote', 'book.topic.suggest', 'book.goal.suggest', 'book.extend', 'book.share.detail', 'book.share.update', 'book.chapter.progress', 'book.create', 'book.generation.retry', 'book.generation.cancel', 'book.favorite', 'book.delete', 'assistant.unsupported']);
           expect(nextInput.systemPrompt).toContain('Call book.create exactly once');
           return response({ text: '', toolCalls: [{ id: 'book-create-1', name: 'book.create', arguments: brief }], stopReason: 'tool_use' });
         }

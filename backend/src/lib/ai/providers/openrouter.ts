@@ -121,16 +121,8 @@ async function post(fetcher: typeof fetch, config: z.output<typeof openRouterPro
 
 function normalizedContent(parts: ChatInput['messages'][number]['content']): unknown {
   const converted = parts.map((part) => {
-    const value = part as unknown as Record<string, unknown>;
     if (part.type === 'text') return { type: 'text', text: part.text };
-    if (value.type === 'image_url') {
-      const imageUrl = value.imageUrl ?? value.image_url;
-      return { type: 'image_url', image_url: imageUrl };
-    }
-    if (value.type === 'image') {
-      const url = value.url ?? value.imageUrl;
-      return { type: 'image_url', image_url: { url } };
-    }
+    if (part.type === 'image') return { type: 'image_url', image_url: { url: `data:${part.mimeType};base64,${Buffer.from(part.bytes).toString('base64')}` } };
     return undefined;
   }).filter((part) => part !== undefined);
   return converted.length === 1 && (converted[0] as { type?: string }).type === 'text' ? (converted[0] as { text: string }).text : converted;
@@ -270,7 +262,7 @@ function captionInstruction(value: ImageCaptionInput) {
 }
 
 async function executeStructuredImage<TOutput>(fetcher: typeof fetch, config: z.output<typeof openRouterProviderConfigSchema>, request: ProviderExecuteRequest, content: unknown[], name: string, schema: Record<string, unknown>, parse: (value: unknown) => TOutput): Promise<ProviderExecuteResponse<TOutput>> {
-  const result = await post(fetcher, config, '/chat/completions', { model: request.externalModelId, messages: [{ role: 'user', content }], response_format: { type: 'json_schema', json_schema: { name, strict: true, schema } } }, request, 'image analysis request');
+  const result = await post(fetcher, config, '/chat/completions', { model: request.externalModelId, messages: [{ role: 'user', content }], max_tokens: 2_048, temperature: 0, response_format: { type: 'json_schema', json_schema: { name, strict: true, schema } } }, request, 'image analysis request');
   const raw = response(chatResponseSchema, await result.json().catch(() => undefined), 'image analysis');
   const text = raw.choices[0]!.message.content;
   if (!text) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter returned no image analysis text');

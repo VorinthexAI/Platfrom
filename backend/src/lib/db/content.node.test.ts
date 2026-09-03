@@ -109,6 +109,7 @@ describe('Content node contracts', () => {
 
   test('search and active-share queries allow roots and guard folder ownership', async () => {
     const searchSource = await Bun.file(new URL('./documents.node.ts', import.meta.url)).text();
+    const folderSource = await Bun.file(new URL('./folders.node.ts', import.meta.url)).text();
     const shareSource = await Bun.file(new URL('./document-shares.node.ts', import.meta.url)).text();
     expect(searchSource).toContain("const folderKeys = input.folderKeys?.length ? input.folderKeys : null");
     expect(searchSource.match(/folder == null \|\| folder.scopeKey == document.scopeKey/g)).toHaveLength(2);
@@ -117,6 +118,8 @@ describe('Content node contracts', () => {
     expect(searchSource).toContain('LET score = MAX(scores)');
     expect(searchSource.match(/input\.minScore \?\? -1/g)).toHaveLength(2);
     expect(searchSource).not.toContain('version.updatedAt');
+    expect(folderSource).toContain('folder.createdAt >= ${input.createdFrom ?? null}');
+    expect(folderSource).toContain('folder.createdAt <= ${input.createdTo ?? null}');
     expect(shareSource).toContain('document != null && document.scopeKey == share.scopeKey');
     expect(shareSource).toContain('folder == null || folder.scopeKey == share.scopeKey');
   });
