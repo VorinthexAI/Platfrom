@@ -21,7 +21,7 @@ export const MAX_IMAGE_PIXELS = 100_000_000;
 const formats = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' } as const;
 type Extension = keyof typeof formats;
 export type UploadedImageFile = File | { filename: string; mimeType: string; sizeBytes: number; bytes: Uint8Array };
-export interface ProcessImageInput { scopeKey: string; ownerKey: string; origin: z.infer<typeof imageOriginSchema>; file: UploadedImageFile; imageKey?: string; idempotencyKey?: string; location?: ImageLocation; mutationPolicy?: 'user' | 'system-only'; signal?: AbortSignal; }
+export interface ProcessImageInput { scopeKey: string; ownerKey: string; origin: z.infer<typeof imageOriginSchema>; file: UploadedImageFile; imageKey?: string; idempotencyKey?: string; fallbackCaption?: string; location?: ImageLocation; mutationPolicy?: 'user' | 'system-only'; signal?: AbortSignal; }
 export const generatedImageCaptionSchema = z.object({ caption: z.string().trim().min(1).max(20_000), score: z.number().int().min(1).max(100) }).strict();
 export type GeneratedImageCaption = z.infer<typeof generatedImageCaptionSchema>;
 export interface ImageProcessingMetrics { count: number; generated: number; reused: number; hashDurationMs: number; captionDurationMs: number; durationMs: number; }
@@ -181,7 +181,7 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, perceptu
       embedding = canonical.embedding;
     } else {
       let generated: GeneratedImageCaption;
-      try { generated = prepared?.generated ?? generatedImageCaptionSchema.parse(await (dependencies.caption ? dependencies.caption({ filename: image.filename, mimeType: image.mimeType, bytes: image.bytes, signal: input.signal }) : captionImageWithVertex(input.scopeKey, { filename: image.filename, mimeType: image.mimeType, bytes: image.bytes, signal: input.signal }))); } catch (error) { throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption and score could not be generated.', { cause: error }); }
+      try { generated = prepared?.generated ?? generatedImageCaptionSchema.parse(await (dependencies.caption ? dependencies.caption({ filename: image.filename, mimeType: image.mimeType, bytes: image.bytes, signal: input.signal }) : captionImageWithVertex(input.scopeKey, { filename: image.filename, mimeType: image.mimeType, bytes: image.bytes, signal: input.signal }))); } catch (error) { if (!input.fallbackCaption) throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption and score could not be generated.', { cause: error }); generated = generatedImageCaptionSchema.parse({ caption: input.fallbackCaption, score: 50 }); }
       await heartbeat.checkpoint();
       caption = generated.caption;
       if (!caption) throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption must not be blank.');
@@ -288,7 +288,9 @@ export async function processImages(inputs: readonly ProcessImageInput[], depend
         ? (await dependencies.captionBatch(captionInputs)).map((result) => generatedImageCaptionSchema.parse(result))
         : await Promise.all(captionInputs.map((value, position) => (dependencies.caption ? dependencies.caption(value) : captionImageWithVertex(inputs[representatives[position]!.index]!.scopeKey, value)).then((result) => generatedImageCaptionSchema.parse(result))));
     } catch (error) {
-      throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption batch could not be generated.', { cause: error });
+      const fallbacks = representatives.map(({ index }) => inputs[index]!.fallbackCaption);
+      if (fallbacks.some((caption) => !caption)) throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption batch could not be generated.', { cause: error });
+      generatedCaptions = fallbacks.map((caption) => generatedImageCaptionSchema.parse({ caption, score: 50 }));
     }
     if (generatedCaptions.length !== captionInputs.length) throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption batch returned the wrong number of results.');
   }

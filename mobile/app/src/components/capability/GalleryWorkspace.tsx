@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
 import { PersistentCoreComposer as CoreComposer } from "@/components/PersistentCoreComposer";
+import { ProfileHeaderRight } from "@/components/ProfileAvatarButton";
 import { PullToRefresh } from "@vorinthex/shared/ui/pull-to-refresh";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Switch } from "@vorinthex/shared/ui/switch";
@@ -27,7 +28,7 @@ import { GalleryMemories } from "@/components/capability/GalleryMemories";
 import { GalleryImageGeneration } from "@/components/capability/GalleryImageGeneration";
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { SearchHistorySheet } from "@/components/SearchHistorySheet";
-import { assistantIconSource, contentPresentationIconSource } from "@/data/capability-icons";
+import { assistantIconSource, capabilityIconSource, contentPresentationIconSource } from "@/data/capability-icons";
 import {
   askGalleryAssistant,
   createGalleryCollection,
@@ -66,6 +67,7 @@ import {
   type GallerySubject,
   type PreparedGalleryUpload,
 } from "@/lib/gallery-client";
+import { fitContainedMediaSize } from "@/lib/media-layout";
 import { filterByHiddenView, hideUserSource, isUserHidden, listUserHiddens, revealUserSource, type HiddenViewFilters, type UserHiddenRecord, type UserHiddenSource } from "@/lib/user-hidden-client";
 import { deleteContentSearchHistory, getContentContext, type ContentSearchHistoryItem } from "@/lib/content-client";
 import { contentQueryKeys } from "@/lib/content-query-cache";
@@ -96,8 +98,9 @@ const CLEANUP_THRESHOLDS = [10, 25, 50, 75, 90] as const;
 const DELETE_IMAGE_CHUNK_SIZE = 100;
 const collectionMembershipRole = (collection: GalleryCollection) => isGalleryCollectionOwned(collection) ? "owner" : collection.role === "owner" ? collection.access.canContribute ? "collaborator" : "viewer" : collection.role;
 const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
-const collectionHasCover = (collection: GalleryCollection) => Boolean(collection.presentation || collection.coverUrl);
+const collectionHasCover = (collection: GalleryCollection) => Boolean(collection.purpose === "generated-media" || collection.presentation || collection.coverUrl);
 function CollectionCover({ collection }: { collection: GalleryCollection }) {
+  if (collection.purpose === "generated-media") return <Image accessibilityLabel={`${collection.name} Core collection`} contentFit="contain" source={assistantIconSource} style={styles.managedCollectionLogo} />;
   if (collection.presentation) return <Image accessibilityLabel={`${collection.name} app collection`} contentFit="contain" source={contentPresentationIconSource[collection.presentation]} style={styles.managedCollectionLogo} />;
   return collection.coverUrl ? <Image contentFit="cover" source={collection.coverUrl} style={styles.collectionCover} /> : null;
 }
@@ -121,7 +124,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Gallery could not complete that request.";
 }
 
-export function GalleryWorkspace({ initialCollectionKey, initialImageKey, returnSignalConnectorKey, returnSignalMessageKey, returnSignalThreadKey, returnTripKey, returnTripName }: { initialCollectionKey?: string; initialImageKey?: string; returnSignalConnectorKey?: string; returnSignalMessageKey?: string; returnSignalThreadKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
+export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initialSearchQuery, returnSignalConnectorKey, returnSignalMessageKey, returnSignalThreadKey, returnTripKey, returnTripName }: { initialCollectionKey?: string; initialImageKey?: string; initialSearchQuery?: string; returnSignalConnectorKey?: string; returnSignalMessageKey?: string; returnSignalThreadKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -190,7 +193,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
   const [history, setHistory] = useState<ContentSearchHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [removingHistoryQuery, setRemovingHistoryQuery] = useState<string>();
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => initialSearchQuery?.slice(0, 500) ?? "");
   const [rootSearchQuery, setRootSearchQuery] = useState("");
   const [rootSearchResults, setRootSearchResults] = useState<GalleryCollection[]>();
   const [rootSearching, setRootSearching] = useState(false);
@@ -269,9 +272,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
   busyRef.current = busy;
   activeCollectionKey.current = activeCollection?.key;
   activeImageOrigin.current = imageOrigin;
-  visibleGalleryView.current = activeCollection
-    ? query.trim() ? "search" : "collection"
-    : activeSubject || showingSearchResults ? "contextual" : "root";
+  visibleGalleryView.current = activeCollection ? (query.trim() ? "search" : "collection") : activeSubject || showingSearchResults ? "contextual" : "root";
   refreshViewKey.current = JSON.stringify([activeCollection?.key, imageOrigin, visibleGalleryView.current, collectionTab, query.trim(), rootSearchQuery.trim(), activeSubject?.key, activeIdentityFilter?.key]);
 
   const contentWidth = width - spacing.md * 2;
@@ -281,14 +282,13 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
   const sheetImageSize = Math.floor((width - 42 - GRID_GAP * (IMAGE_COLUMNS - 1)) / IMAGE_COLUMNS);
   const collectionRole = activeCollection ? collectionMembershipRole(activeCollection) : undefined;
   const managedCollection = isManagedGalleryCollection(activeCollection);
+  const ownsCoreImage = (image: GalleryImage | undefined, collection: GalleryCollection | undefined) => Boolean(image && collection?.purpose === "generated-media" && image.origin === "generated" && image.createdByKey === collection.memberKey);
   const isCollectionOwner = Boolean(activeCollection && isGalleryCollectionOwned(activeCollection));
   const canAddImages = Boolean(activeCollection?.access?.canContribute && collectionRole !== "viewer");
   const memberKeys = [...new Set([getGalleryMemberKey(), ...collections.map(({ memberKey }) => memberKey)].filter(Boolean))];
-  const canMutateImage = (image: GalleryImage | undefined) => Boolean(image && !managedCollection && !isManagedGalleryImage(image) && (activeCollection
-    ? isCollectionOwner || collectionRole === "collaborator" && image.createdByKey === activeCollection.memberKey
-    : false));
-  const latestActiveCollection = () => activeCollection ? collections.find(({ key }) => key === activeCollection.key) : undefined;
-  const canMutateInCollection = (image: GalleryImage | undefined, collection: GalleryCollection | undefined) => Boolean(image && collection && !isManagedGalleryCollection(collection) && !isManagedGalleryImage(image) && (isGalleryCollectionOwned(collection) || collectionMembershipRole(collection) === "collaborator" && image.createdByKey === collection.memberKey));
+  const canMutateImage = (image: GalleryImage | undefined) => Boolean(ownsCoreImage(image, activeCollection) || (image && !managedCollection && !isManagedGalleryImage(image) && (activeCollection ? isCollectionOwner || (collectionRole === "collaborator" && image.createdByKey === activeCollection.memberKey) : false)));
+  const latestActiveCollection = () => (activeCollection ? collections.find(({ key }) => key === activeCollection.key) : undefined);
+  const canMutateInCollection = (image: GalleryImage | undefined, collection: GalleryCollection | undefined) => Boolean(ownsCoreImage(image, collection) || (image && collection && !isManagedGalleryCollection(collection) && !isManagedGalleryImage(image) && (isGalleryCollectionOwned(collection) || (collectionMembershipRole(collection) === "collaborator" && image.createdByKey === collection.memberKey))));
   const showOnlyFavorites = viewFilters.favoritesOnly;
   const showHidden = viewFilters.showHidden;
   const filtersActive = showOnlyFavorites || showHidden;
@@ -318,14 +318,16 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
   }
 
   function refreshCollectionSingletonAfterImageDeletion(generation: number) {
-    const refresh = collectionDeletionRefresh.current.catch(() => undefined).then(async () => {
-      if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.collections(galleryContext), exact: true, refetchType: "none" });
-      if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
-      const loaded = await loadCollectionSingleton(generation);
-      if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
-      setActiveCollection((current) => current ? loaded.find(({ key }) => key === current.key) ?? current : current);
-    });
+    const refresh = collectionDeletionRefresh.current
+      .catch(() => undefined)
+      .then(async () => {
+        if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
+        await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.collections(galleryContext), exact: true, refetchType: "none" });
+        if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
+        const loaded = await loadCollectionSingleton(generation);
+        if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
+        setActiveCollection((current) => (current ? (loaded.find(({ key }) => key === current.key) ?? current) : current));
+      });
     collectionDeletionRefresh.current = refresh;
     return refresh;
   }
@@ -375,8 +377,14 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     setGenerationOpen(false);
     setGenerationPlaceholders([]);
     setCameraOpen(false);
-    setPendingFiles((current) => { deletePreparedFiles(current); return []; });
-    setOptimisticMediaItems((current) => { deletePreparedFiles(current); return []; });
+    setPendingFiles((current) => {
+      deletePreparedFiles(current);
+      return [];
+    });
+    setOptimisticMediaItems((current) => {
+      deletePreparedFiles(current);
+      return [];
+    });
     setCollections([]);
     setRootSearchQuery("");
     setRootSearchResults(undefined);
@@ -407,7 +415,9 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     setLoading(true);
   }, [galleryContext.organizationKey, galleryContext.scopeKey]);
 
-  useEffect(() => { if (userHiddensQuery.data) setUserHiddens(userHiddensQuery.data); }, [userHiddensQuery.data]);
+  useEffect(() => {
+    if (userHiddensQuery.data) setUserHiddens(userHiddensQuery.data);
+  }, [userHiddensQuery.data]);
 
   useEffect(() => {
     if (!initialCollectionKey || initialCollectionOpened.current === initialCollectionKey) return;
@@ -417,12 +427,12 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     viewRequest.current += 1;
     setShowingCollectionOverview(false);
     setImageOrigin("uploaded");
-    setQuery("");
+    setQuery(initialSearchQuery?.slice(0, 500) ?? "");
     setSelectedImageKeys([]);
     setActiveSubject(undefined);
     setShowingSearchResults(false);
     setActiveCollection(collection);
-  }, [collections, initialCollectionKey]);
+  }, [collections, initialCollectionKey, initialSearchQuery]);
 
   useEffect(() => {
     if (!initialImageKey || initialImageOpened.current === initialImageKey || activeCollection?.key !== initialCollectionKey) return;
@@ -442,20 +452,24 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     initialImageLoading.current = routeKey;
     const request = ++initialImageRequest.current;
     const generation = refreshContextGeneration.current;
-    void queryClient.fetchQuery({
-      queryKey: galleryQueryKeys.image(galleryContext, initialCollectionKey, initialImageKey),
-      queryFn: () => searchGalleryImages({ imageKey: initialImageKey, ...(initialCollectionKey ? { collectionKey: initialCollectionKey } : {}) }),
-      staleTime: 0,
-    }).then(({ images: results }) => {
-      if (request !== initialImageRequest.current || generation !== refreshContextGeneration.current) return;
-      const image = results.find(({ key }) => key === initialImageKey);
-      if (image) openInitialImage(image);
-      else setStatus("This image is no longer available.");
-    }).catch((error: unknown) => {
-      if (request === initialImageRequest.current && generation === refreshContextGeneration.current) setStatus(errorMessage(error));
-    }).finally(() => {
-      if (request === initialImageRequest.current) initialImageLoading.current = undefined;
-    });
+    void queryClient
+      .fetchQuery({
+        queryKey: galleryQueryKeys.image(galleryContext, initialCollectionKey, initialImageKey),
+        queryFn: () => searchGalleryImages({ imageKey: initialImageKey, ...(initialCollectionKey ? { collectionKey: initialCollectionKey } : {}) }),
+        staleTime: 0,
+      })
+      .then(({ images: results }) => {
+        if (request !== initialImageRequest.current || generation !== refreshContextGeneration.current) return;
+        const image = results.find(({ key }) => key === initialImageKey);
+        if (image) openInitialImage(image);
+        else setStatus("This image is no longer available.");
+      })
+      .catch((error: unknown) => {
+        if (request === initialImageRequest.current && generation === refreshContextGeneration.current) setStatus(errorMessage(error));
+      })
+      .finally(() => {
+        if (request === initialImageRequest.current) initialImageLoading.current = undefined;
+      });
   }, [activeCollection?.key, images, initialCollectionKey, initialImageKey, queryClient]);
 
   const returnToTripAssets = returnTripKey ? () => router.replace({ pathname: "/capability/[slug]", params: { slug: "compass", tripKey: returnTripKey, openTripAssets: "1" } }) : undefined;
@@ -464,37 +478,32 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
   function setHiddenOptimistically(source: "collection" | "image", sourceKey: string, shouldHide: boolean, label: "Collection" | "Image") {
     const previous = userHiddens;
     const optimistic: UserHiddenRecord = { key: `optimistic-${source}-${sourceKey}`, userKey: "optimistic", source, sourceKey, createdAt: new Date().toISOString() };
-    const next = shouldHide
-      ? [...previous.filter((record) => record.source !== source || record.sourceKey !== sourceKey), optimistic]
-      : previous.filter((record) => record.source !== source || record.sourceKey !== sourceKey);
+    const next = shouldHide ? [...previous.filter((record) => record.source !== source || record.sourceKey !== sourceKey), optimistic] : previous.filter((record) => record.source !== source || record.sourceKey !== sourceKey);
     setUserHiddens(next);
     patchGalleryUserHiddens(queryClient, galleryContext, () => next);
     closeSheet();
     notify(`${label} ${shouldHide ? "hidden" : "revealed"}`);
-    void (shouldHide ? hideUserSource(source, sourceKey) : revealUserSource(source, sourceKey)).then((result) => {
-      if (shouldHide && result) {
-        setUserHiddens((current) => current.map((record) => record.key === optimistic.key ? result : record));
-        patchGalleryUserHiddens(queryClient, galleryContext, (current) => current.map((record) => record.key === optimistic.key ? result : record));
-      }
-    }).catch(() => {
-      setUserHiddens(previous);
-      patchGalleryUserHiddens(queryClient, galleryContext, () => previous);
-      notify(`${label} ${shouldHide ? "hide" : "reveal"} failed`);
-    }).finally(() => {
-      void Promise.all([
-        queryClient.invalidateQueries({ queryKey: galleryQueryKeys.userHiddens(galleryContext), exact: true }),
-        queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext), refetchType: "none" }),
-        queryClient.invalidateQueries({ queryKey: galleryQueryKeys.collections(galleryContext), exact: true, refetchType: "none" }),
-      ]);
-    });
+    void (shouldHide ? hideUserSource(source, sourceKey) : revealUserSource(source, sourceKey))
+      .then((result) => {
+        if (shouldHide && result) {
+          setUserHiddens((current) => current.map((record) => (record.key === optimistic.key ? result : record)));
+          patchGalleryUserHiddens(queryClient, galleryContext, (current) => current.map((record) => (record.key === optimistic.key ? result : record)));
+        }
+      })
+      .catch(() => {
+        setUserHiddens(previous);
+        patchGalleryUserHiddens(queryClient, galleryContext, () => previous);
+        notify(`${label} ${shouldHide ? "hide" : "reveal"} failed`);
+      })
+      .finally(() => {
+        void Promise.all([queryClient.invalidateQueries({ queryKey: galleryQueryKeys.userHiddens(galleryContext), exact: true }), queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext), refetchType: "none" }), queryClient.invalidateQueries({ queryKey: galleryQueryKeys.collections(galleryContext), exact: true, refetchType: "none" })]);
+      });
   }
 
   async function load(collection = activeCollection, silent = false, origin = imageOrigin) {
     const request = silent ? ++backgroundLoadRequest.current : ++viewRequest.current;
     const expectedView = visibleGalleryView.current;
-    const isCurrent = () => silent
-      ? request === backgroundLoadRequest.current && activeCollectionKey.current === collection?.key && (!collection || activeImageOrigin.current === origin) && visibleGalleryView.current === expectedView
-      : request === viewRequest.current && (!collection || activeImageOrigin.current === origin);
+    const isCurrent = () => (silent ? request === backgroundLoadRequest.current && activeCollectionKey.current === collection?.key && (!collection || activeImageOrigin.current === origin) && visibleGalleryView.current === expectedView : request === viewRequest.current && (!collection || activeImageOrigin.current === origin));
     if (!silent) setLoading(true);
     try {
       const overview = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, collection?.key, collection ? origin : undefined), queryFn: () => fetchGalleryOverview(collection?.key, undefined, 100, undefined, undefined, collection ? origin : undefined) });
@@ -535,16 +544,24 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     if (showingSearchResults || activeSubject) return;
     const request = ++viewRequest.current;
     const origin = imageOrigin;
-    void queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, activeCollection?.key, activeCollection ? origin : undefined), queryFn: () => fetchGalleryOverview(activeCollection?.key, undefined, 100, undefined, undefined, activeCollection ? origin : undefined) }).then((overview) => {
-      if (request !== viewRequest.current || activeCollection && activeImageOrigin.current !== origin) return;
-      applyCollectionSingleton(overview.collections);
-      setCanCreateCollections(overview.canCreateCollections);
-      setImages(overview.images);
-      if (activeCollection && origin === "uploaded") promoteAuthoritativeUploads(overview.images);
-      setNextCursor(overview.nextCursor);
-      setCollectionSearchResults(undefined);
-      setStatus(undefined);
-    }).catch((error: unknown) => { if (request === viewRequest.current && (!activeCollection || activeImageOrigin.current === origin)) setStatus(errorMessage(error)); }).finally(() => { if (request === viewRequest.current && (!activeCollection || activeImageOrigin.current === origin)) setLoading(false); });
+    void queryClient
+      .fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, activeCollection?.key, activeCollection ? origin : undefined), queryFn: () => fetchGalleryOverview(activeCollection?.key, undefined, 100, undefined, undefined, activeCollection ? origin : undefined) })
+      .then((overview) => {
+        if (request !== viewRequest.current || (activeCollection && activeImageOrigin.current !== origin)) return;
+        applyCollectionSingleton(overview.collections);
+        setCanCreateCollections(overview.canCreateCollections);
+        setImages(overview.images);
+        if (activeCollection && origin === "uploaded") promoteAuthoritativeUploads(overview.images);
+        setNextCursor(overview.nextCursor);
+        setCollectionSearchResults(undefined);
+        setStatus(undefined);
+      })
+      .catch((error: unknown) => {
+        if (request === viewRequest.current && (!activeCollection || activeImageOrigin.current === origin)) setStatus(errorMessage(error));
+      })
+      .finally(() => {
+        if (request === viewRequest.current && (!activeCollection || activeImageOrigin.current === origin)) setLoading(false);
+      });
   }, [activeCollection?.key, activeSubject?.key, showingSearchResults, galleryContext.organizationKey, galleryContext.scopeKey, imageOrigin, queryClient]);
 
   function scheduleGalleryRefresh(plan: GalleryRefreshPlan) {
@@ -566,9 +583,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
 
   function invalidateCleanupLoad(clearImages = true) {
     const collectionKey = cleanupCollectionKeyRef.current;
-    const invalidation = collectionKey
-      ? queryClient.invalidateQueries({ queryKey: galleryQueryKeys.cleanups(galleryContext, collectionKey), refetchType: "none" })
-      : Promise.resolve();
+    const invalidation = collectionKey ? queryClient.invalidateQueries({ queryKey: galleryQueryKeys.cleanups(galleryContext, collectionKey), refetchType: "none" }) : Promise.resolve();
     cleanupRequest.current += 1;
     cleanupCursorRef.current = null;
     cleanupLoadingRef.current = false;
@@ -582,18 +597,27 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     return invalidation;
   }
 
-  useEffect(() => subscribeAppEvent((event) => {
-    if (event.type === "inbox.changed" || event.type === "conversation.changed") return;
-    const plan = galleryRefreshPlan(event.type === "event-stream.connected" ? "reconnect" : event.slug);
-    if (!busyRef.current && (plan.has("access") || plan.has("cleanup")) && (activeSheetRef.current === "cleanup" || activeSheetRef.current === "confirmCleanupDelete")) invalidateCleanupLoad();
-    scheduleGalleryRefresh(plan);
-  }), []);
+  useEffect(
+    () =>
+      subscribeAppEvent((event) => {
+        if (event.type === "inbox.changed" || event.type === "conversation.changed") return;
+        const plan = galleryRefreshPlan(event.type === "event-stream.connected" ? "reconnect" : event.slug);
+        if (!busyRef.current && (plan.has("access") || plan.has("cleanup")) && (activeSheetRef.current === "cleanup" || activeSheetRef.current === "confirmCleanupDelete")) invalidateCleanupLoad();
+        scheduleGalleryRefresh(plan);
+      }),
+    [],
+  );
 
   useEffect(() => {
     if (!busy && refreshCoalescer.current.hasPending) scheduleGalleryRefresh(new Set());
   }, [busy]);
 
-  useEffect(() => () => { if (refreshTimer.current) clearTimeout(refreshTimer.current); }, []);
+  useEffect(
+    () => () => {
+      if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    },
+    [],
+  );
 
   async function loadMoreImages() {
     if (!activeCollection || !nextCursor || loading || loadingMore || query.trim()) return;
@@ -608,10 +632,14 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       setCanCreateCollections(page.canCreateCollections);
       setImages((current) => appendCursorItems(current, page.images, ({ key }) => key));
       setNextCursor(page.nextCursor);
-      queryClient.setQueryData<GalleryOverview>(galleryQueryKeys.overview(galleryContext, collectionKey, origin), (current) => current ? {
-        ...page,
-        images: appendCursorItems(current.images, page.images, ({ key }) => key),
-      } : page);
+      queryClient.setQueryData<GalleryOverview>(galleryQueryKeys.overview(galleryContext, collectionKey, origin), (current) =>
+        current
+          ? {
+              ...page,
+              images: appendCursorItems(current.images, page.images, ({ key }) => key),
+            }
+          : page,
+      );
     } catch (error) {
       setStatus(errorMessage(error));
     } finally {
@@ -632,15 +660,10 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       if (activeCollectionKey.current === input.collectionKey) {
         viewRequest.current += 1;
         setImageOrigin("generated");
-        setImages((current) => activeImageOrigin.current === "generated" ? prependGeneratedGalleryImages(current, generated) : generated);
+        setImages((current) => (activeImageOrigin.current === "generated" ? prependGeneratedGalleryImages(current, generated) : generated));
         setNextCursor(null);
       }
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overview(galleryContext, input.collectionKey, "generated"), exact: true }),
-        queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overview(galleryContext), exact: true, refetchType: "none" }),
-        queryClient.invalidateQueries({ queryKey: galleryQueryKeys.collections(galleryContext), exact: true, refetchType: "none" }),
-        queryClient.invalidateQueries({ queryKey: galleryGenerationHistoryQueryKey(galleryContext), exact: true, refetchType: "none" }),
-      ]);
+      await Promise.all([queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overview(galleryContext, input.collectionKey, "generated"), exact: true }), queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overview(galleryContext), exact: true, refetchType: "none" }), queryClient.invalidateQueries({ queryKey: galleryQueryKeys.collections(galleryContext), exact: true, refetchType: "none" }), queryClient.invalidateQueries({ queryKey: galleryGenerationHistoryQueryKey(galleryContext), exact: true, refetchType: "none" })]);
       if (activeCollectionKey.current === input.collectionKey) void load(activeCollection, true, "generated");
     } catch (error) {
       if (isCurrentContextGeneration(generation, refreshContextGeneration.current)) {
@@ -670,10 +693,11 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     setIdentitiesLoading(true);
     try {
       const loaded = (await listGallerySubjects()).subjects;
-      if (request === subjectsRequest.current) setSubjects((current) => {
-        const pending = current.filter(({ key }) => key.startsWith("optimistic-"));
-        return [...pending, ...loaded.filter(({ key }) => !deletedIdentityKeys.current.has(key) && !pending.some((identity) => identity.key === key))];
-      });
+      if (request === subjectsRequest.current)
+        setSubjects((current) => {
+          const pending = current.filter(({ key }) => key.startsWith("optimistic-"));
+          return [...pending, ...loaded.filter(({ key }) => !deletedIdentityKeys.current.has(key) && !pending.some((identity) => identity.key === key))];
+        });
       if (request === subjectsRequest.current) setIdentityError(undefined);
     } catch (error) {
       if (!silent && request === subjectsRequest.current) setStatus(errorMessage(error));
@@ -683,7 +707,9 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
   }
 
   useEffect(() => {
-    const timer = setTimeout(() => { void loadSubjects(); }, 0);
+    const timer = setTimeout(() => {
+      void loadSubjects();
+    }, 0);
     return () => clearTimeout(timer);
   }, []);
 
@@ -693,7 +719,9 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     if (activeSubject || !value) {
       return;
     }
-    searchTimer.current = setTimeout(() => { void search(value, activeCollection); }, 300);
+    searchTimer.current = setTimeout(() => {
+      void search(value, activeCollection);
+    }, 300);
     return () => {
       if (searchTimer.current) clearTimeout(searchTimer.current);
     };
@@ -713,13 +741,16 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     const timeout = setTimeout(() => {
       setRootSearching(true);
       setStatus(undefined);
-      void searchGalleryCollections(normalized, false, controller.signal).then(({ collections: matches }) => {
-        if (!controller.signal.aborted) setRootSearchResults(matches);
-      }).catch((cause) => {
-        if (!controller.signal.aborted) setStatus(errorMessage(cause));
-      }).finally(() => {
-        if (!controller.signal.aborted) setRootSearching(false);
-      });
+      void searchGalleryCollections(normalized, false, controller.signal)
+        .then(({ collections: matches }) => {
+          if (!controller.signal.aborted) setRootSearchResults(matches);
+        })
+        .catch((cause) => {
+          if (!controller.signal.aborted) setStatus(errorMessage(cause));
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setRootSearching(false);
+        });
     }, 300);
     const historyTimeout = setTimeout(() => {
       void searchGalleryCollections(normalized, true, controller.signal).catch(() => undefined);
@@ -731,14 +762,20 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     };
   }, [rootSearchQuery]);
 
-  useEffect(() => () => {
-    if (identityPickerSearchTimer.current) clearTimeout(identityPickerSearchTimer.current);
-    if (identityPickerHistoryTimer.current) clearTimeout(identityPickerHistoryTimer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (identityPickerSearchTimer.current) clearTimeout(identityPickerSearchTimer.current);
+      if (identityPickerHistoryTimer.current) clearTimeout(identityPickerHistoryTimer.current);
+    },
+    [],
+  );
 
-  useEffect(() => () => {
-    if (searchFocusReleaseTimer.current) clearTimeout(searchFocusReleaseTimer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (searchFocusReleaseTimer.current) clearTimeout(searchFocusReleaseTimer.current);
+    },
+    [],
+  );
 
   function handleCoreFocusChange(focused: boolean) {
     if (searchFocusReleaseTimer.current) clearTimeout(searchFocusReleaseTimer.current);
@@ -827,9 +864,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       getKey: ({ key }: GalleryImage) => key,
       isCurrent,
       fetchPage: async (cursor?: string) => {
-        const page = cursor
-          ? await fetchGalleryOverview(collectionKey, cursor, 100, undefined, undefined, origin)
-          : await queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, collectionKey, origin), queryFn: () => fetchGalleryOverview(collectionKey, undefined, 100, undefined, undefined, origin), staleTime: 0 });
+        const page = cursor ? await fetchGalleryOverview(collectionKey, cursor, 100, undefined, undefined, origin) : await queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, collectionKey, origin), queryFn: () => fetchGalleryOverview(collectionKey, undefined, 100, undefined, undefined, origin), staleTime: 0 });
         return { page, items: page.images, nextCursor: page.nextCursor };
       },
     });
@@ -880,7 +915,10 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     const uploadCollection = activeCollection?.key === collectionKey ? activeCollection : undefined;
     const uploadView = uploadCollection ? "collection" : "root";
     const result = await uploadGalleryImages(files, collectionKey);
-    if (!isCurrent()) { deletePreparedFiles(files); return; }
+    if (!isCurrent()) {
+      deletePreparedFiles(files);
+      return;
+    }
     setPendingFiles([]);
     const uploadKeys = result.jobs.map(({ key }) => key);
     const jobsByKey = new Map(result.jobs.map((job) => [job.key, job]));
@@ -891,26 +929,29 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     settleUploadJobs(result.jobs, generation);
     if (optimisticBatchKey) {
       const imageKeysByClientKey = new Map(result.jobs.map(({ clientKey, imageKey }) => [clientKey, imageKey]));
-      setOptimisticMediaItems((currentItems) => currentItems.map((item) => item.batchKey === optimisticBatchKey
-        ? { ...item, imageKey: imageKeysByClientKey.get(item.clientKey) }
-        : item));
+      setOptimisticMediaItems((currentItems) => currentItems.map((item) => (item.batchKey === optimisticBatchKey ? { ...item, imageKey: imageKeysByClientKey.get(item.clientKey) } : item)));
       if (selectedOptimisticItemRef.current?.batchKey === optimisticBatchKey) {
         const selected = selectedOptimisticItemRef.current;
         const updated = { ...selected, imageKey: imageKeysByClientKey.get(selected.clientKey) };
         selectedOptimisticItemRef.current = updated;
         setSelectedOptimisticItem(updated);
-        setSelectedImage((current) => current?.key === selected.clientKey && updated.imageKey ? { ...current, key: updated.imageKey } : current);
+        setSelectedImage((current) => (current?.key === selected.clientKey && updated.imageKey ? { ...current, key: updated.imageKey } : current));
       }
     }
-    await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => { if (isCurrent()) setStatus(errorMessage(error)); });
-    if (!isCurrent()) { deletePreparedFiles(files); return; }
+    await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => {
+      if (isCurrent()) setStatus(errorMessage(error));
+    });
+    if (!isCurrent()) {
+      deletePreparedFiles(files);
+      return;
+    }
     void (async () => {
       const settledKeys = new Set<string>();
       const failedKeys = new Set<string>();
       let allSettled = false;
       const refreshVisibleOverview = async () => {
         if (!isCurrent()) return { attempted: false, overview: undefined };
-        if (activeCollectionKey.current === uploadLocation && visibleGalleryView.current === uploadView || !activeCollectionKey.current && visibleGalleryView.current === "root") {
+        if ((activeCollectionKey.current === uploadLocation && visibleGalleryView.current === uploadView) || (!activeCollectionKey.current && visibleGalleryView.current === "root")) {
           const targetCount = uploadCollection ? images.length : images.length;
           const overview = await replayOverviewWindow(uploadCollection?.key, targetCount, generation);
           if (!overview || !isCurrent()) return { attempted: false, overview: undefined };
@@ -924,30 +965,45 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       };
       for (let attempt = 0; attempt < 40; attempt += 1) {
         await wait(3_000);
-        if (!isCurrent()) { deletePreparedFiles(files); return; }
+        if (!isCurrent()) {
+          deletePreparedFiles(files);
+          return;
+        }
         try {
           const current = await fetchGalleryUploadStatus(uploadKeys, 5_000);
-          if (!isCurrent()) { deletePreparedFiles(files); return; }
+          if (!isCurrent()) {
+            deletePreparedFiles(files);
+            return;
+          }
           settleUploadJobs(current.jobs, generation);
           const terminalJobs = current.jobs.filter(({ key, status: jobStatus }) => !settledKeys.has(key) && (jobStatus === "completed" || jobStatus === "failed"));
           if (terminalJobs.length > 0) {
             for (const job of terminalJobs) if (job.status === "failed") failedKeys.add(job.key);
             await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
-            if (!isCurrent()) { deletePreparedFiles(files); return; }
+            if (!isCurrent()) {
+              deletePreparedFiles(files);
+              return;
+            }
             const refresh = await refreshVisibleOverview();
             if (optimisticBatchKey) {
               const visibleOverview: GalleryOverview | undefined = refresh.overview && typeof refresh.overview !== "boolean" ? refresh.overview : undefined;
-              const targetOverview: GalleryOverview | undefined = uploadCollection && visibleOverview
-                ? visibleOverview
-                : await replayOverviewWindow(collectionKey, queryClient.getQueryData<GalleryOverview>(galleryQueryKeys.overview(galleryContext, collectionKey))?.images.length ?? files.length, generation).catch(() => undefined);
-              if (!isCurrent()) { deletePreparedFiles(files); return; }
+              const targetOverview: GalleryOverview | undefined = uploadCollection && visibleOverview ? visibleOverview : await replayOverviewWindow(collectionKey, queryClient.getQueryData<GalleryOverview>(galleryQueryKeys.overview(galleryContext, collectionKey))?.images.length ?? files.length, generation).catch(() => undefined);
+              if (!isCurrent()) {
+                deletePreparedFiles(files);
+                return;
+              }
               const persistedByKey = new Map(targetOverview?.images.map((image) => [image.key, image]));
               const persistedJobs = terminalJobs.filter(({ imageKey, status: jobStatus }) => jobStatus === "failed" || (jobStatus === "completed" && persistedByKey.has(imageKey)));
-              const prefetchResults = await Promise.allSettled(persistedJobs.map(({ imageKey, status: jobStatus }) => {
-                const image = jobStatus === "completed" ? persistedByKey.get(imageKey) : undefined;
-                return image ? Image.prefetch(image.url) : Promise.resolve(true);
-              }));
-              if (!isCurrent()) { deletePreparedFiles(files); return; }
+              const prefetchResults = await Promise.allSettled(
+                persistedJobs.map(({ imageKey, status: jobStatus }) => {
+                  const image = jobStatus === "completed" ? persistedByKey.get(imageKey) : undefined;
+                  return image ? Image.prefetch(image.url) : Promise.resolve(true);
+                }),
+              );
+              if (!isCurrent()) {
+                deletePreparedFiles(files);
+                return;
+              }
               const readyJobs = persistedJobs.filter((_, index) => prefetchResults[index]?.status === "fulfilled");
               for (const job of readyJobs) settledKeys.add(job.key);
               const readyClientKeys = new Set(readyJobs.map(({ key }) => jobsByKey.get(key)?.clientKey).filter((key): key is string => Boolean(key)));
@@ -967,8 +1023,13 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
           if (allSettled) break;
         } catch {}
       }
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => { if (isCurrent()) setStatus(errorMessage(error)); });
-      if (!isCurrent()) { deletePreparedFiles(files); return; }
+      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => {
+        if (isCurrent()) setStatus(errorMessage(error));
+      });
+      if (!isCurrent()) {
+        deletePreparedFiles(files);
+        return;
+      }
       await refreshVisibleOverview();
       if (isCurrent()) await loadSubjects(true);
       if (failedKeys.size > 0) notify(failedKeys.size === uploadKeys.length ? "Upload failed" : "Some uploads failed");
@@ -983,42 +1044,63 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     closeSheet();
     setStatus(undefined);
     try {
-      const files = await Promise.all(assets.slice(0, 20).map(async (asset, index) => {
-        const output = await normalizeCapturedPng(asset, { maxSide: 2400, compress: 0.88 });
-        return {
-          clientKey: `${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`,
-          filename: `gallery-${Date.now()}-${index + 1}.png`,
-          uri: output.uri,
-          sizeBytes: output.sizeBytes,
-          ...(output.latitude !== undefined && output.longitude !== undefined ? { latitude: output.latitude, longitude: output.longitude } : {}),
-        };
-      }));
-      if (!isCurrent()) { deletePreparedFiles(files); return; }
+      const files = await Promise.all(
+        assets.slice(0, 20).map(async (asset, index) => {
+          const output = await normalizeCapturedPng(asset, { maxSide: 2400, compress: 0.88 });
+          return {
+            clientKey: `${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`,
+            filename: `gallery-${Date.now()}-${index + 1}.png`,
+            uri: output.uri,
+            sizeBytes: output.sizeBytes,
+            ...(output.latitude !== undefined && output.longitude !== undefined ? { latitude: output.latitude, longitude: output.longitude } : {}),
+          };
+        }),
+      );
+      if (!isCurrent()) {
+        deletePreparedFiles(files);
+        return;
+      }
       if (activeCollection) {
         const targetCollection = latestActiveCollection();
-        if (!targetCollection?.access?.canContribute || targetCollection.role === "viewer") { deletePreparedFiles(files); return; }
+        if (!targetCollection?.access?.canContribute || targetCollection.role === "viewer") {
+          deletePreparedFiles(files);
+          return;
+        }
         clearCollectionSearch(false);
         const batchKey = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const createdAt = new Date().toISOString();
         setOptimisticMediaItems((current) => [...files.map((file) => ({ ...file, batchKey, collectionKey: targetCollection.key, createdAt })), ...current]);
-        updateCollectionSingleton((current) => current.map((collection) => collection.key === targetCollection.key ? { ...collection, count: collection.count + files.length } : collection));
-        setActiveCollection((current) => current?.key === targetCollection.key ? { ...current, count: current.count + files.length } : current);
-        void completeUpload(files, targetCollection.key, batchKey, generation).then(() => { if (isCurrent()) notify("Upload started"); }).catch(() => {
-          if (!isCurrent()) { deletePreparedFiles(files); return; }
-          setOptimisticMediaItems((current) => current.filter((item) => item.batchKey !== batchKey));
-          updateCollectionSingleton((current) => current.map((collection) => collection.key === targetCollection.key ? { ...collection, count: Math.max(0, collection.count - files.length) } : collection));
-          setActiveCollection((current) => current?.key === targetCollection.key ? { ...current, count: Math.max(0, current.count - files.length) } : current);
-          deletePreparedFiles(files);
-          notify("Upload failed");
-        });
+        updateCollectionSingleton((current) => current.map((collection) => (collection.key === targetCollection.key ? { ...collection, count: collection.count + files.length } : collection)));
+        setActiveCollection((current) => (current?.key === targetCollection.key ? { ...current, count: current.count + files.length } : current));
+        void completeUpload(files, targetCollection.key, batchKey, generation)
+          .then(() => {
+            if (isCurrent()) notify("Upload started");
+          })
+          .catch(() => {
+            if (!isCurrent()) {
+              deletePreparedFiles(files);
+              return;
+            }
+            setOptimisticMediaItems((current) => current.filter((item) => item.batchKey !== batchKey));
+            updateCollectionSingleton((current) => current.map((collection) => (collection.key === targetCollection.key ? { ...collection, count: Math.max(0, collection.count - files.length) } : collection)));
+            setActiveCollection((current) => (current?.key === targetCollection.key ? { ...current, count: Math.max(0, current.count - files.length) } : current));
+            deletePreparedFiles(files);
+            notify("Upload failed");
+          });
         closeSheet();
       } else {
-        if (!isCurrent()) { deletePreparedFiles(files); return; }
+        if (!isCurrent()) {
+          deletePreparedFiles(files);
+          return;
+        }
         setPendingFiles(files);
         openSheet("destination");
       }
     } catch {
-      if (isCurrent()) { setPendingFiles([]); notify("Upload preparation failed"); }
+      if (isCurrent()) {
+        setPendingFiles([]);
+        notify("Upload preparation failed");
+      }
     } finally {
       if (isCurrent()) setBusy(false);
     }
@@ -1031,7 +1113,10 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     if (activeCollection && (!target?.access?.canContribute || target.role === "viewer")) return;
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!isCurrent()) return;
-    if (!permission.granted) { closeSheet(); return; }
+    if (!permission.granted) {
+      closeSheet();
+      return;
+    }
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: true, selectionLimit: 20, quality: 1, exif: true });
     if (!isCurrent()) return;
     if (!result.canceled) await prepareAssets(result.assets, generation);
@@ -1050,22 +1135,32 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     const isCurrent = () => isCurrentContextGeneration(generation, refreshContextGeneration.current);
     const targetCollection = latestActiveCollection();
     setCameraOpen(false);
-    if (!isCurrent() || !targetCollection || !targetCollection.access?.canContribute || targetCollection.role === "viewer" || files.length === 0) { deletePreparedFiles(files); return; }
+    if (!isCurrent() || !targetCollection || !targetCollection.access?.canContribute || targetCollection.role === "viewer" || files.length === 0) {
+      deletePreparedFiles(files);
+      return;
+    }
     clearCollectionSearch(false);
     const batchKey = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const createdAt = new Date().toISOString();
     setOptimisticMediaItems((current) => [...files.map((file) => ({ ...file, batchKey, collectionKey: targetCollection.key, createdAt })), ...current]);
-    updateCollectionSingleton((current) => current.map((collection) => collection.key === targetCollection.key ? { ...collection, count: collection.count + files.length } : collection));
-    setActiveCollection((current) => current?.key === targetCollection.key ? { ...current, count: current.count + files.length } : current);
+    updateCollectionSingleton((current) => current.map((collection) => (collection.key === targetCollection.key ? { ...collection, count: collection.count + files.length } : collection)));
+    setActiveCollection((current) => (current?.key === targetCollection.key ? { ...current, count: current.count + files.length } : current));
     void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext), refetchType: "none" });
-    void completeUpload(files, targetCollection.key, batchKey, generation).then(() => { if (isCurrent()) notify("Upload started"); }).catch(() => {
-      if (!isCurrent()) { deletePreparedFiles(files); return; }
-      setOptimisticMediaItems((current) => current.filter((item) => item.batchKey !== batchKey));
-      updateCollectionSingleton((current) => current.map((collection) => collection.key === targetCollection.key ? { ...collection, count: Math.max(0, collection.count - files.length) } : collection));
-      setActiveCollection((current) => current?.key === targetCollection.key ? { ...current, count: Math.max(0, current.count - files.length) } : current);
-      deletePreparedFiles(files);
-      notify("Upload failed");
-    });
+    void completeUpload(files, targetCollection.key, batchKey, generation)
+      .then(() => {
+        if (isCurrent()) notify("Upload started");
+      })
+      .catch(() => {
+        if (!isCurrent()) {
+          deletePreparedFiles(files);
+          return;
+        }
+        setOptimisticMediaItems((current) => current.filter((item) => item.batchKey !== batchKey));
+        updateCollectionSingleton((current) => current.map((collection) => (collection.key === targetCollection.key ? { ...collection, count: Math.max(0, collection.count - files.length) } : collection)));
+        setActiveCollection((current) => (current?.key === targetCollection.key ? { ...current, count: Math.max(0, current.count - files.length) } : current));
+        deletePreparedFiles(files);
+        notify("Upload failed");
+      });
   }
 
   async function uploadTo(collectionKey: string, showFeedback = true, collectionOverride?: GalleryCollection) {
@@ -1074,11 +1169,16 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     const isCurrent = () => isCurrentContextGeneration(generation, refreshContextGeneration.current);
     const files = [...pendingFiles];
     const targetCollection = collectionOverride ?? collections.find(({ key }) => key === collectionKey);
-    if (!targetCollection?.access?.canContribute || targetCollection.role === "viewer") { deletePreparedFiles(files); setPendingFiles([]); closeSheet(); return; }
+    if (!targetCollection?.access?.canContribute || targetCollection.role === "viewer") {
+      deletePreparedFiles(files);
+      setPendingFiles([]);
+      closeSheet();
+      return;
+    }
     const batchKey = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const createdAt = new Date().toISOString();
     setOptimisticMediaItems((current) => [...files.map((file) => ({ ...file, batchKey, collectionKey, createdAt })), ...current]);
-    if (targetCollection) updateCollectionSingleton((current) => current.map((collection) => collection.key === collectionKey ? { ...collection, count: collection.count + files.length, coverUrl: collection.coverUrl ?? files[0]?.uri ?? null } : collection));
+    if (targetCollection) updateCollectionSingleton((current) => current.map((collection) => (collection.key === collectionKey ? { ...collection, count: collection.count + files.length, coverUrl: collection.coverUrl ?? files[0]?.uri ?? null } : collection)));
     setBusy(true);
     closeSheet();
     try {
@@ -1087,14 +1187,24 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       if (showFeedback) notify("Upload started");
       return true;
     } catch {
-      if (!isCurrent()) { deletePreparedFiles(files); return; }
+      if (!isCurrent()) {
+        deletePreparedFiles(files);
+        return;
+      }
       setOptimisticMediaItems((current) => current.filter((item) => item.batchKey !== batchKey));
       deletePreparedFiles(files);
-      if (targetCollection) updateCollectionSingleton((current) => current.map((collection) => collection.key === collectionKey ? {
-        ...collection,
-        count: Math.max(0, collection.count - files.length),
-        coverUrl: collection.coverUrl === files[0]?.uri ? targetCollection.coverUrl : collection.coverUrl,
-      } : collection));
+      if (targetCollection)
+        updateCollectionSingleton((current) =>
+          current.map((collection) =>
+            collection.key === collectionKey
+              ? {
+                  ...collection,
+                  count: Math.max(0, collection.count - files.length),
+                  coverUrl: collection.coverUrl === files[0]?.uri ? targetCollection.coverUrl : collection.coverUrl,
+                }
+              : collection,
+          ),
+        );
       if (showFeedback) notify("Upload failed");
       return false;
     } finally {
@@ -1111,7 +1221,9 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     setBusy(true);
     try {
       const collection = await createGalleryCollection(name, false);
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => { if (isCurrent()) setStatus(errorMessage(error)); });
+      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => {
+        if (isCurrent()) setStatus(errorMessage(error));
+      });
       if (!isCurrent()) return;
       updateCollectionSingleton((current) => [...current, collection]);
       setNewCollectionName("");
@@ -1120,10 +1232,15 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
         notify(uploadStarted ? "Collection created and upload started" : "Upload failed; collection created");
       } else {
         notify("Collection created");
-        closeSheet(); setBusy(false); await load();
+        closeSheet();
+        setBusy(false);
+        await load();
       }
     } catch (error) {
-      if (isCurrent()) { setStatus(errorMessage(error)); notify("Collection creation failed"); }
+      if (isCurrent()) {
+        setStatus(errorMessage(error));
+        notify("Collection creation failed");
+      }
     } finally {
       if (isCurrent()) setBusy(false);
     }
@@ -1144,8 +1261,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
 
   async function search(value = query.trim(), collection = activeCollection) {
     if (!value) return;
-    const origin = collection ? imageOrigin : undefined;
-    const searchKey = `${collection?.key ?? "root"}:${origin ?? "all"}:${value.toLocaleLowerCase()}`;
+    const searchKey = `${collection?.key ?? "root"}:${value.toLocaleLowerCase()}`;
     if (activeSearch.current === searchKey) return;
     activeSearch.current = searchKey;
     const request = ++searchRequest.current;
@@ -1155,7 +1271,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       const expectedView = collection ? "search" : "root";
       if (request !== searchRequest.current || activeCollectionKey.current !== collection?.key || visibleGalleryView.current !== expectedView) return;
       setSelectedImageKeys([]);
-      setCollectionSearchResults(origin ? result.images.filter((image) => image.origin === origin) : result.images);
+      setCollectionSearchResults(result.images);
       setStatus(undefined);
     } catch {
       const expectedView = collection ? "search" : "root";
@@ -1179,7 +1295,9 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     setStatus(undefined);
     if (refresh && activeCollection) {
       const collection = activeCollection;
-      setTimeout(() => { void load(collection, true); }, 0);
+      setTimeout(() => {
+        void load(collection, true);
+      }, 0);
     }
   }
 
@@ -1209,8 +1327,13 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     const promoted = promoteCachedUserSearchHistory(queryClient, contentContext, item);
     setHistory((current) => [promoted, ...current.filter(({ normalizedQuery }) => normalizedQuery !== item.normalizedQuery)]);
     if (historyTarget.current === "identityPicker") returnToIdentityPicker(item.query);
-    else if (historyTarget.current === "root") { closeSheet(); setRootSearchQuery(item.query); }
-    else { closeSheet(); updateCollectionSearch(item.query); }
+    else if (historyTarget.current === "root") {
+      closeSheet();
+      setRootSearchQuery(item.query);
+    } else {
+      closeSheet();
+      updateCollectionSearch(item.query);
+    }
   }
 
   async function removeHistoryQuery(item: ContentSearchHistoryItem) {
@@ -1286,12 +1409,13 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       await queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "none" }).catch(() => undefined);
       const result = await searchGalleryImages({ imageKey: source.key, collectionKey: collection.key, limit: 50 });
       if (!isCurrent()) return;
-      await Promise.allSettled(result.images.map(({ url }) => Image.prefetch(url)));
+      const matches = result.images.filter(({ key }) => key !== source.key);
+      await Promise.allSettled(matches.map(({ url }) => Image.prefetch(url)));
       if (!isCurrent()) return;
       await wait(Math.max(0, 300 - (Date.now() - loadingStartedAt)));
       if (!isCurrent()) return;
-      queryClient.setQueryData(queryKey, result);
-      setSimilarImages(result.images);
+      queryClient.setQueryData(queryKey, { ...result, images: matches });
+      setSimilarImages(matches);
     } catch (error) {
       if (isCurrent()) setSimilarError(errorMessage(error));
     } finally {
@@ -1300,12 +1424,11 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
   }
 
   function showSimilarImage(image: GalleryImage) {
-    similarRequest.current += 1;
-    setSimilarSource(undefined);
-    setSimilarImages([]);
-    setSimilarLoading(false);
-    setSimilarError(undefined);
-    showImage(image);
+    imageSheetRequest.current += 1;
+    selectedOptimisticItemRef.current = undefined;
+    setSelectedOptimisticItem(undefined);
+    setSelectedImage(image);
+    pushSheet("image");
   }
 
   function openImageEdit() {
@@ -1371,19 +1494,26 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     const { isCurrent } = captureGalleryContextGuard();
     const optimistic = { ...previous, name: editName.trim(), isFavorite: editFavorite, ...(editCoverImageKey !== undefined ? { coverUrl: editCoverPreviewUrl ?? null } : {}) };
     setBusy(true);
-    updateCollectionSingleton((current) => current.map((candidate) => candidate.key === previous.key ? optimistic : candidate));
+    updateCollectionSingleton((current) => current.map((candidate) => (candidate.key === previous.key ? optimistic : candidate)));
     setActiveCollection(optimistic);
     try {
       const { collection } = await updateGalleryCollection(previous.key, editName.trim(), editFavorite, editCoverImageKey);
       if (!isCurrent()) return;
-      updateCollectionSingleton((current) => current.map((candidate) => candidate.key === collection.key ? collection : candidate));
+      updateCollectionSingleton((current) => current.map((candidate) => (candidate.key === collection.key ? collection : candidate)));
       setActiveCollection(collection);
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => { if (isCurrent()) setStatus(errorMessage(error)); });
+      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => {
+        if (isCurrent()) setStatus(errorMessage(error));
+      });
       if (!isCurrent()) return;
       closeSheet();
       notify("Collection updated");
     } catch (error) {
-      if (isCurrent()) { updateCollectionSingleton((current) => current.map((candidate) => candidate.key === previous.key ? previous : candidate)); setActiveCollection(previous); setStatus(errorMessage(error)); notify("Collection update failed"); }
+      if (isCurrent()) {
+        updateCollectionSingleton((current) => current.map((candidate) => (candidate.key === previous.key ? previous : candidate)));
+        setActiveCollection(previous);
+        setStatus(errorMessage(error));
+        notify("Collection update failed");
+      }
     } finally {
       if (isCurrent()) setBusy(false);
     }
@@ -1400,26 +1530,28 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     const collection = activeCollection;
     const { isCurrent } = captureGalleryContextGuard();
     setBusy(true);
+    closeSheet();
+    identityFilterRequest.current += 1;
+    setActiveIdentityFilter(undefined);
+    setSimilarSource(undefined);
+    setSimilarImages([]);
+    setActiveCollection(undefined);
+    setShowingCollectionOverview(true);
+    updateCollectionSingleton((current) => current.filter(({ key }) => key !== collection.key));
+    setImages([]);
     try {
       await deleteGalleryCollection(collection.key);
       void invalidateCompassTrips();
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch(() => { if (isCurrent()) setStatus("Collection refresh failed."); });
+      void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch(() => {
+        if (isCurrent()) setStatus("Collection refresh failed.");
+      });
       if (!isCurrent()) return;
-      closeSheet();
-      identityFilterRequest.current += 1;
-      setActiveIdentityFilter(undefined);
-      setSimilarSource(undefined);
-      setSimilarImages([]);
-      setActiveCollection(undefined);
-      setShowingCollectionOverview(true);
-      updateCollectionSingleton((current) => current.filter(({ key }) => key !== collection.key));
-      setImages([]);
       setStatus(`${collection.name} was deleted.`);
       notify("Collection deleted");
     } catch (error) {
       if (isCurrent()) {
         const favoriteConflict = isGalleryClientErrorCode(error, "GALLERY_COLLECTION_FAVORITE");
-        if (favoriteConflict) closeSheet();
+        void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
         setStatus(favoriteConflict ? undefined : "Collection deletion failed.");
         notify(favoriteConflict ? "Can't delete favorite collection" : "Collection deletion failed");
       }
@@ -1447,11 +1579,19 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       updateCollectionSingleton((current) => current.filter(({ key }) => key !== collection.key));
       setImages([]);
       setStatus(`You left ${collection.name}.`);
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(galleryContext) }).catch((error: unknown) => { if (isCurrent()) setStatus(errorMessage(error)); });
+      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(galleryContext) }).catch((error: unknown) => {
+        if (isCurrent()) setStatus(errorMessage(error));
+      });
       if (!isCurrent()) return;
       notify("Collection left");
-    } catch (error) { if (isCurrent()) { setStatus(errorMessage(error)); notify("Leaving collection failed"); } }
-    finally { if (isCurrent()) setBusy(false); }
+    } catch (error) {
+      if (isCurrent()) {
+        setStatus(errorMessage(error));
+        notify("Leaving collection failed");
+      }
+    } finally {
+      if (isCurrent()) setBusy(false);
+    }
   }
 
   function replaceVisibleImages(updated: GalleryImage[]) {
@@ -1459,7 +1599,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     const replace = (current: GalleryImage[]) => current.map((image) => byKey.get(image.key) ?? image);
     setImages(replace);
     setSimilarImages(replace);
-    setCollectionSearchResults((current) => current ? replace(current) : current);
+    setCollectionSearchResults((current) => (current ? replace(current) : current));
   }
 
   function applyAuthoritativeFavoriteImages(favorites: GalleryImage[]) {
@@ -1467,18 +1607,18 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     const byKey = new Map(favorites.map((image) => [image.key, image]));
     const patch = (current: GalleryImage[]) => current.map((image) => byKey.get(image.key) ?? image);
     favorites.forEach((image) => patchGalleryImage(queryClient, galleryContext, image));
-    const patchResult = (current: { images: GalleryImage[] } | undefined) => current ? { ...current, images: patch(current.images) } : current;
+    const patchResult = (current: { images: GalleryImage[] } | undefined) => (current ? { ...current, images: patch(current.images) } : current);
     queryClient.setQueriesData({ queryKey: [...galleryQueryKeys.all(galleryContext), "search"] }, patchResult);
     queryClient.setQueriesData({ queryKey: [...galleryQueryKeys.all(galleryContext), "duplicates"] }, patchResult);
     setImages(patch);
     setSimilarImages(patch);
-    setCollectionSearchResults((current) => current ? patch(current) : current);
+    setCollectionSearchResults((current) => (current ? patch(current) : current));
     setCleanupImages(patch);
     setDuplicateImages(patch);
     setIdentityPickerImages(patch);
-    setIdentityPickerResults((current) => current ? patch(current) : current);
-    setSelectedImage((current) => current ? byKey.get(current.key) ?? current : current);
-    setIdentityPickerSelected((current) => current ? byKey.get(current.key) ?? current : current);
+    setIdentityPickerResults((current) => (current ? patch(current) : current));
+    setSelectedImage((current) => (current ? (byKey.get(current.key) ?? current) : current));
+    setIdentityPickerSelected((current) => (current ? (byKey.get(current.key) ?? current) : current));
   }
 
   function deleteSelectedImage() {
@@ -1507,7 +1647,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     setCollectionSearchResults((current) => current?.filter(({ key }) => key !== target.key));
     updateCollectionSingleton((current) => current.map((collection) => ({ ...collection, ...(removedFromActive && collection.key === previousActiveCollection?.key ? { count: Math.max(0, collection.count - 1) } : {}), ...(collection.coverUrl === target.url ? { coverUrl: null } : {}) })));
     if (removedFromActive) {
-      setActiveCollection((current) => current ? { ...current, count: Math.max(0, current.count - 1) } : current);
+      setActiveCollection((current) => (current ? { ...current, count: Math.max(0, current.count - 1) } : current));
     }
     setSelectedImage(undefined);
     closeSheet();
@@ -1526,34 +1666,39 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       setActiveCollection(previousActiveCollection);
       setSelectedImage(target);
     };
-    void deleteGalleryImages([target.key]).then((result) => {
-      if (!isCurrent()) return;
-      const reconciled = reconcileGalleryImageDeletion([target], result);
-      if (reconciled.favoriteImages.length) {
-        restore();
-        applyAuthoritativeFavoriteImages(reconciled.favoriteImages);
-        notify("Can't delete favorite image");
-        return;
-      }
-      if (reconciled.deletedImages.length !== 1) {
+    void deleteGalleryImages([target.key])
+      .then((result) => {
+        if (!isCurrent()) return;
+        const reconciled = reconcileGalleryImageDeletion([target], result);
+        if (reconciled.favoriteImages.length) {
+          restore();
+          applyAuthoritativeFavoriteImages(reconciled.favoriteImages);
+          notify("Can't delete favorite image");
+          return;
+        }
+        if (reconciled.deletedImages.length !== 1) {
+          restore();
+          notify("Image deletion failed");
+          return;
+        }
+        void invalidateCompassTrips();
+        notify("Image deleted");
+        void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+        void refreshCollectionSingletonAfterImageDeletion(generation).catch(() => {
+          if (isCurrent()) setStatus("Gallery refresh failed.");
+        });
+        if (isCurrent()) void loadSubjects();
+      })
+      .catch(() => {
+        if (!isCurrent()) return;
         restore();
         notify("Image deletion failed");
-        return;
-      }
-      void invalidateCompassTrips();
-      notify("Image deleted");
-      void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
-      void refreshCollectionSingletonAfterImageDeletion(generation).catch(() => { if (isCurrent()) setStatus("Gallery refresh failed."); });
-      if (isCurrent()) void loadSubjects();
-    }).catch(() => {
-      if (!isCurrent()) return;
-      restore();
-      notify("Image deletion failed");
-    }).finally(() => {
-      if (!isCurrent()) return;
-      busyRef.current = false;
-      setBusy(false);
-    });
+      })
+      .finally(() => {
+        if (!isCurrent()) return;
+        busyRef.current = false;
+        setBusy(false);
+      });
   }
 
   async function showDuplicates() {
@@ -1598,9 +1743,14 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     const queryKey = galleryQueryKeys.duplicates(galleryContext, collectionKey);
     setBusy(true);
     try {
-      const deleted = await deleteGalleryCollectionDuplicates(collectionKey, eligibleImages.map(({ key }) => key));
+      const deleted = await deleteGalleryCollectionDuplicates(
+        collectionKey,
+        eligibleImages.map(({ key }) => key),
+      );
       if (deleted.deletedImageKeys.length) void invalidateCompassTrips();
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch(() => { if (isCurrent()) setStatus("Gallery refresh failed."); });
+      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch(() => {
+        if (isCurrent()) setStatus("Gallery refresh failed.");
+      });
       if (!isCurrent()) return;
       const reconciled = reconcileGalleryDuplicateDeletion(eligibleImages, deleted);
       const removedKeys = new Set(reconciled.removedImages.map(({ key }) => key));
@@ -1609,22 +1759,17 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       const favoriteByKey = new Map(reconciled.favoriteImages.map((image) => [image.key, image]));
       const remainingDuplicates = duplicateImages.filter(({ key }) => !removedKeys.has(key)).map((image) => favoriteByKey.get(image.key) ?? image);
       applyAuthoritativeFavoriteImages(reconciled.favoriteImages);
-      updateCollectionSingleton((current) => current.map((collection) => collection.key === collectionKey
-        ? { ...collection, count: Math.max(0, collection.count - reconciled.removedImages.length) }
-        : collection));
-      setActiveCollection((current) => current ? { ...current, count: Math.max(0, current.count - reconciled.removedImages.length) } : current);
+      updateCollectionSingleton((current) => current.map((collection) => (collection.key === collectionKey ? { ...collection, count: Math.max(0, collection.count - reconciled.removedImages.length) } : collection)));
+      setActiveCollection((current) => (current ? { ...current, count: Math.max(0, current.count - reconciled.removedImages.length) } : current));
       setImages((current) => current.filter(({ key }) => !removedKeys.has(key)));
       setDuplicateImages(remainingDuplicates);
       setDuplicateSelectedImageKeys((current) => current.filter((key) => !removedKeys.has(key)));
       queryClient.setQueryData(queryKey, { images: remainingDuplicates });
       void queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "none" });
-      if (favoriteCount || reconciled.unknownImages.length) goBackSheet(); else closeSheet();
-      setStatus(reconciled.unknownImages.length
-        ? "Some images were not deleted."
-        : `${reconciled.removedImages.length} duplicate image${reconciled.removedImages.length === 1 ? "" : "s"} removed from this collection. ${deletedCount} moved to trash.`);
-      notify(reconciled.unknownImages.length
-        ? "Some images were not deleted"
-        : favoriteCount ? `Can't delete ${favoriteCount} favorite item${favoriteCount === 1 ? "" : "s"}` : "Duplicates deleted");
+      if (favoriteCount || reconciled.unknownImages.length) goBackSheet();
+      else closeSheet();
+      setStatus(reconciled.unknownImages.length ? "Some images were not deleted." : `${reconciled.removedImages.length} duplicate image${reconciled.removedImages.length === 1 ? "" : "s"} removed from this collection. ${deletedCount} moved to trash.`);
+      notify(reconciled.unknownImages.length ? "Some images were not deleted" : favoriteCount ? `Can't delete ${favoriteCount} favorite item${favoriteCount === 1 ? "" : "s"}` : "Duplicates deleted");
     } catch {
       if (isCurrent()) {
         setStatus("Duplicate deletion failed.");
@@ -1635,12 +1780,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     }
   }
 
-  const isCurrentCleanupRequest = (request: number, generation: number, collectionKey: string, threshold: (typeof CLEANUP_THRESHOLDS)[number]) => request === cleanupRequest.current
-    && generation === refreshContextGeneration.current
-    && activeSheetRef.current === "cleanup"
-    && cleanupCollectionKeyRef.current === collectionKey
-    && activeCollectionKey.current === collectionKey
-    && cleanupThresholdRef.current === threshold;
+  const isCurrentCleanupRequest = (request: number, generation: number, collectionKey: string, threshold: (typeof CLEANUP_THRESHOLDS)[number]) => request === cleanupRequest.current && generation === refreshContextGeneration.current && activeSheetRef.current === "cleanup" && cleanupCollectionKeyRef.current === collectionKey && activeCollectionKey.current === collectionKey && cleanupThresholdRef.current === threshold;
 
   async function fetchMutableCleanupPage(collection: GalleryCollection, threshold: (typeof CLEANUP_THRESHOLDS)[number], initialCursor?: string): Promise<CleanupPage> {
     let cursor = initialCursor;
@@ -1744,7 +1884,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
   }
 
   function toggleDeletionSelection(imageKey: string, setSelected: (updater: (current: string[]) => string[]) => void) {
-    setSelected((current) => current.includes(imageKey) ? current.filter((key) => key !== imageKey) : [...current, imageKey]);
+    setSelected((current) => (current.includes(imageKey) ? current.filter((key) => key !== imageKey) : [...current, imageKey]));
   }
 
   function applyDeletedGalleryImages(targets: GalleryImage[], sourceCollectionKey: string) {
@@ -1756,17 +1896,21 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     setSimilarImages((current) => current.filter(({ key }) => !removedKeys.has(key)));
     setCollectionSearchResults((current) => current?.filter(({ key }) => !removedKeys.has(key)));
     setSelectedImageKeys((current) => current.filter((key) => !removedKeys.has(key)));
-    setSelectedImage((current) => current && removedKeys.has(current.key) ? undefined : current);
-    updateCollectionSingleton((current) => current.map((collection) => collection.key === sourceCollectionKey ? { ...collection, count: Math.max(0, collection.count - targets.length), coverUrl: collection.coverUrl && removedUrls.has(collection.coverUrl) ? null : collection.coverUrl } : collection));
-    setActiveCollection((current) => current && current.key === sourceCollectionKey ? { ...current, count: Math.max(0, current.count - targets.length), coverUrl: current.coverUrl && removedUrls.has(current.coverUrl) ? null : current.coverUrl } : current);
+    setSelectedImage((current) => (current && removedKeys.has(current.key) ? undefined : current));
+    updateCollectionSingleton((current) => current.map((collection) => (collection.key === sourceCollectionKey ? { ...collection, count: Math.max(0, collection.count - targets.length), coverUrl: collection.coverUrl && removedUrls.has(collection.coverUrl) ? null : collection.coverUrl } : collection)));
+    setActiveCollection((current) => (current && current.key === sourceCollectionKey ? { ...current, count: Math.max(0, current.count - targets.length), coverUrl: current.coverUrl && removedUrls.has(current.coverUrl) ? null : current.coverUrl } : current));
   }
 
   function applyDeletedCleanupImages(targets: GalleryImage[], sourceCollectionKey: string) {
     const removedKeys = new Set(targets.map(({ key }) => key));
-    queryClient.setQueriesData<CleanupPage>({ queryKey: galleryQueryKeys.cleanups(galleryContext, sourceCollectionKey) }, (page) => page ? {
-      ...page,
-      images: page.images.filter(({ key }) => !removedKeys.has(key)),
-    } : page);
+    queryClient.setQueriesData<CleanupPage>({ queryKey: galleryQueryKeys.cleanups(galleryContext, sourceCollectionKey) }, (page) =>
+      page
+        ? {
+            ...page,
+            images: page.images.filter(({ key }) => !removedKeys.has(key)),
+          }
+        : page,
+    );
     setCleanupImages((current) => current.filter(({ key }) => !removedKeys.has(key)));
     setCleanupSelectedImageKeys((current) => current.filter((key) => !removedKeys.has(key)));
     applyDeletedGalleryImages(targets, sourceCollectionKey);
@@ -1816,12 +1960,12 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       }
       setCleanupError(unknownKeys.size ? "Some images could not be deleted." : undefined);
       setStatus(unknownKeys.size ? "Some images could not be deleted." : `${deletedTargets.length} image${deletedTargets.length === 1 ? "" : "s"} deleted.`);
-      notify(unknownKeys.size
-        ? "Some images were not deleted"
-        : favoriteCount ? `Can't delete ${favoriteCount} favorite item${favoriteCount === 1 ? "" : "s"}` : deletedTargets.length === 1 ? "Image deleted" : "Images deleted");
+      notify(unknownKeys.size ? "Some images were not deleted" : favoriteCount ? `Can't delete ${favoriteCount} favorite item${favoriteCount === 1 ? "" : "s"}` : deletedTargets.length === 1 ? "Image deleted" : "Images deleted");
       if (deletedTargets.length) {
         void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
-        void refreshCollectionSingletonAfterImageDeletion(generation).catch(() => { if (isCurrent()) setStatus("Gallery refresh failed."); });
+        void refreshCollectionSingletonAfterImageDeletion(generation).catch(() => {
+          if (isCurrent()) setStatus("Gallery refresh failed.");
+        });
         void loadSubjects();
       }
     } catch {
@@ -1834,7 +1978,9 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       notify(deletedTargets.length ? "Some images were not deleted" : "Image deletion failed");
       if (deletedTargets.length) {
         void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
-        void refreshCollectionSingletonAfterImageDeletion(generation).catch(() => { if (isCurrent()) setStatus("Gallery refresh failed."); });
+        void refreshCollectionSingletonAfterImageDeletion(generation).catch(() => {
+          if (isCurrent()) setStatus("Gallery refresh failed.");
+        });
         void loadSubjects();
       }
     } finally {
@@ -1895,8 +2041,14 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
 
   function backIdentityPicker() {
     identityPickerRequest.current += 1;
-    if (imagePickerPurpose === "cover") { goBackSheet(); return; }
-    if (!identityPickerCollection) { goBackSheet(); return; }
+    if (imagePickerPurpose === "cover") {
+      goBackSheet();
+      return;
+    }
+    if (!identityPickerCollection) {
+      goBackSheet();
+      return;
+    }
     setIdentityPickerCollection(undefined);
     setIdentityPickerImages([]);
     setIdentityPickerResults(undefined);
@@ -1938,9 +2090,16 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     if (!normalized) return;
     const collection = identityPickerCollection;
     identityPickerSearchTimer.current = setTimeout(() => {
-      void searchGalleryImages({ query: normalized, ...(collection ? { collectionKey: collection.key } : {}), recordHistory: false, limit: 50 }).then(({ images: results }) => {
-        if (isCurrentContextGeneration(generation, refreshContextGeneration.current) && request === identityPickerRequest.current) setIdentityPickerResults(results);
-      }).catch((error: unknown) => { if (isCurrentContextGeneration(generation, refreshContextGeneration.current) && request === identityPickerRequest.current) setStatus(errorMessage(error)); }).finally(() => { if (isCurrentContextGeneration(generation, refreshContextGeneration.current) && request === identityPickerRequest.current) setIdentityPickerSearching(false); });
+      void searchGalleryImages({ query: normalized, ...(collection ? { collectionKey: collection.key } : {}), recordHistory: false, limit: 50 })
+        .then(({ images: results }) => {
+          if (isCurrentContextGeneration(generation, refreshContextGeneration.current) && request === identityPickerRequest.current) setIdentityPickerResults(results);
+        })
+        .catch((error: unknown) => {
+          if (isCurrentContextGeneration(generation, refreshContextGeneration.current) && request === identityPickerRequest.current) setStatus(errorMessage(error));
+        })
+        .finally(() => {
+          if (isCurrentContextGeneration(generation, refreshContextGeneration.current) && request === identityPickerRequest.current) setIdentityPickerSearching(false);
+        });
     }, 300);
     identityPickerHistoryTimer.current = setTimeout(() => {
       void searchGalleryImages({ query: normalized, ...(collection ? { collectionKey: collection.key } : {}), recordHistory: true, limit: 1 }).catch(() => undefined);
@@ -1991,17 +2150,22 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     setSubjects((current) => [optimistic, ...current]);
     setCreatingIdentityKeys((current) => [...current, optimisticKey]);
     returnToIdentityLibrary();
-    void createGallerySubject(name, [image.key]).then(({ subject }) => {
-      if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
-      setSubjects((current) => current.map((candidate) => candidate.key === optimisticKey ? subject : candidate));
-      void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(galleryContext) });
-      notify("Visual identity created");
-    }).catch((error: unknown) => {
-      if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
-      setSubjects((current) => current.filter(({ key }) => key !== optimisticKey));
-      setIdentityError(errorMessage(error));
-      notify("Visual identity creation failed");
-    }).finally(() => { if (isCurrentContextGeneration(generation, refreshContextGeneration.current)) setCreatingIdentityKeys((current) => current.filter((key) => key !== optimisticKey)); });
+    void createGallerySubject(name, [image.key])
+      .then(({ subject }) => {
+        if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
+        setSubjects((current) => current.map((candidate) => (candidate.key === optimisticKey ? subject : candidate)));
+        void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(galleryContext) });
+        notify("Visual identity created");
+      })
+      .catch((error: unknown) => {
+        if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
+        setSubjects((current) => current.filter(({ key }) => key !== optimisticKey));
+        setIdentityError(errorMessage(error));
+        notify("Visual identity creation failed");
+      })
+      .finally(() => {
+        if (isCurrentContextGeneration(generation, refreshContextGeneration.current)) setCreatingIdentityKeys((current) => current.filter((key) => key !== optimisticKey));
+      });
   }
 
   function confirmDeleteVisualIdentity(identity: GallerySubject) {
@@ -2026,28 +2190,39 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
         setShowingSearchResults(false);
         void replayOverviewWindow(undefined, images.length, generation).then((overview) => {
           if (!overview || !isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
-          applyCollectionSingleton(overview.collections); setCanCreateCollections(overview.canCreateCollections); setImages(overview.images); setNextCursor(overview.nextCursor);
+          applyCollectionSingleton(overview.collections);
+          setCanCreateCollections(overview.canCreateCollections);
+          setImages(overview.images);
+          setNextCursor(overview.nextCursor);
         });
       } else if (activeCollection) {
         setCollectionSearchResults(undefined);
         void replayOverviewWindow(activeCollection.key, images.length, generation).then((overview) => {
           if (!overview || !isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
-          applyCollectionSingleton(overview.collections); setCanCreateCollections(overview.canCreateCollections); setImages(overview.images); setNextCursor(overview.nextCursor);
+          applyCollectionSingleton(overview.collections);
+          setCanCreateCollections(overview.canCreateCollections);
+          setImages(overview.images);
+          setNextCursor(overview.nextCursor);
         });
       }
     }
     setIdentityPendingDelete(undefined);
     goBackSheet();
-    void deleteGallerySubject(identity.key).then(() => {
-      if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
-      void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(galleryContext) });
-      notify("Visual identity deleted");
-    }).catch((error: unknown) => {
-      if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
-      deletedIdentityKeys.current.delete(identity.key);
-      setSubjects((current) => current.some(({ key }) => key === identity.key) ? current : [...current, identity]);
-      notify("Visual identity deletion failed");
-    }).finally(() => { if (isCurrentContextGeneration(generation, refreshContextGeneration.current)) deletingIdentityKeys.current.delete(identity.key); });
+    void deleteGallerySubject(identity.key)
+      .then(() => {
+        if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
+        void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(galleryContext) });
+        notify("Visual identity deleted");
+      })
+      .catch((error: unknown) => {
+        if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
+        deletedIdentityKeys.current.delete(identity.key);
+        setSubjects((current) => (current.some(({ key }) => key === identity.key) ? current : [...current, identity]));
+        notify("Visual identity deletion failed");
+      })
+      .finally(() => {
+        if (isCurrentContextGeneration(generation, refreshContextGeneration.current)) deletingIdentityKeys.current.delete(identity.key);
+      });
   }
 
   async function filterByVisualIdentity(identity: GallerySubject) {
@@ -2103,7 +2278,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       setStatus("You can move or copy up to 100 images at once.");
       return;
     }
-    setSelectedImageKeys((current) => current.includes(imageKey) ? current.filter((key) => key !== imageKey) : [...current, imageKey]);
+    setSelectedImageKeys((current) => (current.includes(imageKey) ? current.filter((key) => key !== imageKey) : [...current, imageKey]));
   }
 
   function handleImageLongPress(imageKey: string) {
@@ -2111,7 +2286,9 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     if (!activeCollection || !canMutateImage(image)) return;
     const marker = { key: imageKey, at: Date.now() };
     longPressedImage.current = marker;
-    setTimeout(() => { if (longPressedImage.current === marker) longPressedImage.current = undefined; }, 50);
+    setTimeout(() => {
+      if (longPressedImage.current === marker) longPressedImage.current = undefined;
+    }, 50);
     toggleImageSelection(imageKey);
     void Haptics.selectionAsync();
   }
@@ -2141,18 +2318,22 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     setBusy(true);
     replaceVisibleImages(optimistic);
     optimistic.forEach((image) => patchGalleryImage(queryClient, galleryContext, image));
-    const outcomes = await Promise.allSettled(previous.map((image) => {
-      const request = (favoriteRequests.current.get(image.key) ?? 0) + 1;
-      favoriteRequests.current.set(image.key, request);
-      const write = (favoriteWrites.current.get(image.key) ?? Promise.resolve()).catch(() => undefined).then(() => {
-        if (!isCurrent()) throw new Error("Gallery context changed.");
-        return setGalleryImageFavorite(image.key, nextFavorite);
-      });
-      favoriteWrites.current.set(image.key, write);
-      return write.finally(() => {
-        if (favoriteWrites.current.get(image.key) === write) favoriteWrites.current.delete(image.key);
-      });
-    }));
+    const outcomes = await Promise.allSettled(
+      previous.map((image) => {
+        const request = (favoriteRequests.current.get(image.key) ?? 0) + 1;
+        favoriteRequests.current.set(image.key, request);
+        const write = (favoriteWrites.current.get(image.key) ?? Promise.resolve())
+          .catch(() => undefined)
+          .then(() => {
+            if (!isCurrent()) throw new Error("Gallery context changed.");
+            return setGalleryImageFavorite(image.key, nextFavorite);
+          });
+        favoriteWrites.current.set(image.key, write);
+        return write.finally(() => {
+          if (favoriteWrites.current.get(image.key) === write) favoriteWrites.current.delete(image.key);
+        });
+      }),
+    );
     if (!isCurrent()) return;
     const failed: GalleryImage[] = [];
     const saved: GalleryImage[] = [];
@@ -2185,59 +2366,43 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     }
     const { generation, isCurrent } = captureGalleryContextGuard();
     const keys = eligibleImages.map(({ key }) => key);
-    const cacheSnapshot = snapshotGalleryOverviews(queryClient, galleryContext);
-    const previousImages = images;
-    const previousSimilarImages = similarImages;
-    const previousSearchResults = collectionSearchResults;
-    const previousCollections = collections;
     const previousActiveCollection = activeCollection;
     removeCachedGalleryImages(queryClient, galleryContext, eligibleImages);
     setImages((current) => current.filter(({ key }) => !keys.includes(key)));
     setSimilarImages((current) => current.filter(({ key }) => !keys.includes(key)));
     setCollectionSearchResults((current) => current?.filter(({ key }) => !keys.includes(key)));
     if (activeCollection) {
-      updateCollectionSingleton((current) => current.map((collection) => collection.key === activeCollection.key ? { ...collection, count: Math.max(0, collection.count - eligibleImages.length) } : collection));
-      setActiveCollection((current) => current ? { ...current, count: Math.max(0, current.count - eligibleImages.length) } : current);
+      updateCollectionSingleton((current) => current.map((collection) => (collection.key === activeCollection.key ? { ...collection, count: Math.max(0, collection.count - eligibleImages.length) } : collection)));
+      setActiveCollection((current) => (current ? { ...current, count: Math.max(0, current.count - eligibleImages.length) } : current));
     }
+    setSelectedImageKeys([]);
+    closeSheet();
     setBusy(true);
-    void deleteGalleryImages(keys).then((result) => {
-      if (!isCurrent()) return;
-      const reconciled = reconcileGalleryImageDeletion(eligibleImages, result);
-      restoreGalleryOverviews(queryClient, cacheSnapshot);
-      setImages(previousImages);
-      setSimilarImages(previousSimilarImages);
-      setCollectionSearchResults(previousSearchResults);
-      setCachedGalleryCollections(queryClient, galleryContext, previousCollections);
-      setCollections(previousCollections);
-      setActiveCollection(previousActiveCollection);
-      applyDeletedGalleryImages(reconciled.deletedImages, previousActiveCollection?.key ?? "");
-      applyAuthoritativeFavoriteImages(reconciled.favoriteImages);
-      const deletedKeys = new Set(reconciled.deletedImages.map(({ key }) => key));
-      setSelectedImageKeys(targets.filter(({ key }) => !deletedKeys.has(key)).map(({ key }) => key));
-      closeSheet();
-      const favoriteCount = localFavorites.length + reconciled.favoriteImages.length;
-      if (reconciled.unknownImages.length) setStatus("Some images were not deleted.");
-      notify(reconciled.unknownImages.length
-        ? "Some images were not deleted"
-        : favoriteCount ? `Can't delete ${favoriteCount} favorite item${favoriteCount === 1 ? "" : "s"}` : reconciled.deletedImages.length === 1 ? "Image deleted" : "Images deleted");
-      if (reconciled.deletedImages.length) {
-        void invalidateCompassTrips();
+    void deleteGalleryImages(keys)
+      .then((result) => {
+        if (!isCurrent()) return;
+        const reconciled = reconcileGalleryImageDeletion(eligibleImages, result);
+        const favoriteCount = localFavorites.length + reconciled.favoriteImages.length;
+        if (reconciled.unknownImages.length) setStatus("Some images were not deleted.");
+        notify(reconciled.unknownImages.length ? "Some images were not deleted" : favoriteCount ? `Can't delete ${favoriteCount} favorite item${favoriteCount === 1 ? "" : "s"}` : reconciled.deletedImages.length === 1 ? "Image deleted" : "Images deleted");
+        if (reconciled.deletedImages.length) {
+          void invalidateCompassTrips();
+          void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+          void refreshCollectionSingletonAfterImageDeletion(generation).catch(() => {
+            if (isCurrent()) setStatus("Gallery refresh failed.");
+          });
+          void loadSubjects();
+        }
+      })
+      .catch(() => {
+        if (!isCurrent()) return;
         void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
-        void refreshCollectionSingletonAfterImageDeletion(generation).catch(() => { if (isCurrent()) setStatus("Gallery refresh failed."); });
-        void loadSubjects();
-      }
-    }).catch(() => {
-      if (!isCurrent()) return;
-      restoreGalleryOverviews(queryClient, cacheSnapshot);
-      setImages(previousImages);
-      setSimilarImages(previousSimilarImages);
-      setCollectionSearchResults(previousSearchResults);
-      setCachedGalleryCollections(queryClient, galleryContext, previousCollections);
-      setCollections(previousCollections);
-      setActiveCollection(previousActiveCollection);
-      setStatus("Image deletion failed.");
-      notify("Image deletion failed");
-    }).finally(() => { if (isCurrent()) setBusy(false); });
+        setStatus("Image deletion failed.");
+        notify("Image deletion failed");
+      })
+      .finally(() => {
+        if (isCurrent()) setBusy(false);
+      });
   }
 
   function completeTransfer() {
@@ -2258,11 +2423,13 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     const previousImages = images;
     transferCachedGalleryImages(queryClient, galleryContext, { sourceCollectionKey: sourceCollection.key, destinationCollectionKeys: destinationKeys, images: selected, mode });
     const destinationOverview = queryClient.getQueryData<GalleryOverview>(galleryQueryKeys.overview(galleryContext, destination.key));
-    const nextCollections = destinationOverview?.collections ?? collections.map((collection) => {
-      if (mode === "move" && collection.key === sourceCollection.key) return { ...collection, count: Math.max(0, collection.count - selected.length) };
-      if (destinationKeys.includes(collection.key)) return { ...collection, count: collection.count + selected.length, coverUrl: collection.coverUrl ?? selected[0]?.url ?? null };
-      return collection;
-    });
+    const nextCollections =
+      destinationOverview?.collections ??
+      collections.map((collection) => {
+        if (mode === "move" && collection.key === sourceCollection.key) return { ...collection, count: Math.max(0, collection.count - selected.length) };
+        if (destinationKeys.includes(collection.key)) return { ...collection, count: collection.count + selected.length, coverUrl: collection.coverUrl ?? selected[0]?.url ?? null };
+        return collection;
+      });
     const nextDestination = nextCollections.find(({ key }) => key === destination.key) ?? destination;
     setCachedGalleryCollections(queryClient, galleryContext, nextCollections);
     setCollections(nextCollections);
@@ -2277,22 +2444,26 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     setShowingSearchResults(false);
     closeSheet();
     setStatus(`${selected.length} image${selected.length === 1 ? "" : "s"} ${mode === "move" ? "moved" : "copied"} to ${destination.name}.`);
-    void transferGalleryCollectionImages({ sourceCollectionKey: sourceCollection.key, destinationCollectionKeys: destinationKeys, imageKeys, mode }).then(() => {
-      if (!isCurrent()) return;
-      notify(mode === "move" ? "Images moved" : "Images copied");
-      void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
-      void load(nextDestination, true).then((refreshed) => { if (isCurrent() && !refreshed) setStatus("The transfer completed, but the destination could not be refreshed yet."); });
-    }).catch((error: unknown) => {
-      if (!isCurrent()) return;
-      restoreGalleryOverviews(queryClient, cacheSnapshot);
-      for (const collectionKey of createdDestinationCaches) queryClient.removeQueries({ queryKey: galleryQueryKeys.overview(galleryContext, collectionKey), exact: true });
-      setCachedGalleryCollections(queryClient, galleryContext, previousCollections);
-      setCollections(previousCollections);
-      setActiveCollection(sourceCollection);
-      setImages(previousImages);
-      setStatus(undefined);
-      notify(mode === "move" ? "Image move failed" : "Image copy failed");
-    });
+    void transferGalleryCollectionImages({ sourceCollectionKey: sourceCollection.key, destinationCollectionKeys: destinationKeys, imageKeys, mode })
+      .then(() => {
+        if (!isCurrent()) return;
+        notify(mode === "move" ? "Images moved" : "Images copied");
+        void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+        void load(nextDestination, true).then((refreshed) => {
+          if (isCurrent() && !refreshed) setStatus("The transfer completed, but the destination could not be refreshed yet.");
+        });
+      })
+      .catch((error: unknown) => {
+        if (!isCurrent()) return;
+        restoreGalleryOverviews(queryClient, cacheSnapshot);
+        for (const collectionKey of createdDestinationCaches) queryClient.removeQueries({ queryKey: galleryQueryKeys.overview(galleryContext, collectionKey), exact: true });
+        setCachedGalleryCollections(queryClient, galleryContext, previousCollections);
+        setCollections(previousCollections);
+        setActiveCollection(sourceCollection);
+        setImages(previousImages);
+        setStatus(undefined);
+        notify(mode === "move" ? "Image move failed" : "Image copy failed");
+      });
   }
 
   async function askAssistant() {
@@ -2339,7 +2510,10 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
     closeSheet();
     setSharingOpen(false);
     setCameraOpen(false);
-    setPendingFiles((current) => { deletePreparedFiles(current); return []; });
+    setPendingFiles((current) => {
+      deletePreparedFiles(current);
+      return [];
+    });
     setActiveCollection(undefined);
     setActiveSubject(undefined);
     setActiveIdentityFilter(undefined);
@@ -2383,7 +2557,11 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
         authoritativeCollections = fetchedRoot.collections;
         applyCollectionSingleton(authoritativeCollections);
         setCanCreateCollections(fetchedRoot.canCreateCollections);
-        const indexState = reconcileGalleryState({ mode: visibleGalleryView.current, activeCollectionKey: activeCollection?.key, selectedImageKeys, destinationCollectionKey, authoritativeImagesComplete: false }, authoritativeCollections, images.map(({ key }) => key));
+        const indexState = reconcileGalleryState(
+          { mode: visibleGalleryView.current, activeCollectionKey: activeCollection?.key, selectedImageKeys, destinationCollectionKey, authoritativeImagesComplete: false },
+          authoritativeCollections,
+          images.map(({ key }) => key),
+        );
         currentCollection = indexState.activeCollection;
         if (indexState.accessLost) {
           resetAfterCollectionAccessLoss(fetchedRoot);
@@ -2420,8 +2598,8 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       const mutableImageKeys = new Set<string>();
       const permissionImages = mergeMediaItems(images, mergeMediaItems(collectionSearchResults ?? [], similarImages));
       if (currentCollection && isGalleryCollectionOwned(currentCollection)) for (const key of selectedImageKeys) mutableImageKeys.add(key);
-      for (const image of permissionImages) if (currentCollection && (isGalleryCollectionOwned(currentCollection) || collectionMembershipRole(currentCollection) === "collaborator" && image.createdByKey === currentCollection.memberKey)) mutableImageKeys.add(image.key);
-      const detailMutable = Boolean(selectedImage && currentCollection && (isGalleryCollectionOwned(currentCollection) || collectionMembershipRole(currentCollection) === "collaborator" && selectedImage.createdByKey === currentCollection.memberKey));
+      for (const image of permissionImages) if (currentCollection && (isGalleryCollectionOwned(currentCollection) || (collectionMembershipRole(currentCollection) === "collaborator" && image.createdByKey === currentCollection.memberKey))) mutableImageKeys.add(image.key);
+      const detailMutable = Boolean(selectedImage && currentCollection && (isGalleryCollectionOwned(currentCollection) || (collectionMembershipRole(currentCollection) === "collaborator" && selectedImage.createdByKey === currentCollection.memberKey)));
       const permissions = reconcileGalleryPermissions({ role: currentCollection ? collectionMembershipRole(currentCollection) : undefined, canContribute: currentCollection?.access?.canContribute, activeSheet: activeSheetRef.current, selectedImageKeys, mutableImageKeys, destinationCollectionKey, ownerCapability: !currentCollection && authoritativeCollections.some((collection) => isGalleryCollectionOwned(collection) && collection.access?.canManage), detailMutable });
       if (permissions.closeSheet) closeSheet();
       if (needsCleanup && !permissions.closeSheet && currentCollection && isGalleryCollectionOwned(currentCollection) && currentCollection.key === cleanupCollectionKeyRef.current) {
@@ -2431,7 +2609,10 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       }
       if (activeCollection && (!currentCollection?.access?.canContribute || currentCollection.role === "viewer")) {
         setCameraOpen(false);
-        setPendingFiles((current) => { deletePreparedFiles(current); return []; });
+        setPendingFiles((current) => {
+          deletePreparedFiles(current);
+          return [];
+        });
       }
       setSelectedImageKeys(permissions.selectedImageKeys);
       setDestinationCollectionKey(reconcileGalleryState({ mode: visibleGalleryView.current, activeCollectionKey: currentCollection?.key, selectedImageKeys: [], destinationCollectionKey: permissions.destinationCollectionKey, authoritativeImagesComplete: false }, authoritativeCollections, []).destinationCollectionKey);
@@ -2477,7 +2658,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
           setActiveIdentityFilter(undefined);
           setActiveSubject(undefined);
           setShowingSearchResults(false);
-          const normalOverview = currentOverview ?? await replayOverviewWindow(currentCollection?.key, images.length, generation);
+          const normalOverview = currentOverview ?? (await replayOverviewWindow(currentCollection?.key, images.length, generation));
           if (!normalOverview || !isCurrent()) return;
           refreshedImages = normalOverview.images;
           imagesComplete = normalOverview.replayReachedEnd === true;
@@ -2555,9 +2736,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
         if (!pickerCollection) backIdentityPicker();
         else {
           setIdentityPickerCollection(pickerCollection);
-          const pickerOverview = pickerCollection.key === currentCollection?.key && currentOverview && currentOverview.images.length >= identityPickerImages.length
-            ? currentOverview
-            : await replayOverviewWindow(pickerCollection.key, identityPickerImages.length, generation);
+          const pickerOverview = pickerCollection.key === currentCollection?.key && currentOverview && currentOverview.images.length >= identityPickerImages.length ? currentOverview : await replayOverviewWindow(pickerCollection.key, identityPickerImages.length, generation);
           if (!pickerOverview) return;
           if (!isCurrent()) return;
           setIdentityPickerImages(pickerOverview.images);
@@ -2601,68 +2780,27 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
   const activeSubjects = subjects;
   const duplicateSelectedCount = duplicateSelectedImageKeys.length;
   const cleanupSelectedCount = cleanupSelectedImageKeys.length;
-  const sheetTitle = activeSheet === "rootActions" ? "New in Gallery"
-    : activeSheet === "actions" ? `Add to ${activeCollection?.name ?? "Gallery"}`
-    : activeSheet === "destination" ? "Choose destination"
-      : activeSheet === "newCollection" ? "New collection"
-        : activeSheet === "image" ? selectedImage?.filename ?? selectedOptimisticItem?.filename ?? "Image"
-          : activeSheet === "imageActions" ? "Image actions"
-            : activeSheet === "confirmDeleteImage" ? "Delete image?"
-        : activeSheet === "collectionMenu" ? "Collection actions"
-          : activeSheet === "collectionEdit" ? "Edit collection"
-             : activeSheet === "confirmDeleteCollection" ? "Delete collection?"
-              : activeSheet === "confirmLeaveCollection" ? "Leave collection?"
-              : activeSheet === "imageEdit" ? "Edit image"
-              : activeSheet === "similar" ? "Similar images"
-              : activeSheet === "duplicates" ? "Duplicates"
-                : activeSheet === "confirmDeleteDuplicates" ? `Delete ${duplicateSelectedCount === 1 ? "duplicate" : `${duplicateSelectedCount} duplicates`}?`
-                     : activeSheet === "cleanupMenu" ? "Collection intelligence"
-                    : activeSheet === "cleanup" ? "Clean up"
-                        : activeSheet === "confirmCleanupDelete" ? `Delete ${cleanupSelectedCount === 1 ? "image" : `${cleanupSelectedCount} images`}?`
-                  : activeSheet === "visualIdentities" ? "Visual identities"
-                    : activeSheet === "confirmDeleteIdentity" ? "Delete visual identity?"
-                       : activeSheet === "identityPicker" ? imagePickerPurpose === "cover" ? "Choose collection cover" : "Create visual identity"
-                        : activeSheet === "identityName" ? "Name visual identity"
-                          : activeSheet === "identityPickerFilter" ? "Filter images"
-                          : activeSheet === "filter" ? "Filter images"
-                            : activeSheet === "searchHistory" ? "Search history"
-                              : activeSheet === "bulkActions" ? "Selected image actions"
-                                 : activeSheet === "bulkDelete" ? `Delete ${selectedImageKeys.length === 1 ? "image" : `${selectedImageKeys.length} images`}?`
-                                  : activeSheet === "transferDestination" ? `${transferMode === "move" ? "Move" : "Copy"} to collection`
-                                    : "Gallery";
+  const similarBehindImage = activeSheet === "image" && sheetStack.current.includes("similar");
+  const sheetTitle = activeSheet === "rootActions" ? "New in Gallery" : activeSheet === "actions" ? `Add to ${activeCollection?.name ?? "Gallery"}` : activeSheet === "destination" ? "Choose destination" : activeSheet === "newCollection" ? "New collection" : activeSheet === "image" ? (selectedImage?.filename ?? selectedOptimisticItem?.filename ?? "Image") : activeSheet === "imageActions" ? "Image actions" : activeSheet === "confirmDeleteImage" ? "Delete image?" : activeSheet === "collectionMenu" ? "Collection actions" : activeSheet === "collectionEdit" ? "Edit collection" : activeSheet === "confirmDeleteCollection" ? "Delete collection?" : activeSheet === "confirmLeaveCollection" ? "Leave collection?" : activeSheet === "imageEdit" ? "Edit image" : activeSheet === "similar" ? "Similar images" : activeSheet === "duplicates" ? "Duplicates" : activeSheet === "confirmDeleteDuplicates" ? `Delete ${duplicateSelectedCount === 1 ? "duplicate" : `${duplicateSelectedCount} duplicates`}?` : activeSheet === "cleanupMenu" ? "Collection intelligence" : activeSheet === "cleanup" ? "Clean up" : activeSheet === "confirmCleanupDelete" ? `Delete ${cleanupSelectedCount === 1 ? "image" : `${cleanupSelectedCount} images`}?` : activeSheet === "visualIdentities" ? "Visual identities" : activeSheet === "confirmDeleteIdentity" ? "Delete visual identity?" : activeSheet === "identityPicker" ? (imagePickerPurpose === "cover" ? "Choose collection cover" : "Create visual identity") : activeSheet === "identityName" ? "Name visual identity" : activeSheet === "identityPickerFilter" ? "Filter images" : activeSheet === "filter" ? "Filter images" : activeSheet === "searchHistory" ? "Search history" : activeSheet === "bulkActions" ? "Selected image actions" : activeSheet === "bulkDelete" ? `Delete ${selectedImageKeys.length === 1 ? "image" : `${selectedImageKeys.length} images`}?` : activeSheet === "transferDestination" ? `${transferMode === "move" ? "Move" : "Copy"} to collection` : "Gallery";
   const collectionSearchActive = Boolean(activeCollection && query.trim());
-  const unfilteredVisibleImages = activeIdentityFilter && activeCollection ? collectionSearchResults ?? [] : collectionSearchActive ? collectionSearchResults ?? [] : images;
+  const unfilteredVisibleImages = activeIdentityFilter && activeCollection ? (collectionSearchResults ?? []) : collectionSearchActive ? (collectionSearchResults ?? []) : images;
   const optimisticImageKeys = new Set(optimisticMediaItems.map(({ imageKey }) => imageKey).filter((key): key is string => Boolean(key)));
   const reconciledVisibleImages = mergeMediaItems([], unfilteredVisibleImages).filter(({ key }) => !optimisticImageKeys.has(key));
   const visibleImages = filterByHiddenView(reconciledVisibleImages, userHiddens, "image", viewFilters);
-  const collectionViewerImages = activeCollection && selectedImage && !selectedOptimisticItem
-    ? visibleImages.some(({ key }) => key === selectedImage.key) ? visibleImages : [selectedImage]
-    : selectedImage ? [selectedImage] : [];
+  const collectionViewerImages = activeCollection && selectedImage && !selectedOptimisticItem ? (visibleImages.some(({ key }) => key === selectedImage.key) ? visibleImages : [selectedImage]) : selectedImage ? [selectedImage] : [];
   const collectionViewerIndex = selectedImage ? collectionViewerImages.findIndex(({ key }) => key === selectedImage.key) : -1;
   const focusCollectionImage = (offset: number) => {
     if (collectionViewerImages.length < 2 || collectionViewerIndex < 0) return;
     setSelectedImage(collectionViewerImages[(collectionViewerIndex + offset + collectionViewerImages.length) % collectionViewerImages.length]!);
   };
-  const visibleOptimisticItems = activeCollection && imageOrigin === "uploaded" && !collectionSearchActive && !showOnlyFavorites
-    ? optimisticMediaItems.filter(({ collectionKey }) => collectionKey === activeCollection.key)
-    : [];
+  const visibleOptimisticItems = activeCollection && imageOrigin === "uploaded" && !collectionSearchActive && !showOnlyFavorites ? optimisticMediaItems.filter(({ collectionKey }) => collectionKey === activeCollection.key) : [];
   const visibleGenerationPlaceholders = imageOrigin === "generated" ? generationPlaceholders.filter(({ collectionKey }) => collectionKey === activeCollection?.key) : [];
-  const visibleImageGroups = groupGalleryImagesByCreatedDate<GalleryGridItem>([
-    ...visibleGenerationPlaceholders.flatMap((placeholder) => Array.from({ length: placeholder.count }, (_, index) => ({ kind: "generation", key: `${placeholder.requestKey}:${index}`, createdAt: placeholder.createdAt, requestKey: placeholder.requestKey } as const))),
-    ...visibleOptimisticItems.map((item) => ({ kind: "optimistic", key: item.clientKey, createdAt: item.createdAt, item } as const)),
-    ...visibleImages.map((image) => ({ kind: "persisted", key: image.key, createdAt: image.createdAt, image } as const)),
-  ]);
-  const emptyGridMessage = activeSubject
-      ? `No images are currently identified as ${activeSubject.name}.`
-      : collectionSearchActive || showingSearchResults
-        ? "No images matched this search."
-        : activeCollection
-          ? imageOrigin === "generated" ? "No generated images yet." : "No uploaded images yet."
-          : "Your visual memory starts with the first image.";
+  const visibleImageGroups = groupGalleryImagesByCreatedDate<GalleryGridItem>([...visibleGenerationPlaceholders.flatMap((placeholder) => Array.from({ length: placeholder.count }, (_, index) => ({ kind: "generation", key: `${placeholder.requestKey}:${index}`, createdAt: placeholder.createdAt, requestKey: placeholder.requestKey }) as const)), ...visibleOptimisticItems.map((item) => ({ kind: "optimistic", key: item.clientKey, createdAt: item.createdAt, item }) as const), ...visibleImages.map((image) => ({ kind: "persisted", key: image.key, createdAt: image.createdAt, image }) as const)]);
+  const emptyGridMessage = activeSubject ? `No images are currently identified as ${activeSubject.name}.` : collectionSearchActive || showingSearchResults ? "No images matched this search." : activeCollection ? (imageOrigin === "generated" ? "No generated images yet." : "No uploaded images yet.") : "Your visual memory starts with the first image.";
   const contextualView = Boolean(activeCollection || activeSubject || showingSearchResults);
   const normalCollectionView = Boolean(activeCollection && !activeSubject);
-  const rootCollectionSource = rootSearchQuery.trim() ? rootSearchResults ?? [] : collections;
-  const visibleCollections = filterByHiddenView(rootCollectionSource, userHiddens, "collection", viewFilters).filter((collection) => collectionTab === "mine" ? isGalleryCollectionOwned(collection) : !isGalleryCollectionOwned(collection));
+  const rootCollectionSource = rootSearchQuery.trim() ? (rootSearchResults ?? []) : collections;
+  const visibleCollections = filterByHiddenView(rootCollectionSource, userHiddens, "collection", viewFilters).filter((collection) => (collectionTab === "mine" ? isGalleryCollectionOwned(collection) : !isGalleryCollectionOwned(collection)));
   const rootSearchLoading = Boolean(rootSearchQuery.trim() && (rootSearching || !rootSearchResults));
   const writableCollections = collections.filter(({ access, role }) => access?.canContribute && role !== "viewer");
   const canManageAnyCollection = collections.some((collection) => collection.access?.canManage && isGalleryCollectionOwned(collection));
@@ -2672,159 +2810,522 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
   if (selectedImage && !selectableImages.some(({ key }) => key === selectedImage.key)) selectableImages.push(selectedImage);
   const selectedImages = selectedImageKeys.map((key) => selectableImages.find((image) => image.key === key)).filter((image): image is GalleryImage => Boolean(image));
   const allSelectedFavorite = selectedImages.length > 0 && selectedImages.every(({ isFavorite }) => isFavorite);
-  const bulkToolbar = selectedImageKeys.length ? <Tabs style={styles.bulkToolbar}>
-    <View style={styles.bulkToolbarSelection}>
-      <Button accessibilityLabel="Clear image selection" contentMode="raw" onPress={() => setSelectedImageKeys([])} size="xs" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button>
-      <Text style={styles.bulkSelectionText}>{selectedImageKeys.length} selected</Text>
-    </View>
-    <Button accessibilityLabel="Selected image actions" contentMode="raw" onPress={() => openSheet("bulkActions")} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
-  </Tabs> : null;
-  const filterBadges = (contextual = false) => !filtersActive && (!contextual || !activeIdentityFilter) ? null : <View style={styles.filterBadgeRow}>
-    {showOnlyFavorites ? <View style={styles.similarPill}><Text numberOfLines={1} style={styles.similarPillText}>Favorites</Text><Button accessibilityLabel="Close Favorites filter" contentMode="raw" onPress={() => setViewFilters((current) => ({ ...current, favoritesOnly: false }))} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View> : null}
-    {showHidden ? <View style={styles.similarPill}><Text numberOfLines={1} style={styles.similarPillText}>Show hidden</Text><Button accessibilityLabel="Close Show hidden filter" contentMode="raw" onPress={() => setViewFilters((current) => ({ ...current, showHidden: false }))} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View> : null}
-    {contextual && activeIdentityFilter ? <View style={styles.similarPill}><Image source={activeIdentityFilter.referenceUrl} contentFit="cover" style={styles.similarPillImage} /><Text numberOfLines={1} style={styles.similarPillText}>{activeIdentityFilter.name}</Text><Button accessibilityLabel="Close visual identity filter" contentMode="raw" onPress={clearIdentityFilter} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View> : null}
-  </View>;
-  const sheetFooter = activeSheet === "newCollection" ? <View style={styles.compactSheetActions}>
-      <Button disabled={busy || !canCreateCollections || !newCollectionName.trim()} loading={busy} onPress={() => void createCollectionAndUpload()} size="md" variant="primary">{pendingFiles.length ? "Create and upload" : "Create collection"}</Button>
-      <Button disabled={busy} onPress={closeSheet} size="md" variant="secondary">Close</Button>
-    </View> : activeSheet === "imageEdit" ? <View style={styles.compactSheetActions}>
-      <Button disabled={busy || !editName.trim()} loading={busy} onPress={() => void submitImageEdit()} size="md" variant="primary">Save</Button>
-      <Button disabled={busy} onPress={closeSheet} size="md" variant="secondary">Close</Button>
-    </View> : activeSheet === "collectionEdit" ? <View style={styles.compactSheetActions}>
-      <Button disabled={busy || !editName.trim()} loading={busy} onPress={() => void submitCollectionEdit()} size="md" variant="primary">Save</Button>
-      <Button disabled={busy} onPress={closeSheet} size="md" variant="secondary">Close</Button>
-    </View>
-    : activeSheet === "similar" ? <Button disabled={similarLoading} onPress={closeSheet} size="md" variant="secondary">Close</Button>
-    : activeSheet === "duplicates" ? <View style={styles.compactSheetActions}>
-      <Button disabled={duplicatesLoading || duplicateSelectedCount === 0} onPress={() => pushSheet("confirmDeleteDuplicates")} size="md" variant="primary">Delete duplicates</Button>
-      <Button disabled={duplicatesLoading} onPress={closeSheet} size="md" variant="secondary">Close</Button>
-    </View> : activeSheet === "cleanup" ? <View style={styles.compactSheetActions}>
-      <Button disabled={busy || cleanupLoading || cleanupLoadingMore || cleanupSelectedCount === 0} onPress={() => pushSheet("confirmCleanupDelete")} size="md" variant="primary">Delete</Button>
-      <Button disabled={busy} onPress={closeSheet} size="md" variant="secondary">Close</Button>
-    </View> : activeSheet === "visualIdentities" ? <View style={styles.compactSheetActions}>
-      <Button disabled={identitiesLoading} onPress={() => void openIdentityPicker()} size="md" variant="primary">Create</Button>
-      <Button onPress={closeSheet} size="md" variant="secondary">Close</Button>
-    </View> : activeSheet === "identityPicker" ? <View style={styles.compactSheetActions}>
-      <Button disabled={!identityPickerSelected} onPress={() => imagePickerPurpose === "cover" ? chooseCollectionCover() : pushSheet("identityName")} size="md" variant="primary">{imagePickerPurpose === "cover" ? "Choose" : "Next"}</Button>
-      <Button onPress={imagePickerPurpose === "cover" ? goBackSheet : closeSheet} size="md" variant="secondary">Close</Button>
-    </View> : activeSheet === "identityName" ? <View style={styles.compactSheetActions}>
-      <Button disabled={!identityPickerSelected || !identityPickerName.trim()} onPress={() => void createVisualIdentity()} size="md" variant="primary">Create</Button>
-      <Button onPress={closeSheet} size="md" variant="secondary">Close</Button>
-    </View> : activeSheet === "transferDestination" ? <View style={styles.sheetFooter}>
-    <Button disabled={!destinationCollectionKey} onPress={completeTransfer} size="md" style={styles.sheetFooterAction} variant="primary">{transferMode === "move" ? "Move" : "Copy"} {selectedImageKeys.length} image{selectedImageKeys.length === 1 ? "" : "s"}</Button>
-    <Button onPress={closeSheet} size="md" style={styles.sheetFooterAction} variant="secondary">Close</Button>
-  </View> : undefined;
+  const bulkToolbar = selectedImageKeys.length ? (
+    <Tabs style={styles.bulkToolbar}>
+      <View style={styles.bulkToolbarSelection}>
+        <Button accessibilityLabel="Clear image selection" contentMode="raw" onPress={() => setSelectedImageKeys([])} size="xs" style={styles.bulkToolbarClose} variant="secondary">
+          <CloseIcon size="sm" />
+        </Button>
+        <Text style={styles.bulkSelectionText}>{selectedImageKeys.length} selected</Text>
+      </View>
+      <Button accessibilityLabel="Selected image actions" contentMode="raw" onPress={() => openSheet("bulkActions")} size="xs" variant="icon">
+        <MoreHorizontalIcon size="sm" />
+      </Button>
+    </Tabs>
+  ) : null;
+  const filterBadges = (contextual = false) =>
+    !filtersActive && (!contextual || !activeIdentityFilter) ? null : (
+      <View style={styles.filterBadgeRow}>
+        {showOnlyFavorites ? (
+          <View style={styles.similarPill}>
+            <Text numberOfLines={1} style={styles.similarPillText}>
+              Favorites
+            </Text>
+            <Button accessibilityLabel="Close Favorites filter" contentMode="raw" onPress={() => setViewFilters((current) => ({ ...current, favoritesOnly: false }))} size="xs" variant="icon">
+              <CloseIcon size="sm" />
+            </Button>
+          </View>
+        ) : null}
+        {showHidden ? (
+          <View style={styles.similarPill}>
+            <Text numberOfLines={1} style={styles.similarPillText}>
+              Show hidden
+            </Text>
+            <Button accessibilityLabel="Close Show hidden filter" contentMode="raw" onPress={() => setViewFilters((current) => ({ ...current, showHidden: false }))} size="xs" variant="icon">
+              <CloseIcon size="sm" />
+            </Button>
+          </View>
+        ) : null}
+        {contextual && activeIdentityFilter ? (
+          <View style={styles.similarPill}>
+            <Image source={activeIdentityFilter.referenceUrl} contentFit="cover" style={styles.similarPillImage} />
+            <Text numberOfLines={1} style={styles.similarPillText}>
+              {activeIdentityFilter.name}
+            </Text>
+            <Button accessibilityLabel="Close visual identity filter" contentMode="raw" onPress={clearIdentityFilter} size="xs" variant="icon">
+              <CloseIcon size="sm" />
+            </Button>
+          </View>
+        ) : null}
+      </View>
+    );
+  const sheetFooter =
+    activeSheet === "newCollection" ? (
+      <View style={styles.compactSheetActions}>
+        <Button disabled={busy || !canCreateCollections || !newCollectionName.trim()} loading={busy} onPress={() => void createCollectionAndUpload()} size="md" variant="primary">
+          {pendingFiles.length ? "Create and upload" : "Create collection"}
+        </Button>
+        <Button disabled={busy} onPress={closeSheet} size="md" variant="secondary">
+          Close
+        </Button>
+      </View>
+    ) : activeSheet === "imageEdit" ? (
+      <View style={styles.compactSheetActions}>
+        <Button disabled={busy || !editName.trim()} loading={busy} onPress={() => void submitImageEdit()} size="md" variant="primary">
+          Save
+        </Button>
+        <Button disabled={busy} onPress={closeSheet} size="md" variant="secondary">
+          Close
+        </Button>
+      </View>
+    ) : activeSheet === "collectionEdit" ? (
+      <View style={styles.compactSheetActions}>
+        <Button disabled={busy || !editName.trim()} loading={busy} onPress={() => void submitCollectionEdit()} size="md" variant="primary">
+          Save
+        </Button>
+        <Button disabled={busy} onPress={closeSheet} size="md" variant="secondary">
+          Close
+        </Button>
+      </View>
+    ) : activeSheet === "similar" || similarBehindImage ? (
+      <Button disabled={similarLoading} onPress={closeSheet} size="md" variant="secondary">
+        Close
+      </Button>
+    ) : activeSheet === "duplicates" ? (
+      <View style={styles.compactSheetActions}>
+        <Button disabled={duplicatesLoading || duplicateSelectedCount === 0} onPress={() => pushSheet("confirmDeleteDuplicates")} size="md" variant="primary">
+          Delete duplicates
+        </Button>
+        <Button disabled={duplicatesLoading} onPress={closeSheet} size="md" variant="secondary">
+          Close
+        </Button>
+      </View>
+    ) : activeSheet === "cleanup" ? (
+      <View style={styles.compactSheetActions}>
+        <Button disabled={busy || cleanupLoading || cleanupLoadingMore || cleanupSelectedCount === 0} onPress={() => pushSheet("confirmCleanupDelete")} size="md" variant="primary">
+          Delete
+        </Button>
+        <Button disabled={busy} onPress={closeSheet} size="md" variant="secondary">
+          Close
+        </Button>
+      </View>
+    ) : activeSheet === "visualIdentities" ? (
+      <View style={styles.compactSheetActions}>
+        <Button disabled={identitiesLoading} onPress={() => void openIdentityPicker()} size="md" variant="primary">
+          Create
+        </Button>
+        <Button onPress={closeSheet} size="md" variant="secondary">
+          Close
+        </Button>
+      </View>
+    ) : activeSheet === "identityPicker" ? (
+      <View style={styles.compactSheetActions}>
+        <Button disabled={!identityPickerSelected} onPress={() => (imagePickerPurpose === "cover" ? chooseCollectionCover() : pushSheet("identityName"))} size="md" variant="primary">
+          {imagePickerPurpose === "cover" ? "Choose" : "Next"}
+        </Button>
+        <Button onPress={imagePickerPurpose === "cover" ? goBackSheet : closeSheet} size="md" variant="secondary">
+          Close
+        </Button>
+      </View>
+    ) : activeSheet === "identityName" ? (
+      <View style={styles.compactSheetActions}>
+        <Button disabled={!identityPickerSelected || !identityPickerName.trim()} onPress={() => void createVisualIdentity()} size="md" variant="primary">
+          Create
+        </Button>
+        <Button onPress={closeSheet} size="md" variant="secondary">
+          Close
+        </Button>
+      </View>
+    ) : activeSheet === "transferDestination" ? (
+      <View style={styles.sheetFooter}>
+        <Button disabled={!destinationCollectionKey} onPress={completeTransfer} size="md" style={styles.sheetFooterAction} variant="primary">
+          {transferMode === "move" ? "Move" : "Copy"} {selectedImageKeys.length} image{selectedImageKeys.length === 1 ? "" : "s"}
+        </Button>
+        <Button onPress={closeSheet} size="md" style={styles.sheetFooterAction} variant="secondary">
+          Close
+        </Button>
+      </View>
+    ) : undefined;
 
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
         <WorkspaceAppSwitcher active="gallery" />
+        <ProfileHeaderRight />
       </View>
 
-      <ScrollView alwaysBounceVertical contentContainerStyle={[styles.scroll, { paddingBottom: spacing.md }]} keyboardShouldPersistTaps="handled" onScroll={({ nativeEvent }) => { if (isNearScrollEnd({ offset: nativeEvent.contentOffset.y, viewport: nativeEvent.layoutMeasurement.height, content: nativeEvent.contentSize.height })) void loadMoreImages(); }} refreshControl={<PullToRefresh onRefresh={refreshGallery} refreshing={userRefreshing} />} scrollEventThrottle={120} showsVerticalScrollIndicator={false} style={styles.scrollView}>
+      <ScrollView
+        alwaysBounceVertical
+        contentContainerStyle={[styles.scroll, { paddingBottom: spacing.md }]}
+        keyboardShouldPersistTaps="handled"
+        onScroll={({ nativeEvent }) => {
+          if (
+            isNearScrollEnd({
+              offset: nativeEvent.contentOffset.y,
+              viewport: nativeEvent.layoutMeasurement.height,
+              content: nativeEvent.contentSize.height,
+            })
+          )
+            void loadMoreImages();
+        }}
+        refreshControl={<PullToRefresh onRefresh={refreshGallery} refreshing={userRefreshing} />}
+        scrollEventThrottle={120}
+        showsVerticalScrollIndicator={false}
+        style={styles.scrollView}
+      >
         {!contextualView && (showingCollectionOverview || loading) ? (
           <View style={styles.galleryRoot}>
             <View style={styles.collectionTitleRow}>
               <WorkspaceAppSwitcher active="gallery" trigger="back" />
-              <Text numberOfLines={1} style={styles.collectionTitle}>Gallery</Text>
-              <Button accessibilityLabel="Create in Gallery" contentMode="raw" disabled={loading} onPress={() => openSheet("rootActions")} size="xs" variant="icon"><PlusIcon size="sm" /></Button>
+              <Text numberOfLines={1} style={styles.collectionTitle}>
+                Gallery
+              </Text>
+              <Button accessibilityLabel="Create in Gallery" contentMode="raw" disabled={loading} onPress={() => openSheet("rootActions")} size="xs" variant="icon">
+                <PlusIcon size="sm" />
+              </Button>
             </View>
-            {status ? <View accessibilityLiveRegion="polite" style={styles.statusCard}><Text style={styles.status}>{status}</Text></View> : null}
+            {status ? (
+              <View accessibilityLiveRegion="polite" style={styles.statusCard}>
+                <Text style={styles.status}>{status}</Text>
+              </View>
+            ) : null}
             <View style={styles.rootActions}>
               <View style={styles.collectionSearch}>
                 <SearchIcon size="sm" variant="muted" />
-                <TextInput accessibilityLabel="Search Gallery collections" editable={!collectionSearchFocusBlocked} focusable={!collectionSearchFocusBlocked} onChangeText={setRootSearchQuery} onFocus={() => { if (collectionSearchFocusBlocked) { rootSearchInput.current?.blur(); Keyboard.dismiss(); } }} placeholder="Search..." ref={rootSearchInput} style={styles.rootSearchInput} value={rootSearchQuery} />
-                {rootSearchQuery.trim() ? <Button accessibilityLabel="Clear Gallery search" contentMode="raw" iconOnly onPress={() => setRootSearchQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}
+                <TextInput
+                  accessibilityLabel="Search Gallery collections"
+                  editable={!collectionSearchFocusBlocked}
+                  focusable={!collectionSearchFocusBlocked}
+                  onChangeText={setRootSearchQuery}
+                  onFocus={() => {
+                    if (collectionSearchFocusBlocked) {
+                      rootSearchInput.current?.blur();
+                      Keyboard.dismiss();
+                    }
+                  }}
+                  placeholder="Search..."
+                  ref={rootSearchInput}
+                  style={styles.rootSearchInput}
+                  value={rootSearchQuery}
+                />
+                {rootSearchQuery.trim() ? (
+                  <Button accessibilityLabel="Clear Gallery search" contentMode="raw" iconOnly onPress={() => setRootSearchQuery("")} size="xs" variant="secondary">
+                    <CloseIcon size="sm" />
+                  </Button>
+                ) : null}
               </View>
-              <Button accessibilityLabel="Filter Gallery" contentMode="raw" onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
+              <Button accessibilityLabel="Filter Gallery" contentMode="raw" onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon">
+                <FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} />
+              </Button>
             </View>
             <Tabs accessibilityRole="tablist" style={styles.collectionTabs}>
-              <Button accessibilityRole="tab" accessibilityState={{ selected: collectionTab === "mine" }} onPress={() => setCollectionTab("mine")} size="xs" style={styles.collectionTab} variant={collectionTab === "mine" ? "secondary" : "ghost"}>Collections</Button>
-              <Button accessibilityRole="tab" accessibilityState={{ selected: collectionTab === "shared" }} onPress={() => setCollectionTab("shared")} size="xs" style={styles.collectionTab} variant={collectionTab === "shared" ? "secondary" : "ghost"}>Shared collections</Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: collectionTab === "mine" }} onPress={() => setCollectionTab("mine")} size="xs" style={styles.collectionTab} variant={collectionTab === "mine" ? "secondary" : "ghost"}>
+                Collections
+              </Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: collectionTab === "shared" }} onPress={() => setCollectionTab("shared")} size="xs" style={styles.collectionTab} variant={collectionTab === "shared" ? "secondary" : "ghost"}>
+                Shared collections
+              </Button>
             </Tabs>
             {filterBadges()}
             <View style={styles.collectionGrid}>
-              {loading || rootSearchLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.collectionCard, styles.collectionSkeleton, { width: collectionSize, height: collectionSize }]} />) : visibleCollections.map((collection) => (
-                <View key={collection.key} style={[styles.collectionCard, { width: collectionSize, height: collectionSize }]}>
-                  <CollectionCover collection={collection} />
-                   <Button accessibilityLabel={`${collection.name}, ${collection.count} images`} contentMode="raw" onPress={() => { viewRequest.current += 1; setShowingCollectionOverview(false); setLoading(true); setImageOrigin("uploaded"); setQuery(""); setSelectedImageKeys([]); setActiveSubject(undefined); setShowingSearchResults(false); setActiveCollection(collection); }} size="xl" style={[styles.collectionMain, collectionHasCover(collection) && styles.coveredCollectionMain]} variant="ghost">
-                    {collectionHasCover(collection) ? null : <FolderIcon size="lg" />}
-                    <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.collectionName, collectionHasCover(collection) && styles.coveredCollectionName]}>{collection.name}</Text>
-                  </Button>
+              {loading || rootSearchLoading
+                ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.collectionCard, styles.collectionSkeleton, { width: collectionSize, height: collectionSize }]} />)
+                : visibleCollections.map((collection) => (
+                    <View key={collection.key} style={[styles.collectionCard, { width: collectionSize, height: collectionSize }]}>
+                      <CollectionCover collection={collection} />
+                      <Button
+                        accessibilityLabel={`${collection.name}, ${collection.count} images`}
+                        contentMode="raw"
+                        onPress={() => {
+                          viewRequest.current += 1;
+                          setShowingCollectionOverview(false);
+                          setLoading(true);
+                          setImageOrigin("uploaded");
+                          setQuery("");
+                          setSelectedImageKeys([]);
+                          setActiveSubject(undefined);
+                          setShowingSearchResults(false);
+                          setActiveCollection(collection);
+                        }}
+                        shape="rounded"
+                        size="xl"
+                        style={[styles.collectionMain, collectionHasCover(collection) && styles.coveredCollectionMain]}
+                        variant="ghost"
+                      >
+                        {collectionHasCover(collection) ? null : <FolderIcon size="lg" />}
+                        <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.collectionName, collectionHasCover(collection) && styles.coveredCollectionName]}>
+                          {collection.name}
+                        </Text>
+                      </Button>
+                    </View>
+                  ))}
+              {!loading && !rootSearchLoading && visibleCollections.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyText}>{rootSearchQuery.trim() ? "No collections matched this search." : collectionTab === "shared" ? "No collections have been shared with you." : "No collections here yet."}</Text>
+                  {!rootSearchQuery.trim() && collectionTab === "mine" && canCreateCollections ? (
+                    <Button
+                      accessibilityLabel="Create collection"
+                      contentMode="raw"
+                      onPress={() => {
+                        setPendingFiles([]);
+                        setNewCollectionName("");
+                        openSheet("newCollection");
+                      }}
+                      size="md"
+                      style={styles.emptyPlusButton}
+                      variant="icon"
+                    >
+                      <PlusIcon size="sm" />
+                    </Button>
+                  ) : null}
                 </View>
-              ))}
-              {!loading && !rootSearchLoading && visibleCollections.length === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>{rootSearchQuery.trim() ? "No collections matched this search." : collectionTab === "shared" ? "No collections have been shared with you." : "No collections here yet."}</Text>{!rootSearchQuery.trim() && collectionTab === "mine" && canCreateCollections ? <Button accessibilityLabel="Create collection" contentMode="raw" onPress={() => { setPendingFiles([]); setNewCollectionName(""); openSheet("newCollection"); }} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : null}
+              ) : null}
             </View>
           </View>
         ) : null}
 
-        {activeCollection ? <View style={styles.collectionView}>
-          <View style={styles.collectionTitleRow}>
-            <Button accessibilityLabel="Back to Gallery collections" contentMode="raw" hitSlop={5} onPress={showCollectionsOverview} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button>
-            <Text numberOfLines={1} style={styles.collectionTitle}>{activeCollection.name}</Text>
-            <View style={styles.collectionTitleActions}>
-              <Button accessibilityLabel={`Manage ${activeCollection.name}`} contentMode="raw" hitSlop={5} onPress={() => openSheet("collectionMenu")} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
-              {canAddImages ? <Button accessibilityLabel={`Add images to ${activeCollection.name}`} contentMode="raw" disabled={busy} hitSlop={5} onPress={() => openSheet("actions")} size="sm" variant="icon"><PlusIcon size="sm" /></Button> : null}
+        {activeCollection ? (
+          <View style={styles.collectionView}>
+            <View style={styles.collectionTitleRow}>
+              <Button accessibilityLabel="Back to Gallery collections" contentMode="raw" hitSlop={5} onPress={showCollectionsOverview} size="sm" variant="icon">
+                <ChevronLeftIcon size="sm" />
+              </Button>
+              <Text numberOfLines={1} style={styles.collectionTitle}>
+                {activeCollection.name}
+              </Text>
+              <View style={styles.collectionTitleActions}>
+                <Button accessibilityLabel={`Manage ${activeCollection.name}`} contentMode="raw" hitSlop={5} onPress={() => openSheet("collectionMenu")} size="sm" variant="icon">
+                  <MoreHorizontalIcon size="sm" />
+                </Button>
+                {canAddImages ? (
+                  <Button accessibilityLabel={`Add images to ${activeCollection.name}`} contentMode="raw" disabled={busy} hitSlop={5} onPress={() => openSheet("actions")} size="sm" variant="icon">
+                    <PlusIcon size="sm" />
+                  </Button>
+                ) : null}
+              </View>
             </View>
+            {!managedCollection ? (
+              <View style={styles.sharingRow}>
+                <Button accessibilityLabel={`AI actions for ${activeCollection.name}`} contentMode="raw" onPress={() => openSheet("cleanupMenu")} size="sm" variant="icon">
+                  <BrainIcon size="sm" />
+                </Button>
+                <Button
+                  accessibilityLabel={`Sharing and access for ${activeCollection.name}`}
+                  contentMode="raw"
+                  onPress={() => {
+                    closeSheet();
+                    setSharingOpen(true);
+                  }}
+                  size="sm"
+                  variant="icon"
+                >
+                  <MemberIcon size="sm" />
+                </Button>
+              </View>
+            ) : null}
+            {normalCollectionView ? (
+              <View style={styles.rootActions}>
+                <View style={styles.collectionSearch}>
+                  <SearchIcon size="sm" variant="muted" />
+                  <TextInput
+                    accessibilityLabel={`Search images in ${activeCollection.name}`}
+                    editable={!collectionSearchFocusBlocked}
+                    onChangeText={updateCollectionSearch}
+                    onFocus={() => {
+                      if (collectionSearchFocusBlocked) {
+                        collectionSearchInput.current?.blur();
+                        Keyboard.dismiss();
+                      }
+                    }}
+                    onSubmitEditing={() => {
+                      if (searchTimer.current) clearTimeout(searchTimer.current);
+                      void search();
+                    }}
+                    placeholder="Search..."
+                    ref={collectionSearchInput}
+                    returnKeyType="search"
+                    style={styles.rootSearchInput}
+                    value={query}
+                  />
+                  {query.trim() ? (
+                    <Button accessibilityLabel="Clear image search" contentMode="raw" hitSlop={8} iconOnly onPress={() => clearCollectionSearch()} size="xs" variant="secondary">
+                      <CloseIcon size="sm" />
+                    </Button>
+                  ) : null}
+                </View>
+                <Button accessibilityLabel={`Filter ${activeCollection.name}`} contentMode="raw" onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon">
+                  <FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} />
+                </Button>
+              </View>
+            ) : null}
+            {normalCollectionView ? (
+              <Tabs accessibilityLabel="Image origin" accessibilityRole="tablist" style={styles.collectionTabs}>
+                <Button accessibilityRole="tab" accessibilityState={{ selected: imageOrigin === "uploaded" }} onPress={() => showImageOrigin("uploaded")} size="xs" style={styles.collectionTab} variant={imageOrigin === "uploaded" ? "secondary" : "ghost"}>
+                  Uploaded
+                </Button>
+                <Button accessibilityRole="tab" accessibilityState={{ selected: imageOrigin === "generated" }} onPress={() => showImageOrigin("generated")} size="xs" style={styles.collectionTab} variant={imageOrigin === "generated" ? "secondary" : "ghost"}>
+                  Generated
+                </Button>
+              </Tabs>
+            ) : null}
+            {bulkToolbar}
+            {filterBadges(true)}
+            {status ? (
+              <View accessibilityLiveRegion="polite" style={styles.statusCard}>
+                <Text style={styles.status}>{status}</Text>
+              </View>
+            ) : null}
+            {(loading || ((searching || (loadingMore && showOnlyFavorites)) && visibleImages.length === 0)) && visibleGenerationPlaceholders.length === 0 ? (
+              <View accessibilityLabel={searching ? "Searching images" : "Loading images"} accessibilityRole="progressbar" style={styles.grid}>
+                {Array.from({ length: IMAGE_COLUMNS }, (_, index) => (
+                  <Skeleton key={index} style={[styles.imageSkeleton, { width: imageSize, height: imageSize }]} />
+                ))}
+              </View>
+            ) : visibleImages.length === 0 && visibleOptimisticItems.length === 0 && visibleGenerationPlaceholders.length === 0 && normalCollectionView ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>{showOnlyFavorites ? "No favorite images here." : emptyGridMessage}</Text>
+                {collectionSearchActive || showOnlyFavorites || !canAddImages ? null : imageOrigin === "uploaded" ? (
+                  <Button accessibilityLabel={`Upload images to ${activeCollection.name}`} contentMode="raw" onPress={() => void choosePhotos()} size="md" style={styles.emptyPlusButton} variant="icon">
+                    <PlusIcon size="sm" />
+                  </Button>
+                ) : !managedCollection && collectionRole !== "viewer" && activeCollection.access.canContribute ? (
+                  <Button accessibilityLabel={`Generate images in ${activeCollection.name}`} contentMode="raw" onPress={() => setGenerationOpen(true)} size="md" style={styles.emptyPlusButton} variant="icon">
+                    <PlusIcon size="sm" />
+                  </Button>
+                ) : null}
+              </View>
+            ) : visibleImages.length === 0 && visibleOptimisticItems.length === 0 && visibleGenerationPlaceholders.length === 0 ? (
+              <Text style={styles.emptyText}>{showOnlyFavorites ? "No favorite images here." : emptyGridMessage}</Text>
+            ) : (
+              <View style={styles.imageSections}>
+                {visibleImageGroups.map((group) => (
+                  <View key={group.label} style={styles.dateGroup}>
+                    <Text style={styles.dateHeading}>{group.label}</Text>
+                    <View style={styles.grid}>
+                      {group.images.map((entry) =>
+                        entry.kind === "generation" ? (
+                          <Skeleton accessibilityLabel="Generating image" accessibilityRole="progressbar" key={entry.key} style={[styles.imageSkeleton, { width: imageSize, height: imageSize }]} />
+                        ) : entry.kind === "optimistic" ? (
+                          <Button key={entry.key} accessibilityLabel={entry.item.filename} contentMode="raw" onPress={() => showOptimisticImage(entry.item)} shape="rounded" size="xl" style={[styles.imageButton, { width: imageSize, height: imageSize }]} variant="ghost">
+                            <View style={styles.imageFrame}>
+                              <Image source={entry.item.uri} contentFit="cover" style={styles.image} />
+                            </View>
+                          </Button>
+                        ) : (
+                          <Button
+                            key={entry.key}
+                            accessibilityLabel={entry.image.caption || entry.image.filename}
+                            accessibilityState={{
+                              selected: selectedImageKeys.includes(entry.image.key),
+                            }}
+                            contentMode="raw"
+                            onLongPress={canMutateImage(entry.image) ? () => handleImageLongPress(entry.image.key) : undefined}
+                            onPress={() => handleImagePress(entry.image)}
+                            shape="rounded"
+                            size="xl"
+                            style={[styles.imageButton, { width: imageSize, height: imageSize }]}
+                            variant="ghost"
+                          >
+                            <View style={[styles.imageFrame, selectedImageKeys.includes(entry.image.key) && styles.imageFrameSelected]}>
+                              <Image source={entry.image.url} contentFit="cover" style={styles.image} transition={150} />
+                              {selectedImageKeys.includes(entry.image.key) ? (
+                                <View style={styles.selectionBadge}>
+                                  <CheckIcon size="sm" variant="inverse" />
+                                </View>
+                              ) : null}
+                            </View>
+                          </Button>
+                        ),
+                      )}
+                    </View>
+                  </View>
+                ))}
+                {loadingMore ? (
+                  <View style={styles.grid}>
+                    {Array.from({ length: IMAGE_COLUMNS }, (_, index) => (
+                      <Skeleton key={`more-${index}`} style={[styles.imageSkeleton, { width: imageSize, height: imageSize }]} />
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            )}
           </View>
-          {!managedCollection ? <View style={styles.sharingRow}><Button accessibilityLabel={`AI actions for ${activeCollection.name}`} contentMode="raw" onPress={() => openSheet("cleanupMenu")} size="sm" variant="icon"><BrainIcon size="sm" /></Button><Button accessibilityLabel={`Sharing and access for ${activeCollection.name}`} contentMode="raw" onPress={() => { closeSheet(); setSharingOpen(true); }} size="sm" variant="icon"><MemberIcon size="sm" /></Button></View> : null}
-          {normalCollectionView ? <View style={styles.rootActions}>
-            <View style={styles.collectionSearch}>
-              <SearchIcon size="sm" variant="muted" />
-              <TextInput accessibilityLabel={`Search images in ${activeCollection.name}`} editable={!collectionSearchFocusBlocked} onChangeText={updateCollectionSearch} onFocus={() => { if (collectionSearchFocusBlocked) { collectionSearchInput.current?.blur(); Keyboard.dismiss(); } }} onSubmitEditing={() => { if (searchTimer.current) clearTimeout(searchTimer.current); void search(); }} placeholder="Search..." ref={collectionSearchInput} returnKeyType="search" style={styles.rootSearchInput} value={query} />
-              {query.trim() ? <Button accessibilityLabel="Clear image search" contentMode="raw" hitSlop={8} iconOnly onPress={() => clearCollectionSearch()} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}
+        ) : contextualView ? (
+          <View style={styles.collectionView}>
+            <View style={styles.collectionTitleRow}>
+              <Button
+                accessibilityLabel="Back to Gallery collections"
+                contentMode="raw"
+                hitSlop={5}
+                onPress={() => {
+                  if (activeSubject) void exitSubject();
+                  else showCollectionsOverview();
+                }}
+                size="sm"
+                variant="icon"
+              >
+                <ChevronLeftIcon size="sm" />
+              </Button>
+              <Text numberOfLines={1} style={styles.collectionTitle}>
+                {activeSubject?.name ?? "Search results"}
+              </Text>
+              <Text style={styles.count}>{images.length}</Text>
             </View>
-             <Button accessibilityLabel={`Filter ${activeCollection.name}`} contentMode="raw" onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
-           </View> : null}
-          {normalCollectionView ? <Tabs accessibilityLabel="Image origin" accessibilityRole="tablist" style={styles.collectionTabs}>
-            <Button accessibilityRole="tab" accessibilityState={{ selected: imageOrigin === "uploaded" }} onPress={() => showImageOrigin("uploaded")} size="xs" style={styles.collectionTab} variant={imageOrigin === "uploaded" ? "secondary" : "ghost"}>Uploaded</Button>
-            <Button accessibilityRole="tab" accessibilityState={{ selected: imageOrigin === "generated" }} onPress={() => showImageOrigin("generated")} size="xs" style={styles.collectionTab} variant={imageOrigin === "generated" ? "secondary" : "ghost"}>Generated</Button>
-          </Tabs> : null}
-          {bulkToolbar}
-          {filterBadges(true)}
-          {status ? <View accessibilityLiveRegion="polite" style={styles.statusCard}><Text style={styles.status}>{status}</Text></View> : null}
-           {(loading || (searching || loadingMore && showOnlyFavorites) && visibleImages.length === 0) && visibleGenerationPlaceholders.length === 0 ? <View accessibilityLabel={searching ? "Searching images" : "Loading images"} accessibilityRole="progressbar" style={styles.grid}>{Array.from({ length: IMAGE_COLUMNS }, (_, index) => <Skeleton key={index} style={[styles.imageSkeleton, { width: imageSize, height: imageSize }]} />)}</View> : visibleImages.length === 0 && visibleOptimisticItems.length === 0 && visibleGenerationPlaceholders.length === 0 && normalCollectionView ? <View style={styles.emptyState}><Text style={styles.emptyText}>{showOnlyFavorites ? "No favorite images here." : emptyGridMessage}</Text>{collectionSearchActive || showOnlyFavorites || !canAddImages ? null : imageOrigin === "uploaded" ? <Button accessibilityLabel={`Upload images to ${activeCollection.name}`} contentMode="raw" onPress={() => void choosePhotos()} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : !managedCollection && collectionRole !== "viewer" && activeCollection.access.canContribute ? <Button accessibilityLabel={`Generate images in ${activeCollection.name}`} contentMode="raw" onPress={() => setGenerationOpen(true)} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : visibleImages.length === 0 && visibleOptimisticItems.length === 0 && visibleGenerationPlaceholders.length === 0 ? <Text style={styles.emptyText}>{showOnlyFavorites ? "No favorite images here." : emptyGridMessage}</Text> : (
-            <View style={styles.imageSections}>
-              {visibleImageGroups.map((group) => <View key={group.label} style={styles.dateGroup}>
-                <Text style={styles.dateHeading}>{group.label}</Text>
-                <View style={styles.grid}>{group.images.map((entry) => entry.kind === "generation" ? <Skeleton accessibilityLabel="Generating image" accessibilityRole="progressbar" key={entry.key} style={[styles.imageSkeleton, { width: imageSize, height: imageSize }]} /> : entry.kind === "optimistic" ? (
-                  <Button key={entry.key} accessibilityLabel={entry.item.filename} contentMode="raw" onPress={() => showOptimisticImage(entry.item)} size="xl" style={[styles.imageButton, { width: imageSize, height: imageSize }]} variant="ghost">
+            {filterBadges(true)}
+            {status ? (
+              <View accessibilityLiveRegion="polite" style={styles.statusCard}>
+                <Text style={styles.status}>{status}</Text>
+              </View>
+            ) : null}
+            {visibleImages.length ? (
+              <View style={styles.grid}>
+                {visibleImages.map((image) => (
+                  <Button key={image.key} accessibilityLabel={image.caption || image.filename} contentMode="raw" onPress={() => handleImagePress(image)} shape="rounded" size="xl" style={[styles.imageButton, { width: imageSize, height: imageSize }]} variant="ghost">
                     <View style={styles.imageFrame}>
-                      <Image source={entry.item.uri} contentFit="cover" style={styles.image} />
+                      <Image source={image.url} contentFit="cover" style={styles.image} transition={150} />
                     </View>
                   </Button>
-                ) : (
-                  <Button key={entry.key} accessibilityLabel={entry.image.caption || entry.image.filename} accessibilityState={{ selected: selectedImageKeys.includes(entry.image.key) }} contentMode="raw" onLongPress={canMutateImage(entry.image) ? () => handleImageLongPress(entry.image.key) : undefined} onPress={() => handleImagePress(entry.image)} size="xl" style={[styles.imageButton, { width: imageSize, height: imageSize }]} variant="ghost">
-                    <View style={[styles.imageFrame, selectedImageKeys.includes(entry.image.key) && styles.imageFrameSelected]}>
-                      <Image source={entry.image.url} contentFit="cover" style={styles.image} transition={150} />
-                      {selectedImageKeys.includes(entry.image.key) ? <View style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}
-                    </View>
-                  </Button>
-                ))}</View>
-              </View>)}
-              {loadingMore ? <View style={styles.grid}>{Array.from({ length: IMAGE_COLUMNS }, (_, index) => <Skeleton key={`more-${index}`} style={[styles.imageSkeleton, { width: imageSize, height: imageSize }]} />)}</View> : null}
-            </View>
-          )}
-        </View> : contextualView ? <View style={styles.collectionView}>
-           <View style={styles.collectionTitleRow}>
-            <Button accessibilityLabel="Back to Gallery collections" contentMode="raw" hitSlop={5} onPress={() => { if (activeSubject) void exitSubject(); else showCollectionsOverview(); }} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button>
-            <Text numberOfLines={1} style={styles.collectionTitle}>{activeSubject?.name ?? "Search results"}</Text>
-            <Text style={styles.count}>{images.length}</Text>
-           </View>
-           {filterBadges(true)}
-          {status ? <View accessibilityLiveRegion="polite" style={styles.statusCard}><Text style={styles.status}>{status}</Text></View> : null}
-           {visibleImages.length ? <View style={styles.grid}>{visibleImages.map((image) => <Button key={image.key} accessibilityLabel={image.caption || image.filename} contentMode="raw" onPress={() => handleImagePress(image)} size="xl" style={[styles.imageButton, { width: imageSize, height: imageSize }]} variant="ghost"><View style={styles.imageFrame}><Image source={image.url} contentFit="cover" style={styles.image} transition={150} /></View></Button>)}</View> : <View style={styles.emptyState}><Text style={styles.emptyText}>{showOnlyFavorites ? "No favorite images here." : emptyGridMessage}</Text></View>}
-        </View> : null}
+                ))}
+              </View>
+            ) : (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>{showOnlyFavorites ? "No favorite images here." : emptyGridMessage}</Text>
+              </View>
+            )}
+          </View>
+        ) : null}
       </ScrollView>
 
       <CoreComposer
-        accessory={returnToSignalAttachments ? <Button accessibilityLabel="Back to Signal attachments" contentMode="raw" onPress={returnToSignalAttachments} size="sm" style={styles.tripReturn} variant="secondary"><Text numberOfLines={1} style={styles.tripReturnText}>Signal attachments</Text><ChevronRightIcon size="sm" /></Button> : returnToTripAssets ? <Button accessibilityLabel={`Back to ${returnTripName ?? "trip"} assets`} contentMode="raw" onPress={returnToTripAssets} size="sm" style={styles.tripReturn} variant="secondary"><Text numberOfLines={1} style={styles.tripReturnText}>{returnTripName ?? "Trip"}</Text><ChevronRightIcon size="sm" /></Button> : undefined}
+        accessory={
+          returnToSignalAttachments ? (
+            <Button accessibilityLabel="Back to Signal attachments" contentMode="raw" onPress={returnToSignalAttachments} size="sm" style={styles.tripReturn} variant="secondary">
+              <Text numberOfLines={1} style={styles.tripReturnText}>
+                Signal attachments
+              </Text>
+              <ChevronRightIcon size="sm" />
+            </Button>
+          ) : returnToTripAssets ? (
+            <Button accessibilityLabel={`Back to ${returnTripName ?? "trip"} assets`} contentMode="raw" onPress={returnToTripAssets} size="sm" style={styles.tripReturn} variant="secondary">
+              <Text numberOfLines={1} style={styles.tripReturnText}>
+                {returnTripName ?? "Trip"}
+              </Text>
+              <ChevronRightIcon size="sm" />
+            </Button>
+          ) : undefined
+        }
         accessibilityLabel="Ask Core about your Gallery"
         disabled={assistantBusy}
         editable={!assistantBusy}
         leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />}
         loading={assistantBusy}
-        message={aiResponse ? <Text numberOfLines={3} style={styles.aiResponse}>{aiResponse}</Text> : null}
+        message={
+          aiResponse ? (
+            <Text numberOfLines={3} style={styles.aiResponse}>
+              {aiResponse}
+            </Text>
+          ) : null
+        }
         onChangeText={setAiInput}
         onFocusChange={handleCoreFocusChange}
         onSubmit={() => void askAssistant()}
@@ -2841,21 +3342,55 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
       <SearchHistorySheet error={status} history={history} loading={historyLoading} onClose={closeSheet} onRemove={(item) => void removeHistoryQuery(item)} onSelect={applyHistoryQuery} open={!sharingOpen && sheetOpen && activeSheet === "searchHistory"} removingQuery={removingHistoryQuery} />
 
       <BottomSheet
-        footer={<Button onPress={closeSheet} size="md" variant="secondary">Close</Button>}
+        footer={
+          <Button onPress={similarBehindImage ? goBackSheet : closeSheet} size="md" variant="secondary">
+            Close
+          </Button>
+        }
         height="full"
-        onOpenChange={(open) => { if (!open) closeSheet(); }}
+        onOpenChange={(open) => {
+          if (!open && (activeSheetRef.current === "image" || activeSheetRef.current === "imageActions")) {
+            if (sheetStack.current.length) goBackSheet();
+            else closeSheet();
+          }
+        }}
         onSwipeLeft={collectionViewerImages.length > 1 ? () => focusCollectionImage(1) : undefined}
         onSwipeRight={collectionViewerImages.length > 1 ? () => focusCollectionImage(-1) : undefined}
         open={!sharingOpen && sheetOpen && (activeSheet === "image" || activeSheet === "imageActions") && Boolean(selectedImage || selectedOptimisticItem)}
         pageKey={selectedImage?.key ?? selectedOptimisticItem?.clientKey}
         title={selectedImage?.filename ?? selectedOptimisticItem?.filename ?? "Image"}
       >
-        {selectedImage || selectedOptimisticItem ? <View style={styles.detail}>
-          <View style={styles.detailMenuRow}>
-            {selectedImage && (activeCollection || !isManagedGalleryImage(selectedImage)) ? <Button accessibilityLabel="Open image actions" contentMode="raw" onPress={() => pushSheet("imageActions")} size="md" style={styles.detailMenuButton} variant="icon"><MoreHorizontalIcon size="sm" /></Button> : null}
+        {selectedImage || selectedOptimisticItem ? (
+          <View style={styles.detail}>
+            <View style={styles.detailMenuRow}>
+              {selectedImage && (activeCollection || !isManagedGalleryImage(selectedImage)) ? (
+                <Button accessibilityLabel="Open image actions" contentMode="raw" onPress={() => pushSheet("imageActions")} size="md" style={styles.detailMenuButton} variant="icon">
+                  <MoreHorizontalIcon size="sm" />
+                </Button>
+              ) : null}
+            </View>
+            <View
+              accessibilityActions={
+                collectionViewerImages.length > 1
+                  ? [
+                      { name: "decrement", label: "Previous image" },
+                      { name: "increment", label: "Next image" },
+                    ]
+                  : undefined
+              }
+              accessibilityLabel={`${selectedImage?.filename ?? selectedOptimisticItem?.filename ?? "Image"} collection image`}
+              accessibilityRole="adjustable"
+              onAccessibilityAction={({ nativeEvent }) => {
+                if (nativeEvent.actionName === "decrement") focusCollectionImage(-1);
+                if (nativeEvent.actionName === "increment") focusCollectionImage(1);
+              }}
+              onLayout={({ nativeEvent }) => setImageViewerSize(nativeEvent.layout)}
+              style={styles.detailImageFrame}
+            >
+              {selectedImage && imageViewerSize.width > 0 && imageViewerSize.height > 0 ? <GalleryViewerImage image={selectedImage} viewport={imageViewerSize} /> : null}
+            </View>
           </View>
-          <View accessibilityActions={collectionViewerImages.length > 1 ? [{ name: "decrement", label: "Previous image" }, { name: "increment", label: "Next image" }] : undefined} accessibilityLabel={`${selectedImage?.filename ?? selectedOptimisticItem?.filename ?? "Image"} collection image`} accessibilityRole="adjustable" onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "decrement") focusCollectionImage(-1); if (nativeEvent.actionName === "increment") focusCollectionImage(1); }} onLayout={({ nativeEvent }) => setImageViewerSize(nativeEvent.layout)} style={styles.detailImageFrame}>{selectedImage && imageViewerSize.width > 0 && imageViewerSize.height > 0 ? <GalleryViewerImage image={selectedImage} viewport={imageViewerSize} /> : null}</View>
-        </View> : null}
+        ) : null}
       </BottomSheet>
 
       <BottomSheet
@@ -2864,194 +3399,800 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
         footer={sheetFooter}
         focusKey={activeSheet}
         hideHeading={activeSheet === "rootActions" || activeSheet === "actions" || activeSheet === "collectionMenu" || activeSheet === "filter" || activeSheet === "imageActions" || activeSheet === "bulkActions" || activeSheet === "cleanupMenu"}
-        height={activeSheet === "destination" || activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "similar" || activeSheet === "duplicates" || activeSheet === "cleanup" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory" ? "full" : undefined}
-        onOpenChange={(open) => { if (!open) { if (activeSheetRef.current === "imageActions") goBackSheet(); else closeSheet(); } }}
-        open={!sharingOpen && sheetOpen && activeSheet !== "image" && activeSheet !== "searchHistory"}
-        title={sheetTitle}
+        height={activeSheet === "destination" || activeSheet === "imageEdit" || activeSheet === "newCollection" || activeSheet === "collectionEdit" || activeSheet === "similar" || similarBehindImage || activeSheet === "duplicates" || activeSheet === "cleanup" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory" ? "full" : undefined}
+        onOpenChange={(open) => {
+          if (!open) {
+            if (activeSheetRef.current === "imageActions") goBackSheet();
+            else closeSheet();
+          }
+        }}
+        open={!sharingOpen && sheetOpen && (activeSheet !== "image" || similarBehindImage) && activeSheet !== "searchHistory"}
+        title={similarBehindImage ? "Similar images" : sheetTitle}
       >
-        {activeSheet === "cleanup" ? <FlatList
-          columnWrapperStyle={styles.cleanupGridRow}
-          contentContainerStyle={styles.cleanupListContent}
-          data={cleanupImages}
-          keyExtractor={({ key }) => key}
-          ListEmptyComponent={cleanupLoading ? <View accessibilityLabel="Loading cleanup images" accessibilityRole="progressbar" style={styles.cleanupGridRow}>{Array.from({ length: IMAGE_COLUMNS }, (_, index) => <Skeleton key={index} style={[styles.imageSkeleton, { width: sheetImageSize, height: sheetImageSize }]} />)}</View> : <View style={styles.cleanupEmpty}><Text accessibilityRole={cleanupError ? "alert" : undefined} style={styles.emptyText}>{cleanupError ?? "No scored images found at this threshold."}</Text></View>}
-          ListFooterComponent={cleanupLoadingMore ? <View accessibilityLabel="Loading more cleanup images" accessibilityRole="progressbar" style={styles.cleanupGridRow}>{Array.from({ length: IMAGE_COLUMNS }, (_, index) => <Skeleton key={`cleanup-more-${index}`} style={[styles.imageSkeleton, { width: sheetImageSize, height: sheetImageSize }]} />)}</View> : null}
-          ListHeaderComponent={<View style={styles.cleanupHeader}><Tabs accessibilityRole="tablist" style={styles.cleanupTabs}>{CLEANUP_THRESHOLDS.map((threshold) => <Button key={threshold} accessibilityLabel={`Quality threshold ${threshold}`} accessibilityRole="tab" accessibilityState={{ selected: cleanupThreshold === threshold }} disabled={busy} onPress={() => void loadCleanupImages(threshold)} size="md" style={styles.cleanupTab} variant={cleanupThreshold === threshold ? "secondary" : "ghost"}>{threshold}</Button>)}</Tabs>{cleanupError && cleanupImages.length > 0 ? <View accessibilityLiveRegion="polite" style={styles.inlineError}><Text style={styles.inlineErrorText}>{cleanupError}</Text></View> : null}</View>}
-          numColumns={IMAGE_COLUMNS}
-          onEndReached={() => void loadMoreCleanupImages()}
-          onEndReachedThreshold={0.4}
-          renderItem={({ item: image }) => { const selected = cleanupSelectedImageKeys.includes(image.key); return <Button accessibilityLabel={`${selected ? "Deselect" : "Select"} ${image.filename} for cleanup`} accessibilityState={{ selected }} contentMode="raw" disabled={busy} onPress={() => toggleDeletionSelection(image.key, setCleanupSelectedImageKeys)} size="md" style={[styles.imageButton, styles.cleanupCard, { width: sheetImageSize, height: sheetImageSize }]} variant="ghost"><View style={[styles.imageFrame, selected && styles.imageFrameSelected]}><Image source={image.url} contentFit="cover" style={styles.image} />{selected ? <View style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View></Button>; }}
-          showsVerticalScrollIndicator={false}
-          style={styles.fullSheetScroll}
-        /> : activeSheet === "similar" ? <FlatList columnWrapperStyle={styles.cleanupGridRow} contentContainerStyle={styles.similarListContent} data={similarLoading ? [] : similarImages} keyExtractor={({ key }) => key} ListEmptyComponent={similarLoading ? <View accessibilityLabel="Loading similar images" accessibilityRole="progressbar" style={styles.grid}>{Array.from({ length: IMAGE_COLUMNS }, (_, index) => <Skeleton key={index} style={[styles.imageSkeleton, { width: sheetImageSize, height: sheetImageSize }]} />)}</View> : <View style={styles.duplicateEmpty}><Text style={styles.emptyText}>{similarError ?? "No similar images found in this collection."}</Text></View>} numColumns={IMAGE_COLUMNS} renderItem={({ item: image }) => <Button accessibilityLabel={image.caption || image.filename} contentMode="raw" onPress={() => showSimilarImage(image)} size="md" style={[styles.imageButton, { width: sheetImageSize, height: sheetImageSize }]} variant="ghost"><View style={styles.imageFrame}><Image source={image.url} contentFit="cover" style={styles.image} /></View></Button>} showsVerticalScrollIndicator={false} style={styles.fullSheetScroll} /> : <ScrollView contentContainerStyle={[styles.sheetContent, (activeSheet === "destination" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetContent]} keyboardShouldPersistTaps="handled" onScroll={({ nativeEvent }) => { if (activeSheet === "identityPicker" && isNearScrollEnd({ offset: nativeEvent.contentOffset.y, viewport: nativeEvent.layoutMeasurement.height, content: nativeEvent.contentSize.height })) void loadMoreIdentityPickerImages(); }} scrollEventThrottle={120} showsVerticalScrollIndicator={false} style={[styles.sheetScroll, (activeSheet === "destination" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll, { maxHeight: activeSheet === "destination" || activeSheet === "transferDestination" || activeSheet === "duplicates" || activeSheet === "imageEdit" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "searchHistory" ? undefined : height * 0.6 }]}>
-        {activeSheet === "rootActions" ? <BottomSheetMenu>
-          {canCreateCollections ? <BottomSheetItem onPress={() => { setPendingFiles([]); setNewCollectionName(""); pushSheet("newCollection"); }} style={styles.sheetAction} variant="secondary">Create collection</BottomSheetItem> : null}
-          {canManageAnyCollection ? <BottomSheetItem onPress={() => void openIdentityPicker()} style={styles.sheetAction} variant="secondary">Create visual identity</BottomSheetItem> : null}
-        </BottomSheetMenu> : null}
-        {activeSheet === "actions" ? <BottomSheetMenu>
-          <BottomSheetItem disabled={busy} loading={busy} onPress={() => void choosePhotos()} style={styles.sheetAction} variant="secondary">Upload images</BottomSheetItem>
-          <BottomSheetItem disabled={busy} loading={busy} onPress={() => void takePhoto()} style={styles.sheetAction} variant="secondary">Capture images</BottomSheetItem>
-          {isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={() => void openIdentityPicker()} style={styles.sheetAction} variant="secondary">Create visual identity</BottomSheetItem> : null}
-        </BottomSheetMenu> : null}
-        {activeSheet === "destination" ? <>
-          <View style={styles.destinationGrid}>{writableCollections.map((collection) => <View key={collection.key} style={[styles.destinationCard, { width: destinationCollectionSize, height: destinationCollectionSize }]}>
-            <CollectionCover collection={collection} />
-            <Button accessibilityLabel={`Upload to ${collection.name}`} contentMode="raw" disabled={busy} onPress={() => void uploadTo(collection.key)} shape="rounded" size="md" style={[styles.collectionMain, collectionHasCover(collection) && styles.coveredCollectionMain]} variant="ghost">
-              {collectionHasCover(collection) ? null : <FolderIcon size="lg" />}
-              <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.collectionName, collectionHasCover(collection) && styles.coveredCollectionName]}>{collection.name}</Text>
-            </Button>
-          </View>)}</View>
-          {canCreateCollections ? <BottomSheetItem contentMode="raw" onPress={() => { setNewCollectionName(""); openSheet("newCollection"); }} variant="ghost"><View style={styles.sheetItem}><PlusIcon size="md" /><Text style={styles.sheetText}>New collection</Text></View></BottomSheetItem> : null}
-        </> : null}
-        {activeSheet === "newCollection" ? <View style={styles.form}>
-          <TextInput accessibilityLabel="Collection name" editable={!busy} onChangeText={setNewCollectionName} placeholder="Name" returnKeyType="done" style={styles.formInput} value={newCollectionName} />
-        </View> : null}
-        {activeSheet === "collectionMenu" ? <BottomSheetMenu>
-          {isCollectionOwner && !managedCollection ? <BottomSheetItem disabled={busy} onPress={openCollectionEdit} style={styles.sheetAction} variant="secondary">Edit</BottomSheetItem> : null}
-          {isCollectionOwner && !managedCollection ? <BottomSheetItem disabled={busy} onPress={() => void openVisualIdentities()} style={styles.sheetAction} variant="secondary">Visual identities</BottomSheetItem> : null}
-          <BottomSheetItem disabled={busy} onPress={() => { if (activeCollection) setHiddenOptimistically("collection", activeCollection.key, !hidden("collection", activeCollection.key), "Collection"); }} style={styles.sheetAction} variant="secondary">{activeCollection && hidden("collection", activeCollection.key) ? "Reveal" : "Hide"}</BottomSheetItem>
-          {!managedCollection ? isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={() => pushSheet("confirmDeleteCollection")} style={styles.sheetAction} variant="secondary">Delete collection</BottomSheetItem> : <BottomSheetItem disabled={busy} onPress={() => pushSheet("confirmLeaveCollection")} style={styles.sheetAction} variant="secondary">Leave</BottomSheetItem> : null}
-        </BottomSheetMenu> : null}
-        {activeSheet === "cleanupMenu" ? <BottomSheetMenu>
-          {collectionRole !== "viewer" && activeCollection?.access.canContribute ? <BottomSheetItem disabled={busy} onPress={() => { closeSheet(); setGenerationOpen(true); }} style={styles.sheetAction} variant="secondary">Generate images</BottomSheetItem> : null}
-          <BottomSheetItem disabled={busy} onPress={() => { closeSheet(); setMemoriesOpen(true); }} style={styles.sheetAction} variant="secondary">Memories</BottomSheetItem>
-          <BottomSheetItem disabled={busy} onPress={() => { closeSheet(); setHighlightsOpen(true); }} style={styles.sheetAction} variant="secondary">Highlights</BottomSheetItem>
-          {isCollectionOwner ? <BottomSheetItem disabled={busy} onPress={() => void showDuplicates()} style={styles.sheetAction} variant="secondary">Find duplicates</BottomSheetItem> : null}
-          {isCollectionOwner ? <BottomSheetItem onPress={() => void showCleanup()} style={styles.sheetAction} variant="secondary">Clean up</BottomSheetItem> : null}
-        </BottomSheetMenu> : null}
-        {activeSheet === "imageActions" && selectedImage ? <BottomSheetMenu>
-          {canMutateImage(selectedImage) ? <BottomSheetItem onPress={openImageEdit} style={styles.sheetAction} variant="secondary">Edit</BottomSheetItem> : null}
-          {activeCollection ? <BottomSheetItem onPress={() => void findSimilar()} style={styles.sheetAction} variant="secondary">Find similar</BottomSheetItem> : null}
-          {!managedCollection && !isManagedGalleryImage(selectedImage) ? <BottomSheetItem onPress={() => setHiddenOptimistically("image", selectedImage.key, !hidden("image", selectedImage.key), "Image")} style={styles.sheetAction} variant="secondary">{hidden("image", selectedImage.key) ? "Reveal" : "Hide"}</BottomSheetItem> : null}
-          {canMutateImage(selectedImage) ? <BottomSheetItem onPress={() => pushSheet("confirmDeleteImage")} style={styles.sheetAction} variant="secondary">Delete image</BottomSheetItem> : null}
-        </BottomSheetMenu> : null}
-        {activeSheet === "imageEdit" && selectedImage ? <View style={styles.form}>
-          <TextInput accessibilityLabel="Image name" editable={!busy} maxLength={255} onChangeText={setEditName} placeholder="Image name" style={styles.formInput} value={editName} />
-          <View style={styles.favoriteSwitchRow}><Switch accessibilityLabel="Favorite image" checked={editFavorite} onCheckedChange={setEditFavorite} /><Text style={styles.favoriteSwitchLabel}>Favorite</Text></View>
-        </View> : null}
-        {activeSheet === "collectionEdit" && activeCollection ? <View style={styles.form}>
-          <TextInput accessibilityLabel="Collection name" editable={!busy} maxLength={120} onChangeText={setEditName} placeholder="Collection name" style={styles.formInput} value={editName} />
-          <View style={styles.favoriteSwitchRow}><Switch accessibilityLabel="Favorite collection" checked={editFavorite} onCheckedChange={setEditFavorite} /><Text style={styles.favoriteSwitchLabel}>Favorite</Text></View>
-          <View style={styles.collectionCoverField}>
-            <Text style={styles.sheetSubtitle}>Cover</Text>
-            <View style={styles.collectionCoverControl}>
-              <Button accessibilityLabel={editCoverPreviewUrl ? "Change collection cover" : "Choose collection cover"} contentMode="raw" disabled={busy} onPress={() => void openCollectionCoverPicker()} shape="rounded" size="md" style={styles.collectionCoverButton} variant="secondary">
-                {editCoverPreviewUrl ? <Image contentFit="cover" source={editCoverPreviewUrl} style={styles.collectionCover} /> : <FolderIcon size="lg" />}
+        {activeSheet === "cleanup" ? (
+          <FlatList
+            columnWrapperStyle={styles.cleanupGridRow}
+            contentContainerStyle={styles.cleanupListContent}
+            data={cleanupImages}
+            keyExtractor={({ key }) => key}
+            ListEmptyComponent={
+              cleanupLoading ? (
+                <View accessibilityLabel="Loading cleanup images" accessibilityRole="progressbar" style={styles.cleanupGridRow}>
+                  {Array.from({ length: IMAGE_COLUMNS }, (_, index) => (
+                    <Skeleton key={index} style={[styles.imageSkeleton, { width: sheetImageSize, height: sheetImageSize }]} />
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.cleanupEmpty}>
+                  <Text accessibilityRole={cleanupError ? "alert" : undefined} style={styles.emptyText}>
+                    {cleanupError ?? "No scored images found at this threshold."}
+                  </Text>
+                </View>
+              )
+            }
+            ListFooterComponent={
+              cleanupLoadingMore ? (
+                <View accessibilityLabel="Loading more cleanup images" accessibilityRole="progressbar" style={styles.cleanupGridRow}>
+                  {Array.from({ length: IMAGE_COLUMNS }, (_, index) => (
+                    <Skeleton key={`cleanup-more-${index}`} style={[styles.imageSkeleton, { width: sheetImageSize, height: sheetImageSize }]} />
+                  ))}
+                </View>
+              ) : null
+            }
+            ListHeaderComponent={
+              <View style={styles.cleanupHeader}>
+                <Tabs accessibilityRole="tablist" style={styles.cleanupTabs}>
+                  {CLEANUP_THRESHOLDS.map((threshold) => (
+                    <Button
+                      key={threshold}
+                      accessibilityLabel={`Quality threshold ${threshold}`}
+                      accessibilityRole="tab"
+                      accessibilityState={{
+                        selected: cleanupThreshold === threshold,
+                      }}
+                      disabled={busy}
+                      onPress={() => void loadCleanupImages(threshold)}
+                      size="md"
+                      style={styles.cleanupTab}
+                      variant={cleanupThreshold === threshold ? "secondary" : "ghost"}
+                    >
+                      {threshold}
+                    </Button>
+                  ))}
+                </Tabs>
+                {cleanupError && cleanupImages.length > 0 ? (
+                  <View accessibilityLiveRegion="polite" style={styles.inlineError}>
+                    <Text style={styles.inlineErrorText}>{cleanupError}</Text>
+                  </View>
+                ) : null}
+              </View>
+            }
+            numColumns={IMAGE_COLUMNS}
+            onEndReached={() => void loadMoreCleanupImages()}
+            onEndReachedThreshold={0.4}
+            renderItem={({ item: image }) => {
+              const selected = cleanupSelectedImageKeys.includes(image.key);
+              return (
+                <Button accessibilityLabel={`${selected ? "Deselect" : "Select"} ${image.filename} for cleanup`} accessibilityState={{ selected }} contentMode="raw" disabled={busy} onPress={() => toggleDeletionSelection(image.key, setCleanupSelectedImageKeys)} shape="rounded" size="md" style={[styles.imageButton, styles.cleanupCard, { width: sheetImageSize, height: sheetImageSize }]} variant="ghost">
+                  <View style={[styles.imageFrame, selected && styles.imageFrameSelected]}>
+                    <Image source={image.url} contentFit="cover" style={styles.image} />
+                    {selected ? (
+                      <View style={styles.selectionBadge}>
+                        <CheckIcon size="sm" variant="inverse" />
+                      </View>
+                    ) : null}
+                  </View>
+                </Button>
+              );
+            }}
+            showsVerticalScrollIndicator={false}
+            style={styles.fullSheetScroll}
+          />
+        ) : activeSheet === "similar" || similarBehindImage ? (
+          <FlatList
+            columnWrapperStyle={styles.cleanupGridRow}
+            contentContainerStyle={styles.similarListContent}
+            data={similarLoading ? [] : similarImages}
+            keyExtractor={({ key }) => key}
+            ListEmptyComponent={
+              similarLoading ? (
+                <View accessibilityLabel="Loading similar images" accessibilityRole="progressbar" style={styles.grid}>
+                  {Array.from({ length: IMAGE_COLUMNS }, (_, index) => (
+                    <Skeleton key={index} style={[styles.imageSkeleton, { width: sheetImageSize, height: sheetImageSize }]} />
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.duplicateEmpty}>
+                  <Text style={styles.emptyText}>{similarError ?? "No similar images found in this collection."}</Text>
+                </View>
+              )
+            }
+            numColumns={IMAGE_COLUMNS}
+            renderItem={({ item: image }) => (
+              <Button accessibilityLabel={image.caption || image.filename} contentMode="raw" onPress={() => showSimilarImage(image)} shape="rounded" size="md" style={[styles.imageButton, { width: sheetImageSize, height: sheetImageSize }]} variant="ghost">
+                <View style={styles.imageFrame}>
+                  <Image source={image.url} contentFit="cover" style={styles.image} />
+                </View>
               </Button>
-              {editCoverPreviewUrl ? <Button accessibilityLabel="Clear collection cover" contentMode="raw" disabled={busy} iconOnly onPress={() => { setEditCoverImageKey(null); setEditCoverPreviewUrl(null); }} size="md" style={styles.collectionCoverRemove} variant="secondary"><CloseIcon size="sm" /></Button> : null}
-            </View>
-          </View>
-        </View> : null}
-        {activeSheet === "confirmDeleteImage" ? <View style={styles.compactSheetActions}>
-          <Button disabled={busy} loading={busy} onPress={deleteSelectedImage} size="md" variant="primary">Delete</Button>
-          <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">Close</Button>
-        </View> : null}
-        {activeSheet === "confirmDeleteCollection" ? <View style={styles.compactSheetActions}>
-          <Button disabled={busy} loading={busy} onPress={() => void removeActiveCollection()} size="md" variant="primary">Delete</Button>
-          <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">Close</Button>
-        </View> : null}
-        {activeSheet === "confirmLeaveCollection" ? <View style={styles.compactSheetActions}>
-          <Button disabled={busy} loading={busy} onPress={() => void leaveActiveCollection()} size="md" variant="primary">Leave</Button>
-          <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">Close</Button>
-        </View> : null}
-        {activeSheet === "duplicates" ? <View style={styles.duplicatePanel}>
-          {duplicatesLoading ? <View accessibilityLabel="Loading duplicate images" accessibilityRole="progressbar" style={styles.grid}>{Array.from({ length: IMAGE_COLUMNS }, (_, index) => <Skeleton key={index} style={[styles.imageSkeleton, { width: sheetImageSize, height: sheetImageSize }]} />)}</View>
-            : duplicateImages.length ? <View style={styles.grid}>{duplicateImages.map((image) => { const selected = duplicateSelectedImageKeys.includes(image.key); return <Button key={image.key} accessibilityLabel={`${selected ? "Deselect" : "Select"} ${image.filename} for duplicate deletion`} accessibilityState={{ selected }} contentMode="raw" disabled={busy} onPress={() => toggleDeletionSelection(image.key, setDuplicateSelectedImageKeys)} size="md" style={[styles.duplicateImageButton, { width: sheetImageSize, height: sheetImageSize }]} variant="ghost"><View style={[styles.imageFrame, selected && styles.imageFrameSelected]}><Image source={image.url} contentFit="cover" style={styles.image} />{selected ? <View style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View></Button>; })}</View>
-              : <View style={styles.duplicateEmpty}><Text style={styles.emptyText}>{duplicatesError ?? "No duplicate images found in this collection."}</Text></View>}
-        </View> : null}
-        {activeSheet === "filter" ? <View style={styles.filterPanel}>
-          <View style={styles.favoriteSwitchRow}>
-            <Switch accessibilityLabel="Show only Gallery favorites" checked={showOnlyFavorites} onCheckedChange={(checked) => { setViewFilters((current) => ({ ...current, favoritesOnly: checked })); closeSheet(); }} />
-            <Text style={styles.favoriteSwitchLabel}>Favorites</Text>
-          </View>
-          <View style={styles.favoriteSwitchRow}>
-            <Switch accessibilityLabel="Show hidden Gallery items" checked={showHidden} onCheckedChange={(checked) => { setViewFilters((current) => ({ ...current, showHidden: checked })); closeSheet(); }} />
-            <Text style={styles.favoriteSwitchLabel}>Show hidden</Text>
-          </View>
-          <Button onPress={() => void openSearchHistory(activeCollection ? "gallery" : "root")} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button>
-        </View> : null}
-        {activeSheet === "identityPickerFilter" ? <View style={styles.filterPanel}>
-          <View style={styles.favoriteSwitchRow}>
-            <Switch accessibilityLabel="Show only favorite picker items" checked={showOnlyFavorites} onCheckedChange={(checked) => setViewFilters((current) => ({ ...current, favoritesOnly: checked }))} />
-            <Text style={styles.favoriteSwitchLabel}>Favorites</Text>
-          </View>
-          <View style={styles.favoriteSwitchRow}>
-            <Switch accessibilityLabel="Show hidden picker items" checked={showHidden} onCheckedChange={(checked) => setViewFilters((current) => ({ ...current, showHidden: checked }))} />
-            <Text style={styles.favoriteSwitchLabel}>Show hidden</Text>
-          </View>
-          <Button onPress={() => void openVisualIdentities()} size="md" variant="secondary">Visual identities</Button>
-          <Button onPress={() => void openSearchHistory("identityPicker")} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button>
-        </View> : null}
-        {activeSheet === "visualIdentities" ? <View style={styles.identityLibrary}>
-          {identityError && activeSubjects.length > 0 ? <View accessibilityLiveRegion="polite" style={styles.inlineError}><Text style={styles.inlineErrorText}>{identityError}</Text></View> : null}
-          {identitiesLoading || creatingIdentityKeys.length > 0 ? <View accessibilityLabel="Loading visual identities" accessibilityRole="progressbar" style={styles.collectionGrid}>{Array.from({ length: COLLECTION_COLUMNS }, (_, index) => <Skeleton key={index} style={[styles.collectionCard, styles.collectionSkeleton, { width: destinationCollectionSize, height: destinationCollectionSize }]} />)}</View>
-            : activeSubjects.length ? <View style={styles.collectionGrid}>{activeSubjects.map((identity) => <View key={identity.key} style={[styles.collectionCard, { width: destinationCollectionSize, height: destinationCollectionSize }]}>
-              <Image source={identity.referenceUrl} contentFit="cover" style={styles.collectionCover} />
-              <Button accessibilityLabel={`${identity.name}, ${identity.imageCount} matching images`} contentMode="raw" disabled={creatingIdentityKeys.includes(identity.key)} onPress={() => void filterByVisualIdentity(identity)} size="md" style={[styles.collectionMain, styles.coveredCollectionMain]} variant="ghost">
-                <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.collectionName, styles.coveredCollectionName]}>{identity.name}</Text>
-              </Button>
-              {!creatingIdentityKeys.includes(identity.key) ? <Button accessibilityLabel={`Delete visual identity ${identity.name}`} contentMode="raw" onPress={() => confirmDeleteVisualIdentity(identity)} size="md" style={styles.thumbnailRemove} variant="icon"><CloseIcon size="sm" /></Button> : null}
-            </View>)}</View> : <View style={styles.duplicateEmpty}><Text accessibilityRole={identityError ? "alert" : undefined} style={styles.emptyText}>{identityError ?? "No visual identities yet."}</Text></View>}
-        </View> : null}
-        {activeSheet === "confirmDeleteIdentity" ? <View style={styles.compactSheetActions}>
-          <Button disabled={!identityPendingDelete} onPress={deleteVisualIdentity} size="md" variant="primary">Delete</Button>
-          <Button onPress={goBackSheet} size="md" variant="secondary">Close</Button>
-        </View> : null}
-        {activeSheet === "identityPicker" ? <View style={styles.identityPicker}>
-          <Text style={styles.sheetSubtitle}>{imagePickerPurpose === "cover" ? `Choose an existing image from ${activeCollection?.name ?? "this collection"}.` : "Choose an image to create a visual identity from."}</Text>
-          {identityPickerCollection ? <View style={styles.destinationLocationLane}><Button accessibilityLabel="Back to collections" contentMode="raw" onPress={backIdentityPicker} size="md" variant="icon"><ChevronLeftIcon size="sm" /></Button><Text numberOfLines={1} style={styles.destinationLocationTitle}>{identityPickerCollection.name}</Text></View> : null}
-          <View style={styles.rootActions}>
-            <View style={styles.collectionSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search images for visual identity" onChangeText={updateIdentityPickerSearch} placeholder="Search images..." style={styles.rootSearchInput} value={identityPickerQuery} />{identityPickerQuery.trim() ? <Button accessibilityLabel="Clear image search" contentMode="raw" iconOnly onPress={() => updateIdentityPickerSearch("")} size="md" variant="secondary"><CloseIcon size="sm" /></Button> : null}</View>
-            <Button accessibilityLabel="Filter visual identity image picker" contentMode="raw" onPress={() => pushSheet("identityPickerFilter")} size="md" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
-          </View>
-          {filterBadges()}
-          {!identityPickerCollection && !identityPickerQuery.trim() ? <View style={[styles.collectionGrid, !identityPickerLoading && identityPickerVisibleCollections.length === 0 && styles.sheetEmptyContent]}>
-            {identityPickerLoading ? Array.from({ length: COLLECTION_COLUMNS }, (_, index) => <Skeleton key={index} style={[styles.collectionCard, styles.collectionSkeleton, { width: destinationCollectionSize, height: destinationCollectionSize }]} />) : identityPickerVisibleCollections.map((collection) => <View key={collection.key} style={[styles.collectionCard, { width: destinationCollectionSize, height: destinationCollectionSize }]}><CollectionCover collection={collection} /><Button accessibilityLabel={`${collection.name}, ${collection.count} images`} contentMode="raw" onPress={() => void openIdentityPickerCollection(collection)} size="md" style={[styles.collectionMain, collectionHasCover(collection) && styles.coveredCollectionMain]} variant="ghost">{collectionHasCover(collection) ? null : <FolderIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.collectionName, collectionHasCover(collection) && styles.coveredCollectionName]}>{collection.name}</Text></Button></View>)}
-            {!identityPickerLoading && identityPickerVisibleCollections.length === 0 ? <Text style={styles.emptyText}>No collections found.</Text> : null}
-          </View> : null}
-          {identityPickerCollection || identityPickerQuery.trim() ? identityPickerSearching || identityPickerLoading && identityPickerVisibleImages.length === 0 ? <View accessibilityLabel="Loading images" accessibilityRole="progressbar" style={styles.grid}>{Array.from({ length: IMAGE_COLUMNS }, (_, index) => <Skeleton key={index} style={[styles.imageSkeleton, { width: sheetImageSize, height: sheetImageSize }]} />)}</View> : identityPickerVisibleImages.length ? <View style={styles.grid}>{identityPickerVisibleImages.map((image) => { const selected = identityPickerSelected?.key === image.key; return <Button key={image.key} accessibilityLabel={`${selected ? "Deselect" : "Select"} ${image.filename}`} accessibilityState={{ selected }} contentMode="raw" onPress={() => setIdentityPickerSelected(selected ? undefined : image)} size="md" style={[styles.imageButton, { width: sheetImageSize, height: sheetImageSize }]} variant="ghost"><View style={[styles.imageFrame, selected && styles.imageFrameSelected]}><Image source={image.url} contentFit="cover" style={styles.image} />{selected ? <View style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View></Button>; })}{identityPickerLoading ? Array.from({ length: IMAGE_COLUMNS }, (_, index) => <Skeleton key={`picker-more-${index}`} style={[styles.imageSkeleton, { width: sheetImageSize, height: sheetImageSize }]} />) : null}</View> : <View style={styles.duplicateEmpty}><Text style={styles.emptyText}>No images found.</Text></View> : null}
-        </View> : null}
-        {activeSheet === "identityName" && identityPickerSelected ? <View style={styles.identityNameForm}>
-          <TextInput accessibilityLabel="Visual identity name" maxLength={120} onChangeText={setIdentityPickerName} placeholder="Name" value={identityPickerName} />
-          <Button accessibilityLabel="Choose a different visual identity image" contentMode="raw" onPress={goBackSheet} shape="rounded" size="md" style={styles.identityImageButton} variant="secondary">
-            <Image contentFit="cover" source={identityPickerSelected.url} style={styles.identityImage} />
-          </Button>
-        </View> : null}
-        {activeSheet === "bulkActions" ? <BottomSheetMenu>
-          <Button disabled={busy} loading={busy} onPress={() => void updateSelectedFavorites()} size="md" variant="secondary">{allSelectedFavorite ? "Unfavorite" : "Favorite"}</Button>
-          <Button disabled={busy || !activeCollection} onPress={() => openTransfer("move")} size="md" variant="secondary">Move to collection</Button>
-          <Button disabled={busy || !activeCollection} onPress={() => openTransfer("copy")} size="md" variant="secondary">Copy to collection</Button>
-          <Button disabled={busy} onPress={() => pushSheet("bulkDelete")} size="md" variant="secondary">Delete</Button>
-        </BottomSheetMenu> : null}
-        {activeSheet === "bulkDelete" ? <View style={styles.compactSheetActions}>
-          <Button disabled={busy} loading={busy} onPress={deleteSelectedImages} size="md" variant="primary">Delete</Button>
-          <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">Close</Button>
-        </View> : null}
-        {activeSheet === "transferDestination" ? <View style={styles.destinationBrowser}>
-          <View style={styles.destinationLocationLane}><Text numberOfLines={1} style={styles.destinationLocationTitle}>Gallery</Text></View>
-          <View style={[styles.destinationGrid, writableCollections.filter(({ key }) => key !== activeCollection?.key).length === 0 && styles.sheetEmptyContent]}>{writableCollections.filter(({ key }) => key !== activeCollection?.key).map((collection) => {
-            const selected = destinationCollectionKey === collection.key;
-            return <View key={collection.key} style={[styles.destinationCard, selected && styles.destinationCardSelected, { width: destinationCollectionSize, height: destinationCollectionSize }]}>
-              <CollectionCover collection={collection} />
-              <Button accessibilityLabel={`${selected ? "Remove" : "Select"} ${collection.name}`} accessibilityState={{ selected }} contentMode="raw" onPress={() => setDestinationCollectionKey(selected ? undefined : collection.key)} shape="rounded" size="md" style={[styles.collectionMain, collectionHasCover(collection) && styles.coveredCollectionMain]} variant="ghost">
-                {collectionHasCover(collection) ? null : <FolderIcon size="lg" />}
-                <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.collectionName, collectionHasCover(collection) && styles.coveredCollectionName]}>{collection.name}</Text>
-                {selected ? <View style={styles.destinationBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}
-              </Button>
-            </View>;
-          })}
-          {writableCollections.filter(({ key }) => key !== activeCollection?.key).length === 0 ? <Text style={styles.emptyText}>No writable destination collections are available.</Text> : null}
-          </View>
-        </View> : null}
-        {activeSheet === "confirmDeleteDuplicates" ? <View style={styles.compactSheetActions}>
-          <Button disabled={busy || duplicateSelectedCount === 0} loading={busy} onPress={() => void deleteDuplicates()} size="md" variant="primary">Delete</Button>
-          <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">Close</Button>
-        </View> : null}
-        {activeSheet === "confirmCleanupDelete" ? <View style={styles.compactSheetActions}>
-          <Button disabled={busy || cleanupSelectedCount === 0} loading={busy} onPress={() => void deleteCleanupImages()} size="md" variant="primary">Delete</Button>
-          <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">Close</Button>
-        </View> : null}
-        </ScrollView>}
+            )}
+            showsVerticalScrollIndicator={false}
+            style={styles.fullSheetScroll}
+          />
+        ) : (
+          <ScrollView
+            contentContainerStyle={[styles.sheetContent, (activeSheet === "destination" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetContent]}
+            keyboardShouldPersistTaps="handled"
+            onScroll={({ nativeEvent }) => {
+              if (
+                activeSheet === "identityPicker" &&
+                isNearScrollEnd({
+                  offset: nativeEvent.contentOffset.y,
+                  viewport: nativeEvent.layoutMeasurement.height,
+                  content: nativeEvent.contentSize.height,
+                })
+              )
+                void loadMoreIdentityPickerImages();
+            }}
+            scrollEventThrottle={120}
+            showsVerticalScrollIndicator={false}
+            style={[
+              styles.sheetScroll,
+              (activeSheet === "destination" || activeSheet === "duplicates" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "transferDestination" || activeSheet === "searchHistory") && styles.fullSheetScroll,
+              {
+                maxHeight: activeSheet === "destination" || activeSheet === "transferDestination" || activeSheet === "duplicates" || activeSheet === "imageEdit" || activeSheet === "visualIdentities" || activeSheet === "identityPicker" || activeSheet === "identityName" || activeSheet === "searchHistory" ? undefined : height * 0.6,
+              },
+            ]}
+          >
+            {activeSheet === "rootActions" ? (
+              <BottomSheetMenu>
+                {canCreateCollections ? (
+                  <BottomSheetItem
+                    onPress={() => {
+                      setPendingFiles([]);
+                      setNewCollectionName("");
+                      pushSheet("newCollection");
+                    }}
+                    style={styles.sheetAction}
+                    variant="secondary"
+                  >
+                    Create collection
+                  </BottomSheetItem>
+                ) : null}
+                {canManageAnyCollection ? (
+                  <BottomSheetItem onPress={() => void openIdentityPicker()} style={styles.sheetAction} variant="secondary">
+                    Create visual identity
+                  </BottomSheetItem>
+                ) : null}
+              </BottomSheetMenu>
+            ) : null}
+            {activeSheet === "actions" ? (
+              <BottomSheetMenu>
+                <BottomSheetItem disabled={busy} loading={busy} onPress={() => void choosePhotos()} style={styles.sheetAction} variant="secondary">
+                  Upload images
+                </BottomSheetItem>
+                <BottomSheetItem disabled={busy} loading={busy} onPress={() => void takePhoto()} style={styles.sheetAction} variant="secondary">
+                  Capture images
+                </BottomSheetItem>
+                {isCollectionOwner ? (
+                  <BottomSheetItem disabled={busy} onPress={() => void openIdentityPicker()} style={styles.sheetAction} variant="secondary">
+                    Create visual identity
+                  </BottomSheetItem>
+                ) : null}
+              </BottomSheetMenu>
+            ) : null}
+            {activeSheet === "destination" ? (
+              <>
+                <View style={styles.destinationGrid}>
+                  {writableCollections.map((collection) => (
+                    <View
+                      key={collection.key}
+                      style={[
+                        styles.destinationCard,
+                        {
+                          width: destinationCollectionSize,
+                          height: destinationCollectionSize,
+                        },
+                      ]}
+                    >
+                      <CollectionCover collection={collection} />
+                      <Button accessibilityLabel={`Upload to ${collection.name}`} contentMode="raw" disabled={busy} onPress={() => void uploadTo(collection.key)} shape="rounded" size="md" style={[styles.collectionMain, collectionHasCover(collection) && styles.coveredCollectionMain]} variant="ghost">
+                        {collectionHasCover(collection) ? null : <FolderIcon size="lg" />}
+                        <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.collectionName, collectionHasCover(collection) && styles.coveredCollectionName]}>
+                          {collection.name}
+                        </Text>
+                      </Button>
+                    </View>
+                  ))}
+                </View>
+                {canCreateCollections ? (
+                  <BottomSheetItem
+                    contentMode="raw"
+                    onPress={() => {
+                      setNewCollectionName("");
+                      openSheet("newCollection");
+                    }}
+                    variant="ghost"
+                  >
+                    <View style={styles.sheetItem}>
+                      <PlusIcon size="md" />
+                      <Text style={styles.sheetText}>New collection</Text>
+                    </View>
+                  </BottomSheetItem>
+                ) : null}
+              </>
+            ) : null}
+            {activeSheet === "newCollection" ? (
+              <View style={styles.form}>
+                <TextInput accessibilityLabel="Collection name" editable={!busy} onChangeText={setNewCollectionName} placeholder="Name" returnKeyType="done" style={styles.formInput} value={newCollectionName} />
+              </View>
+            ) : null}
+            {activeSheet === "collectionMenu" ? (
+              <BottomSheetMenu>
+                {isCollectionOwner && !managedCollection ? (
+                  <BottomSheetItem disabled={busy} onPress={openCollectionEdit} style={styles.sheetAction} variant="secondary">
+                    Edit
+                  </BottomSheetItem>
+                ) : null}
+                {isCollectionOwner && !managedCollection ? (
+                  <BottomSheetItem disabled={busy} onPress={() => void openVisualIdentities()} style={styles.sheetAction} variant="secondary">
+                    Visual identities
+                  </BottomSheetItem>
+                ) : null}
+                <BottomSheetItem
+                  disabled={busy}
+                  onPress={() => {
+                    if (activeCollection) setHiddenOptimistically("collection", activeCollection.key, !hidden("collection", activeCollection.key), "Collection");
+                  }}
+                  style={styles.sheetAction}
+                  variant="secondary"
+                >
+                  {activeCollection && hidden("collection", activeCollection.key) ? "Reveal" : "Hide"}
+                </BottomSheetItem>
+                {!managedCollection ? (
+                  isCollectionOwner ? (
+                    <BottomSheetItem disabled={busy} onPress={() => pushSheet("confirmDeleteCollection")} style={styles.sheetAction} variant="secondary">
+                      Delete collection
+                    </BottomSheetItem>
+                  ) : (
+                    <BottomSheetItem disabled={busy} onPress={() => pushSheet("confirmLeaveCollection")} style={styles.sheetAction} variant="secondary">
+                      Leave
+                    </BottomSheetItem>
+                  )
+                ) : null}
+              </BottomSheetMenu>
+            ) : null}
+            {activeSheet === "cleanupMenu" ? (
+              <BottomSheetMenu>
+                {collectionRole !== "viewer" && activeCollection?.access.canContribute ? (
+                  <BottomSheetItem
+                    disabled={busy}
+                    onPress={() => {
+                      closeSheet();
+                      setGenerationOpen(true);
+                    }}
+                    style={styles.sheetAction}
+                    variant="secondary"
+                  >
+                    Generate images
+                  </BottomSheetItem>
+                ) : null}
+                <BottomSheetItem
+                  disabled={busy}
+                  onPress={() => {
+                    closeSheet();
+                    setMemoriesOpen(true);
+                  }}
+                  style={styles.sheetAction}
+                  variant="secondary"
+                >
+                  Memories
+                </BottomSheetItem>
+                <BottomSheetItem
+                  disabled={busy}
+                  onPress={() => {
+                    closeSheet();
+                    setHighlightsOpen(true);
+                  }}
+                  style={styles.sheetAction}
+                  variant="secondary"
+                >
+                  Highlights
+                </BottomSheetItem>
+                {isCollectionOwner ? (
+                  <BottomSheetItem disabled={busy} onPress={() => void showDuplicates()} style={styles.sheetAction} variant="secondary">
+                    Find duplicates
+                  </BottomSheetItem>
+                ) : null}
+                {isCollectionOwner ? (
+                  <BottomSheetItem onPress={() => void showCleanup()} style={styles.sheetAction} variant="secondary">
+                    Clean up
+                  </BottomSheetItem>
+                ) : null}
+              </BottomSheetMenu>
+            ) : null}
+            {activeSheet === "imageActions" && selectedImage ? (
+              <BottomSheetMenu>
+                {canMutateImage(selectedImage) ? (
+                  <BottomSheetItem onPress={openImageEdit} style={styles.sheetAction} variant="secondary">
+                    Edit
+                  </BottomSheetItem>
+                ) : null}
+                {activeCollection ? (
+                  <BottomSheetItem onPress={() => void findSimilar()} style={styles.sheetAction} variant="secondary">
+                    Find similar
+                  </BottomSheetItem>
+                ) : null}
+                {canMutateImage(selectedImage) ? (
+                  <BottomSheetItem onPress={() => setHiddenOptimistically("image", selectedImage.key, !hidden("image", selectedImage.key), "Image")} style={styles.sheetAction} variant="secondary">
+                    {hidden("image", selectedImage.key) ? "Reveal" : "Hide"}
+                  </BottomSheetItem>
+                ) : null}
+                {canMutateImage(selectedImage) ? (
+                  <BottomSheetItem onPress={() => pushSheet("confirmDeleteImage")} style={styles.sheetAction} variant="secondary">
+                    Delete image
+                  </BottomSheetItem>
+                ) : null}
+              </BottomSheetMenu>
+            ) : null}
+            {activeSheet === "imageEdit" && selectedImage ? (
+              <View style={styles.form}>
+                <TextInput accessibilityLabel="Image name" editable={!busy} maxLength={255} onChangeText={setEditName} placeholder="Image name" style={styles.formInput} value={editName} />
+                <View style={styles.favoriteSwitchRow}>
+                  <Switch accessibilityLabel="Favorite image" checked={editFavorite} onCheckedChange={setEditFavorite} />
+                  <Text style={styles.favoriteSwitchLabel}>Favorite</Text>
+                </View>
+              </View>
+            ) : null}
+            {activeSheet === "collectionEdit" && activeCollection ? (
+              <View style={styles.form}>
+                <TextInput accessibilityLabel="Collection name" editable={!busy} maxLength={120} onChangeText={setEditName} placeholder="Collection name" style={styles.formInput} value={editName} />
+                <View style={styles.favoriteSwitchRow}>
+                  <Switch accessibilityLabel="Favorite collection" checked={editFavorite} onCheckedChange={setEditFavorite} />
+                  <Text style={styles.favoriteSwitchLabel}>Favorite</Text>
+                </View>
+                <View style={styles.collectionCoverField}>
+                  <Text style={styles.sheetSubtitle}>Cover</Text>
+                  <View style={styles.collectionCoverControl}>
+                    <Button accessibilityLabel={editCoverPreviewUrl ? "Change collection cover" : "Choose collection cover"} contentMode="raw" disabled={busy} onPress={() => void openCollectionCoverPicker()} shape="rounded" size="md" style={styles.collectionCoverButton} variant="secondary">
+                      {editCoverPreviewUrl ? <Image contentFit="cover" source={editCoverPreviewUrl} style={styles.collectionCover} /> : <FolderIcon size="lg" />}
+                    </Button>
+                    {editCoverPreviewUrl ? (
+                      <Button
+                        accessibilityLabel="Clear collection cover"
+                        contentMode="raw"
+                        disabled={busy}
+                        iconOnly
+                        onPress={() => {
+                          setEditCoverImageKey(null);
+                          setEditCoverPreviewUrl(null);
+                        }}
+                        size="md"
+                        style={styles.collectionCoverRemove}
+                        variant="secondary"
+                      >
+                        <CloseIcon size="sm" />
+                      </Button>
+                    ) : null}
+                  </View>
+                </View>
+              </View>
+            ) : null}
+            {activeSheet === "confirmDeleteImage" ? (
+              <View style={styles.compactSheetActions}>
+                <Button disabled={busy} onPress={deleteSelectedImage} size="md" variant="primary">
+                  Delete
+                </Button>
+                <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">
+                  Close
+                </Button>
+              </View>
+            ) : null}
+            {activeSheet === "confirmDeleteCollection" ? (
+              <View style={styles.compactSheetActions}>
+                <Button disabled={busy} onPress={() => void removeActiveCollection()} size="md" variant="primary">
+                  Delete
+                </Button>
+                <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">
+                  Close
+                </Button>
+              </View>
+            ) : null}
+            {activeSheet === "confirmLeaveCollection" ? (
+              <View style={styles.compactSheetActions}>
+                <Button disabled={busy} loading={busy} onPress={() => void leaveActiveCollection()} size="md" variant="primary">
+                  Leave
+                </Button>
+                <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">
+                  Close
+                </Button>
+              </View>
+            ) : null}
+            {activeSheet === "duplicates" ? (
+              <View style={styles.duplicatePanel}>
+                {duplicatesLoading ? (
+                  <View accessibilityLabel="Loading duplicate images" accessibilityRole="progressbar" style={styles.grid}>
+                    {Array.from({ length: IMAGE_COLUMNS }, (_, index) => (
+                      <Skeleton key={index} style={[styles.imageSkeleton, { width: sheetImageSize, height: sheetImageSize }]} />
+                    ))}
+                  </View>
+                ) : duplicateImages.length ? (
+                  <View style={styles.grid}>
+                    {duplicateImages.map((image) => {
+                      const selected = duplicateSelectedImageKeys.includes(image.key);
+                      return (
+                        <Button key={image.key} accessibilityLabel={`${selected ? "Deselect" : "Select"} ${image.filename} for duplicate deletion`} accessibilityState={{ selected }} contentMode="raw" disabled={busy} onPress={() => toggleDeletionSelection(image.key, setDuplicateSelectedImageKeys)} shape="rounded" size="md" style={[styles.duplicateImageButton, { width: sheetImageSize, height: sheetImageSize }]} variant="ghost">
+                          <View style={[styles.imageFrame, selected && styles.imageFrameSelected]}>
+                            <Image source={image.url} contentFit="cover" style={styles.image} />
+                            {selected ? (
+                              <View style={styles.selectionBadge}>
+                                <CheckIcon size="sm" variant="inverse" />
+                              </View>
+                            ) : null}
+                          </View>
+                        </Button>
+                      );
+                    })}
+                  </View>
+                ) : (
+                  <View style={styles.duplicateEmpty}>
+                    <Text style={styles.emptyText}>{duplicatesError ?? "No duplicate images found in this collection."}</Text>
+                  </View>
+                )}
+              </View>
+            ) : null}
+            {activeSheet === "filter" ? (
+              <View style={styles.filterPanel}>
+                <View style={styles.favoriteSwitchRow}>
+                  <Switch
+                    accessibilityLabel="Show only Gallery favorites"
+                    checked={showOnlyFavorites}
+                    onCheckedChange={(checked) => {
+                      setViewFilters((current) => ({
+                        ...current,
+                        favoritesOnly: checked,
+                      }));
+                      closeSheet();
+                    }}
+                  />
+                  <Text style={styles.favoriteSwitchLabel}>Favorites</Text>
+                </View>
+                <View style={styles.favoriteSwitchRow}>
+                  <Switch
+                    accessibilityLabel="Show hidden Gallery items"
+                    checked={showHidden}
+                    onCheckedChange={(checked) => {
+                      setViewFilters((current) => ({
+                        ...current,
+                        showHidden: checked,
+                      }));
+                      closeSheet();
+                    }}
+                  />
+                  <Text style={styles.favoriteSwitchLabel}>Show hidden</Text>
+                </View>
+                <Button onPress={() => void openSearchHistory(activeCollection ? "gallery" : "root")} size="md" style={styles.searchHistoryOption} variant="secondary">
+                  Search history
+                </Button>
+              </View>
+            ) : null}
+            {activeSheet === "identityPickerFilter" ? (
+              <View style={styles.filterPanel}>
+                <View style={styles.favoriteSwitchRow}>
+                  <Switch
+                    accessibilityLabel="Show only favorite picker items"
+                    checked={showOnlyFavorites}
+                    onCheckedChange={(checked) =>
+                      setViewFilters((current) => ({
+                        ...current,
+                        favoritesOnly: checked,
+                      }))
+                    }
+                  />
+                  <Text style={styles.favoriteSwitchLabel}>Favorites</Text>
+                </View>
+                <View style={styles.favoriteSwitchRow}>
+                  <Switch
+                    accessibilityLabel="Show hidden picker items"
+                    checked={showHidden}
+                    onCheckedChange={(checked) =>
+                      setViewFilters((current) => ({
+                        ...current,
+                        showHidden: checked,
+                      }))
+                    }
+                  />
+                  <Text style={styles.favoriteSwitchLabel}>Show hidden</Text>
+                </View>
+                <Button onPress={() => void openVisualIdentities()} size="md" variant="secondary">
+                  Visual identities
+                </Button>
+                <Button onPress={() => void openSearchHistory("identityPicker")} size="md" style={styles.searchHistoryOption} variant="secondary">
+                  Search history
+                </Button>
+              </View>
+            ) : null}
+            {activeSheet === "visualIdentities" ? (
+              <View style={styles.identityLibrary}>
+                {identityError && activeSubjects.length > 0 ? (
+                  <View accessibilityLiveRegion="polite" style={styles.inlineError}>
+                    <Text style={styles.inlineErrorText}>{identityError}</Text>
+                  </View>
+                ) : null}
+                {identitiesLoading || creatingIdentityKeys.length > 0 ? (
+                  <View accessibilityLabel="Loading visual identities" accessibilityRole="progressbar" style={styles.collectionGrid}>
+                    {Array.from({ length: COLLECTION_COLUMNS }, (_, index) => (
+                      <Skeleton
+                        key={index}
+                        style={[
+                          styles.collectionCard,
+                          styles.collectionSkeleton,
+                          {
+                            width: destinationCollectionSize,
+                            height: destinationCollectionSize,
+                          },
+                        ]}
+                      />
+                    ))}
+                  </View>
+                ) : activeSubjects.length ? (
+                  <View style={styles.collectionGrid}>
+                    {activeSubjects.map((identity) => (
+                      <View
+                        key={identity.key}
+                        style={[
+                          styles.collectionCard,
+                          {
+                            width: destinationCollectionSize,
+                            height: destinationCollectionSize,
+                          },
+                        ]}
+                      >
+                        <Image source={identity.referenceUrl} contentFit="cover" style={styles.collectionCover} />
+                        <Button accessibilityLabel={`${identity.name}, ${identity.imageCount} matching images`} contentMode="raw" disabled={creatingIdentityKeys.includes(identity.key)} onPress={() => void filterByVisualIdentity(identity)} size="md" style={[styles.collectionMain, styles.coveredCollectionMain]} variant="ghost">
+                          <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.collectionName, styles.coveredCollectionName]}>
+                            {identity.name}
+                          </Text>
+                        </Button>
+                        {!creatingIdentityKeys.includes(identity.key) ? (
+                          <Button accessibilityLabel={`Delete visual identity ${identity.name}`} contentMode="raw" onPress={() => confirmDeleteVisualIdentity(identity)} size="md" style={styles.thumbnailRemove} variant="icon">
+                            <CloseIcon size="sm" />
+                          </Button>
+                        ) : null}
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <View style={styles.duplicateEmpty}>
+                    <Text accessibilityRole={identityError ? "alert" : undefined} style={styles.emptyText}>
+                      {identityError ?? "No visual identities yet."}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            ) : null}
+            {activeSheet === "confirmDeleteIdentity" ? (
+              <View style={styles.compactSheetActions}>
+                <Button disabled={!identityPendingDelete} onPress={deleteVisualIdentity} size="md" variant="primary">
+                  Delete
+                </Button>
+                <Button onPress={goBackSheet} size="md" variant="secondary">
+                  Close
+                </Button>
+              </View>
+            ) : null}
+            {activeSheet === "identityPicker" ? (
+              <View style={styles.identityPicker}>
+                <Text style={styles.sheetSubtitle}>{imagePickerPurpose === "cover" ? `Choose an existing image from ${activeCollection?.name ?? "this collection"}.` : "Choose an image to create a visual identity from."}</Text>
+                {identityPickerCollection ? (
+                  <View style={styles.destinationLocationLane}>
+                    <Button accessibilityLabel="Back to collections" contentMode="raw" onPress={backIdentityPicker} size="md" variant="icon">
+                      <ChevronLeftIcon size="sm" />
+                    </Button>
+                    <Text numberOfLines={1} style={styles.destinationLocationTitle}>
+                      {identityPickerCollection.name}
+                    </Text>
+                  </View>
+                ) : null}
+                <View style={styles.rootActions}>
+                  <View style={styles.collectionSearch}>
+                    <SearchIcon size="sm" variant="muted" />
+                    <TextInput accessibilityLabel="Search images for visual identity" onChangeText={updateIdentityPickerSearch} placeholder="Search images..." style={styles.rootSearchInput} value={identityPickerQuery} />
+                    {identityPickerQuery.trim() ? (
+                      <Button accessibilityLabel="Clear image search" contentMode="raw" iconOnly onPress={() => updateIdentityPickerSearch("")} size="md" variant="secondary">
+                        <CloseIcon size="sm" />
+                      </Button>
+                    ) : null}
+                  </View>
+                  <Button accessibilityLabel="Filter visual identity image picker" contentMode="raw" onPress={() => pushSheet("identityPickerFilter")} size="md" style={styles.searchHistoryButton} variant="icon">
+                    <FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} />
+                  </Button>
+                </View>
+                {filterBadges()}
+                {!identityPickerCollection && !identityPickerQuery.trim() ? (
+                  <View style={[styles.collectionGrid, !identityPickerLoading && identityPickerVisibleCollections.length === 0 && styles.sheetEmptyContent]}>
+                    {identityPickerLoading
+                      ? Array.from({ length: COLLECTION_COLUMNS }, (_, index) => (
+                          <Skeleton
+                            key={index}
+                            style={[
+                              styles.collectionCard,
+                              styles.collectionSkeleton,
+                              {
+                                width: destinationCollectionSize,
+                                height: destinationCollectionSize,
+                              },
+                            ]}
+                          />
+                        ))
+                      : identityPickerVisibleCollections.map((collection) => (
+                          <View
+                            key={collection.key}
+                            style={[
+                              styles.collectionCard,
+                              {
+                                width: destinationCollectionSize,
+                                height: destinationCollectionSize,
+                              },
+                            ]}
+                          >
+                            <CollectionCover collection={collection} />
+                            <Button accessibilityLabel={`${collection.name}, ${collection.count} images`} contentMode="raw" onPress={() => void openIdentityPickerCollection(collection)} shape="rounded" size="md" style={[styles.collectionMain, collectionHasCover(collection) && styles.coveredCollectionMain]} variant="ghost">
+                              {collectionHasCover(collection) ? null : <FolderIcon size="lg" />}
+                              <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.collectionName, collectionHasCover(collection) && styles.coveredCollectionName]}>
+                                {collection.name}
+                              </Text>
+                            </Button>
+                          </View>
+                        ))}
+                    {!identityPickerLoading && identityPickerVisibleCollections.length === 0 ? <Text style={styles.emptyText}>No collections found.</Text> : null}
+                  </View>
+                ) : null}
+                {identityPickerCollection || identityPickerQuery.trim() ? (
+                  identityPickerSearching || (identityPickerLoading && identityPickerVisibleImages.length === 0) ? (
+                    <View accessibilityLabel="Loading images" accessibilityRole="progressbar" style={styles.grid}>
+                      {Array.from({ length: IMAGE_COLUMNS }, (_, index) => (
+                        <Skeleton key={index} style={[styles.imageSkeleton, { width: sheetImageSize, height: sheetImageSize }]} />
+                      ))}
+                    </View>
+                  ) : identityPickerVisibleImages.length ? (
+                    <View style={styles.grid}>
+                      {identityPickerVisibleImages.map((image) => {
+                        const selected = identityPickerSelected?.key === image.key;
+                        return (
+                          <Button key={image.key} accessibilityLabel={`${selected ? "Deselect" : "Select"} ${image.filename}`} accessibilityState={{ selected }} contentMode="raw" onPress={() => setIdentityPickerSelected(selected ? undefined : image)} shape="rounded" size="md" style={[styles.imageButton, { width: sheetImageSize, height: sheetImageSize }]} variant="ghost">
+                            <View style={[styles.imageFrame, selected && styles.imageFrameSelected]}>
+                              <Image source={image.url} contentFit="cover" style={styles.image} />
+                              {selected ? (
+                                <View style={styles.selectionBadge}>
+                                  <CheckIcon size="sm" variant="inverse" />
+                                </View>
+                              ) : null}
+                            </View>
+                          </Button>
+                        );
+                      })}
+                      {identityPickerLoading
+                        ? Array.from({ length: IMAGE_COLUMNS }, (_, index) => (
+                            <Skeleton
+                              key={`picker-more-${index}`}
+                              style={[
+                                styles.imageSkeleton,
+                                {
+                                  width: sheetImageSize,
+                                  height: sheetImageSize,
+                                },
+                              ]}
+                            />
+                          ))
+                        : null}
+                    </View>
+                  ) : (
+                    <View style={styles.duplicateEmpty}>
+                      <Text style={styles.emptyText}>No images found.</Text>
+                    </View>
+                  )
+                ) : null}
+              </View>
+            ) : null}
+            {activeSheet === "identityName" && identityPickerSelected ? (
+              <View style={styles.identityNameForm}>
+                <TextInput accessibilityLabel="Visual identity name" maxLength={120} onChangeText={setIdentityPickerName} placeholder="Name" value={identityPickerName} />
+                <Button accessibilityLabel="Choose a different visual identity image" contentMode="raw" onPress={goBackSheet} shape="rounded" size="md" style={styles.identityImageButton} variant="secondary">
+                  <Image contentFit="cover" source={identityPickerSelected.url} style={styles.identityImage} />
+                </Button>
+              </View>
+            ) : null}
+            {activeSheet === "bulkActions" ? (
+              <BottomSheetMenu>
+                <Button disabled={busy} loading={busy} onPress={() => void updateSelectedFavorites()} size="md" variant="secondary">
+                  {allSelectedFavorite ? "Unfavorite" : "Favorite"}
+                </Button>
+                <Button disabled={busy || !activeCollection} onPress={() => openTransfer("move")} size="md" variant="secondary">
+                  Move to collection
+                </Button>
+                <Button disabled={busy || !activeCollection} onPress={() => openTransfer("copy")} size="md" variant="secondary">
+                  Copy to collection
+                </Button>
+                <Button disabled={busy} onPress={() => pushSheet("bulkDelete")} size="md" variant="secondary">
+                  Delete
+                </Button>
+              </BottomSheetMenu>
+            ) : null}
+            {activeSheet === "bulkDelete" ? (
+              <View style={styles.compactSheetActions}>
+                <Button disabled={busy} onPress={deleteSelectedImages} size="md" variant="primary">
+                  Delete
+                </Button>
+                <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">
+                  Close
+                </Button>
+              </View>
+            ) : null}
+            {activeSheet === "transferDestination" ? (
+              <View style={styles.destinationBrowser}>
+                <View style={styles.destinationLocationLane}>
+                  <Text numberOfLines={1} style={styles.destinationLocationTitle}>
+                    Gallery
+                  </Text>
+                </View>
+                <View style={[styles.destinationGrid, writableCollections.filter(({ key }) => key !== activeCollection?.key).length === 0 && styles.sheetEmptyContent]}>
+                  {writableCollections
+                    .filter(({ key }) => key !== activeCollection?.key)
+                    .map((collection) => {
+                      const selected = destinationCollectionKey === collection.key;
+                      return (
+                        <View
+                          key={collection.key}
+                          style={[
+                            styles.destinationCard,
+                            selected && styles.destinationCardSelected,
+                            {
+                              width: destinationCollectionSize,
+                              height: destinationCollectionSize,
+                            },
+                          ]}
+                        >
+                          <CollectionCover collection={collection} />
+                          <Button accessibilityLabel={`${selected ? "Remove" : "Select"} ${collection.name}`} accessibilityState={{ selected }} contentMode="raw" onPress={() => setDestinationCollectionKey(selected ? undefined : collection.key)} shape="rounded" size="md" style={[styles.collectionMain, collectionHasCover(collection) && styles.coveredCollectionMain]} variant="ghost">
+                            {collectionHasCover(collection) ? null : <FolderIcon size="lg" />}
+                            <Text ellipsizeMode="tail" numberOfLines={1} style={[styles.collectionName, collectionHasCover(collection) && styles.coveredCollectionName]}>
+                              {collection.name}
+                            </Text>
+                            {selected ? (
+                              <View style={styles.destinationBadge}>
+                                <CheckIcon size="sm" variant="inverse" />
+                              </View>
+                            ) : null}
+                          </Button>
+                        </View>
+                      );
+                    })}
+                  {writableCollections.filter(({ key }) => key !== activeCollection?.key).length === 0 ? <Text style={styles.emptyText}>No writable destination collections are available.</Text> : null}
+                </View>
+              </View>
+            ) : null}
+            {activeSheet === "confirmDeleteDuplicates" ? (
+              <View style={styles.compactSheetActions}>
+                <Button disabled={busy || duplicateSelectedCount === 0} loading={busy} onPress={() => void deleteDuplicates()} size="md" variant="primary">
+                  Delete
+                </Button>
+                <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">
+                  Close
+                </Button>
+              </View>
+            ) : null}
+            {activeSheet === "confirmCleanupDelete" ? (
+              <View style={styles.compactSheetActions}>
+                <Button disabled={busy || cleanupSelectedCount === 0} loading={busy} onPress={() => void deleteCleanupImages()} size="md" variant="primary">
+                  Delete
+                </Button>
+                <Button disabled={busy} onPress={goBackSheet} size="md" variant="secondary">
+                  Close
+                </Button>
+              </View>
+            ) : null}
+          </ScrollView>
+        )}
       </BottomSheet>
       {activeCollection ? <GalleryCollectionSharing collection={activeCollection} context={galleryContext} memberKeys={memberKeys} onClose={() => setSharingOpen(false)} open={sharingOpen} /> : null}
       {cameraOpen ? <GalleryCaptureModal onClose={() => setCameraOpen(false)} onSubmit={uploadCapturedPhotos} /> : null}
@@ -3061,7 +4202,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, return
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.page },
-  header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.md, justifyContent: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1 },
+  header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.md, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomColor: palette.hairline, borderBottomWidth: 1 },
   scrollView: { flex: 1 },
   scroll: { flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
   galleryRoot: { flexGrow: 1, gap: spacing.md },
@@ -3183,6 +4324,5 @@ const styles = StyleSheet.create({
 });
 
 function GalleryViewerImage({ image, viewport }: { image: GalleryImage; viewport: { width: number; height: number } }) {
-  const scale = image.width > 0 && image.height > 0 ? Math.min(viewport.width / image.width, viewport.height / image.height) : 1;
-  return <Image contentFit="contain" source={image.url} style={[styles.detailImage, { width: image.width > 0 ? image.width * scale : viewport.width, height: image.height > 0 ? image.height * scale : viewport.height }]} />;
+  return <Image contentFit="contain" source={image.url} style={[styles.detailImage, fitContainedMediaSize(image, viewport)]} />;
 }

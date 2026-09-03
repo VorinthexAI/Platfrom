@@ -21,8 +21,6 @@ import {
   type CapabilitySlug,
 } from "@/data/registry";
 import { completionHaptic, decisionHaptic } from "@/lib/haptics";
-import { trackOnboardingDecision } from "@/lib/analytics";
-import type { CoreAppName } from "@/lib/analytics-events";
 import { createRandom } from "@/lib/random";
 import { durations, springs, swipe } from "@/theme/motion";
 import { palette, radii } from "@/theme/tokens";
@@ -333,15 +331,6 @@ export function CardStack({ onComplete }: CardStackProps) {
 
   const handleCommit = useCallback(
     (slug: CapabilitySlug, decision: CapabilityDecision) => {
-      const stepIndex = CAPABILITIES.findIndex((capability) => capability.slug === slug);
-      const capability = CAPABILITIES[stepIndex];
-      if (capability && stepIndex >= 0 && stepIndex < 5) {
-        void trackOnboardingDecision(
-          (stepIndex + 1) as 1 | 2 | 3 | 4 | 5,
-          capability.name as CoreAppName,
-          decision,
-        ).catch(() => undefined);
-      }
       decide(slug, decision);
     },
     [decide],

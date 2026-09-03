@@ -88,8 +88,8 @@ export interface ContentRepository {
   listSummaryAudio?(scopeKey: string, summaryKeys: string[]): Promise<DocumentSummaryAudio[]>;
   createSummaryAudio?(audio: DocumentSummaryAudio): Promise<{ audio: DocumentSummaryAudio; created: boolean }>;
   deleteSummaryAudio?(summaryKey: string): Promise<void>;
-  semanticSearch(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; documentKeys?: string[]; extensions?: Document['extension'][]; createdAfter?: string; createdBefore?: string; updatedAfter?: string; updatedBefore?: string; minScore?: number; limit?: number }): Promise<Array<{ score: number; document: Document; matchedContent?: string }>>;
-  semanticSearchFolders?(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; minScore: number; limit: number }): Promise<Array<{ score: number; folder: Folder }>>;
+  semanticSearch(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; documentKeys?: string[]; extensions?: Document['extension'][]; createdFrom?: string; createdTo?: string; createdAfter?: string; createdBefore?: string; updatedAfter?: string; updatedBefore?: string; minScore?: number; limit?: number }): Promise<Array<{ score: number; document: Document; matchedContent?: string }>>;
+  semanticSearchFolders?(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; createdFrom?: string; createdTo?: string; minScore: number; limit: number }): Promise<Array<{ score: number; folder: Folder }>>;
   semanticNeighbors?(input: { embedding: number[]; scopeKey: string; activeFolderKeys: string[]; sourceFolderKey?: string; sourceDocumentKey?: string; limit: number }): Promise<{ folders: Array<{ score: number; folder: Folder }>; documents: Array<{ score: number; document: Document }>; files: Array<{ score: number; document: Document }> }>;
   generatedDocumentBindings?(documentKeys: string[]): Promise<GeneratedDocumentBinding[]>;
   transaction?<T>(operation: (repository: ContentRepository) => Promise<T>): Promise<T>;
@@ -136,7 +136,7 @@ export interface ContentToolDependencies extends RouterDependencies {
 
 const rank: Record<Role, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4 };
 const ROUTED_EMBEDDING_CONCURRENCY = 8;
-const CONTENT_SEARCH_CACHE_VERSION = 4;
+const CONTENT_SEARCH_CACHE_VERSION = 6;
 const MAIL_ENVELOPE_KINDS = new Set([
   'mail-thread', 'mail-message', 'mail-reply-draft', 'mail-new-draft', 'mail-tone', 'mail-reply-context', 'mail-writing-profile', 'mail-contact', 'mail-rule',
 ]);
@@ -188,6 +188,10 @@ function publicDocumentContent(document: Document) {
   return raw && typeof raw === 'object' && 'kind' in raw && raw.kind === 'mail-message'
     ? emailMessagePayloadSchema.parse(raw).data.body
     : document.content;
+}
+
+function withinCreationDateRange(value: { createdAt: string }, createdFrom?: string, createdTo?: string) {
+  return (!createdFrom || value.createdAt >= createdFrom) && (!createdTo || value.createdAt <= createdTo);
 }
 
 function isSystemManagedMailDocument(document: Document) {
@@ -984,6 +988,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         return true;
       };
       const values = allFolders.filter((item) => {
+        if (!withinCreationDateRange(item, input.createdFrom, input.createdTo)) return false;
         if (!isVisible(item)) return false;
         if (!input.includeDescendants) return item.parentFolderKey === input.parentFolderKey;
         if (!input.parentFolderKey) return true;
@@ -1001,7 +1006,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const offset = input.cursor ? Number(Buffer.from(input.cursor, 'base64url').toString()) || 0 : 0;
       const limit = input.limit ?? 50;
       const documents = input.includeDocuments && input.parentFolderKey
-        ? (await repo.listDocuments(input.scopeKey)).filter((item) => archiveVisible(item) && item.folderKey === input.parentFolderKey).map(documentView)
+        ? (await repo.listDocuments(input.scopeKey)).filter((item) => archiveVisible(item) && item.folderKey === input.parentFolderKey && withinCreationDateRange(item, input.createdFrom, input.createdTo)).map(documentView)
         : undefined;
       result = {
         folders: await Promise.all(values.slice(offset, offset + limit).map((value) => folderView(value, d))),
@@ -1453,8 +1458,9 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       })), false, repo);
     } else if (tool === 'document.list') {
       const parent = await location(input.scopeKey, input.folderKey, 'viewer');
+      const folderKeys = input.includeDescendants && parent ? new Set([parent.key, ...descendants(await foldersIn(input.scopeKey), parent.key).map((item) => item.key)]) : undefined;
       const values = (await repo.listDocuments(input.scopeKey))
-        .filter((item) => archiveVisible(item) && !item._internalDeletion && item.folderKey === parent?.key && (!input.extensions || item.extension !== undefined && input.extensions.includes(item.extension)));
+        .filter((item) => archiveVisible(item) && !item._internalDeletion && (folderKeys ? item.folderKey !== undefined && folderKeys.has(item.folderKey) : item.folderKey === parent?.key) && (!input.extensions || item.extension !== undefined && input.extensions.includes(item.extension)) && withinCreationDateRange(item, input.createdFrom, input.createdTo));
       const sort = input.sort ?? { field: 'name', direction: 'asc' };
       values.sort((left: any, right: any) => String(left[sort.field]).localeCompare(String(right[sort.field])) * (sort.direction === 'asc' ? 1 : -1));
       const offset = input.cursor ? Number(Buffer.from(input.cursor, 'base64url').toString()) || 0 : 0;
@@ -2155,6 +2161,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         ]);
       };
       const [allFolders, allDocuments] = await Promise.all([repo.listFolders(input.scopeKey), repo.listDocuments(input.scopeKey)]);
+      const folderDescriptors = new Map(allFolders.map((current) => [current.key, { key: current.key, name: current.name }]));
       let folderKeys: string[] | undefined;
       let revisionFolders = allFolders;
       if (folderKey) {
@@ -2167,12 +2174,12 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         revisionFolders = allFolders.filter((item) => relevant.has(item.key));
       }
       const revisionDocuments = folderKeys ? allDocuments.filter((item) => item.folderKey && folderKeys!.includes(item.folderKey)) : allDocuments;
-      const folderRevision = revisionFolders.map((item) => `${item.key}:${item.parentFolderKey ?? ''}:${item.updatedAt}:${item.isFavorite ? 'favorite' : ''}:${item._internalDeletion ? 'pending' : ''}`);
+      const folderRevision = revisionFolders.map((item) => `${item.key}:${item.name}:${item.parentFolderKey ?? ''}:${item.updatedAt}:${item.isFavorite ? 'favorite' : ''}:${item._internalDeletion ? 'pending' : ''}`);
       const documentRevision = revisionDocuments.map((item) => `${item.key}:${item.name}:${item.folderKey ?? ''}:${item.semanticContentHash ?? ''}:${item.isFavorite ? 'favorite' : ''}:${item._internalDeletion ? 'pending' : ''}`);
       const sourceRevision = createHash('sha256').update([...folderRevision, ...documentRevision].sort().join('\n')).digest('hex');
       const cached = await store.get({ actorKey: member.user.key, scopeKey: input.scopeKey, normalizedQuery, folderKey, includeDescendants, cacheVersion }).catch(() => null);
-      const cachedValue = cached?.output as { result?: unknown; sourceRevision?: string; minimumScore?: number; includeSummaries?: boolean; replayable?: boolean } | undefined;
-      const reusable = Boolean(cachedValue?.replayable && cachedValue.result && cachedValue.sourceRevision === sourceRevision && cachedValue.minimumScore === input.minimumScore && cachedValue.includeSummaries === input.includeSummaries);
+      const cachedValue = cached?.output as { result?: unknown; sourceRevision?: string; minimumScore?: number; includeSummaries?: boolean; limit?: number; createdFrom?: string; createdTo?: string; replayable?: boolean } | undefined;
+      const reusable = Boolean(cachedValue?.replayable && cachedValue.result && cachedValue.sourceRevision === sourceRevision && cachedValue.minimumScore === input.minimumScore && cachedValue.includeSummaries === input.includeSummaries && cachedValue.limit === input.limit && cachedValue.createdFrom === input.createdFrom && cachedValue.createdTo === input.createdTo);
       if (reusable) {
         const parsed = contentToolOutputSchemas[tool].parse({ ...(cachedValue!.result as object), query: input.query, cached: true });
         await recordSearch(cachedValue);
@@ -2180,6 +2187,11 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       } else if (!input.includeSummaries) {
         const queryText = normalizedQuery;
         const queryTokens = new Set<string>(queryText.match(/[\p{L}\p{N}]+/gu) ?? []);
+        const queryTokenText = [...queryText.matchAll(/[\p{L}\p{N}]+/gu)].map(([token]) => token).join(' ');
+        const nameMentioned = (value: string) => {
+          const name = [...value.normalize('NFKC').toLocaleLowerCase('en-US').matchAll(/[\p{L}\p{N}]+/gu)].map(([token]) => token).join(' ');
+          return Boolean(name) && (` ${queryTokenText} `).includes(` ${name} `);
+        };
         const scoreText = (value: string) => {
           const normalized = value.normalize('NFKC').toLocaleLowerCase('en-US');
           if (normalized.includes(queryText)) return 0.75;
@@ -2190,19 +2202,23 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         const activeFolders = [];
         for (const current of allFolders) {
           if (folderKeys && !folderKeys.includes(current.key)) continue;
+          if (!withinCreationDateRange(current, input.createdFrom, input.createdTo)) continue;
           if (!archiveVisible(current) || current._internalDeletion || !await activeFolderHierarchy(current.key, current.scopeKey)) continue;
-          const score = scoreText(`${current.name}\n${current.description ?? ''}`);
-          if (score >= input.minimumScore) activeFolders.push({ folder: current, score });
+          const exactNameMatch = nameMentioned(current.name);
+          const score = Math.max(scoreText(`${current.name}\n${current.description ?? ''}`), exactNameMatch ? 0.75 : 0);
+          if (score >= input.minimumScore) activeFolders.push({ folder: current, score, exactNameMatch });
         }
         const activeDocuments = [];
         for (const current of allDocuments) {
           if (folderKeys && (!current.folderKey || !folderKeys.includes(current.folderKey))) continue;
+          if (!withinCreationDateRange(current, input.createdFrom, input.createdTo)) continue;
           if (!archiveVisible(current) || current._internalDeletion || !await activeFolderHierarchy(current.folderKey, current.scopeKey)) continue;
-          const score = scoreText(`${current.name}\n${current.content}`);
-          if (score >= input.minimumScore) activeDocuments.push({ document: current, score });
+          const exactNameMatch = nameMentioned(current.name);
+          const score = Math.max(scoreText(`${current.name}\n${current.content}`), exactNameMatch ? 0.75 : 0);
+          if (score >= input.minimumScore) activeDocuments.push({ document: current, score, exactNameMatch });
         }
         const hasExactMatch = activeFolders.some(({ score }) => score >= 0.75) || activeDocuments.some(({ score }) => score >= 0.75);
-        if (!hasExactMatch) {
+        if (!hasExactMatch || input.minimumScore < 0) {
           let embeddingTimer: number | undefined;
           const queryEmbedding = dependencies.queryEmbedding ?? await Promise.race<number[] | undefined>([
             embed(input.query, undefined, input.scopeKey, 'query').catch(() => undefined),
@@ -2211,46 +2227,46 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           if (embeddingTimer) clearTimeout(embeddingTimer);
           if (queryEmbedding) {
             const [documentMatches, folderMatches] = await Promise.all([
-              repo.semanticSearch({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 40 }),
-              repo.semanticSearchFolders?.({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 20 }) ?? [],
+              repo.semanticSearch({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), createdFrom: input.createdFrom, createdTo: input.createdTo, minScore: input.minimumScore, limit: input.limit }),
+              repo.semanticSearchFolders?.({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), createdFrom: input.createdFrom, createdTo: input.createdTo, minScore: input.minimumScore, limit: input.limit }) ?? [],
             ]);
             for (const match of folderMatches) {
-              if (!archiveVisible(match.folder) || match.folder.scopeKey !== input.scopeKey || folderKeys && !folderKeys.includes(match.folder.key) || match.folder._internalDeletion || !await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) continue;
+              if (!archiveVisible(match.folder) || !withinCreationDateRange(match.folder, input.createdFrom, input.createdTo) || match.folder.scopeKey !== input.scopeKey || folderKeys && !folderKeys.includes(match.folder.key) || match.folder._internalDeletion || !await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) continue;
               const previous = activeFolders.find(({ folder: current }) => current.key === match.folder.key);
               if (previous) previous.score = Math.max(previous.score, match.score);
-              else activeFolders.push(match);
+               else activeFolders.push({ ...match, exactNameMatch: nameMentioned(match.folder.name) });
             }
             for (const match of documentMatches) {
-              if (!archiveVisible(match.document) || match.document.scopeKey !== input.scopeKey || folderKeys && (!match.document.folderKey || !folderKeys.includes(match.document.folderKey)) || match.document._internalDeletion || !await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) continue;
+              if (!archiveVisible(match.document) || !withinCreationDateRange(match.document, input.createdFrom, input.createdTo) || match.document.scopeKey !== input.scopeKey || folderKeys && (!match.document.folderKey || !folderKeys.includes(match.document.folderKey)) || match.document._internalDeletion || !await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) continue;
               const previous = activeDocuments.find(({ document: current }) => current.key === match.document.key);
               if (previous) previous.score = Math.max(previous.score, match.score);
-              else activeDocuments.push(match);
+               else activeDocuments.push({ ...match, exactNameMatch: nameMentioned(match.document.name) });
             }
           }
         }
-        const folders = activeFolders.sort((left, right) => right.score - left.score || left.folder.key.localeCompare(right.folder.key)).slice(0, 4).map(({ folder: current, score }) => ({ key: current.key, scopeKey: current.scopeKey, ...(current.parentFolderKey ? { parentFolderKey: current.parentFolderKey } : {}), name: current.name, ...(current.description ? { description: current.description } : {}), isFavorite: Boolean(current.isFavorite), managed: managedFolder(current), score: Math.max(0, Math.min(1, score)) }));
-        const documents = activeDocuments.sort((left, right) => right.score - left.score || left.document.key.localeCompare(right.document.key)).slice(0, 10).map(({ document: current, score }) => ({ documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), isFavorite: Boolean(current.isFavorite), managed: managedDocument(current), score: Math.max(0, Math.min(1, score)) }));
+        const folders = activeFolders.sort((left, right) => Number(right.exactNameMatch) - Number(left.exactNameMatch) || right.score - left.score || left.folder.key.localeCompare(right.folder.key)).slice(0, input.minimumScore < 0 ? input.limit : Math.min(4, input.limit)).map(({ folder: current, score }) => ({ key: current.key, scopeKey: current.scopeKey, ...(current.parentFolderKey ? { parentFolderKey: current.parentFolderKey } : {}), name: current.name, ...(current.description ? { description: current.description } : {}), isFavorite: Boolean(current.isFavorite), managed: managedFolder(current), createdAt: current.createdAt, updatedAt: current.updatedAt, score: Math.max(0, Math.min(1, score)) }));
+        const documents = activeDocuments.sort((left, right) => Number(right.exactNameMatch) - Number(left.exactNameMatch) || right.score - left.score || left.document.key.localeCompare(right.document.key)).slice(0, input.minimumScore < 0 ? input.limit : Math.min(10, input.limit)).map(({ document: current, score }) => ({ documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey, folder: folderDescriptors.get(current.folderKey) } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), isFavorite: Boolean(current.isFavorite), managed: managedDocument(current), createdAt: current.createdAt, updatedAt: current.updatedAt, score: Math.max(0, Math.min(1, score)) }));
         const freshResult = { query: input.query, folders, documents, cached: false };
-        await recordSearch({ result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: false, replayable: true });
+        await recordSearch({ result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: false, limit: input.limit, createdFrom: input.createdFrom, createdTo: input.createdTo, replayable: true });
         result = freshResult;
       } else {
         let queryEmbedding: number[];
         try { queryEmbedding = dependencies.queryEmbedding ?? await embed(input.query, undefined, input.scopeKey, 'query'); }
         catch (error) { fail('CONTENT_SEARCH_EMBEDDING_FAILED', 'Search query embedding failed.', tool, 'embed', undefined, error, true); }
         const [documentMatches, folderMatches] = await Promise.all([
-          repo.semanticSearch({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 100 }),
-          repo.semanticSearchFolders?.({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 20 }) ?? [],
+          repo.semanticSearch({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), createdFrom: input.createdFrom, createdTo: input.createdTo, minScore: input.minimumScore, limit: input.limit }),
+          repo.semanticSearchFolders?.({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), createdFrom: input.createdFrom, createdTo: input.createdTo, minScore: input.minimumScore, limit: input.limit }) ?? [],
         ]);
         const folders = [];
         for (const match of folderMatches) {
-          if (match.score < input.minimumScore || !archiveVisible(match.folder) || match.folder.scopeKey !== input.scopeKey || folderKeys && !folderKeys.includes(match.folder.key) || match.folder._internalDeletion || !await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) continue;
-          folders.push({ key: match.folder.key, scopeKey: match.folder.scopeKey, ...(match.folder.parentFolderKey ? { parentFolderKey: match.folder.parentFolderKey } : {}), name: match.folder.name, ...(match.folder.description ? { description: match.folder.description } : {}), isFavorite: Boolean(match.folder.isFavorite), managed: managedFolder(match.folder), score: Math.max(0, Math.min(1, match.score)) });
-          if (folders.length === 4) break;
+          if (match.score < input.minimumScore || !archiveVisible(match.folder) || !withinCreationDateRange(match.folder, input.createdFrom, input.createdTo) || match.folder.scopeKey !== input.scopeKey || folderKeys && !folderKeys.includes(match.folder.key) || match.folder._internalDeletion || !await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) continue;
+          folders.push({ key: match.folder.key, scopeKey: match.folder.scopeKey, ...(match.folder.parentFolderKey ? { parentFolderKey: match.folder.parentFolderKey } : {}), name: match.folder.name, ...(match.folder.description ? { description: match.folder.description } : {}), isFavorite: Boolean(match.folder.isFavorite), managed: managedFolder(match.folder), createdAt: match.folder.createdAt, updatedAt: match.folder.updatedAt, score: Math.max(0, Math.min(1, match.score)) });
+          if (folders.length === (input.minimumScore < 0 ? input.limit : Math.min(4, input.limit))) break;
         }
         const selectedDocuments = [];
         for (const match of documentMatches) {
-          if (match.score >= input.minimumScore && archiveVisible(match.document) && match.document.scopeKey === input.scopeKey && (!folderKeys || match.document.folderKey !== undefined && folderKeys.includes(match.document.folderKey)) && !match.document._internalDeletion && await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) selectedDocuments.push(match);
-          if (selectedDocuments.length === 10) break;
+          if (match.score >= input.minimumScore && archiveVisible(match.document) && withinCreationDateRange(match.document, input.createdFrom, input.createdTo) && match.document.scopeKey === input.scopeKey && (!folderKeys || match.document.folderKey !== undefined && folderKeys.includes(match.document.folderKey)) && !match.document._internalDeletion && await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) selectedDocuments.push(match);
+          if (selectedDocuments.length === (input.minimumScore < 0 ? input.limit : Math.min(10, input.limit))) break;
         }
         const documents = [];
         let summariesComplete = true;
@@ -2269,13 +2285,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               complete = false;
               summary = `This document contains semantically relevant information for "${input.query}".`;
             }
-            return { complete, document: { documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), isFavorite: Boolean(current.isFavorite), managed: managedDocument(current), score: Math.max(0, Math.min(1, score)), summary } };
+            return { complete, document: { documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey, folder: folderDescriptors.get(current.folderKey) } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), isFavorite: Boolean(current.isFavorite), managed: managedDocument(current), createdAt: current.createdAt, updatedAt: current.updatedAt, score: Math.max(0, Math.min(1, score)), summary } };
           }));
           summariesComplete &&= batch.every(({ complete }) => complete);
           documents.push(...batch.map(({ document }) => document));
         }
         const freshResult = { query: input.query, folders, documents, cached: false };
-        await recordSearch({ result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: true, replayable: summariesComplete });
+        await recordSearch({ result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: true, limit: input.limit, createdFrom: input.createdFrom, createdTo: input.createdTo, replayable: summariesComplete });
         result = freshResult;
       }
     } else {

@@ -124,10 +124,10 @@ test("semantically searches inboxes, tones, messages, and drafts through app sea
   expect((await client.searchEmailMessagesForContext(context, connector.connectorKey, client.normalizeEmailOverviewQuery({ search: "roadmap", facets: ["important", "favorite"] }), false, controller.signal))[0]).toEqual(thread);
   expect((await client.searchEmailDraftsForContext(context, connector.connectorKey, "follow up", false, controller.signal))[0]).toEqual(draft);
   expect(calls).toEqual([
-    { method: "POST", path: "/app/search", body: { ...context, query: "leadership", collectionSlugs: ["inboxes"], minimumScore: 0.55, limit: 50, recordHistory: false }, config: { timeout: 15_000, signal: controller.signal } },
-    { method: "POST", path: "/app/search", body: { ...context, query: "measured", collectionSlugs: ["email-tones"], minimumScore: 0.55, limit: 50, recordHistory: true }, config: { timeout: 15_000, signal: controller.signal } },
-    { method: "POST", path: "/app/search", body: { ...context, query: "roadmap", collectionSlugs: ["email-messages"], recordHistory: false, limit: 50, minimumScore: 0.55, filters: { connectorKey: connector.connectorKey, readState: "unread", emailFacets: ["important", "favorite"] } }, config: { timeout: 15_000, signal: controller.signal } },
-    { method: "POST", path: "/app/search", body: { ...context, query: "follow up", collectionSlugs: ["email-drafts"], minimumScore: 0.55, limit: 50, recordHistory: false, filters: { connectorKey: connector.connectorKey } }, config: { timeout: 15_000, signal: controller.signal } },
+    { method: "POST", path: "/app/search", body: { ...context, query: "leadership", collectionSlugs: ["inboxes"], limit: 50, recordHistory: false }, config: { timeout: 15_000, signal: controller.signal } },
+    { method: "POST", path: "/app/search", body: { ...context, query: "measured", collectionSlugs: ["email-tones"], limit: 50, recordHistory: true }, config: { timeout: 15_000, signal: controller.signal } },
+    { method: "POST", path: "/app/search", body: { ...context, query: "roadmap", collectionSlugs: ["email-messages"], recordHistory: false, limit: 50, filters: { connectorKey: connector.connectorKey, readState: "unread", emailFacets: ["important", "favorite"] } }, config: { timeout: 15_000, signal: controller.signal } },
+    { method: "POST", path: "/app/search", body: { ...context, query: "follow up", collectionSlugs: ["email-drafts"], limit: 50, recordHistory: false, filters: { connectorKey: connector.connectorKey } }, config: { timeout: 15_000, signal: controller.signal } },
   ]);
 });
 

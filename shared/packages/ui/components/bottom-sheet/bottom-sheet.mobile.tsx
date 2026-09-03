@@ -273,6 +273,7 @@ export function BottomSheet({
     if (open) {
       dismissingRef.current = false;
       setVisible(true);
+      if (focusPresentedRef.current) bottomSheetFocusCoordinator.restart(sceneSheetId, focusCycleKeyRef.current);
       translateY.setValue(reducedMotionRef.current ? 0 : closedOffsetRef.current);
       overlayOpacity.setValue(reducedMotionRef.current ? 1 : 0);
       animate(true);

@@ -12,11 +12,17 @@ const searchOptions = {
   limit: z.number().int().min(1).max(50).default(50),
 } as const;
 
+const dateRangeOptions = {
+  createdFrom: z.string().datetime().optional(),
+  createdTo: z.string().datetime().optional(),
+} as const;
+
 const textSearchSchema = z.object({
   query: z.string().trim().min(1).max(12_000),
   collectionKey: z.string().cuid().optional(),
   recordHistory: z.boolean().default(true),
   ...searchOptions,
+  ...dateRangeOptions,
 }).strict();
 const similarImageSearchSchema = z.object({
   imageKey: z.string().cuid(),
@@ -132,6 +138,7 @@ export const imageSearchTool = {
     ]);
     const embedding = currentEmbeddingSchema.parse(response.output.embedding);
     const search = dependencies.searchImages ?? searchAccessibleImages;
+    const searchDateRange = { ...(input.createdFrom ? { createdFrom: input.createdFrom } : {}), ...(input.createdTo ? { createdTo: input.createdTo } : {}) };
     const [semanticResults, ...identityResults] = await Promise.all([
       search({
         organizationKey,
@@ -141,6 +148,7 @@ export const imageSearchTool = {
         ...(input.collectionKey ? { collectionKey: input.collectionKey } : {}),
         threshold: input.threshold,
         limit: input.limit,
+        ...searchDateRange,
       }),
       ...identities.map((identity) => search({
         organizationKey,
@@ -149,6 +157,7 @@ export const imageSearchTool = {
         embedding: identity.embedding,
         ...(input.collectionKey ? { collectionKey: input.collectionKey } : {}),
         limit: input.limit,
+        ...searchDateRange,
       })),
     ]);
     const merged = new Map<string, AccessibleImageSearchResult>();

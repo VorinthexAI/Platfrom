@@ -4,6 +4,7 @@ import { isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib
 import { EMAIL_INBOXES_COLLECTION, emailInboxSchema, type EmailInbox } from '@/lib/db/email-inboxes.node';
 import type { OrganizationConnector } from './connector-schema';
 import { emailInboxKey } from './inbox-key';
+import type { EmailCreatedAtRange } from './repository';
 
 type Database = Pick<typeof db, 'query'>;
 const parse = (value: unknown) => emailInboxSchema.parse(withArangoKey(value as Record<string, unknown>));
@@ -16,10 +17,10 @@ export function createInboxRepository(database: Database = db) {
       const value = await cursor.next();
       return value ? { ...parse(value), revision: revision(value) } : null;
     },
-    async search(organizationKey: string, scopeKey: string, connectorKeys: string[], embedding: number[], query: string, minimumScore: number, limit: number) {
+    async search(organizationKey: string, scopeKey: string, connectorKeys: string[], embedding: number[], query: string, minimumScore: number, limit: number, range: EmailCreatedAtRange = {}) {
       if (!connectorKeys.length) return [];
       const normalized = query.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US');
-      const cursor = await database.query(`FOR inbox IN @@inboxes FILTER inbox.organizationKey == @organizationKey && inbox.scopeKey == @scopeKey && inbox.connectorKey IN @connectorKeys LET connector = DOCUMENT(organizationConnectors, inbox.connectorKey) FILTER connector != null && connector.provider == "gmail" && connector.status != "revoked" FILTER IS_ARRAY(inbox.embedding) && LENGTH(inbox.embedding) == LENGTH(@embedding) LET direct = CONTAINS(LOWER(CONCAT_SEPARATOR(" ", inbox.name, inbox.description)), @query) LET score = COSINE_SIMILARITY(inbox.embedding, @embedding) FILTER direct || IS_NUMBER(score) && score >= @minimumScore SORT direct DESC, score DESC, inbox.updatedAt DESC, inbox._key ASC LIMIT @limit RETURN { inbox, score: direct ? 1 : score }`, { '@inboxes': EMAIL_INBOXES_COLLECTION, organizationKey, scopeKey, connectorKeys, embedding, query: normalized, minimumScore, limit });
+      const cursor = await database.query(`FOR inbox IN @@inboxes FILTER inbox.organizationKey == @organizationKey && inbox.scopeKey == @scopeKey && inbox.connectorKey IN @connectorKeys FILTER @createdFrom == null || inbox.createdAt >= @createdFrom FILTER @createdTo == null || inbox.createdAt <= @createdTo LET connector = DOCUMENT(organizationConnectors, inbox.connectorKey) FILTER connector != null && connector.provider == "gmail" && connector.status != "revoked" FILTER IS_ARRAY(inbox.embedding) && LENGTH(inbox.embedding) == LENGTH(@embedding) LET direct = CONTAINS(LOWER(CONCAT_SEPARATOR(" ", inbox.name, inbox.description)), @query) LET score = COSINE_SIMILARITY(inbox.embedding, @embedding) FILTER direct || IS_NUMBER(score) && score >= @minimumScore SORT direct DESC, score DESC, inbox.updatedAt DESC, inbox._key ASC LIMIT @limit RETURN { inbox, score: direct ? 1 : score }`, { '@inboxes': EMAIL_INBOXES_COLLECTION, organizationKey, scopeKey, connectorKeys, embedding, query: normalized, minimumScore, limit, createdFrom: range.createdFrom ?? null, createdTo: range.createdTo ?? null });
       return (await cursor.all() as Array<{ inbox: unknown; score: number }>).map(({ inbox, score }) => ({ inbox: parse(inbox), score }));
     },
     async ensure(connector: OrganizationConnector, metadata: { name: string; description?: string }, embedding: number[], overwrite: boolean, expectedRevision?: string | null): Promise<(EmailInbox & { revision: string }) | null> {

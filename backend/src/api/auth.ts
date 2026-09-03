@@ -778,7 +778,7 @@ export async function verifyGoogleIdentityToken(
     return {
       email,
       name: typeof payload.name === 'string' ? payload.name : null,
-      profileUrl: typeof payload.picture === 'string' ? payload.picture : null,
+      profileUrl: null,
     };
   } catch {
     return null;
@@ -842,7 +842,7 @@ async function exchangeGoogleCode(code: string, redirectUri: string) {
   });
   const profile = await profileResponse.json().catch(() => null) as { email?: string; name?: string; picture?: string; email_verified?: boolean } | null;
   if (!profileResponse.ok || !profile?.email || profile.email_verified !== true) return null;
-  return { email: profile.email, name: profile.name ?? null, profileUrl: profile.picture ?? null };
+  return { email: profile.email, name: profile.name ?? null, profileUrl: null };
 }
 
 async function exchangeAppleCode(code: string, redirectUri: string) {
@@ -865,7 +865,6 @@ async function exchangeAppleCode(code: string, redirectUri: string) {
 async function completeOAuthProfile(
   profile: { email: string; name: string | null; profileUrl: string | null },
   mobileRedirectUri?: string,
-  initializeNameOnly = false,
 ) {
   const normalized = normalizeEmail(profile.email);
 
@@ -883,11 +882,10 @@ async function completeOAuthProfile(
   }
 
   const user = await upsertUserByEmail(normalized, {
-    ...(profile.name && (!initializeNameOnly || !existingUser?.name) ? { name: profile.name } : {}),
-    ...(profile.profileUrl ? { profileUrl: profile.profileUrl } : {}),
+    ...(profile.name ? { name: profile.name } : {}),
     isVerified: true,
     lastLoginAt: new Date().toISOString(),
-  });
+  }, { initializeNameOnly: true });
   await provisionPersonalAuthContext(user);
   const tokens = await issueUserTokens(user);
   const alias = user.alias ?? generateAlias(user.key);
@@ -926,7 +924,7 @@ export async function completeNativeAppleSignIn(idToken: string, nonce: string, 
     clientId: requiredEnv('APPLE_NATIVE_CLIENT_ID'),
     nonce,
   });
-  return profile ? completeOAuthProfile({ ...profile, name: name?.trim() || profile.name }, undefined, true) : null;
+  return profile ? completeOAuthProfile({ ...profile, name: name?.trim() || profile.name }) : null;
 }
 
 function allowedMobileOAuthRedirect(uri: string) {
@@ -1300,11 +1298,11 @@ export async function validateMagicLink(token: string): Promise<MagicLinkValidat
   };
 }
 
-export async function createUserWithAuth(input: { email: string; name?: string; profile_url?: string; country_code?: z.infer<typeof countryCodeSchema> }) {
+export async function createUserWithAuth(input: { email: string; name?: string; country_code?: z.infer<typeof countryCodeSchema> }) {
   const normalized = normalizeEmail(input.email);
   const user = await upsertUserByEmail(normalized, {
     name: input.name ?? defaultNameFromEmail(normalized),
-    profileUrl: input.profile_url ?? null,
+    profileUrl: null,
     ...(input.country_code ? { countryCode: input.country_code } : {}),
   });
   return { userId: user.key };

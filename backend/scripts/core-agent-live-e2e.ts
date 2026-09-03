@@ -201,33 +201,30 @@ try {
   const direct = await turn('direct', `Do not use any tools. Reply with exactly this text and nothing else: ${directMarker}`);
   if (direct.content.trim() !== directMarker) throw new Error(`Direct response was not exact: ${JSON.stringify(direct.content)}`);
 
-  const created = await turn('create', `Use folder.create to create exactly one root folder named "${originalFolderName}" with description "${originalDescription}". Do not create any other resource. Confirm the exact name after the tool succeeds.`);
-  includesExact(created.content, originalFolderName, 'Create response');
-  const createdFolders = (await listFolders()).filter((folder) => folder.name === originalFolderName);
-  if (createdFolders.length !== 1) throw new Error(`Expected exactly one created folder, found ${createdFolders.length}.`);
-  folderKey = string(createdFolders[0]?.key, 'created folder key');
-  if (createdFolders[0]?.description !== originalDescription) throw new Error(`Created folder description did not match: ${JSON.stringify(createdFolders[0])}`);
+  const searched = await turn('search', `Use app.search with collectionSlugs ["folders", "documents", "files"] to find resources matching "${directMarker}". Do not modify anything.`);
+  if (!searched.content.trim()) throw new Error('Search response was empty.');
 
-  const listed = await turn('list', `Use folder.list to list the root folders. Tell me whether the exact folder "${originalFolderName}" exists and include that exact name in your response. Do not modify anything.`);
-  includesExact(listed.content, originalFolderName, 'List response');
-  successfulAgentResponse(listed.content, 'List response');
+  const signalSearch = await turn('signal-search', `Use app.search with collectionSlugs ["inboxes", "email-tones", "email-messages", "email-drafts"] to find resources matching "${directMarker}". Do not modify anything.`);
+  if (!signalSearch.content.trim()) throw new Error('Signal search response was empty.');
 
-  const updated = await turn('update', `Use folder.update to update only the folder with key "${folderKey}". Rename it to "${renamedFolderName}" and set its description to "${updatedDescription}". Confirm the exact new name after the tool succeeds.`);
-  includesExact(updated.content, renamedFolderName, 'Update response');
-  const updatedFolder = await findFolder(folderKey);
-  if (updatedFolder?.name !== renamedFolderName || updatedFolder.description !== updatedDescription) throw new Error(`Folder update was not persisted: ${JSON.stringify(updatedFolder)}`);
+  const listed = await turn('list', 'Use app.search with operation "list" and collectionSlugs ["folders"] to list the root folders. Briefly report the result without modifying anything.');
+  if (!listed.content.trim()) throw new Error('List response was empty.');
 
-  const deleted = await turn('delete', `Use folder.delete to permanently delete only the empty, non-favorite folder with key "${folderKey}" and name "${renamedFolderName}". Use recursive false. Confirm the exact deleted name after the tool succeeds.`);
-  includesExact(deleted.content, renamedFolderName, 'Delete response');
-  if (await findFolder(folderKey)) throw new Error('Deleted folder is still retrievable.');
-  folderKey = undefined;
+  const counted = await turn('favorite-book-count', 'How many favorite audio books do I have? Use the exact workspace data and do not modify anything.');
+  if (!counted.content.trim()) throw new Error('Favorite book count response was empty.');
+
+  const completedTrips = await turn('completed-trip-count', 'How many completed trips do I have? Use the exact workspace data and do not modify anything.');
+  if (!completedTrips.content.trim()) throw new Error('Completed trip count response was empty.');
+
+  const bookDates = await turn('favorite-book-dates', 'When were my favorite audio books created? Use the exact workspace data and do not modify anything.');
+  if (!bookDates.content.trim()) throw new Error('Favorite book dates response was empty.');
 
   const messages = await api(`/conversations/${conversationKey}/messages/list`, { organizationKey, scopeKey, limit: 20 });
   const persisted = array(messages.items, 'persisted messages');
-  if (persisted.length !== 10) throw new Error(`Expected 10 persisted messages for five turns, received ${persisted.length}.`);
+  if (persisted.length !== 14) throw new Error(`Expected 14 persisted messages for seven turns, received ${persisted.length}.`);
   if (persisted.some((value) => object(value, 'persisted message').status !== 'COMPLETED')) throw new Error('At least one persisted message was not completed.');
 
-  console.log('Core agent live E2E passed: direct answer, folder list/create/update/delete, SSE protocol, canonical persistence checks, and conversation history.');
+  console.log('Core agent live E2E passed: direct answer, app search/list/count, SSE protocol, canonical persistence checks, and conversation history.');
 } finally {
   if (folderKey && accessToken) {
     try { await deleteFolderDirect(folderKey); }

@@ -71,11 +71,60 @@ describe('canonical email persistence', () => {
   test('scopes semantic search facets in the dedicated query', async () => {
     let call: { query: string; bindVars: Record<string, unknown> } | undefined;
     const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return cursor(undefined, [{ thread: arango(thread), score: 0.8 }]); } };
-    const result = await createEmailRepository(database as never).searchThreads(scopeKey, accountKey, embedding, ' Roadmap ', 0.55, 10, { readState: 'unread', facets: ['favorite', 'important', 'favorite'] });
-    expect(call?.bindVars).toMatchObject({ scopeKey, connectorKey: accountKey, query: 'roadmap', readState: 'unread', facets: ['favorite', 'important'] });
+    const result = await createEmailRepository(database as never).searchThreads(scopeKey, accountKey, embedding, ' Roadmap ', 0.55, 10, { readState: 'unread', facets: ['favorite', 'important', 'favorite'], createdFrom: at, createdTo: at });
+    expect(call?.bindVars).toMatchObject({ scopeKey, connectorKey: accountKey, query: 'roadmap', readState: 'unread', facets: ['favorite', 'important'], createdFrom: at, createdTo: at });
     expect(call?.query).toContain('FOR message IN emailMessages');
     expect(call?.query).toContain('DOCUMENT(emailThreads, message.threadKey)');
+    expect(call!.query.indexOf('thread.createdAt >= @createdFrom')).toBeLessThan(call!.query.indexOf('COSINE_SIMILARITY'));
+    expect(call!.query.indexOf('thread.createdAt <= @createdTo')).toBeLessThan(call!.query.indexOf('LIMIT @limit'));
     expect(result).toMatchObject([{ thread: { key: thread.key }, score: 0.8 }]);
+  });
+
+  test('filters overview threads inclusively before pagination and binds cursors to the date range', async () => {
+    const before = { ...thread, key: newId(), providerThreadId: 'before', createdAt: '2026-08-24T23:59:59.999Z', lastMessageAt: '2026-08-28T00:00:00.000Z' };
+    const upper = { ...thread, key: newId(), providerThreadId: 'upper', createdAt: '2026-08-26T00:00:00.000Z', lastMessageAt: '2026-08-26T00:00:00.000Z' };
+    const lower = { ...thread, key: newId(), providerThreadId: 'lower', createdAt: '2026-08-25T00:00:00.000Z', lastMessageAt: '2026-08-27T00:00:00.000Z' };
+    const database = { query: async (_query: string, bindVars: Record<string, unknown>) => cursor(undefined, bindVars['@collection'] === 'emailThreads' ? [before, upper, lower].map(arango) : []) };
+    const repository = createEmailRepository(database as never);
+    const first = await repository.overview(scopeKey, accountKey, { filter: 'all', createdFrom: lower.createdAt, createdTo: upper.createdAt, limit: 1 });
+    expect(first.threads.map(({ key }) => key)).toEqual([lower.key]);
+    expect(first.counts.all).toBe(2);
+    expect(first.nextCursor).not.toBeNull();
+    await expect(repository.overview(scopeKey, accountKey, { filter: 'all', createdFrom: lower.createdAt, createdTo: at, limit: 1, cursor: first.nextCursor! })).rejects.toThrow('another connector, scope, or query');
+  });
+
+  test('ranks all active connector drafts before applying the result limit', async () => {
+    const queryEmbedding = [1, ...Array(EMBEDDING_DIMENSIONS - 1).fill(0)];
+    const old = '2026-08-24T12:00:00.000Z';
+    const drafts = [
+      { key: newId(), scopeKey, accountKey, variant: 'new' as const, to: ['person@example.com'], subject: 'Other', generatedContent: 'Unrelated', status: 'generated' as const, embedding: [0, 1, ...Array(EMBEDDING_DIMENSIONS - 2).fill(0)], createdAt: at, updatedAt: at },
+      { key: newId(), scopeKey, accountKey, variant: 'new' as const, to: ['person@example.com'], subject: 'Roadmap', generatedContent: 'Review it', status: 'generated' as const, embedding: queryEmbedding, createdAt: old, updatedAt: old },
+    ];
+    const database = { query: async (_query: string, bindVars: Record<string, unknown>) => cursor(undefined, bindVars['@collection'] === 'emailDrafts' ? drafts.map(arango) : []) };
+    const result = await createEmailRepository(database as never).searchDrafts(scopeKey, accountKey, queryEmbedding, 'roadmap', -1, 1, { createdFrom: old, createdTo: old });
+    expect(result).toEqual([{ draft: expect.objectContaining({ key: drafts[1]!.key }), score: 1 }]);
+  });
+
+  test('lists every eligible overview draft through an exact-count paginated query', async () => {
+    const reply = { key: newId(), scopeKey, variant: 'reply' as const, replyMode: 'reply' as const, creationSource: 'subscription' as const, threadKey: thread.key, messageKey: message.key, to: ['sender@example.com'], cc: [], generatedContent: 'Reply', status: 'generated' as const, embedding, createdAt: at, updatedAt: at };
+    let call: { query: string; bindVars: Record<string, unknown> } | undefined;
+    const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return cursor({ drafts: [arango(reply)], total: 73 }); } };
+    const result = await createEmailRepository(database as never).listDraftPage(scopeKey, accountKey, { createdFrom: at, createdTo: at, offset: 50, limit: 25 });
+    expect(result).toEqual({ drafts: [expect.objectContaining({ key: reply.key })], total: 73 });
+    expect(call?.bindVars).toMatchObject({ scopeKey, connectorKey: accountKey, createdFrom: at, createdTo: at, offset: 50, limit: 25 });
+    expect(call?.query).toContain('draft.variant == "reply" && draft.creationSource == "subscription"');
+    expect(call!.query.indexOf('draft.createdAt >= @createdFrom')).toBeLessThan(call!.query.indexOf('SORT draft.updatedAt'));
+    expect(call!.query.indexOf('draft.createdAt <= @createdTo')).toBeLessThan(call!.query.indexOf('SLICE(eligible'));
+    expect(call?.query).toContain('total: LENGTH(eligible)');
+  });
+
+  test('filters tone creation dates before semantic ranking and limit', async () => {
+    let call: { query: string; bindVars: Record<string, unknown> } | undefined;
+    const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return cursor(undefined, []); } };
+    await createEmailRepository(database as never).searchTones(scopeKey, embedding, 'calm', 0.55, 10, { createdFrom: at, createdTo: at });
+    expect(call?.bindVars).toMatchObject({ createdFrom: at, createdTo: at });
+    expect(call!.query.indexOf('tone.createdAt >= @createdFrom')).toBeLessThan(call!.query.indexOf('COSINE_SIMILARITY'));
+    expect(call!.query.indexOf('tone.createdAt <= @createdTo')).toBeLessThan(call!.query.indexOf('LIMIT @limit'));
   });
 
   test('deletes generated summaries only after queuing their audio storage', async () => {

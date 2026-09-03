@@ -7,7 +7,7 @@ import { placeReferenceSchema } from '@/lib/db/place-references.node';
 import { placeHeroMediaSchema } from '@/lib/db/place-hero-media.node';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { createTravelRepository, TravelRepositoryError, type TravelAccessContext, type TravelDatabase, type TravelRepository } from './repository';
-import { CHILDREN_REQUEST_TOKEN_MAX_LENGTH, CHILDREN_REQUEST_TOKEN_VALIDITY_MS, childrenRequestTokenSchema, createTravelService, placeDto, recentPlaceDto, travelChildrenFindInputSchema, travelCityDetailSchema, travelCityFindInputSchema, travelOverviewInputSchema, travelPlaceCreateInputSchema, travelPlaceDeleteInputSchema, travelPlaceDetailSchema, travelPlaceFindInputSchema, travelPlaceFindResponseSchema, travelPlaceGuideFindInputSchema, travelPlaceOpenInputSchema, travelPlaceReferenceGenerateInputSchema, travelPlaceReferenceListInputSchema, travelPlaceSearchInputSchema, travelPlaceUpdateInputSchema, travelTripAttachmentSetInputSchema, travelTripCreateInputSchema, travelTripDeleteInputSchema, travelTripGuideGenerateInputSchema, travelTripGuideListInputSchema, travelTripListInputSchema, travelTripUpdateInputSchema } from './service';
+import { CHILDREN_REQUEST_TOKEN_MAX_LENGTH, CHILDREN_REQUEST_TOKEN_VALIDITY_MS, childrenRequestTokenSchema, createTravelService, placeDto, recentPlaceDto, travelChildrenFindInputSchema, travelCityDetailSchema, travelCityFindInputSchema, travelOverviewInputSchema, travelPlaceCreateInputSchema, travelPlaceDeleteInputSchema, travelPlaceDetailSchema, travelPlaceFindInputSchema, travelPlaceFindResponseSchema, travelPlaceGuideFindInputSchema, travelPlaceOpenInputSchema, travelPlaceReferenceGenerateInputSchema, travelPlaceReferenceListInputSchema, travelPlaceSearchInputSchema, travelPlaceUpdateInputSchema, travelTripAttachmentSetInputSchema, travelTripCreateInputSchema, travelTripDeleteInputSchema, travelTripGuideGenerateInputSchema, travelTripGuideListInputSchema, travelTripListInputSchema, travelTripSearchInputSchema, travelTripUpdateInputSchema } from './service';
 
 const key = 'cmrnlzf650002qc7k4p5zem5w';
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
@@ -63,13 +63,15 @@ describe('travel contracts and service', () => {
 
   test('semantically searches only repository-authorized saved places and signs covers', async () => {
     const calls: string[] = [];
+    let dateRange: unknown;
     const repository = {
       authorizeRead: async () => { calls.push('authorize'); },
-      searchPlaces: async (_context: unknown, vector: number[]) => { calls.push(`search:${vector.length}`); return [{ place, heroStorageKey: 'media/tokyo.png' }]; },
+      searchPlaces: async (_context: unknown, vector: number[], range: unknown) => { calls.push(`search:${vector.length}`); dateRange = range; return [{ place, heroStorageKey: 'media/tokyo.png' }]; },
     } as unknown as TravelRepository;
     const service = createTravelService({ repository, userSearches: { record: async (_userKey: string, query: string) => { calls.push(`history:${query}`); return {} as never; } } as never, embed: async ({ text }) => { calls.push(`embed:${text}`); return embedding; }, signImageUrl: async (storageKey) => `https://signed.test/${storageKey}` });
-    await expect(service.searchPlaces({ organizationKey: 'organization', scopeKey, query: ' neighborhoods ', recordHistory: false }, key)).resolves.toEqual({ places: [placeDto(place, 'https://signed.test/media/tokyo.png')] });
+    await expect(service.searchPlaces({ organizationKey: 'organization', scopeKey, query: ' neighborhoods ', recordHistory: false, createdFrom: timestamp, createdTo: timestamp }, key)).resolves.toEqual({ places: [placeDto(place, 'https://signed.test/media/tokyo.png')] });
     expect(calls).toEqual(['authorize', 'embed:neighborhoods', `search:${EMBEDDING_DIMENSIONS}`]);
+    expect(dateRange).toEqual({ createdFrom: timestamp, createdTo: timestamp });
     calls.length = 0;
     expect(JSON.stringify(await service.searchPlaces({ organizationKey: 'organization', scopeKey, query: 'Tokyo' }, key))).not.toContain('embedding');
     expect(calls).toEqual(['authorize', 'history:Tokyo', 'embed:Tokyo', `search:${EMBEDDING_DIMENSIONS}`]);
@@ -77,14 +79,25 @@ describe('travel contracts and service', () => {
 
   test('searches trips with the same complete aggregate projection as list', async () => {
     const history: string[] = [];
+    let dateRange: unknown;
     const trip = tripSchema.parse({ key, userKey: key, scopeKey, name: 'Tokyo route', embedding, embeddingContentVersion: 1, createdAt: timestamp });
     const record = { trip, places: [place], placeHeroStorageKeys: ['media/tokyo.png'], attachments: [], coverStorageKey: 'media/tokyo.png' };
-    const repository = { authorizeRead: async () => {}, searchTrips: async () => [record] } as unknown as TravelRepository;
+    const repository = { authorizeRead: async () => {}, searchTrips: async (_context: unknown, _vector: number[], range: unknown) => { dateRange = range; return [record]; } } as unknown as TravelRepository;
     const service = createTravelService({ repository, userSearches: { record: async (_userKey: string, query: string) => { history.push(query); return {} as never; } } as never, embed: async () => embedding, signImageUrl: async (storageKey) => `https://signed.test/${storageKey}` });
-    const result = await service.searchTrips({ organizationKey: 'organization', scopeKey, query: 'Japan spring', recordHistory: false }, key);
-    expect(result.trips[0]).toMatchObject({ key, name: 'Tokyo route', places: [placeDto(place, 'https://signed.test/media/tokyo.png')], attachments: [], coverUrl: 'https://signed.test/media/tokyo.png' });
+    const result = await service.searchTrips({ organizationKey: 'organization', scopeKey, query: 'Japan spring', recordHistory: false, createdFrom: timestamp, createdTo: timestamp }, key);
+    expect(result.trips[0]).toMatchObject({ key, name: 'Tokyo route', createdAt: timestamp, updatedAt: timestamp, places: [placeDto(place, 'https://signed.test/media/tokyo.png')], attachments: [], coverUrl: 'https://signed.test/media/tokyo.png' });
+    expect(dateRange).toEqual({ createdFrom: timestamp, createdTo: timestamp });
     expect(JSON.stringify(result)).not.toContain('embedding');
     expect(history).toEqual([]);
+  });
+
+  test('rejects reversed creation-date ranges for place and trip searches', () => {
+    const reversed = { organizationKey: 'organization', scopeKey, query: 'Tokyo', createdFrom: '2026-08-12T00:00:00.000Z', createdTo: timestamp };
+    for (const schema of [travelPlaceSearchInputSchema, travelTripSearchInputSchema]) {
+      const result = schema.safeParse(reversed);
+      expect(result.success).toBe(false);
+      if (!result.success) expect(result.error.issues.map((issue) => issue.path.join('.'))).toContain('createdTo');
+    }
   });
 
   test('keeps committed trip mutations successful when place and cover signing fail', async () => {
@@ -821,14 +834,16 @@ describe('travel repository', () => {
     expect(queries.filter((query) => query.includes('FOR media IN placeHeroMedia')).every((query) => query.includes('media.scopeKey == @scopeKey'))).toBe(true);
   });
 
-  test('filters saved place ownership before deterministic cosine ordering', async () => {
+  test('inclusively filters saved-place creation dates before deterministic cosine ordering', async () => {
     const queries: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const database: TravelDatabase = { async query(query, bindVars) { queries.push({ query, bindVars }); return { async all() { return []; } }; } };
-    await expect(createTravelRepository(database).searchPlaces({ organizationKey: 'organization', scopeKey, userKey: key }, embedding)).resolves.toEqual([]);
+    await expect(createTravelRepository(database).searchPlaces({ organizationKey: 'organization', scopeKey, userKey: key }, embedding, { createdFrom: timestamp, createdTo: timestamp })).resolves.toEqual([]);
     const query = queries[0]!.query;
     expect(query.indexOf('place.scopeKey == @scopeKey && place.userKey == @userKey && place.saved == true')).toBeLessThan(query.indexOf('COSINE_SIMILARITY'));
+    expect(query.indexOf('place.createdAt >= @createdFrom')).toBeLessThan(query.indexOf('COSINE_SIMILARITY'));
+    expect(query.indexOf('place.createdAt <= @createdTo')).toBeLessThan(query.indexOf('COSINE_SIMILARITY'));
     expect(query).toContain('SORT score DESC, place._key ASC');
-    expect(queries[0]!.bindVars).toMatchObject({ organizationKey: 'organization', scopeKey, userKey: key, dimensions: EMBEDDING_DIMENSIONS });
+    expect(queries[0]!.bindVars).toMatchObject({ organizationKey: 'organization', scopeKey, userKey: key, dimensions: EMBEDDING_DIMENSIONS, createdFrom: timestamp, createdTo: timestamp });
   });
 
   test('atomically authorizes and opens only the trusted user and scope place', async () => {
@@ -920,17 +935,20 @@ describe('travel repository', () => {
     expect(queries[0]).toContain('collection.mutationPolicy != "system-only" && collection.purpose == null');
   });
 
-  test('ranks authorized trip keys semantically then reuses list aggregate loading', async () => {
+  test('inclusively filters trip creation dates before ranking then reuses list aggregate loading', async () => {
     const trip = tripSchema.parse({ key, userKey: key, scopeKey, name: 'Tokyo route', embedding, embeddingContentVersion: 1, createdAt: timestamp });
-    const queries: string[] = [];
-    const database: TravelDatabase = { async query(query) { queries.push(query); return { async all() {
+    const queries: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const database: TravelDatabase = { async query(query, bindVars) { queries.push({ query, bindVars }); return { async all() {
       if (query.includes('COSINE_SIMILARITY')) return [key];
       return [{ trip: { ...trip, _key: key }, places: [{ place: { ...place, _key: key }, heroStorageKey: null }], attachments: [] }];
     } }; } };
-    await expect(createTravelRepository(database).searchTrips({ organizationKey: 'organization', scopeKey, userKey: key }, embedding)).resolves.toMatchObject([{ trip: { key }, places: [{ key }] }]);
-    expect(queries[0]!.indexOf('trip.scopeKey == @scopeKey && trip.userKey == @userKey')).toBeLessThan(queries[0]!.indexOf('COSINE_SIMILARITY'));
-    expect(queries[0]).toContain('SORT score DESC, trip._key ASC');
-    expect(queries[1]).toContain('FOR attachment IN tripAttachments');
+    await expect(createTravelRepository(database).searchTrips({ organizationKey: 'organization', scopeKey, userKey: key }, embedding, { createdFrom: timestamp, createdTo: timestamp })).resolves.toMatchObject([{ trip: { key }, places: [{ key }] }]);
+    expect(queries[0]!.query.indexOf('trip.scopeKey == @scopeKey && trip.userKey == @userKey')).toBeLessThan(queries[0]!.query.indexOf('COSINE_SIMILARITY'));
+    expect(queries[0]!.query.indexOf('trip.createdAt >= @createdFrom')).toBeLessThan(queries[0]!.query.indexOf('COSINE_SIMILARITY'));
+    expect(queries[0]!.query.indexOf('trip.createdAt <= @createdTo')).toBeLessThan(queries[0]!.query.indexOf('COSINE_SIMILARITY'));
+    expect(queries[0]!.query).toContain('SORT score DESC, trip._key ASC');
+    expect(queries[0]!.bindVars).toMatchObject({ createdFrom: timestamp, createdTo: timestamp });
+    expect(queries[1]!.query).toContain('FOR attachment IN tripAttachments');
   });
 
   test('replays the current persisted aggregate without writes and never resurrects a deleted receipted trip', async () => {

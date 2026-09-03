@@ -166,7 +166,7 @@ describe('auth helpers', () => {
     expect(await verifyGoogleIdentityToken(await tokenFor({}), loadKeys)).toEqual({
       email: 'verified@example.com',
       name: 'Verified User',
-      profileUrl: 'https://example.com/avatar.png',
+      profileUrl: null,
     });
     expect(await verifyGoogleIdentityToken(await tokenFor({ aud: 'another-client' }), loadKeys)).toBeNull();
     expect(await verifyGoogleIdentityToken(await tokenFor({ email_verified: false }), loadKeys)).toBeNull();

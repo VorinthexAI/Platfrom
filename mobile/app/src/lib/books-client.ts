@@ -30,6 +30,8 @@ export const bookSchema = z.strictObject({
   estimatedMinutes: z.number().int().nonnegative(),
   chapterCount: z.number().int().nonnegative(),
   progressPercent: z.number().min(0).max(100),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
   generationProgressPercent: z.number().min(0).max(100).optional(),
   failureMessage: z.string().min(1).optional(),
   currentChapterKey: keySchema.optional(),
@@ -167,7 +169,7 @@ async function request<T>(method: "post" | "patch" | "delete", path: string, bod
 
 export function fetchBooksOverview() { return request("post", "/books/overview", {}, overviewRequestSchema, overviewResponseSchema); }
 export async function searchBooks(query: string, signal?: AbortSignal, recordHistory = false) {
-  const output = await searchApp({ query, collectionSlugs: ["books"], recordHistory, limit: 50, minimumScore: 0.55 }, signal);
+  const output = await searchApp({ query, collectionSlugs: ["books"], recordHistory, limit: 50 }, signal);
   return appSearchResults(output, "books", bookSchema.extend({ score: z.number() })).map(({ score: _score, ...book }) => book);
 }
 export function suggestBookTopics(excludeTopics: string[] = []) { return request("post", "/books/topic-suggestions", { excludeTopics }, bookTopicSuggestionsRequestSchema, bookTopicSuggestionsResponseSchema, 50_000); }

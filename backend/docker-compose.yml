@@ -83,6 +83,7 @@ services:
       - ./src:/app/src
       - ./tsconfig.json:/app/tsconfig.json
       - ../shared:/shared:ro
+      - ../mobile/app/src/data:/mobile/app/src/data:ro
       - ${HOME}/.aws:/root/.aws:ro
     depends_on:
       arangodb:
@@ -119,6 +120,7 @@ services:
       - ./src:/app/src
       - ./tsconfig.json:/app/tsconfig.json
       - ../shared:/shared:ro
+      - ../mobile/app/src/data:/mobile/app/src/data:ro
       - ${HOME}/.aws:/root/.aws:ro
     depends_on:
       arangodb:

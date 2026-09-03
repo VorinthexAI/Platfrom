@@ -3,7 +3,9 @@ import { Hono } from 'hono';
 import { FOUNDER_ACCESS_MAX_AGE_SECONDS, FOUNDER_REFRESH_MAX_AGE_SECONDS } from './auth';
 import { isResendWebhookPath } from './resend';
 import { isGmailWebhookPath } from './email-webhook';
-import { createAutoRefreshAuthTokens, isPublicBookSharePath, isPublicFounderAuthPath, rateLimitByIp, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
+import { createAutoRefreshAuthTokens, createBindEventApp, isPublicBookSharePath, isPublicFounderAuthPath, rateLimitByIp, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
+import { currentEventAppKey } from '@/lib/ai/events/runtime';
+import { APP_KEYS } from '@/lib/apps/registry';
 
 function middlewareContext(path: string, headers: Record<string, string> = {}, search = '', method = 'GET') {
   return {
@@ -21,6 +23,38 @@ function middlewareContext(path: string, headers: Record<string, string> = {}, s
     },
   } as any;
 }
+
+describe('application key middleware', () => {
+  const bindEventApp = createBindEventApp(async (key) => key === APP_KEYS.GALLERY || key === APP_KEYS.CORE);
+  test('binds a valid app key for the full request', async () => {
+    let appKey: string | undefined;
+    await bindEventApp(middlewareContext('/api/v1/app/search', { 'x-vorinthex-app-key': ` ${APP_KEYS.GALLERY} ` }), async () => { appKey = currentEventAppKey(); });
+    expect(appKey).toBe(APP_KEYS.GALLERY);
+  });
+
+  test('defaults missing headers to Core and rejects malformed or unknown keys', async () => {
+    let appKey: string | undefined;
+    await bindEventApp(middlewareContext('/api/v1/app/search'), async () => { appKey = currentEventAppKey(); });
+    expect(appKey).toBe(APP_KEYS.CORE);
+    expect((await bindEventApp(middlewareContext('/api/v1/app/search', { 'x-vorinthex-app-key': 'other' }), async () => undefined))?.status).toBe(400);
+    expect((await bindEventApp(middlewareContext('/api/v1/app/search', { 'x-vorinthex-app-key': APP_KEYS.ARCHIVE }), async () => undefined))?.status).toBe(400);
+    let legacyHeaderAppKey: string | undefined;
+    await bindEventApp(middlewareContext('/api/v1/app/search', { 'x-vorinthex-domain': 'gallery' }), async () => { legacyHeaderAppKey = currentEventAppKey(); });
+    expect(legacyHeaderAppKey).toBe(APP_KEYS.CORE);
+  });
+
+  test('does not query the registry when defaulting trusted and backward clients to Core', async () => {
+    const bindDefault = createBindEventApp(async () => { throw new Error('must not query'); });
+    let appKey: string | undefined;
+    await bindDefault(middlewareContext('/api/v1/app/search'), async () => { appKey = currentEventAppKey(); });
+    expect(appKey).toBe(APP_KEYS.CORE);
+  });
+
+  test('does not look up apps for health or the public registry', async () => {
+    const exempt = createBindEventApp(async () => { throw new Error('must not query'); });
+    for (const path of ['/api/v1/health', '/api/v1/apps']) await exempt(middlewareContext(path), async () => undefined);
+  });
+});
 
 describe('api middleware webhook exemptions', () => {
   test('recognizes only the v1 Resend webhook path', () => {

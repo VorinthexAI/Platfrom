@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { getUserByAliasSlug, getUserByEmailHash, insertUser, updateUser, type User } from '@/lib/db/users.node';
+import { getUserByAliasSlug, getUserByEmailHash, initializeUserNameIfMissing, insertUser, updateUser, type User } from '@/lib/db/users.node';
 import { getVisitorByDistinctId, type Visitor } from '@/lib/db/visitors.node';
 import { isArangoUniqueConstraintError } from '@/lib/db/base';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '@/lib/alias';
@@ -44,7 +44,7 @@ async function createUniqueAliasSlug(alias: string, userKey: string): Promise<st
 export async function upsertUserByEmail(
   email: string,
   values: Partial<Omit<User, 'key' | 'email' | 'emailHash'>> = {},
-  options: { distinctId?: string | null } = {},
+  options: { distinctId?: string | null; initializeNameOnly?: boolean } = {},
 ): Promise<User> {
   const normalized = normalizeEmail(email);
   const emailHash = await hashUserEmail(normalized);
@@ -56,6 +56,8 @@ export async function upsertUserByEmail(
 
   async function reconcileWithExisting(existing: User): Promise<User> {
     const patch: Partial<User> = { ...values, organizationId, email: normalized, emailHash, updatedAt: now };
+    const initialName = options.initializeNameOnly && typeof patch.name === 'string' ? patch.name : null;
+    if (options.initializeNameOnly) delete patch.name;
     // Country is captured at account creation, not rewritten by later sign-ins.
     delete patch.countryCode;
     if (existing.guestBootstrapSecretHash) delete patch.guestBootstrapSecretHash;
@@ -70,7 +72,8 @@ export async function upsertUserByEmail(
     if (patch.alias_slug === undefined && existing.alias_slug == null) {
       patch.alias_slug = await createUniqueAliasSlug(alias, existing.key);
     }
-    return updateUser(existing.key, patch);
+    const updated = await updateUser(existing.key, patch);
+    return initialName ? await initializeUserNameIfMissing(updated.key, initialName, now) ?? updated : updated;
   }
 
   const existing = await getUserByEmailHash(emailHash);

@@ -148,7 +148,7 @@ test("passes cancellation and authoritative country context", async () => {
 test("strictly searches for one country without leaking the workspace scope", async () => {
   const controller = new AbortController();
   expect(await client.searchCountries(" volcanic island ", controller.signal)).toEqual({ name: "Iceland", countryCode: "IS", latitude: 64.96, longitude: -19.02 });
-  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", query: "volcanic island", collectionSlugs: ["countries"], recordHistory: true, limit: 1, minimumScore: 0.55 }, config: { timeout: 15_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", query: "volcanic island", collectionSlugs: ["countries"], recordHistory: true, limit: 1 }, config: { timeout: 15_000, signal: controller.signal } });
   expect(client.countrySearchResultSchema.safeParse({ country: { name: "Iceland", countryCode: "IS", latitude: 64.96, longitude: -19.02, continent: "Europe" } }).success).toBe(false);
   expect(client.countrySearchResultSchema.parse({ country: null })).toEqual({ country: null });
 });
@@ -202,7 +202,7 @@ test("finds one to five strict direct country and city results", async () => {
 test("semantically searches strict saved place DTOs", async () => {
   const controller = new AbortController();
   expect(await client.searchPlaces(" volcanic capital ", controller.signal)).toEqual([place]);
-  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", query: "volcanic capital", collectionSlugs: ["places"], recordHistory: true, limit: 50, minimumScore: 0.55 }, config: { timeout: 15_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", query: "volcanic capital", collectionSlugs: ["places"], recordHistory: true, limit: 50 }, config: { timeout: 15_000, signal: controller.signal } });
   await client.searchPlaces(" volcanic capital ", controller.signal, false);
   expect(calls[1]?.body).toMatchObject({ query: "volcanic capital", recordHistory: false });
 });
@@ -226,7 +226,7 @@ test("lists trips separately from the travel overview with strict DTOs", async (
 test("semantically searches strict trip DTOs", async () => {
   const controller = new AbortController();
   expect(await client.searchTrips(" northern lights ", controller.signal)).toEqual([trip]);
-  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", query: "northern lights", collectionSlugs: ["trips"], recordHistory: true, limit: 50, minimumScore: 0.55 }, config: { timeout: 15_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", query: "northern lights", collectionSlugs: ["trips"], recordHistory: true, limit: 50 }, config: { timeout: 15_000, signal: controller.signal } });
   await client.searchTrips(" northern lights ", controller.signal, false);
   expect(calls[1]?.body).toMatchObject({ query: "northern lights", recordHistory: false });
 });

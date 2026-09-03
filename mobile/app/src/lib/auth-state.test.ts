@@ -22,6 +22,8 @@ let getCalls = 0;
 let clearContextCalls = 0;
 let clearTokenCalls = 0;
 let revokeCalls = 0;
+let tokenReadError: Error | undefined;
+let tokenReadGate: Promise<void> | undefined;
 const patchCalls: unknown[] = [];
 let unauthorizedListener: (() => void) | undefined;
 
@@ -58,7 +60,7 @@ mock.module("@/lib/token-vault", () => ({
   tokenVault: {
     clear: async () => { clearTokenCalls += 1; session = null; },
     clearIfCurrent: async () => { clearTokenCalls += 1; session = null; return true; },
-    read: async () => session,
+    read: async () => { await tokenReadGate; if (tokenReadError) throw tokenReadError; return session; },
     snapshot: async () => ({ session, generation: 0 }),
   },
 }));
@@ -75,6 +77,8 @@ beforeEach(() => {
   clearContextCalls = 0;
   clearTokenCalls = 0;
   revokeCalls = 0;
+  tokenReadError = undefined;
+  tokenReadGate = undefined;
   patchCalls.length = 0;
   useAuthStore.setState({ status: "bootstrapping", user: null, organization: null, scope: null });
 });
@@ -128,4 +132,71 @@ test("does not clear a session for a non-bearer 401", async () => {
 
   expect(clearTokenCalls).toBe(0);
   expect(session).toEqual(storedSession);
+});
+
+test("optimistically updates and rolls back profile fields without touching the session", () => {
+  useAuthStore.setState({ status: "authenticated", user: { ...realContext.user, isOnboarded: true, name: "Ada" }, organization: realContext.organization, scope: realContext.main_scope });
+  const update = useAuthStore.getState().optimisticProfile({ avatarUrl: "file:///avatar.png" });
+
+  expect(useAuthStore.getState().user?.avatarUrl).toBe("file:///avatar.png");
+  update.rollback();
+  expect(useAuthStore.getState().user?.avatarUrl).toBeUndefined();
+  expect(session).toBeNull();
+});
+
+test("an older failed profile request cannot overwrite a newer optimistic edit", () => {
+  useAuthStore.setState({ status: "authenticated", user: { ...realContext.user, isOnboarded: true, name: "Ada" }, organization: realContext.organization, scope: realContext.main_scope });
+  const older = useAuthStore.getState().optimisticProfile({ name: "Grace" });
+  const newer = useAuthStore.getState().optimisticProfile({ name: "Katherine" });
+
+  older.rollback();
+  expect(useAuthStore.getState().user?.name).toBe("Katherine");
+  newer.reconcile({ name: "Katherine Johnson" });
+  expect(useAuthStore.getState().user?.name).toBe("Katherine Johnson");
+});
+
+test("two failed optimistic edits restore the last confirmed value", () => {
+  useAuthStore.setState({ status: "authenticated", user: { ...realContext.user, isOnboarded: true, name: "Ada" }, organization: realContext.organization, scope: realContext.main_scope });
+  const older = useAuthStore.getState().optimisticProfile({ name: "Grace" });
+  const newer = useAuthStore.getState().optimisticProfile({ name: "Katherine" });
+  older.rollback();
+  newer.rollback();
+  expect(useAuthStore.getState().user?.name).toBe("Ada");
+});
+
+test("a newer failure restores an older successful edit", () => {
+  useAuthStore.setState({ status: "authenticated", user: { ...realContext.user, isOnboarded: true, name: "Ada" }, organization: realContext.organization, scope: realContext.main_scope });
+  const older = useAuthStore.getState().optimisticProfile({ name: "Grace" });
+  const newer = useAuthStore.getState().optimisticProfile({ name: "Katherine" });
+  older.reconcile({ name: "Grace Hopper" });
+  newer.rollback();
+  expect(useAuthStore.getState().user?.name).toBe("Grace Hopper");
+});
+
+test("signs out locally even when secure session reads fail", async () => {
+  useAuthStore.setState({ status: "authenticated", user: { ...realContext.user, isOnboarded: true }, organization: realContext.organization, scope: realContext.main_scope });
+  tokenReadError = new Error("secure storage unavailable");
+  await useAuthStore.getState().signOut();
+  expect(useAuthStore.getState().status).toBe("unauthenticated");
+  expect(useAuthStore.getState().user).toBeNull();
+  expect(clearTokenCalls).toBe(1);
+  expect(clearContextCalls).toBe(1);
+});
+
+test("signs out synchronously before secure storage and remote revocation finish", async () => {
+  useAuthStore.setState({ status: "authenticated", user: { ...realContext.user, isOnboarded: true }, organization: realContext.organization, scope: realContext.main_scope });
+  session = storedSession;
+  let releaseRead!: () => void;
+  tokenReadGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+
+  const completion = useAuthStore.getState().signOut();
+  expect(useAuthStore.getState().status).toBe("unauthenticated");
+  expect(useAuthStore.getState().user).toBeNull();
+  expect(clearTokenCalls).toBe(0);
+  expect(revokeCalls).toBe(0);
+
+  releaseRead();
+  await completion;
+  expect(clearTokenCalls).toBe(1);
+  expect(revokeCalls).toBe(1);
 });

@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test";
 
 const read = (path: string) => Bun.file(new URL(path, import.meta.url)).text();
-const [core, switcher, archive, gallery, compass, signal, ascend] = await Promise.all([
+const [core, switcher, routeLayout, archive, gallery, compass, signal, ascend] = await Promise.all([
   read("../../../../shared/packages/ui/components/core-composer/core-composer.mobile.tsx"),
   read("../components/capability/WorkspaceAppSwitcher.tsx"),
+  read("../app/capability/_layout.tsx"),
   read("../components/capability/KnowledgeWorkspace.tsx"),
   read("../components/capability/GalleryWorkspace.tsx"),
   read("../components/capability/TravelWorkspace.tsx"),
@@ -26,6 +27,8 @@ test("opens Core as an in-layout page and returns without routing", () => {
   expect(core).toContain("AccessibilityInfo.setAccessibilityFocus(inputHandle)");
   expect(core).toContain("showSoftInputOnFocus={expanded}");
   expect(core).toContain("valueRef.current.length");
+  expect(routeLayout).toContain("if (workspaceSelection !== routeSlug) return null");
+  expect(routeLayout).not.toContain("selectedApp");
 });
 
 test("matches the Archive header rhythm and keeps the Core prompt composer", () => {
@@ -37,7 +40,7 @@ test("matches the Archive header rhythm and keeps the Core prompt composer", () 
   expect(core).toContain("gap: spacing.xs");
   expect(core).toContain("fontSize: 24");
   expect(core).toContain('const CORE_PAGE_PROMPTS = ["Ask anything"] as const');
-  expect(core).toContain('<RotatingPrompt key={expanded ? "core-page" : "workspace"} prompts={expanded ? CORE_PAGE_PROMPTS : prompts} />');
+  expect(core).toContain('<RotatingPrompt key={expanded ? "core-page" : "workspace"} prompts={expanded ? expandedPrompts : prompts} />');
   expect(core).toContain("{showPrompt ? (");
   expect(core).toContain('placeholder=""');
   expect(core).toContain("multiline={expanded}");
@@ -48,7 +51,7 @@ test("matches the Archive header rhythm and keeps the Core prompt composer", () 
 
 test("keeps the workspace composer compact and grows the Core input only when text wraps", () => {
   expect(core).toContain("const multiline = expanded && inputHeight > COLLAPSED_INPUT_HEIGHT");
-  expect(core).toContain("return <View style={[styles.composer, multiline && styles.composerOpen]}>");
+  expect(core).toContain("<View style={[styles.composer, multiline && styles.composerOpen]}>");
   expect(core).toContain("height: expanded ? inputHeight : COLLAPSED_INPUT_HEIGHT");
   expect(core).toContain("{expanded && value.length > 0 ? <Text");
   expect(core).toContain("const lineCount = Math.max(1, nativeEvent.lines.length)");
@@ -56,6 +59,9 @@ test("keeps the workspace composer compact and grows the Core input only when te
   expect(core).toContain('const inputValue = expanded ? value : (value.split(/\\r?\\n/)[0] ?? "")');
   expect(core).toContain("scrollEnabled={expanded && inputLineCount > 6}");
   expect(core).not.toContain('borderColor: "#55616C"');
+  expect(core).toContain('expanded && (expandedAccessory || expandedFooter)');
+  expect(core).toContain('{expanded ? expandedAccessory : null}');
+  expect(core).toContain('{expanded ? expandedFooter : null}');
 });
 
 test("waits for the keyboard to hide and restores the workspace composer without a delayed flash", () => {
@@ -65,6 +71,7 @@ test("waits for the keyboard to hide and restores the workspace composer without
   expect(core).not.toContain("collapsedVisible");
   expect(core).toContain("if (editable) return;");
   expect(core).toContain("inputRef.current?.blur();");
+  expect(core).toContain("inputRef.current?.blur();\n    Keyboard.dismiss();\n    onSubmit();");
 });
 
 test("delays focus by 100ms and keeps the horizontal page inset above the keyboard", () => {
@@ -88,12 +95,12 @@ test("keeps workspace keyboard avoidance from competing with the Core page", () 
 
 test("temporarily displays Core while the selector remains limited to five apps", () => {
   expect(switcher).toContain('identity?: "active" | "core"');
-  expect(switcher).toContain('identity === "core" ? "Core" : selected.name');
+  expect(switcher).toContain('app.slug === "core"');
   expect(switcher).toContain('identity === "core" ? assistantIconSource');
   expect(switcher).toContain("onSelectActive?.()");
-  const availableApps = switcher.match(/const AVAILABLE_APPS:[\s\S]*?\];/)?.[0] ?? "";
-  for (const name of ["Archive", "Gallery", "Compass", "Signal", "Ascend"]) expect(availableApps).toContain(`name: "${name}"`);
-  expect(availableApps).not.toContain('name: "Core"');
+  const availableApps = switcher.match(/const AVAILABLE_APP_SLUGS[\s\S]*?;/)?.[0] ?? "";
+  for (const slug of ["archive", "gallery", "compass", "signal", "ascend"]) expect(availableApps).toContain(`"${slug}"`);
+  expect(availableApps).not.toContain('"core"');
 });
 
 test("every workspace supplies its underlying app to the temporary Core identity", () => {

@@ -47,13 +47,16 @@ describe('routing response decoder', () => {
     expect(emitted).not.toContain('\ud83d');
   });
 
-  test('never emits for a valid tool selection regardless of property order', async () => {
+  test('never emits and discards incidental text for a valid tool selection regardless of property order', async () => {
     for (const source of [
       '{"tools":["agent.query"],"message":""}',
       '{"message":"","tools":["agent.query","document.search"]}',
+      '{"tools":["agent.query"],"message":"I will search for that."}',
+      '{"message":"I will search for that.","tools":["agent.query"]}',
     ]) {
       const result = await decode(source, { fragments: [...source] });
       expect(result.value.tools.length).toBeGreaterThan(0);
+      expect(result.value.message).toBe('');
       expect(result.emitted).toEqual([]);
     }
   });
@@ -65,6 +68,12 @@ describe('routing response decoder', () => {
     expect(await rejected(JSON.stringify({ tools, message: '' }))).toHaveProperty('message', expect.stringContaining('at most 20'));
   });
 
+  test('canonicalizes an authorized slug when a provider prematurely includes arguments', async () => {
+    await expect(decode(`{"tools":["agent.query(query='archive', limit=100)"],"message":""}`)).resolves.toMatchObject({ value: { tools: ['agent.query'], message: '' } });
+    expect(await rejected(`{"tools":["unknown.tool(query='archive')"],"message":""}`)).toHaveProperty('message', expect.stringContaining('not allowed'));
+    expect(await rejected(`{"tools":["agent.query","agent.query(query='archive')"],"message":""}`)).toHaveProperty('message', expect.stringContaining('duplicate tool'));
+  });
+
   test('rejects unknown and duplicate object fields', async () => {
     for (const source of [
       '{"tools":[],"message":"answer","extra":true}',
@@ -74,12 +83,10 @@ describe('routing response decoder', () => {
     ]) expect(await rejected(source)).toBeInstanceOf(RoutingResponseError);
   });
 
-  test('enforces direct and tool-selection message exclusivity', async () => {
+  test('requires a nonblank direct response', async () => {
     for (const source of [
       '{"tools":[],"message":""}',
       '{"tools":[],"message":"  \n "}',
-      '{"tools":["agent.query"],"message":"answer"}',
-      '{"tools":["agent.query"],"message":" "}',
     ]) expect(await rejected(source)).toBeInstanceOf(RoutingResponseError);
   });
 

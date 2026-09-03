@@ -4,6 +4,7 @@ import { AppState } from "react-native";
 
 import { getEventStream } from "./api-client";
 import { publishAppEvent } from "./app-events";
+import { appSearchQueryRoot } from "./app-search-client";
 import { publishBookChanged } from "./book-events";
 import { createCoalescedRefresh } from "./async-refresh";
 import { compassQueryKeys } from "./compass-query-keys";
@@ -48,6 +49,7 @@ export function AuthenticatedEventBridge() {
     const contentContext = { userKey, organizationKey, scopeKey };
     const conversationContext = { userKey, organizationKey, scopeKey };
     const invalidateCompassTrips = () => void queryClient.invalidateQueries({ queryKey: compassQueryKeys.trips(compassContext) });
+    const invalidateAppSearch = () => void queryClient.invalidateQueries({ queryKey: appSearchQueryRoot, refetchType: "active" });
     const invalidateCompassPlaceReferences = () => void queryClient.invalidateQueries({ queryKey: compassQueryKeys.places(compassContext) });
     const invalidateArchive = () => void queryClient.invalidateQueries({ queryKey: contentQueryKeys.all(contentContext), refetchType: "active" });
     const invalidateSignal = () => {
@@ -85,6 +87,7 @@ export function AuthenticatedEventBridge() {
       const currentController = controller;
       void getEventStream("/events/stream", (event) => {
         if (!isCurrent()) return;
+        invalidateAppSearch();
         invalidateUserHiddens();
         if (event.event === "trip.changed") invalidateCompassTrips();
         if (event.event === "place.reference.changed") invalidateCompassPlaceReferences();
@@ -117,6 +120,7 @@ export function AuthenticatedEventBridge() {
       }, currentController.signal, () => {
         if (!isCurrent()) return;
         attempt = 0;
+        invalidateAppSearch();
         invalidateUserHiddens();
         invalidateArchive();
         invalidateGallery(galleryRefreshPlan("reconnect"));
@@ -148,6 +152,7 @@ export function AuthenticatedEventBridge() {
       }
       if (!wasActive) {
         attempt = 0;
+        invalidateAppSearch();
         invalidateGallery(galleryRefreshPlan("reconnect"));
         invalidateArchive();
         invalidateCompassTrips();

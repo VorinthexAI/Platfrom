@@ -44,6 +44,14 @@ export class EmailWatchRepairPendingError extends Error {
 }
 const keySchema = z.string().cuid();
 const notificationHistoryIdSchema = z.string().regex(/^\d+$/);
+const createdAtBoundarySchema = z.string().datetime().transform((value) => new Date(value).toISOString());
+const emailCreatedAtRangeShape = { createdFrom: createdAtBoundarySchema.optional(), createdTo: createdAtBoundarySchema.optional() } as const;
+function rejectReversedCreatedAtRange(value: { createdFrom?: string; createdTo?: string }, context: z.RefinementCtx) {
+  if (value.createdFrom && value.createdTo && value.createdFrom > value.createdTo) context.addIssue({ code: z.ZodIssueCode.custom, path: ['createdTo'], message: 'createdTo must be on or after createdFrom' });
+}
+const emailCreatedAtRangeSchema = z.object(emailCreatedAtRangeShape).strict().superRefine(rejectReversedCreatedAtRange);
+function assertCreatedAtRange(value: { createdFrom?: string; createdTo?: string }) { emailCreatedAtRangeSchema.parse({ createdFrom: value.createdFrom, createdTo: value.createdTo }); }
+function createdAtRange(value: { createdFrom?: string; createdTo?: string }) { return value.createdFrom || value.createdTo ? { createdFrom: value.createdFrom, createdTo: value.createdTo } : undefined; }
 export const emailOverviewInputShape = {
   connectorKey: keySchema.optional(),
   filter: z.enum(['all', 'important', 'urgent', 'needs_action', 'filtered', 'unread', 'favorite', 'trash']).optional(),
@@ -52,19 +60,25 @@ export const emailOverviewInputShape = {
   search: z.string().trim().max(200).optional(),
   cursor: z.string().min(1).max(2_000).optional(),
   limit: z.number().int().min(1).max(50).optional(),
+  ...emailCreatedAtRangeShape,
 } as const;
 export const emailOverviewInputSchema = z.object(emailOverviewInputShape).strict().superRefine((value, context) => {
   const hasCompositeField = value.readState !== undefined || value.facets !== undefined;
   if (value.filter !== undefined && hasCompositeField) context.addIssue({ code: z.ZodIssueCode.custom, message: 'filter cannot be combined with composite overview fields' });
   if (hasCompositeField && (value.readState === undefined || value.facets === undefined)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'readState and facets must be provided together' });
-  if (!value.connectorKey && (value.filter !== undefined || hasCompositeField || value.search !== undefined || value.cursor !== undefined || value.limit !== undefined)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'connectorKey is required for an overview query' });
+  if (!value.connectorKey && (value.filter !== undefined || hasCompositeField || value.search !== undefined || value.cursor !== undefined || value.limit !== undefined || value.createdFrom !== undefined || value.createdTo !== undefined)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'connectorKey is required for an overview query' });
+  rejectReversedCreatedAtRange(value, context);
 });
-export const emailSemanticSearchInputSchema = z.object({ query: z.string().trim().min(1).max(500), minimumScore: z.number().min(-1).max(1).default(0.55), limit: z.number().int().min(1).max(50).default(50), recordHistory: z.boolean().default(true) }).strict();
-export const emailMessageSearchInputSchema = emailSemanticSearchInputSchema.extend({
+const emailSemanticSearchInputShape = { query: z.string().trim().min(1).max(500), minimumScore: z.number().min(-1).max(1).default(0.55), limit: z.number().int().min(1).max(50).default(50), recordHistory: z.boolean().default(true), ...emailCreatedAtRangeShape } as const;
+export const emailSemanticSearchInputSchema = z.object(emailSemanticSearchInputShape).strict();
+export const emailMessageSearchInputSchema = z.object({
+  ...emailSemanticSearchInputShape,
   connectorKey: keySchema,
   readState: z.enum(['read', 'unread']).optional(),
   facets: z.array(z.enum(EMAIL_OVERVIEW_FACETS)).max(EMAIL_OVERVIEW_FACETS.length).optional(),
 }).strict();
+export const emailDraftSearchInputSchema = z.object({ ...emailSemanticSearchInputShape, connectorKey: keySchema }).strict();
+export const emailDraftListInputSchema = z.object({ connectorKey: keySchema, offset: z.number().int().min(0).max(1_000_000).default(0), limit: z.number().int().min(1).max(100).default(50), ...emailCreatedAtRangeShape }).strict();
 export const emailThreadReadInputSchema = z.object({ threadKey: keySchema, cursor: z.string().min(1).max(2_000).optional() }).strict();
 export const inboxUpdateInputSchema = z.object({ connectorKey: keySchema, name: z.string().trim().min(1).max(255).optional(), description: z.string().trim().min(1).max(10_000).nullable().optional(), coverImageKey: keySchema.nullable().optional(), isFavorite: z.boolean().optional() }).strict().refine((value) => value.name !== undefined || value.description !== undefined || value.coverImageKey !== undefined || value.isFavorite !== undefined, 'inbox metadata is required');
 export const inboxSortInputSchema = z.object({ connectorKey: keySchema }).strict();
@@ -166,6 +180,7 @@ export const publicEmailDraftSearchResultSchema = z.object({ drafts: z.array(z.u
   publicEmailReplyDraftSchema.extend({ score: z.number().min(-1).max(1) }).strict(),
   publicEmailNewDraftSchema.extend({ score: z.number().min(-1).max(1) }).strict(),
 ])) }).strict();
+export const publicEmailDraftListResultSchema = z.object({ drafts: z.array(publicEmailDraftSchema), total: z.number().int().nonnegative(), offset: z.number().int().nonnegative(), limit: z.number().int().positive() }).strict();
 export const publicEmailInboxSchema = z.object({
   key: keySchema, connectorKey: keySchema, provider: z.literal('gmail'), email: z.string().email(), name: z.string().min(1), description: z.string().optional(), coverUrl: z.string().url().optional(), isFavorite: z.boolean(),
   status: z.enum(['active', 'error', 'revoked']), syncEnabled: z.boolean().optional(), initialSyncCompleted: z.boolean(), syncStatus: z.enum(['idle', 'syncing', 'error']).optional(), lastSyncedAt: z.string().datetime().optional(), syncError: z.string().optional(),
@@ -867,8 +882,8 @@ export function createEmailService(options: {
       const selected = accounts.find(({ connectorKey }) => connectorKey === input.connectorKey);
       if (!selected) throw new EmailRepositoryError('not_found', 'Email connector is not available in this scope');
       const query = input.readState !== undefined && input.facets !== undefined
-        ? { readState: input.readState, facets: normalizeEmailOverviewFacets(input.facets), search: input.search, cursor: input.cursor, limit: input.limit }
-        : { filter: (input.filter ?? 'all') as EmailOverviewLegacyFilter, search: input.search, cursor: input.cursor, limit: input.limit };
+        ? { readState: input.readState, facets: normalizeEmailOverviewFacets(input.facets), search: input.search, cursor: input.cursor, limit: input.limit, ...createdAtRange(input) }
+        : { filter: (input.filter ?? 'all') as EmailOverviewLegacyFilter, search: input.search, cursor: input.cursor, limit: input.limit, ...createdAtRange(input) };
       const result = await repository.overview(actor.scopeKey, selected.connectorKey, query);
       const drafts = await repository.listDrafts(actor.scopeKey, selected.connectorKey);
       return publicEmailOverviewSchema.parse({
@@ -876,13 +891,23 @@ export function createEmailService(options: {
         counts: result.counts, nextCursor: result.nextCursor,
       });
     },
+    async listDrafts(actor: EmailActor, rawInput: unknown) {
+      await access(actor);
+      const input = emailDraftListInputSchema.parse(rawInput);
+      assertCreatedAtRange(input);
+      const connector = await connectors.getExact(actor.organizationKey, actor.scopeKey, input.connectorKey);
+      if (!connector || connector.status === 'revoked') throw new EmailRepositoryError('not_found', 'Email connector is not available in this scope');
+      const result = await repository.listDraftPage(actor.scopeKey, connector.key, input);
+      return publicEmailDraftListResultSchema.parse({ drafts: result.drafts.map(publicDraft), total: result.total, offset: input.offset, limit: input.limit });
+    },
     async searchInboxes(actor: EmailActor, rawInput: unknown, options: { signal?: AbortSignal; timeoutMs?: number; queryEmbedding?: number[] } = {}) {
       await access(actor);
       const input = emailSemanticSearchInputSchema.parse(rawInput);
+      assertCreatedAtRange(input);
       const available = await connectors.listAuthorizedScope(actor.organizationKey, actor.scopeKey);
       const byKey = new Map(available.map((connector) => [connector.key, connector]));
       const embedding = options.queryEmbedding ?? await embed({ text: input.query, purpose: 'query', signal: options.signal, timeoutMs: options.timeoutMs }, actor.organizationKey);
-      const matches = await inboxes.search(actor.organizationKey, actor.scopeKey, [...byKey.keys()], embedding, input.query, input.minimumScore, input.limit);
+      const matches = await inboxes.search(actor.organizationKey, actor.scopeKey, [...byKey.keys()], embedding, input.query, input.minimumScore, input.limit, createdAtRange(input));
       const results = (await Promise.all(matches.map(async ({ inbox, score }) => {
         const connector = byKey.get(inbox.connectorKey);
         return connector ? { ...(await projectInbox(inbox, connector)), score } : null;
@@ -893,28 +918,31 @@ export function createEmailService(options: {
     async searchTones(actor: EmailActor, rawInput: unknown, options: { signal?: AbortSignal; timeoutMs?: number; queryEmbedding?: number[] } = {}) {
       await access(actor);
       const input = emailSemanticSearchInputSchema.parse(rawInput);
+      assertCreatedAtRange(input);
       const embedding = options.queryEmbedding ?? await embed({ text: input.query, purpose: 'query', signal: options.signal, timeoutMs: options.timeoutMs }, actor.organizationKey);
-      const tones = await Promise.all((await repository.searchTones(actor.scopeKey, embedding, input.query, input.minimumScore, input.limit)).map(async ({ tone, score }) => ({ ...(await projectTone(tone)), score })));
+      const tones = await Promise.all((await repository.searchTones(actor.scopeKey, embedding, input.query, input.minimumScore, input.limit, createdAtRange(input))).map(async ({ tone, score }) => ({ ...(await projectTone(tone)), score })));
       if (input.recordHistory) await userSearches.record(actor.userKey, input.query);
       return { tones };
     },
     async searchMessages(actor: EmailActor, rawInput: unknown, options: { signal?: AbortSignal; timeoutMs?: number; queryEmbedding?: number[] } = {}) {
       await access(actor);
       const input = emailMessageSearchInputSchema.parse(rawInput);
+      assertCreatedAtRange(input);
       const connector = await connectors.getExact(actor.organizationKey, actor.scopeKey, input.connectorKey);
       if (!connector || connector.status === 'revoked') throw new EmailRepositoryError('not_found', 'Email connector is not available in this scope');
       const embedding = options.queryEmbedding ?? await embed({ text: input.query, purpose: 'query', signal: options.signal, timeoutMs: options.timeoutMs }, actor.organizationKey);
-      const matches = await repository.searchThreads(actor.scopeKey, connector.key, embedding, input.query, input.minimumScore, input.limit, { readState: input.readState, facets: input.facets });
+      const matches = await repository.searchThreads(actor.scopeKey, connector.key, embedding, input.query, input.minimumScore, input.limit, { readState: input.readState, facets: input.facets, ...createdAtRange(input) });
       if (input.recordHistory) await userSearches.record(actor.userKey, input.query);
       return { threads: matches.map(({ thread, score }) => ({ ...publicThread(thread), score })) };
     },
     async searchDrafts(actor: EmailActor, rawInput: unknown, options: { signal?: AbortSignal; timeoutMs?: number; queryEmbedding?: number[] } = {}) {
       await access(actor);
-      const input = emailMessageSearchInputSchema.pick({ connectorKey: true, query: true, minimumScore: true, limit: true, recordHistory: true }).parse(rawInput);
+      const input = emailDraftSearchInputSchema.parse(rawInput);
+      assertCreatedAtRange(input);
       const connector = await connectors.getExact(actor.organizationKey, actor.scopeKey, input.connectorKey);
       if (!connector || connector.status === 'revoked') throw new EmailRepositoryError('not_found', 'Email connector is not available in this scope');
       const embedding = options.queryEmbedding ?? await embed({ text: input.query, purpose: 'query', signal: options.signal, timeoutMs: options.timeoutMs }, actor.organizationKey);
-      const matches = await repository.searchDrafts(actor.scopeKey, connector.key, embedding, input.query, input.minimumScore, input.limit);
+      const matches = await repository.searchDrafts(actor.scopeKey, connector.key, embedding, input.query, input.minimumScore, input.limit, createdAtRange(input));
       if (input.recordHistory) await userSearches.record(actor.userKey, input.query);
       return publicEmailDraftSearchResultSchema.parse({ drafts: matches.map(({ draft, score }) => ({ ...publicDraft(draft), score })) });
     },

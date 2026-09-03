@@ -3,13 +3,14 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { websocket } from 'hono/bun';
 import { errorHandler } from './errors';
-import { autoRefreshAuthTokens, rateLimitByIp, requestLogger, requireEnvApiKey, validateQueryParams } from './middleware';
+import { autoRefreshAuthTokens, bindEventApp, rateLimitByIp, requestLogger, requireEnvApiKey, validateQueryParams } from './middleware';
 import { handleResendWebhook, RESEND_WEBHOOK_V1_PATH } from './resend';
 import { GMAIL_WEBHOOK_V1_PATH, handleGmailWebhook } from './email-webhook';
 import { closeEmailSyncQueue, enqueueEmailWatchRenewal, recoverEmailSyncQueue, startEmailSyncWorker } from '@/lib/email-inbox/sync-queue';
 import { closeGalleryUploadQueue, recoverGalleryUploadQueue, startGalleryUploadWorker } from '@/lib/gallery/upload-queue';
 import { registerRoutes } from './routes';
 import { drainStorageDeletionJobs } from '@/lib/storage-deletion';
+import { closeConversationImageTurnQueue, recoverConversationImageTurnQueue, startConversationImageTurnWorker } from '@/lib/conversations/image-turn-queue';
 
 export const app = new Hono();
 const api = app.basePath('/api/v1');
@@ -36,6 +37,7 @@ app.use('*', cors({
     'X-API-Key',
     'X-Vorinthex-API-Key',
     'X-Vorinthex-Session-Transport',
+    'X-Vorinthex-App-Key',
     'X-Refresh-Token',
     'svix-id',
     'svix-timestamp',
@@ -46,6 +48,7 @@ app.use('*', cors({
 app.use('*', requestLogger);
 app.use('*', rateLimitByIp);
 app.use('*', requireEnvApiKey);
+app.use('*', bindEventApp);
 app.use('*', autoRefreshAuthTokens);
 app.use('*', validateQueryParams);
 app.onError(errorHandler);
@@ -68,13 +71,16 @@ if (import.meta.main) {
   console.log(`vorinthex app listening on ${port}`);
   const emailWorker = startEmailSyncWorker();
   const galleryWorker = startGalleryUploadWorker();
+  const conversationImageWorker = startConversationImageTurnWorker();
   void recoverGalleryUploadQueue().catch((error) => console.error('gallery upload queue recovery failed', { error }));
   void drainStorageDeletionJobs(1000).catch((error) => console.error('storage deletion recovery failed', { error }));
   void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error }));
   void recoverEmailSyncQueue().catch((error) => console.error('email synchronization queue recovery failed', { error }));
+  void recoverConversationImageTurnQueue().catch((error) => console.error('conversation image queue recovery failed', { error }));
   const storageDeletionTimer = setInterval(() => { void drainStorageDeletionJobs(1000).catch((error) => console.error('storage deletion recovery failed', { error })); }, 60_000);
   const renewalTimer = setInterval(() => { void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error })); }, 6 * 60 * 60_000);
   const emailRecoveryTimer = setInterval(() => { void recoverEmailSyncQueue().catch((error) => console.error('email synchronization queue recovery failed', { error })); }, 60_000);
+  const conversationImageRecoveryTimer = setInterval(() => { void recoverConversationImageTurnQueue().catch((error) => console.error('conversation image queue recovery failed', { error })); }, 60_000);
 
   let shuttingDown = false;
   const shutdown = async () => {
@@ -84,10 +90,13 @@ if (import.meta.main) {
     clearInterval(storageDeletionTimer);
     clearInterval(renewalTimer);
     clearInterval(emailRecoveryTimer);
+    clearInterval(conversationImageRecoveryTimer);
     await emailWorker.close();
     await galleryWorker.close();
+    await conversationImageWorker.close();
     await closeEmailSyncQueue();
     await closeGalleryUploadQueue();
+    await closeConversationImageTurnQueue();
     process.exit(0);
   };
 

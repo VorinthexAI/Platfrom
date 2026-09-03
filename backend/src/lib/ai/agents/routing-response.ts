@@ -36,6 +36,12 @@ function parseString(source: string, start: number): StringToken {
   return { complete: false, value, next: source.length };
 }
 
+function canonicalToolName(value: string, allowedTools: ReadonlySet<string>) {
+  if (allowedTools.has(value)) return value;
+  const invocation = /^([a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+)\s*\([\s\S]*\)$/.exec(value);
+  return invocation && allowedTools.has(invocation[1]!) ? invocation[1]! : undefined;
+}
+
 function parseTools(source: string, start: number, allowedTools: ReadonlySet<string>) {
   if (source[start] !== '[') throw new RoutingResponseError('tools must be an array');
   const tools: string[] = []; const selected = new Set<string>(); let index = skipWhitespace(source, start + 1);
@@ -45,9 +51,10 @@ function parseTools(source: string, start: number, allowedTools: ReadonlySet<str
     if (source[index] !== '"') throw new RoutingResponseError('tools must contain only strings');
     const token = parseString(source, index);
     if (!token.complete) return { complete: false, tools, next: token.next };
-    if (!allowedTools.has(token.value)) throw new RoutingResponseError(`tool "${token.value}" is not allowed`);
-    if (selected.has(token.value)) throw new RoutingResponseError(`duplicate tool "${token.value}"`);
-    selected.add(token.value); tools.push(token.value);
+    const toolName = canonicalToolName(token.value, allowedTools);
+    if (!toolName) throw new RoutingResponseError(`tool "${token.value}" is not allowed`);
+    if (selected.has(toolName)) throw new RoutingResponseError(`duplicate tool "${toolName}"`);
+    selected.add(toolName); tools.push(toolName);
     if (tools.length > MAX_ROUTING_RESPONSE_TOOLS) throw new RoutingResponseError(`tools may contain at most ${MAX_ROUTING_RESPONSE_TOOLS} entries`);
     index = skipWhitespace(source, token.next);
     if (index >= source.length) return { complete: false, tools, next: index };
@@ -107,9 +114,9 @@ function parseResponse(source: string, allowedTools: ReadonlySet<string>, nameMo
   if (name !== undefined && name.length > 200) throw new RoutingResponseError('name must contain at most 200 characters');
   if (message.length > 100_000) throw new RoutingResponseError('message must contain at most 100000 characters');
   if (tools.length === 0 && message.trim() === '') throw new RoutingResponseError('direct response message must not be blank');
-  if (tools.length > 0 && message !== '') throw new RoutingResponseError('tool-selection response message must be exactly empty');
-  const value: RoutingResponse = name === undefined ? { tools, message } : { tools, message, name };
-  return { complete: true, message, messageComplete: true, toolsClosedEmpty: tools.length === 0, nameValid: snapshot.nameValid, value };
+  const routedMessage = tools.length > 0 ? '' : message;
+  const value: RoutingResponse = name === undefined ? { tools, message: routedMessage } : { tools, message: routedMessage, name };
+  return { complete: true, message: routedMessage, messageComplete: true, toolsClosedEmpty: tools.length === 0, nameValid: snapshot.nameValid, value };
 }
 
 export function createRoutingResponseDecoder(options: RoutingResponseDecoderOptions) {

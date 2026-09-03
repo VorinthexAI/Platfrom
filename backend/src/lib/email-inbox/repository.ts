@@ -10,7 +10,9 @@ export const EMAIL_OVERVIEW_FACETS = ['urgent', 'important', 'filtered', 'favori
 export type EmailOverviewFacet = typeof EMAIL_OVERVIEW_FACETS[number];
 export type EmailOverviewReadState = 'read' | 'unread';
 export type EmailOverviewLegacyFilter = 'all' | 'important' | 'urgent' | 'needs_action' | 'filtered' | 'unread' | 'favorite' | 'trash';
-export type EmailOverviewRepositoryQuery = { filter: EmailOverviewLegacyFilter; search?: string; cursor?: string; limit?: number } | { readState: EmailOverviewReadState; facets: EmailOverviewFacet[]; search?: string; cursor?: string; limit?: number };
+export type EmailCreatedAtRange = { createdFrom?: string; createdTo?: string };
+type EmailOverviewPage = EmailCreatedAtRange & { search?: string; cursor?: string; limit?: number };
+export type EmailOverviewRepositoryQuery = ({ filter: EmailOverviewLegacyFilter } | { readState: EmailOverviewReadState; facets: EmailOverviewFacet[] }) & EmailOverviewPage;
 
 export function normalizeEmailOverviewFacets(facets: readonly EmailOverviewFacet[]) { const selected = new Set(facets); return EMAIL_OVERVIEW_FACETS.filter((facet) => selected.has(facet)); }
 export class EmailRepositoryError extends Error { constructor(readonly reason: 'not_found' | 'forbidden' | 'conflict', message: string = reason) { super(message); } }

@@ -135,8 +135,8 @@ export function GalleryImageGeneration({ collection, onClose, onGenerate, open }
 
 const styles = StyleSheet.create({
   content: { gap: spacing.md, paddingBottom: spacing.xl },
-  countTabs: { alignSelf: "flex-start", flexDirection: "row", padding: 3, borderWidth: 1, borderColor: palette.hairline },
-  countTab: { minWidth: 42 },
+  countTabs: { width: "100%", flexDirection: "row", padding: 3, borderWidth: 1, borderColor: palette.hairline },
+  countTab: { flex: 1 },
   contextActions: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing.xs },
   contextChip: { alignSelf: "flex-start", minHeight: 34, maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: "rgba(221, 226, 229, 0.18)", borderRadius: 999, backgroundColor: "rgba(255, 255, 255, 0.03)" },
   contextChipMain: { minWidth: 0, flexShrink: 1, justifyContent: "center", paddingLeft: 7, paddingRight: 0 },

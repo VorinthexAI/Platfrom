@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { apiClient } from "@/lib/api-client";
+import { conversationRetrievalSchema } from "@/lib/conversation-client";
 import { publishUserSearchHistoryAppend } from "@/lib/user-search-history-events";
 import { useAuthStore } from "@/state/auth";
 
@@ -12,7 +13,6 @@ export const appSearchInputSchema = z.strictObject({
   collectionSlugs: z.array(appSearchCollectionSlugSchema).min(1).max(10).refine((slugs) => new Set(slugs).size === slugs.length, "Collection slugs must be distinct."),
   recordHistory: z.boolean().default(true),
   limit: z.number().int().min(1).max(50).default(10),
-  minimumScore: z.number().min(-1).max(1).default(0.55),
   filters: z.strictObject({
     folderKey: z.string().min(1).optional(),
     includeDescendants: z.boolean().optional(),
@@ -20,19 +20,26 @@ export const appSearchInputSchema = z.strictObject({
     connectorKey: z.string().min(1).optional(),
     readState: z.enum(["read", "unread"]).optional(),
     emailFacets: z.array(z.enum(["urgent", "important", "filtered", "favorite"])).max(4).optional(),
+    createdFrom: z.string().datetime({ offset: true }).transform((value) => new Date(value).toISOString()).optional(),
+    createdTo: z.string().datetime({ offset: true }).transform((value) => new Date(value).toISOString()).optional(),
   }).optional(),
+}).superRefine((input, context) => {
+  if ((input.filters?.createdFrom || input.filters?.createdTo) && input.collectionSlugs.includes("countries")) context.addIssue({ code: "custom", path: ["filters"], message: "Countries do not have a creation date." });
+  if (input.filters?.createdFrom && input.filters.createdTo && input.filters.createdFrom > input.filters.createdTo) context.addIssue({ code: "custom", path: ["filters", "createdTo"], message: "createdTo must not precede createdFrom." });
 });
 export type AppSearchInput = z.input<typeof appSearchInputSchema>;
 
-const appSearchOutputSchema = z.strictObject({
+export const appSearchOutputSchema = z.strictObject({
   query: z.string(),
   groups: z.array(z.strictObject({ collectionSlug: appSearchCollectionSlugSchema, results: z.array(z.unknown()) })),
+  retrieval: conversationRetrievalSchema.nullable().optional(),
 });
 export type AppSearchOutput = z.infer<typeof appSearchOutputSchema>;
+export const appSearchQueryRoot = ["app-search"] as const;
 
 export function appSearchQueryKey(contextIdentity: string, input: AppSearchInput) {
   const parsed = appSearchInputSchema.parse({ ...input, recordHistory: false });
-  return ["app-search", contextIdentity, parsed] as const;
+  return [...appSearchQueryRoot, contextIdentity, parsed] as const;
 }
 
 function context() {

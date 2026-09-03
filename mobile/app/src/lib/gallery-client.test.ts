@@ -88,6 +88,7 @@ test("uses authoritative ownership with a legacy role fallback", () => {
 
 test("identifies backend-managed place media without inferring it from names", () => {
   expect(isManagedGalleryCollection({ purpose: "place-media", mutationPolicy: "system-only" })).toBe(true);
+  expect(isManagedGalleryCollection({ purpose: "generated-media", mutationPolicy: "user" })).toBe(false);
   expect(isManagedGalleryCollection({ purpose: null, mutationPolicy: "user" })).toBe(false);
   expect(isManagedGalleryImage({ mutationPolicy: "system-only" })).toBe(true);
   expect(isManagedGalleryImage({ mutationPolicy: "user" })).toBe(false);
@@ -181,28 +182,36 @@ test("sends collection-scoped semantic searches through the canonical endpoint",
 
   expect(calls).toEqual([{
     path: "/app/search",
-    body: { organizationKey: "organization", scopeKey: "scope", query: "rain", collectionSlugs: ["images"], recordHistory: false, limit: 50, minimumScore: 0.55, filters: { collectionKey: "collection" } },
+    body: { organizationKey: "organization", scopeKey: "scope", query: "rain", collectionSlugs: ["images"], recordHistory: false, limit: 50, filters: { collectionKey: "collection" } },
     timeout: 15_000,
   }]);
 });
 
 test("searches Gallery collections through app.search without a score cutoff", async () => {
   await searchGalleryCollections("road trips", false);
-  expect(calls[0]).toMatchObject({ path: "/app/search", body: { query: "road trips", collectionSlugs: ["collections"], recordHistory: false, limit: 50, minimumScore: -1 } });
+  expect(calls[0]).toMatchObject({ path: "/app/search", body: { query: "road trips", collectionSlugs: ["collections"], recordHistory: false, limit: 50 } });
+  expect(calls[0]?.body).not.toHaveProperty("minimumScore");
 });
 
 test("can request up to ten image matches without a score cutoff", async () => {
-  await searchGalleryImages({ query: "rain", recordHistory: false, limit: 10, minimumScore: -1 });
+  await searchGalleryImages({ query: "rain", recordHistory: false, limit: 10 });
 
   expect(calls[0]).toMatchObject({
     path: "/app/search",
-    body: { query: "rain", collectionSlugs: ["images"], recordHistory: false, limit: 10, minimumScore: -1 },
+    body: { query: "rain", collectionSlugs: ["images"], recordHistory: false, limit: 10 },
   });
+});
+
+test("parses collection summaries returned by direct image search", async () => {
+  const generated = { ...image("generated", "generated.png", "Generated"), origin: "generated" as const, collections: [{ key: "generated-media", name: "Core" }] };
+  responses.set("/gallery/images/search", { images: [generated] });
+
+  expect(await searchGalleryImages({ imageKey: "generated" })).toEqual({ images: [generated] });
 });
 
 test("validates and sends ordered custom highlight and memory image payloads", async () => {
   responses.set("/gallery/highlights", { highlight: { key: "highlight", collectionKey: "collection", imageKeys: ["first", "second"], images: [], createdByKey: "membership", createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z" } });
-  responses.set("/gallery/memories", { memory: { key: "memory", imageKey: "first", text: "Memory", image: { key: "first", url: "https://images.example/first" }, createdByKey: "membership", createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z" } });
+  responses.set("/gallery/memories", { memory: { key: "memory", imageKey: "first", text: "Memory", image: { key: "first", url: "https://images.example/first", width: 1200, height: 800 }, createdByKey: "membership", createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z" } });
 
   await createGalleryCollectionHighlight("collection", ["first", "second"]);
   await createGalleryCollectionMemory("collection", "first");

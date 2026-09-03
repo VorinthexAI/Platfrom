@@ -39,7 +39,6 @@ import {
 import { invokeContentTool } from './content-tools';
 import { communicationHandlers } from './communication';
 import { bootstrapGuestAuth, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
-import { recordPlatformEvent } from './platform-events';
 import { acceptGalleryCollectionInvite, activateGalleryCollectionShare, completeGalleryUploads, createGalleryCollection, createGalleryCollectionInvite, createGalleryCollectionShare, createGalleryHighlight, createGalleryMemory, createGallerySubject, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryHighlight, deleteGalleryImages, deleteGalleryMemory, deleteGallerySubject, findGalleryCollectionDuplicates, galleryOverview, galleryUploadStatus, leaveGalleryCollection, listGalleryCollectionMembers, listGalleryCollectionShares, listGalleryHighlights, listGalleryMemories, listGalleryPendingInvites, listGallerySubjectImages, listGallerySubjects, presignGalleryUploads, readGalleryHighlight, readGalleryMemory, rejectGalleryCollectionInvite, removeGalleryCollectionMember, revokeGalleryCollectionInvite, revokeGalleryCollectionShare, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMemberRole, updateGalleryCollectionShare, updateGalleryImage } from './gallery';
 import { travelHandlers } from './travel';
 import { countryHandlers } from './countries';
@@ -54,6 +53,10 @@ import { appSpeechHandler } from './app-speech';
 import { publicBookShareHandlers } from './public-book-shares';
 import { deleteImageGenerationHistory, generateImage, listImageGenerationHistory } from './image-generation';
 import { conversationHandlers } from './conversations';
+import { transientAttachmentHandlers } from './transient-attachments';
+import { completeAccountAvatar, presignAccountAvatar, updateAccountProfile } from './account-profile';
+import { feedbackHandlers, ticketHandler } from './tickets';
+import { listApps } from './apps';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -65,8 +68,9 @@ const emailBody = strictObject({ email: emailSchema });
 const oauthProviderSchema = z.enum(['google', 'apple']);
 
 export function registerRoutes(app: Hono) {
+  app.get('/apps', listApps);
   app.post('/auth/signup', async (c) => {
-    const body = await parseJson(c, strictObject({ email: emailSchema, name: z.string().optional(), profile_url: z.string().url().optional(), country_code: countryCodeSchema.optional() }));
+    const body = await parseJson(c, strictObject({ email: emailSchema, name: z.string().optional(), country_code: countryCodeSchema.optional() }));
     return c.json(await createUserWithAuth(body), 201);
   });
 
@@ -394,12 +398,18 @@ export function registerRoutes(app: Hono) {
   app.post('/auth/guest', bootstrapGuestAuth);
   app.get('/auth/me', getAuthAccount);
   app.patch('/auth/me', patchAuthAccount);
+  app.patch('/auth/me/profile', updateAccountProfile);
+  app.post('/auth/me/profile/avatar/uploads/presign', presignAccountAvatar);
+  app.post('/auth/me/profile/avatar/uploads/complete', completeAccountAvatar);
   app.get('/auth/me/hiddens', userHiddenHandlers.list);
   app.post('/auth/me/hiddens', userHiddenHandlers.hide);
   app.delete('/auth/me/hiddens', userHiddenHandlers.reveal);
   app.post('/auth/logout', logoutAuthAccount);
+  app.post('/tickets', ticketHandler);
+  app.post('/feedback', feedbackHandlers.create);
+  app.post('/feedback/list', feedbackHandlers.list);
+  app.put('/feedback/:ticketKey/vote', feedbackHandlers.vote);
 
-  app.post('/app/events', recordPlatformEvent);
   app.post('/app/search', searchApp);
   app.post('/images/generate', generateImage);
   app.get('/images/generation-history', listImageGenerationHistory);
@@ -412,7 +422,11 @@ export function registerRoutes(app: Hono) {
   app.post('/conversations/:conversationKey/favorite', conversationHandlers.favorite);
   app.delete('/conversations/:conversationKey', conversationHandlers.delete);
   app.post('/conversations/:conversationKey/messages/list', conversationHandlers.messages);
+  app.delete('/conversations/:conversationKey/messages/:messageKey', conversationHandlers.deleteMessage);
+  app.post('/conversations/:conversationKey/image-turns', conversationHandlers.imageTurn);
   app.post('/conversations/:conversationKey/turn/stream', conversationHandlers.turn);
+  app.post('/conversations/:conversationKey/attachments/uploads/presign', transientAttachmentHandlers.reserve);
+  app.post('/conversations/:conversationKey/attachments/uploads/complete', transientAttachmentHandlers.complete);
 
   app.post('/presence/join', joinPresence);
   app.post('/presence/beat', presenceBeat);

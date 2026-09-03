@@ -3,7 +3,7 @@ import { streamSSE } from 'hono/streaming';
 import { z, ZodError } from 'zod';
 import { authorizeContentExecution, ContentError, type ToolContext } from '@/lib/ai/tools';
 import { createConversationService, getDefaultConversationService, ConversationError, type ConversationService, type ConversationTurnEvent } from '@/lib/conversations/service';
-import { conversationCreateInputSchema, conversationFavoriteInputSchema, conversationKeyInputSchema, conversationListInputSchema, conversationMessageListInputSchema, conversationRenameInputSchema, conversationSafeMessageSchema, conversationSearchInputSchema, conversationSendInputSchema } from '@/lib/conversations/schemas';
+import { conversationCreateInputSchema, conversationFavoriteInputSchema, conversationImageTurnRequestKeySchema, conversationImageTurnShape, conversationKeyInputSchema, conversationListInputSchema, conversationMessageDeleteInputSchema, conversationMessageListInputSchema, conversationRenameInputSchema, conversationSafeMessageSchema, conversationSearchInputSchema, conversationSendInputSchema } from '@/lib/conversations/schemas';
 import { getAuthIdentity } from './security';
 import { parseJson } from './validation';
 import { publishUserEvent } from './events';
@@ -62,11 +62,22 @@ export function createConversationHandlers(dependencies: ConversationHandlerDepe
   favorite: (c: Context) => invoke(c, selected({ isFavorite: conversationFavoriteInputSchema.shape.isFavorite }), (service, input, context) => service.favorite({ ...input, conversationKey: z.string().cuid().parse(c.req.param('conversationKey')) }, context), true, dependencies),
   delete: (c: Context) => invoke(c, selected({}), (service, _input, context) => service.delete(conversationKeyInputSchema.parse({ conversationKey: c.req.param('conversationKey') }), context), true, dependencies),
   messages: (c: Context) => invoke(c, selected({ cursor: conversationMessageListInputSchema.shape.cursor, limit: conversationMessageListInputSchema.shape.limit }), (service, input, context) => service.messages({ ...input, conversationKey: z.string().cuid().parse(c.req.param('conversationKey')) }, context), false, dependencies),
+  deleteMessage: (c: Context) => invoke(c, selected({}), (service, _input, context) => service.deleteMessage(conversationMessageDeleteInputSchema.parse({ conversationKey: c.req.param('conversationKey'), messageKey: c.req.param('messageKey') }), context), true, dependencies),
+  async imageTurn(c: Context) {
+    try {
+      const body = await parseJson(c, selected({ prompt: conversationImageTurnShape.prompt, requestKey: conversationImageTurnRequestKeySchema, referenceImageKeys: conversationImageTurnShape.referenceImageKeys, size: conversationImageTurnShape.size, quality: conversationImageTurnShape.quality, mode: conversationImageTurnShape.mode }));
+      const context = await authenticated(c, body.organizationKey, body.scopeKey, dependencies); if (context instanceof Response) return context;
+      const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...input } = body;
+      const data = await (dependencies.service ?? getDefaultConversationService()).enqueueImageTurn({ ...input, conversationKey: z.string().cuid().parse(c.req.param('conversationKey')) }, context);
+      if (context.principal.kind === 'member') await (dependencies.publishChanged ?? publishUserEvent)(context.principal.user.key, 'conversation.changed');
+      return c.json({ success: true, data }, 202);
+    } catch (error) { return failure(c, error); }
+  },
   async turn(c: Context) {
     try {
-      const body = await parseJson(c, selected({ message: conversationSendInputSchema.shape.message, requestKey: conversationSendInputSchema.shape.requestKey }));
+      const body = await parseJson(c, selected({ message: z.string().trim().min(1).max(20_000), requestKey: z.string().trim().min(1).max(180), attachmentKeys: z.array(z.string().cuid()).max(10).default([]), referenceImageKeys: z.array(z.string().cuid()).max(1).default([]) }));
       const context = await authenticated(c, body.organizationKey, body.scopeKey, dependencies); if (context instanceof Response) return context;
-      const input = conversationSendInputSchema.parse({ conversationKey: c.req.param('conversationKey'), message: body.message, requestKey: body.requestKey });
+      const input = conversationSendInputSchema.parse({ conversationKey: c.req.param('conversationKey'), message: body.message, requestKey: body.requestKey, attachmentKeys: body.attachmentKeys, referenceImageKeys: body.referenceImageKeys });
       return streamSSE(c, async (stream) => {
         const abort = bindConversationStreamAbort(stream, c.req.raw.signal);
         const service = dependencies.createTurnService?.(abort.signal) ?? createConversationService({ router: { signal: abort.signal } });

@@ -14,6 +14,7 @@ import { replayableShareSchema, shareSchema, type ReplayableShare, type Share } 
 import { bookExtensionSchema, type BookExtension } from '@/lib/db/book-extensions.node';
 
 export interface BookAccessContext { organizationKey: string; scopeKey: string; userKey: string; generationLeaseToken?: string; signal?: AbortSignal }
+export interface BookCreationDateRange { createdFrom?: string; createdTo?: string }
 export interface BookDetailRow { book: Book; chapters: Array<{ chapter: BookChapter; progress: BookProgress | null }> }
 export interface BookSearchRow extends BookDetailRow { score: number }
 export interface BookGenerationIdentity { bookKey: string; organizationKey: string; scopeKey: string; userKey: string }
@@ -28,6 +29,10 @@ export class BookRepositoryError extends Error {
 
 const accessQuery = (write: boolean) => `LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate) LET scope = DOCUMENT(scopes, @scopeKey) LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role) FILTER membership != null && scope != null && scope.organizationKey == @organizationKey FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"${write ? '' : ', "member", "viewer"'}] RETURN membership._key`;
 const parse = <T>(schema: { parse(value: unknown): T }, value: unknown) => schema.parse(withArangoKey(value as Record<string, unknown>));
+const parseBook = (value: unknown) => {
+  const document = withArangoKey(value as Record<string, unknown>);
+  return bookSchema.parse({ ...document, updatedAt: document.updatedAt ?? document.createdAt });
+};
 const unsetPatch = (patch: Record<string, unknown>) => Object.fromEntries(Object.entries(patch).map(([field, value]) => [field, value === undefined ? null : value]));
 const stableKey = (kind: string, ...values: string[]) => `c${createHash('sha256').update([kind, ...values].join('\0')).digest('hex').slice(0, 24)}`;
 async function authorize(database: BookDatabase, context: BookAccessContext, write: boolean) {
@@ -38,7 +43,7 @@ async function authorize(database: BookDatabase, context: BookAccessContext, wri
 export interface BookRepository {
   authorize(context: BookAccessContext, write?: boolean): Promise<void>;
   list(context: BookAccessContext): Promise<BookDetailRow[]>;
-  search(context: BookAccessContext, query: string, queryEmbedding: number[], minimumScore: number, limit: number): Promise<BookSearchRow[]>;
+  search(context: BookAccessContext, query: string, queryEmbedding: number[], minimumScore: number, limit: number, dateRange?: BookCreationDateRange): Promise<BookSearchRow[]>;
   detail(context: BookAccessContext, bookKey: string): Promise<BookDetailRow>;
   findByGenerationRequest(context: BookAccessContext, generationRequestKey: string): Promise<BookDetailRow | null>;
   failGeneration(job: BookGenerationIdentity, message: string, now: string): Promise<boolean>;
@@ -78,15 +83,15 @@ export function createBookRepository(database: BookDatabase = db, transact: Book
   const readDetail = async (context: BookAccessContext, bookKey?: string) => {
     await authorize(database, context, false);
     const rows = await (await database.query(`FOR book IN books FILTER book.scopeKey == @scopeKey ${bookKey ? '&& book._key == @bookKey' : ''} LET chapters = (FOR chapter IN bookChapters FILTER chapter.scopeKey == @scopeKey && chapter.bookKey == book._key LET progress = FIRST(FOR item IN bookProgress FILTER item.scopeKey == @scopeKey && item.userKey == @userKey && item.bookKey == book._key && item.chapterKey == chapter._key LIMIT 1 RETURN item) SORT chapter.position ASC RETURN { chapter, progress }) SORT book.updatedAt DESC RETURN { book, chapters }`, { scopeKey: context.scopeKey, userKey: context.userKey, ...(bookKey ? { bookKey } : {}) })).all() as Array<{ book: unknown; chapters: Array<{ chapter: unknown; progress: unknown | null }> }>;
-    return rows.map((row) => ({ book: parse(bookSchema, row.book), chapters: row.chapters.map(({ chapter, progress }) => ({ chapter: parse(bookChapterSchema, chapter), progress: progress ? parse(bookProgressSchema, progress) : null })) }));
+    return rows.map((row) => ({ book: parseBook(row.book), chapters: row.chapters.map(({ chapter, progress }) => ({ chapter: parse(bookChapterSchema, chapter), progress: progress ? parse(bookProgressSchema, progress) : null })) }));
   };
   return {
     authorize: (context, write = false) => authorize(database, context, write),
     list: (context) => readDetail(context),
-    async search(context, query, queryEmbedding, minimumScore, limit) {
+    async search(context, query, queryEmbedding, minimumScore, limit, dateRange = {}) {
       await authorize(database, context, false);
-      const rows = await (await database.query('FOR book IN books FILTER book.scopeKey == @scopeKey LET text = LOWER(CONCAT_SEPARATOR(" ", book.title, book.subtitle, book.description, book.goal, book.audience, book.outcome)) LET direct = CONTAINS(text, @query) LET semantic = IS_ARRAY(book.embedding) && LENGTH(book.embedding) == LENGTH(@queryEmbedding) ? COSINE_SIMILARITY(book.embedding, @queryEmbedding) : -1 FILTER direct || semantic >= @minimumScore LET chapters = (FOR chapter IN bookChapters FILTER chapter.scopeKey == @scopeKey && chapter.bookKey == book._key LET progress = FIRST(FOR item IN bookProgress FILTER item.scopeKey == @scopeKey && item.userKey == @userKey && item.bookKey == book._key && item.chapterKey == chapter._key LIMIT 1 RETURN item) SORT chapter.position ASC RETURN { chapter, progress }) SORT direct DESC, semantic DESC, book.updatedAt DESC, book._key ASC LIMIT @limit RETURN { book, chapters, score: direct ? 1 : semantic }', { scopeKey: context.scopeKey, userKey: context.userKey, query: query.trim().toLocaleLowerCase(), queryEmbedding, minimumScore, limit })).all() as Array<{ book: unknown; chapters: Array<{ chapter: unknown; progress: unknown | null }>; score: number }>;
-      return rows.map((row) => ({ book: parse(bookSchema, row.book), chapters: row.chapters.map(({ chapter, progress }) => ({ chapter: parse(bookChapterSchema, chapter), progress: progress ? parse(bookProgressSchema, progress) : null })), score: row.score }));
+      const rows = await (await database.query('FOR book IN books FILTER book.scopeKey == @scopeKey FILTER @createdFrom == null || book.createdAt >= @createdFrom FILTER @createdTo == null || book.createdAt <= @createdTo LET text = LOWER(CONCAT_SEPARATOR(" ", book.title, book.subtitle, book.description, book.goal, book.audience, book.outcome)) LET direct = CONTAINS(text, @query) LET semantic = IS_ARRAY(book.embedding) && LENGTH(book.embedding) == LENGTH(@queryEmbedding) ? COSINE_SIMILARITY(book.embedding, @queryEmbedding) : -1 FILTER direct || semantic >= @minimumScore LET chapters = (FOR chapter IN bookChapters FILTER chapter.scopeKey == @scopeKey && chapter.bookKey == book._key LET progress = FIRST(FOR item IN bookProgress FILTER item.scopeKey == @scopeKey && item.userKey == @userKey && item.bookKey == book._key && item.chapterKey == chapter._key LIMIT 1 RETURN item) SORT chapter.position ASC RETURN { chapter, progress }) SORT direct DESC, semantic DESC, book.updatedAt DESC, book._key ASC LIMIT @limit RETURN { book, chapters, score: direct ? 1 : semantic }', { scopeKey: context.scopeKey, userKey: context.userKey, query: query.trim().toLocaleLowerCase(), queryEmbedding, minimumScore, limit, createdFrom: dateRange.createdFrom ?? null, createdTo: dateRange.createdTo ?? null })).all() as Array<{ book: unknown; chapters: Array<{ chapter: unknown; progress: unknown | null }>; score: number }>;
+      return rows.map((row) => ({ book: parseBook(row.book), chapters: row.chapters.map(({ chapter, progress }) => ({ chapter: parse(bookChapterSchema, chapter), progress: progress ? parse(bookProgressSchema, progress) : null })), score: row.score }));
     },
     async detail(context, bookKey) { const row = (await readDetail(context, bookKey))[0]; if (!row) throw new BookRepositoryError('not_found'); return row; },
     async findByGenerationRequest(context, generationRequestKey) { await authorize(database, context, false); const key = (await (await database.query('FOR book IN books FILTER book.scopeKey == @scopeKey && book.generationRequestKey == @generationRequestKey LIMIT 1 RETURN book._key', { scopeKey: context.scopeKey, generationRequestKey })).all())[0]; return typeof key === 'string' ? (await readDetail(context, key))[0] ?? null : null; },

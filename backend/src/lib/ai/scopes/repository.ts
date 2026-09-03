@@ -128,7 +128,7 @@ export function createScopeRepository(
       await requireScope(scopeKey);
       const remove = async (executor: Pick<typeof db, 'query'>) => {
       const attachmentCleanup = await executor.query(`
-        LET managedCollections = (FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.purpose IN ["place-media", "email-media"] && collection.mutationPolicy == "system-only" RETURN collection._key)
+        LET managedCollections = (FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.purpose IN ["place-media", "email-media", "generated-media"] && collection.mutationPolicy == "system-only" RETURN collection._key)
         LET boundImages = (FOR binding IN emailAttachmentBindings FILTER binding.scopeKey == @scopeKey && binding.targetType == "image" FILTER binding.targetKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "email-attachment-target", binding._key)), 24)) LET image = DOCUMENT(images, binding.targetKey) FILTER image != null && image.scopeKey == @scopeKey && image.mutationPolicy == "system-only" RETURN image)
         LET relatedImages = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey IN managedCollections LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.mutationPolicy == "system-only" RETURN image)
         LET managedImages = UNIQUE(UNION(boundImages, relatedImages))
@@ -141,7 +141,7 @@ export function createScopeRepository(
       `, { scopeKey, now: new Date().toISOString() });
       const attachmentCaptionKeys = (await attachmentCleanup.next() as string[] | undefined) ?? [];
        const teardown = await executor.query(`
-         LET managedCollections = (FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.purpose IN ["place-media", "email-media"] && collection.mutationPolicy == "system-only" RETURN collection._key)
+         LET managedCollections = (FOR collection IN collections FILTER collection.scopeKey == @scopeKey && collection.purpose IN ["place-media", "email-media", "generated-media"] && collection.mutationPolicy == "system-only" RETURN collection._key)
         LET boundAttachmentImages = (FOR binding IN emailAttachmentBindings FILTER binding.scopeKey == @scopeKey && binding.targetType == "image" FILTER binding.targetKey == CONCAT("c", LEFT(SHA256(CONCAT_SEPARATOR("\\u0000", "email-attachment-target", binding._key)), 24)) LET image = DOCUMENT(images, binding.targetKey) FILTER image != null && image.scopeKey == @scopeKey && image.mutationPolicy == "system-only" RETURN { key: image._key, storageKey: image.storageKey, captionKey: image.imageCaptionKey })
         LET relatedManagedImages = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey IN managedCollections LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.mutationPolicy == "system-only" RETURN { key: image._key, storageKey: image.storageKey, captionKey: image.imageCaptionKey })
         LET managedImages = UNIQUE(UNION(boundAttachmentImages, relatedManagedImages))
@@ -149,7 +149,10 @@ export function createScopeRepository(
         LET captionKeys = managedImages[*].captionKey
         LET cleanupGeneratedDocumentBindings = (FOR binding IN generatedDocumentBindings FILTER binding.scopeKey == @scopeKey REMOVE binding IN generatedDocumentBindings RETURN 1)
         LET cleanupConversationMessages = (FOR item IN conversationMessages FILTER item.scopeKey == @scopeKey REMOVE item IN conversationMessages RETURN 1)
-        LET cleanupConversations = (FOR item IN conversations FILTER item.scopeKey == @scopeKey REMOVE item IN conversations RETURN 1)
+         LET cleanupConversations = (FOR item IN conversations FILTER item.scopeKey == @scopeKey REMOVE item IN conversations RETURN 1)
+         LET cleanupTicketVotes = (FOR item IN ticketVotes FILTER item.scopeKey == @scopeKey REMOVE item IN ticketVotes RETURN 1)
+         LET cleanupTickets = (FOR item IN tickets FILTER item.scopeKey == @scopeKey REMOVE item IN tickets RETURN 1)
+         LET cleanupEvents = (FOR item IN events FILTER item.scopeId == @scopeKey REMOVE item IN events RETURN 1)
         LET cleanupTripAttachments = (FOR attachment IN tripAttachments FILTER attachment.scopeKey == @scopeKey REMOVE attachment IN tripAttachments RETURN 1)
         LET cleanupTripCreationReceipts = (FOR receipt IN tripCreationReceipts FILTER receipt.scopeKey == @scopeKey REMOVE receipt IN tripCreationReceipts RETURN 1)
         LET cleanupPlaceImages = (FOR relation IN placeImages FILTER relation.scopeKey == @scopeKey REMOVE relation IN placeImages RETURN 1)
@@ -255,7 +258,8 @@ export function createScopeRepository(
        if (attachmentCaptionKeys.length) await executor.query('FOR caption IN imageCaptions FILTER caption._key IN @captionKeys FILTER LENGTH(FOR retained IN images FILTER retained.imageCaptionKey == caption._key LIMIT 1 RETURN 1) == 0 REMOVE caption IN imageCaptions', { captionKeys: attachmentCaptionKeys });
       };
       if (!database.beginTransaction) return remove(database as unknown as Pick<typeof db, 'query'>);
-      const write = ['scopes', 'scopeScopes', 'scopeMembers', 'conversations', 'conversationMessages', 'organizationConnectors', 'folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'documentShares', 'generatedDocumentBindings', 'emailAttachmentBindings', 'emailAttachments', 'emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'images', 'imageCaptions', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'placeImages', 'collections', 'collectionInvites', 'collectionMembers', 'places', 'trips', 'tripPlaces', 'tripAttachments', 'tripCreationReceipts', 'tripGuides', 'placeReferences', 'placeHeroMedia', 'books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'tagAssignments', 'shares', 'userHiddens', 'storageDeletionJobs'];
+       const write = ['scopes', 'scopeScopes', 'scopeMembers', 'conversations', 'conversationMessages', 'organizationConnectors', 'folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'documentShares', 'generatedDocumentBindings', 'emailAttachmentBindings', 'emailAttachments', 'emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'images', 'imageCaptions', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'placeImages', 'collections', 'collectionInvites', 'collectionMembers', 'places', 'trips', 'tripPlaces', 'tripAttachments', 'tripCreationReceipts', 'tripGuides', 'placeReferences', 'placeHeroMedia', 'books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'tagAssignments', 'shares', 'userHiddens', 'events', 'storageDeletionJobs', 'ticketVotes'];
+      write.push('tickets');
       await withDatabaseTransaction(database as typeof db, { write }, (executor) => remove(executor));
     },
 

@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
-import type { ContentRepository } from './content-runtime';
-import { authorizeDocumentParseLocation, CONTENT_TOOL_NAMES, ContentError, runContentTool, type ContentIdempotencyStore } from '.';
+import { authorizeDocumentParseLocation, runContentTool, type ContentIdempotencyStore, type ContentRepository } from './content-runtime';
+import { CONTENT_TOOL_NAMES } from './content-registry';
+import { ContentError } from './content-errors';
 import { documentKeyForRequest, DocumentProcessingError } from '@/lib/ai/document-processing';
 import { documentEmbed } from '@/lib/ai/document-processing';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
@@ -240,6 +241,43 @@ describe('Content runtime', () => {
 
     expect(direct.folders.map((folder: any) => folder.key)).toEqual([f.folderKey]);
     expect(tree.folders.map((folder: any) => folder.key).sort()).toEqual([f.folderKey, child, leaf].sort());
+  });
+
+  test('filters folder and document lists inclusively before pagination', async () => {
+    const f = fixture('viewer');
+    const boundary = '2026-07-22T10:00:00.000Z';
+    const folderKeys = ['Older', 'Boundary', 'Newer'].map((name, index) => {
+      const key = newId();
+      const createdAt = index === 0 ? '2026-07-22T09:59:59.999Z' : index === 1 ? boundary : '2026-07-22T10:00:00.001Z';
+      f.folders.set(key, { key, scopeKey: f.scopeKey, name, embedding, createdAt, updatedAt: createdAt });
+      return key;
+    });
+    const documentKeys = ['Older', 'Boundary', 'Newer'].map((name, index) => {
+      const key = f.addDocument(`${name} content`);
+      const document = f.documents.get(key);
+      document.name = name;
+      document.createdAt = index === 0 ? '2026-07-22T09:59:59.999Z' : index === 1 ? boundary : '2026-07-22T10:00:00.001Z';
+      delete document.folderKey;
+      return key;
+    });
+
+    const folders = await runContentTool('folder.list', { scopeKey: f.scopeKey, createdFrom: boundary, createdTo: boundary, limit: 1 }, f.context, { repository: f.repository });
+    const documents = await runContentTool('document.list', { scopeKey: f.scopeKey, createdFrom: boundary, createdTo: boundary, limit: 1 }, f.context, { repository: f.repository });
+
+    expect(folders).toEqual({ folders: [expect.objectContaining({ key: folderKeys[1], createdAt: boundary })] });
+    expect(documents).toEqual({ documents: [expect.objectContaining({ key: documentKeys[1], createdAt: boundary })] });
+  });
+
+  test('lists documents in the selected folder hierarchy before pagination', async () => {
+    const f = fixture('viewer'); const child = newId();
+    f.folders.set(child, { key: child, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, createdAt: now, updatedAt: now });
+    const directKey = f.addDocument('Direct'); const nestedKey = f.addDocument('Nested');
+    f.documents.get(directKey).folderKey = f.folderKey;
+    f.documents.get(nestedKey).folderKey = child;
+    const direct = await runContentTool('document.list', { scopeKey: f.scopeKey, folderKey: f.folderKey }, f.context, { repository: f.repository });
+    const tree = await runContentTool('document.list', { scopeKey: f.scopeKey, folderKey: f.folderKey, includeDescendants: true }, f.context, { repository: f.repository });
+    expect(direct.documents.map((document: any) => document.key)).toEqual([directKey]);
+    expect(tree.documents.map((document: any) => document.key).sort()).toEqual([directKey, nestedKey].sort());
   });
 
   test('projects only plain document content when requested', async () => {
@@ -655,7 +693,7 @@ describe('Content runtime', () => {
     const nestedDocumentKey = [...f.documents.keys()][1]!;
     f.documents.get(nestedDocumentKey).folderKey = childKey;
     const folderReplay = await runContentTool('content.search', { scopeKey: f.scopeKey, folderKey: f.folderKey, query: 'launch roadmap' }, f.context, dependencies);
-    expect(folderReplay.folders).toEqual([{ key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', isFavorite: false, managed: false, score: 0.9 }]);
+    expect(folderReplay.folders).toEqual([{ key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', isFavorite: false, managed: false, createdAt: now, updatedAt: now, score: 0.9 }]);
     expect(folderReplay.cached).toBe(false);
     expect(rows).toHaveLength(3);
     expect(folderReplay.documents.some((document) => document.documentKey === nestedDocumentKey)).toBe(true);
@@ -719,6 +757,101 @@ describe('Content runtime', () => {
     const replay = await runContentTool('content.search', { scopeKey: f.scopeKey, folderKey: f.folderKey, query: 'semantically related', includeSummaries: false }, f.context, dependencies);
     expect(embeddingCalls).toBe(1);
     expect(replay.cached).toBe(true);
+  });
+
+  test('filters lexical and semantic content candidates by creation date and isolates cache reuse', async () => {
+    const f = fixture('viewer');
+    const boundary = '2026-07-22T10:00:00.000Z';
+    f.folders.get(f.folderKey).createdAt = boundary;
+    f.folders.get(f.folderKey).updatedAt = boundary;
+    f.folders.get(f.folderKey).name = 'Boundary launch folder';
+    const oldFolderKey = newId();
+    f.folders.set(oldFolderKey, { key: oldFolderKey, scopeKey: f.scopeKey, name: 'Old launch folder', embedding, createdAt: '2026-07-22T09:59:59.999Z', updatedAt: boundary });
+    const boundaryDocumentKey = f.addDocument('Boundary launch document');
+    f.documents.get(boundaryDocumentKey).createdAt = boundary;
+    const oldDocumentKey = f.addDocument('Old launch document');
+    f.documents.get(oldDocumentKey).createdAt = '2026-07-22T09:59:59.999Z';
+    let documentSemanticInput: any;
+    let folderSemanticInput: any;
+    f.repository.semanticSearch = async (input) => { documentSemanticInput = input; return [...f.documents.values()].map((document) => ({ score: 0.9, document })); };
+    f.repository.semanticSearchFolders = async (input) => { folderSemanticInput = input; return [...f.folders.values()].map((folder) => ({ score: 0.9, folder })); };
+    let cachedOutput: unknown;
+    const searchQueries = {
+      async get() { return cachedOutput ? { output: cachedOutput } : null; },
+      async record(input: any) { cachedOutput = input.output; },
+    };
+    const dependencies: any = {
+      repository: f.repository,
+      queryEmbedding: embedding,
+      searchQueries,
+      userSearches: { async record() { return {} as any; }, async list() { return []; }, async remove(_userKey: string, query: string) { return { normalizedQuery: query, deleted: false }; } },
+    };
+
+    const lexical = await runContentTool('content.search', { scopeKey: f.scopeKey, query: 'launch', includeSummaries: false, createdFrom: boundary, createdTo: boundary, recordHistory: false }, f.context, dependencies);
+    expect(lexical.folders.map((folder) => folder.key)).toEqual([f.folderKey]);
+    expect(lexical.documents.map((document) => document.documentKey)).toEqual([boundaryDocumentKey]);
+    expect(lexical.folders[0]).toMatchObject({ createdAt: boundary, updatedAt: boundary });
+    expect(lexical.documents[0]).toMatchObject({ createdAt: boundary, updatedAt: now });
+
+    const semantic = await runContentTool('content.search', { scopeKey: f.scopeKey, query: 'semantic-only', includeSummaries: false, minimumScore: -1, createdFrom: boundary, createdTo: boundary, recordHistory: false }, f.context, dependencies);
+    expect(documentSemanticInput).toMatchObject({ createdFrom: boundary, createdTo: boundary });
+    expect(folderSemanticInput).toMatchObject({ createdFrom: boundary, createdTo: boundary });
+    expect(semantic.documents.map((document) => document.documentKey)).toEqual([boundaryDocumentKey]);
+    expect(semantic.folders.map((folder) => folder.key)).toEqual([f.folderKey]);
+
+    const differentRange = await runContentTool('content.search', { scopeKey: f.scopeKey, query: 'semantic-only', includeSummaries: false, minimumScore: -1, createdTo: '2026-07-22T09:59:59.999Z', recordHistory: false }, f.context, dependencies);
+    expect(differentRange.cached).toBe(false);
+    expect(differentRange.documents.map((document) => document.documentKey)).toContain(oldDocumentKey);
+    expect(differentRange.folders.map((folder) => folder.key)).toContain(oldFolderKey);
+  });
+
+  test('semantically enriches exact lexical matches when the caller disables the cutoff', async () => {
+    const f = fixture('viewer');
+    const documentKey = f.addDocument('Orange launch plan');
+    f.documents.get(documentKey).name = 'Orange launch plan';
+    let semanticCalls = 0;
+    f.repository.semanticSearch = async () => { semanticCalls += 1; return [{ document: f.documents.get(documentKey), score: 0.91 }]; };
+    const result = await runContentTool('content.search', { scopeKey: f.scopeKey, query: 'orange', includeSummaries: false, minimumScore: -1, limit: 1, recordHistory: false }, f.context, {
+      repository: f.repository,
+      queryEmbedding: embedding,
+      userSearches: { async record() { return {} as any; }, async list() { return []; }, async remove(_userKey: string, query: string) { return { normalizedQuery: query, deleted: false }; } },
+    });
+    expect(semanticCalls).toBe(1);
+    expect(result.documents).toEqual([expect.objectContaining({ documentKey, score: 0.91 })]);
+  });
+
+  test('ranks a whole-token document title mention ahead of a stronger semantic distractor', async () => {
+    const f = fixture('viewer');
+    const namedKey = f.addDocument('The requested research findings.');
+    const distractorKey = f.addDocument('General notes with semantically similar material.');
+    f.documents.get(namedKey).name = 'Research Note';
+    f.documents.get(distractorKey).name = 'Quarterly Analysis';
+    f.repository.semanticSearch = async () => [
+      { document: f.documents.get(distractorKey), score: 0.99 },
+      { document: f.documents.get(namedKey), score: 0.2 },
+    ];
+    const result = await runContentTool('content.search', { scopeKey: f.scopeKey, query: 'What can you tell me about the Research-Note document?', includeSummaries: false, minimumScore: -1, limit: 1, recordHistory: false }, f.context, {
+      repository: f.repository,
+      queryEmbedding: embedding,
+      userSearches: { async record() { return {} as any; }, async list() { return []; }, async remove(_userKey: string, query: string) { return { normalizedQuery: query, deleted: false }; } },
+    });
+    expect(result.documents).toEqual([expect.objectContaining({ documentKey: namedKey, name: 'Research Note' })]);
+  });
+
+  test('does not treat a partial title token as a named-resource match', async () => {
+    const f = fixture('viewer');
+    const partialKey = f.addDocument('Unrelated body.');
+    const semanticKey = f.addDocument('Researcher background and profile.');
+    f.documents.get(partialKey).name = 'Research';
+    f.documents.get(semanticKey).name = 'Profile';
+    f.repository.semanticSearch = async () => [{ document: f.documents.get(semanticKey), score: 0.99 }];
+    const result = await runContentTool('content.search', { scopeKey: f.scopeKey, query: 'Tell me about the researcher profile', includeSummaries: false, minimumScore: -1, limit: 1, recordHistory: false }, f.context, {
+      repository: f.repository,
+      queryEmbedding: embedding,
+      userSearches: { async record() { return {} as any; }, async list() { return []; }, async remove(_userKey: string, query: string) { return { normalizedQuery: query, deleted: false }; } },
+    });
+    expect(result.documents[0]?.documentKey).toBe(semanticKey);
+    expect(result.documents[0]?.documentKey).not.toBe(partialKey);
   });
 
   test('returns search results when cache and history persistence are unavailable', async () => {

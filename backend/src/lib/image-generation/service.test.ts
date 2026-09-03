@@ -17,7 +17,7 @@ const safeAsk = (async () => ({ output: { text: '{"safe":true}', toolCalls: [], 
 const history = { record: async () => ({}), list: async () => [], remove: async () => ({ normalizedPrompt: '', deleted: false }) } as any;
 const claimedLedger = () => ({ claim: async () => ({ status: 'claimed' as const }), start: async () => true, renew: async () => true, complete: async () => {}, fail: async () => {}, release: async () => {} });
 const persistedImage = (key = newId()) => ({ key, scopeKey, filename: 'generated.png', caption: 'Earth', imageCaptionKey: newId(), createdByKey: membershipKey, storageKey: `durable/${key}.png`, mimeType: 'image/png', sizeBytes: 8, width: 1024, height: 1024, embedding: [], origin: 'generated', isFavorite: false, createdAt: '2026-08-19T00:00:00.000Z', updatedAt: '2026-08-19T00:00:00.000Z' }) as any;
-const createImageGenerationService = (dependencies: Parameters<typeof createProductionImageGenerationService>[0] = {}) => createProductionImageGenerationService({ publishGeneratedImages: async () => {}, ...dependencies });
+const createImageGenerationService = (dependencies: Parameters<typeof createProductionImageGenerationService>[0] = {}) => createProductionImageGenerationService({ publishGeneratedImages: async () => {}, publishManagedGeneratedImage: async () => {}, ...dependencies });
 
 describe('image generation service', () => {
   test('uses strict bounded contracts and an exact distinct fallback', () => {
@@ -107,6 +107,21 @@ describe('image generation service', () => {
     const service = createImageGenerationService({ executeAsk: safeAsk, history, gallery: { ...authorizedGallery, getCollectionRole: async () => 'viewer' }, idempotency: { ...claimedLedger(), claim: async () => { claimed += 1; return { status: 'claimed' }; } }, execute: (async () => { provider += 1; return {}; }) as any });
     await expect(service.generate({ collectionKey, prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, context, 'denied')).rejects.toThrow('contribution access');
     expect({ claimed, provider }).toEqual({ claimed: 0, provider: 0 });
+  });
+
+  test('generates exactly one user-mutable image through the exact managed collection path', async () => {
+    const processed: ProcessImageInput[][] = []; const attached: unknown[][] = []; let providerCalls = 0;
+    const service = createImageGenerationService({
+      history, idempotency: claimedLedger(), getImage: async () => null, embedCollection: async () => [], signUrl: async () => 'https://images.example/generated.png',
+      gallery: { ...authorizedGallery, getCollectionRole: async () => { throw new Error('public collection authorization must not run'); }, ensureGeneratedMediaCollection: async () => ({ key: collectionKey }) as never, attachGeneratedMedia: async (...args) => { attached.push(args); return true; } },
+      execute: (async () => { providerCalls += 1; return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' }; }) as any,
+      process: async (inputs) => { processed.push([...inputs]); return [persistedImage()]; },
+    });
+    const result = await service.generateManaged({ prompt: 'Managed image' }, context, 'managed-request');
+    expect(result.images).toHaveLength(1); expect(providerCalls).toBe(1);
+    expect(processed[0]).toHaveLength(1); expect(processed[0]![0]).not.toHaveProperty('mutationPolicy');
+    expect(attached[0]?.slice(0, 2)).toEqual([scopeKey, collectionKey]);
+    expect(typeof attached[0]?.[2]).toBe('string'); expect(attached[0]?.[3]).toBe(membershipKey);
   });
 
   test('invokes the image action directly without a text-model preflight', async () => {
@@ -298,12 +313,42 @@ describe('image generation service', () => {
       scheduleLeaseRenewal: (renew) => { renew(); return () => {}; },
       execute: (async () => { throw new Error('provider failed'); }) as any,
     });
-    await expect(service.generate({ collectionKey, prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, context, 'failure')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_FAILED', retryable: false });
+    await expect(service.generate({ collectionKey, prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, context, 'failure')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_FAILED', retryable: true });
     expect(renewals).toBeGreaterThan(0);
     expect(releases).toBe(0);
     expect(failures).toBe(1);
-    expect(storedFailure).toEqual({ code: 'IMAGE_GENERATION_FAILED', message: 'Image generation request could not be completed.', retryable: false });
+    expect(storedFailure).toEqual({ code: 'IMAGE_GENERATION_FAILED', message: 'Image generation request could not be completed.', retryable: true });
     expect(JSON.stringify(storedFailure)).not.toContain('provider failed');
+  });
+
+  test('reclaims a retryable durable failure and completes without changing the idempotency key', async () => {
+    let state: 'new' | 'failed' | 'completed' = 'new';
+    let storedFailure: { code: string; message: string; retryable: boolean } | undefined;
+    let providerCalls = 0;
+    const ledger = {
+      ...claimedLedger(),
+      claim: async (_identity: unknown, _hash: string, _owner: string, _now: string, retryFailed?: boolean) => {
+        if (state === 'failed' && (!retryFailed || !storedFailure?.retryable)) return { status: 'failed' as const, failure: storedFailure! };
+        return { status: 'claimed' as const };
+      },
+      fail: async (_identity: unknown, _hash: string, _owner: string, failure: typeof storedFailure) => { storedFailure = failure; state = 'failed'; },
+      complete: async () => { state = 'completed'; },
+    };
+    const service = createImageGenerationService({
+      executeAsk: safeAsk, history, gallery: authorizedGallery, idempotency: ledger, getImage: async () => null,
+      execute: (async () => {
+        providerCalls += 1;
+        if (providerCalls === 1) throw new Error('transient provider failure');
+        return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' };
+      }) as any,
+      process: async () => [persistedImage()], publishGeneratedImages: async () => {}, signUrl: async () => 'https://images.example/generated.png',
+    });
+    const input = { collectionKey, prompt: 'Retry Earth', count: 1, size: '1024x1024' as const, quality: 'low' as const };
+    await expect(service.generate(input, context, 'retryable-image')).rejects.toMatchObject({ retryable: true });
+    await expect(service.generate(input, context, 'retryable-image')).resolves.toMatchObject({ images: [{ origin: 'generated' }] });
+    expect(providerCalls).toBe(2);
+    expect(state as string).toBe('completed');
+    expect(storedFailure?.retryable).toBe(true);
   });
 
   test('leaves failed image generation indeterminate when terminal failure cannot be written', async () => {

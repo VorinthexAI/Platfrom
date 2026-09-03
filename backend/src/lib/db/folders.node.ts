@@ -100,13 +100,15 @@ export async function archiveVisibleFolderKeys(scopeKey: string): Promise<Set<st
 }
 
 /** Scope authorization is applied before semantic scoring. */
-export async function semanticSearchFolders(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; minScore: number; limit: number }): Promise<Array<{ score: number; folder: Folder }>> {
+export async function semanticSearchFolders(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; createdFrom?: string; createdTo?: string; minScore: number; limit: number }): Promise<Array<{ score: number; folder: Folder }>> {
   const embedding = currentEmbeddingSchema.parse(input.embedding);
   if (input.authorizedScopeKeys.length === 0 || input.folderKeys?.length === 0) return [];
   const cursor = await db.query(aql`
     FOR folder IN ${db.collection(FOLDERS_COLLECTION)}
       FILTER folder.scopeKey IN ${input.authorizedScopeKeys}
       FILTER ${input.folderKeys === undefined} || folder._key IN ${input.folderKeys ?? []}
+      FILTER ${input.createdFrom ?? null} == null || folder.createdAt >= ${input.createdFrom ?? null}
+      FILTER ${input.createdTo ?? null} == null || folder.createdAt <= ${input.createdTo ?? null}
       FILTER !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
       FILTER (folder.archiveVisibility || "visible") == "visible"
       FILTER IS_ARRAY(folder.embedding) && LENGTH(folder.embedding) == LENGTH(${embedding})

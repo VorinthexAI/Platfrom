@@ -4,16 +4,18 @@ import { join } from "node:path";
 
 const workspace = readFileSync(join(import.meta.dir, "../components/capability/GalleryWorkspace.tsx"), "utf8");
 const highlights = readFileSync(join(import.meta.dir, "../components/capability/GalleryHighlights.tsx"), "utf8");
+const normalize = (source: string) => source.replace(/\s+/g, "").replace(/,([}\]])/g, "$1").replace(/\?\((?=<)/g, "?");
 
 test("opens persistent highlights from the active collection brain menu", () => {
   expect(workspace).toContain('accessibilityLabel={`AI actions for ${activeCollection.name}`}');
   expect(workspace).toContain('setHighlightsOpen(true)');
-  expect(workspace).toContain('>Highlights</BottomSheetItem>');
+  expect(normalize(workspace)).toContain(normalize('>Highlights</BottomSheetItem>'));
   expect(workspace).not.toContain('>Create highlight</BottomSheetItem>');
-  const cleanupStart = workspace.indexOf('{activeSheet === "cleanupMenu" ? <BottomSheetMenu>');
-  const cleanupMenu = workspace.slice(cleanupStart, workspace.indexOf('activeSheet === "imageActions"', cleanupStart));
-  expect(cleanupMenu).toContain('>Highlights</BottomSheetItem>');
-  expect(cleanupMenu.indexOf('>Highlights</BottomSheetItem>')).toBeLessThan(cleanupMenu.indexOf('{isCollectionOwner ?'));
+  const normalizedWorkspace = normalize(workspace);
+  const cleanupStart = normalizedWorkspace.indexOf(normalize('{activeSheet === "cleanupMenu" ? <BottomSheetMenu>'));
+  const cleanupMenu = normalizedWorkspace.slice(cleanupStart, normalizedWorkspace.indexOf(normalize('activeSheet === "imageActions"'), cleanupStart));
+  expect(cleanupMenu).toContain(normalize('>Highlights</BottomSheetItem>'));
+  expect(cleanupMenu.indexOf(normalize('>Highlights</BottomSheetItem>'))).toBeLessThan(cleanupMenu.indexOf(normalize('{isCollectionOwner ?')));
 });
 
 test("uses separate full-height grid and player sheets with footer actions", () => {

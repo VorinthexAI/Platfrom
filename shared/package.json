@@ -16,6 +16,10 @@
       "react-native": "./packages/ui/components/text-input/text-input.mobile.tsx",
       "default": "./packages/ui/components/text-input/text-input.web.tsx"
     },
+    "./ui/avatar": {
+      "react-native": "./packages/ui/components/avatar/avatar.mobile.tsx",
+      "default": "./packages/ui/components/avatar/avatar.web.tsx"
+    },
     "./ui/ai-text-editor": {
       "react-native": "./packages/ui/components/ai-text-editor/ai-text-editor.mobile.tsx",
       "default": "./packages/ui/components/ai-text-editor/ai-text-editor.web.tsx"
@@ -39,6 +43,10 @@
     "./ui/core-composer": {
       "react-native": "./packages/ui/components/core-composer/core-composer.mobile.tsx",
       "default": "./packages/ui/components/core-composer/core-composer.web.tsx"
+    },
+    "./ui/rich-text": {
+      "react-native": "./packages/ui/components/rich-text/rich-text.mobile.tsx",
+      "default": "./packages/ui/components/rich-text/rich-text.web.tsx"
     },
     "./ui/chrome-icon": {
       "react-native": "./packages/ui/components/chrome-icon/chrome-icon.mobile.tsx",
@@ -110,6 +118,7 @@
     "@radix-ui/react-tooltip": "^1.2.11",
     "axios": "^1.18.1",
     "date-fns": "^4.4.0",
+    "marked": "^16.4.1",
     "react-native-svg": "15.15.4",
     "zod": "^4.4.3"
   },

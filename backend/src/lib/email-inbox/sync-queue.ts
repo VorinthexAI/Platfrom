@@ -5,6 +5,7 @@ import { createRedisConnection } from '@/lib/redis';
 import { createConnectorRepository } from './connector-repository';
 import { createSystemEmailService } from './service';
 import { runTrustedTool } from '@/lib/ai/tools';
+import { toolEventService, type ToolEventRecorder } from '@/lib/ai/events/service';
 import type { TrustedEmailToolDependencies, TrustedEmailToolName } from '@/lib/ai/tools/email-ingestion-tool-definitions';
 
 const SYNC_QUEUE_NAME = 'email-incremental-sync';
@@ -209,14 +210,17 @@ export async function processEmailSyncJob(raw: unknown, dependencies: {
   service?: ReturnType<typeof createSystemEmailService>;
   queue?: ChildQueueAccess;
   runTrusted?: (name: TrustedEmailToolName, input: unknown, dependencies: TrustedEmailToolDependencies) => Promise<unknown>;
+  recordEvent?: ToolEventRecorder;
 } = {}): Promise<EmailSyncResult> {
   const job = emailSyncJobSchema.parse(raw);
   const connectors = dependencies.connectors ?? createConnectorRepository();
   const service = dependencies.service ?? createSystemEmailService({ connectors });
   const trusted = dependencies.runTrusted ?? runTrustedTool;
+  const recordEvent = dependencies.recordEvent ?? (Object.keys(dependencies).length === 0 ? toolEventService.record : undefined);
   const trustedDependencies = (organizationKey: string, scopeKey: string): TrustedEmailToolDependencies => ({
     context: { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'system' } },
     email: service,
+    ...(recordEvent ? { recordEvent } : {}),
   });
   if (job.kind === 'notification') {
     const targets = await connectors.listSyncTargetsByEmail(job.emailAddress);

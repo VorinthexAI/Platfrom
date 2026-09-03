@@ -3,6 +3,8 @@ import { AxiosHeaders, create, isAxiosError, type AxiosInstance } from "axios";
 import { extractSessionTokens, normalizeApiPath } from "./auth-helpers";
 import { tokenVault } from "./token-vault";
 import { consumeServerSentEvents, parseServerSentEvent, type ServerSentEvent } from "./sse";
+import { selectedAppKeyHeaders } from "./app-request-headers";
+import { ensureAppsReady } from "@/state/apps";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://vorinthex.com";
 const BACKEND_API_KEY = process.env.EXPO_PUBLIC_BACKEND_API_KEY ?? "";
@@ -20,11 +22,13 @@ export const apiClient: AxiosInstance = create({
 });
 
 apiClient.interceptors.request.use(async (config) => {
+  await ensureAppsReady();
   config.url = normalizeApiPath(config.url ?? "/");
   const { session, generation, invalidated } = await tokenVault.snapshot();
   if (invalidated) unauthorizedListener?.();
   requestSessions.set(config, { generation, authenticated: Boolean(session) });
   const headers = AxiosHeaders.from(config.headers);
+  for (const [name, value] of Object.entries(selectedAppKeyHeaders())) headers.set(name, value);
   if (BACKEND_API_KEY) headers.set("X-Vorinthex-API-Key", BACKEND_API_KEY);
   if (session) {
     if (session.accessExpiresAt > Date.now()) headers.set("Authorization", `Bearer ${session.accessToken}`);
@@ -81,11 +85,13 @@ async function authenticatedEventStream(
   signal?: AbortSignal,
   onOpen?: () => void,
 ) {
+  await ensureAppsReady();
   const { session, generation, invalidated } = await tokenVault.snapshot();
   if (invalidated) unauthorizedListener?.();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "X-Vorinthex-Session-Transport": "header",
+    ...selectedAppKeyHeaders(),
     ...(BACKEND_API_KEY ? { "X-Vorinthex-API-Key": BACKEND_API_KEY } : {}),
     ...(session?.accessExpiresAt && session.accessExpiresAt > Date.now() ? { Authorization: `Bearer ${session.accessToken}` } : {}),
     ...(session?.refreshToken ? { "X-Refresh-Token": session.refreshToken } : {}),

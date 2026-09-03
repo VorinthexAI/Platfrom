@@ -1,15 +1,15 @@
 import type { Context } from 'hono';
 import { z, ZodError } from 'zod';
-import { appSearchInputSchema, createAppSearchService, type AppSearchDependencies, type AppSearchService } from '@/lib/app-search/service';
+import { appSearchInputShape, createAppSearchService, projectAppSearchRetrieval, validateAppSearchInput, type AppSearchDependencies, type AppSearchService } from '@/lib/app-search/service';
 import { authorizeContentExecution, ContentError, type RunAuthenticatedContentToolOptions } from '@/lib/ai/tools';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { getAuthIdentity } from './security';
 import { parseJson } from './validation';
 
-export const appSearchHttpInputSchema = appSearchInputSchema.extend({
+export const appSearchHttpInputSchema = z.object({ ...appSearchInputShape,
   organizationKey: z.string().trim().min(1),
   scopeKey: z.string().cuid(),
-}).strict();
+}).strict().superRefine(validateAppSearchInput);
 
 export interface AppSearchHandlerDependencies {
   getIdentity?: typeof getAuthIdentity;
@@ -34,7 +34,7 @@ export function createAppSearchHandler(dependencies: AppSearchHandlerDependencie
         ...dependencies.searchDependencies,
         signal: c.req.raw.signal,
       });
-      return c.json({ success: true, data: output });
+      return c.json({ success: true, data: { ...output, retrieval: projectAppSearchRetrieval(input, output) } });
     } catch (error) {
       if (error instanceof ContentError) return c.json({ success: false, error: error.toJSON() }, error.code === 'CONTENT_FORBIDDEN' ? 403 : 400);
       if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ success: false, error: 'invalid app search request' }, 400);

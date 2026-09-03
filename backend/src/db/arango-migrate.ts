@@ -24,6 +24,8 @@ import { decodeEmailTone, decodeEmailToneContent, emailMessageSemanticText, emai
 import { bookGenerationInputSchema } from '../lib/books/schemas';
 import { LEGACY_BOOK_CHAPTER_WORD_MAX, LEGACY_BOOK_CHAPTER_WORD_MIN } from '../lib/db/book-chapters.node';
 import { emailArchiveRootFolderKey, emailMediaCollectionKey } from '../lib/email-inbox/export-container-keys';
+import { APP_KEYS, seedApps } from '../lib/apps/registry';
+import { createAppsRepository } from '../lib/db/apps.node';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -34,6 +36,63 @@ export interface CollectionSpec {
   indexes?: Array<{ fields: string[]; unique?: boolean; sparse?: boolean }>;
   embedKeys?: string[];
   skipEmbedding?: boolean;
+}
+
+export const LEGACY_EVENT_APP_KEYS = {
+  archive: APP_KEYS.ARCHIVE,
+  gallery: APP_KEYS.GALLERY,
+  compass: APP_KEYS.COMPASS,
+  signal: APP_KEYS.SIGNAL,
+  ascend: APP_KEYS.ASCEND,
+  core: APP_KEYS.CORE,
+} as const;
+
+export async function migrateEventAppKeys(targetDb: Pick<Database, 'query'>): Promise<void> {
+  await targetDb.query(`
+    FOR event IN events
+      LET mappedAppKey = event.domain == "archive" ? @archiveKey
+        : event.domain == "gallery" ? @galleryKey
+        : event.domain == "compass" ? @compassKey
+        : event.domain == "signal" ? @signalKey
+        : event.domain == "ascend" ? @ascendKey
+        : event.domain == "core" ? @coreKey
+        : null
+      LET appKey = HAS(event, "domain") ? mappedAppKey : event.appKey
+      LET app = IS_STRING(appKey) ? DOCUMENT(apps, appKey) : null
+      FILTER app == null
+        OR !HAS(event, "userId")
+        OR !HAS(event, "scopeId")
+        OR !IS_STRING(event.slug)
+        OR !REGEX_TEST(event.slug, "^[a-z][a-z0-9-]*(\\\\.[a-z][a-z0-9-]*)+$")
+        OR HAS(event, "distinctId")
+        OR HAS(event, "data")
+        OR HAS(event, "embedding")
+      REMOVE event IN events
+  `, Object.fromEntries(Object.entries(LEGACY_EVENT_APP_KEYS).map(([domain, key]) => [`${domain}Key`, key])));
+  await targetDb.query(`
+    FOR event IN events
+      LET mappedAppKey = event.domain == "archive" ? @archiveKey
+        : event.domain == "gallery" ? @galleryKey
+        : event.domain == "compass" ? @compassKey
+        : event.domain == "signal" ? @signalKey
+        : event.domain == "ascend" ? @ascendKey
+        : event.domain == "core" ? @coreKey
+        : null
+      LET appKey = HAS(event, "domain") ? mappedAppKey : event.appKey
+      UPDATE event WITH { appKey, domain: null } IN events OPTIONS { keepNull: false }
+  `, Object.fromEntries(Object.entries(LEGACY_EVENT_APP_KEYS).map(([domain, key]) => [`${domain}Key`, key])));
+}
+
+export async function migrateTicketTypes(targetDb: Pick<Database, 'query'>): Promise<void> {
+  await targetDb.query(`
+    FOR ticket IN tickets
+      FILTER !HAS(ticket, "type") || (ticket.type == "feedback" && (!HAS(ticket, "upvotes") || !HAS(ticket, "downvotes")))
+      UPDATE ticket WITH {
+        type: HAS(ticket, "type") ? ticket.type : "issue",
+        upvotes: ticket.type == "feedback" ? (HAS(ticket, "upvotes") && IS_NUMBER(ticket.upvotes) && ticket.upvotes >= 0 ? ticket.upvotes : 0) : null,
+        downvotes: ticket.type == "feedback" ? (HAS(ticket, "downvotes") && IS_NUMBER(ticket.downvotes) && ticket.downvotes >= 0 ? ticket.downvotes : 0) : null
+      } IN tickets OPTIONS { keepNull: false }
+  `);
 }
 
 export async function migrateImageCaptions(targetDb: Database): Promise<void> {
@@ -186,6 +245,13 @@ export async function migrateContainerPresentations(targetDb: Database): Promise
       FILTER presentation != null && collection.presentation != presentation
       UPDATE collection WITH { presentation } IN collections
   `, { communicationCollectionKeys });
+}
+
+/** Restores normal ownership semantics without overwriting a user-renamed Core collection. */
+export async function migrateManagedGeneratedMedia(targetDb: Database): Promise<void> {
+  await targetDb.query('FOR collection IN collections FILTER collection.purpose == "generated-media" && collection.name == "Generated media" UPDATE collection WITH { name: "Core" } IN collections');
+  await targetDb.query('FOR collection IN collections FILTER collection.purpose == "generated-media" && collection.mutationPolicy != "user" UPDATE collection WITH { mutationPolicy: "user" } IN collections');
+  await targetDb.query('FOR imageKey IN UNIQUE(FOR relation IN collectionImages LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null && collection.purpose == "generated-media" RETURN relation.imageKey) LET image = DOCUMENT(images, imageKey) FILTER image != null && image.origin == "generated" && image.mutationPolicy == "system-only" UPDATE image WITH { mutationPolicy: "user" } IN images');
 }
 
 export async function retireUserSettings(targetDb: Database): Promise<void> {
@@ -1511,6 +1577,7 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
        'organizationConnectors', 'channels', 'threads', 'messages', 'messageMentions',
       'messageReactions', 'polls', 'pollOptions', 'pollVotes',
     ]) await removeBy(name, 'scopeKey', scopeKeys);
+    await removeBy('events', 'scopeId', scopeKeys);
     if (await exists('scopeScopes')) {
       await transaction.query('FOR relation IN scopeScopes FILTER relation.parentKey IN @keys || relation.childKey IN @keys REMOVE relation IN scopeScopes', { keys: scopeKeys });
     }
@@ -1623,6 +1690,7 @@ async function removeDocumentDependents(
 }
 
 export const collections: CollectionSpec[] = [
+  { name: 'apps', skipEmbedding: true, indexes: [{ fields: ['slug'], unique: true }] },
   {
     name: 'users',
     embedKeys: ['email', 'name'],
@@ -1632,6 +1700,7 @@ export const collections: CollectionSpec[] = [
       { fields: ['emailHash'], unique: true },
       { fields: ['alias_slug'], unique: true, sparse: true },
       { fields: ['refreshTokenHash'], unique: true, sparse: true },
+      { fields: ['profileStorageKey'], unique: true, sparse: true },
     ],
   },
   // Private per-user visibility overlay. Never expose through the generic node registry.
@@ -1651,8 +1720,9 @@ export const collections: CollectionSpec[] = [
     skipEmbedding: true,
     indexes: [
       { fields: ['slug', 'createdAt'] },
-      { fields: ['distinctId', 'createdAt'] },
+      { fields: ['appKey', 'createdAt'] },
       { fields: ['userId', 'createdAt'], sparse: true },
+      { fields: ['scopeId', 'createdAt'], sparse: true },
     ],
   },
   {
@@ -1799,6 +1869,10 @@ export const collections: CollectionSpec[] = [
   // Private Core conversations. Assistant embeddings are written only after completed turns.
   { name: 'conversations', skipEmbedding: true, indexes: [{ fields: ['organizationKey', 'scopeKey', 'userKey', 'isFavorite', 'updatedAt'] }, { fields: ['organizationKey', 'scopeKey', 'userKey', 'updatedAt'] }] },
   { name: 'conversationMessages', skipEmbedding: true, indexes: [{ fields: ['conversationKey', 'userKey', 'turnKey', 'role'], unique: true }, { fields: ['organizationKey', 'scopeKey', 'userKey', 'conversationKey', 'createdAt'] }, { fields: ['conversationKey', 'role', 'status'] }] },
+  // Private support requests. Access is only through the canonical ticket service.
+  { name: 'tickets', embedKeys: ['message'], indexes: [{ fields: ['organizationKey', 'scopeKey', 'type', 'createdAt'] }, { fields: ['organizationKey', 'scopeKey', 'userKey', 'createdAt'] }, { fields: ['organizationKey', 'userKey', 'idempotencyKey'], unique: true }] },
+  // Private per-user feedback votes. Counts on tickets are derived from this collection.
+  { name: 'ticketVotes', skipEmbedding: true, indexes: [{ fields: ['ticketKey', 'userKey'], unique: true }, { fields: ['scopeKey', 'ticketKey'] }, { fields: ['userKey'] }] },
   // Private generation prompt history. Generated media and storage references never belong here.
   { name: 'userGenerations', skipEmbedding: true, indexes: [{ fields: ['userKey', 'type', 'normalizedPrompt'], unique: true }, { fields: ['userKey', 'type', 'generatedAt'] }] },
   // Private durable outbox for object deletion after metadata commits.
@@ -2023,6 +2097,10 @@ async function main() {
       await collection.create();
       console.log(`Created collection ${spec.name}`);
     }
+    if (spec.name === 'apps') {
+      await collection.ensureIndex({ type: 'persistent', fields: ['slug'], unique: true, sparse: false });
+      await seedApps(createAppsRepository(targetDb));
+    }
     if (spec.name === 'processedWebhookEvents') {
       await targetDb.query(`
         FOR event IN processedWebhookEvents
@@ -2030,6 +2108,7 @@ async function main() {
           REMOVE event IN processedWebhookEvents
       `);
     }
+    if (spec.name === 'tickets') await migrateTicketTypes(targetDb);
     if (spec.name === 'folders' || spec.name === 'images' || spec.name === 'collections' || spec.name === 'documents') {
       await migrateContentFavorites(targetDb, spec.name);
     }
@@ -2051,6 +2130,7 @@ async function main() {
       }
     }
     if (spec.name === 'conversationMessages') {
+      await targetDb.query('FOR message IN conversationMessages FILTER !HAS(message, "type") UPDATE message WITH { type: "TEXT" } IN conversationMessages');
       await targetDb.query('FOR message IN conversationMessages FILTER !IS_STRING(message.requestHash) || !REGEX_TEST(message.requestHash, "^[a-f0-9]{64}$") LET userMessage = message.role == "USER" ? message : FIRST(FOR candidate IN conversationMessages FILTER candidate.conversationKey == message.conversationKey && candidate.turnKey == message.turnKey && candidate.role == "USER" LIMIT 1 RETURN candidate) LET payload = userMessage == null ? message.content : userMessage.content UPDATE message WITH { requestHash: SHA256(CONCAT_SEPARATOR("\\u0000", message.conversationKey, payload)) } IN conversationMessages');
     }
     if (spec.name === 'contentSearchQueries') {
@@ -2135,6 +2215,9 @@ async function main() {
     if (spec.name === 'shares') {
       await migrateContentShares(targetDb);
     }
+    if (spec.name === 'events') {
+      await migrateEventAppKeys(targetDb);
+    }
     const existingIndexes = await collection.indexes();
     for (const index of existingIndexes) {
       const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
@@ -2183,6 +2266,7 @@ async function main() {
   await migrateRetiredEmailDefaultTones(targetDb);
   await migrateDurableBookGeneration(targetDb);
   await migrateGeneratedTravelDocuments(targetDb);
+  await migrateManagedGeneratedMedia(targetDb);
 
   await targetDb.query(`
     FOR audio IN documentAudioVersions

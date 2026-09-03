@@ -30,6 +30,17 @@ describe('MediaLibrary image processing', () => {
     ]);
     expect(uploads.every(({ mimeType, bytes }) => mimeType === 'image/png' && bytes.subarray(0, 8).every((byte, index) => byte === [137, 80, 78, 71, 13, 10, 26, 10][index]))).toBe(true);
   });
+  test('keeps generated images when optional visual captioning returns invalid output', async () => {
+    let storedCaption = '';
+    const result = await processImages([{ ...input(), origin: 'generated', fallbackCaption: 'A generated blue rectangle.' }], {
+      storage: { async upload({ key }) { return { storageKey: key }; }, async delete() {} },
+      hashBatch: async () => ['0123456789abcdef'], findCaption: async () => null,
+      captionBatch: async () => { throw new Error('invalid structured caption'); },
+      embed: async (text) => { storedCaption = text; return Array(EMBEDDING_DIMENSIONS).fill(0.1); }, getImage: async () => null, persistImage: async ({ image }) => image,
+    });
+    expect(result[0]?.caption).toBe('A generated blue rectangle.');
+    expect(storedCaption).toContain('A generated blue rectangle.');
+  });
 
   test('replays historical JPEG persistence without migrating its object', async () => {
     const source = alternateFormats[0]!.bytes;

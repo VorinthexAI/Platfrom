@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { executeAction, executeAsk, type ExecuteActionOptions } from '@/lib/ai/router';
+import { executeAction, executeAsk, ProviderExecutionError, type ExecuteActionOptions } from '@/lib/ai/router';
 import { imageGenerateInputSchema, imageOutputSchema, MAX_IMAGE_GENERATION_REFERENCES, type ChatOutput, type ImageOutput, type ProviderExecuteResponse } from '@/lib/ai/providers';
 import { processImages, type ImageProcessingDependencies, type ProcessImageInput } from '@/lib/ai/image-processing';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
@@ -11,6 +11,7 @@ import { claimContentIdempotency, completeContentIdempotency, failContentIdempot
 import { newId } from '@/lib/ids';
 import { storedImageDataUrl } from '@/lib/gallery/image-reference';
 import { getDefaultUserGenerationService, type UserGenerationService } from '@/lib/user-generations/service';
+import { embedText } from '@/lib/embeddings';
 
 const prompt = z.string().trim().min(1).max(8_000);
 const style = z.string().trim().min(1).max(120);
@@ -47,6 +48,7 @@ export const imageGenerateModelInputSchema = imageGenerateActionInputSchema.exte
   referenceImageKeys: z.array(z.string().cuid()).max(MAX_IMAGE_GENERATION_REFERENCES).refine((keys) => new Set(keys).size === keys.length, 'Reference image keys must be distinct.').default([]),
   collectionKey: z.string().cuid(),
 }).strict();
+export const managedImageGenerateInputSchema = imageGenerateModelInputSchema.omit({ collectionKey: true, count: true }).strict();
 
 export const imageGenerationHistoryListInputSchema = z.object({ limit: z.number().int().min(1).max(50).default(20) }).strict();
 export const imageGenerationHistoryDeleteInputSchema = z.object({ prompt }).strict();
@@ -89,6 +91,13 @@ export class ImageGenerationReferenceError extends Error {
 
 class GeneratedImageAttachmentError extends Error {}
 
+function isRetryableImageGenerationFailure(error: unknown) {
+  if (error instanceof ImageGenerationAccessError || error instanceof ImageGenerationReferenceError || error instanceof z.ZodError) return false;
+  if (error instanceof ImageGenerationIdempotencyError) return error.retryable;
+  if (error instanceof ProviderExecutionError) return error.attempts.every(({ code }) => code !== 'invalid_input' && code !== 'unsupported_action');
+  return true;
+}
+
 const durableGeneratedImageSchema = savedGeneratedImageSchema.omit({ url: true, sizeBytes: true, origin: true, createdByKey: true }).extend({ storageKey: z.string().min(1), sizeBytes: z.number().int().positive().optional(), origin: z.literal('generated').optional(), createdByKey: z.string().cuid().optional() }).strict();
 const durableGenerateReplaySchema = z.object({
   images: z.array(durableGeneratedImageSchema).min(1).max(3),
@@ -107,12 +116,14 @@ export interface ImageGenerationServiceDependencies extends ExecuteActionOptions
   processing?: ImageProcessingDependencies;
   signUrl?: (storageKey: string) => Promise<string>;
   now?: () => number;
-  gallery?: Pick<GalleryRepository, 'getCollectionRole' | 'canAccessImage' | 'getImage' | 'attachGeneratedImages'>;
+  gallery?: Pick<GalleryRepository, 'getCollectionRole' | 'canAccessImage' | 'getImage' | 'attachGeneratedImages'> & Partial<Pick<GalleryRepository, 'ensureGeneratedMediaCollection' | 'attachGeneratedMedia'>>;
+  embedCollection?: typeof embedText;
   getImage?: typeof getImageById;
   resolveReference?: (storageKey: string, mimeType: string) => Promise<string>;
   maxReferenceDataUrlBytes?: number;
   history?: UserGenerationService;
   publishGeneratedImages?: (collectionKey: string) => Promise<void>;
+  publishManagedGeneratedImage?: (collectionKey: string, userKey: string) => Promise<void>;
   idempotency?: {
     claim(identity: ContentIdempotencyIdentity, requestHash: string, leaseOwner: string, now: string, retryFailed?: boolean): Promise<ContentIdempotencyClaim>;
     start(identity: ContentIdempotencyIdentity, requestHash: string, leaseOwner: string, now: string): Promise<boolean>;
@@ -185,6 +196,14 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
     const { mutationEventTargets, publishGalleryEvents } = await import('@/lib/gallery/mutation-events');
     await publishGalleryEvents(mutationEventTargets('uploadCompleted', { collections: [collectionKey] }));
   });
+  const publishManagedGeneratedImage = dependencies.publishManagedGeneratedImage ?? (async (collectionKey: string, userKey: string) => {
+    const { mutationEventTargets, publishGalleryEvents } = await import('@/lib/gallery/mutation-events');
+    await publishGalleryEvents([
+      ...mutationEventTargets('uploadCompleted', { collections: [collectionKey] }),
+      { route: 'user', key: userKey, event: 'collection.index.changed' },
+      { route: 'user', key: userKey, event: 'image.changed' },
+    ]);
+  });
 
   async function projectReplay(replay: unknown): Promise<ImageGenerateOutput> {
     const durable = durableGenerateReplaySchema.parse(replay);
@@ -232,12 +251,14 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
     return imageIdeasOutputSchema.parse({ concepts: await createRawIdeas(rawInput, context.organizationKey) });
   }
 
-  async function generate(rawInput: unknown, context: ToolContext, requestKey: string | undefined): Promise<ImageGenerateOutput> {
+  async function generateIntoCollection(rawInput: unknown, context: ToolContext, requestKey: string | undefined, managed = false): Promise<ImageGenerateOutput> {
     const input = imageGenerateModelInputSchema.parse(rawInput);
     const { actorKey: ownerKey, userKey } = memberContext(context);
     const idempotencyKey = z.string().trim().min(1).max(256).parse(requestKey);
-    const role = await gallery.getCollectionRole(context.runtimeScopeKey, input.collectionKey, ownerKey);
-    if (role !== 'owner' && role !== 'collaborator') throw new ImageGenerationAccessError('Image generation requires active contribution access to the Gallery collection.');
+    if (!managed) {
+      const role = await gallery.getCollectionRole(context.runtimeScopeKey, input.collectionKey, ownerKey);
+      if (role !== 'owner' && role !== 'collaborator') throw new ImageGenerationAccessError('Image generation requires active contribution access to the Gallery collection.');
+    }
     const references = await Promise.all(input.referenceImageKeys.map(async (imageKey) => {
       const image = await gallery.getImage(imageKey);
       if (!image || image.scopeKey !== context.runtimeScopeKey || !await gallery.canAccessImage(context.runtimeScopeKey, imageKey, ownerKey)) throw new ImageGenerationAccessError('A reference image is unavailable.');
@@ -246,7 +267,7 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
     const maximumReferenceBytes = dependencies.maxReferenceDataUrlBytes ?? MAX_IMAGE_GENERATION_REFERENCE_DATA_URL_BYTES;
     const projectedReferenceBytes = references.reduce((total, image) => total + Buffer.byteLength(`data:${image.mimeType};base64,`) + 4 * Math.ceil(image.sizeBytes / 3), 0);
     if (projectedReferenceBytes > maximumReferenceBytes) throw new ImageGenerationReferenceError(`Reference images must total at most ${maximumReferenceBytes} data-URL bytes.`);
-    const identity = { organizationKey: context.organizationKey, actorKey: ownerKey, tool: 'image.generate', idempotencyKey };
+    const identity = { organizationKey: context.organizationKey, actorKey: ownerKey, tool: managed ? 'conversation.image' : 'image.generate', idempotencyKey };
     const flightKey = `${context.organizationKey}\0${ownerKey}\0${context.runtimeScopeKey}\0${idempotencyKey}`;
     const requestHash = createHash('sha256').update(JSON.stringify({ scopeKey: context.runtimeScopeKey, input })).digest('hex');
     const existing = inFlight.get(flightKey);
@@ -310,8 +331,9 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
             scopeKey: context.runtimeScopeKey,
             ownerKey,
             origin: 'generated',
+            fallbackCaption: input.prompt,
             imageKey: generatedImageKey(context.runtimeScopeKey, ownerKey, idempotencyKey, index),
-            idempotencyKey: generatedImageIdempotencyKey(ownerKey, idempotencyKey, index),
+             idempotencyKey: generatedImageIdempotencyKey(ownerKey, idempotencyKey, index),
             file: { filename: `generated-${index + 1}.${extension}`, mimeType: image.mimeType, sizeBytes: bytes.byteLength, bytes },
             signal,
           };
@@ -321,7 +343,10 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
         if (saved.length !== input.count) throw new Error(`Image persistence returned ${saved.length} images; expected ${input.count}.`);
         if (saved.some((image) => !image)) throw new Error('Image persistence did not return every requested image.');
         try {
-          if (!await gallery.attachGeneratedImages(context.runtimeScopeKey, input.collectionKey, saved.map((image) => image!.key), ownerKey, new Date(now()).toISOString())) throw new GeneratedImageAttachmentError('Image generation collection access changed.');
+          const attached = managed
+            ? saved.length === 1 && Boolean(gallery.attachGeneratedMedia) && await gallery.attachGeneratedMedia!(context.runtimeScopeKey, input.collectionKey, saved[0]!.key, ownerKey, new Date(now()).toISOString())
+            : await gallery.attachGeneratedImages(context.runtimeScopeKey, input.collectionKey, saved.map((image) => image!.key), ownerKey, new Date(now()).toISOString());
+          if (!attached) throw new GeneratedImageAttachmentError('Image generation collection access changed.');
         } catch (error) {
           if (error instanceof GeneratedImageAttachmentError) throw error;
           throw new GeneratedImageAttachmentError('Generated images could not be attached to the collection.', { cause: error });
@@ -336,13 +361,14 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
         executionSucceeded = true;
         await (dependencies.history ?? getDefaultUserGenerationService()).record(userKey, 'image', input.prompt).catch((error) => console.error('image generation history record failed', { error }));
         await idempotency.complete(identity, requestHash, leaseOwner, durable, new Date(now()).toISOString());
-        await publishGeneratedImages(input.collectionKey).catch((error) => console.error('generated image publication failed', { error }));
+         await (managed ? publishManagedGeneratedImage(input.collectionKey, userKey) : publishGeneratedImages(input.collectionKey)).catch((error) => console.error('generated image publication failed', { error }));
         return projectReplay(durable);
       } catch (error) {
         if (!executionSucceeded) {
           const failure = error instanceof GeneratedImageAttachmentError
             ? { code: 'IMAGE_ATTACHMENT_FAILED', message: 'Generated images could not be attached to the collection.', retryable: true }
-            : { code: 'IMAGE_GENERATION_FAILED', message: 'Image generation request could not be completed.', retryable: false };
+            : { code: 'IMAGE_GENERATION_FAILED', message: 'Image generation request could not be completed.', retryable: isRetryableImageGenerationFailure(error) };
+          console.error('image generation execution failed', { tool: identity.tool, idempotencyKey: identity.idempotencyKey, retryable: failure.retryable, error });
           const terminalized = await idempotency.fail(identity, requestHash, leaseOwner, failure, new Date(now()).toISOString()).then(() => true, () => false);
           if (terminalized) throw new ImageGenerationIdempotencyError('IMAGE_IDEMPOTENCY_FAILED', failure.message, failure.retryable);
         }
@@ -357,6 +383,20 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
     try { return await promise; } finally { if (inFlight.get(flightKey) === flight) inFlight.delete(flightKey); }
   }
 
+  async function generate(rawInput: unknown, context: ToolContext, requestKey: string | undefined) {
+    return generateIntoCollection(rawInput, context, requestKey, false);
+  }
+
+  async function generateManaged(rawInput: unknown, context: ToolContext, requestKey: string | undefined) {
+    const input = managedImageGenerateInputSchema.parse(rawInput);
+    const { actorKey } = memberContext(context);
+    const at = new Date(now()).toISOString();
+    const embedding = await (dependencies.embedCollection ?? embedText)({ text: 'Core', purpose: 'document', signal: dependencies.signal, timeoutMs: dependencies.timeoutMs });
+    const collection = await gallery.ensureGeneratedMediaCollection?.(context.runtimeScopeKey, actorKey, embedding, at);
+    if (!collection) throw new ImageGenerationAccessError('Core collection access denied.');
+    return generateIntoCollection({ ...input, collectionKey: collection.key, count: 1 }, context, requestKey, true);
+  }
+
   async function listHistory(rawInput: unknown, context: ToolContext) {
     const input = imageGenerationHistoryListInputSchema.parse(rawInput);
     const { userKey } = memberContext(context);
@@ -369,7 +409,7 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
     return (dependencies.history ?? getDefaultUserGenerationService()).remove(userKey, 'image', input.prompt);
   }
 
-  return { createIdeas, createRawIdeas, generate, generateRaw, listHistory, deleteHistory };
+  return { createIdeas, createRawIdeas, generate, generateManaged, generateRaw, listHistory, deleteHistory };
 }
 
 export type ImageGenerationService = ReturnType<typeof createImageGenerationService>;

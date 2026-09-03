@@ -13,9 +13,12 @@ import type { EmailActor } from '@/lib/email-inbox/service';
 import { newId } from '@/lib/ids';
 import { userHiddenOperations } from '@/lib/user-hiddens/operations';
 import type { AssistantCapability, AssistantCapabilityContext } from './capabilities';
-import { appSearchInputSchema, createAppSearchService } from '@/lib/app-search/service';
+import { ASSISTANT_RAW_RESULT } from './capability-result';
+import { APP_SEARCH_COLLECTION_ADAPTERS, appSearchInputSchema, createAppSearchService, projectAppSearchModelResult } from '@/lib/app-search/service';
 import { appTextEnhanceInputSchema, appTextTranslateInputSchema, createAppTransformationService } from '@/lib/app-transformation/service';
 import { appSpeechInputSchema, createAppSpeechService } from '@/lib/app-speech/service';
+import { accountProfileService, profileNameUpdateInputSchema, safeProfileUpdateResultSchema } from '@/lib/account-profile/service';
+import { feedbackListInputSchema, feedbackVoteInputSchema, getDefaultTicketService, ticketSubmitInputSchema } from '@/lib/tickets/service';
 
 const key = z.string().cuid();
 const name = z.string().trim().min(1).max(255);
@@ -106,7 +109,7 @@ export const appSearchCapability: AssistantCapability<typeof appSearchInputSchem
   inputSchema: appSearchInputSchema,
   definition: {
     name: 'app.search',
-    description: 'Standard semantic search for any user resource: folders, documents, files, image collections, images, audio books (collection slug "books"), inboxes, email tones, email messages, email drafts, saved places, trips, and countries. Choose collectionSlugs for the resource kinds implied by the request; include multiple slugs in one search when the request spans kinds. Infer limit from the requested number of results, using the default when the user gives no count.',
+    description: `The single workspace resource query capability. Resolve resource meaning across any language, code-switching, ordinary misspellings, inflection, synonyms, paraphrases, and unambiguous recent references, then map it to the narrowest canonical collectionSlugs without requiring a product-area name or platform vocabulary. Normalize obvious mistakes in intent and resource-type words, but preserve possible resource names, proper names, and title words in the user's language. Infer the operation from the intended outcome rather than trigger words: use search for semantic discovery, list for query-free inventories and questions about user-visible resource properties, count for exact filtered totals, get for an exact known key, and summarize for a non-persisting Archive document summary. Search only resource kinds supported by the user's meaning; combine collectionSlugs only for genuine cross-resource requests, never merely because collections are related. If materially different resource interpretations remain, ask a concise clarification instead of guessing. For search, reduce conversational wording to the distinguishing resource name or subject while preserving possible title words. Set limit to the requested quantity: grammatical singular or one/single in the user's language means 1, an explicit number means that number up to 50, and an unspecified plural uses the default. Use limit 50 when a user-visible property question asks about every matching resource. For email-message and email-draft list/count, first resolve the inbox and pass its authorized connectorKey filter. Convert time ranges to filters.createdFrom/createdTo for every registered timestamped collection; countries have no creation lifecycle and do not accept date filters. Use status and isFavorite filters only where registered; never guess enum values or field names. Registered collection adapters: ${(Object.entries(APP_SEARCH_COLLECTION_ADAPTERS) as Array<[string, { operations: readonly string[]; filters: readonly string[]; fields: readonly string[]; statuses?: readonly string[] }]>).map(([slug, adapter]) => `${slug} [operations: ${adapter.operations.join(', ')}; filters: ${adapter.filters.join(', ') || 'none'}; fields: ${adapter.fields.join(', ')}${adapter.statuses ? `; status values: ${adapter.statuses.join(', ')}` : ''}]`).join('; ')}.`,
     inputSchema: contentZodToJsonSchema(appSearchInputSchema),
   },
   async execute(rawInput, context) {
@@ -121,10 +124,10 @@ export const appSearchCapability: AssistantCapability<typeof appSearchInputSchem
       countries: context.countries,
       books: context.books,
     });
-    const sources = output.groups.flatMap((group) => group.collectionSlug === 'documents' || group.collectionSlug === 'files'
+    const sources = 'query' in output ? output.groups.flatMap((group) => group.collectionSlug === 'documents' || group.collectionSlug === 'files'
       ? group.results.map(({ key: documentKey, name }) => ({ documentKey, name }))
-      : []);
-    return { kind: 'continue', result: output, sources };
+      : []) : [];
+    return { kind: 'continue', result: projectAppSearchModelResult(output), [ASSISTANT_RAW_RESULT]: output, sources };
   },
 };
 
@@ -158,6 +161,30 @@ export const hiddenListCapability = capability('content.hidden.list', 'List cont
   const rows = await userHiddenOperations.list({}, hiddenContext(context));
   return { items: rows.map(({ key, source, sourceKey, createdAt }) => ({ key, source, sourceKey, createdAt })) };
 });
+
+export const platformCapabilities = [
+  capability('profile.update', 'Change the authenticated user\'s profile name.', profileNameUpdateInputSchema, async (input, context) => {
+    const { userKey } = identity(context);
+    const { profile } = await (context.accountProfile ?? accountProfileService).updateName(input, userKey);
+    return safeProfileUpdateResultSchema.parse({ profile: { name: profile.name } });
+  }),
+  capability('ticket.create', 'Submit an issue ticket for the authenticated user in the current organization and scope.', ticketSubmitInputSchema, async (input, context) => {
+    identity(context);
+    return (context.tickets ?? getDefaultTicketService()).submit(input, context.domain, context.requestKey ?? newId());
+  }),
+  capability('feedback.create', 'Submit product feedback for the authenticated user in the current organization and scope.', ticketSubmitInputSchema, async (input, context) => {
+    identity(context);
+    return (context.tickets ?? getDefaultTicketService()).createFeedback(input, context.domain, context.requestKey ?? newId());
+  }),
+  capability('feedback.list', 'List recent product feedback and the authenticated user\'s vote in the current organization and scope.', feedbackListInputSchema, async (input, context) => {
+    identity(context);
+    return (context.tickets ?? getDefaultTicketService()).listFeedback(input, context.domain);
+  }),
+  capability('feedback.vote', 'Set, change, or clear the authenticated user\'s vote on product feedback in the current organization and scope.', feedbackVoteInputSchema, async (input, context) => {
+    identity(context);
+    return (context.tickets ?? getDefaultTicketService()).setFeedbackVote(input, context.domain, context.requestKey ?? newId());
+  }),
+] as const;
 
 export const archiveCapabilities = [
   hiddenCapability('folder', 'hide'),

@@ -21,6 +21,26 @@ describe('Gallery repository transactions', () => {
     expect((binds.relations as unknown[])).toHaveLength(2);
   });
 
+  test('idempotently creates and attaches only through the exact generated-media policy', async () => {
+    const scopeKey = newId(), actorKey = newId(), imageKey = newId(), now = '2026-09-03T00:00:00.000Z';
+    const parentScopeKey = newId();
+    const embedding = Array(EMBEDDING_DIMENSIONS).fill(0); const queries: string[] = []; const transactions: unknown[] = [];
+    const database: MediaLibraryDatabase = { async query(value, variables) { queries.push(value); const collection = (variables as any)?.collection; return { async all() { return value.includes('RETURN { elevated:') ? [{ elevated: false, memberScopes: [parentScopeKey], relations: [{ parentKey: parentScopeKey, childKey: scopeKey }] }] : value.includes('UPSERT { scopeKey: @scopeKey, purpose: "generated-media" }') ? [{ ...collection, _key: collection._key }] : [true]; } }; } };
+    const repository = createGalleryRepository(database, async (names, operation) => { transactions.push(names); return operation(database); });
+    const collection = await repository.ensureGeneratedMediaCollection(scopeKey, actorKey, embedding, now);
+    expect(collection).toMatchObject({ scopeKey, purpose: 'generated-media', mutationPolicy: 'user', name: 'Core' });
+    await expect(repository.attachGeneratedMedia(scopeKey, collection!.key, imageKey, actorKey, now)).resolves.toBe(true);
+    expect(queries.filter((query) => query.includes('RETURN { elevated:'))).toHaveLength(2);
+    expect(queries.find((query) => query.includes('purpose: "generated-media" }'))).toContain('UPSERT { scopeKey: @scopeKey, purpose: "generated-media" }');
+    const attachment = queries.find((query) => query.includes('collection.purpose == "generated-media"'))!;
+    expect(attachment).toContain('collection.purpose == "generated-media" && collection.mutationPolicy == "user"');
+    expect(attachment).toContain('image.origin == "generated" && image.mutationPolicy == "user"');
+    expect(queries.find((query) => query.includes('purpose: "generated-media" }'))).not.toContain('UPDATE { name: "Core"');
+    expect(queries.find((query) => query.includes('purpose: "generated-media" }'))).toContain('INSERT @member UPDATE { role: "owner" }');
+    expect(transactions).toContainEqual({ read: ['userOrganizations', 'scopes', 'scopeMembers', 'scopeScopes'], write: ['collections', 'collectionMembers'] });
+    expect(transactions).toContainEqual({ read: ['images', 'collections', 'scopes', 'scopeMembers', 'scopeScopes', 'userOrganizations'], write: ['collectionImages'] });
+  });
+
   test('enforces managed media policy below operations for elevated actors and registry paths', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     expect(source).toContain('image.mutationPolicy != "system-only"');
@@ -99,6 +119,7 @@ describe('Gallery repository transactions', () => {
     for (const query of queries) {
       expect(query).toContain('"owner" IN roles');
       expect(query).toContain('image.createdByKey == @actorKey');
+      expect(query).toContain('image.origin == "generated"');
       expect(query).toContain('"collaborator" IN roles');
       expect(query).toContain('UPDATE image');
     }
@@ -163,7 +184,7 @@ describe('Gallery repository transactions', () => {
     expect(queries[0]).toContain('SORT relation.createdAt ASC, relation._key ASC');
     expect(queries[1]).toContain('LENGTH(accessibleCollections) > 0');
     expect(queries[1]).toContain('image.createdByKey == @actorKey && relationCount == 0');
-    expect(queries[0]).toContain('collection.purpose == "email-media"');
+    expect(queries[0]).toContain('collection.purpose IN ["email-media", "generated-media"]');
     expect(queries[0]).toContain('collection.mutationPolicy == "system-only" && scoped');
     expect(queries[0]).toContain('collection.mutationPolicy == "system-only" ? null');
     expect(queries[1]).toContain('collection.mutationPolicy == "system-only" ? null');
@@ -173,7 +194,7 @@ describe('Gallery repository transactions', () => {
     const queries: string[] = [];
     const database: MediaLibraryDatabase = { async query(query) { queries.push(query); return { async all() { return []; } }; } };
     await createGalleryRepository(database).getCollectionRole(newId(), newId(), newId());
-    expect(queries[0]).toContain('LET managedViewer = collection.purpose == "email-media"');
+    expect(queries[0]).toContain('LET managedViewer = collection.purpose IN ["email-media", "generated-media"]');
     expect(queries[0]).toContain('collection.mutationPolicy == "system-only" ? null');
     expect(queries[0]).toContain('managedViewer ? "viewer"');
   });
@@ -200,7 +221,22 @@ describe('Gallery repository transactions', () => {
     expect(query).toContain('scopeRole IN ["owner", "admin", "moderator"]');
     expect(query).toContain('COSINE_SIMILARITY(collection.embedding, @embedding)');
     expect(query).toContain('explicitOwnerCount == 0');
-    expect(binds).toEqual({ scopeKey, actorKey, embedding, minimumScore: 0.55, limit: 10 });
+    expect(binds).toEqual({ scopeKey, actorKey, embedding, minimumScore: 0.55, createdFrom: null, createdTo: null, limit: 10 });
+  });
+
+  test('filters collection creation dates inclusively before semantic ranking and limit', async () => {
+    const scopeKey = newId(), actorKey = newId(), embedding = Array(EMBEDDING_DIMENSIONS).fill(0.1);
+    const createdFrom = '2026-08-01T00:00:00.000Z', createdTo = '2026-08-31T23:59:59.999Z';
+    let query = '', binds: Record<string, unknown> = {};
+    const database: MediaLibraryDatabase = { async query(value, variables) { query = value; binds = variables ?? {}; return { async all() { return []; } }; } };
+    await createGalleryRepository(database).searchAccessibleCollections({ scopeKey, actorKey, embedding, minimumScore: 0.55, createdFrom, createdTo, limit: 3 });
+    const fromFilter = 'FILTER @createdFrom == null || collection.createdAt >= @createdFrom';
+    const toFilter = 'FILTER @createdTo == null || collection.createdAt <= @createdTo';
+    expect(query).toContain(fromFilter);
+    expect(query).toContain(toFilter);
+    expect(query.indexOf(fromFilter)).toBeLessThan(query.indexOf('COSINE_SIMILARITY'));
+    expect(query.indexOf(toFilter)).toBeLessThan(query.indexOf('LIMIT @limit'));
+    expect(binds).toMatchObject({ createdFrom, createdTo, limit: 3 });
   });
 
   test('includes active scope moderators in manager-only subject event audiences', async () => {
@@ -263,6 +299,30 @@ describe('Gallery repository transactions', () => {
     expect(JSON.parse(Buffer.from(first.images.nextCursor!, 'base64url').toString('utf8'))).toMatchObject({ version: 3, origin: 'generated', maxCaptionScore: null });
     await expect(repository.listOverview({ scopeKey, actorKey, collectionKey, origin: 'generated', limit: 1, cursor: first.images.nextCursor! })).resolves.toBeDefined();
     await expect(repository.listOverview({ scopeKey, actorKey, collectionKey, origin: 'uploaded', limit: 1, cursor: first.images.nextCursor! })).rejects.toThrow('Cursor does not belong');
+  });
+
+  test('filters image creation dates inclusively before keyset pagination and binds them into cursors', async () => {
+    const scopeKey = newId(), collectionKey = newId(), actorKey = newId();
+    const createdFrom = '2026-08-01T00:00:00.000Z', createdTo = '2026-08-31T23:59:59.999Z', createdAt = createdTo;
+    const row = { _key: newId(), scopeKey, filename: 'boundary.jpg', caption: 'Boundary', imageCaptionKey: null, storageKey: 'media/boundary', mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), origin: 'uploaded', isFavorite: false, createdAt, updatedAt: createdAt };
+    let imageQuery = '', imageBinds: Record<string, unknown> = {};
+    const database: MediaLibraryDatabase = { async query(query, bindVars) { return { async all() {
+      if (query.includes('FOR collection IN collections')) return [];
+      imageQuery = query; imageBinds = bindVars ?? {}; return [row, { ...row, _key: newId() }];
+    } }; } };
+    const repository = createGalleryRepository(database);
+    const first = await repository.listOverview({ scopeKey, actorKey, collectionKey, createdFrom, createdTo, limit: 1 });
+    const fromFilter = 'FILTER @createdFrom == null || image.createdAt >= @createdFrom';
+    const toFilter = 'FILTER @createdTo == null || image.createdAt <= @createdTo';
+    expect(imageQuery).toContain(fromFilter);
+    expect(imageQuery).toContain(toFilter);
+    expect(imageQuery.indexOf(fromFilter)).toBeLessThan(imageQuery.indexOf('FILTER @afterCreatedAt'));
+    expect(imageQuery.indexOf(toFilter)).toBeLessThan(imageQuery.indexOf('FILTER @afterCreatedAt'));
+    expect(imageBinds).toMatchObject({ createdFrom, createdTo, queryLimit: 2 });
+    expect(JSON.parse(Buffer.from(first.images.nextCursor!, 'base64url').toString('utf8'))).toMatchObject({ version: 4, createdFrom, createdTo });
+    await expect(repository.listOverview({ scopeKey, actorKey, collectionKey, createdFrom, createdTo, limit: 1, cursor: first.images.nextCursor! })).resolves.toBeDefined();
+    await expect(repository.listOverview({ scopeKey, actorKey, collectionKey, createdFrom, createdTo: '2026-08-30T23:59:59.999Z', limit: 1, cursor: first.images.nextCursor! })).rejects.toThrow('Cursor does not belong');
+    await expect(repository.listOverview({ scopeKey, actorKey, collectionKey, limit: 1, cursor: first.images.nextCursor! })).rejects.toThrow('Cursor does not belong');
   });
 
   test('filters caption scores before stable keyset pagination and binds the threshold into cursors', async () => {

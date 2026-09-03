@@ -2612,11 +2612,11 @@ describe('semantic root search', () => {
       embed: async (input) => { calls.push(['embed', input]); return embedding; },
       userSearches: { record: async (_userKey: string, query: string) => { history.push(query); return {} as never; } } as never,
     });
-    expect(await service.searchInboxes(actor, { query: 'leadership', recordHistory: false }, { signal, timeoutMs: 321 })).toMatchObject({ inboxes: [{ key: inbox.key, connectorKey: connector.key, score: 0.91 }] });
-    expect(await service.searchTones(actor, { query: 'measured' })).toEqual({ tones: [{ key: tone.key, name: tone.name, instruction: tone.instruction, isFavorite: false, createdAt: now, updatedAt: now, score: 0.82 }] });
+    expect(await service.searchInboxes(actor, { query: 'leadership', recordHistory: false, createdFrom: now, createdTo: now }, { signal, timeoutMs: 321 })).toMatchObject({ inboxes: [{ key: inbox.key, connectorKey: connector.key, score: 0.91 }] });
+    expect(await service.searchTones(actor, { query: 'measured', createdFrom: now, createdTo: now })).toEqual({ tones: [{ key: tone.key, name: tone.name, instruction: tone.instruction, isFavorite: false, createdAt: now, updatedAt: now, score: 0.82 }] });
     expect(calls[0]).toBe('authorized');
-    expect(calls).toContainEqual(['inboxes', actor.organizationKey, scopeKey, [connector.key], embedding, 'leadership', 0.55, 50]);
-    expect(calls).toContainEqual(['tones', scopeKey, embedding, 'measured', 0.55, 50]);
+    expect(calls).toContainEqual(['inboxes', actor.organizationKey, scopeKey, [connector.key], embedding, 'leadership', 0.55, 50, { createdFrom: now, createdTo: now }]);
+    expect(calls).toContainEqual(['tones', scopeKey, embedding, 'measured', 0.55, 50, { createdFrom: now, createdTo: now }]);
     expect(calls).toContainEqual(['embed', { text: 'leadership', purpose: 'query', signal, timeoutMs: 321 }]);
     expect(history).toEqual(['measured']);
   });
@@ -2639,8 +2639,8 @@ describe('semantic root search', () => {
       authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }),
       embed: async () => embedding,
     });
-    const result = await service.searchDrafts(actor, { connectorKey: connector.key, query: 'roadmap', recordHistory: false });
-    expect(calls).toEqual([[scopeKey, connector.key, embedding, 'roadmap', 0.55, 50]]);
+    const result = await service.searchDrafts(actor, { connectorKey: connector.key, query: 'roadmap', recordHistory: false, createdFrom: now, createdTo: now });
+    expect(calls).toEqual([[scopeKey, connector.key, embedding, 'roadmap', 0.55, 50, { createdFrom: now, createdTo: now }]]);
     expect(result.drafts[0]).toMatchObject({ key: draft.key, connectorKey: connector.key, subject: 'Roadmap', score: 0.88 });
     expect(result.drafts[0]).not.toHaveProperty('scopeKey');
     expect(result.drafts[0]).not.toHaveProperty('embedding');
@@ -2662,6 +2662,30 @@ describe('semantic root search', () => {
     await expect(service.searchMessages(actor, { connectorKey: connector.key, query: 'project', recordHistory: false })).resolves.toMatchObject({ threads: [{ key: thread.key, score: 0.91 }] });
     await expect(service.searchDrafts(actor, { connectorKey: connector.key, query: 'roadmap', recordHistory: false })).resolves.toMatchObject({ drafts: [{ key: draft.key, score: 0.88 }] });
   });
+
+  test('rejects reversed semantic creation ranges before embedding', async () => {
+    let embedded = false;
+    const service = createEmailService({ repository: {} as never, connectors: {} as never, inboxes: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }), embed: async () => { embedded = true; return embedding; } });
+    await expect(service.searchInboxes(actor, { query: 'private', createdFrom: '2026-08-12T00:00:00Z', createdTo: '2026-08-11T00:00:00Z' })).rejects.toThrow('createdTo must be on or after createdFrom');
+    await expect(service.searchTones(actor, { query: 'private', createdFrom: '2026-08-12T00:00:00Z', createdTo: '2026-08-11T00:00:00Z' })).rejects.toThrow('createdTo must be on or after createdFrom');
+    await expect(service.searchMessages(actor, { connectorKey: connector.key, query: 'private', createdFrom: '2026-08-12T00:00:00Z', createdTo: '2026-08-11T00:00:00Z' })).rejects.toThrow('createdTo must be on or after createdFrom');
+    await expect(service.searchDrafts(actor, { connectorKey: connector.key, query: 'private', createdFrom: '2026-08-12T00:00:00Z', createdTo: '2026-08-11T00:00:00Z' })).rejects.toThrow('createdTo must be on or after createdFrom');
+    expect(embedded).toBe(false);
+  });
+
+  test('authorizes and returns exact paginated eligible draft totals', async () => {
+    const activeDraft = { key: newId(), scopeKey, variant: 'reply' as const, replyMode: 'reply' as const, creationSource: 'subscription' as const, threadKey: thread.key, messageKey: message.key, to: ['sender@example.com'], cc: [], generatedContent: 'Reply', status: 'generated' as const, embedding, createdAt: now, updatedAt: now };
+    const calls: unknown[][] = [];
+    const service = createEmailService({
+      repository: { listDraftPage: async (...input: unknown[]) => { calls.push(input); return { drafts: [activeDraft], total: 73 }; } } as never,
+      connectors: { getExact: async () => connector } as never,
+      authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }),
+    });
+    const result = await service.listDrafts(actor, { connectorKey: connector.key, createdFrom: now, createdTo: now, offset: 50, limit: 25 });
+    expect(calls).toEqual([[scopeKey, connector.key, { connectorKey: connector.key, createdFrom: now, createdTo: now, offset: 50, limit: 25 }]]);
+    expect(result).toMatchObject({ drafts: [{ key: activeDraft.key }], total: 73, offset: 50, limit: 25 });
+    expect(result.drafts[0]).not.toHaveProperty('scopeKey');
+  });
 });
 
 describe('multi-inbox account authorization', () => {
@@ -2670,15 +2694,16 @@ describe('multi-inbox account authorization', () => {
     const inbox = { key: newId(), organizationKey: connector.organizationKey, scopeKey, connectorKey: connector.key, name: 'Work', isFavorite: false, embedding, createdAt: now, updatedAt: now };
     const repository = { overview: async (...input: unknown[]) => { queries.push(input); return { threads: [], nextCursor: null, counts: { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 0 }, repositorySecret: true }; }, listDrafts: async () => [] };
     const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector] } as never, inboxes: { getByConnector: async () => inbox, coverStorageKey: async () => undefined } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
-    const output = await service.overview(actor, { connectorKey: connector.key, readState: 'unread', facets: ['favorite', 'urgent', 'important', 'urgent', 'filtered'], search: ' plan ', limit: 20 });
+    const output = await service.overview(actor, { connectorKey: connector.key, readState: 'unread', facets: ['favorite', 'urgent', 'important', 'urgent', 'filtered'], search: ' plan ', limit: 20, createdFrom: now, createdTo: now });
     expect(output).not.toHaveProperty('repositorySecret');
-    expect(queries).toEqual([[scopeKey, connector.key, { readState: 'unread', facets: ['urgent', 'important', 'filtered', 'favorite'], search: 'plan', cursor: undefined, limit: 20 }]]);
+    expect(queries).toEqual([[scopeKey, connector.key, { readState: 'unread', facets: ['urgent', 'important', 'filtered', 'favorite'], search: 'plan', cursor: undefined, limit: 20, createdFrom: now, createdTo: now }]]);
     expect(() => emailOverviewInputSchema.parse({ connectorKey: connector.key, filter: 'all', readState: 'read', facets: ['urgent'] })).toThrow();
     expect(() => emailOverviewInputSchema.parse({ connectorKey: connector.key, readState: 'read' })).toThrow();
     expect(() => emailOverviewInputSchema.parse({ connectorKey: connector.key, facets: ['urgent'] })).toThrow();
     expect(() => emailOverviewInputSchema.parse({ connectorKey: connector.key, readState: 'read', facets: ['unknown'] })).toThrow();
     expect(() => emailOverviewInputSchema.parse({ connectorKey: connector.key, readState: 'read', facets: [], unknown: true })).toThrow();
     expect(emailOverviewInputSchema.parse({ connectorKey: connector.key, readState: 'read', facets: [] })).toMatchObject({ facets: [] });
+    expect(() => emailOverviewInputSchema.parse({ connectorKey: connector.key, createdFrom: '2026-08-12T00:00:00Z', createdTo: '2026-08-11T00:00:00Z' })).toThrow('createdTo must be on or after createdFrom');
   });
 
   test('returns a sanitized account root without querying thread pages', async () => {

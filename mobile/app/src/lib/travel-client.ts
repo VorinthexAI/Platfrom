@@ -20,6 +20,7 @@ export const placeSchema = z.strictObject({
   createdAt: z.iso.datetime(),
   coverUrl: z.url().optional(),
 });
+const appSearchPlaceSchema = placeSchema.extend({ trips: z.array(z.strictObject({ key: keySchema, name: z.string().min(1) })).optional() });
 
 export type Place = z.infer<typeof placeSchema>;
 
@@ -304,7 +305,7 @@ export async function findPlaces(query: string, signal?: AbortSignal) {
 export async function searchPlaces(query: string, signal?: AbortSignal, recordHistory = true) {
   const input = placeSearchInputSchema.parse({ query, recordHistory });
   const output = await searchApp({ ...input, collectionSlugs: ["places"], limit: 50 }, signal);
-  return appSearchResults(output, "places", placeSchema);
+  return appSearchResults(output, "places", appSearchPlaceSchema).map(({ trips: _trips, ...place }) => place);
 }
 
 export function listTrips(signal?: AbortSignal) {

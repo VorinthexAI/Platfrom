@@ -10,6 +10,7 @@ const appSwitcher = readFileSync(new URL("../components/capability/WorkspaceAppS
 const coreComposer = readFileSync(new URL("../../../../shared/packages/ui/components/core-composer/core-composer.mobile.tsx", import.meta.url), "utf8");
 const chevronDownIcon = readFileSync(new URL("../../../../shared/packages/ui/icons/chevron-down/chevron-down.mobile.tsx", import.meta.url), "utf8");
 const eventBridge = readFileSync(new URL("./event-bridge.tsx", import.meta.url), "utf8");
+const normalize = (source: string) => source.replace(/\s+/g, "").replace(/,([}\]])/g, "$1").replace(/\?\((?=<)/g, "?");
 
 test("keeps the interactive globe behavior and bounded focus pulse", () => {
   expect(globe).toContain("createCountryBoundaryGeometry");
@@ -444,7 +445,7 @@ test("links all user folders and collections and opens exact assets in their app
   expect(knowledgeWorkspace).toContain('accessibilityLabel={`Back to ${returnTripName ?? "trip"} assets`}');
   expect(galleryWorkspace).toContain('accessibilityLabel={`Back to ${returnTripName ?? "trip"} assets`}');
   expect(knowledgeWorkspace).toContain('{returnTripName ?? "Trip"}</Text><ChevronRightIcon size="sm" />');
-  expect(galleryWorkspace).toContain('{returnTripName ?? "Trip"}</Text><ChevronRightIcon size="sm" />');
+  expect(normalize(galleryWorkspace)).toContain(normalize('{returnTripName ?? "Trip"}</Text><ChevronRightIcon size="sm" />'));
   expect(appSwitcher).not.toContain("onBack?: () => void");
   expect(appSwitcher).toContain('trigger === "back"');
   expect(appSwitcher).toContain('onPress={() => setOpen(true)}');

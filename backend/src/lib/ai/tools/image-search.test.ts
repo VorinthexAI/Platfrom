@@ -29,6 +29,7 @@ function result(scopeKey: string, key = newId()) {
       embedding, imageCaptionKey: null, createdByKey: null, origin: 'uploaded' as const, mutationPolicy: 'user' as const, isFavorite: false, createdAt: now, updatedAt: now,
     },
     score: 0.92,
+    collections: [],
   };
 }
 

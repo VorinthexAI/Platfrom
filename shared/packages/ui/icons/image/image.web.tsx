@@ -18,8 +18,9 @@ export function ImageIcon({ variant = "inherit", size = "md", strokeWidth = 1.4,
   const pixelSize = sizes[size];
   return (
     <svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" {...props}>
-      <path d="M5 12h14" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" />
-      <path d="M12 5v14" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <rect x="3" y="4" width="18" height="16" rx="2" stroke={colors[variant]} strokeWidth={strokeWidth} />
+      <circle cx="8.5" cy="9" r="1.5" stroke={colors[variant]} strokeWidth={strokeWidth} />
+      <path d="m4 17 4.5-4.5 3.5 3.5 2-2 6 6" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

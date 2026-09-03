@@ -14,6 +14,7 @@ import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { isProviderError } from '@/lib/ai/providers/errors';
+import { seedApps } from '@/lib/apps/registry';
 
 export type SeedResult = {
   collection: string;
@@ -260,7 +261,7 @@ async function assignSeededFounderOrchestrators(rootOrganizationKey: string): Pr
 }
 
 export async function seedCoreDbNodes(): Promise<SeedResult[]> {
-  const results: SeedResult[] = [];
+  const results: SeedResult[] = [...await seedApps()];
   for (const country of COUNTRY_CATALOG) {
     const semanticHash = createHash('sha256').update(country.name).digest('hex');
     const currentCursor = await db.query<{ key: string; semanticVersion?: number; semanticHash?: string }>('FOR country IN countries FILTER country.countryCode == @countryCode LIMIT 1 RETURN { key: country._key, semanticVersion: country.semanticVersion, semanticHash: country.semanticHash }', { countryCode: country.countryCode });
