@@ -127,17 +127,17 @@ test("orders places with shared round chevrons, wrapping moves, and bulk remove"
   expect(workspace).toContain('orderHero: { width: 32, height: 32');
   expect(workspace).toContain('orderControl: { width: 32, height: 32, minHeight: 32');
   expect(workspace).toContain('bulkToolbar: { width: "100%", minHeight: 36, marginBottom: spacing.xs, padding: 3');
-  expect(workspace).toContain('bulkRemoveAction: { height: 30, minHeight: 30');
-  expect(workspace).toContain('bulkRemoveText: { fontFamily: fonts.regular, fontSize: 11, letterSpacing: 0.4 }');
   expect(workspace).toContain('backgroundColor: palette.page');
   expect(workspace).toContain('accessibilityActions={[{ name: "longpress"');
   expect(workspace).toContain("Haptics.selectionAsync()");
   expect(workspace).toContain('function OrderBulkToolbar');
-  expect(workspace).toContain('onRemove={() => setOrderRemoveOpen(true)}');
-  expect(workspace).toContain('size="md" style={[styles.bulkRemoveAction, styles.sheetSecondary]} textStyle={styles.bulkRemoveText} variant="secondary">Remove</Button>');
+  expect(workspace).toContain('onMore={() => setOrderBulkMenuOpen(true)}');
+  expect(workspace).toContain('accessibilityLabel="Selected trip place actions"');
+  expect(workspace).toContain('openPlaceTags(selectedOrderPlaceKeys, () => setOrderBulkMenuOpen(false))');
+  expect(workspace).toContain('delaySheetTransition(() => setOrderRemoveOpen(true))');
   expect(workspace).toContain('title="Remove places?"');
   expect(workspace).toContain('onPress={removeSelectedOrderPlaces} size="md" variant="primary">Remove</Button>');
-  expect(workspace).not.toContain("orderMenuOpen");
+  expect(workspace).toContain("orderBulkMenuOpen");
   expect(workspace).toContain("if (!remaining.length)");
   expect(workspace).toContain('title: "A trip must contain at least one place"');
 });
@@ -406,14 +406,31 @@ test("shows Compass success feedback before mutation APIs settle", () => {
 test("semantically searches saved places or trips from the active table tab", () => {
   expect(workspace).toContain("export const PLACE_SEARCH_DEBOUNCE_MS = 300");
   expect(workspace).toContain("export const PLACE_SEARCH_HISTORY_DEBOUNCE_MS = 800");
-  expect(workspace).toContain("compassQueryKeys.placeSearch(travelContext, tableSearchTerm)");
-  expect(workspace).toContain("searchPlaces(tableSearchTerm, signal, false)");
-  expect(workspace).toContain("compassQueryKeys.tripSearch(travelContext, tableSearchTerm)");
-  expect(workspace).toContain("searchTrips(tableSearchTerm, signal, false)");
-  expect(workspace).toContain('tableTab === "places" ? searchPlaces(query, controller.signal, true) : searchTrips(query, controller.signal, true)');
+  expect(workspace).toContain("compassQueryKeys.placeSearch(travelContext, tableSearchTerm, selectedTagKeys)");
+  expect(workspace).toContain("searchPlaces(tableSearchTerm, signal, false, selectedTagKeys)");
+  expect(workspace).toContain("compassQueryKeys.tripSearch(travelContext, tableSearchTerm, selectedTagKeys)");
+  expect(workspace).toContain("searchTrips(tableSearchTerm, signal, false, selectedTagKeys)");
+  expect(workspace).toContain('tableTab === "places" ? searchPlaces(query, controller.signal, true, selectedTagKeys) : searchTrips(query, controller.signal, true, selectedTagKeys)');
   expect(workspace).toContain("}, PLACE_SEARCH_HISTORY_DEBOUNCE_MS)");
   expect(workspace).toContain('tableTab === "places" ? "Search Places" : "Search Trips"');
   expect(workspace.indexOf("styles.rootActions")).toBeLessThan(workspace.indexOf('accessibilityLabel="Compass table categories"'));
+});
+
+test("applies session tags only to the saved Places and Trips table", () => {
+  expect(workspace).toContain('const tagContextKey = tagFilterContextKey(contentContext)');
+  expect(workspace).toContain('state.selectedTagsByContext[tagContextKey] ?? EMPTY_SELECTED_TAGS');
+  expect(workspace).toContain('<TagFilterLane context={contentContext} />');
+  expect(workspace).toContain('<TagFilterSheet context={contentContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />');
+  expect(workspace).toContain('searchPlaces(tableSearchTerm, signal, false, selectedTagKeys)');
+  expect(workspace).toContain('searchTrips(tableSearchTerm, signal, false, selectedTagKeys)');
+  expect(workspace).toContain('const candidates = savedTableSearchActive ? savedPlaceSearchQuery.data ?? [] : places');
+  expect(workspace).toContain('const candidates = savedTableSearchActive ? tripSearchQuery.data ?? [] : trips');
+  expect(workspace).toContain('(!placeFavoritesOnly || place.isFavorite)');
+  expect(workspace).toContain('(!tripFavoritesOnly || trip.isFavorite)');
+  expect(workspace).toContain('>Tags</BottomSheetItem>');
+  expect(workspace.match(/<TagFilterLane context=\{contentContext\} \/>/g)).toHaveLength(1);
+  expect(workspace).toContain('findPlaces(query, controller.signal)');
+  expect(workspace).toContain('searchCountries(query, controller.signal)');
 });
 
 test("keeps place card covers cached across refreshed signed URLs", () => {

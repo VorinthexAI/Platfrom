@@ -207,6 +207,14 @@ test("semantically searches strict saved place DTOs", async () => {
   expect(calls[1]?.body).toMatchObject({ query: "volcanic capital", recordHistory: false });
 });
 
+test("lists and searches saved places with sorted all-tag filters", async () => {
+  const controller = new AbortController();
+  expect(await client.searchPlaces("", controller.signal, false, ["summer", "adventure"])).toEqual([place]);
+  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", operation: "list", collectionSlugs: ["places"], recordHistory: false, limit: 50, filters: { tagKeys: ["adventure", "summer"], tagMatch: "all" } }, config: { timeout: 15_000, signal: controller.signal } });
+  await client.searchPlaces(" volcanic capital ", controller.signal, false, ["summer", "adventure"]);
+  expect(calls[1]?.body).toMatchObject({ query: "volcanic capital", filters: { tagKeys: ["adventure", "summer"], tagMatch: "all" } });
+});
+
 test("lists trips separately from the travel overview with strict DTOs", async () => {
   const controller = new AbortController();
   expect(await client.listTrips(controller.signal)).toEqual([trip]);
@@ -229,6 +237,12 @@ test("semantically searches strict trip DTOs", async () => {
   expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", query: "northern lights", collectionSlugs: ["trips"], recordHistory: true, limit: 50 }, config: { timeout: 15_000, signal: controller.signal } });
   await client.searchTrips(" northern lights ", controller.signal, false);
   expect(calls[1]?.body).toMatchObject({ query: "northern lights", recordHistory: false });
+});
+
+test("lists saved trips with sorted all-tag filters", async () => {
+  const controller = new AbortController();
+  expect(await client.searchTrips("", controller.signal, false, ["winter", "aurora"])).toEqual([trip]);
+  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", operation: "list", collectionSlugs: ["trips"], recordHistory: false, limit: 50, filters: { tagKeys: ["aurora", "winter"], tagMatch: "all" } }, config: { timeout: 15_000, signal: controller.signal } });
 });
 
 test("lists and generates strict persisted trip guides with trusted workspace context", async () => {

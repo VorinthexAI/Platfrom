@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { db, withTransaction } from '@/lib/db/client';
 import { isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib/db/base';
-import { bookSchema, type Book } from '@/lib/db/books.node';
+import { bookSchema, fixedChargeReceiptSchema, type Book } from '@/lib/db/books.node';
 import { bookContextSchema, type BookContext } from '@/lib/db/book-contexts.node';
 import { bookChapterSchema, type BookChapter } from '@/lib/db/book-chapters.node';
 import { bookProgressSchema, type BookProgress } from '@/lib/db/book-progress.node';
@@ -12,6 +12,7 @@ import { documentSchema, type Document } from '@/lib/db/documents.node';
 import { generatedDocumentBindingSchema, type GeneratedDocumentBinding } from '@/lib/db/generated-document-bindings.node';
 import { replayableShareSchema, shareSchema, type ReplayableShare, type Share } from '@/lib/db/shares.node';
 import { bookExtensionSchema, type BookExtension } from '@/lib/db/book-extensions.node';
+import type { FixedChargeReceipt } from '@/lib/ai/events/runtime';
 
 export interface BookAccessContext { organizationKey: string; scopeKey: string; userKey: string; generationLeaseToken?: string; signal?: AbortSignal }
 export interface BookCreationDateRange { createdFrom?: string; createdTo?: string }
@@ -46,7 +47,9 @@ export interface BookRepository {
   search(context: BookAccessContext, query: string, queryEmbedding: number[], minimumScore: number, limit: number, dateRange?: BookCreationDateRange): Promise<BookSearchRow[]>;
   detail(context: BookAccessContext, bookKey: string): Promise<BookDetailRow>;
   findByGenerationRequest(context: BookAccessContext, generationRequestKey: string): Promise<BookDetailRow | null>;
-  failGeneration(job: BookGenerationIdentity, message: string, now: string): Promise<boolean>;
+  listRecoverableGenerations(now: string, limit: number): Promise<BookGenerationIdentity[]>;
+  terminalizeGeneration(job: BookGenerationIdentity, leaseToken: string, message: string, intentKey: string, now: string): Promise<boolean>;
+  acceptCreateCharge(context: BookAccessContext, bookKey: string, receipt: FixedChargeReceipt, now: string): Promise<Book>;
   claimGeneration(context: BookAccessContext, bookKey: string, leaseToken: string, now: string, leaseExpiresAt: string): Promise<boolean>;
   renewGeneration(context: BookAccessContext, bookKey: string, leaseToken: string, leaseExpiresAt: string): Promise<boolean>;
   releaseGeneration(context: BookAccessContext, bookKey: string, leaseToken: string): Promise<boolean>;
@@ -71,7 +74,7 @@ export interface BookRepository {
   publishArchive(context: BookAccessContext, bookKey: string, exports: BookArchiveExport[], now: string): Promise<void>;
   publishChapters(context: BookAccessContext, bookKey: string, chapterCount: number, now: string): Promise<void>;
   ensureGalleryExportCollection(context: BookAccessContext, bookKey: string, bookTitle: string, embedding: number[], now: string): Promise<{ collectionKey: string; ownerKey: string }>;
-  linkGalleryExportImages(context: BookAccessContext, collectionKey: string, ownerKey: string, imageKeys: string[], now: string): Promise<void>;
+  linkGalleryExportImages(context: BookAccessContext, bookKey: string, collectionKey: string, ownerKey: string, imageKeys: string[], now: string): Promise<void>;
   addSources(context: BookAccessContext, bookKey: string, sources: BookSource[]): Promise<void>;
   advanceGeneration(context: BookAccessContext, bookKey: string, now: string): Promise<void>;
   reconcileGeneration(context: BookAccessContext, bookKey: string, completedUnits: number, now: string): Promise<void>;
@@ -95,7 +98,36 @@ export function createBookRepository(database: BookDatabase = db, transact: Book
     },
     async detail(context, bookKey) { const row = (await readDetail(context, bookKey))[0]; if (!row) throw new BookRepositoryError('not_found'); return row; },
     async findByGenerationRequest(context, generationRequestKey) { await authorize(database, context, false); const key = (await (await database.query('FOR book IN books FILTER book.scopeKey == @scopeKey && book.generationRequestKey == @generationRequestKey LIMIT 1 RETURN book._key', { scopeKey: context.scopeKey, generationRequestKey })).all())[0]; return typeof key === 'string' ? (await readDetail(context, key))[0] ?? null : null; },
-    async failGeneration(job, message, now) { const rows = await (await database.query('LET scope = DOCUMENT(scopes, @scopeKey) FOR book IN books FILTER book._key == @bookKey && book.scopeKey == @scopeKey && scope != null && scope.organizationKey == @organizationKey FILTER book.generationOwnerKey == @userKey && book.status NOT IN ["ready", "cancelled", "failed"] FILTER book.generationLeaseToken == null || book.generationLeaseExpiresAt == null || book.generationLeaseExpiresAt <= @now UPDATE book WITH { status: "failed", generationError: @message, updatedAt: @now } IN books RETURN 1', { bookKey: job.bookKey, organizationKey: job.organizationKey, scopeKey: job.scopeKey, userKey: job.userKey, message: message.slice(0, 4_000), now })).all(); return rows.length === 1; },
+    async listRecoverableGenerations(now, limit) {
+      const rows = await (await database.query('FOR book IN books FILTER book.status NOT IN ["ready", "failed", "cancelled"] && book.generationInput != null && book.generationOwnerKey != null && book.cancelRequestedAt == null FILTER book.generationLeaseToken == null || book.generationLeaseExpiresAt == null || book.generationLeaseExpiresAt <= @now LET scope = DOCUMENT(scopes, book.scopeKey) FILTER scope != null SORT book.updatedAt ASC, book._key ASC LIMIT @limit RETURN { bookKey: book._key, organizationKey: scope.organizationKey, scopeKey: book.scopeKey, userKey: book.generationOwnerKey }', { now, limit })).all();
+      return rows.map((value) => z.object({ bookKey: z.string().cuid(), organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid(), userKey: z.string().cuid() }).strict().parse(value));
+    },
+    async acceptCreateCharge(context, bookKey, receipt, now) { await authorize(database, context, true); const valid = fixedChargeReceiptSchema.parse(receipt); if (valid.userKey !== context.userKey || valid.toolSlug !== 'book.create') throw new BookRepositoryError('conflict', 'Audio book charge receipt does not match the create request.'); const value = (await (await database.query('FOR book IN books FILTER book._key == @bookKey && book.scopeKey == @scopeKey && book.generationOwnerKey == @userKey LET replacement = book.fixedChargeReceipt == null || book.fixedChargeReceipt.transactionKey != @receipt.transactionKey UPDATE book WITH MERGE({ fixedChargeReceipt: @receipt, updatedAt: @now }, replacement && book.status == "failed" ? { status: "queued", generationError: null, cancelRequestedAt: null } : {}) IN books OPTIONS { keepNull: false } RETURN NEW', { bookKey, scopeKey: context.scopeKey, userKey: context.userKey, receipt: valid, now })).all())[0]; if (!value) throw new BookRepositoryError('not_found'); return parse(bookSchema, value); },
+    async terminalizeGeneration(job, leaseToken, message, intentKey, now) {
+      return transact({ read: ['scopes'], write: ['books', 'bookExtensions', 'bookChapters', 'chapterContexts', 'bookProgress', 'generatedDocumentBindings', 'documents', 'storageDeletionJobs', 'bookRefundIntents'] }, async (transaction) => {
+        const rows = await (await transaction.query(`LET scope = DOCUMENT(scopes, @scopeKey)
+          LET book = DOCUMENT(books, @bookKey)
+          FILTER book != null && book.scopeKey == @scopeKey && scope != null && scope.organizationKey == @organizationKey && book.generationOwnerKey == @userKey
+          FILTER book.status NOT IN ["ready", "cancelled", "failed"] && book.generationLeaseToken == @leaseToken
+          LET extension = book.activeExtensionKey == null ? null : DOCUMENT(bookExtensions, book.activeExtensionKey)
+          LET receipt = extension == null ? book.fixedChargeReceipt : extension.fixedChargeReceipt
+          LET suffix = (FOR chapter IN bookChapters FILTER chapter.scopeKey == @scopeKey && chapter.bookKey == @bookKey && (extension == null || chapter.position > extension.baseChapterCount) RETURN chapter)
+          LET suffixKeys = suffix[*]._key
+          LET bindingRows = (FOR binding IN generatedDocumentBindings FILTER binding.scopeKey == @scopeKey && binding.subjectType == "chapter" && binding.subjectKey IN suffixKeys RETURN binding)
+          LET documentKeys = bindingRows[*].documentKey
+          LET queuedStorage = LENGTH(FOR storageKey IN UNIQUE(APPEND(suffix[*].audioStorageKey, extension == null ? [book.coverStorageKey] : [])) FILTER storageKey != null UPSERT { storageKey } INSERT { storageKey, createdAt: @now, status: "pending" } UPDATE {} IN storageDeletionJobs RETURN 1)
+          LET removedBindings = LENGTH(FOR binding IN bindingRows REMOVE binding IN generatedDocumentBindings RETURN 1)
+          LET removedDocuments = LENGTH(FOR document IN documents FILTER document._key IN documentKeys && document.scopeKey == @scopeKey REMOVE document IN documents RETURN 1)
+          LET removedContexts = LENGTH(FOR item IN chapterContexts FILTER item.scopeKey == @scopeKey && item.chapterKey IN suffixKeys REMOVE item IN chapterContexts RETURN 1)
+          LET removedProgress = LENGTH(FOR item IN bookProgress FILTER item.scopeKey == @scopeKey && item.chapterKey IN suffixKeys REMOVE item IN bookProgress RETURN 1)
+          LET removedChapters = LENGTH(FOR chapter IN suffix REMOVE chapter IN bookChapters RETURN 1)
+          LET failedExtension = extension == null ? null : FIRST(FOR item IN bookExtensions FILTER item._key == extension._key UPDATE item WITH { status: "failed", updatedAt: @now } IN bookExtensions RETURN NEW)
+          UPDATE book WITH extension == null ? { status: "failed", generationError: @message, coverStorageKey: null, coverInputHash: null, chapterCount: 0, generationCompletedUnits: 0, generationLeaseToken: null, generationLeaseExpiresAt: null, updatedAt: @now } : { status: "ready", generationStage: "complete", generationError: null, activeExtensionKey: null, chapterCount: extension.baseChapterCount, generationCompletedUnits: book.generationTotalUnits, generationLeaseToken: null, generationLeaseExpiresAt: null, updatedAt: @now } IN books OPTIONS { keepNull: false }
+          LET refund = (FOR refundable IN receipt == null || receipt.userKey != @userKey ? [] : [receipt] UPSERT { chargeTransactionKey: refundable.transactionKey } INSERT { _key: @intentKey, bookKey: @bookKey, extensionKey: extension == null ? null : extension._key, userKey: refundable.userKey, chargeTransactionKey: refundable.transactionKey, executionIdentity: refundable.executionIdentity, microSparks: refundable.microSparks, status: "pending", createdAt: @now, updatedAt: @now } UPDATE {} IN bookRefundIntents OPTIONS { keepNull: false } RETURN 1)
+          RETURN LENGTH(refund)`, { ...job, leaseToken, message: message.slice(0, 4_000), intentKey, now })).all();
+        return rows.length === 1;
+      });
+    },
     async claimGeneration(context, bookKey, leaseToken, now, leaseExpiresAt) { await authorize(database, context, true); const rows = await (await database.query('FOR book IN books FILTER book._key == @bookKey && book.scopeKey == @scopeKey && book.status NOT IN ["ready", "cancelled"] && book.cancelRequestedAt == null FILTER book.generationLeaseToken == null || book.generationLeaseExpiresAt == null || book.generationLeaseExpiresAt <= @now UPDATE book WITH { generationLeaseToken: @leaseToken, generationLeaseExpiresAt: @leaseExpiresAt } IN books RETURN 1', { bookKey, scopeKey: context.scopeKey, leaseToken, now, leaseExpiresAt })).all(); return rows.length === 1; },
     async renewGeneration(context, bookKey, leaseToken, leaseExpiresAt) { await authorize(database, context, true); const rows = await (await database.query('FOR book IN books FILTER book._key == @bookKey && book.scopeKey == @scopeKey && book.generationLeaseToken == @leaseToken && book.cancelRequestedAt == null && book.status != "cancelled" UPDATE book WITH { generationLeaseExpiresAt: @leaseExpiresAt } IN books RETURN 1', { bookKey, scopeKey: context.scopeKey, leaseToken, leaseExpiresAt })).all(); return rows.length === 1; },
     async releaseGeneration(context, bookKey, leaseToken) { await authorize(database, context, true); const rows = await (await database.query('FOR book IN books FILTER book._key == @bookKey && book.scopeKey == @scopeKey && book.generationLeaseToken == @leaseToken UPDATE book WITH { generationLeaseToken: null, generationLeaseExpiresAt: null } IN books OPTIONS { keepNull: false } RETURN 1', { bookKey, scopeKey: context.scopeKey, leaseToken })).all(); return rows.length === 1; },
@@ -140,10 +172,17 @@ export function createBookRepository(database: BookDatabase = db, transact: Book
         return await transact({ read: ['userOrganizations', 'scopes', 'scopeMembers', 'bookChapters'], write: ['books', 'bookExtensions'] }, async (transaction) => {
           await authorize(transaction, context, true);
           const valid = bookExtensionSchema.parse(extension);
+          if (valid.userKey !== context.userKey || valid.fixedChargeReceipt && (valid.fixedChargeReceipt.userKey !== context.userKey || valid.fixedChargeReceipt.toolSlug !== 'book.extend')) throw new BookRepositoryError('conflict', 'Audio book charge receipt does not match the extension request.');
           const replay = (await (await transaction.query('FOR item IN bookExtensions FILTER item.scopeKey == @scopeKey && item.bookKey == @bookKey && item.requestKey == @requestKey LIMIT 1 RETURN item', { scopeKey: valid.scopeKey, bookKey: valid.bookKey, requestKey: valid.requestKey })).all())[0];
           if (replay) {
-            const receipt = parse(bookExtensionSchema, replay);
+            let receipt = parse(bookExtensionSchema, replay);
             if (receipt.requestFingerprint !== valid.requestFingerprint) throw new BookRepositoryError('conflict', 'Extension request key was reused with different titles.');
+            if (valid.fixedChargeReceipt && receipt.status === 'failed' && receipt.fixedChargeReceipt?.transactionKey !== valid.fixedChargeReceipt.transactionKey) {
+              const reset = (await (await transaction.query('LET book = DOCUMENT(books, @bookKey) FILTER book != null && book.scopeKey == @scopeKey && book.status == "ready" UPDATE @extensionKey WITH { status: "pending", fixedChargeReceipt: @fixedChargeReceipt, updatedAt: @now } IN bookExtensions UPDATE book WITH { activeExtensionKey: @extensionKey, status: "queued", generationStage: "outline", generationCompletedUnits: 0, generationTotalUnits: @generationTotalUnits, generationError: null, chapterCount: @targetChapterCount, updatedAt: @now } IN books OPTIONS { keepNull: false } RETURN NEW', { bookKey: valid.bookKey, scopeKey: valid.scopeKey, extensionKey: receipt.key, fixedChargeReceipt: valid.fixedChargeReceipt, generationTotalUnits: valid.titles.length * 3 + 1, targetChapterCount: valid.targetChapterCount, now })).all())[0];
+              if (!reset) throw new BookRepositoryError('conflict', 'Terminal extension could not be retried.');
+              receipt = { ...receipt, status: 'pending', fixedChargeReceipt: valid.fixedChargeReceipt, updatedAt: now };
+              return { extension: bookExtensionSchema.parse(receipt), book: parse(bookSchema, reset), replayed: false };
+            }
             const bookValue = (await (await transaction.query('LET book = DOCUMENT(books, @bookKey) FILTER book != null && book.scopeKey == @scopeKey RETURN book', { bookKey: valid.bookKey, scopeKey: valid.scopeKey })).all())[0];
             if (!bookValue) throw new BookRepositoryError('not_found');
             return { extension: receipt, book: parse(bookSchema, bookValue), replayed: true };
@@ -159,7 +198,7 @@ export function createBookRepository(database: BookDatabase = db, transact: Book
     async updateBook(context, bookKey, patch) { await authorize(database, context, true); const value = (await (await database.query('FOR book IN books FILTER book._key == @bookKey && book.scopeKey == @scopeKey && (!@fenced || (book.generationLeaseToken == @generationLeaseToken && book.cancelRequestedAt == null && book.status != "cancelled")) UPDATE book WITH @patch IN books OPTIONS { keepNull: false } RETURN NEW', { bookKey, scopeKey: context.scopeKey, fenced: context.generationLeaseToken !== undefined, generationLeaseToken: context.generationLeaseToken ?? null, patch: unsetPatch(patch) })).all())[0]; if (!value) throw new BookRepositoryError(context.generationLeaseToken ? 'conflict' : 'not_found', context.generationLeaseToken ? 'Audio book generation lease was lost.' : undefined); return parse(bookSchema, value); },
     async updateChapter(context, chapterKey, patch) { await authorize(database, context, true); const value = (await (await database.query('LET chapter = DOCUMENT(bookChapters, @chapterKey) LET book = chapter == null ? null : DOCUMENT(books, chapter.bookKey) FILTER chapter != null && chapter.scopeKey == @scopeKey && (!@fenced || (book != null && book.generationLeaseToken == @generationLeaseToken && book.cancelRequestedAt == null && book.status != "cancelled")) UPDATE chapter WITH @patch IN bookChapters OPTIONS { keepNull: false } RETURN NEW', { chapterKey, scopeKey: context.scopeKey, fenced: context.generationLeaseToken !== undefined, generationLeaseToken: context.generationLeaseToken ?? null, patch: unsetPatch(patch) })).all())[0]; if (!value) throw new BookRepositoryError(context.generationLeaseToken ? 'conflict' : 'not_found', context.generationLeaseToken ? 'Audio book generation lease was lost.' : undefined); return parse(bookChapterSchema, value); },
     async isCancellationRequested(context, bookKey) { await authorize(database, context, false); const values = await (await database.query('LET book = DOCUMENT(books, @bookKey) FILTER book != null && book.scopeKey == @scopeKey RETURN book.cancelRequestedAt != null || book.status == "cancelled"', { bookKey, scopeKey: context.scopeKey })).all(); if (!values.length) throw new BookRepositoryError('not_found'); return values[0] === true; },
-    async retryGeneration(context, bookKey, now) { await authorize(database, context, true); const value = (await (await database.query('FOR book IN books FILTER book._key == @bookKey && book.scopeKey == @scopeKey && book.status IN ["failed", "cancelled"] && book.generationInput != null && book.generationOwnerKey != null FILTER book.generationLeaseToken == null || book.generationLeaseExpiresAt == null || book.generationLeaseExpiresAt <= @now UPDATE book WITH { status: "queued", generationError: null, cancelRequestedAt: null, generationLeaseToken: null, generationLeaseExpiresAt: null, generationAttempt: book.generationAttempt + 1, updatedAt: @now } IN books OPTIONS { keepNull: false } RETURN NEW', { bookKey, scopeKey: context.scopeKey, now })).all())[0]; if (!value) throw new BookRepositoryError('conflict', 'Audio book generation can be retried only when resumable input is available and any active worker lease has expired.'); return parse(bookSchema, value); },
+    async retryGeneration(context, bookKey, now) { await authorize(database, context, true); const value = (await (await database.query('FOR book IN books FILTER book._key == @bookKey && book.scopeKey == @scopeKey && book.status == "cancelled" && book.generationInput != null && book.generationOwnerKey != null FILTER book.generationLeaseToken == null || book.generationLeaseExpiresAt == null || book.generationLeaseExpiresAt <= @now UPDATE book WITH { status: "queued", generationError: null, cancelRequestedAt: null, generationLeaseToken: null, generationLeaseExpiresAt: null, generationAttempt: book.generationAttempt + 1, updatedAt: @now } IN books OPTIONS { keepNull: false } RETURN NEW', { bookKey, scopeKey: context.scopeKey, now })).all())[0]; if (!value) throw new BookRepositoryError('conflict', 'Cancelled audio book generation can be resumed only when resumable input is available and any active worker lease has expired; failed paid generation must be retried through its original create or extension request.'); return parse(bookSchema, value); },
     async cancelGeneration(context, bookKey, now) { await authorize(database, context, true); const value = (await (await database.query('FOR book IN books FILTER book._key == @bookKey && book.scopeKey == @scopeKey && book.status NOT IN ["ready", "cancelled"] UPDATE book WITH { status: "cancelled", cancelRequestedAt: @now, updatedAt: @now } IN books RETURN NEW', { bookKey, scopeKey: context.scopeKey, now })).all())[0]; if (!value) throw new BookRepositoryError('conflict', 'Completed or already cancelled audio books cannot be cancelled.'); return parse(bookSchema, value); },
     async setFavorite(context, bookKey, isFavorite, now) { await authorize(database, context, true); const value = (await (await database.query('FOR book IN books FILTER book._key == @bookKey && book.scopeKey == @scopeKey UPDATE book WITH { isFavorite: @isFavorite, updatedAt: @now } IN books RETURN NEW', { bookKey, scopeKey: context.scopeKey, isFavorite, now })).all())[0]; if (!value) throw new BookRepositoryError('not_found'); return parse(bookSchema, value); },
     async shareDetail(context, bookKey) {
@@ -180,7 +219,7 @@ export function createBookRepository(database: BookDatabase = db, transact: Book
       return value ? { share: parse(shareSchema, value.share), book: parse(bookSchema, value.book), chapters: value.chapters.map((chapter) => parse(bookChapterSchema, chapter)) } : null;
     },
     async deleteBook(context, bookKey, now) {
-      const shareTokenHash = await transact({ read: ['userOrganizations', 'scopes', 'scopeMembers'], write: ['books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'bookExtensions', 'generatedDocumentBindings', 'storageDeletionJobs', 'shares'] }, async (transaction) => {
+      const shareTokenHash = await transact({ read: ['userOrganizations', 'scopes', 'scopeMembers'], write: ['books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'bookExtensions', 'generatedDocumentBindings', 'storageDeletionJobs', 'shares', 'tagAssignments'] }, async (transaction) => {
         await authorize(transaction, context, true);
         const row = (await (await transaction.query('LET book = DOCUMENT(books, @bookKey) FILTER book != null && book.scopeKey == @scopeKey LET chapters = (FOR chapter IN bookChapters FILTER chapter.scopeKey == @scopeKey && chapter.bookKey == @bookKey RETURN chapter) RETURN { book, chapters }', { bookKey, scopeKey: context.scopeKey })).all())[0] as { book: Record<string, unknown>; chapters: Array<Record<string, unknown>> } | undefined;
         if (!row) throw new BookRepositoryError('not_found');
@@ -193,6 +232,7 @@ export function createBookRepository(database: BookDatabase = db, transact: Book
         for (const collection of ['bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'bookProgress']) await transaction.query(`FOR item IN ${collection} FILTER item.scopeKey == @scopeKey && item.bookKey == @bookKey REMOVE item IN ${collection}`, { scopeKey: context.scopeKey, bookKey });
         await transaction.query('FOR item IN bookExtensions FILTER item.scopeKey == @scopeKey && item.bookKey == @bookKey REMOVE item IN bookExtensions', { scopeKey: context.scopeKey, bookKey });
         const hashes = await (await transaction.query('FOR share IN shares FILTER share.scopeKey == @scopeKey && share.sourceType == "book" && share.sourceKey == @bookKey REMOVE share IN shares RETURN OLD.tokenHash', { scopeKey: context.scopeKey, bookKey })).all();
+        await transaction.query('FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "book" && assignment.sourceKey == @bookKey REMOVE assignment IN tagAssignments', { scopeKey: context.scopeKey, bookKey });
         const shareTokenHash = hashes[0];
         if (hashes.length > 1 || shareTokenHash !== undefined && typeof shareTokenHash !== 'string') throw new BookRepositoryError('conflict', 'Audio book share invariant was violated.');
         await transaction.query('REMOVE @bookKey IN books', { bookKey });
@@ -230,8 +270,10 @@ export function createBookRepository(database: BookDatabase = db, transact: Book
       });
     },
     async ensureGalleryExportCollection(context, bookKey, bookTitle, embedding, now) {
-      return transact({ read: ['userOrganizations', 'scopes', 'scopeMembers'], write: ['collections', 'collectionMembers'] }, async (transaction) => {
+      return transact({ read: ['userOrganizations', 'scopes', 'scopeMembers', 'books'], write: ['collections', 'collectionMembers'] }, async (transaction) => {
         await authorize(transaction, context, true);
+        const active = await (await transaction.query('LET book = DOCUMENT(books, @bookKey) FILTER book != null && book.scopeKey == @scopeKey && book.generationLeaseToken == @generationLeaseToken && book.cancelRequestedAt == null && book.status != "cancelled" RETURN true', { bookKey, scopeKey: context.scopeKey, generationLeaseToken: context.generationLeaseToken })).all();
+        if (active[0] !== true) throw new BookRepositoryError('conflict', 'Gallery export generation lease was lost.');
         const ownerKey = (await (await transaction.query('FOR membership IN userOrganizations FILTER membership.organizationId == @organizationKey && membership.userId == @userKey && membership.status == "active" LIMIT 1 RETURN membership._key', { organizationKey: context.organizationKey, userKey: context.userKey })).all())[0];
         if (typeof ownerKey !== 'string') throw new BookRepositoryError('forbidden');
         const collectionKey = stableKey('gallery-book-export', context.scopeKey, bookKey);
@@ -240,12 +282,12 @@ export function createBookRepository(database: BookDatabase = db, transact: Book
         return { collectionKey, ownerKey };
       });
     },
-    async linkGalleryExportImages(context, collectionKey, ownerKey, imageKeys, now) {
+    async linkGalleryExportImages(context, bookKey, collectionKey, ownerKey, imageKeys, now) {
       if (!imageKeys.length) return;
-      await transact({ read: ['userOrganizations', 'scopes', 'scopeMembers', 'collections', 'images'], write: ['collectionImages'] }, async (transaction) => {
+      await transact({ read: ['userOrganizations', 'scopes', 'scopeMembers', 'books', 'collections', 'images'], write: ['collectionImages'] }, async (transaction) => {
         await authorize(transaction, context, true);
         await transaction.query('FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == @collectionKey && relation.imageKey NOT IN @imageKeys REMOVE relation IN collectionImages', { scopeKey: context.scopeKey, collectionKey, imageKeys });
-        const linked = await (await transaction.query('LET collection = DOCUMENT(collections, @collectionKey) FILTER collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy == "user" && collection.purpose == null FOR imageKey IN UNIQUE(@imageKeys) LET image = DOCUMENT(images, imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.createdByKey == @ownerKey LET relationKey = CONCAT("c", SUBSTRING(SHA256(CONCAT("book-gallery-export\\u0000", @collectionKey, "\\u0000", imageKey)), 0, 24)) UPSERT { _key: relationKey } INSERT { _key: relationKey, scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey, addedByKey: @ownerKey, createdAt: @now } UPDATE {} IN collectionImages RETURN imageKey', { collectionKey, scopeKey: context.scopeKey, ownerKey, imageKeys, now })).all();
+        const linked = await (await transaction.query('LET book = DOCUMENT(books, @bookKey) FILTER book != null && book.scopeKey == @scopeKey && book.generationLeaseToken == @generationLeaseToken && book.cancelRequestedAt == null && book.status != "cancelled" LET collection = DOCUMENT(collections, @collectionKey) FILTER collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy == "user" && collection.purpose == null FOR imageKey IN UNIQUE(@imageKeys) LET image = DOCUMENT(images, imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.createdByKey == @ownerKey LET relationKey = CONCAT("c", SUBSTRING(SHA256(CONCAT("book-gallery-export\\u0000", @collectionKey, "\\u0000", imageKey)), 0, 24)) UPSERT { _key: relationKey } INSERT { _key: relationKey, scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey, addedByKey: @ownerKey, createdAt: @now } UPDATE {} IN collectionImages RETURN imageKey', { bookKey, collectionKey, scopeKey: context.scopeKey, generationLeaseToken: context.generationLeaseToken, ownerKey, imageKeys, now })).all();
         if (linked.length !== new Set(imageKeys).size) throw new BookRepositoryError('conflict', 'Gallery images could not all be linked to the audio book collection.');
       });
     },

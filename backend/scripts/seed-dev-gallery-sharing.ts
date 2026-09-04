@@ -59,6 +59,7 @@ async function main() {
   const fakeUsers = await Promise.all(plan.identities.map(async (identity, index) => userSchema.parse({
     key: identity.userKey,
     organizationId: organizationKey,
+    currentScopeKey: scopeKey,
     email: identity.email,
     emailHash: await hashUserEmail(identity.email),
     name: identity.name,

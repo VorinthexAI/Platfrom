@@ -21,7 +21,7 @@ export const MAX_IMAGE_PIXELS = 100_000_000;
 const formats = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' } as const;
 type Extension = keyof typeof formats;
 export type UploadedImageFile = File | { filename: string; mimeType: string; sizeBytes: number; bytes: Uint8Array };
-export interface ProcessImageInput { scopeKey: string; ownerKey: string; origin: z.infer<typeof imageOriginSchema>; file: UploadedImageFile; imageKey?: string; idempotencyKey?: string; fallbackCaption?: string; location?: ImageLocation; mutationPolicy?: 'user' | 'system-only'; signal?: AbortSignal; }
+export interface ProcessImageInput { scopeKey: string; ownerKey: string; billingUserKey?: string; origin: z.infer<typeof imageOriginSchema>; file: UploadedImageFile; imageKey?: string; idempotencyKey?: string; fallbackCaption?: string; location?: ImageLocation; mutationPolicy?: 'user' | 'system-only'; signal?: AbortSignal; }
 export const generatedImageCaptionSchema = z.object({ caption: z.string().trim().min(1).max(20_000), score: z.number().int().min(1).max(100) }).strict();
 export type GeneratedImageCaption = z.infer<typeof generatedImageCaptionSchema>;
 export interface ImageProcessingMetrics { count: number; generated: number; reused: number; hashDurationMs: number; captionDurationMs: number; durationMs: number; }
@@ -168,7 +168,7 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, perceptu
     reservation = await reserve(requestedKey) ?? undefined;
     if (!reservation) throw new Error('A storage deletion claim or upload reservation is active for this deterministic image key');
     heartbeat = startStorageUploadHeartbeat(reservation, renewReservation, dependencies.reservationHeartbeatMs);
-    storageKey = (await storage.upload({ key: requestedKey, bytes: image.bytes, mimeType: image.mimeType })).storageKey;
+    storageKey = (await storage.upload({ key: requestedKey, bytes: image.bytes, mimeType: image.mimeType, ...(input.billingUserKey ? { billingUserKey: input.billingUserKey } : {}) })).storageKey;
   } catch (error) { await heartbeat?.stop(); throw new ImageProcessingError('IMAGE_UPLOAD_FAILED', 'The original image could not be uploaded.', { cause: error }); }
   try {
     let canonical = prepared?.canonical ?? await (dependencies.findCaption ?? findReusableImageCaption)(input.scopeKey, perceptualHash, input.ownerKey);

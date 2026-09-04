@@ -1,4 +1,4 @@
-import { HeadObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, HeadObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { z, ZodError } from 'zod';
 import { collectionSchema } from '@/lib/db/collections.node';
@@ -36,6 +36,7 @@ import { imageCollectionMemorySchema, type ImageCollectionMemory } from '@/lib/d
 import { executeAsk } from '@/lib/ai/router/execute-route';
 import type { ChatOutput } from '@/lib/ai/providers';
 import { performance } from 'node:perf_hooks';
+import { assertStorageGrowthAllowed, recordStoredObject, StorageUnfundedError } from '@/lib/automations/storage-charger-repository';
 
 const creationDateRangeShape = { createdFrom: z.string().datetime().optional(), createdTo: z.string().datetime().optional() } as const;
 const validCreationDateRange = (value: { createdFrom?: string; createdTo?: string }) => value.createdFrom === undefined || value.createdTo === undefined || Date.parse(value.createdFrom) <= Date.parse(value.createdTo);
@@ -109,6 +110,7 @@ export interface GalleryOperationContext {
   getUpload?: typeof repository.getUpload;
   queueUploads?: typeof repository.queueUploads;
   verifyUploadObject?: (upload: z.infer<typeof galleryUploadSchema>) => Promise<boolean>;
+  recordStoredObject?: typeof recordStoredObject;
   insertUploads?: typeof repository.insertUploads;
   signUpload?: (upload: z.infer<typeof galleryUploadSchema>) => Promise<string>;
   canManageScope?: typeof repository.canManageScope;
@@ -352,6 +354,10 @@ async function reserveUploads(rawInput: unknown, context: GalleryOperationContex
     const membership = await authorize(context);
     if (input.collectionKey) { const { role } = await collectionRole(context, input.collectionKey); if (role === 'viewer') throw new GalleryOperationError(403, 'GALLERY_COLLECTION_READ_ONLY', 'Collection is read-only.'); }
     else if (!await (context.canManageScope ?? repository.canManageScope)(input.scopeKey, membership.key)) throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'Gallery upload denied.');
+    if (!context.signUpload) {
+      try { await assertStorageGrowthAllowed(membership.userId); }
+      catch (error) { if (error instanceof StorageUnfundedError) throw new GalleryOperationError(409, error.code, error.message); throw error; }
+    }
     const now = new Date();
     const locations = await Promise.all(input.files.map((file) => file.latitude === undefined || file.longitude === undefined ? undefined : reverseGeocodeImage({ latitude: file.latitude, longitude: file.longitude })));
     const records = input.files.map((file, index) => {
@@ -381,6 +387,8 @@ async function completeUploads(rawInput: unknown, context: GalleryOperationConte
     await Promise.all(uploads.map(async (upload) => {
       const matches = context.verifyUploadObject ? await context.verifyUploadObject(upload) : await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: upload.storageKey })).then((head) => head.ContentLength === upload.sizeBytes && head.ContentType === upload.mimeType);
       if (!matches) throw new GalleryOperationError(409, 'GALLERY_UPLOAD_MISMATCH', 'Uploaded image does not match its reservation.');
+      try { await (context.recordStoredObject ?? recordStoredObject)({ storageKey: upload.storageKey, userKey: membership.userId, sizeBytes: upload.sizeBytes }); }
+      catch (error) { if (!context.recordStoredObject) await s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: upload.storageKey })).catch(() => undefined); throw error; }
     }));
     const queued = await (context.queueUploads ?? repository.queueUploads)({ uploadKeys: input.uploadKeys, organizationKey: input.organizationKey, scopeKey: input.scopeKey, actorKey: membership.key, now: new Date().toISOString() });
     if (!queued) throw new GalleryOperationError(409, 'GALLERY_UPLOAD_CHANGED', 'One or more upload reservations changed before queueing.');
@@ -687,6 +695,9 @@ async function createSubject(rawInput: unknown, context: GalleryOperationContext
     const input = { ...subjectCreateSchema.parse(rawInput), ...context };
     const membership = await authorize(context);
     if (!await repository.canManageScope(input.scopeKey, membership.key)) throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'Gallery subjects are read-only.');
+    const identityKey = context.idempotencyKey ? `c${createHash('sha256').update(`subject\0${input.scopeKey}\0${membership.key}\0${context.idempotencyKey}`).digest('hex').slice(0, 24)}` : newId();
+    const replay = await repository.getSubject(input.scopeKey, identityKey, membership.key);
+    if (replay) return { subject: await safeSubject(replay) };
     const references = await Promise.all(input.imageKeys.map(async (key) => {
       const image = await repository.getImage(key);
       if (!image || image.scopeKey !== input.scopeKey) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Reference image not found.');
@@ -695,12 +706,12 @@ async function createSubject(rawInput: unknown, context: GalleryOperationContext
     const profile = await imageCreateVisualIdentityTool.execute({ imageUrls: await Promise.all(references.map(({ storageKey }) => storedImageAnalysisDataUrl(storageKey, 1024))) }, { organizationKey: input.organizationKey, signal: context.signal });
     const now = new Date().toISOString();
     const embedding = currentEmbeddingSchema.parse(await embedText({ text: `${input.name}\n\n${profile.description}` }));
-    const identity = visualIdentitySchema.parse({ key: newId(), scopeKey: input.scopeKey, createdByKey: membership.key, name: input.name, description: profile.description, referenceImageKey: references[0]!.key, embedding, createdAt: now, updatedAt: now });
+    const identity = visualIdentitySchema.parse({ key: identityKey, scopeKey: input.scopeKey, createdByKey: membership.key, name: input.name, description: profile.description, referenceImageKey: references[0]!.key, embedding, createdAt: now, updatedAt: now });
     const matches = await repository.searchAccessibleImages({ organizationKey: input.organizationKey, scopeKey: input.scopeKey, actorKey: membership.key, embedding, threshold: 0.82, limit: 50 });
     const confidence = new Map(matches.map(({ image, score }) => [image.key, score]));
     for (const reference of references) confidence.set(reference.key, 1);
     const referenceKeys = new Set(references.map(({ key }) => key));
-    const relations = [...confidence].map(([imageKey, score]) => imageIdentitySchema.parse({ key: newId(), scopeKey: input.scopeKey, imageKey, identityKey: identity.key, confidence: score, isReference: referenceKeys.has(imageKey), createdAt: now }));
+    const relations = [...confidence].map(([imageKey, score]) => imageIdentitySchema.parse({ key: context.idempotencyKey ? `c${createHash('sha256').update(`subject-image\0${identity.key}\0${imageKey}`).digest('hex').slice(0, 24)}` : newId(), scopeKey: input.scopeKey, imageKey, identityKey: identity.key, confidence: score, isReference: referenceKeys.has(imageKey), createdAt: now }));
     if (!await repository.createSubject(identity, relations, input.imageKeys, membership.key)) throw new GalleryOperationError(409, 'GALLERY_REFERENCES_CHANGED', 'A reference image or current access changed before the Subject was created.');
     const row = await repository.getSubject(input.scopeKey, identity.key, membership.key);
     if (!row) throw new GalleryOperationError(500, 'GALLERY_SUBJECT_FAILED', 'Subject could not be read after creation.');

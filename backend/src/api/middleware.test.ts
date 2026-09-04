@@ -286,6 +286,23 @@ describe('validateQueryParams', () => {
     expect(nextCalls).toBe(2);
   });
 
+  test('allows only the tag assignment action query on assignment requests', async () => {
+    let nextCalls = 0;
+    await validateQueryParams(
+      middlewareContext('/api/v1/tags/assignments', {}, '?action=tag', 'POST'),
+      async () => { nextCalls += 1; },
+    );
+    await expect(validateQueryParams(
+      middlewareContext('/api/v1/tags/assignments', {}, '?action=tag&source=ai', 'POST'),
+      async () => { nextCalls += 1; },
+    )).rejects.toThrow();
+    await expect(validateQueryParams(
+      middlewareContext('/api/v1/tags/assignments', {}, '?action=replace', 'POST'),
+      async () => { nextCalls += 1; },
+    )).rejects.toThrow();
+    expect(nextCalls).toBe(1);
+  });
+
   test('does not retain a query whitelist for the removed orchestrator chat route', async () => {
     let nextCalls = 0;
 

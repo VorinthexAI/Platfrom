@@ -11,6 +11,10 @@ import { FoundersAccessError } from '@/lib/founders/access';
 import type { ContentToolDependencies } from '@/lib/ai/tools/content-runtime';
 import { getAuthIdentity } from './security';
 import { parseJson } from './validation';
+import { sparkErrorResponse } from './errors';
+import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
+import { toolEventService, type ToolEventRecorder } from '@/lib/ai/events/service';
+import { createHash } from 'node:crypto';
 
 const contextSchema = z.object({ organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid() }).strict();
 
@@ -22,6 +26,8 @@ interface AppTransformationHandlerDependencies {
   email?: EmailService;
   content?: ContentToolDependencies;
   executeContent?: AssistantCapabilityContext['executeContent'];
+  recordEvent?: ToolEventRecorder;
+  billing?: ToolBillingDependencies;
 }
 
 function createHandler(capability: typeof appEnhanceCapability | typeof appTranslateCapability, dependencies: AppTransformationHandlerDependencies = {}) {
@@ -35,19 +41,24 @@ function createHandler(capability: typeof appEnhanceCapability | typeof appTrans
         ...dependencies.authorizationOptions,
         authenticatedUserKey: identity.key,
       });
-      const result = await capability.execute(body.input, {
+      const rawRequestKey = c.req.header('idempotency-key');
+      const requestKey = capability === appTranslateCapability
+        ? z.string().trim().min(1).max(200).parse(rawRequestKey)
+        : z.string().trim().min(1).max(200).parse(rawRequestKey ?? createHash('sha256').update(JSON.stringify(body)).digest('hex'));
+      const result = await observeToolExecution(capability.definition.name, context, () => capability.execute(body.input, {
         domain: context,
-        requestKey: c.req.header('idempotency-key')?.trim() ? z.string().min(1).max(200).parse(c.req.header('idempotency-key')!.trim()) : undefined,
+        requestKey,
         appTransformation: dependencies.service,
         email: dependencies.email,
         contentDependencies: dependencies.content,
         executeContent: dependencies.executeContent,
         signal: c.req.raw.signal,
         timeoutMs: 4 * 60_000,
-      });
+      }), { recorder: dependencies.recordEvent ?? toolEventService.record, idempotencyKey: requestKey, input: body.input, ...dependencies.billing });
       if (result.kind !== 'continue') throw new Error('App transformation returned an unsupported result.');
       return c.json({ success: true, data: result.result });
     } catch (error) {
+      const billing = sparkErrorResponse(c, error); if (billing) return billing;
       if (error instanceof ContentError) return c.json({ success: false, error: error.toJSON() }, error.code === 'CONTENT_FORBIDDEN' ? 403 : 400);
       if (error instanceof FoundersAccessError) return c.json({ success: false, error: 'app transformation access denied' }, 403);
       if (error instanceof EmailIdempotencyError) return c.json({ success: false, error: { code: error.code, message: error.message, retryable: error.retryable } }, 409);

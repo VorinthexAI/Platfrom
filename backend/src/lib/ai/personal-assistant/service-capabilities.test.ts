@@ -11,6 +11,7 @@ const domain = {
   runtimeScopeKey: scopeKey,
   principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } },
 } as unknown as ToolContext;
+const tagToolNames = ['tag.list', 'tag.create', 'tag.update', 'tag.delete', 'tag.assignment.set'];
 
 const expected: Array<[AssistantSurface, string[]]> = [
   ['knowledge-workspace', ['app.enhance', 'app.translate', 'app.speech', 'content.hidden.list', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'note.write']],
@@ -71,14 +72,40 @@ describe('personal assistant service capabilities', () => {
     expect(calls.filter(([kind]) => kind === 'feedback-vote')).toHaveLength(5);
   });
 
+  test('exposes no direct tag capabilities on any Core workspace surface', () => {
+    for (const surface of ['knowledge-workspace', 'media-workspace', 'book-workspace', 'travel-workspace', 'signal-workspace'] as const) {
+      const capabilities = defaultAssistantCapabilityRegistry.resolve(surface);
+      expect(capabilities.filter(({ definition }) => tagToolNames.includes(definition.name))).toEqual([]);
+      expect(capabilities.some(({ definition }) => definition.name === 'app.search')).toBe(true);
+    }
+  });
+
   test('describes app.search as the collection-aware workspace query path', () => {
-    const description = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'app.search')!.definition.description;
-    for (const guidance of ['single workspace resource query', 'any language, code-switching, ordinary misspellings, inflection, synonyms, paraphrases', 'without requiring a product-area name or platform vocabulary', 'preserve possible resource names, proper names, and title words in the user\'s language', 'Infer the operation from the intended outcome rather than trigger words', 'combine collectionSlugs only for genuine cross-resource requests', 'ask a concise clarification instead of guessing', 'list for query-free inventories', 'count for exact filtered totals', 'non-persisting Archive document summary', 'grammatical singular or one/single in the user\'s language means 1', 'an explicit number means that number', 'unspecified plural uses the default', 'Registered collection adapters']) expect(description).toContain(guidance);
+    const capability = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'app.search')!;
+    const description = capability.definition.description;
+    const providerSchema = capability.definition.inputSchema as { required: string[]; properties: Record<string, { description?: string }> };
+    for (const guidance of ['single workspace resource query', 'any language, code-switching, ordinary misspellings, inflection, synonyms, paraphrases', 'without requiring a product-area name or platform vocabulary', 'preserve possible resource names, proper names, and title words in the user\'s language', 'Infer the operation from the intended outcome rather than trigger words', 'combine collectionSlugs only for genuine cross-resource requests', 'ask a concise clarification instead of guessing', 'list for query-free inventories', 'count for exact filtered totals', 'non-persisting Archive document summary', 'Always set limit to the requested quantity', 'grammatical singular or one/single in the user\'s language means 1', 'an explicit number means that number', 'unspecified plural requires a reasonable bounded limit, usually 10', 'Registered collection adapters']) expect(description).toContain(guidance);
+    expect(description).not.toContain('uses the default');
+    expect(providerSchema.required).toContain('limit');
+    expect(providerSchema.properties.limit?.description).toContain('singular answer target even when plural evidence identifies it');
+  });
+
+  test('publishes understandable app.search tag filters to providers', () => {
+    const capability = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'app.search')!;
+    const providerSchema = capability.definition.inputSchema as { properties: { filters: { properties: Record<string, { description?: string; items?: { type?: string }; enum?: string[] }> } } };
+    const filters = providerSchema.properties.filters.properties;
+    expect(filters.tagNames?.items).toMatchObject({ type: 'string' });
+    expect(filters.tagNames?.description).toContain('Exact private tag display names');
+    expect(filters.tagKeys?.description).toContain('Exact private tag IDs');
+    expect(filters.tagMatch?.enum).toEqual(['any', 'all']);
+    expect(filters.tagMatch?.description).toContain('all requires every supplied tag');
+    expect(filters.tagMatch?.description).toContain('any requires at least one supplied tag');
+    expect(filters.tagMatch?.description).toContain('Defaults to any');
   });
 
   test('returns the same readable, redacted app.search evidence used by Core', async () => {
     const capability = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'app.search')!;
-    const result = await capability.execute({ query: 'roadmap', collectionSlugs: ['documents'] }, {
+    const result = await capability.execute({ query: 'roadmap', collectionSlugs: ['documents'], limit: 1 }, {
       domain,
       appSearch: { search: async () => ({ query: 'roadmap', groups: [{ collectionSlug: 'documents', results: [{ key: newId(), name: 'Plan', content: 'Private roadmap evidence', url: 'https://signed.example/private', embedding: [1, 2, 3] }] }] }) },
     } as any);
@@ -102,7 +129,7 @@ describe('personal assistant service capabilities', () => {
   test('keeps unified email app.search filters strict and unambiguous', () => {
     const schema = defaultAssistantCapabilityRegistry.resolve('signal-workspace').find(({ definition }) => definition.name === 'app.search')!.inputSchema;
     const connectorKey = newId();
-    expect(schema.parse({ operation: 'list', collectionSlugs: ['email-messages'], filters: { connectorKey, readState: 'read', emailFacets: ['urgent', 'favorite'] } })).toMatchObject({ operation: 'list', filters: { connectorKey, readState: 'read', emailFacets: ['urgent', 'favorite'] } });
+    expect(schema.parse({ operation: 'list', collectionSlugs: ['email-messages'], limit: 10, filters: { connectorKey, readState: 'read', emailFacets: ['urgent', 'favorite'] } })).toMatchObject({ operation: 'list', filters: { connectorKey, readState: 'read', emailFacets: ['urgent', 'favorite'] } });
     expect(() => schema.parse({ operation: 'list', collectionSlugs: ['email-messages'], filters: { connectorKey, readState: 'read', emailFacets: ['invalid'] } })).toThrow();
     expect(() => schema.parse({ operation: 'list', collectionSlugs: ['places'], filters: { connectorKey } })).toThrow();
   });

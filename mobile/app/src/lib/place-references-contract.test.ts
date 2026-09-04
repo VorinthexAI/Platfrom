@@ -21,7 +21,7 @@ test("offers four parameterized place reference kinds without report compatibili
   expect(workspace).toContain("PLACE_REFERENCE_OPTIONS.map");
   expect(workspace).toContain("listPlaceReferences(selectedPlace.key, placeReferenceKind, signal)");
   expect(workspace).toContain("generatePlaceReference(placeKey, kind, randomUUID())");
-  expect(workspace).toContain('<GeneratedDocumentSheets appendGeneration createLabel="Request new" documents={placeReferencesQuery.data}');
+  expect(workspace).toContain('<GeneratedDocumentSheets appendGeneration contentContext={contentContext} createLabel="Request new" documents={placeReferencesQuery.data}');
   expect(workspace).toContain("placeReferencesQuery.data?.find(({ key }) => key === selectedPlaceReference.key)");
   expect(workspace).toContain('accessibilityLabel="AI place actions"');
   expect(workspace).toContain('<BrainIcon size="sm" />');
@@ -54,7 +54,9 @@ test("keeps place generation in the listing as one appended skeleton before open
   expect(workspace).toContain('<View style={styles.tripGuidePillAccessory}><ChevronRightIcon size="sm" /></View>');
   expect(workspace).toContain("keys.map((key) => deleteContentDocument(key))");
   expect(workspace).toContain('accessibilityLabel="Clear reference selection"');
-  expect(workspace).toContain('textStyle={styles.bulkRemoveText} variant="secondary">Remove</Button>');
+  expect(workspace).toContain('accessibilityLabel="Selected document actions"');
+  expect(workspace).toContain('targets={activeSelectedKeys.map((key) => ({ type: "document", key }))}');
+  expect(workspace).toContain('requestAnimationFrame(() => setResourceTagsOpen(true))');
   expect(workspace).toContain('title={`Remove ${activeSelectedKeys.length === 1');
   expect(workspace).toContain("documentSelected && styles.tripGuidePillSelected");
   expect(workspace).toContain('tripGuidePillSelected: { borderColor: palette.silver50, borderWidth: 2 }');
@@ -64,4 +66,18 @@ test("keeps place generation in the listing as one appended skeleton before open
     { heading: "Stay", body: "- Near transit\n- Book early" },
     { heading: "Food", body: "Try the market." },
   ]);
+});
+
+test("offers tags for every managed place selection without clearing selections on apply", () => {
+  expect(workspace).toContain('import { ResourceTagsSheet } from "@/components/ResourceTagsSheet";');
+  expect(workspace).toContain('setResourceTagTargets(keys.map((key) => ({ type: "place", key })))');
+  expect(workspace).toContain('openPlaceTags(selectedTablePlaceKeys, () => setPlaceBulkMenuOpen(false))');
+  expect(workspace).toContain('openPlaceTags(selectedTripPlaceKeys, () => setTripBulkMenuOpen(false))');
+  expect(workspace).toContain('openPlaceTags(selectedOrderPlaceKeys, () => setOrderBulkMenuOpen(false))');
+  expect(workspace).toContain('<OrderBulkToolbar count={selectedOrderPlaceKeys.length} onClear={() => setSelectedOrderPlaceKeys([])} onMore={() => setOrderBulkMenuOpen(true)} />');
+  expect(workspace).toContain('accessibilityLabel="Selected trip place actions"');
+  expect(workspace).toContain('<ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />');
+  expect(workspace).not.toContain('openPlaceTags(selectedPlaceKeys');
+  expect(workspace).not.toContain('openPlaceTags(selectedTripAddPlaceKeys');
+  expect(workspace).not.toContain('openPlaceTags(selectedAssetAttachments');
 });

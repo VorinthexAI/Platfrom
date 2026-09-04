@@ -22,6 +22,13 @@ packages, and mobile app.
 The broader routing overview is in
 [backend/src/lib/ai/README.md](backend/src/lib/ai/README.md).
 
+## Billing And Analytics
+
+- [Spark costs](backend/src/lib/costs/README.md) defines integer accounting,
+  grants, tool/action pricing precedence, and hourly storage charging.
+- [Events](backend/src/lib/ai/events/README.md) defines scoped analytics,
+  execution observation, and ledger linkage.
+
 ## Development
 
 1. Install and unlock `git-crypt` for `.github/environments.json`.

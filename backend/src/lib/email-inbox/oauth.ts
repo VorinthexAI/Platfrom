@@ -101,7 +101,7 @@ export function createEmailOAuthService(options: {
         if (!result.credentials.refreshToken) throw new Error('Gmail did not issue an offline refresh token');
         const initializeInactive = !previous || previous.status === 'revoked';
         let connector = await connectors.upsert({
-          organizationKey: state.organizationKey, scopeKey: state.scopeKey, createdByMembershipKey: state.membershipKey,
+          organizationKey: state.organizationKey, scopeKey: state.scopeKey, createdByMembershipKey: state.membershipKey, billingUserKey: state.userKey,
           provider: state.provider, providerAccountId: result.identity.providerAccountId, email: result.identity.email, scopes: result.scopes, credentials: result.credentials, initializeInactive,
           expectedRevision: previous?.revision ?? null,
         });

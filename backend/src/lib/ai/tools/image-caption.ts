@@ -19,6 +19,7 @@ export interface ImageCaptionToolDependencies extends ExecuteActionOptions {
 export const imageCaptionTool = {
   name: 'image.caption',
   inputSchema: imageCaptionInputSchema,
+  isReadOnly: () => true,
   providerDefinition: {
     name: 'image.caption',
     description: 'Generate one ordered result per supplied image URL with a rich caption and an integer quality score from 1 to 100. For document purposes, the caption contains the transcription and the score assesses source legibility and quality.',

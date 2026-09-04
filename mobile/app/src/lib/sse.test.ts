@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { consumeServerSentEvents, eventStreamRetryDelay, invalidatesGalleryQueries, parseServerSentEvent } from "./sse";
+import { consumeServerSentEvents, eventStreamRetryDelay, invalidatesGalleryQueries, isAuthenticatedBearerRejection, parseServerSentEvent } from "./sse";
 import { publishAppEvent, subscribeAppEvent } from "./app-events";
 
 test("parses named multiline server-sent events", () => {
@@ -29,6 +29,13 @@ test("maps every audited Gallery slug to invalidation", () => {
 test("bounds reconnect backoff and jitter", () => {
   expect(eventStreamRetryDelay(0, () => 0)).toBe(750);
   expect(eventStreamRetryDelay(20, () => 1)).toBe(37_500);
+});
+
+test("clears streaming sessions only for authenticated Bearer rejections", () => {
+  expect(isAuthenticatedBearerRejection(401, "Bearer realm=api", true)).toBe(true);
+  expect(isAuthenticatedBearerRejection(401, "Bearer realm=api", false)).toBe(false);
+  expect(isAuthenticatedBearerRejection(401, null, true)).toBe(false);
+  expect(isAuthenticatedBearerRejection(403, "Bearer realm=api", true)).toBe(false);
 });
 
 test("delivers app events to active subscribers only", () => {

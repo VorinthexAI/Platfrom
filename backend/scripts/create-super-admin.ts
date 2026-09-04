@@ -49,6 +49,7 @@ async function main() {
     const { encryptSecret } = await import('@/lib/crypto');
     const { newId } = await import('@/lib/ids');
     const { getRootOrganizationId } = await import('@/lib/db/organizations.node');
+    const { provisionPersonalAuthContext } = await import('@/lib/db/personal-auth-context.node');
     const { verifySuccessiveTotpCodes } = await import('@/api/auth');
 
     const email = await askEmail();
@@ -58,9 +59,11 @@ async function main() {
     const existingSuperAdmin = await getUserByEmailHash(emailHash);
     const now = new Date().toISOString();
     const rootOrganizationId = await getRootOrganizationId();
+    const currentScopeKey = newId();
     const superAdmin = existingSuperAdmin ?? await insertUser({
       key: newId(),
       organizationId: rootOrganizationId,
+      currentScopeKey,
       email,
       emailHash,
       name: null,
@@ -80,6 +83,7 @@ async function main() {
     if (existingSuperAdmin) {
       await updateUser(existingSuperAdmin.key, { isVerified: true, updatedAt: now });
     }
+    await provisionPersonalAuthContext(superAdmin, existingSuperAdmin ? {} : { mainScopeKey: currentScopeKey });
     const existingLink = await getUserOrganizationByOrganizationAndUser(rootOrganizationId, superAdminKey);
     const superAdminLink = await upsertUserOrganizationByKey({
       key: existingLink?.key ?? `root-owner-${superAdminKey}`,

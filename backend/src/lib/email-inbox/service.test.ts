@@ -1262,17 +1262,20 @@ describe('email synchronization', () => {
     const raw = gmailMessage('staged-message', 'staged-thread');
     const staged = { bindingKey: newId(), leaseToken: '11111111-1111-4111-8111-111111111111', targetType: 'document' as const, targetKey: newId(), membershipKey: connector.createdByMembershipKey };
     const commits: unknown[] = [], compensated: unknown[] = [];
+    let stagedInput: any;
+    const billedConnector = { ...connector, billingUserKey: userKey };
     const service = createEmailService({
       repository: { syncThread: async (input: any) => { commits.push(...input.attachmentCommits); throw new Error('mail transaction failed'); }, deleteProviderThread: async () => undefined } as never,
-      connectors: { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true } as never,
+      connectors: { getExact: async () => billedConnector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true } as never,
       authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
       client: () => ({ profile: async () => ({ historyId: 'history-2' }), listThreads: async () => ({ threads: [{ id: raw.threadId }] }), threadMetadata: async () => ({ id: raw.threadId, messages: [raw] }), message: async () => raw }) as never,
-      attachmentIngestion: { ingest: async () => ({ type: 'document', key: staged.targetKey }), ingestMessage: async () => [], stageMessage: async () => ({ refs: [{ type: 'document', key: staged.targetKey }], staged: [staged] }), renew: async () => undefined, compensate: async (items) => { compensated.push(...items); } },
+      attachmentIngestion: { ingest: async () => ({ type: 'document', key: staged.targetKey }), ingestMessage: async () => [], stageMessage: async (input) => { stagedInput = input; return { refs: [{ type: 'document', key: staged.targetKey }], staged: [staged] }; }, renew: async () => undefined, compensate: async (items) => { compensated.push(...items); } },
       classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined,
     });
     await expect(service.sync(actor, connector.key)).rejects.toThrow('Email synchronization batch failed');
     expect(commits).toEqual([staged]);
     expect(compensated).toEqual([staged]);
+    expect(stagedInput).toMatchObject({ billingUserKey: userKey, connectorKey: connector.key });
   });
 
   test('does not advance the History cursor when an unknown sanitizer failure requires retry', async () => {

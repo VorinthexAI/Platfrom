@@ -6,6 +6,8 @@ import { runTool } from '@/lib/ai/tools';
 import { ImageGenerationIdempotencyError } from '@/lib/image-generation/service';
 import { createImageGenerateHandler, createImageGenerationHistoryDeleteHandler, createImageGenerationHistoryListHandler } from './image-generation';
 import { registerRoutes } from './routes';
+import { recordActionCost, recordActionUsage } from '@/lib/ai/events/runtime';
+import { SparkRepositoryError } from '@/lib/sparks/repository';
 
 const organizationKey = newId(), scopeKey = newId(), userKey = newId(), collectionKey = newId();
 const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
@@ -35,6 +37,20 @@ describe('image generation HTTP API', () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]).toEqual(calls[1]);
     expect(calls[0]?.[1]).toBe(context);
+  });
+
+  test('meters image actions identically and returns 402 before generated output is accepted', async () => {
+    const charges: Record<string, unknown>[] = [];
+    const service = { generate: async (input: { count?: number }) => { await recordActionCost('image'); await recordActionUsage('image', { operation: 'generate', count: input.count ?? 1 }, { inputTokens: 0, outputTokens: 0, totalTokens: 0 }); return { images: [], provider: { durationMs: 0, costUsd: null } }; } } as never;
+    const billing = { charge: async (_key: string, input: Record<string, unknown>) => { charges.push(input); return { status: 'applied', transaction: { key: newId() } } as never; } };
+    await runTool('image.generate', '', { collectionKey, prompt: 'Earth', count: 2 }, { contentContext: context, requestKey: 'core-image', images: service, recordEvent: async () => {}, billing });
+    const app = new Hono().post('/images/generate', createImageGenerateHandler({ getIdentity: identity, authorize, service, recordEvent: async () => {}, billing }));
+    expect((await app.request('/images/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'http-image' }, body: JSON.stringify({ organizationKey, scopeKey, collectionKey, prompt: 'Earth', count: 2 }) })).status).toBe(201);
+    expect(charges).toHaveLength(2);
+    expect(charges.every((charge) => charge.actionSlug === 'image' && charge.microSparks === 60_000_000)).toBe(true);
+
+    const insufficient = new Hono().post('/images/generate', createImageGenerateHandler({ getIdentity: identity, authorize, service, recordEvent: async () => {}, billing: { charge: async () => { throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'private'); } } }));
+    expect((await insufficient.request('/images/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'insufficient-image' }, body: JSON.stringify({ organizationKey, scopeKey, collectionKey, prompt: 'Earth' }) })).status).toBe(402);
   });
 
   test('maps image idempotency conflicts to HTTP 409', async () => {

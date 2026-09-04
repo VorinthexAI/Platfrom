@@ -57,6 +57,9 @@ import { transientAttachmentHandlers } from './transient-attachments';
 import { completeAccountAvatar, presignAccountAvatar, updateAccountProfile } from './account-profile';
 import { feedbackHandlers, ticketHandler } from './tickets';
 import { listApps } from './apps';
+import { tagHandlers } from './tags';
+import { recordAnalyticsEvent } from './event-ingestion';
+import { getBillingSummary } from './billing';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -69,6 +72,7 @@ const oauthProviderSchema = z.enum(['google', 'apple']);
 
 export function registerRoutes(app: Hono) {
   app.get('/apps', listApps);
+  app.get('/billing/summary', getBillingSummary);
   app.post('/auth/signup', async (c) => {
     const body = await parseJson(c, strictObject({ email: emailSchema, name: z.string().optional(), country_code: countryCodeSchema.optional() }));
     return c.json(await createUserWithAuth(body), 201);
@@ -411,9 +415,15 @@ export function registerRoutes(app: Hono) {
   app.put('/feedback/:ticketKey/vote', feedbackHandlers.vote);
 
   app.post('/app/search', searchApp);
+  app.post('/tags/list', tagHandlers.list);
+  app.post('/tags', tagHandlers.create);
+  app.patch('/tags/:tagKey', tagHandlers.update);
+  app.delete('/tags/:tagKey', tagHandlers.delete);
+  app.post('/tags/assignments', tagHandlers.assignments);
   app.post('/images/generate', generateImage);
   app.get('/images/generation-history', listImageGenerationHistory);
   app.delete('/images/generation-history', deleteImageGenerationHistory);
+  app.post('/events', recordAnalyticsEvent);
   app.get('/events/stream', streamEvents);
   app.post('/conversations', conversationHandlers.create);
   app.post('/conversations/list', conversationHandlers.list);

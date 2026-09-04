@@ -9,8 +9,9 @@ export const appSearchCollectionSlugSchema = z.enum(["folders", "documents", "fi
 export type AppSearchCollectionSlug = z.infer<typeof appSearchCollectionSlugSchema>;
 
 export const appSearchInputSchema = z.strictObject({
-  query: z.string().trim().min(1).max(500),
-  collectionSlugs: z.array(appSearchCollectionSlugSchema).min(1).max(10).refine((slugs) => new Set(slugs).size === slugs.length, "Collection slugs must be distinct."),
+  operation: z.enum(["search", "list"]).optional(),
+  query: z.string().trim().min(1).max(500).optional(),
+  collectionSlugs: z.array(appSearchCollectionSlugSchema).min(1).max(appSearchCollectionSlugSchema.options.length).refine((slugs) => new Set(slugs).size === slugs.length, "Collection slugs must be distinct."),
   recordHistory: z.boolean().default(true),
   limit: z.number().int().min(1).max(50).default(10),
   filters: z.strictObject({
@@ -22,15 +23,22 @@ export const appSearchInputSchema = z.strictObject({
     emailFacets: z.array(z.enum(["urgent", "important", "filtered", "favorite"])).max(4).optional(),
     createdFrom: z.string().datetime({ offset: true }).transform((value) => new Date(value).toISOString()).optional(),
     createdTo: z.string().datetime({ offset: true }).transform((value) => new Date(value).toISOString()).optional(),
+    tagKeys: z.array(z.string().min(1)).min(1).max(20).refine((keys) => new Set(keys).size === keys.length, "Tag keys must be distinct.").optional(),
+    tagMatch: z.enum(["any", "all"]).optional(),
   }).optional(),
 }).superRefine((input, context) => {
+  const operation = input.operation ?? (input.query ? "search" : "list");
+  if (operation === "search" && !input.query) context.addIssue({ code: "custom", path: ["query"], message: "Search requires a query." });
+  if (operation === "list" && input.query) context.addIssue({ code: "custom", path: ["query"], message: "List does not accept a query." });
+  if (input.filters?.tagMatch && !input.filters.tagKeys) context.addIssue({ code: "custom", path: ["filters", "tagMatch"], message: "tagMatch requires tagKeys." });
   if ((input.filters?.createdFrom || input.filters?.createdTo) && input.collectionSlugs.includes("countries")) context.addIssue({ code: "custom", path: ["filters"], message: "Countries do not have a creation date." });
   if (input.filters?.createdFrom && input.filters.createdTo && input.filters.createdFrom > input.filters.createdTo) context.addIssue({ code: "custom", path: ["filters", "createdTo"], message: "createdTo must not precede createdFrom." });
 });
 export type AppSearchInput = z.input<typeof appSearchInputSchema>;
 
 export const appSearchOutputSchema = z.strictObject({
-  query: z.string(),
+  operation: z.literal("list").optional(),
+  query: z.string().optional(),
   groups: z.array(z.strictObject({ collectionSlug: appSearchCollectionSlugSchema, results: z.array(z.unknown()) })),
   retrieval: conversationRetrievalSchema.nullable().optional(),
 });

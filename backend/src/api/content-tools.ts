@@ -5,6 +5,10 @@ import { MAX_DOCUMENT_SCAN_PAGE_BYTES } from '@/lib/ai/document-scanning';
 import { ContentError, contentToolInputSchemas, contentToolNameSchema, isContentMutation, runAuthenticatedContentTool, type ContentErrorCode, type RunAuthenticatedContentToolOptions } from '@/lib/ai/tools';
 import { getAuthIdentity } from './security';
 import { strictObject } from './validation';
+import { sparkErrorResponse } from './errors';
+import { lookupToolCostPolicy } from '@/lib/costs';
+import { toolEventService } from '@/lib/ai/events/service';
+import { createHash } from 'node:crypto';
 
 const bodySchema = strictObject({ organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid(), input: z.unknown() });
 const delayedDevTools = new Set(['folder.list', 'document.list', 'content.search-history.list']);
@@ -95,8 +99,11 @@ export function createContentToolHandler(dependencies: ContentToolHandlerDepende
       const body = await parseLimitedBody(c, tool, maximum);
       let input = tool === 'document.parse' ? normalizeDocumentUpload(body.input, maximum) : tool === 'document.scan' ? normalizeDocumentScan(body.input) : body.input;
       input = contentToolInputSchemas[tool].parse(input);
-      const idempotencyKey = c.req.header('idempotency-key')?.trim();
+      let idempotencyKey = c.req.header('idempotency-key')?.trim();
       if (idempotencyKey && idempotencyKey.length > 200) throw new ContentError('CONTENT_INVALID_INPUT', 'Idempotency-Key is too long.', tool, { action: 'parse' });
+      const costPolicy = lookupToolCostPolicy(tool, input);
+      if (costPolicy?.mode === 'fixed' && !idempotencyKey) throw new ContentError('CONTENT_INVALID_INPUT', 'Idempotency-Key is required for priced Content operations.', tool, { action: 'idempotency' });
+      if (!idempotencyKey && (costPolicy?.mode === 'action' || costPolicy?.mode === 'outcome')) idempotencyKey = createHash('sha256').update(JSON.stringify(body)).digest('hex');
       if (isContentMutation(tool, input)) {
         if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ContentError('CONTENT_INVALID_INPUT', 'Content tool input must be an object.', tool, { action: 'parse' });
         const existing = (input as Record<string, unknown>).idempotencyKey;
@@ -108,9 +115,10 @@ export function createContentToolHandler(dependencies: ContentToolHandlerDepende
         ? Number(process.env.CONTENT_DEV_READ_DELAY_MS ?? 0)
         : 0;
       if (Number.isFinite(devDelayMs) && devDelayMs > 0) await Bun.sleep(Math.min(devDelayMs, 5_000));
-      const output = await (dependencies.run ?? runAuthenticatedContentTool)({ organizationKey: body.organizationKey, scopeKey: body.scopeKey, tool, input }, { ...dependencies.serviceOptions, authenticatedUserKey: identity.key, contentDependencies: { ...dependencies.serviceOptions?.contentDependencies, signal: c.req.raw.signal } });
+      const output = await (dependencies.run ?? runAuthenticatedContentTool)({ organizationKey: body.organizationKey, scopeKey: body.scopeKey, tool, input }, { ...dependencies.serviceOptions, authenticatedUserKey: identity.key, recordEvent: dependencies.serviceOptions?.recordEvent ?? toolEventService.record, ...(idempotencyKey ? { requestKey: idempotencyKey } : {}), contentDependencies: { ...dependencies.serviceOptions?.contentDependencies, signal: c.req.raw.signal } });
       return c.json({ success: true, data: output });
     } catch (error) {
+      const billing = sparkErrorResponse(c, error); if (billing) return billing;
       if (error instanceof ContentError) return c.json(responseError(error), contentStatus(error.code));
       if (error instanceof ZodError) return c.json(responseError(new ContentError('CONTENT_INVALID_INPUT', 'Content request input was invalid.', tool, { action: 'parse' })), 400);
       if (error instanceof SyntaxError) return c.json(responseError(new ContentError('CONTENT_INVALID_INPUT', 'Request body must be valid JSON.', tool, { action: 'parse' })), 400);

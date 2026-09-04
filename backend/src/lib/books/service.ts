@@ -6,10 +6,13 @@ import { bookProgressSchema } from '@/lib/db/book-progress.node';
 import { bookGenerationInputSchema } from '@/lib/db/books.node';
 import { bookExtensionSchema } from '@/lib/db/book-extensions.node';
 import { executeAsk } from '@/lib/ai/router';
+import { ProviderExecutionError } from '@/lib/ai/router';
+import { currentFixedChargeReceipt, markFixedChargeOutcomeAccepted, type FixedChargeReceipt } from '@/lib/ai/events/runtime';
 import type { ChatOutput } from '@/lib/ai/providers';
 import { decryptAuthenticatedJson } from '@/lib/authenticated-encryption';
 import { BookRepositoryError, createBookRepository, type BookAccessContext, type BookDetailRow, type BookRepository } from './repository';
 import { BOOK_GENERATION_LEASE_MS, BOOK_GENERATION_RENEW_MS } from './generation-config';
+import { BookGenerationTerminalError } from './generation-errors';
 
 const contextShape = { organizationKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid() };
 export const bookOverviewInputSchema = strictObject(contextShape);
@@ -57,7 +60,7 @@ export const bookExtendToolInputSchema = z.discriminatedUnion('mode', [
 ]);
 export const bookExtensionPreviewOutputSchema = strictObject({ titles: extensionTitlesSchema });
 export type BookCreateInput = z.output<typeof bookCreateInputSchema>;
-export type BookGenerationInput = z.output<typeof bookGenerationInputSchema> & { organizationKey: string; scopeKey: string; generationRequestKey?: string; generationBriefFingerprint?: string };
+export type BookGenerationInput = z.output<typeof bookGenerationInputSchema> & { organizationKey: string; scopeKey: string; generationRequestKey?: string; generationBriefFingerprint?: string; fixedChargeReceipt?: FixedChargeReceipt };
 export interface BookGenerator { create(input: BookGenerationInput, context: BookAccessContext): Promise<string>; write(bookKey: string, input: BookGenerationInput, context: BookAccessContext & { generationLeaseToken: string; persistFailure?: boolean }): Promise<void> }
 interface BookGenerationIdentity { bookKey: string; organizationKey: string; scopeKey: string; userKey: string }
 type UrlSigner = (storageKey: string) => Promise<string>;
@@ -66,6 +69,13 @@ type TopicSuggester = (input: Record<string, unknown>, organizationKey: string, 
 type DetachGeneration = (run: () => Promise<void>) => void;
 
 const SAFE_GENERATION_FAILURE = 'Audio book generation failed. Retry the audio book to continue.';
+
+export function isTerminalBookGenerationFailure(error: unknown): boolean {
+  if (error instanceof BookGenerationTerminalError) return true;
+  if (error instanceof ProviderExecutionError) return error.attempts.length > 0 && error.attempts.every(({ code }) => code === 'invalid_input' || code === 'unsupported_action');
+  if (error instanceof BookRepositoryError || error instanceof DOMException && error.name === 'AbortError') return false;
+  return typeof error === 'object' && error !== null && 'retryable' in error && (error as { retryable?: unknown }).retryable === false && 'code' in error;
+}
 
 function parseTopicSuggestions(value: string) {
   return bookTopicSuggestOutputSchema.parse(JSON.parse(value.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')));
@@ -116,12 +126,19 @@ export function createBookService(options: { repository?: BookRepository; genera
     const stop = scheduleRenewal(renew, renewMs);
     const cancellationTimer = setInterval(() => { void repository.isCancellationRequested(context, job.bookKey).then((cancelled) => { if (cancelled) controller.abort(); }).catch(() => undefined); }, 1_000); cancellationTimer.unref();
     try { await options.generator.write(job.bookKey, { ...job, ...row.book.generationInput }, { ...context, generationLeaseToken: token, signal: controller.signal, persistFailure: false }); await renewal; if (renewalError) throw renewalError; }
+    catch (error) {
+      const cancelled = await repository.isCancellationRequested(context, job.bookKey);
+      if (!cancelled && isTerminalBookGenerationFailure(error)) await repository.terminalizeGeneration(job, token, SAFE_GENERATION_FAILURE, id(), now());
+      throw error;
+    }
     finally { clearInterval(cancellationTimer); stop(); await renewal; await repository.releaseGeneration(context, job.bookKey, token).catch(() => false); }
   };
   const startGeneration = (job: BookGenerationIdentity) => {
     detach(async () => {
       try { await processGeneration(job); }
-      catch (error) { console.error('audio book generation failed', { bookKey: job.bookKey, scopeKey: job.scopeKey, error }); await repository.failGeneration(job, SAFE_GENERATION_FAILURE, now()).catch(() => false); }
+      catch (error) {
+        console.error('audio book generation failed', { bookKey: job.bookKey, scopeKey: job.scopeKey, error });
+      }
       await publish(job.scopeKey);
     });
   };
@@ -174,7 +191,9 @@ export function createBookService(options: { repository?: BookRepository; genera
       }
       if (input.titles.length !== input.chapterCount) throw new z.ZodError([{ code: 'custom', path: ['titles'], message: 'A title is required for every extension chapter.' }]);
       const fingerprint = createHash('sha256').update(JSON.stringify({ chapterCount: input.chapterCount, titles: input.titles })).digest('hex'); const timestamp = now();
-      const accepted = await repository.acceptExtension(context, bookExtensionSchema.parse({ key: id(), scopeKey: input.scopeKey, bookKey, userKey, requestKey: input.requestKey, requestFingerprint: fingerprint, titles: input.titles, baseChapterCount: row.book.chapterCount, targetChapterCount: row.book.chapterCount + input.chapterCount, status: 'pending', createdAt: timestamp, updatedAt: timestamp }), timestamp);
+      const fixedChargeReceipt = currentFixedChargeReceipt('book.extend');
+      const accepted = await repository.acceptExtension(context, bookExtensionSchema.parse({ key: id(), scopeKey: input.scopeKey, bookKey, userKey, requestKey: input.requestKey, requestFingerprint: fingerprint, titles: input.titles, baseChapterCount: row.book.chapterCount, targetChapterCount: row.book.chapterCount + input.chapterCount, status: 'pending', ...(fixedChargeReceipt ? { fixedChargeReceipt } : {}), createdAt: timestamp, updatedAt: timestamp }), timestamp);
+      if (fixedChargeReceipt) markFixedChargeOutcomeAccepted('book.extend');
       if (!accepted.replayed) await publish(input.scopeKey);
       if (accepted.book.status !== 'ready') startRow(await repository.detail(context, bookKey), input.organizationKey);
       return bookDto(await repository.detail(context, bookKey), sign);
@@ -190,19 +209,20 @@ export function createBookService(options: { repository?: BookRepository; genera
       return { book, chapters };
     },
     async create(raw: unknown, userKey: string) {
-      const request = bookCreateInputSchema.parse(raw); const input = { organizationKey: request.organizationKey, scopeKey: request.scopeKey, generationRequestKey: request.generationRequestKey, topic: request.topic, goal: request.goal, currentKnowledge: request.currentKnowledge, writingTone: request.writingTone, chapterCount: 10 as const, language: request.language, archiveDocumentKeys: request.archiveDocumentKeys, narratorVoiceKey: request.narratorVoiceKey, narrationPace: request.narrationPace, ...(request.additionalInstructions === undefined ? {} : { additionalInstructions: request.additionalInstructions }) }; const context = access(input, userKey); await repository.authorize(context, true);
-      const { generationRequestKey, ...brief } = input; const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...fingerprintInput } = brief;
+      const request = bookCreateInputSchema.parse(raw); const fixedChargeReceipt = currentFixedChargeReceipt('book.create'); const input = { organizationKey: request.organizationKey, scopeKey: request.scopeKey, generationRequestKey: request.generationRequestKey, topic: request.topic, goal: request.goal, currentKnowledge: request.currentKnowledge, writingTone: request.writingTone, chapterCount: 10 as const, language: request.language, archiveDocumentKeys: request.archiveDocumentKeys, narratorVoiceKey: request.narratorVoiceKey, narrationPace: request.narrationPace, ...(request.additionalInstructions === undefined ? {} : { additionalInstructions: request.additionalInstructions }), ...(fixedChargeReceipt ? { fixedChargeReceipt } : {}) }; const context = access(input, userKey); await repository.authorize(context, true);
+      const { generationRequestKey, fixedChargeReceipt: _fixedChargeReceipt, ...brief } = input; const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...fingerprintInput } = brief;
       const fingerprint = createHash('sha256').update(JSON.stringify(fingerprintInput)).digest('hex');
       const existing = await repository.findByGenerationRequest(context, generationRequestKey);
       if (existing) {
         if (existing.book.generationBriefFingerprint !== fingerprint) throw new BookRepositoryError('conflict', 'Generation request key was reused with a different brief.');
-        startRow(existing, input.organizationKey);
-        return bookDto(existing, sign);
+        const accepted = fixedChargeReceipt ? (await repository.acceptCreateCharge(context, existing.book.key, fixedChargeReceipt, now()), await repository.detail(context, existing.book.key)) : existing; if (fixedChargeReceipt) markFixedChargeOutcomeAccepted('book.create'); startRow(accepted, input.organizationKey);
+        return bookDto(accepted, sign);
       }
       if (!options.generator) throw new Error('Audio book generation is not configured');
       let bookKey: string;
       try { bookKey = await options.generator.create({ ...input, generationBriefFingerprint: fingerprint }, context); }
-      catch (error) { if (!(error instanceof BookRepositoryError) || error.reason !== 'conflict') throw error; const winner = await repository.findByGenerationRequest(context, generationRequestKey); if (!winner || winner.book.generationBriefFingerprint !== fingerprint) throw error; startRow(winner, input.organizationKey); return bookDto(winner, sign); }
+       catch (error) { if (!(error instanceof BookRepositoryError) || error.reason !== 'conflict') throw error; const winner = await repository.findByGenerationRequest(context, generationRequestKey); if (!winner || winner.book.generationBriefFingerprint !== fingerprint) throw error; const accepted = fixedChargeReceipt ? (await repository.acceptCreateCharge(context, winner.book.key, fixedChargeReceipt, now()), await repository.detail(context, winner.book.key)) : winner; if (fixedChargeReceipt) markFixedChargeOutcomeAccepted('book.create'); startRow(accepted, input.organizationKey); return bookDto(accepted, sign); }
+      if (fixedChargeReceipt) markFixedChargeOutcomeAccepted('book.create');
       startGeneration({ bookKey, organizationKey: input.organizationKey, scopeKey: input.scopeKey, userKey });
       await publish(input.scopeKey);
       return bookDto(await repository.detail(context, bookKey), sign);
@@ -219,6 +239,11 @@ export function createBookService(options: { repository?: BookRepository; genera
       if (!book.generationOwnerKey || !options.generator) throw new Error('Audio book generation is not configured');
       startGeneration({ bookKey, organizationKey: input.organizationKey, scopeKey: input.scopeKey, userKey: book.generationOwnerKey });
       await publish(input.scopeKey); return bookDto(await repository.detail(context, book.key), sign);
+    },
+    async recoverGenerations(limit = 100) {
+      const jobs = await repository.listRecoverableGenerations(now(), z.number().int().min(1).max(500).parse(limit));
+      for (const job of jobs) startGeneration(job);
+      return { recovered: jobs.length };
     },
     async cancel(bookKey: string, raw: unknown, userKey: string) { const input = bookMutationInputSchema.parse(raw); const context = access(input, userKey); await repository.cancelGeneration(context, bookKey, now()); await publish(input.scopeKey); return bookDto(await repository.detail(context, bookKey), sign); },
     async setFavorite(bookKey: string, raw: unknown, userKey: string) { const input = bookFavoriteInputSchema.parse(raw); const context = access(input, userKey); await repository.setFavorite(context, bookKey, input.isFavorite, now()); await publish(input.scopeKey); return bookDto(await repository.detail(context, bookKey), sign); },

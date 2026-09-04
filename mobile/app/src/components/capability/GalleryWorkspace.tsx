@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { FlatList, Keyboard, ScrollView, StyleSheet, Text, View, useWindowDimensions, type TextInput as NativeTextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
@@ -28,6 +28,9 @@ import { GalleryMemories } from "@/components/capability/GalleryMemories";
 import { GalleryImageGeneration } from "@/components/capability/GalleryImageGeneration";
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { SearchHistorySheet } from "@/components/SearchHistorySheet";
+import { ResourceTagsSheet } from "@/components/ResourceTagsSheet";
+import { TagFilterLane } from "@/components/TagFilterLane";
+import { TagFilterSheet } from "@/components/TagFilterSheet";
 import { assistantIconSource, capabilityIconSource, contentPresentationIconSource } from "@/data/capability-icons";
 import {
   askGalleryAssistant,
@@ -69,11 +72,13 @@ import {
 } from "@/lib/gallery-client";
 import { fitContainedMediaSize } from "@/lib/media-layout";
 import { filterByHiddenView, hideUserSource, isUserHidden, listUserHiddens, revealUserSource, type HiddenViewFilters, type UserHiddenRecord, type UserHiddenSource } from "@/lib/user-hidden-client";
-import { deleteContentSearchHistory, getContentContext, type ContentSearchHistoryItem } from "@/lib/content-client";
+import { deleteContentSearchHistory, type ContentSearchHistoryItem } from "@/lib/content-client";
 import { contentQueryKeys } from "@/lib/content-query-cache";
 import { getUserSearchHistory, promoteCachedUserSearchHistory, removeCachedUserSearchHistory, userSearchHistoryQueryKey } from "@/lib/user-search-history-cache";
+import { tagFilterContextKey } from "@/lib/tag-client";
 import { compassQueryKeys, galleryQueryKeys, getGalleryCollections, invalidateAssistantChanges, patchGalleryImage, patchGalleryUserHiddens, removeCachedGalleryImages, restoreGalleryOverviews, setCachedGalleryCollections, snapshotGalleryOverviews, transferCachedGalleryImages } from "@/lib/workspace-query-cache";
 import { useAuthStore } from "@/state/auth";
+import { EMPTY_SELECTED_TAGS, useUiStore } from "@/state/ui";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { normalizeCapturedPng, type CapturedImage } from "@/lib/captured-image";
 import { subscribeAppEvent } from "@/lib/app-events";
@@ -130,7 +135,11 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
   const { showToast } = useToast();
   const notify = (title: string) => showToast({ title, duration: 2_000 });
   const galleryContext = getGalleryContext();
-  const contentContext = getContentContext();
+  const userKey = useAuthStore((state) => String(state.user?.key ?? ""));
+  const contentContext = useMemo(() => ({ ...galleryContext, userKey }), [galleryContext.organizationKey, galleryContext.scopeKey, userKey]);
+  const tagContextKey = tagFilterContextKey(contentContext);
+  const selectedTags = useUiStore((state) => state.selectedTagsByContext[tagContextKey] ?? EMPTY_SELECTED_TAGS);
+  const selectedTagKeys = useMemo(() => selectedTags.map(({ key }) => key), [selectedTags]);
   const invalidateCompassTrips = () => queryClient.invalidateQueries({ queryKey: compassQueryKeys.trips(galleryContext), exact: true });
   const userHiddensQuery = useQuery({ queryKey: galleryQueryKeys.userHiddens(galleryContext), queryFn: listUserHiddens, staleTime: 0 });
   const insets = useSafeAreaInsets();
@@ -140,7 +149,6 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
   const [userHiddens, setUserHiddens] = useState<UserHiddenRecord[]>([]);
   const [canCreateCollections, setCanCreateCollections] = useState(false);
   const [collectionTab, setCollectionTab] = useState<"mine" | "shared">("mine");
-  const [imageOrigin, setImageOrigin] = useState<"uploaded" | "generated">("uploaded");
   const [sharingOpen, setSharingOpen] = useState(false);
   const [highlightsOpen, setHighlightsOpen] = useState(false);
   const [memoriesOpen, setMemoriesOpen] = useState(false);
@@ -190,6 +198,8 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
   const [pendingFiles, setPendingFiles] = useState<PreparedGalleryUpload[]>([]);
   const [activeSheet, setActiveSheet] = useState<GallerySheet>();
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [tagFilterOpen, setTagFilterOpen] = useState(false);
+  const [resourceTagsOpen, setResourceTagsOpen] = useState(false);
   const [history, setHistory] = useState<ContentSearchHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [removingHistoryQuery, setRemovingHistoryQuery] = useState<string>();
@@ -255,7 +265,6 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
   const favoriteRequests = useRef(new Map<string, number>());
   const favoriteWrites = useRef(new Map<string, Promise<{ image: GalleryImage }>>());
   const activeCollectionKey = useRef<string | undefined>(undefined);
-  const activeImageOrigin = useRef(imageOrigin);
   const visibleGalleryView = useRef<"root" | "collection" | "search" | "duplicates" | "contextual">("root");
   const longPressedImage = useRef<{ key: string; at: number } | undefined>(undefined);
   const cameraContextGeneration = useRef(0);
@@ -271,9 +280,8 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
   const refreshViewKey = useRef("");
   busyRef.current = busy;
   activeCollectionKey.current = activeCollection?.key;
-  activeImageOrigin.current = imageOrigin;
-  visibleGalleryView.current = activeCollection ? (query.trim() ? "search" : "collection") : activeSubject || showingSearchResults ? "contextual" : "root";
-  refreshViewKey.current = JSON.stringify([activeCollection?.key, imageOrigin, visibleGalleryView.current, collectionTab, query.trim(), rootSearchQuery.trim(), activeSubject?.key, activeIdentityFilter?.key]);
+  visibleGalleryView.current = activeCollection ? (query.trim() || selectedTagKeys.length ? "search" : "collection") : activeSubject || showingSearchResults ? "contextual" : "root";
+  refreshViewKey.current = JSON.stringify([activeCollection?.key, visibleGalleryView.current, collectionTab, query.trim(), rootSearchQuery.trim(), selectedTagKeys, activeSubject?.key, activeIdentityFilter?.key]);
 
   const contentWidth = width - spacing.md * 2;
   const collectionSize = Math.floor((contentWidth - COLLECTION_GAP * (COLLECTION_COLUMNS - 1)) / COLLECTION_COLUMNS);
@@ -291,7 +299,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
   const canMutateInCollection = (image: GalleryImage | undefined, collection: GalleryCollection | undefined) => Boolean(ownsCoreImage(image, collection) || (image && collection && !isManagedGalleryCollection(collection) && !isManagedGalleryImage(image) && (isGalleryCollectionOwned(collection) || (collectionMembershipRole(collection) === "collaborator" && image.createdByKey === collection.memberKey))));
   const showOnlyFavorites = viewFilters.favoritesOnly;
   const showHidden = viewFilters.showHidden;
-  const filtersActive = showOnlyFavorites || showHidden;
+  const filtersActive = showOnlyFavorites || showHidden || selectedTags.length > 0;
   const hidden = (source: UserHiddenSource, sourceKey: string) => isUserHidden(userHiddens, source, sourceKey);
   const captureGalleryContextGuard = () => {
     const generation = refreshContextGeneration.current;
@@ -426,7 +434,6 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
     initialCollectionOpened.current = initialCollectionKey;
     viewRequest.current += 1;
     setShowingCollectionOverview(false);
-    setImageOrigin("uploaded");
     setQuery(initialSearchQuery?.slice(0, 500) ?? "");
     setSelectedImageKeys([]);
     setActiveSubject(undefined);
@@ -500,20 +507,20 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
       });
   }
 
-  async function load(collection = activeCollection, silent = false, origin = imageOrigin) {
+  async function load(collection = activeCollection, silent = false) {
     const request = silent ? ++backgroundLoadRequest.current : ++viewRequest.current;
     const expectedView = visibleGalleryView.current;
-    const isCurrent = () => (silent ? request === backgroundLoadRequest.current && activeCollectionKey.current === collection?.key && (!collection || activeImageOrigin.current === origin) && visibleGalleryView.current === expectedView : request === viewRequest.current && (!collection || activeImageOrigin.current === origin));
+    const isCurrent = () => (silent ? request === backgroundLoadRequest.current && activeCollectionKey.current === collection?.key && visibleGalleryView.current === expectedView : request === viewRequest.current);
     if (!silent) setLoading(true);
     try {
-      const overview = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, collection?.key, collection ? origin : undefined), queryFn: () => fetchGalleryOverview(collection?.key, undefined, 100, undefined, undefined, collection ? origin : undefined) });
+      const overview = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, collection?.key), queryFn: () => fetchGalleryOverview(collection?.key, undefined, 100) });
       if (!isCurrent()) return false;
       applyCollectionSingleton(overview.collections);
       setCanCreateCollections(overview.canCreateCollections);
       setImages(overview.images);
-      if (collection && origin === "uploaded") promoteAuthoritativeUploads(overview.images);
+      if (collection) promoteAuthoritativeUploads(overview.images);
       setNextCursor(overview.nextCursor);
-      setCollectionSearchResults(undefined);
+      if (!selectedTagKeys.length) setCollectionSearchResults(undefined);
       if (!silent) setStatus(undefined);
       return overview;
     } catch (error) {
@@ -524,45 +531,32 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
     }
   }
 
-  function showImageOrigin(next: "uploaded" | "generated") {
-    if (next === imageOrigin) return;
-    viewRequest.current += 1;
-    backgroundLoadRequest.current += 1;
-    searchRequest.current += 1;
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    activeSearch.current = undefined;
-    setQuery("");
-    setCollectionSearchResults(undefined);
-    setSelectedImageKeys([]);
-    setNextCursor(null);
-    setStatus(undefined);
-    setLoading(true);
-    setImageOrigin(next);
-  }
-
   useEffect(() => {
     if (showingSearchResults || activeSubject) return;
+    if (activeCollection && (query.trim() || selectedTagKeys.length)) {
+      setLoading(false);
+      return;
+    }
     const request = ++viewRequest.current;
-    const origin = imageOrigin;
     void queryClient
-      .fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, activeCollection?.key, activeCollection ? origin : undefined), queryFn: () => fetchGalleryOverview(activeCollection?.key, undefined, 100, undefined, undefined, activeCollection ? origin : undefined) })
+      .fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, activeCollection?.key), queryFn: () => fetchGalleryOverview(activeCollection?.key, undefined, 100) })
       .then((overview) => {
-        if (request !== viewRequest.current || (activeCollection && activeImageOrigin.current !== origin)) return;
+        if (request !== viewRequest.current) return;
         applyCollectionSingleton(overview.collections);
         setCanCreateCollections(overview.canCreateCollections);
         setImages(overview.images);
-        if (activeCollection && origin === "uploaded") promoteAuthoritativeUploads(overview.images);
+        if (activeCollection) promoteAuthoritativeUploads(overview.images);
         setNextCursor(overview.nextCursor);
         setCollectionSearchResults(undefined);
         setStatus(undefined);
       })
       .catch((error: unknown) => {
-        if (request === viewRequest.current && (!activeCollection || activeImageOrigin.current === origin)) setStatus(errorMessage(error));
+        if (request === viewRequest.current) setStatus(errorMessage(error));
       })
       .finally(() => {
-        if (request === viewRequest.current && (!activeCollection || activeImageOrigin.current === origin)) setLoading(false);
+        if (request === viewRequest.current) setLoading(false);
       });
-  }, [activeCollection?.key, activeSubject?.key, showingSearchResults, galleryContext.organizationKey, galleryContext.scopeKey, imageOrigin, queryClient]);
+  }, [activeCollection?.key, activeSubject?.key, showingSearchResults, galleryContext.organizationKey, galleryContext.scopeKey, queryClient, selectedTagKeys]);
 
   function scheduleGalleryRefresh(plan: GalleryRefreshPlan) {
     refreshCoalescer.current.add(plan);
@@ -620,19 +614,18 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
   );
 
   async function loadMoreImages() {
-    if (!activeCollection || !nextCursor || loading || loadingMore || query.trim()) return;
+    if (!activeCollection || !nextCursor || loading || loadingMore || query.trim() || selectedTagKeys.length) return;
     const collectionKey = activeCollection.key;
-    const origin = imageOrigin;
     const cursor = nextCursor;
     setLoadingMore(true);
     try {
-      const page = await fetchGalleryOverview(collectionKey, cursor, 100, undefined, undefined, origin);
-      if (activeCollectionKey.current !== collectionKey || activeImageOrigin.current !== origin) return;
+      const page = await fetchGalleryOverview(collectionKey, cursor, 100);
+      if (activeCollectionKey.current !== collectionKey) return;
       applyCollectionSingleton(page.collections);
       setCanCreateCollections(page.canCreateCollections);
       setImages((current) => appendCursorItems(current, page.images, ({ key }) => key));
       setNextCursor(page.nextCursor);
-      queryClient.setQueryData<GalleryOverview>(galleryQueryKeys.overview(galleryContext, collectionKey, origin), (current) =>
+      queryClient.setQueryData<GalleryOverview>(galleryQueryKeys.overview(galleryContext, collectionKey), (current) =>
         current
           ? {
               ...page,
@@ -643,7 +636,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
     } catch (error) {
       setStatus(errorMessage(error));
     } finally {
-      if (activeCollectionKey.current === collectionKey && activeImageOrigin.current === origin) setLoadingMore(false);
+      if (activeCollectionKey.current === collectionKey) setLoadingMore(false);
     }
   }
 
@@ -651,7 +644,6 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
     const generation = refreshContextGeneration.current;
     const placeholder = { collectionKey: input.collectionKey, count: input.count, createdAt: new Date().toISOString(), requestKey };
     setGenerationPlaceholders((current) => addGalleryGenerationPlaceholder(current, placeholder));
-    if (activeCollectionKey.current === input.collectionKey) showImageOrigin("generated");
     try {
       const generated = await generateGalleryImages(input, requestKey);
       if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
@@ -659,12 +651,10 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
       prependGeneratedGalleryImagesToCache(queryClient, galleryContext, input.collectionKey, generated);
       if (activeCollectionKey.current === input.collectionKey) {
         viewRequest.current += 1;
-        setImageOrigin("generated");
-        setImages((current) => (activeImageOrigin.current === "generated" ? prependGeneratedGalleryImages(current, generated) : generated));
-        setNextCursor(null);
+        setImages((current) => prependGeneratedGalleryImages(current, generated));
       }
-      await Promise.all([queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overview(galleryContext, input.collectionKey, "generated"), exact: true }), queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overview(galleryContext), exact: true, refetchType: "none" }), queryClient.invalidateQueries({ queryKey: galleryQueryKeys.collections(galleryContext), exact: true, refetchType: "none" }), queryClient.invalidateQueries({ queryKey: galleryGenerationHistoryQueryKey(galleryContext), exact: true, refetchType: "none" })]);
-      if (activeCollectionKey.current === input.collectionKey) void load(activeCollection, true, "generated");
+      await Promise.all([queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overview(galleryContext, input.collectionKey), exact: true }), queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overview(galleryContext), exact: true, refetchType: "none" }), queryClient.invalidateQueries({ queryKey: galleryQueryKeys.collections(galleryContext), exact: true, refetchType: "none" }), queryClient.invalidateQueries({ queryKey: galleryGenerationHistoryQueryKey(galleryContext), exact: true, refetchType: "none" })]);
+      if (activeCollectionKey.current === input.collectionKey) void load(activeCollection, true);
     } catch (error) {
       if (isCurrentContextGeneration(generation, refreshContextGeneration.current)) {
         const message = errorMessage(error);
@@ -681,12 +671,12 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
       favoritePageRequest.current = undefined;
       return;
     }
-    if (!activeCollection || !nextCursor || loadingMore || query.trim() || activeSubject || showingSearchResults) return;
+    if (!activeCollection || !nextCursor || loadingMore || query.trim() || selectedTagKeys.length || activeSubject || showingSearchResults) return;
     const request = `${activeCollection.key}:${nextCursor}`;
     if (favoritePageRequest.current === request) return;
     favoritePageRequest.current = request;
     void loadMoreFavoriteImages();
-  }, [activeCollection?.key, activeSubject?.key, loading, loadingMore, nextCursor, query, showOnlyFavorites, showingSearchResults]);
+  }, [activeCollection?.key, activeSubject?.key, loading, loadingMore, nextCursor, query, selectedTagKeys, showOnlyFavorites, showingSearchResults]);
 
   async function loadSubjects(silent = false) {
     const request = ++subjectsRequest.current;
@@ -716,21 +706,30 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     const value = query.trim();
-    if (activeSubject || !value) {
+    if (activeSubject) {
       return;
     }
+    searchRequest.current += 1;
+    activeSearch.current = undefined;
+    if (!value && (!selectedTagKeys.length || !activeCollection)) {
+      setSearching(false);
+      setCollectionSearchResults(undefined);
+      return;
+    }
+    setSearching(true);
+    setCollectionSearchResults(undefined);
     searchTimer.current = setTimeout(() => {
       void search(value, activeCollection);
     }, 300);
     return () => {
       if (searchTimer.current) clearTimeout(searchTimer.current);
     };
-  }, [activeCollection?.key, activeSubject?.key, query]);
+  }, [activeCollection?.key, activeSubject?.key, query, selectedTagKeys]);
 
   useEffect(() => {
     const normalized = rootSearchQuery.trim();
     rootSearchRequest.current?.abort();
-    if (!normalized) {
+    if (!normalized && !selectedTagKeys.length) {
       setRootSearching(false);
       setRootSearchResults(undefined);
       return;
@@ -741,7 +740,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
     const timeout = setTimeout(() => {
       setRootSearching(true);
       setStatus(undefined);
-      void searchGalleryCollections(normalized, false, controller.signal)
+      void searchGalleryCollections(normalized, false, controller.signal, selectedTagKeys)
         .then(({ collections: matches }) => {
           if (!controller.signal.aborted) setRootSearchResults(matches);
         })
@@ -752,15 +751,15 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
           if (!controller.signal.aborted) setRootSearching(false);
         });
     }, 300);
-    const historyTimeout = setTimeout(() => {
-      void searchGalleryCollections(normalized, true, controller.signal).catch(() => undefined);
-    }, 800);
+    const historyTimeout = normalized ? setTimeout(() => {
+      void searchGalleryCollections(normalized, true, controller.signal, selectedTagKeys).catch(() => undefined);
+    }, 800) : undefined;
     return () => {
       clearTimeout(timeout);
-      clearTimeout(historyTimeout);
+      if (historyTimeout) clearTimeout(historyTimeout);
       controller.abort();
     };
-  }, [rootSearchQuery]);
+  }, [rootSearchQuery, selectedTagKeys]);
 
   useEffect(
     () => () => {
@@ -798,6 +797,16 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
     activeSheetRef.current = sheet;
     setActiveSheet(sheet);
     setSheetOpen(true);
+  }
+
+  function openTagFilters() {
+    closeSheet();
+    requestAnimationFrame(() => setTagFilterOpen(true));
+  }
+
+  function openResourceTags() {
+    closeSheet();
+    requestAnimationFrame(() => setResourceTagsOpen(true));
   }
 
   function pushSheet(sheet: GallerySheet) {
@@ -857,20 +866,20 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
     setAssistantSearchSource(undefined);
   }
 
-  async function replayOverviewWindow(collectionKey: string | undefined, targetCount: number, generation: number, origin = collectionKey === activeCollectionKey.current ? activeImageOrigin.current : undefined) {
+  async function replayOverviewWindow(collectionKey: string | undefined, targetCount: number, generation: number) {
     const isCurrent = () => isCurrentContextGeneration(generation, refreshContextGeneration.current);
     const replay = await replayPaginatedWindow({
       targetCount,
       getKey: ({ key }: GalleryImage) => key,
       isCurrent,
       fetchPage: async (cursor?: string) => {
-        const page = cursor ? await fetchGalleryOverview(collectionKey, cursor, 100, undefined, undefined, origin) : await queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, collectionKey, origin), queryFn: () => fetchGalleryOverview(collectionKey, undefined, 100, undefined, undefined, origin), staleTime: 0 });
+        const page = cursor ? await fetchGalleryOverview(collectionKey, cursor, 100) : await queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, collectionKey), queryFn: () => fetchGalleryOverview(collectionKey, undefined, 100), staleTime: 0 });
         return { page, items: page.images, nextCursor: page.nextCursor };
       },
     });
     if (replay.cancelled || !replay.firstPage || !isCurrent()) return undefined;
     const overview = { ...replay.firstPage, images: replay.items, nextCursor: replay.nextCursor, replayReachedEnd: replay.reachedEnd };
-    queryClient.setQueryData(galleryQueryKeys.overview(galleryContext, collectionKey, origin), overview);
+    queryClient.setQueryData(galleryQueryKeys.overview(galleryContext, collectionKey), overview);
     return overview;
   }
 
@@ -1260,14 +1269,14 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
   }
 
   async function search(value = query.trim(), collection = activeCollection) {
-    if (!value) return;
-    const searchKey = `${collection?.key ?? "root"}:${value.toLocaleLowerCase()}`;
+    if (!value && !selectedTagKeys.length) return;
+    const searchKey = `${collection?.key ?? "root"}:${value.toLocaleLowerCase()}:${selectedTagKeys.join(",")}`;
     if (activeSearch.current === searchKey) return;
     activeSearch.current = searchKey;
     const request = ++searchRequest.current;
     setSearching(true);
     try {
-      const result = await searchGalleryImages({ query: value, ...(collection ? { collectionKey: collection.key } : {}), recordHistory: true, limit: 50 });
+      const result = await searchGalleryImages({ query: value, ...(collection ? { collectionKey: collection.key } : {}), recordHistory: Boolean(value), limit: 50, tagKeys: selectedTagKeys });
       const expectedView = collection ? "search" : "root";
       if (request !== searchRequest.current || activeCollectionKey.current !== collection?.key || visibleGalleryView.current !== expectedView) return;
       setSelectedImageKeys([]);
@@ -1293,7 +1302,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
     setCollectionSearchResults(undefined);
     setSearching(false);
     setStatus(undefined);
-    if (refresh && activeCollection) {
+    if (refresh && activeCollection && !selectedTagKeys.length) {
       const collection = activeCollection;
       setTimeout(() => {
         void load(collection, true);
@@ -2667,9 +2676,10 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
           setNextCursor(normalOverview.nextCursor);
           setStatus("That visual identity is no longer available.");
         }
-      } else if (plan.has("search") && query.trim()) {
+      } else if (plan.has("search") && (query.trim() || selectedTagKeys.length) && currentCollection) {
         const value = query.trim();
-        const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.search(galleryContext, "text", currentCollection?.key, value.toLocaleLowerCase()), queryFn: () => searchGalleryImages({ query: value, ...(currentCollection ? { collectionKey: currentCollection.key } : {}), recordHistory: false, limit: 50 }), staleTime: 0 });
+        const searchValue = `${value.toLocaleLowerCase()}:${selectedTagKeys.join(",")}`;
+        const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.search(galleryContext, "text", currentCollection.key, searchValue), queryFn: () => searchGalleryImages({ query: value, collectionKey: currentCollection.key, recordHistory: false, limit: 50, tagKeys: selectedTagKeys }), staleTime: 0 });
         if (!isCurrent()) return;
         refreshedImages = result.images;
         imagesComplete = contextualReplayReachedEnd;
@@ -2767,7 +2777,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
     const viewGeneration = viewRequest.current;
     const searchGeneration = searchRequest.current;
     const plan = new Set<GalleryRefreshFamily>(["root", "current"]);
-    if (query.trim() || showingSearchResults || activeSubject || activeIdentityFilter) plan.add("search");
+    if (query.trim() || selectedTagKeys.length || showingSearchResults || activeSubject || activeIdentityFilter) plan.add("search");
     if (activeSubject || activeIdentityFilter) plan.add("subjects");
     setUserRefreshing(true);
     try {
@@ -2782,7 +2792,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
   const cleanupSelectedCount = cleanupSelectedImageKeys.length;
   const similarBehindImage = activeSheet === "image" && sheetStack.current.includes("similar");
   const sheetTitle = activeSheet === "rootActions" ? "New in Gallery" : activeSheet === "actions" ? `Add to ${activeCollection?.name ?? "Gallery"}` : activeSheet === "destination" ? "Choose destination" : activeSheet === "newCollection" ? "New collection" : activeSheet === "image" ? (selectedImage?.filename ?? selectedOptimisticItem?.filename ?? "Image") : activeSheet === "imageActions" ? "Image actions" : activeSheet === "confirmDeleteImage" ? "Delete image?" : activeSheet === "collectionMenu" ? "Collection actions" : activeSheet === "collectionEdit" ? "Edit collection" : activeSheet === "confirmDeleteCollection" ? "Delete collection?" : activeSheet === "confirmLeaveCollection" ? "Leave collection?" : activeSheet === "imageEdit" ? "Edit image" : activeSheet === "similar" ? "Similar images" : activeSheet === "duplicates" ? "Duplicates" : activeSheet === "confirmDeleteDuplicates" ? `Delete ${duplicateSelectedCount === 1 ? "duplicate" : `${duplicateSelectedCount} duplicates`}?` : activeSheet === "cleanupMenu" ? "Collection intelligence" : activeSheet === "cleanup" ? "Clean up" : activeSheet === "confirmCleanupDelete" ? `Delete ${cleanupSelectedCount === 1 ? "image" : `${cleanupSelectedCount} images`}?` : activeSheet === "visualIdentities" ? "Visual identities" : activeSheet === "confirmDeleteIdentity" ? "Delete visual identity?" : activeSheet === "identityPicker" ? (imagePickerPurpose === "cover" ? "Choose collection cover" : "Create visual identity") : activeSheet === "identityName" ? "Name visual identity" : activeSheet === "identityPickerFilter" ? "Filter images" : activeSheet === "filter" ? "Filter images" : activeSheet === "searchHistory" ? "Search history" : activeSheet === "bulkActions" ? "Selected image actions" : activeSheet === "bulkDelete" ? `Delete ${selectedImageKeys.length === 1 ? "image" : `${selectedImageKeys.length} images`}?` : activeSheet === "transferDestination" ? `${transferMode === "move" ? "Move" : "Copy"} to collection` : "Gallery";
-  const collectionSearchActive = Boolean(activeCollection && query.trim());
+  const collectionSearchActive = Boolean(activeCollection && (query.trim() || selectedTags.length));
   const unfilteredVisibleImages = activeIdentityFilter && activeCollection ? (collectionSearchResults ?? []) : collectionSearchActive ? (collectionSearchResults ?? []) : images;
   const optimisticImageKeys = new Set(optimisticMediaItems.map(({ imageKey }) => imageKey).filter((key): key is string => Boolean(key)));
   const reconciledVisibleImages = mergeMediaItems([], unfilteredVisibleImages).filter(({ key }) => !optimisticImageKeys.has(key));
@@ -2793,15 +2803,16 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
     if (collectionViewerImages.length < 2 || collectionViewerIndex < 0) return;
     setSelectedImage(collectionViewerImages[(collectionViewerIndex + offset + collectionViewerImages.length) % collectionViewerImages.length]!);
   };
-  const visibleOptimisticItems = activeCollection && imageOrigin === "uploaded" && !collectionSearchActive && !showOnlyFavorites ? optimisticMediaItems.filter(({ collectionKey }) => collectionKey === activeCollection.key) : [];
-  const visibleGenerationPlaceholders = imageOrigin === "generated" ? generationPlaceholders.filter(({ collectionKey }) => collectionKey === activeCollection?.key) : [];
+  const visibleOptimisticItems = activeCollection && !collectionSearchActive && !showOnlyFavorites ? optimisticMediaItems.filter(({ collectionKey }) => collectionKey === activeCollection.key) : [];
+  const visibleGenerationPlaceholders = generationPlaceholders.filter(({ collectionKey }) => collectionKey === activeCollection?.key);
   const visibleImageGroups = groupGalleryImagesByCreatedDate<GalleryGridItem>([...visibleGenerationPlaceholders.flatMap((placeholder) => Array.from({ length: placeholder.count }, (_, index) => ({ kind: "generation", key: `${placeholder.requestKey}:${index}`, createdAt: placeholder.createdAt, requestKey: placeholder.requestKey }) as const)), ...visibleOptimisticItems.map((item) => ({ kind: "optimistic", key: item.clientKey, createdAt: item.createdAt, item }) as const), ...visibleImages.map((image) => ({ kind: "persisted", key: image.key, createdAt: image.createdAt, image }) as const)]);
-  const emptyGridMessage = activeSubject ? `No images are currently identified as ${activeSubject.name}.` : collectionSearchActive || showingSearchResults ? "No images matched this search." : activeCollection ? (imageOrigin === "generated" ? "No generated images yet." : "No uploaded images yet.") : "Your visual memory starts with the first image.";
+  const emptyGridMessage = activeSubject ? `No images are currently identified as ${activeSubject.name}.` : collectionSearchActive || showingSearchResults ? "No images matched this search." : activeCollection ? "No images yet." : "Your visual memory starts with the first image.";
   const contextualView = Boolean(activeCollection || activeSubject || showingSearchResults);
   const normalCollectionView = Boolean(activeCollection && !activeSubject);
-  const rootCollectionSource = rootSearchQuery.trim() ? (rootSearchResults ?? []) : collections;
+  const rootSearchActive = Boolean(rootSearchQuery.trim() || selectedTags.length);
+  const rootCollectionSource = rootSearchActive ? (rootSearchResults ?? []) : collections;
   const visibleCollections = filterByHiddenView(rootCollectionSource, userHiddens, "collection", viewFilters).filter((collection) => (collectionTab === "mine" ? isGalleryCollectionOwned(collection) : !isGalleryCollectionOwned(collection)));
-  const rootSearchLoading = Boolean(rootSearchQuery.trim() && (rootSearching || !rootSearchResults));
+  const rootSearchLoading = Boolean(rootSearchActive && (rootSearching || !rootSearchResults));
   const writableCollections = collections.filter(({ access, role }) => access?.canContribute && role !== "viewer");
   const canManageAnyCollection = collections.some((collection) => collection.access?.canManage && isGalleryCollectionOwned(collection));
   const identityPickerVisibleCollections = filterByHiddenView(collections, userHiddens, "collection", viewFilters);
@@ -2809,6 +2820,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
   const selectableImages = mergeMediaItems(images, mergeMediaItems(collectionSearchResults ?? [], similarImages));
   if (selectedImage && !selectableImages.some(({ key }) => key === selectedImage.key)) selectableImages.push(selectedImage);
   const selectedImages = selectedImageKeys.map((key) => selectableImages.find((image) => image.key === key)).filter((image): image is GalleryImage => Boolean(image));
+  const resourceTagTargets = selectedImageKeys.map((key) => ({ type: "image" as const, key }));
   const allSelectedFavorite = selectedImages.length > 0 && selectedImages.every(({ isFavorite }) => isFavorite);
   const bulkToolbar = selectedImageKeys.length ? (
     <Tabs style={styles.bulkToolbar}>
@@ -3018,6 +3030,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
                 <FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} />
               </Button>
             </View>
+            <TagFilterLane context={contentContext} />
             <Tabs accessibilityRole="tablist" style={styles.collectionTabs}>
               <Button accessibilityRole="tab" accessibilityState={{ selected: collectionTab === "mine" }} onPress={() => setCollectionTab("mine")} size="xs" style={styles.collectionTab} variant={collectionTab === "mine" ? "secondary" : "ghost"}>
                 Collections
@@ -3040,7 +3053,6 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
                           viewRequest.current += 1;
                           setShowingCollectionOverview(false);
                           setLoading(true);
-                          setImageOrigin("uploaded");
                           setQuery("");
                           setSelectedImageKeys([]);
                           setActiveSubject(undefined);
@@ -3061,8 +3073,8 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
                   ))}
               {!loading && !rootSearchLoading && visibleCollections.length === 0 ? (
                 <View style={styles.emptyState}>
-                  <Text style={styles.emptyText}>{rootSearchQuery.trim() ? "No collections matched this search." : collectionTab === "shared" ? "No collections have been shared with you." : "No collections here yet."}</Text>
-                  {!rootSearchQuery.trim() && collectionTab === "mine" && canCreateCollections ? (
+                  <Text style={styles.emptyText}>{rootSearchActive ? "No collections matched this search." : collectionTab === "shared" ? "No collections have been shared with you." : "No collections here yet."}</Text>
+                  {!rootSearchActive && collectionTab === "mine" && canCreateCollections ? (
                     <Button
                       accessibilityLabel="Create collection"
                       contentMode="raw"
@@ -3158,16 +3170,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
                 </Button>
               </View>
             ) : null}
-            {normalCollectionView ? (
-              <Tabs accessibilityLabel="Image origin" accessibilityRole="tablist" style={styles.collectionTabs}>
-                <Button accessibilityRole="tab" accessibilityState={{ selected: imageOrigin === "uploaded" }} onPress={() => showImageOrigin("uploaded")} size="xs" style={styles.collectionTab} variant={imageOrigin === "uploaded" ? "secondary" : "ghost"}>
-                  Uploaded
-                </Button>
-                <Button accessibilityRole="tab" accessibilityState={{ selected: imageOrigin === "generated" }} onPress={() => showImageOrigin("generated")} size="xs" style={styles.collectionTab} variant={imageOrigin === "generated" ? "secondary" : "ghost"}>
-                  Generated
-                </Button>
-              </Tabs>
-            ) : null}
+            {normalCollectionView ? <TagFilterLane context={contentContext} /> : null}
             {bulkToolbar}
             {filterBadges(true)}
             {status ? (
@@ -3184,15 +3187,11 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
             ) : visibleImages.length === 0 && visibleOptimisticItems.length === 0 && visibleGenerationPlaceholders.length === 0 && normalCollectionView ? (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyText}>{showOnlyFavorites ? "No favorite images here." : emptyGridMessage}</Text>
-                {collectionSearchActive || showOnlyFavorites || !canAddImages ? null : imageOrigin === "uploaded" ? (
+                {collectionSearchActive || showOnlyFavorites || !canAddImages ? null : (
                   <Button accessibilityLabel={`Upload images to ${activeCollection.name}`} contentMode="raw" onPress={() => void choosePhotos()} size="md" style={styles.emptyPlusButton} variant="icon">
                     <PlusIcon size="sm" />
                   </Button>
-                ) : !managedCollection && collectionRole !== "viewer" && activeCollection.access.canContribute ? (
-                  <Button accessibilityLabel={`Generate images in ${activeCollection.name}`} contentMode="raw" onPress={() => setGenerationOpen(true)} size="md" style={styles.emptyPlusButton} variant="icon">
-                    <PlusIcon size="sm" />
-                  </Button>
-                ) : null}
+                )}
               </View>
             ) : visibleImages.length === 0 && visibleOptimisticItems.length === 0 && visibleGenerationPlaceholders.length === 0 ? (
               <Text style={styles.emptyText}>{showOnlyFavorites ? "No favorite images here." : emptyGridMessage}</Text>
@@ -3340,6 +3339,8 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
       {activeCollection && !managedCollection && activeCollection.access.canContribute && collectionRole !== "viewer" ? <GalleryImageGeneration collection={activeCollection} key={`generation:${activeCollection.key}`} onClose={() => setGenerationOpen(false)} onGenerate={(input, requestKey) => void generateImages(input, requestKey)} open={generationOpen} /> : null}
 
       <SearchHistorySheet error={status} history={history} loading={historyLoading} onClose={closeSheet} onRemove={(item) => void removeHistoryQuery(item)} onSelect={applyHistoryQuery} open={!sharingOpen && sheetOpen && activeSheet === "searchHistory"} removingQuery={removingHistoryQuery} />
+      <TagFilterSheet context={contentContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />
+      <ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />
 
       <BottomSheet
         footer={
@@ -3870,6 +3871,9 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
                   />
                   <Text style={styles.favoriteSwitchLabel}>Show hidden</Text>
                 </View>
+                <BottomSheetItem onPress={openTagFilters} style={styles.sheetAction} variant="secondary">
+                  Tags
+                </BottomSheetItem>
                 <Button onPress={() => void openSearchHistory(activeCollection ? "gallery" : "root")} size="md" style={styles.searchHistoryOption} variant="secondary">
                   Search history
                 </Button>
@@ -4106,6 +4110,9 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
               <BottomSheetMenu>
                 <Button disabled={busy} loading={busy} onPress={() => void updateSelectedFavorites()} size="md" variant="secondary">
                   {allSelectedFavorite ? "Unfavorite" : "Favorite"}
+                </Button>
+                <Button disabled={busy} onPress={openResourceTags} size="md" variant="secondary">
+                  Tags
                 </Button>
                 <Button disabled={busy || !activeCollection} onPress={() => openTransfer("move")} size="md" variant="secondary">
                   Move to collection

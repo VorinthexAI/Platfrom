@@ -36,7 +36,8 @@ describe('canonical email persistence schemas', () => {
     const thread = emailThreadRecordSchema.parse({ ...base, accountKey: key, providerThreadId: 'thread', subject: 'Subject', summary: 'Summary', intent: 'Reply', priority: 'normal', state: 'needs_action', lastMessageAt: now });
     const exported = exportEmailThreadToArchive(thread, { scopeKey: otherKey, exportKey: 'cmrnlzf660003qc7kmember001', folderKey: key, exportedAt: now });
     expect(exported.key).not.toBe(thread.key);
-    expect(JSON.parse(exported.content)).toMatchObject({ kind: 'mail-thread', data: { providerThreadId: 'thread' } });
+    expect(exported.content).toBe('Summary\n\nReply');
+    expect(exported.content.startsWith('{')).toBe(false);
     expect(() => exportEmailThreadToArchive(thread, { scopeKey: otherKey, exportKey: thread.key, folderKey: key, exportedAt: now })).toThrow('independent');
   });
 });

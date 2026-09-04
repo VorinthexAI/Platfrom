@@ -14,4 +14,5 @@ export async function ensureOrganizationConnectorsCollection(database: Pick<type
   await collection.ensureIndex({ type: 'persistent', fields: ['scopeKey', 'provider', 'status'] });
   await collection.ensureIndex({ type: 'persistent', fields: ['email', 'syncEnabled'] });
   await collection.ensureIndex({ type: 'persistent', fields: ['syncEnabled', 'watchExpiresAt'] });
+  await collection.ensureIndex({ type: 'persistent', fields: ['billingStatus'] });
 }

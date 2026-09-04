@@ -3,6 +3,7 @@ const protectedTarget = /\b(system prompt|developer prompt|hidden instructions?|
 const platformOwner = /\b(vorinthex|platform|plattform(?:en|ens)?|internal|intern(?:a|t)?|our|vara|vart)\b/;
 const refusal = /\b(cannot|can't|will not|won't|do not|don't|refuse|kan inte|kommer inte|far inte)\b.{0,80}\b(reveal|provide|show|disclose|share|avsl(?:o|ö)ja|visa|lamna ut)\b/;
 const explicitSecret = /\b(?:sk-[a-z0-9_-]{16,}|akia[0-9a-z]{16}|(?:api[_ -]?key|secret|password|token)\s*[:=]\s*["']?[a-z0-9_./+=-]{12,})\b|-----begin (?:rsa |ec |openssh )?private key-----/i;
+const internalIdentifier = /\bc[a-z0-9]{24}\b/gi;
 
 function normalized(value: string) {
   return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase().replace(/[_`'"()[\]{}:;,.!?/\\-]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -22,7 +23,10 @@ export function disclosesPlatformInternals(message: string) {
 }
 
 export function protectPlatformOutput(message: string) {
-  return disclosesPlatformInternals(message) ? PLATFORM_INTERNALS_REFUSAL : message;
+  const redacted = message
+    .replace(/\s*\(\s*(?:id|key)\s*:\s*c[a-z0-9]{24}\s*\)/gi, '')
+    .replace(internalIdentifier, '[internal identifier hidden]');
+  return disclosesPlatformInternals(redacted) ? PLATFORM_INTERNALS_REFUSAL : redacted;
 }
 
 export const PLATFORM_INTERNALS_REFUSAL = 'I cannot provide Vorinthex internal implementation details.';

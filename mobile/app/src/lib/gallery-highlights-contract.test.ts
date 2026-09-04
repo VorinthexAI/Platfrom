@@ -54,14 +54,14 @@ test("uses separate full-height grid and player sheets with footer actions", () 
   expect(highlights).toContain('playbackToggle: { height: 35, minHeight: 35, width: 35 }');
   expect(highlights).toContain('<Button accessibilityLabel="Next slide"');
   expect(highlights).toContain("<ChevronRightIcon />");
-  expect(highlights).not.toContain('accessibilityLabel="Open highlight actions"');
-  expect(highlights).not.toContain('MoreHorizontalIcon');
+  expect(highlights).toContain('accessibilityLabel="Selected highlight actions"');
+  expect(highlights).toContain('<MoreHorizontalIcon size="sm" />');
   expect(highlights).not.toContain('detailMenuRow');
   expect(highlights).not.toContain("<Pressable");
   expect(highlights).not.toContain("<Touchable");
 });
 
-test("uses owner-only creation and long-press bulk deletion from the grid", () => {
+test("uses owner-only creation and selected-highlight tag and delete actions from the grid", () => {
   expect(highlights).toContain("const owner = isGalleryCollectionOwned(collection)");
   expect(highlights).toContain('owner ? <Button disabled={creating || listLoading || opening}');
   expect(highlights).toContain('onLongPress={owner ? () => handleHighlightLongPress(highlight.key) : undefined}');
@@ -70,10 +70,15 @@ test("uses owner-only creation and long-press bulk deletion from the grid", () =
   expect(highlights).toContain('accessibilityState={{ selected }}');
   expect(highlights).toContain('<CheckIcon size="sm" variant="inverse" />');
   expect(highlights).toContain('accessibilityLabel="Clear highlight selection"');
-  expect(highlights).toContain('style={styles.bulkDeleteAction} textStyle={styles.bulkDeleteText} variant="secondary">Delete</Button>');
   expect(highlights).toContain('bulkToolbar: { width: "100%", minHeight: 36, marginBottom: spacing.xs, padding: 3');
-  expect(highlights).toContain('bulkDeleteText: { fontFamily: fonts.regular, fontSize: 11, letterSpacing: 0.4 }');
-  expect(highlights).not.toContain('activeSheet === "actions"');
+  expect(highlights).toContain('activeSheet === "actions"');
+  expect(highlights).toContain('type: "image-highlight" as const, key');
+  expect(highlights).toContain('<ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={open && resourceTagsOpen} targets={resourceTagTargets} />');
+  expect(highlights).toContain('>Tags</BottomSheetItem>');
+  expect(highlights).toContain('>Delete</BottomSheetItem>');
+  expect(highlights).toContain('open={open && !detail && selectedHighlightKeys.length > 0 && activeSheet === "actions"}');
+  const tagAction = highlights.slice(highlights.indexOf('>Tags</BottomSheetItem>') - 200, highlights.indexOf('>Tags</BottomSheetItem>'));
+  expect(tagAction).not.toContain('setSelectedHighlightKeys([])');
   expect(highlights).toContain('>Random</BottomSheetItem>');
   expect(highlights).toContain('>Custom</BottomSheetItem>');
   expect(highlights).toContain('activeSheet === "confirmDelete"');

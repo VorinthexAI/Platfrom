@@ -4,7 +4,7 @@ import { buildAuthAccountResponse, guestBootstrapSchema, patchAuthAccountSchema 
 describe('GET /auth/me response contract', () => {
   test('returns safe user and personal Main context without auth secrets', async () => {
     const response = await buildAuthAccountResponse({
-      key: 'user-1', organizationId: 'root', email: 'person@example.com', emailHash: 'secret-hash', countryCode: 'SE',
+      key: 'user-1', organizationId: 'root', currentScopeKey: 'cmrnlzf640000qc7k4p5zem5w', microSparkBalance: 0, email: 'person@example.com', emailHash: 'secret-hash', countryCode: 'SE',
       name: 'Person', profileUrl: null, profileStorageKey: null, alias: 'Nova', alias_slug: null, isVerified: true, isOnboarded: false, guestBootstrapSecretHash: null,
       is_subscribed_to_updates: true, is_subscribed_to_updates_unsubscribe_token_hash: 'unsubscribe-secret',
       is_subscribed_to_updates_unsubscribe_requested_at: null, refreshTokenHash: 'refresh-secret', refreshTokenExpiresAt: null,
@@ -29,7 +29,7 @@ describe('GET /auth/me response contract', () => {
 
   test('returns the account with a null avatar when signed URL projection fails', async () => {
     const user = {
-      key: 'user-1', organizationId: 'root', email: 'person@example.com', emailHash: 'secret-hash', countryCode: 'SE' as const,
+      key: 'user-1', organizationId: 'root', currentScopeKey: 'cmrnlzf640000qc7k4p5zem5w', microSparkBalance: 0, email: 'person@example.com', emailHash: 'secret-hash', countryCode: 'SE' as const,
       name: 'Person', profileUrl: null, profileStorageKey: 'profiles/user-1/avatar.png', alias: 'Nova', alias_slug: null, isVerified: true, isOnboarded: false, guestBootstrapSecretHash: null,
       is_subscribed_to_updates: true, is_subscribed_to_updates_unsubscribe_token_hash: null, is_subscribed_to_updates_unsubscribe_requested_at: null,
       refreshTokenHash: null, refreshTokenExpiresAt: null, refreshFounderMembershipKey: null, refreshFounderMfaVersion: null, lastLoginAt: null,

@@ -111,6 +111,11 @@ test("retains the last populated page throughout the close animation", () => {
   expect(mobileSheet).toContain("page={open ? livePage : pageSnapshotRef.current}");
 });
 
+test("unmounts a controlled sheet after an interrupted close animation", () => {
+  expect(mobileSheet).toContain("if (!show && !openRef.current) setVisible(false)");
+  expect(mobileSheet).not.toContain("if (finished && !show && !openRef.current)");
+});
+
 test("classifies every full-height sheet workflow explicitly", () => {
   expect(core).not.toContain("<BottomSheet");
   expect(core).toContain("<CorePage");

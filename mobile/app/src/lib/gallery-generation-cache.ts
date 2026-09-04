@@ -1,7 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 import type { GalleryGenerationHistoryItem, GalleryImage, GalleryOverview } from "./gallery-client";
-import type { WorkspaceContext } from "./workspace-query-cache";
+import { galleryQueryKeys, type WorkspaceContext } from "./workspace-query-cache";
 
 export type GalleryGenerationPlaceholder = {
   collectionKey: string;
@@ -17,7 +17,6 @@ export function createGalleryGenerationRequestKey(now = Date.now()) {
 }
 
 export const galleryGenerationHistoryQueryKey = (context: WorkspaceContext) => ["gallery", context.organizationKey, context.scopeKey, "generation-history"] as const;
-const generatedGalleryOverviewQueryKey = (context: WorkspaceContext, collectionKey: string) => ["gallery", context.organizationKey, context.scopeKey, "overviews", collectionKey, "generated"] as const;
 
 export function addGalleryGenerationPlaceholder(current: GalleryGenerationPlaceholder[], placeholder: GalleryGenerationPlaceholder) {
   return [placeholder, ...current.filter(({ requestKey }) => requestKey !== placeholder.requestKey)];
@@ -33,7 +32,7 @@ export function prependGeneratedGalleryImages(current: GalleryImage[], generated
 }
 
 export function prependGeneratedGalleryImagesToCache(queryClient: QueryClient, context: WorkspaceContext, collectionKey: string, generated: GalleryImage[]) {
-  queryClient.setQueryData<GalleryOverview>(generatedGalleryOverviewQueryKey(context, collectionKey), (overview) => overview ? {
+  queryClient.setQueryData<GalleryOverview>(galleryQueryKeys.overview(context, collectionKey), (overview) => overview ? {
     ...overview,
     images: prependGeneratedGalleryImages(overview.images, generated),
   } : overview);

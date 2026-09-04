@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { newId } from '@/lib/ids';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
-import { APP_SEARCH_COLLECTION_ADAPTERS, MAX_APP_SEARCH_RETRIEVAL_RESULTS, appSearchInputSchema, appSearchRetrievalSchema, appSearchSumOutputSchema, createAppSearchService, describeAppSearchCollections, projectAppSearchModelResult, projectAppSearchRetrieval } from './service';
+import { APP_SEARCH_COLLECTION_ADAPTERS, MAX_APP_SEARCH_RETRIEVAL_RESULTS, appSearchInputSchema, appSearchModelInputSchema, appSearchRetrievalSchema, appSearchSumOutputSchema, createAppSearchService, describeAppSearchCollections, projectAppSearchModelResult, projectAppSearchRetrieval } from './service';
 
 const organizationKey = newId();
 const scopeKey = newId();
@@ -24,10 +24,13 @@ describe('app search service', () => {
       { query: 'roadmap', collectionSlugs: ['folders'], queryEmbedding: embedding },
       { query: 'roadmap', collectionSlugs: ['folders'], minimumScore: 0.55 },
     ]) expect(() => appSearchInputSchema.parse(invalid)).toThrow();
+    expect(() => appSearchModelInputSchema.parse({ query: 'roadmap', collectionSlugs: ['folders'] })).toThrow();
+    expect(appSearchModelInputSchema.parse({ query: 'roadmap', collectionSlugs: ['folders'], limit: 1 })).toMatchObject({ limit: 1 });
+    expect(appSearchModelInputSchema.parse({ query: 'roadmap', collectionSlugs: ['folders'], limit: 50 })).toMatchObject({ limit: 50 });
   });
 
   test('publishes distinct field, filter, operation, and status metadata for every collection adapter', () => {
-    expect(Object.keys(APP_SEARCH_COLLECTION_ADAPTERS)).toHaveLength(13);
+    expect(Object.keys(APP_SEARCH_COLLECTION_ADAPTERS)).toHaveLength(15);
     for (const [slug, adapter] of Object.entries(APP_SEARCH_COLLECTION_ADAPTERS)) {
       expect(adapter.description.length, `${slug} semantic description`).toBeGreaterThan(30);
       expect(adapter.operations.length, `${slug} operations`).toBeGreaterThan(0);
@@ -43,11 +46,13 @@ describe('app search service', () => {
         expect(metadata.description.length, `${slug}.${field} description`).toBeGreaterThan(20);
         expect(['bytes', 'minutes', 'chapters']).toContain(metadata.unit);
       }
-      if (slug === 'countries') expect(adapter.filters).not.toEqual(expect.arrayContaining(['createdFrom', 'createdTo']));
+      if (slug === 'countries' || slug === 'tag-assignments') expect(adapter.filters).not.toEqual(expect.arrayContaining(['createdFrom', 'createdTo']));
       else expect(adapter.filters, `${slug} creation filters`).toEqual(expect.arrayContaining(['createdFrom', 'createdTo']));
     }
-    expect(APP_SEARCH_COLLECTION_ADAPTERS.trips).toMatchObject({ filters: ['status', 'isFavorite', 'createdFrom', 'createdTo'], statuses: ['planned', 'completed'] });
-    expect(APP_SEARCH_COLLECTION_ADAPTERS.places).toMatchObject({ filters: ['status', 'createdFrom', 'createdTo'], statuses: ['wishlist', 'visited'] });
+    expect(APP_SEARCH_COLLECTION_ADAPTERS.trips).toMatchObject({ filters: ['status', 'isFavorite', 'createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], statuses: ['planned', 'completed'] });
+    expect(APP_SEARCH_COLLECTION_ADAPTERS.places).toMatchObject({ filters: ['status', 'createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], statuses: ['wishlist', 'visited'] });
+    expect(APP_SEARCH_COLLECTION_ADAPTERS.tags).toMatchObject({ operations: ['search', 'list', 'count', 'get'], filters: ['createdFrom', 'createdTo'], fields: ['key', 'name', 'description', 'createdAt', 'updatedAt'] });
+    expect(APP_SEARCH_COLLECTION_ADAPTERS['tag-assignments']).toMatchObject({ operations: ['list', 'count', 'get'], filters: ['tagNames', 'tagKeys', 'tagMatch', 'targetTypes'], fields: ['key', 'tag', 'target'] });
     expect(APP_SEARCH_COLLECTION_ADAPTERS.trips.fields).toEqual(expect.arrayContaining(['status', 'isFavorite', 'createdAt', 'updatedAt']));
     expect(APP_SEARCH_COLLECTION_ADAPTERS.books.statuses).toEqual(['queued', 'researching', 'planning', 'writing', 'narrating', 'finalizing', 'failed', 'ready', 'cancelled']);
     expect(APP_SEARCH_COLLECTION_ADAPTERS.books.fields).toEqual(expect.arrayContaining(['title', 'status', 'isFavorite', 'createdAt', 'updatedAt']));
@@ -102,6 +107,147 @@ describe('app search service', () => {
       expect(result.success).toBe(false);
       if (!result.success) expect(result.error.issues.map((issue) => issue.path.join('.'))).toContain(path);
     }
+    const firstTag = newId(), secondTag = newId();
+    expect(appSearchInputSchema.parse({ operation: 'count', collectionSlugs: ['documents', 'files'], filters: { tagKeys: [firstTag, secondTag] } }).filters).toMatchObject({ tagKeys: [firstTag, secondTag], tagMatch: 'any' });
+    expect(appSearchModelInputSchema.parse({ operation: 'count', collectionSlugs: ['documents'], limit: 10, filters: { tagNames: ['  Ｗork  ', 'Priority'] } }).filters).toEqual({ tagNames: ['Work', 'Priority'], tagMatch: 'any' });
+    expect(appSearchModelInputSchema.parse({ operation: 'list', collectionSlugs: ['documents', 'places'], limit: 10, filters: { tagKeys: [firstTag, secondTag], tagMatch: 'all' } }).filters).toEqual({ tagKeys: [firstTag, secondTag], tagMatch: 'all' });
+    for (const invalid of [
+      { operation: 'count', collectionSlugs: ['books'], filters: { tagMatch: 'all' } },
+      { operation: 'count', collectionSlugs: ['books'], filters: { tagKeys: [firstTag, firstTag] } },
+      { operation: 'count', collectionSlugs: ['books'], filters: { tagNames: ['Work', ' work '] } },
+      { operation: 'count', collectionSlugs: ['books'], filters: { tagNames: ['Work'], tagKeys: [firstTag] } },
+      { query: 'Europe', collectionSlugs: ['countries'], filters: { tagKeys: [firstTag] } },
+      { query: 'Work', collectionSlugs: ['tags'], filters: { tagNames: ['Work'] } },
+      { query: 'mixed', collectionSlugs: ['books', 'countries'], filters: { tagKeys: [firstTag] } },
+      { query: 'relationships', collectionSlugs: ['tag-assignments'] },
+      { operation: 'list', collectionSlugs: ['tag-assignments'], filters: { targetTypes: ['document', 'document'] } },
+    ]) expect(() => appSearchInputSchema.parse(invalid)).toThrow();
+  });
+
+  test('filters authorized tags before limits and exact count/sum, projects tags, redacts keys, and persists filters', async () => {
+    const workTag = newId(), urgentTag = newId();
+    const rows = [
+      { key: newId(), title: 'First', subtitle: '', description: '', status: 'ready', isFavorite: false, isExtending: false, estimatedMinutes: 10, chapterCount: 1, progressPercent: 0, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', score: 0.9 },
+      { key: newId(), title: 'Tagged second', subtitle: '', description: '', status: 'ready', isFavorite: false, isExtending: false, estimatedMinutes: 20, chapterCount: 2, progressPercent: 0, createdAt: '2026-01-02T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z', score: 0.8 },
+      { key: newId(), title: 'Tagged third', subtitle: '', description: '', status: 'ready', isFavorite: false, isExtending: false, estimatedMinutes: 30, chapterCount: 3, progressPercent: 0, createdAt: '2026-01-03T00:00:00.000Z', updatedAt: '2026-01-03T00:00:00.000Z', score: 0.7 },
+    ];
+    const calls: unknown[] = [];
+    const scopeTags = {
+      get: async (_owner: unknown, key: string) => [workTag, urgentTag].includes(key) ? { key } : null,
+      list: async () => [],
+      resolveOwnedByNormalizedNames: async (_owner: unknown, names: string[]) => names.map((name) => name === 'work' ? { key: workTag, normalizedName: name } : { key: urgentTag, normalizedName: name }),
+      searchOwned: async () => [],
+      resolveCandidateKeys: async (_owner: unknown, keys: string[], types: string[], match: string) => { calls.push({ keys, types, match }); return { book: match === 'all' ? [rows[2]!.key] : [rows[1]!.key, rows[2]!.key] }; },
+      resolveEmailThreadKeys: async () => [],
+      rankCandidateKeys: async (_owner: unknown, _type: string, keys: string[]) => keys.map((key) => ({ key, score: rows.find((row) => row.key === key)?.score ?? 0 })),
+      listTargetTags: async (_owner: unknown, targets: Array<{ type: string; key: string }>) => Object.fromEntries(targets.map((target) => [`${target.type}\0${target.key}`, target.key === rows[2]!.key ? [{ key: urgentTag, name: 'Urgent' }, { key: workTag, name: 'Work' }] : [{ key: workTag, name: 'Work' }]])),
+    } as never;
+    const service = createAppSearchService({ scopeTags, executeEmbedding: async () => ({ embedding }), books: { overview: async () => ({ books: rows }), search: async () => ({ books: rows }), detail: async () => ({ book: {}, chapters: [] }) } as never });
+    const list = await service.search({ operation: 'list', collectionSlugs: ['books'], limit: 1, filters: { tagKeys: [workTag] } }, context);
+    expect(list.groups[0]?.results).toEqual([{ ...rows[1], tags: [{ key: workTag, name: 'Work' }] }]);
+    await expect(service.search({ operation: 'count', collectionSlugs: ['books'], filters: { tagKeys: [workTag] } }, context)).resolves.toEqual({ operation: 'count', groups: [{ collectionSlug: 'books', count: 2 }] });
+    await expect(service.search({ operation: 'count', collectionSlugs: ['books'], filters: { tagNames: [' Ｗork '] } }, context)).resolves.toEqual({ operation: 'count', groups: [{ collectionSlug: 'books', count: 2 }] });
+    await expect(service.search({ operation: 'sum', collectionSlugs: ['books'], field: 'estimatedMinutes', filters: { tagKeys: [workTag, urgentTag], tagMatch: 'all' } }, context)).resolves.toEqual({ operation: 'sum', groups: [{ collectionSlug: 'books', field: 'estimatedMinutes', sum: 30, unit: 'minutes', matchedCount: 1, valueCount: 1 }] });
+    const search = await service.search({ query: 'tagged', collectionSlugs: ['books'], limit: 1, filters: { tagKeys: [workTag] }, recordHistory: false }, context);
+    expect(search.groups[0]?.results[0]).toMatchObject({ key: rows[1]!.key, tags: [{ key: workTag, name: 'Work' }] });
+    const compact = projectAppSearchModelResult(search) as any;
+    expect(compact.groups[0].examples[0].tags).toEqual([{ name: 'Work' }]);
+    expect(JSON.stringify(compact)).not.toContain(workTag);
+    const retrieval = projectAppSearchRetrieval({ query: 'tagged', collectionSlugs: ['books'], limit: 1, filters: { tagKeys: [workTag] } }, search)!;
+    expect(retrieval.filters).toEqual({ tagKeys: [workTag], tagMatch: 'any' });
+    expect(JSON.stringify(retrieval.groups)).not.toContain('Work');
+    expect(calls).toEqual(expect.arrayContaining([{ keys: [workTag], types: ['book'], match: 'any' }, { keys: [workTag, urgentTag], types: ['book'], match: 'all' }]));
+  });
+
+  test('lists multiple resource collections requiring every supplied tag key', async () => {
+    const firstTag = newId(), secondTag = newId(), documentKey = newId(), placeKey = newId(), excludedKey = newId();
+    const date = '2026-09-04T00:00:00.000Z';
+    const calls: unknown[] = [];
+    const tags = [{ key: firstTag, name: 'Work' }, { key: secondTag, name: 'Priority' }];
+    const scopeTags = {
+      get: async (_owner: unknown, key: string) => tags.find((tag) => tag.key === key) ?? null,
+      resolveCandidateKeys: async (_owner: unknown, keys: string[], targetTypes: string[], match: string) => {
+        calls.push({ keys, targetTypes, match });
+        return { document: [documentKey], place: [placeKey] };
+      },
+      resolveEmailThreadKeys: async () => [],
+      listTargetTags: async (_owner: unknown, targets: Array<{ type: string; key: string }>) => Object.fromEntries(targets.map((target) => [`${target.type}\0${target.key}`, tags])),
+    } as never;
+    const service = createAppSearchService({
+      scopeTags,
+      executeContent: (async () => ({ documents: [
+        { key: documentKey, scopeKey, name: 'Tagged document', isFavorite: false, createdAt: date, updatedAt: date },
+        { key: excludedKey, scopeKey, name: 'Only one tag', isFavorite: false, createdAt: date, updatedAt: date },
+      ] })) as never,
+      travel: { overview: async () => ({ places: [
+        { key: placeKey, kind: 'place', name: 'Tagged place', summary: 'Matches every tag', countryCode: 'SE', latitude: 59.3, longitude: 18.1, status: 'wishlist', isFavorite: false, createdAt: date },
+        { key: excludedKey, kind: 'place', name: 'Other place', summary: 'Does not match', countryCode: 'SE', latitude: 59.3, longitude: 18.1, status: 'wishlist', isFavorite: false, createdAt: date },
+      ] }) } as never,
+    });
+    const result = await service.search({ operation: 'list', collectionSlugs: ['documents', 'places'], limit: 10, filters: { tagKeys: [firstTag, secondTag], tagMatch: 'all' } }, context);
+    const groups = result.groups as Array<{ collectionSlug: string; results: Array<{ key: string; tags?: Array<{ key: string }> }> }>;
+    expect(groups.map((group) => [group.collectionSlug, group.results.map(({ key }) => key)])).toEqual([['documents', [documentKey]], ['places', [placeKey]]]);
+    expect(groups.every((group) => group.results.every((item) => item.tags?.map(({ key }) => key).sort().join() === [firstTag, secondTag].sort().join()))).toBe(true);
+    expect(calls).toEqual([{ keys: [firstTag, secondTag], targetTypes: ['document', 'place'], match: 'all' }]);
+  });
+
+  test('validates every tag before searching and maps files, collections, and messages to exact target types', async () => {
+    const valid = newId(), missing = newId(); let searches = 0; const types: string[][] = [];
+    const scopeTags = { get: async (_owner: unknown, key: string) => key === valid ? { key } : null, resolveOwnedByNormalizedNames: async () => [], resolveCandidateKeys: async (_owner: unknown, _keys: string[], targetTypes: string[]) => { types.push(targetTypes); return Object.fromEntries(targetTypes.map((type) => [type, []])); }, resolveEmailThreadKeys: async () => [], rankCandidateKeys: async () => [], listTargetTags: async () => ({}) } as never;
+    const service = createAppSearchService({ scopeTags, executeEmbedding: async () => ({ embedding }), executeContent: (async () => { searches += 1; return { folders: [], documents: [] }; }) as never, galleryOverview: (async () => ({ collections: [], images: [] })) as never, email: { overview: async () => ({ accounts: [] }) } as never });
+    await expect(service.search({ query: 'x', collectionSlugs: ['files', 'collections', 'email-messages'], filters: { tagKeys: [missing] }, recordHistory: false }, context)).rejects.toMatchObject({ code: 'CONTENT_NOT_FOUND' });
+    await expect(service.search({ query: 'x', collectionSlugs: ['files'], filters: { tagNames: ['Missing'] }, recordHistory: false }, context)).rejects.toMatchObject({ code: 'CONTENT_NOT_FOUND', message: 'Tag was not found in the authenticated user and scope.' });
+    expect(searches).toBe(0);
+    await service.search({ query: 'x', collectionSlugs: ['files', 'collections', 'email-messages'], filters: { tagKeys: [valid] }, recordHistory: false }, context);
+    expect(types).toEqual([['document', 'image-collection', 'email-thread', 'email-message']]);
+  });
+
+  test('searches, lists, counts, and gets private scope tags while redacting keys from Core', async () => {
+    const first = { key: newId(), scopeKey, userKey, name: 'Work', normalizedName: 'work', description: 'Projects and planning', embedding, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' };
+    const second = { ...first, key: newId(), name: 'Priority', normalizedName: 'priority', description: undefined };
+    const scopeTags = {
+      list: async () => [first, second],
+      get: async (_owner: unknown, key: string) => key === first.key ? first : null,
+      searchOwned: async () => [{ ...first, score: 0.91 }],
+      listTargetTags: async () => ({}),
+    } as never;
+    const service = createAppSearchService({ scopeTags, executeEmbedding: async () => ({ embedding }) });
+    const searched = await service.search({ query: 'planning', collectionSlugs: ['tags'], limit: 1, recordHistory: false }, context);
+    expect(searched.groups).toEqual([{ collectionSlug: 'tags', results: [{ key: first.key, name: 'Work', description: 'Projects and planning', createdAt: first.createdAt, updatedAt: first.updatedAt, score: 0.91 }] }]);
+    await expect(service.search({ operation: 'list', collectionSlugs: ['tags'], limit: 1 }, context)).resolves.toMatchObject({ groups: [{ results: [{ key: first.key, name: 'Work' }] }] });
+    await expect(service.search({ operation: 'count', collectionSlugs: ['tags'] }, context)).resolves.toEqual({ operation: 'count', groups: [{ collectionSlug: 'tags', count: 2 }] });
+    await expect(service.search({ operation: 'get', collectionSlugs: ['tags'], key: first.key }, context)).resolves.toMatchObject({ groups: [{ results: [{ key: first.key, name: 'Work' }] }] });
+    const compact = projectAppSearchModelResult(searched);
+    expect(compact).toMatchObject({ groups: [{ examples: [{ label: 'Work', description: 'Projects and planning' }] }] });
+    expect(JSON.stringify(compact)).not.toContain(first.key);
+    expect(projectAppSearchRetrieval({ query: 'planning', collectionSlugs: ['tags'], limit: 1, recordHistory: false }, searched)).toMatchObject({ groups: [{ collectionSlug: 'tags', results: [{ key: first.key, label: 'Work' }] }] });
+  });
+
+  test('lists, counts, and gets recognizable tag assignments while stripping every key from Core', async () => {
+    const workKey = newId(), priorityKey = newId(), assignmentKey = newId(), targetKey = newId();
+    const assignment = { key: assignmentKey, tag: { key: workKey, name: 'Work' }, target: { type: 'document' as const, key: targetKey, label: 'Research Note' } };
+    const calls: unknown[] = [];
+    const scopeTags = {
+      resolveOwnedByNormalizedNames: async (_owner: unknown, names: string[]) => names.filter((name) => name === 'work' || name === 'priority').map((name) => ({ key: name === 'work' ? workKey : priorityKey, normalizedName: name })),
+      listAssignments: async (_owner: unknown, query: unknown) => { calls.push(['list', query]); return [assignment]; },
+      countAssignments: async (_owner: unknown, query: unknown) => { calls.push(['count', query]); return 1; },
+      getAssignment: async (_owner: unknown, key: string) => key === assignmentKey ? assignment : null,
+    } as never;
+    const service = createAppSearchService({ scopeTags });
+    const input = { operation: 'list' as const, collectionSlugs: ['tag-assignments'] as const, limit: 10, filters: { tagNames: [' Work ', 'Priority'], tagMatch: 'all' as const, targetTypes: ['document'] as const } };
+    const listed = await service.search(input, context);
+    expect(listed).toEqual({ operation: 'list', groups: [{ collectionSlug: 'tag-assignments', results: [assignment] }] });
+    await expect(service.search({ operation: 'count', collectionSlugs: ['tag-assignments'], filters: { tagNames: ['Work', 'Priority'], tagMatch: 'all', targetTypes: ['document'] } }, context)).resolves.toEqual({ operation: 'count', groups: [{ collectionSlug: 'tag-assignments', count: 1 }] });
+    await expect(service.search({ operation: 'get', collectionSlugs: ['tag-assignments'], key: assignmentKey }, context)).resolves.toEqual({ operation: 'get', groups: [{ collectionSlug: 'tag-assignments', results: [assignment] }] });
+    await expect(service.search({ operation: 'list', collectionSlugs: ['tag-assignments'], filters: { tagNames: ['Missing'] } }, context)).rejects.toMatchObject({ code: 'CONTENT_NOT_FOUND' });
+    expect(calls).toEqual([
+      ['list', { tagKeys: [workKey, priorityKey], tagMatch: 'all', targetTypes: ['document'], limit: 10 }],
+      ['count', { tagKeys: [workKey, priorityKey], tagMatch: 'all', targetTypes: ['document'] }],
+    ]);
+    const compact = projectAppSearchModelResult(listed);
+    expect(compact).toMatchObject({ groups: [{ examples: [{ tag: 'Work', targetType: 'document', targetLabel: 'Research Note' }] }] });
+    expect(JSON.stringify(compact)).not.toMatch(new RegExp(`${assignmentKey}|${workKey}|${targetKey}`));
+    expect(projectAppSearchRetrieval(input, listed)).toBeNull();
   });
 
   test('lists and counts canonical resources without creating an embedding or search history', async () => {
@@ -454,6 +600,15 @@ describe('app search service', () => {
     });
   });
 
+  test('does not let one requested image fan out into multiple visible collection retrievals', () => {
+    const date = '2026-08-24T00:00:00.000Z';
+    const collections = Array.from({ length: 9 }, (_, index) => ({ key: newId(), name: `Collection ${index + 1}` }));
+    const images = collections.map((collection, index) => ({ key: newId(), filename: `${index}.jpg`, caption: `Image ${index}`, imageCaptionKey: null, mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, city: null, country: null, countryCode: null, latitude: null, longitude: null, locationSource: null, origin: 'uploaded' as const, mutationPolicy: 'user' as const, isFavorite: false, createdAt: date, updatedAt: date, url: `https://example.test/${index}.jpg`, score: 0.9, collections: [collection] }));
+    const retrieval = projectAppSearchRetrieval({ query: 'these images', collectionSlugs: ['images'], limit: 1 }, { query: 'these images', groups: [{ collectionSlug: 'images', results: images }] })!;
+    expect(retrieval.limit).toBe(1);
+    expect(retrieval.groups).toEqual([{ collectionSlug: 'collections', results: [{ key: collections[0]!.key, label: 'Collection 1' }] }]);
+  });
+
   test('projects nested Archive matches to one containing-folder pill and keeps root resources direct', () => {
     const folderKey = newId(); const date = '2026-08-24T00:00:00.000Z';
     const nestedDocument = { key: newId(), scopeKey, folderKey, folder: { key: folderKey, name: 'Project Atlas' }, name: 'Roadmap', isFavorite: false, createdAt: date, updatedAt: date, score: 0.9 };
@@ -497,7 +652,7 @@ describe('app search service', () => {
   test('bounds persisted results and normalizes unsafe labels without failing a successful search', () => {
     const date = '2026-08-24T00:00:00.000Z';
     const results = Array.from({ length: 50 }, (_, index) => ({ key: newId(), scopeKey, name: index === 0 ? '   ' : 'x'.repeat(300), isFavorite: false, createdAt: date, updatedAt: date, score: 0.8 }));
-    const retrieval = projectAppSearchRetrieval({ query: 'many', collectionSlugs: ['folders', 'documents', 'files'] }, { query: 'many', groups: [
+    const retrieval = projectAppSearchRetrieval({ query: 'many', collectionSlugs: ['folders', 'documents', 'files'], limit: 50 }, { query: 'many', groups: [
       { collectionSlug: 'folders', results }, { collectionSlug: 'documents', results }, { collectionSlug: 'files', results },
     ] })!;
     expect(retrieval.groups.flatMap(({ results: items }) => items)).toHaveLength(MAX_APP_SEARCH_RETRIEVAL_RESULTS);
@@ -567,7 +722,7 @@ describe('app search service', () => {
     expect(events.slice(0, 3).sort()).toEqual(['content:start', 'email:start', 'gallery:start']);
     expect(events.at(-1)).toBe('history');
     expect(JSON.stringify(result)).not.toMatch(/embedding|organizationKey|initialSyncCompleted/);
-    expect(result.groups[2]).toEqual({ collectionSlug: 'inboxes', results: [{ key: expect.any(String), connectorKey: expect.any(String), provider: 'gmail', email: 'work@example.com', name: 'Work', isFavorite: false, status: 'active', syncEnabled: true, syncStatus: 'idle', createdAt: '2026-08-24T00:00:00.000Z', updatedAt: '2026-08-24T00:00:00.000Z', score: 0.75 }] });
+    expect(result.groups[2]).toEqual({ collectionSlug: 'inboxes', results: [{ key: expect.any(String), connectorKey: expect.any(String), provider: 'gmail', email: 'work@example.com', name: 'Work', isFavorite: false, status: 'active', syncEnabled: true, syncStatus: 'idle', createdAt: '2026-08-24T00:00:00.000Z', updatedAt: '2026-08-24T00:00:00.000Z', score: 0.75, tags: [] }] });
     expect(result.groups[1]).toMatchObject({ collectionSlug: 'images', results: [{ origin: 'generated' }] });
   });
 
@@ -683,7 +838,7 @@ describe('app search service', () => {
     });
     const result = await service.search({ query: 'decisions', collectionSlugs: ['books'], recordHistory: false }, context);
     expect(received).toEqual({ input: { organizationKey, scopeKey, query: 'decisions', minimumScore: -1, limit: 10 }, actorKey: userKey, options: { queryEmbedding: embedding } });
-    expect(result.groups).toEqual([{ collectionSlug: 'books', results: [{ key: bookKey, title: 'Clear decisions', subtitle: 'A practical guide', description: 'Make better decisions.', status: 'ready', isFavorite: false, isExtending: false, estimatedMinutes: 30, chapterCount: 4, progressPercent: 25, createdAt: date, updatedAt: date, score: 0.88 }] }]);
+    expect(result.groups).toEqual([{ collectionSlug: 'books', results: [{ key: bookKey, title: 'Clear decisions', subtitle: 'A practical guide', description: 'Make better decisions.', status: 'ready', isFavorite: false, isExtending: false, estimatedMinutes: 30, chapterCount: 4, progressPercent: 25, createdAt: date, updatedAt: date, score: 0.88, tags: [] }] }]);
   });
 
   test('searches authorized Gallery collections with trusted membership and ownership metadata', async () => {

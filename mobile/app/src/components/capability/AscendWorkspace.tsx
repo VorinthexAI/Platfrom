@@ -3,7 +3,7 @@ import { randomUUID } from "expo-crypto";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   Animated,
@@ -49,7 +49,10 @@ import {
 } from "@vorinthex/shared/ui/icons-mobile";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
+import { ResourceTagsSheet } from "@/components/ResourceTagsSheet";
 import { SearchHistorySheet } from "@/components/SearchHistorySheet";
+import { TagFilterLane } from "@/components/TagFilterLane";
+import { TagFilterSheet } from "@/components/TagFilterSheet";
 import { BookSharing } from "@/components/capability/BookSharing";
 import { EmailAttachmentPicker, type EmailAttachmentLabels } from "@/components/capability/EmailAttachmentPicker";
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
@@ -82,6 +85,7 @@ import {
 import { deleteContentSearchHistory, getContentContext, type ContentSearchHistoryItem } from "@/lib/content-client";
 import { attachmentIdentity } from "@/lib/email-attachment-picker";
 import type { EmailAttachmentRef } from "@/lib/email-client";
+import { tagFilterContextKey } from "@/lib/tag-client";
 import {
   addCachedBook,
   ascendQueryKeys,
@@ -98,6 +102,7 @@ import {
   userSearchHistoryQueryKey,
 } from "@/lib/user-search-history-cache";
 import { useAuthStore } from "@/state/auth";
+import { EMPTY_SELECTED_TAGS, useUiStore } from "@/state/ui";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 
 const COLUMNS = 3;
@@ -231,8 +236,11 @@ function ChapterReading({ chapter }: { chapter?: BookChapter }) {
 export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initialBookKey?: string; initialSearchQuery?: string } = {}) {
   const queryClient = useQueryClient();
   const playback = useBookPlayback();
-  const context = getBooksContext();
-  const contentContext = getContentContext();
+  const context = useMemo(() => getBooksContext(), []);
+  const contentContext = useMemo(() => getContentContext(), []);
+  const tagContextKey = tagFilterContextKey(contentContext);
+  const selectedTags = useUiStore((state) => state.selectedTagsByContext[tagContextKey] ?? EMPTY_SELECTED_TAGS);
+  const selectedTagKeys = useMemo(() => selectedTags.map(({ key }) => key).sort(), [selectedTags]);
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const { showToast } = useToast();
@@ -263,6 +271,8 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
   const [query, setQuery] = useState(() => initialSearchQuery?.slice(0, 500) ?? "");
   const [searchTerm, setSearchTerm] = useState("");
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
+  const [tagFilterOpen, setTagFilterOpen] = useState(false);
+  const [resourceTagsOpen, setResourceTagsOpen] = useState(false);
   const [rootSearchFocusable, setRootSearchFocusable] = useState(true);
   const [history, setHistory] = useState<ContentSearchHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -298,9 +308,9 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
     refetchInterval: (query) => query.state.data?.books.some(({ status }) => ACTIVE_STATUSES.includes(status)) ? 2_000 : false,
   });
   const searchQuery = useQuery({
-    queryKey: ascendQueryKeys.search(context, searchTerm),
-    queryFn: ({ signal }) => searchBooks(searchTerm, signal, true),
-    enabled: Boolean(searchTerm),
+    queryKey: ascendQueryKeys.search(context, searchTerm, selectedTagKeys),
+    queryFn: ({ signal }) => searchBooks(searchTerm, signal, Boolean(searchTerm), selectedTagKeys),
+    enabled: !bookPageOpen && Boolean(searchTerm || selectedTagKeys.length),
   });
   const pendingQuery = useQuery<PendingRequest[]>({
     enabled: false,
@@ -334,7 +344,7 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
   const allSelectedFavorite = selectionActive && selectedBooks.every(({ isFavorite }) => isFavorite);
   const detail = detailQuery.data;
   const normalizedQuery = query.trim();
-  const searchActive = Boolean(normalizedQuery);
+  const searchActive = Boolean(normalizedQuery || selectedTagKeys.length);
   const searchPending = searchActive && (searchTerm !== normalizedQuery || searchQuery.isPending || searchQuery.isFetching);
   const searchError = searchTerm === normalizedQuery ? searchQuery.error : undefined;
   const filteredBooks = (searchActive ? searchTerm === normalizedQuery ? searchQuery.data ?? [] : [] : books).filter((book) => !showOnlyFavorites || book.isFavorite);
@@ -349,6 +359,7 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
   const dirty = JSON.stringify(draft) !== JSON.stringify(INITIAL_DRAFT);
   const creating = createTopicOpen || createTopicCustomOpen || createGoalOpen || createGoalCustomOpen || createDetailsOpen;
   const contextSelection: EmailAttachmentRef[] = draft.archiveDocumentKeys.map((key) => ({ type: "document", key }));
+  const resourceTagTargets = selectedBookKeys.map((key) => ({ type: "book" as const, key }));
   const contextCardSize = Math.floor(((contextGridWidth || width - 40) - 18) / 4);
 
   useEffect(() => () => {
@@ -561,6 +572,16 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
   function open(next: LibrarySheet) {
     setSheet(next);
     setSheetOpen(true);
+  }
+  function openTagFilters() {
+    setSheetOpen(false);
+    setSheet(undefined);
+    requestAnimationFrame(() => setTagFilterOpen(true));
+  }
+  function openSelectedBookTags() {
+    setSheetOpen(false);
+    setSheet(undefined);
+    requestAnimationFrame(() => setResourceTagsOpen(true));
   }
   function closeCreationSheets() {
     setContextPickerOpen(false);
@@ -884,11 +905,11 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
     try {
       if (bookPageOpen) {
         await detailQuery.refetch();
-      } else if (normalizedQuery) {
+      } else if (normalizedQuery || selectedTagKeys.length) {
         setSearchTerm(normalizedQuery);
         await queryClient.fetchQuery({
-          queryKey: ascendQueryKeys.search(context, normalizedQuery),
-          queryFn: ({ signal }) => searchBooks(normalizedQuery, signal, false),
+          queryKey: ascendQueryKeys.search(context, normalizedQuery, selectedTagKeys),
+          queryFn: ({ signal }) => searchBooks(normalizedQuery, signal, false, selectedTagKeys),
           staleTime: 0,
         });
       } else {
@@ -1059,8 +1080,9 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
       ) : <>
         <View style={styles.searchRow}>
           <View style={styles.rootSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search audio books" editable={rootSearchFocusable} focusable={rootSearchFocusable} onChangeText={setQuery} placeholder="Search..." ref={rootSearchInputRef} style={styles.rootSearchInput} value={query} />{query ? <Button accessibilityLabel="Clear audio book search" contentMode="raw" iconOnly onPress={() => setQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}</View>
-          <Button accessibilityLabel="Filter audio books" contentMode="raw" onPress={() => open("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={showOnlyFavorites ? "accent" : "default"} /></Button>
+          <Button accessibilityLabel="Filter audio books" contentMode="raw" onPress={() => open("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={showOnlyFavorites || selectedTags.length ? "accent" : "default"} /></Button>
         </View>
+        <TagFilterLane context={contentContext} />
         {selectionActive ? <Tabs accessibilityLabel="Selected audio book toolbar" style={styles.bulkToolbar}>
           <View style={styles.bulkToolbarSelection}>
             <Button accessibilityLabel="Clear selection" contentMode="raw" disabled={bulkLoading} onPress={() => setSelectedBookKeys([])} size="xs" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button>
@@ -1069,7 +1091,7 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
           <Button accessibilityLabel="Selected audio book actions" contentMode="raw" disabled={bulkLoading} onPress={() => open("bulkActions")} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
         </Tabs> : null}
         <ScrollView alwaysBounceVertical contentContainerStyle={styles.library} refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />} showsVerticalScrollIndicator={false}>
-          {overviewQuery.isPending || searchPending ? <View accessibilityLabel={searchActive ? "Searching audio books" : "Loading audio books"} accessibilityRole="progressbar" onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} style={styles.grid}>{Array.from({ length: COLUMNS }, (_, index) => <Skeleton key={index} style={{ width: cardWidth, height: (cardWidth * 16) / 9, borderRadius: radii.sm }} />)}</View> : overviewQuery.error || searchError ? <View style={styles.state}><Text style={styles.stateTitle}>{searchError ? "Audio book search failed." : "Audio books could not be loaded."}</Text><Button onPress={() => void (searchError ? searchQuery.refetch() : overviewQuery.refetch())} size="sm" variant="secondary">Retry</Button></View> : (
+          {(!searchActive && overviewQuery.isPending) || searchPending ? <View accessibilityLabel={searchActive ? "Searching audio books" : "Loading audio books"} accessibilityRole="progressbar" onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} style={styles.grid}>{Array.from({ length: COLUMNS }, (_, index) => <Skeleton key={index} style={{ width: cardWidth, height: (cardWidth * 16) / 9, borderRadius: radii.sm }} />)}</View> : (!searchActive && overviewQuery.error) || searchError ? <View style={styles.state}><Text style={styles.stateTitle}>{searchError ? "Audio book search failed." : "Audio books could not be loaded."}</Text><Button onPress={() => void (searchError ? searchQuery.refetch() : overviewQuery.refetch())} size="sm" variant="secondary">Retry</Button></View> : (
             <View onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} style={styles.grid}>
               {filteredBooks.map((book, index) => {
                 if (book.key.startsWith("pending-") || ["queued", "researching", "planning"].includes(book.status)) return <Skeleton accessibilityLabel="Preparing audio book metadata" accessibilityRole="progressbar" key={book.key} style={{ width: cardWidth, height: (cardWidth * 16) / 9, borderRadius: radii.sm }} />;
@@ -1078,7 +1100,7 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
               })}
             </View>
           )}
-          {!overviewQuery.isPending && !searchPending && !overviewQuery.error && !searchError && filteredBooks.length === 0 ? <View style={[styles.state, searchActive && styles.searchEmptyState]}><Text style={styles.stateTitle}>{searchActive ? "No audio books matched this search." : showOnlyFavorites ? "No favorite audio books." : books.length ? "No audio books match this view." : "No audio books yet."}</Text>{!books.length && !searchActive && !showOnlyFavorites ? <Button accessibilityLabel="Create audio book" contentMode="raw" onPress={beginCreate} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : null}
+          {(!overviewQuery.isPending || searchActive) && !searchPending && (!overviewQuery.error || searchActive) && !searchError && filteredBooks.length === 0 ? <View style={[styles.state, searchActive && styles.searchEmptyState]}><Text style={styles.stateTitle}>{searchActive ? "No audio books matched these filters." : showOnlyFavorites ? "No favorite audio books." : books.length ? "No audio books match this view." : "No audio books yet."}</Text>{!books.length && !searchActive && !showOnlyFavorites ? <Button accessibilityLabel="Create audio book" contentMode="raw" onPress={beginCreate} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : null}
         </ScrollView>
       </>}
       <CoreComposer
@@ -1159,6 +1181,7 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
               <Switch accessibilityLabel="Show only favorite audio books" checked={showOnlyFavorites} onCheckedChange={(checked) => { setShowOnlyFavorites(checked); setSheetOpen(false); setSheet(undefined); }} />
               <Text style={styles.favoriteSwitchLabel}>Favorites</Text>
             </View>
+            <Button onPress={openTagFilters} size="md" style={styles.searchHistoryOption} variant="secondary">Tags</Button>
             <Button onPress={() => void openSearchHistory()} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button>
           </View>
         ) : null}
@@ -1187,6 +1210,7 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
         ) : null}
         {sheet === "bulkActions" ? <BottomSheetMenu>
           <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void updateBooksFavorite(selectedBooks, !allSelectedFavorite, true)} size="md" variant="secondary">{allSelectedFavorite ? "Unfavorite" : "Favorite"}</Button>
+          <Button disabled={bulkLoading} onPress={openSelectedBookTags} size="md" variant="secondary">Tags</Button>
           <Button disabled={bulkLoading} onPress={() => setSheet("bulkDelete")} size="md" variant="secondary">Delete</Button>
         </BottomSheetMenu> : null}
         {sheet === "bulkDelete" ? <View style={styles.compactSheetActions}>
@@ -1221,6 +1245,9 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
         {sheet === "chapterRead" ? <ChapterReading chapter={readingChapter} /> : null}
         {sheet === "bookSummary" ? <View style={styles.summarySheetContent}><View style={styles.chapterSummaryPanel}><Text selectable style={styles.chapterSummaryText}>{detail?.book.description || "A description is unavailable for this audio book."}</Text></View></View> : null}
       </BottomSheet>
+
+      <TagFilterSheet context={contentContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />
+      <ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />
 
       <BottomSheet
         dismissible={!topicSuggestionsMutation.isPending}

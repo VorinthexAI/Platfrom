@@ -24,7 +24,7 @@ test("creates distinct stable request keys for concurrent submissions", () => {
 test("prepends and deduplicates authoritative generated images in state and cache", () => {
   const client = new QueryClient();
   const old = image("old"), generated = image("generated");
-  const overviewKey = ["gallery", "organization", "scope", "overviews", "collection", "generated"];
+  const overviewKey = ["gallery", "organization", "scope", "overviews", "collection"];
   client.setQueryData(overviewKey, { collections: [], images: [old, generated], nextCursor: null, canCreateCollections: true });
   prependGeneratedGalleryImagesToCache(client, context, "collection", [generated]);
   expect(prependGeneratedGalleryImages([old, generated], [generated]).map(({ key }) => key)).toEqual(["generated", "old"]);

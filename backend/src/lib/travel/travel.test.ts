@@ -1071,7 +1071,7 @@ describe('travel repository', () => {
     const repository = createTravelRepository(database, async (value, operation) => { collections = value; return operation(database); });
     const context = { organizationKey: 'organization', scopeKey, userKey: key };
     await expect(repository.deletePlace(context, key, timestamp)).resolves.toEqual({ placeKey: key });
-    expect(collections).toEqual({ read: ['userOrganizations', 'scopes', 'scopeMembers', 'places'], write: ['places', 'placeHeroMedia', 'placeReferences', 'tripPlaces', 'trips', 'storageDeletionJobs'] });
+    expect(collections).toEqual({ read: ['userOrganizations', 'scopes', 'scopeMembers', 'places'], write: ['places', 'placeHeroMedia', 'placeReferences', 'tripPlaces', 'trips', 'storageDeletionJobs', 'tagAssignments'] });
     expect(calls[0]!.query).toContain('place.scopeKey == @scopeKey && place.userKey == @userKey && place.saved == true');
     expect(calls.some(({ query }) => query.includes('REMOVE reference IN placeReferences'))).toBe(true);
     expect(calls.some(({ query }) => query.includes('REMOVE media IN placeHeroMedia'))).toBe(true);

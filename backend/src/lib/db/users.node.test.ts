@@ -4,6 +4,7 @@ import { countryCodeSchema, initializeUserNameIfMissing, userSchema } from './us
 const baseUser = {
   key: 'usr_test',
   organizationId: 'org_root',
+  currentScopeKey: 'cm1234567890123456789012345',
   email: 'user@example.com',
   emailHash: 'a'.repeat(64),
   createdAt: '2026-07-08T00:00:00.000Z',
@@ -11,6 +12,17 @@ const baseUser = {
 };
 
 describe('user node schema', () => {
+  test('requires a current scope key', () => {
+    expect(() => userSchema.parse({ ...baseUser, currentScopeKey: undefined })).toThrow();
+  });
+
+  test('stores balances as safe integer microSparks', () => {
+    expect(userSchema.parse(baseUser).microSparkBalance).toBe(0);
+    expect(() => userSchema.parse({ ...baseUser, microSparkBalance: 0.5 })).toThrow();
+    expect(() => userSchema.parse({ ...baseUser, microSparkBalance: -1 })).toThrow();
+    expect(() => userSchema.parse({ ...baseUser, microSparkBalance: Number.MAX_SAFE_INTEGER + 1 })).toThrow();
+  });
+
   test('accepts ISO alpha-2 country codes and rejects arbitrary values', () => {
     expect(countryCodeSchema.parse('SE')).toBe('SE');
     expect(() => countryCodeSchema.parse('SWE')).toThrow();
@@ -62,13 +74,16 @@ describe('user node schema', () => {
 
   test('hard deletion atomically removes user generation history', async () => {
     const source = await Bun.file(new URL('./users.node.ts', import.meta.url)).text();
-    expect(source).toContain("withTransaction(['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages', 'ticketVotes', 'tickets', 'events', 'storageDeletionJobs']");
+    expect(source).toContain("withTransaction(['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages', 'ticketVotes', 'tickets', 'events', 'sparkTransactions', 'storageDeletionJobs', 'tags', 'tagAssignments']");
+    expect(source).toContain('FOR tag IN tags FILTER tag.userKey == @userKey REMOVE tag IN tags');
+    expect(source.indexOf('REMOVE assignment IN tagAssignments')).toBeLessThan(source.indexOf('REMOVE tag IN tags'));
     expect(source).toContain('FOR generation IN userGenerations FILTER generation.userKey == @userKey REMOVE generation IN userGenerations');
     expect(source).toContain('FOR ticket IN tickets FILTER ticket.userKey == @userKey REMOVE ticket IN tickets');
     expect(source).toContain('FILTER vote.userKey == @userKey || vote.ticketKey IN authoredTicketKeys');
     expect(source).toContain('FILTER ticket._key IN MINUS(votedTicketKeys, authoredTicketKeys) && ticket.type == "feedback"');
     expect(source).toContain('upvotes = SUM(vote.vote == "up"');
     expect(source).toContain('FOR event IN events FILTER event.userId == @userKey REMOVE event IN events');
+    expect(source).toContain('FOR item IN sparkTransactions FILTER item.userKey == @userKey REMOVE item IN sparkTransactions');
     expect(source).toContain('IS_STRING(user.profileStorageKey) UPSERT { storageKey: user.profileStorageKey }');
     expect(source.indexOf('REMOVE generation IN userGenerations')).toBeLessThan(source.indexOf('REMOVE @userKey IN users'));
     expect(source.indexOf('REMOVE vote IN ticketVotes')).toBeLessThan(source.indexOf('REMOVE ticket IN tickets'));

@@ -22,7 +22,7 @@ import type { AgentRuntimeDependencies } from '@/lib/ai/agents';
 import { AGENT_TOOL_DEFINITIONS } from './agent-tool-definitions';
 import type { AgentToolDependencies } from './agent-tool-definitions';
 import { webSearchTool, type WebSearchToolDependencies } from './web-search';
-import { observeToolExecution } from '@/lib/ai/events/runtime';
+import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
 import { APP_KEYS } from '@/lib/apps/registry';
 import type { ToolEventRecorder } from '@/lib/ai/events/service';
 
@@ -43,6 +43,13 @@ export const toolInputSchemas: Record<string, z.ZodTypeAny> = Object.fromEntries
 );
 
 export const TOOL_DEFINITIONS = PUBLIC_TOOL_DEFINITIONS.map(({ providerDefinition }) => providerDefinition);
+
+/** Authoritative input-aware execution-effect classification for model-visible tools. */
+export function isToolReadOnly(name: string, rawInput: unknown) {
+  const toolName = modelToolNameSchema.parse(name);
+  const definition = publicToolDefinitionsByName.get(toolName)!;
+  return definition.isReadOnly(rawInput);
+}
 export interface ToolDependencies extends RouterDependencies, DocumentParseDependencies, Pick<ImageCaptionToolDependencies, 'executeImageCaption'>, Pick<ImageCreateVisualIdentityToolDependencies, 'executeDescription'>, Pick<WebSearchToolDependencies, 'executeSearch'> {
   signal?: AbortSignal;
   organizationKey?: string;
@@ -63,25 +70,26 @@ export interface ToolDependencies extends RouterDependencies, DocumentParseDepen
   appSpeechService?: AppSpeechService;
   accountProfileService?: WorkspaceToolDependencies['accountProfile'];
   ticketService?: WorkspaceToolDependencies['tickets'];
+  scopeTagService?: WorkspaceToolDependencies['scopeTags'];
   conversationService?: AgentToolDependencies['conversations'];
   currentConversationKey?: string;
   currentReferenceImageKeys?: string[];
   agentDependencies?: AgentRuntimeDependencies;
   recordEvent?: ToolEventRecorder;
+  billing?: ToolBillingDependencies;
 }
 
 /** Executes one of the capabilities exposed by the unified tool registry. */
-export function runTool(name: 'image.caption', skill: string, rawInput: ImageCaptionInput, dependencies?: ToolDependencies): Promise<ImageCaptionOutput>;
+export function runTool(name: 'image.caption', skill: string, rawInput: ImageCaptionInput, dependencies: ToolDependencies & { contentContext: ToolContext }): Promise<ImageCaptionOutput>;
 export function runTool(name: 'image.search', skill: string, rawInput: ImageSearchInput, dependencies: ToolDependencies & { contentContext: ToolContext }): ReturnType<typeof galleryOperations.search>;
 export function runTool<Name extends ContentToolName>(name: Name, skill: string, rawInput: ContentToolInput<Name>, dependencies: ToolDependencies & { contentContext: ToolContext }): Promise<ContentToolOutput<Name>>;
-export function runTool(name: string, skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<unknown>;
-export async function runTool(name: string, skill: string, rawInput: unknown, dependencies: ToolDependencies = {}): Promise<unknown> {
+export function runTool(name: string, skill: string, rawInput: unknown, dependencies: ToolDependencies & { contentContext: ToolContext }): Promise<unknown>;
+export async function runTool(name: string, skill: string, rawInput: unknown, dependencies: ToolDependencies & { contentContext: ToolContext }): Promise<unknown> {
   const toolName = modelToolNameSchema.parse(name);
   toolInputSchemas[toolName]!.parse(rawInput);
   return observeToolExecution(toolName, dependencies.contentContext, async () => {
     if (toolName === imageCaptionTool.name) return imageCaptionTool.execute(rawInput, dependencies);
     if (toolName === imageCreateVisualIdentityTool.name) return imageCreateVisualIdentityTool.execute(rawInput, dependencies);
-    if (!dependencies.contentContext) throw new Error(`Tool ${toolName} requires contentContext.`);
     if (toolName === webSearchTool.name) return webSearchTool.execute(rawInput, {
       organizationKey: dependencies.contentContext.organizationKey,
       executeSearch: dependencies.executeSearch,
@@ -111,6 +119,7 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
       appSpeech: dependencies.appSpeechService,
       accountProfile: dependencies.accountProfileService,
       tickets: dependencies.ticketService,
+      scopeTags: dependencies.scopeTagService,
       signal: dependencies.signal,
       timeoutMs: dependencies.timeoutMs,
       content: {
@@ -132,7 +141,7 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
         ingestion: { ...dependencies, ...dependencies.contentDependencies?.ingestion },
       },
     });
-  }, { recorder: dependencies.recordEvent });
+  }, { recorder: dependencies.recordEvent, idempotencyKey: dependencies.requestKey, input: rawInput, ...dependencies.billing });
 }
 
 /** Executes a system-only tool without exposing it to Core or model providers. */
@@ -140,7 +149,7 @@ export async function runTrustedTool(name: TrustedEmailToolName, rawInput: unkno
   const definition = trustedToolDefinitionsByName.get(name);
   if (!definition) throw new Error(`Unknown trusted tool ${name}`);
   definition.inputSchema.parse(rawInput);
-  return observeToolExecution(name, dependencies.context, () => (definition.execute as (input: unknown, dependencies: TrustedEmailToolDependencies) => Promise<unknown>)(rawInput, dependencies), { appKey: APP_KEYS.SIGNAL, recorder: dependencies.recordEvent });
+  return observeToolExecution(name, dependencies.context, () => (definition.execute as (input: unknown, dependencies: TrustedEmailToolDependencies) => Promise<unknown>)(rawInput, dependencies), { appKey: APP_KEYS.SIGNAL, recorder: dependencies.recordEvent, input: rawInput });
 }
 
 export { sanitizeAgentInput, sanitizedAgentMessageSchema } from './input-sanitizer';

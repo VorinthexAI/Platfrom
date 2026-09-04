@@ -697,22 +697,24 @@ export async function scanContentDocument(pages: { name: string; size: number; b
   }, undefined, contentContext);
 }
 
-const appFolderResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), parentFolderKey: z.string().min(1).optional(), name: z.string().min(1), description: z.string().optional(), isFavorite: z.boolean(), score: z.number() });
-const appDocumentResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), folderKey: z.string().min(1).optional(), folder: z.strictObject({ key: z.string().min(1), name: z.string().min(1) }).optional(), name: z.string().min(1), extension: z.string().optional(), isFavorite: z.boolean(), score: z.number() });
+const appResultTagsSchema = z.array(z.strictObject({ key: z.string().min(1), name: z.string() })).optional();
+const appFolderResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), parentFolderKey: z.string().min(1).optional(), name: z.string().min(1), description: z.string().optional(), isFavorite: z.boolean(), createdAt: z.string().datetime().optional(), updatedAt: z.string().datetime().optional(), score: z.number().optional(), tags: appResultTagsSchema });
+const appDocumentResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), folderKey: z.string().min(1).optional(), folder: z.strictObject({ key: z.string().min(1), name: z.string().min(1) }).optional(), name: z.string().min(1), extension: z.string().optional(), mimeType: z.string().optional(), sizeBytes: z.number().int().positive().optional(), isFavorite: z.boolean(), createdAt: z.string().datetime().optional(), updatedAt: z.string().datetime().optional(), score: z.number().optional(), tags: appResultTagsSchema });
 
-async function searchAppContent(query: string, signal: AbortSignal | undefined, folderKey: string | undefined, includeDescendants: boolean, recordHistory: boolean, limit = 50): Promise<ContentSearchResponse> {
-  const output = await searchApp({ query, collectionSlugs: ["folders", "documents", "files"], recordHistory, limit, ...(folderKey ? { filters: { folderKey, includeDescendants } } : {}) }, signal);
-  const folders = appSearchResults(output, "folders", appFolderResultSchema).map(({ scopeKey: _scopeKey, ...folder }) => folder);
-  const documents = [...appSearchResults(output, "documents", appDocumentResultSchema), ...appSearchResults(output, "files", appDocumentResultSchema)].map(({ key, ...document }) => ({ documentKey: key, ...document }));
-  return { query: output.query, folders, documents, cached: false };
+async function searchAppContent(query: string, signal: AbortSignal | undefined, folderKey: string | undefined, includeDescendants: boolean, recordHistory: boolean, limit = 50, tagKeys: string[] = []): Promise<ContentSearchResponse> {
+  const filters = { ...(folderKey ? { folderKey, includeDescendants } : {}), ...(tagKeys.length ? { tagKeys, tagMatch: "all" as const } : {}) };
+  const output = await searchApp({ ...(query ? { query } : { operation: "list" as const }), collectionSlugs: ["folders", "documents", "files"], recordHistory, limit, ...(Object.keys(filters).length ? { filters } : {}) }, signal);
+  const folders = appSearchResults(output, "folders", appFolderResultSchema).map(({ scopeKey: _scopeKey, createdAt: _createdAt, updatedAt: _updatedAt, tags: _tags, score = 0, ...folder }) => ({ ...folder, score }));
+  const documents = [...appSearchResults(output, "documents", appDocumentResultSchema), ...appSearchResults(output, "files", appDocumentResultSchema)].map(({ key, createdAt: _createdAt, updatedAt: _updatedAt, tags: _tags, score = 0, ...document }) => ({ documentKey: key, ...document, score }));
+  return { query: output.query ?? query, folders, documents, cached: false };
 }
 
 export function searchContent(query: string, folderKey?: string, includeDescendants = false) {
   return searchAppContent(query, undefined, folderKey, includeDescendants, true);
 }
 
-export function searchContentMatches(query: string, signal?: AbortSignal, folderKey?: string, recordHistory = true, options: { limit?: number } = {}) {
-  return searchAppContent(query, signal, folderKey, true, recordHistory, options.limit);
+export function searchContentMatches(query: string, signal?: AbortSignal, folderKey?: string, recordHistory = true, options: { limit?: number; tagKeys?: string[] } = {}) {
+  return searchAppContent(query, signal, folderKey, true, recordHistory, options.limit, options.tagKeys);
 }
 
 export function findContentNeighbors(source: { folderKey: string } | { documentKey: string }, signal?: AbortSignal) {

@@ -116,7 +116,7 @@ export interface ImageGenerationServiceDependencies extends ExecuteActionOptions
   processing?: ImageProcessingDependencies;
   signUrl?: (storageKey: string) => Promise<string>;
   now?: () => number;
-  gallery?: Pick<GalleryRepository, 'getCollectionRole' | 'canAccessImage' | 'getImage' | 'attachGeneratedImages'> & Partial<Pick<GalleryRepository, 'ensureGeneratedMediaCollection' | 'attachGeneratedMedia'>>;
+  gallery?: Pick<GalleryRepository, 'getCollectionRole' | 'getCollection' | 'canAccessImage' | 'getImage' | 'attachGeneratedImages'> & Partial<Pick<GalleryRepository, 'ensureGeneratedMediaCollection' | 'attachGeneratedMedia'>>;
   embedCollection?: typeof embedText;
   getImage?: typeof getImageById;
   resolveReference?: (storageKey: string, mimeType: string) => Promise<string>;
@@ -255,7 +255,10 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
     const input = imageGenerateModelInputSchema.parse(rawInput);
     const { actorKey: ownerKey, userKey } = memberContext(context);
     const idempotencyKey = z.string().trim().min(1).max(256).parse(requestKey);
-    if (!managed) {
+    const collection = managed ? undefined : await gallery.getCollection(context.runtimeScopeKey, input.collectionKey);
+    const managedDestination = managed || (collection?.purpose === 'generated-media' && collection.mutationPolicy === 'system-only');
+    if (!managedDestination && collection?.mutationPolicy === 'system-only') throw new ImageGenerationAccessError('Image generation cannot modify this managed Gallery collection.');
+    if (!managedDestination) {
       const role = await gallery.getCollectionRole(context.runtimeScopeKey, input.collectionKey, ownerKey);
       if (role !== 'owner' && role !== 'collaborator') throw new ImageGenerationAccessError('Image generation requires active contribution access to the Gallery collection.');
     }
@@ -343,8 +346,8 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
         if (saved.length !== input.count) throw new Error(`Image persistence returned ${saved.length} images; expected ${input.count}.`);
         if (saved.some((image) => !image)) throw new Error('Image persistence did not return every requested image.');
         try {
-          const attached = managed
-            ? saved.length === 1 && Boolean(gallery.attachGeneratedMedia) && await gallery.attachGeneratedMedia!(context.runtimeScopeKey, input.collectionKey, saved[0]!.key, ownerKey, new Date(now()).toISOString())
+          const attached = managedDestination
+            ? Boolean(gallery.attachGeneratedMedia) && await gallery.attachGeneratedMedia!(context.runtimeScopeKey, input.collectionKey, saved.map((image) => image!.key), ownerKey, new Date(now()).toISOString())
             : await gallery.attachGeneratedImages(context.runtimeScopeKey, input.collectionKey, saved.map((image) => image!.key), ownerKey, new Date(now()).toISOString());
           if (!attached) throw new GeneratedImageAttachmentError('Image generation collection access changed.');
         } catch (error) {
@@ -361,7 +364,7 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
         executionSucceeded = true;
         await (dependencies.history ?? getDefaultUserGenerationService()).record(userKey, 'image', input.prompt).catch((error) => console.error('image generation history record failed', { error }));
         await idempotency.complete(identity, requestHash, leaseOwner, durable, new Date(now()).toISOString());
-         await (managed ? publishManagedGeneratedImage(input.collectionKey, userKey) : publishGeneratedImages(input.collectionKey)).catch((error) => console.error('generated image publication failed', { error }));
+         await (managedDestination ? publishManagedGeneratedImage(input.collectionKey, userKey) : publishGeneratedImages(input.collectionKey)).catch((error) => console.error('generated image publication failed', { error }));
         return projectReplay(durable);
       } catch (error) {
         if (!executionSucceeded) {

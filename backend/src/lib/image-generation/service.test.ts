@@ -12,7 +12,7 @@ const context = {
 } as unknown as ToolContext;
 
 const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString('base64');
-const authorizedGallery = { getCollectionRole: async () => 'owner' as const, canAccessImage: async () => true, getImage: async () => null, attachGeneratedImages: async () => true };
+const authorizedGallery = { getCollectionRole: async () => 'owner' as const, getCollection: async () => ({ purpose: undefined, mutationPolicy: 'user' }) as never, canAccessImage: async () => true, getImage: async () => null, attachGeneratedImages: async () => true };
 const safeAsk = (async () => ({ output: { text: '{"safe":true}', toolCalls: [], stopReason: 'completed' }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' })) as any;
 const history = { record: async () => ({}), list: async () => [], remove: async () => ({ normalizedPrompt: '', deleted: false }) } as any;
 const claimedLedger = () => ({ claim: async () => ({ status: 'claimed' as const }), start: async () => true, renew: async () => true, complete: async () => {}, fail: async () => {}, release: async () => {} });
@@ -109,11 +109,22 @@ describe('image generation service', () => {
     expect({ claimed, provider }).toEqual({ claimed: 0, provider: 0 });
   });
 
+  test('rejects non-generation managed collections before claiming or invoking the provider', async () => {
+    let claimed = 0, provider = 0, roleChecks = 0;
+    const service = createImageGenerationService({ executeAsk: safeAsk, history,
+      gallery: { ...authorizedGallery, getCollection: async () => ({ purpose: 'email-media', mutationPolicy: 'system-only' }) as never, getCollectionRole: async () => { roleChecks += 1; return 'owner'; } },
+      idempotency: { ...claimedLedger(), claim: async () => { claimed += 1; return { status: 'claimed' }; } },
+      execute: (async () => { provider += 1; return {}; }) as any,
+    });
+    await expect(service.generate({ collectionKey, prompt: 'Not email media', count: 1 }, context, 'managed-denied')).rejects.toThrow('cannot modify this managed');
+    expect({ claimed, provider, roleChecks }).toEqual({ claimed: 0, provider: 0, roleChecks: 0 });
+  });
+
   test('generates exactly one user-mutable image through the exact managed collection path', async () => {
     const processed: ProcessImageInput[][] = []; const attached: unknown[][] = []; let providerCalls = 0;
     const service = createImageGenerationService({
       history, idempotency: claimedLedger(), getImage: async () => null, embedCollection: async () => [], signUrl: async () => 'https://images.example/generated.png',
-      gallery: { ...authorizedGallery, getCollectionRole: async () => { throw new Error('public collection authorization must not run'); }, ensureGeneratedMediaCollection: async () => ({ key: collectionKey }) as never, attachGeneratedMedia: async (...args) => { attached.push(args); return true; } },
+      gallery: { ...authorizedGallery, getCollectionRole: async () => { throw new Error('public collection authorization must not run'); }, ensureGeneratedMediaCollection: async () => ({ key: collectionKey, purpose: 'generated-media', mutationPolicy: 'system-only' }) as never, attachGeneratedMedia: async (...args) => { attached.push(args); return true; } },
       execute: (async () => { providerCalls += 1; return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' }; }) as any,
       process: async (inputs) => { processed.push([...inputs]); return [persistedImage()]; },
     });
@@ -121,7 +132,29 @@ describe('image generation service', () => {
     expect(result.images).toHaveLength(1); expect(providerCalls).toBe(1);
     expect(processed[0]).toHaveLength(1); expect(processed[0]![0]).not.toHaveProperty('mutationPolicy');
     expect(attached[0]?.slice(0, 2)).toEqual([scopeKey, collectionKey]);
-    expect(typeof attached[0]?.[2]).toBe('string'); expect(attached[0]?.[3]).toBe(membershipKey);
+    expect(attached[0]?.[2]).toEqual([result.images[0]!.key]); expect(attached[0]?.[3]).toBe(membershipKey);
+  });
+
+  test('routes direct multi-image generation into managed Core through one atomic dedicated attachment', async () => {
+    const attached: unknown[][] = []; let genericAttachments = 0, roleChecks = 0;
+    const service = createImageGenerationService({
+      history, idempotency: claimedLedger(), getImage: async () => null, signUrl: async () => 'https://images.example/generated.png',
+      gallery: {
+        ...authorizedGallery,
+        getCollection: async () => ({ key: collectionKey, purpose: 'generated-media', mutationPolicy: 'system-only' }) as never,
+        getCollectionRole: async () => { roleChecks += 1; return 'viewer'; },
+        attachGeneratedImages: async () => { genericAttachments += 1; return true; },
+        attachGeneratedMedia: async (...args) => { attached.push(args); return true; },
+      },
+      execute: (async () => ({ output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' })) as any,
+      process: async (inputs) => inputs.map(() => persistedImage()),
+    });
+    const result = await service.generate({ collectionKey, prompt: 'Two managed images', count: 2 }, context, 'direct-managed');
+    expect(result.images).toHaveLength(2);
+    expect(roleChecks).toBe(0);
+    expect(genericAttachments).toBe(0);
+    expect(attached).toHaveLength(1);
+    expect(attached[0]?.[2]).toEqual(result.images.map(({ key }) => key));
   });
 
   test('invokes the image action directly without a text-model preflight', async () => {

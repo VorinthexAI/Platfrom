@@ -263,18 +263,19 @@ describe('Gallery operation boundaries', () => {
     const organizationKey = 'organization', scopeKey = key(), actorKey = key(), userId = key(), uploadKeys = [key(), key()];
     const makeUpload = (uploadKey: string) => galleryUploadSchema.parse({ key: uploadKey, organizationKey, scopeKey, actorKey, imageKey: key(), collectionKey: null, filename: 'photo.jpg', mimeType: 'image/jpeg', sizeBytes: 10, storageKey: `pending/${uploadKey}`, processingMode: 'library', status: 'reserved', errorCode: null, createdAt: '2026-08-18T12:00:00.000Z', updatedAt: '2026-08-18T12:00:00.000Z', expiresAt: '2099-08-18T12:15:00.000Z' });
     const uploads = new Map(uploadKeys.map((uploadKey) => [uploadKey, makeUpload(uploadKey)]));
-    let queueCalls = 0, enqueued: readonly string[] = [], verified = 0;
+    let queueCalls = 0, enqueued: readonly string[] = [], verified = 0, recorded = 0;
     const events: string[] = [];
     const context = {
       organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId, status: 'active' },
       getUpload: async (uploadKey: string) => uploads.get(uploadKey) ?? null,
       verifyUploadObject: async () => { verified += 1; return true; },
+      recordStoredObject: async () => { recorded += 1; },
       queueUploads: async () => { queueCalls += 1; return uploadKeys.map((uploadKey) => galleryUploadSchema.parse({ ...uploads.get(uploadKey)!, status: 'queued' })); },
       enqueueUploadBatch: async (keys: readonly string[]) => { enqueued = keys; },
       publishUserEvent: async (_userKey: string, slug: string) => { events.push(slug); },
     } as any;
     await expect(galleryOperations.completeUploads({ uploadKeys }, context)).resolves.toMatchObject({ jobs: [{ status: 'queued' }, { status: 'queued' }] });
-    expect({ verified, queueCalls, enqueued, events }).toEqual({ verified: 2, queueCalls: 1, enqueued: uploadKeys, events: ['upload.changed'] });
+    expect({ verified, recorded, queueCalls, enqueued, events }).toEqual({ verified: 2, recorded: 2, queueCalls: 1, enqueued: uploadKeys, events: ['upload.changed'] });
 
     uploads.set(uploadKeys[1]!, galleryUploadSchema.parse({ ...uploads.get(uploadKeys[1]!)!, organizationKey: 'foreign' }));
     verified = 0; queueCalls = 0;
@@ -290,6 +291,7 @@ describe('Gallery operation boundaries', () => {
     const context = {
       organizationKey, scopeKey, membership: { key: actorKey, organizationId: organizationKey, userId, status: 'active' },
       getUpload: async () => reserved, verifyUploadObject: async () => true,
+      recordStoredObject: async () => {},
       queueUploads: async () => { durableStatus = 'queued'; return [galleryUploadSchema.parse({ ...reserved, status: 'queued' })]; },
       enqueueUploadBatch: async () => { throw new Error('redis unavailable'); },
       publishUserEvent: async (_userKey: string, slug: string) => { events.push(slug); },

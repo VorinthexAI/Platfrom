@@ -14,6 +14,7 @@ export interface AgentToolDependencies {
 export const AGENT_TOOL_DEFINITIONS = Object.freeze([{
   name: 'agents.core',
   inputSchema: coreAgentToolInputSchema,
+  isReadOnly: () => false,
   providerDefinition: {
     name: 'agents.core',
     description: 'Ask the canonical private workspace agent to answer a message with authorized business tools.',

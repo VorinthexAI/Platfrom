@@ -179,6 +179,7 @@ function querySchemaForPath(path: string, method: string) {
   if (method === 'GET' && apiPath === '/gallery/highlights') return strictObject({ organizationKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
   if (method === 'GET' && apiPath === '/gallery/memories') return strictObject({ organizationKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
   if (method === 'GET' && apiPath === '/images/generation-history') return strictObject({ organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid(), limit: z.string().regex(/^\d+$/).optional() });
+  if (method === 'POST' && apiPath === '/tags/assignments') return strictObject({ action: z.enum(['tag', 'untag']) });
   if (/^\/content\/tools\/[^/]+$/.test(apiPath)) return strictObject({});
   if (method === 'GET' && apiPath === '/public/books/shares/stream') return strictObject({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/) });
   if (apiPath === '/books' || apiPath === '/books/overview' || apiPath === '/books/topic-suggestions' || apiPath === '/books/goal-suggestions' || /^\/books\/[^/]+(?:\/detail|\/(?:retry|cancel|favorite)|\/share\/(?:detail|update))?$/.test(apiPath) || /^\/books\/[^/]+\/chapters\/[^/]+\/progress$/.test(apiPath)) return strictObject({});

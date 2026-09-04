@@ -49,11 +49,12 @@ describe('email OAuth state', () => {
       status: 'active', createdAt: now, updatedAt: now,
     });
     const stateWrites: unknown[][] = [];
+    let upsertInput: any;
     let watchWrites = 0;
     const initialJobs: any[] = [];
     const connectors = {
       findExact: async () => null,
-      upsert: async () => ({ ...connector, revision: 'connector-upsert' }),
+      upsert: async (input: unknown) => { upsertInput = input; return { ...connector, revision: 'connector-upsert' }; },
       getByKey: async () => connector,
       setSyncState: async (...input: unknown[]) => { stateWrites.push(input); return true; },
       activateInitialization: async () => ({ ...connector, revision: 'connector-active' }),
@@ -75,6 +76,7 @@ describe('email OAuth state', () => {
     expect(watchWrites).toBe(1);
     expect(initialJobs).toEqual([{ organizationKey: 'org-1', scopeKey, connectorKey: connector.key, operationKey: expect.any(String) }]);
     expect(initialJobs[0].operationKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(upsertInput).toMatchObject({ billingUserKey: userKey });
     expect(await oauth.exchange({ userKey, organizationKey: 'org-1', scopeKey, code })).toMatchObject({ email: 'person@example.com' });
     expect(await oauth.exchange({ userKey, organizationKey: 'org-1', scopeKey, code })).toBeNull();
   });

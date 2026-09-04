@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { observeToolExecution } from '@/lib/ai/events/runtime';
+import type { ToolBillingDependencies } from '@/lib/ai/events/runtime';
+import type { ToolEventRecorder } from '@/lib/ai/events/service';
 import { coreChatInputSchema, type CoreChatMessage } from '@/lib/ai/actions/core-chat';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { runContentTool, type ContentToolDependencies } from '@/lib/ai/tools/content-runtime';
@@ -60,6 +62,9 @@ export interface PersonalAssistantDependencies {
   appSearch?: AppSearchService;
   accountProfile?: AccountProfileService;
   tickets?: TicketService;
+  scopeTags?: AssistantCapabilityContext['scopeTags'];
+  recordEvent?: ToolEventRecorder;
+  billing?: ToolBillingDependencies;
 }
 
 const BASE_SYSTEM_PROMPT = `You are the user's capability-bound personal AI assistant. Select an available tool for the request.
@@ -226,12 +231,13 @@ export async function runPersonalAssistant(
       appSearch: dependencies.appSearch,
       accountProfile: dependencies.accountProfile,
       tickets: dependencies.tickets,
+      scopeTags: dependencies.scopeTags,
       signal: dependencies.router?.signal,
       timeoutMs: dependencies.router?.timeoutMs,
-    }));
+    }), { recorder: dependencies.recordEvent, idempotencyKey: createHash('sha256').update(JSON.stringify({ requestKey, iteration, toolCallId: toolCall.id, tool: toolCall.name })).digest('hex'), input: toolCall.arguments, ...dependencies.billing });
     domainToolExecuted = true;
     const mutationWorkspace = typeof capability.mutationWorkspace === 'function' ? capability.mutationWorkspace(toolCall.arguments) : capability.mutationWorkspace;
-    if (mutationWorkspace) changedWorkspaces.add(mutationWorkspace);
+    if (mutationWorkspace) for (const workspace of Array.isArray(mutationWorkspace) ? mutationWorkspace : [mutationWorkspace]) changedWorkspaces.add(workspace);
     if (toolCall.name === 'book.create' && result.kind === 'continue') bookCreated = true;
     if (result.kind === 'continue') for (const source of result.sources ?? []) sources.set(source.documentKey, source);
     if (result.kind === 'note') return personalAssistantOutputSchema.parse({ type: 'note', content: result.content, message: result.message, sources: [...sources.values()], changes: changes() });

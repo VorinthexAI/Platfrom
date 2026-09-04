@@ -40,3 +40,7 @@ export function eventStreamRetryDelay(attempt: number, random = Math.random) {
   const base = Math.min(30_000, 1_000 * 2 ** boundedAttempt);
   return Math.round(base * (0.75 + random() * 0.5));
 }
+
+export function isAuthenticatedBearerRejection(status: number, authenticateHeader: string | null, authenticated: boolean) {
+  return status === 401 && Boolean(authenticateHeader?.includes("Bearer")) && authenticated;
+}

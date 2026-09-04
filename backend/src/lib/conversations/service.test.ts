@@ -294,7 +294,21 @@ describe('private conversations', () => {
         throw new Error('malformed continuation');
       },
     }).turn({ conversationKey, message: 'how many GB of images', requestKey: 'sum-fallback' }, context, (event) => { events.push(event); });
-    expect(events.at(-1)).toMatchObject({ type: 'done', message: { status: 'COMPLETED', content: '1500000000 bytes' } });
+    expect(events.at(-1)).toMatchObject({ type: 'done', message: { status: 'COMPLETED', content: '20 matching resources; 1500000000 bytes' } });
+  });
+
+  test('preserves compound aggregate evidence after another successful read-only lookup', async () => {
+    const events: any[] = []; const { repository } = repositoryMock(); const collectionKey = newId();
+    await createConversationService({
+      repository, embed: async () => [1],
+      core: async (_request, execution) => {
+        execution.onToolSucceeded?.('web.search', { query: 'Core' }, { text: 'Core' });
+        execution.onToolSucceeded?.('app.search', { operation: 'count', collectionSlugs: ['images'], filters: { collectionKey }, limit: 10 }, { operation: 'count', groups: [{ collectionSlug: 'images', count: 20 }] });
+        execution.onToolSucceeded?.('app.search', { operation: 'sum', collectionSlugs: ['images'], field: 'sizeBytes', filters: { collectionKey }, limit: 10 }, { operation: 'sum', groups: [{ collectionSlug: 'images', field: 'sizeBytes', sum: 1_500_000_000, unit: 'bytes', matchedCount: 20, valueCount: 20 }] });
+        throw new Error('malformed continuation');
+      },
+    }).turn({ conversationKey, message: 'Hur många bilder och hur många MB?', requestKey: 'compound-fallback' }, context, (event) => { events.push(event); });
+    expect(events.at(-1)).toMatchObject({ type: 'done', message: { status: 'COMPLETED', content: '20 matching resources; 1500000000 bytes' } });
   });
 
   test('does not emit partial text from a failed agent attempt before retrying', async () => {

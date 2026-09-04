@@ -4,6 +4,8 @@ import { createRedisConnection } from '@/lib/redis';
 import { createImageGenerationService, managedImageGenerateInputSchema, type ImageGenerationService } from '@/lib/image-generation/service';
 import { getDefaultConversationRepository, type ConversationRepository } from './repository';
 import { publishUserEvent } from '@/api/events';
+import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
+import { toolEventService, type ToolEventRecorder } from '@/lib/ai/events/service';
 
 const QUEUE_NAME = 'conversation-image-turns';
 const jobOptions: JobsOptions = {
@@ -44,6 +46,8 @@ export async function processConversationImageTurn(raw: unknown, dependencies: {
   repository?: ConversationRepository;
   images?: Pick<ImageGenerationService, 'generateManaged'>;
   publishChanged?: typeof publishUserEvent;
+  recordEvent?: ToolEventRecorder;
+  billing?: ToolBillingDependencies;
   terminalFailure?: boolean;
   now?: () => string;
 } = {}) {
@@ -51,7 +55,12 @@ export async function processConversationImageTurn(raw: unknown, dependencies: {
   const repository = dependencies.repository ?? getDefaultConversationRepository();
   const context = { organizationKey: job.organizationKey, runtimeScopeKey: job.scopeKey, principal: { kind: 'member' as const, user: { key: job.userKey }, userOrganization: { key: job.actorKey, organizationId: job.organizationKey, userId: job.userKey, status: 'active' as const }, scopeMember: null } };
   try {
-    const output = await (dependencies.images ?? createImageGenerationService()).generateManaged(job.input, context as never, job.requestKey);
+    const output = await observeToolExecution(
+      'conversation.image.enqueue',
+      context as never,
+      () => (dependencies.images ?? createImageGenerationService()).generateManaged(job.input, context as never, job.requestKey),
+      { recorder: dependencies.recordEvent ?? (dependencies.images ? undefined : toolEventService.record), idempotencyKey: job.requestKey, input: job.input, ...dependencies.billing },
+    );
     if (output.images.length !== 1) throw new Error('Conversation image generation must produce exactly one image.');
     const completed = await repository.completeImageTurn({ organizationKey: job.organizationKey, scopeKey: job.scopeKey, userKey: job.userKey }, job.conversationKey, job.assistantMessageKey, output.images[0]!.key, (dependencies.now ?? (() => new Date().toISOString()))());
     if (!completed) throw new Error('Conversation image response changed before completion.');

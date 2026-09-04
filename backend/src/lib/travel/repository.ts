@@ -128,7 +128,7 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
         FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
         FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member", "viewer"]
         FOR place IN places
-          FILTER place.scopeKey == @scopeKey && place.userKey == @userKey && place.countryCode == @countryCode && place.name == @name && place.generatedDetail != null
+          FILTER place.scopeKey == @scopeKey && place.userKey == @userKey && place.countryCode == @countryCode && LOWER(place.name) == LOWER(@name) && place.generatedDetail != null
           LIMIT 1 UPDATE place WITH { openedAt: @openedAt } IN places RETURN NEW
       `, { ...context, countryCode, name, openedAt });
       const opened = (await cursor.all())[0];
@@ -138,7 +138,7 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
     async findGenerated(context, countryCode, name) {
       const cursor = await database.query(`
         FOR place IN places
-          FILTER place.scopeKey == @scopeKey && place.userKey == @userKey && (@countryCode == null || place.countryCode == @countryCode) && place.name == @name
+          FILTER place.scopeKey == @scopeKey && place.userKey == @userKey && (@countryCode == null || place.countryCode == @countryCode) && LOWER(place.name) == LOWER(@name)
           LIMIT 1 RETURN place
       `, { scopeKey: context.scopeKey, userKey: context.userKey, countryCode, name });
       const found = (await cursor.all())[0];
@@ -230,7 +230,7 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
       z.string().datetime().parse(updatedAt);
       const result = await transaction({
         read: ['userOrganizations', 'scopes', 'scopeMembers', 'places'],
-        write: ['places', 'placeHeroMedia', 'placeReferences', 'tripPlaces', 'trips', 'storageDeletionJobs'],
+        write: ['places', 'placeHeroMedia', 'placeReferences', 'tripPlaces', 'trips', 'storageDeletionJobs', 'tagAssignments'],
       }, async (executor) => {
         const cursor = await executor.query(`
           LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
@@ -253,6 +253,7 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
         if (heroStorageKeys.length > 0) await executor.query('FOR storageKey IN @storageKeys UPSERT { storageKey } INSERT { storageKey, createdAt: @updatedAt } UPDATE {} IN storageDeletionJobs', { storageKeys: heroStorageKeys, updatedAt });
         await executor.query('FOR media IN placeHeroMedia FILTER media.scopeKey == @scopeKey && media.userKey == @userKey && media.placeKey == @placeKey REMOVE media IN placeHeroMedia', { scopeKey: context.scopeKey, userKey: context.userKey, placeKey });
         await executor.query('FOR relation IN tripPlaces FILTER relation.scopeKey == @scopeKey && relation.placeKey == @placeKey REMOVE relation IN tripPlaces', { scopeKey: context.scopeKey, placeKey });
+        await executor.query('FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "place" && assignment.sourceKey == @placeKey REMOVE assignment IN tagAssignments', { scopeKey: context.scopeKey, placeKey });
         if (tripKeys.length > 0) await executor.query('FOR trip IN trips FILTER trip._key IN @tripKeys && trip.scopeKey == @scopeKey && trip.userKey == @userKey UPDATE trip WITH { updatedAt: @updatedAt } IN trips', { scopeKey: context.scopeKey, userKey: context.userKey, tripKeys, updatedAt });
         await executor.query('REMOVE @placeKey IN places', { placeKey });
         return 'deleted' as const;
@@ -420,7 +421,7 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
       return parseTripPresentation(updated);
     },
     async deleteTrip(context, tripKey) {
-      const result = await transaction({ read: ['userOrganizations', 'scopes', 'scopeMembers', 'tripCreationReceipts'], write: ['trips', 'tripPlaces', 'tripAttachments', 'tripGuides'] }, async (executor) => {
+      const result = await transaction({ read: ['userOrganizations', 'scopes', 'scopeMembers', 'tripCreationReceipts'], write: ['trips', 'tripPlaces', 'tripAttachments', 'tripGuides', 'tagAssignments'] }, async (executor) => {
         const cursor = await executor.query(`
           LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
           LET scope = DOCUMENT(scopes, @scopeKey)
@@ -439,6 +440,7 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
         await executor.query('FOR guide IN tripGuides FILTER guide.scopeKey == @scopeKey && guide.userKey == @userKey && guide.tripKey == @tripKey REMOVE guide IN tripGuides', { scopeKey: context.scopeKey, userKey: context.userKey, tripKey });
         await executor.query('FOR attachment IN tripAttachments FILTER attachment.scopeKey == @scopeKey && attachment.tripKey == @tripKey REMOVE attachment IN tripAttachments', { scopeKey: context.scopeKey, tripKey });
         await executor.query('FOR relation IN tripPlaces FILTER relation.scopeKey == @scopeKey && relation.tripKey == @tripKey REMOVE relation IN tripPlaces', { scopeKey: context.scopeKey, tripKey });
+        await executor.query('FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "trip" && assignment.sourceKey == @tripKey REMOVE assignment IN tagAssignments', { scopeKey: context.scopeKey, tripKey });
         await executor.query('REMOVE @tripKey IN trips', { tripKey });
         return 'deleted' as const;
       });

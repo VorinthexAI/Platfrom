@@ -5,6 +5,7 @@ import { ContentError } from '@/lib/ai/tools';
 import { createContentToolHandler } from './content-tools';
 import { registerRoutes } from './routes';
 import { validateQueryParams } from './middleware';
+import { SparkRepositoryError } from '@/lib/sparks/repository';
 
 const organizationKey = newId(), scopeKey = newId(), folderKey = newId();
 function request(dependencies: Parameters<typeof createContentToolHandler>[0], tool = 'folder.list', body: unknown = { organizationKey, scopeKey, input: { scopeKey } }, headers: Record<string, string> = {}) {
@@ -38,11 +39,12 @@ describe('Content tool API', () => {
     expect(JSON.stringify(call)).not.toContain('membershipKey');
   });
 
-  test('does not forward idempotency to reads and rejects mutation mismatches', async () => {
-    let dispatched: any;
-    const deps = { getIdentity: async () => ({ key: newId(), identityType: 'user' as const }), run: async (input: any) => { dispatched = input; return {}; } };
+  test('keeps read inputs clean, forwards the execution key, and rejects mutation mismatches', async () => {
+    let dispatched: any, executionOptions: any;
+    const deps = { getIdentity: async () => ({ key: newId(), identityType: 'user' as const }), run: async (input: any, options: any) => { dispatched = input; executionOptions = options; return {}; } };
     expect((await request(deps, 'folder.list', undefined, { 'idempotency-key': 'ignored' })).status).toBe(200);
     expect(dispatched.input.idempotencyKey).toBeUndefined();
+    expect(executionOptions.requestKey).toBe('ignored');
     expect((await request(deps, 'document.translate', { organizationKey, scopeKey, input: { documentKeys: [newId()], targetLanguage: 'French' } }, { 'idempotency-key': 'ignored-preview' })).status).toBe(400);
     expect(dispatched.input.idempotencyKey).toBeUndefined();
     const mismatch = await request(deps, 'folder.create', { organizationKey, scopeKey, input: { folders: [{ scopeKey, name: 'Plans' }], idempotencyKey: 'body' } }, { 'idempotency-key': 'header' });
@@ -70,13 +72,41 @@ describe('Content tool API', () => {
 
   test('normalizes document base64 without retaining encoded content and enforces size', async () => {
     let input: any; const user = { key: newId(), identityType: 'user' as const };
-    const valid = await request({ getIdentity: async () => user, maxDocumentBytes: 4, run: async (requestInput) => { input = requestInput.input; return {}; } }, 'document.parse', { organizationKey, scopeKey, input: { scopeKey, folderKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 3, encoding: 'base64', content: 'YWJj' } } });
+    const valid = await request({ getIdentity: async () => user, maxDocumentBytes: 4, run: async (requestInput) => { input = requestInput.input; return {}; } }, 'document.parse', { organizationKey, scopeKey, input: { scopeKey, folderKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 3, encoding: 'base64', content: 'YWJj' } } }, { 'idempotency-key': 'parse-request' });
     expect(valid.status).toBe(200);
     expect(input.file.bytes).toEqual(new Uint8Array([97, 98, 99]));
     expect(input.file.content).toBeUndefined();
     const tooLarge = await request({ getIdentity: async () => user, maxDocumentBytes: 2, run: async () => ({}) }, 'document.parse', { organizationKey, scopeKey, input: { scopeKey, folderKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 3, encoding: 'base64', content: 'YWJj' } } });
     expect(tooLarge.status).toBe(400);
     expect(await tooLarge.json()).toMatchObject({ error: { code: 'DOCUMENT_TOO_LARGE' } });
+  });
+
+  test('coordinates fixed Content HTTP debits, full refunds, and insufficient balance', async () => {
+    const userKey = newId();
+    const charges: Record<string, unknown>[] = [], refunds: Record<string, unknown>[] = [];
+    let executions = 0;
+    const serviceOptions = {
+      resolveMembership: async () => ({ key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' }),
+      resolveUser: async () => ({ key: userKey, currentScopeKey: scopeKey }),
+      authorizeScope: async () => ({ allowed: true }),
+      execute: async () => { executions += 1; return { results: [] }; },
+      recordEvent: async () => {},
+      billing: {
+        charge: async (_key: string, input: Record<string, unknown>) => { charges.push(input); return { status: 'applied', transaction: { key: newId(), eventKey: input.eventKey } } as never; },
+        refund: async (_key: string, input: Record<string, unknown>) => { refunds.push(input); return { status: 'applied', transaction: { key: newId() } } as never; },
+      },
+    } as never;
+    const body = { organizationKey, scopeKey, input: { scopeKey, folderKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 3, encoding: 'base64', content: 'YWJj' } } };
+    expect((await request({ getIdentity: async () => ({ key: userKey, identityType: 'user' }), serviceOptions }, 'document.parse', body, { 'idempotency-key': 'parse-billed' })).status).toBe(200);
+    expect(charges[0]).toMatchObject({ kind: 'tool', toolSlug: 'document.parse', microSparks: 2_000_000 });
+
+    const failedOptions = { ...(serviceOptions as any), execute: async () => { throw new Error('parse failed'); } };
+    expect((await request({ getIdentity: async () => ({ key: userKey, identityType: 'user' }), serviceOptions: failedOptions }, 'document.parse', body, { 'idempotency-key': 'parse-failed' })).status).toBe(500);
+    expect(refunds).toHaveLength(1);
+
+    const insufficientOptions = { ...(serviceOptions as any), billing: { charge: async () => { throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'private'); } } };
+    expect((await request({ getIdentity: async () => ({ key: userKey, identityType: 'user' }), serviceOptions: insufficientOptions }, 'document.parse', body, { 'idempotency-key': 'parse-insufficient' })).status).toBe(402);
+    expect(executions).toBe(1);
   });
 
   test('rejects oversized request bodies before JSON and base64 normalization', async () => {

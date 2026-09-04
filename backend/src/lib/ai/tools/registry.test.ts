@@ -1,18 +1,26 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import type { ToolContext } from './tool-context';
-import { CONTENT_TOOL_NAMES, MODEL_TOOL_NAMES, runTool, runTrustedTool, TOOL_DEFINITIONS, TOOL_NAMES, toolInputSchemas } from './index';
+import { CONTENT_TOOL_NAMES, isToolReadOnly, MODEL_TOOL_NAMES, runTool, runTrustedTool, TOOL_DEFINITIONS, TOOL_NAMES, toolInputSchemas } from './index';
 import { signalCapabilities } from '@/lib/ai/personal-assistant/service-capabilities';
 import { defaultAssistantCapabilityRegistry } from '@/lib/ai/personal-assistant/capabilities';
+
+const billingFixture = {
+  recordEvent: async () => {},
+  billing: {
+    charge: async (_userKey: string, input: Record<string, unknown>) => ({ status: 'applied', transaction: { key: newId(), eventKey: input.eventKey } }) as never,
+    refund: async () => ({ status: 'applied', transaction: { key: newId() } }) as never,
+  },
+};
 
 describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(184);
-    expect(MODEL_TOOL_NAMES).toHaveLength(181);
-    expect(TOOL_DEFINITIONS).toHaveLength(181);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 136);
+    expect(TOOL_NAMES).toHaveLength(190);
+    expect(MODEL_TOOL_NAMES).toHaveLength(187);
+    expect(TOOL_DEFINITIONS).toHaveLength(187);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 142);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...MODEL_TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -28,7 +36,10 @@ describe('unified tool registry', () => {
     for (const field of ['organizationKey', 'scopeKey', 'userKey', 'model', 'provider', 'engine', 'apiKey']) expect(() => toolInputSchemas['web.search'].parse({ query: 'latest Gemini release', [field]: 'forged' })).toThrow('Unrecognized key');
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'app.search')).toHaveLength(1);
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['app.enhance', 'app.translate', 'app.speech']));
-    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote']));
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['tag.list', 'tag.create', 'tag.update', 'tag.delete', 'tag.assignment.set']));
+    expect(toolInputSchemas['tag.list'].parse({})).toEqual({ limit: 50 });
+    for (const name of ['tag.list', 'tag.create', 'tag.update', 'tag.delete', 'tag.assignment.set']) expect(() => toolInputSchemas[name].parse({ organizationKey: 'forged' })).toThrow('Unrecognized key');
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['billing.summary.read', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote']));
     expect(toolInputSchemas['feedback.create'].parse({ message: 'Add dark mode' })).toEqual({ message: 'Add dark mode' });
     expect(toolInputSchemas['feedback.list'].parse({})).toEqual({ limit: 20 });
     expect(toolInputSchemas['feedback.vote'].parse({ ticketKey: newId(), vote: null })).toMatchObject({ vote: null });
@@ -45,11 +56,12 @@ describe('unified tool registry', () => {
     expect(TOOL_NAMES).not.toContain('document.enhance');
     expect(TOOL_NAMES).not.toContain('document.translate');
     expect(TOOL_NAMES).not.toContain('email.message.translate');
-    expect(toolInputSchemas['app.search'].parse({ query: 'roadmap', collectionSlugs: ['folders', 'images'] })).toEqual({ query: 'roadmap', collectionSlugs: ['folders', 'images'], recordHistory: true, limit: 10 });
-    expect(toolInputSchemas['app.search'].parse({ operation: 'count', collectionSlugs: ['books'] })).toMatchObject({ operation: 'count', collectionSlugs: ['books'] });
-    expect(toolInputSchemas['app.search'].parse({ operation: 'get', collectionSlugs: ['books'], key: newId() })).toMatchObject({ operation: 'get' });
-    expect(toolInputSchemas['app.search'].parse({ operation: 'count', collectionSlugs: ['images'] })).toMatchObject({ operation: 'count', collectionSlugs: ['images'] });
-    expect(toolInputSchemas['app.search'].parse({ operation: 'sum', collectionSlugs: ['images'], field: 'sizeBytes' })).toMatchObject({ operation: 'sum', collectionSlugs: ['images'], field: 'sizeBytes' });
+    expect(() => toolInputSchemas['app.search'].parse({ query: 'roadmap', collectionSlugs: ['folders', 'images'] })).toThrow();
+    expect(toolInputSchemas['app.search'].parse({ query: 'roadmap', collectionSlugs: ['folders', 'images'], limit: 10 })).toEqual({ query: 'roadmap', collectionSlugs: ['folders', 'images'], recordHistory: true, limit: 10 });
+    expect(toolInputSchemas['app.search'].parse({ operation: 'count', collectionSlugs: ['books'], limit: 10 })).toMatchObject({ operation: 'count', collectionSlugs: ['books'] });
+    expect(toolInputSchemas['app.search'].parse({ operation: 'get', collectionSlugs: ['books'], key: newId(), limit: 1 })).toMatchObject({ operation: 'get' });
+    expect(toolInputSchemas['app.search'].parse({ operation: 'count', collectionSlugs: ['images'], limit: 10 })).toMatchObject({ operation: 'count', collectionSlugs: ['images'] });
+    expect(toolInputSchemas['app.search'].parse({ operation: 'sum', collectionSlugs: ['images'], field: 'sizeBytes', limit: 10 })).toMatchObject({ operation: 'sum', collectionSlugs: ['images'], field: 'sizeBytes' });
     expect(() => toolInputSchemas['app.search'].parse({ operation: 'sum', collectionSlugs: ['images'], field: 'width' })).toThrow();
     expect(() => toolInputSchemas['app.search'].parse({ operation: 'list', collectionSlugs: ['books'], query: 'unexpected' })).toThrow();
     expect(() => toolInputSchemas['app.search'].parse({ query: 'roadmap', collectionSlugs: ['folders'], minimumScore: 0.55 })).toThrow('Unrecognized key');
@@ -166,11 +178,27 @@ describe('unified tool registry', () => {
     }
   });
 
+  test('classifies model-visible execution effects from the canonical registry', () => {
+    expect(isToolReadOnly('app.search', { query: 'roadmap', collectionSlugs: ['documents'], limit: 1 })).toBe(true);
+    expect(isToolReadOnly('web.search', { query: 'current guidance' })).toBe(true);
+    expect(isToolReadOnly('feedback.list', {})).toBe(true);
+    expect(isToolReadOnly('tag.list', {})).toBe(true);
+    expect(isToolReadOnly('conversation.list', {})).toBe(true);
+    expect(isToolReadOnly('app.enhance', { text: 'Draft' })).toBe(true);
+
+    expect(isToolReadOnly('profile.update', { name: 'Ada' })).toBe(false);
+    expect(isToolReadOnly('feedback.vote', { ticketKey: newId(), vote: 'up' })).toBe(false);
+    expect(isToolReadOnly('tag.create', { name: 'Plan' })).toBe(false);
+    expect(isToolReadOnly('tag.assignment.set', { changes: [{ tagKey: newId(), target: { type: 'document', key: newId() }, assigned: true }] })).toBe(false);
+    expect(isToolReadOnly('conversation.image.enqueue', { prompt: 'A dog' })).toBe(false);
+    expect(isToolReadOnly('app.enhance', { documentKey: newId(), save: true })).toBe(false);
+  });
+
   test('returns raw app.search results to unified observers while keeping model projection in the agent', async () => {
     const organizationKey = newId(), scopeKey = newId(), userKey = newId();
     const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const raw = { query: 'roadmap', groups: [{ collectionSlug: 'documents', results: [{ key: newId(), name: 'Roadmap', scopeKey, isFavorite: false, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }] }] };
-    await expect(runTool('app.search', 'agents.core', { query: 'roadmap', collectionSlugs: ['documents'] }, { contentContext: context, appSearchService: { search: async () => raw } as never })).resolves.toEqual(raw);
+    await expect(runTool('app.search', 'agents.core', { query: 'roadmap', collectionSlugs: ['documents'], limit: 1 }, { contentContext: context, appSearchService: { search: async () => raw } as never })).resolves.toEqual(raw);
   });
 
   test('executes profile and ticket tools through canonical services with trusted identity and context', async () => {
@@ -208,6 +236,8 @@ describe('unified tool registry', () => {
     const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const calls: unknown[] = [];
     const result = await runTool('web.search', '', { query: 'current information' }, {
+      ...billingFixture,
+      requestKey: 'web-request',
       contentContext,
       executeSearch: async (trustedOrganization, input, options) => {
         calls.push({ trustedOrganization, input, providers: options.providers });
@@ -310,21 +340,21 @@ describe('unified tool registry', () => {
     await runTool('trip.list', '', {}, { contentContext, travelService });
     await runTool('trip.search', '', { query: 'Iceland route' }, { contentContext, travelService });
     await expect(runTool('trip.create', '', { name: 'Route', placeKeys: [scopeKey], userKey }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
-    await runTool('trip.create', '', { name: 'Route', placeKeys: [scopeKey] }, { contentContext, travelService, requestKey: 'request-1' });
+    await runTool('trip.create', '', { name: 'Route', placeKeys: [scopeKey] }, { ...billingFixture, contentContext, travelService, requestKey: 'request-1' });
     await expect(runTool('trip.update', '', { tripKey: scopeKey, isFavorite: true, position: 0 }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
     await runTool('trip.update', '', { tripKey: scopeKey, isFavorite: true }, { contentContext, travelService });
     await runTool('trip.delete', '', { tripKey: scopeKey }, { contentContext, travelService });
     await expect(runTool('trip.attachment.set', '', { tripKey: scopeKey, attachments: [{ type: 'file', key: scopeKey }] }, { contentContext, travelService })).rejects.toThrow();
     await runTool('trip.attachment.set', '', { tripKey: scopeKey, attachments: [{ type: 'collection', key: scopeKey }] }, { contentContext, travelService });
-    await runTool('place.guide.find', '', { query: 'Reykjavik' }, { contentContext, travelService });
+    await runTool('place.guide.find', '', { query: 'Reykjavik' }, { ...billingFixture, contentContext, travelService, requestKey: 'guide-request' });
     const cityInput = { city: 'Reykjavik', country: { name: 'Iceland', code: 'IS', continent: 'Europe', lat: 65, lon: -18 } };
     await expect(runTool('place.find-city', '', { ...cityInput, userKey }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
-    await runTool('place.find-city', '', cityInput, { contentContext, travelService });
+    await runTool('place.find-city', '', cityInput, { ...billingFixture, contentContext, travelService, requestKey: 'city-request' });
     await expect(runTool('place.find-children', '', { childrenRequestToken: 'token', scopeKey }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
     await runTool('place.find-children', '', { childrenRequestToken: 'token' }, { contentContext, travelService });
     const createInput = { name: 'Iceland', summary: 'Volcanic island.', countryCode: 'IS', latitude: 65, longitude: -18, imageRequestToken: 'token' };
     await expect(runTool('place.create', '', { ...createInput, scopeKey }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
-    await runTool('place.create', '', createInput, { contentContext, travelService });
+    await runTool('place.create', '', createInput, { ...billingFixture, contentContext, travelService, requestKey: 'place-request' });
     await expect(runTool('place.update', '', { placeKey: scopeKey, status: 'visited', userKey }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
     await runTool('place.update', '', { placeKey: scopeKey, status: 'visited' }, { contentContext, travelService });
     await runTool('place.delete', '', { placeKey: scopeKey }, { contentContext, travelService });
@@ -463,7 +493,7 @@ describe('unified tool registry', () => {
     await expect(runTool('book.topic.suggest', '', { scopeKey }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
     await runTool('book.topic.suggest', '', { excludeTopics: ['Old idea'] }, { contentContext, bookService });
     await runTool('book.goal.suggest', '', { topic: 'Decision making', excludeGoals: ['Old goal'] }, { contentContext, bookService });
-    await runTool('book.create', '', brief, { contentContext, bookService, requestKey: 'request-1' });
+    await runTool('book.create', '', brief, { ...billingFixture, contentContext, bookService, requestKey: 'request-1' });
     const bookKey = newId();
     await expect(runTool('book.favorite', '', { bookKey, isFavorite: true, organizationKey }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
     await runTool('book.favorite', '', { bookKey, isFavorite: true }, { contentContext, bookService });
@@ -547,7 +577,7 @@ describe('unified tool registry', () => {
     expect(cases).toHaveLength(31);
     for (const [name, method, input] of cases) {
       await expect(runTool(name, '', { ...input, unexpected: true }, { contentContext, emailService, requestKey: 'signal-request' })).rejects.toThrow('Unrecognized key');
-      const output = await runTool(name, '', input, { contentContext, emailService, requestKey: 'signal-request' });
+      const output = await runTool(name, '', input, { ...billingFixture, contentContext, emailService, requestKey: 'signal-request' });
       const call = calls.at(-1)!;
       expect(call[0]).toBe(method);
       expect(call[1]).toEqual(actor);

@@ -535,16 +535,17 @@ export function fetchGalleryUploadStatus(uploadKeys: string[], timeout = 60_000)
   );
 }
 
-export function searchGalleryImages(input: { query?: string; imageKey?: string; identityKey?: string; duplicates?: true; collectionKey?: string; recordHistory?: boolean; limit?: number }, signal?: AbortSignal) {
-  if (input.query !== undefined) {
-    return searchApp({ query: input.query, collectionSlugs: ["images"], recordHistory: input.recordHistory ?? true, limit: Math.min(input.limit ?? 10, 50), ...(input.collectionKey ? { filters: { collectionKey: input.collectionKey } } : {}) }, signal)
+export function searchGalleryImages(input: { query?: string; imageKey?: string; identityKey?: string; duplicates?: true; collectionKey?: string; recordHistory?: boolean; limit?: number; tagKeys?: string[] }, signal?: AbortSignal) {
+  if (input.query !== undefined || input.tagKeys?.length) {
+    const filters = { ...(input.collectionKey ? { collectionKey: input.collectionKey } : {}), ...(input.tagKeys?.length ? { tagKeys: input.tagKeys, tagMatch: "all" as const } : {}) };
+    return searchApp({ ...(input.query ? { query: input.query } : { operation: "list" as const }), collectionSlugs: ["images"], recordHistory: input.recordHistory ?? true, limit: Math.min(input.limit ?? 10, 50), ...(Object.keys(filters).length ? { filters } : {}) }, signal)
       .then((output) => ({ images: appSearchResults(output, "images", galleryImageSchema) }));
   }
   return postGallery<unknown>("/gallery/images/search", input, 4 * 60_000, signal).then((value) => z.strictObject({ images: z.array(galleryImageSchema) }).parse(value));
 }
 
-export function searchGalleryCollections(query: string, recordHistory = true, signal?: AbortSignal) {
-  return searchApp({ query, collectionSlugs: ["collections"], recordHistory, limit: 50 }, signal)
+export function searchGalleryCollections(query: string, recordHistory = true, signal?: AbortSignal, tagKeys: string[] = []) {
+  return searchApp({ ...(query ? { query } : { operation: "list" as const }), collectionSlugs: ["collections"], recordHistory, limit: 50, ...(tagKeys.length ? { filters: { tagKeys, tagMatch: "all" as const } } : {}) }, signal)
     .then((output) => ({ collections: appSearchResults(output, "collections", galleryCollectionSchema) }));
 }
 

@@ -131,6 +131,21 @@ test("semantically searches inboxes, tones, messages, and drafts through app sea
   ]);
 });
 
+test("filters Signal text searches and empty-query lists without dropping inbox selectors", async () => {
+  const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+  const tags = ["tag-b", "tag-a"];
+  await client.searchEmailInboxesForContext(context, "", true, undefined, tags);
+  await client.searchEmailTonesForContext(context, "measured", false, undefined, tags);
+  await client.searchEmailMessagesForContext(context, connector.connectorKey, client.normalizeEmailOverviewQuery({ readState: "read", facets: ["favorite"], search: "" }), true, undefined, tags);
+  await client.searchEmailDraftsForContext(context, connector.connectorKey, "follow up", false, undefined, tags);
+  expect(calls.map(({ body }) => body)).toEqual([
+    { ...context, operation: "list", recordHistory: false, limit: 50, filters: { tagKeys: ["tag-a", "tag-b"], tagMatch: "all" }, collectionSlugs: ["inboxes"] },
+    { ...context, query: "measured", recordHistory: false, limit: 50, filters: { tagKeys: ["tag-a", "tag-b"], tagMatch: "all" }, collectionSlugs: ["email-tones"] },
+    { ...context, operation: "list", collectionSlugs: ["email-messages"], recordHistory: false, limit: 50, filters: { connectorKey: connector.connectorKey, readState: "read", emailFacets: ["favorite"], tagKeys: ["tag-a", "tag-b"], tagMatch: "all" } },
+    { ...context, query: "follow up", recordHistory: false, limit: 50, collectionSlugs: ["email-drafts"], filters: { connectorKey: connector.connectorKey, tagKeys: ["tag-a", "tag-b"], tagMatch: "all" } },
+  ]);
+});
+
 test("accepts and sends arbitrary custom tone selectors while rejecting empty selectors", async () => {
   expect(client.emailToneSchema.parse("custom-tone-key")).toBe("custom-tone-key");
   expect(() => client.emailToneSchema.parse(" ")).toThrow();

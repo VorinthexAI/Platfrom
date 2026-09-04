@@ -225,9 +225,14 @@ test("Signal composite keys normalize and parse every facet combination", () => 
   const all = signalQueryKeys.overview(context, "connector", { readState: "read", facets: ["favorite", "filtered", "important", "urgent"], search: "  client  " });
   expect(all).toEqual([...signalQueryKeys.accountOverviews(context, "connector"), "inbox", "read", "urgent,important,filtered,favorite", "client"]);
   expect(parseSignalOverviewQuery(all)).toEqual({ kind: "inbox", query: { readState: "read", facets: ["urgent", "important", "filtered", "favorite"], search: "client" } });
-  const empty = signalQueryKeys.overview(context, "connector", { readState: "unread", facets: [], search: "" });
+  const emptyQuery = { readState: "unread" as const, facets: [] as const, search: "" };
+  const empty = signalQueryKeys.overview(context, "connector", emptyQuery);
   expect(parseSignalOverviewQuery(empty)).toEqual({ kind: "inbox", query: { readState: "unread", facets: [], search: "" } });
   expect(parseSignalOverviewQuery(signalQueryKeys.overview(context, "connector", "trash"))).toEqual({ kind: "legacy", filter: "trash", search: null });
+  const tagged = signalQueryKeys.overview(context, "connector", emptyQuery, undefined, ["tag-b", "tag-a"]);
+  expect(tagged).toEqual([...signalQueryKeys.accountOverviews(context, "connector"), "inbox", "unread", "", null, "tags", "tag-a,tag-b"]);
+  expect(parseSignalOverviewQuery(tagged)).toEqual({ kind: "inbox", query: { readState: "unread", facets: [], search: "" }, tagKeys: ["tag-a", "tag-b"] });
+  expect(ascendQueryKeys.search(context, "", ["tag-b", "tag-a"])).toEqual([...ascendQueryKeys.searches(context), "", "tags", "tag-a,tag-b"]);
 });
 
 test("Signal favorite membership is optional when off and required when on", () => {

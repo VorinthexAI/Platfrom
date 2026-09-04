@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { toArangoDoc } from '@/lib/db/base';
-import { archiveDocument, emailDraftPayloadSchema, emailMessagePayloadSchema, emailReplyContextPayloadSchema, emailThreadPayloadSchema, emailTonePayloadSchema, encodeEmailToneContent, prepareEmailReplyContextDocument, prepareEmailToneDocument } from './archive-payloads';
+import { archiveDocument, emailArchivePayloadContent, emailDraftPayloadSchema, emailMessagePayloadSchema, emailReplyContextPayloadSchema, emailThreadPayloadSchema, emailTonePayloadSchema, encodeEmailToneContent, prepareEmailReplyContextDocument, prepareEmailToneDocument } from './archive-payloads';
 import { organizationConnectorSchema } from './connector-schema';
 import { inboxSchema } from './inbox-schema';
 import { emailInboxKey } from './inbox-key';
@@ -106,12 +106,12 @@ export function buildMailDevSeedManifest(input: {
     const threadKey = mailDevFixtureKey('mail-thread', thread.scopeKey, thread.accountKey, thread.providerThreadId);
     emailThreads.push(emailThreadRecordSchema.parse({ ...thread, key: threadKey, developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT }));
     const threadPayload = emailThreadPayloadSchema.parse({ version: 1, kind: 'mail-thread', data: withoutArchiveFields(thread) });
-    const threadDocument = archiveDocument({ key: mailDevFixtureKey('email-archive-thread-export', threadKey), scopeKey: input.scopeKey, folderKey: mailDevFixtureKey('email-archive-export-inbox', input.scopeKey, thread.accountKey), name: thread.subject, payload: threadPayload, embedding: thread.embedding, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT, mutationPolicy: 'user', developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX });
+    const threadDocument = archiveDocument({ key: mailDevFixtureKey('email-archive-thread-export', threadKey), scopeKey: input.scopeKey, folderKey: mailDevFixtureKey('email-archive-export-inbox', input.scopeKey, thread.accountKey), name: thread.subject, content: emailArchivePayloadContent(threadPayload), embedding: thread.embedding, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT, mutationPolicy: 'user', developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX });
     const messageDocuments = messages.map((message) => {
       const key = mailDevFixtureKey('mail-message', message.scopeKey, message.accountKey, message.providerMessageId);
       emailMessages.push(emailMessageRecordSchema.parse({ ...message, key, threadKey, developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT }));
       const payload = emailMessagePayloadSchema.parse({ version: 1, kind: 'mail-message', data: { ...withoutArchiveFields(message), threadKey } });
-      return archiveDocument({ key: mailDevFixtureKey('email-archive-message-export', key), scopeKey: input.scopeKey, folderKey: mailDevFixtureKey('email-archive-export-inbox', input.scopeKey, message.accountKey), name: message.subject, payload, embedding: message.embedding, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT, mutationPolicy: 'user', developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX });
+      return archiveDocument({ key: mailDevFixtureKey('email-archive-message-export', key), scopeKey: input.scopeKey, folderKey: mailDevFixtureKey('email-archive-export-inbox', input.scopeKey, message.accountKey), name: message.subject, content: emailArchivePayloadContent(payload), embedding: message.embedding, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT, mutationPolicy: 'user', developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX });
     });
     return [threadDocument, ...messageDocuments];
   });
@@ -121,8 +121,7 @@ export function buildMailDevSeedManifest(input: {
     const data = emailTonePayloadSchema.shape.data.parse({ ...(slug ? { slug } : { identifier: `${MAIL_DEV_FIXTURE_PREFIX}:${tone.id}` }), name: tone.name, instruction: tone.instruction });
     const embedding = fixtures.threads[fixtures.tones.indexOf(tone)]!.thread.embedding;
     const payload = emailTonePayloadSchema.parse({ version: 1, kind: 'mail-tone', data });
-    const document = archiveDocument({ key: mailDevFixtureKey('mail-tone-export', input.scopeKey, key), scopeKey: input.scopeKey, folderKey: folders.tones, name: tone.name, payload, embedding, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT, mutationPolicy: 'user', developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX });
-    document.content = encodeEmailToneContent(data);
+    const document = archiveDocument({ key: mailDevFixtureKey('mail-tone-export', input.scopeKey, key), scopeKey: input.scopeKey, folderKey: folders.tones, name: tone.name, content: encodeEmailToneContent(data), embedding, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT, mutationPolicy: 'user', developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX });
     document.isFavorite = tone.isFavorite;
     documents.push(prepareEmailToneDocument(document, data, embedding));
     emailTones.push(emailToneRecordSchema.parse({ ...data, key, scopeKey: input.scopeKey, embedding, isFavorite: tone.isFavorite, developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT }));
@@ -132,7 +131,7 @@ export function buildMailDevSeedManifest(input: {
     const data = emailReplyContextPayloadSchema.shape.data.parse({ name: note.name, text: note.text });
     const embedding = fixtures.threads[fixtures.replyContext.indexOf(note) + 6]!.thread.embedding;
     const payload = emailReplyContextPayloadSchema.parse({ version: 1, kind: 'mail-reply-context', data });
-    const document = archiveDocument({ key: mailDevFixtureKey('mail-reply-context-export', input.scopeKey, key), scopeKey: input.scopeKey, folderKey: folders.replyContext, name: note.name, payload, embedding, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT, mutationPolicy: 'user', developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX });
+    const document = archiveDocument({ key: mailDevFixtureKey('mail-reply-context-export', input.scopeKey, key), scopeKey: input.scopeKey, folderKey: folders.replyContext, name: note.name, content: emailArchivePayloadContent(payload), embedding, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT, mutationPolicy: 'user', developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX });
     documents.push(prepareEmailReplyContextDocument(document, data, embedding));
     emailReplyContext.push(emailReplyContextRecordSchema.parse({ ...data, key, scopeKey: input.scopeKey, embedding, developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT }));
   }
@@ -146,7 +145,7 @@ export function buildMailDevSeedManifest(input: {
     const kind = draft.variant === 'new' ? 'mail-new-draft' : 'mail-reply-draft';
     const payload = emailDraftPayloadSchema.parse({ version: 1, kind, data });
     const embedding = fixtures.threads[fixtures.drafts.indexOf(draft) + 12]!.thread.embedding;
-    documents.push(archiveDocument({ key: mailDevFixtureKey('mail-draft-export', input.scopeKey, key), scopeKey: input.scopeKey, folderKey: folders.drafts, name: draft.variant === 'new' ? draft.subject : `Reply ${draft.threadFixtureId}`, payload, embedding, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT, mutationPolicy: 'user', developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX }));
+    documents.push(archiveDocument({ key: mailDevFixtureKey('mail-draft-export', input.scopeKey, key), scopeKey: input.scopeKey, folderKey: folders.drafts, name: draft.variant === 'new' ? draft.subject : `Reply ${draft.threadFixtureId}`, content: emailArchivePayloadContent(payload), embedding, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT, mutationPolicy: 'user', developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX }));
     emailDrafts.push(emailDraftRecordSchema.parse({ ...data, key, scopeKey: input.scopeKey, embedding, developmentFixtureIdentifier: MAIL_DEV_FIXTURE_PREFIX, createdAt: MAIL_DEV_FIXTURE_AT, updatedAt: MAIL_DEV_FIXTURE_AT }));
   }
   return { fixtures, connectors, inboxes, exportFolders, emailThreads, emailMessages, emailDrafts, emailTones, emailReplyContext, documents, accountKeys, attachmentAssets };

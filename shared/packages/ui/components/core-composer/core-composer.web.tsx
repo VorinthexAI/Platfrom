@@ -28,6 +28,7 @@ export type CoreComposerProps = {
   onLeadingPress?: () => void;
   onSubmit: () => void;
   pageActions?: ReactNode;
+  pageBackdrop?: ReactNode;
   prompts: readonly string[];
   sendIcon: ReactNode;
   style?: React.CSSProperties;
@@ -51,6 +52,7 @@ export function CoreComposer({
   onLeadingPress,
   onSubmit,
   pageActions,
+  pageBackdrop,
   prompts,
   sendIcon,
   style,
@@ -60,6 +62,7 @@ export function CoreComposer({
     <div style={style}>
       {accessory}
       {pageActions}
+      {pageBackdrop}
       {message}
       <div>
         {onLeadingPress ? (

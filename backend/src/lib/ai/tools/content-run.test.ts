@@ -10,7 +10,7 @@ const now = '2026-07-22T00:00:00.000Z';
 function fixture() {
   const organization = organizationSchema.parse({ key: newId(), name: 'Acme', createdAt: now, updatedAt: now });
   const scope = scopeSchema.parse({ key: newId(), organizationKey: organization.key, slug: 'content', name: 'Content', summary: 'Content', description: 'Content', position: 1 });
-  const user = userSchema.parse({ key: newId(), organizationId: organization.key, email: 'owner@acme.test', emailHash: 'hash', createdAt: now, updatedAt: now });
+  const user = userSchema.parse({ key: newId(), organizationId: organization.key, currentScopeKey: scope.key, email: 'owner@acme.test', emailHash: 'hash', createdAt: now, updatedAt: now });
   const membership = userOrganizationSchema.parse({ key: newId(), organizationId: organization.key, userId: user.key, orgRole: 'owner', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
   const organizationDecision = { allowed: true, reason: 'ALLOWED' as const, effectiveRole: 'owner' as const, organization: {} as never, membership: {} as never };
   const scopeDecision = { allowed: true, reason: 'ALLOWED', effectiveRole: 'owner' as const, accessSources: ['organization-role' as const], organizationDecision, scope: { key: scope.key } as never };

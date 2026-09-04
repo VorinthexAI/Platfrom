@@ -14,6 +14,7 @@ import {
   hiddenListCapability,
   platformCapabilities,
   signalCapabilities,
+  tagCapabilities,
 } from '@/lib/ai/personal-assistant/service-capabilities';
 import { galleryAssistantCapabilities } from '@/lib/ai/personal-assistant/gallery-capabilities';
 import type { AssistantCapability, AssistantCapabilityContext } from '@/lib/ai/personal-assistant/capabilities';
@@ -39,6 +40,7 @@ export interface WorkspaceToolDependencies {
   appSearch?: AppSearchService;
   appTransformation?: AppTransformationService;
   appSpeech?: AppSpeechService;
+  scopeTags?: AssistantCapabilityContext['scopeTags'];
   accountProfile?: AssistantCapabilityContext['accountProfile'];
   tickets?: AssistantCapabilityContext['tickets'];
   signal?: AbortSignal;
@@ -50,6 +52,13 @@ function publicDefinition(capability: AssistantCapability) {
     name: capability.definition.name,
     inputSchema: capability.inputSchema,
     providerDefinition: capability.definition,
+    isReadOnly(rawInput: unknown) {
+      const input = capability.inputSchema.parse(rawInput);
+      const effect = typeof capability.executionEffect === 'function' ? capability.executionEffect(input) : capability.executionEffect;
+      if (effect) return effect === 'read';
+      const mutationWorkspace = typeof capability.mutationWorkspace === 'function' ? capability.mutationWorkspace(input) : capability.mutationWorkspace;
+      return !mutationWorkspace;
+    },
     async execute(rawInput: unknown, dependencies: WorkspaceToolDependencies) {
       const context: AssistantCapabilityContext = {
         domain: dependencies.context,
@@ -69,6 +78,7 @@ function publicDefinition(capability: AssistantCapability) {
         appSpeech: dependencies.appSpeech,
         accountProfile: dependencies.accountProfile,
         tickets: dependencies.tickets,
+        scopeTags: dependencies.scopeTags,
         signal: dependencies.signal,
         timeoutMs: dependencies.timeoutMs,
       };
@@ -86,6 +96,7 @@ const WORKSPACE_CAPABILITIES = Object.freeze([
   appSpeechCapability,
   hiddenListCapability,
   ...platformCapabilities,
+  ...tagCapabilities,
   ...archiveCapabilities,
   ...galleryAssistantCapabilities,
   ...compassCapabilities,

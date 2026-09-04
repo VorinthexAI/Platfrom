@@ -153,8 +153,8 @@ async function scopedDelete(
   if (hiddenSource) {
     await executor.query('FOR hidden IN userHiddens FILTER hidden.source == @hiddenSource && hidden.sourceKey == @removedKey REMOVE hidden IN userHiddens', { hiddenSource, removedKey });
   }
-  if (collection === 'documents') {
-    await executor.query('FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "document" && assignment.sourceKey == @removedKey REMOVE assignment IN tagAssignments', { scopeKey, removedKey });
+  if (collection === 'documents' || collection === 'folders') {
+    await executor.query('FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == @sourceType && assignment.sourceKey == @removedKey REMOVE assignment IN tagAssignments', { scopeKey, sourceType: collection === 'documents' ? 'document' : 'folder', removedKey });
   }
   return true;
 }

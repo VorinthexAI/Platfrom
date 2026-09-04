@@ -5,6 +5,8 @@ import { runTool } from '@/lib/ai/tools';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { createAppTransformationHandlers } from './app-transformation';
 import { registerRoutes } from './routes';
+import { recordActionCost, recordActionUsage } from '@/lib/ai/events/runtime';
+import { SparkRepositoryError } from '@/lib/sparks/repository';
 
 const organizationKey = newId(), scopeKey = newId(), userKey = newId(), documentKey = newId(), messageKey = newId();
 const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
@@ -47,7 +49,7 @@ describe('app transformation HTTP API', () => {
     const calls: unknown[][] = [];
     const executeContent = async (...args: any[]) => { calls.push(args); return { results: [{ success: true, data: { text: 'Generated.' } }] }; };
     await runTool('app.translate', '', { documentKey, targetLanguage: 'French', save: false }, { contentContext: context, executeWorkspaceContent: executeContent as never });
-    const response = await appWith({ getIdentity: identity, authorize, executeContent: executeContent as never }).request('/app/translate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, input: { documentKey, targetLanguage: 'French', save: false } }) });
+    const response = await appWith({ getIdentity: identity, authorize, executeContent: executeContent as never }).request('/app/translate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'preview-request' }, body: JSON.stringify({ organizationKey, scopeKey, input: { documentKey, targetLanguage: 'French', save: false } }) });
     expect(response.status).toBe(200);
     expect(calls).toHaveLength(2);
     for (const call of calls) {
@@ -68,5 +70,19 @@ describe('app transformation HTTP API', () => {
       [{ userKey, organizationKey, scopeKey }, { messageKey, targetLanguage: 'French', sourceLanguage: undefined }, 'tool-request'],
       [{ userKey, organizationKey, scopeKey }, { messageKey, targetLanguage: 'French', sourceLanguage: undefined }, 'http-request'],
     ]);
+  });
+
+  test('HTTP and Core meter translation actions identically and preserve 402', async () => {
+    const charges: Record<string, unknown>[] = [];
+    const service = { enhance: async () => ({ text: 'unused' }), translate: async () => { await recordActionCost('text'); await recordActionUsage('text', { messages: ['Draft'] }, { inputTokens: 1, outputTokens: 1, totalTokens: 2 }); return { text: 'Brouillon' }; } };
+    const billing = { charge: async (_key: string, input: Record<string, unknown>) => { charges.push(input); return { status: 'applied', transaction: { key: newId() } } as never; } };
+    await runTool('app.translate', '', { text: 'Draft', targetLanguage: 'French' }, { contentContext: context, appTransformationService: service, requestKey: 'core-translate', recordEvent: async () => {}, billing });
+    const response = await appWith({ getIdentity: identity, authorize, service, recordEvent: async () => {}, billing }).request('/app/translate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'http-translate' }, body: JSON.stringify({ organizationKey, scopeKey, input: { text: 'Draft', targetLanguage: 'French' } }) });
+    expect(response.status).toBe(200);
+    expect(charges).toHaveLength(2);
+    expect(charges.every((charge) => charge.actionSlug === 'text' && charge.microSparks === 550)).toBe(true);
+
+    const insufficient = await appWith({ getIdentity: identity, authorize, service, recordEvent: async () => {}, billing: { charge: async () => { throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'private'); } } }).request('/app/translate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'insufficient-translate' }, body: JSON.stringify({ organizationKey, scopeKey, input: { text: 'Draft', targetLanguage: 'French' } }) });
+    expect(insufficient.status).toBe(402);
   });
 });

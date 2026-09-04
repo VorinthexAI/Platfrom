@@ -28,6 +28,11 @@ test("renders every pricing amount with a local-tax disclaimer", () => {
 
   expect(html).toContain(formatSparkCount(NEWCOMER_FREE_SPARKS));
   expect(html).toContain("Local taxes may be added where required.");
+  expect(html).toContain("Prepaid Sparks remain available after subscription cancellation");
+  expect(html).toContain("balances never go below zero");
+  expect(html).toContain("no debt or backcharges accrue");
+  expect(html).toContain("hard-deleted after 90 consecutive unfunded days");
+  expect(html).not.toMatch(/notice/i);
   expect(html).not.toMatch(/pre-launch|planned|not purchasable|unlimited/i);
 
   for (const plan of SPARK_MONTHLY_PLANS) {

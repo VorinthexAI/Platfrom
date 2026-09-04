@@ -107,7 +107,7 @@ export function createPlaceImageGenerator(dependencies: PlaceImageDependencies) 
         if (encoded.byteLength > PLACE_IMAGE_PNG_MAX_BYTES) throw new Error('Generated place PNG exceeds the maximum allowed size.');
         assertPlacePngDimensions(encoded);
         const stagingStarted = now();
-        await storage.upload({ key: stagedKey, bytes: encoded, mimeType: 'image/png' });
+        await storage.upload({ key: stagedKey, bytes: encoded, mimeType: 'image/png', billingUserKey: userKey });
         const stagingMs = elapsed(now, stagingStarted);
         const result = travelPlaceImageResponseSchema.parse({
           status: 'ready', image: { status: 'ready', title: token.hero.title, url: `data:image/png;base64,${Buffer.from(encoded).toString('base64')}`, width: 1536, height: 1024, mimeType: 'image/png' },

@@ -181,13 +181,15 @@ export const signalQueryKeys = {
   all: (context: WorkspaceContext) => ["signal", ...contextKey(context)] as const,
   overviews: (context: WorkspaceContext) => [...signalQueryKeys.all(context), "overviews"] as const,
   accountOverviews: (context: WorkspaceContext, connectorKey?: string) => [...signalQueryKeys.overviews(context), connectorKey ?? null] as const,
-  overview: (context: WorkspaceContext, connectorKey?: string, query?: EmailOverviewQuery | EmailFilter, search?: string) => {
+  overview: (context: WorkspaceContext, connectorKey?: string, query?: EmailOverviewQuery | EmailFilter, search?: string, tagKeys: readonly string[] = []) => {
     if (!connectorKey && !query) return [...signalQueryKeys.accountOverviews(context), "root"] as const;
     if (typeof query === "string") return [...signalQueryKeys.accountOverviews(context, connectorKey), "legacy", query, search?.trim() || null] as const;
     const normalized = normalizeEmailOverviewQuery(query);
-    return [...signalQueryKeys.accountOverviews(context, connectorKey), "inbox", normalized.readState, normalized.facets.join(","), normalized.search || null] as const;
+    const tags = [...new Set(tagKeys)].sort();
+    return [...signalQueryKeys.accountOverviews(context, connectorKey), "inbox", normalized.readState, normalized.facets.join(","), normalized.search || null, ...(tags.length ? ["tags", tags.join(",")] : [])] as const;
   },
-  overviewPage: (context: WorkspaceContext, connectorKey: string | undefined, query: EmailOverviewQuery | EmailFilter, cursor: string, search?: string) => [...signalQueryKeys.overview(context, connectorKey, query, search), "pages", cursor] as const,
+  overviewPage: (context: WorkspaceContext, connectorKey: string | undefined, query: EmailOverviewQuery | EmailFilter, cursor: string, search?: string, tagKeys: readonly string[] = []) => [...signalQueryKeys.overview(context, connectorKey, query, search, tagKeys), "pages", cursor] as const,
+  rootSearch: (context: WorkspaceContext, collection: "inboxes" | "tones", query: string, tagKeys: readonly string[] = []) => [...signalQueryKeys.all(context), "root-search", collection, query.trim().toLocaleLowerCase(), [...new Set(tagKeys)].sort().join(",") || null] as const,
   details: (context: WorkspaceContext) => [...signalQueryKeys.all(context), "details"] as const,
   detail: (context: WorkspaceContext, connectorKey: string | undefined, threadKey: string) => [...signalQueryKeys.details(context), connectorKey ?? null, threadKey] as const,
   drafts: (context: WorkspaceContext, connectorKey: string) => [...signalQueryKeys.all(context), "drafts", connectorKey] as const,
@@ -202,14 +204,15 @@ export const signalQueryKeys = {
 export type ParsedSignalOverviewQuery =
   | Readonly<{ kind: "root" }>
   | Readonly<{ kind: "legacy"; filter: EmailFilter; search: string | null }>
-  | Readonly<{ kind: "inbox"; query: EmailOverviewQuery }>;
+  | Readonly<{ kind: "inbox"; query: EmailOverviewQuery; tagKeys?: readonly string[] }>;
 export function parseSignalOverviewQuery(queryKey: QueryKey): ParsedSignalOverviewQuery | undefined {
   const mode = queryKey[5];
   if (mode === "root") return { kind: "root" };
   if (mode === "legacy" && typeof queryKey[6] === "string") return { kind: "legacy", filter: queryKey[6] as EmailFilter, search: typeof queryKey[7] === "string" ? queryKey[7] : null };
   if (mode !== "inbox" || (queryKey[6] !== "read" && queryKey[6] !== "unread") || typeof queryKey[7] !== "string") return undefined;
   const facets = queryKey[7] ? queryKey[7].split(",").filter((facet): facet is EmailFacet => ["urgent", "important", "filtered", "favorite"].includes(facet)) : [];
-  return { kind: "inbox", query: normalizeEmailOverviewQuery({ readState: queryKey[6], facets, search: typeof queryKey[8] === "string" ? queryKey[8] : undefined }) };
+  const tagKeys = queryKey[9] === "tags" && typeof queryKey[10] === "string" ? queryKey[10].split(",").filter(Boolean) : undefined;
+  return { kind: "inbox", query: normalizeEmailOverviewQuery({ readState: queryKey[6], facets, search: typeof queryKey[8] === "string" ? queryKey[8] : undefined }), ...(tagKeys?.length ? { tagKeys } : {}) };
 }
 
 export const ascendQueryKeys = {
@@ -217,7 +220,7 @@ export const ascendQueryKeys = {
   overview: (context: WorkspaceContext) => [...ascendQueryKeys.all(context), "overview"] as const,
   pending: (context: WorkspaceContext) => [...ascendQueryKeys.all(context), "pending"] as const,
   searches: (context: WorkspaceContext) => [...ascendQueryKeys.all(context), "searches"] as const,
-  search: (context: WorkspaceContext, query: string) => [...ascendQueryKeys.searches(context), query.trim().toLocaleLowerCase()] as const,
+  search: (context: WorkspaceContext, query: string, tagKeys: readonly string[] = []) => [...ascendQueryKeys.searches(context), query.trim().toLocaleLowerCase(), ...([...new Set(tagKeys)].sort().length ? ["tags", [...new Set(tagKeys)].sort().join(",")] : [])] as const,
   details: (context: WorkspaceContext) => [...ascendQueryKeys.all(context), "details"] as const,
   detail: (context: WorkspaceContext, bookKey: string) => [...ascendQueryKeys.details(context), bookKey] as const,
 };
@@ -483,7 +486,7 @@ export function reconcileSignalThreads(queryClient: QueryClient, context: Worksp
     const parsed = parseSignalOverviewQuery(queryKey);
     if (!parsed || parsed.kind === "root") continue;
     const isPage = queryKey.at(-2) === "pages";
-    queryClient.setQueryData(queryKey, reconcileSignalOverviewThreads(overview, currentUpdates, parsed.kind === "inbox" ? parsed.query : parsed.filter, parsed.kind === "legacy" ? parsed.search : null, !isPage, previous));
+    queryClient.setQueryData(queryKey, reconcileSignalOverviewThreads(overview, currentUpdates, parsed.kind === "inbox" ? parsed.query : parsed.filter, parsed.kind === "legacy" ? parsed.search : null, !isPage && !(parsed.kind === "inbox" && parsed.tagKeys?.length), previous));
   }
   for (const update of currentUpdates) queryClient.setQueryData<{ thread: EmailThread; messages: (Record<string, unknown> & { labels?: string[]; isRead?: boolean; unread?: boolean })[] }>(signalQueryKeys.detail(context, connectorKey, update.key), (detail) => {
     if (!detail) return detail;

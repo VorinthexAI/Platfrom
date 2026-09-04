@@ -1,33 +1,34 @@
 import { describe, expect, test } from 'bun:test';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
-import { archiveDocument, decodeEmailDraft, decodeEmailTone, emailAttachmentRefsSchema, emailContactPayloadSchema, emailDraftPayloadSchema, emailRulePayloadSchema, emailTonePayloadSchema, emailWritingProfilePayloadSchema, encodeArchivePayload, encodeEmailToneContent } from './archive-payloads';
+import { archiveDocument, decodeEmailDraft, decodeEmailTone, emailArchivePayloadContent, emailAttachmentRefsSchema, emailContactPayloadSchema, emailDraftPayloadSchema, emailRulePayloadSchema, emailTonePayloadSchema, emailWritingProfilePayloadSchema, encodeArchivePayload, encodeEmailToneContent, legacyEmailArchiveContent } from './archive-payloads';
 
 const key = 'cmrnlzf650002qc7k4p5zem5w';
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
 const now = '2026-08-20T09:00:00.000Z';
 const embedding = Array(EMBEDDING_DIMENSIONS).fill(0);
+const envelopeDocument = (payload: unknown, name = 'Mail') => archiveDocument({ key, scopeKey, folderKey: scopeKey, name, content: encodeArchivePayload(payload), embedding, createdAt: now, updatedAt: now });
 
 describe('mail Archive payload codecs', () => {
   test('round-trips a strict versioned new draft without embedding bytes in content', () => {
     const payload = emailDraftPayloadSchema.parse({ version: 1, kind: 'mail-new-draft', data: { variant: 'new', accountKey: key, to: ['person@example.com'], subject: 'Hello', generatedContent: 'Body', status: 'generated', attachments: [{ type: 'document', key }] } });
-    const document = archiveDocument({ key, scopeKey, folderKey: scopeKey, name: 'Hello', payload, embedding, createdAt: now, updatedAt: now });
+    const document = envelopeDocument(payload, 'Hello');
     expect(decodeEmailDraft(document)).toMatchObject({ key, scopeKey, variant: 'new', creationSource: 'manual', subject: 'Hello', attachments: [{ type: 'document', key }] });
     expect(document.content).not.toContain('embedding');
   });
 
   test('preserves exact blank authored draft fields', () => {
     const payload = emailDraftPayloadSchema.parse({ version: 1, kind: 'mail-new-draft', data: { variant: 'new', accountKey: key, to: ['person@example.com'], subject: '', generatedContent: '(Empty message)', finalContent: '', status: 'edited' } });
-    const document = archiveDocument({ key, scopeKey, folderKey: scopeKey, name: '(No subject)', payload, embedding, createdAt: now, updatedAt: now });
+    const document = envelopeDocument(payload, '(No subject)');
     expect(decodeEmailDraft(document)).toMatchObject({ subject: '', finalContent: '', status: 'edited' });
   });
 
   test('persists a validated Archive representation only for its exact email payload', () => {
     const payload = emailDraftPayloadSchema.parse({ version: 1, kind: 'mail-new-draft', data: { variant: 'new', accountKey: key, to: ['person@example.com'], subject: 'Hello', generatedContent: 'Body', status: 'generated' } });
-    const content = JSON.stringify(payload);
+    const content = emailArchivePayloadContent(payload);
     const representation = { content, embedding, contentChunks: ['semantic email'], chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: 'a'.repeat(64) };
-    const document = archiveDocument({ key, scopeKey, folderKey: scopeKey, name: 'Hello', payload, representation, createdAt: now, updatedAt: now });
+    const document = archiveDocument({ key, scopeKey, folderKey: scopeKey, name: 'Hello', content, representation, createdAt: now, updatedAt: now });
     expect(document).toMatchObject(representation);
-    expect(() => archiveDocument({ key, scopeKey, folderKey: scopeKey, name: 'Hello', payload: { ...payload, kind: 'different' }, representation, createdAt: now, updatedAt: now })).toThrow('does not match');
+    expect(() => archiveDocument({ key, scopeKey, folderKey: scopeKey, name: 'Hello', content: 'Different', representation, createdAt: now, updatedAt: now })).toThrow('does not match');
   });
 
   test('rejects duplicate and overlapping new-draft recipients case-insensitively', () => {
@@ -38,7 +39,7 @@ describe('mail Archive payload codecs', () => {
 
   test('round-trips safe reply mode and resolved recipients with compatibility defaults', () => {
     const payload = emailDraftPayloadSchema.parse({ version: 1, kind: 'mail-reply-draft', data: { variant: 'reply', replyMode: 'reply_all', threadKey: key, messageKey: scopeKey, to: ['person@example.com'], cc: ['copy@example.com'], generatedContent: 'Body', status: 'generated' } });
-    const document = archiveDocument({ key, scopeKey, folderKey: scopeKey, name: 'Reply', payload, embedding, createdAt: now, updatedAt: now });
+    const document = envelopeDocument(payload, 'Reply');
     expect(decodeEmailDraft(document)).toMatchObject({ creationSource: 'manual', replyMode: 'reply_all', to: ['person@example.com'], cc: ['copy@example.com'] });
     const automatic = emailDraftPayloadSchema.parse({ version: 1, kind: 'mail-reply-draft', data: { ...payload.data, creationSource: 'subscription' } });
     expect(automatic.data.creationSource).toBe('subscription');
@@ -69,7 +70,7 @@ describe('mail Archive payload codecs', () => {
 
   test('decodes user-edited Markdown tones while preserving strict canonical metadata', () => {
     const tone = { slug: 'warm' as const, name: 'Warm' as const, instruction: 'Sound human.' };
-    const document = archiveDocument({ key, scopeKey, folderKey: scopeKey, name: tone.name, payload: emailTonePayloadSchema.parse({ version: 1, kind: 'mail-tone', data: tone }), embedding, createdAt: now, updatedAt: now, mutationPolicy: 'user' });
+    const document = envelopeDocument(emailTonePayloadSchema.parse({ version: 1, kind: 'mail-tone', data: tone }), tone.name);
     document.content = `# Warm\n\n<!-- vorinthex-mail-tone {"version":1,"slug":"warm"} -->\n\nLegacy description.\n\n## Instruction\n\nOpen with appreciation and use plain language.`;
     expect(decodeEmailTone(document)).toMatchObject({ slug: 'warm', name: 'Warm', instruction: 'Open with appreciation and use plain language.' });
     expect(decodeEmailTone(document)).not.toHaveProperty('description');
@@ -81,10 +82,22 @@ describe('mail Archive payload codecs', () => {
 
   test('creates ordinary mail documents and retains the legacy tone backfill', async () => {
     const payload = emailDraftPayloadSchema.parse({ version: 1, kind: 'mail-new-draft', data: { variant: 'new', accountKey: key, to: ['person@example.com'], subject: 'Hello', generatedContent: 'Body', status: 'generated' } });
-    expect(archiveDocument({ key, scopeKey, folderKey: scopeKey, name: 'Draft', payload, embedding, createdAt: now, updatedAt: now }).mutationPolicy).toBe('user');
+    expect(archiveDocument({ key, scopeKey, folderKey: scopeKey, name: 'Draft', content: emailArchivePayloadContent(payload), embedding, createdAt: now, updatedAt: now }).mutationPolicy).toBe('user');
     const migration = await Bun.file(new URL('../../db/arango-migrate.ts', import.meta.url)).text();
     expect(migration).toContain('payload.kind == "mail-tone"');
     expect(migration).toContain('mutationPolicy: "user"');
     expect(migration).toContain('vorinthex-mail-tone');
+  });
+
+  test('projects current and legacy email envelopes into user-facing Archive text', () => {
+    const payload = emailDraftPayloadSchema.parse({ version: 1, kind: 'mail-new-draft', data: { variant: 'new', accountKey: key, to: ['person@example.com'], subject: 'Hello', generatedContent: 'Readable body', status: 'generated' } });
+    expect(emailArchivePayloadContent(payload)).toContain('Readable body');
+    expect(legacyEmailArchiveContent(JSON.stringify(payload))).toBe(emailArchivePayloadContent(payload));
+    const legacy = { type: 'mail-reply-context', version: 1, emailDraftKey: key, intent: 'Arrange a meeting', context: { recipientName: 'Hugo', relationship: 'Professional contact', relevantPoints: ['Prefers mornings'] } };
+    const content = legacyEmailArchiveContent(JSON.stringify(legacy));
+    expect(content).toContain('Arrange a meeting');
+    expect(content).toContain('Recipient Name');
+    expect(content).not.toContain('emailDraftKey');
+    expect(content?.trim().startsWith('{')).toBe(false);
   });
 });

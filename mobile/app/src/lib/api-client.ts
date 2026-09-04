@@ -2,8 +2,9 @@ import { AxiosHeaders, create, isAxiosError, type AxiosInstance } from "axios";
 
 import { extractSessionTokens, normalizeApiPath } from "./auth-helpers";
 import { tokenVault } from "./token-vault";
-import { consumeServerSentEvents, parseServerSentEvent, type ServerSentEvent } from "./sse";
+import { consumeServerSentEvents, isAuthenticatedBearerRejection, parseServerSentEvent, type ServerSentEvent } from "./sse";
 import { selectedAppKeyHeaders } from "./app-request-headers";
+import { createObservedHttpError, rejectObservedDomainError } from "./domain-error-observer";
 import { ensureAppsReady } from "@/state/apps";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://vorinthex.com";
@@ -55,7 +56,7 @@ apiClient.interceptors.response.use(async (response) => {
       if (cleared) unauthorizedListener?.();
     }
   }
-  return Promise.reject(error);
+  return rejectObservedDomainError(error);
 });
 
 export function onUnauthorized(listener: () => void) {
@@ -106,6 +107,7 @@ async function authenticatedEventStream(
     const abort = () => request.abort();
     const processAvailable = () => {
       if (processingError) return;
+      if (request.readyState >= 2 && (request.status < 200 || request.status >= 300)) return;
       try {
         const available = request.responseText.slice(processed);
         processed = request.responseText.length;
@@ -131,15 +133,16 @@ async function authenticatedEventStream(
     request.onerror = () => { cleanup(); reject(processingError ?? new Error("Streaming request failed.")); };
     request.onabort = () => { cleanup(); reject(processingError ?? new DOMException("Aborted", "AbortError")); };
     request.onload = () => { void (async () => {
-      processAvailable();
+      if (request.status >= 200 && request.status < 300) processAvailable();
       if (processingError) throw processingError;
       const event = parseServerSentEvent(buffer);
       if (event) onEvent(event);
       const tokens = extractSessionTokens(undefined, (name) => request.getResponseHeader(name));
       if (tokens) await tokenVault.writeIfCurrent(tokens, generation);
       if (request.status < 200 || request.status >= 300) {
-        if (request.status === 401 && session && await tokenVault.clearIfCurrent(generation)) unauthorizedListener?.();
-        throw new Error(`Streaming request failed with status ${request.status}.`);
+        if (isAuthenticatedBearerRejection(request.status, request.getResponseHeader("www-authenticate"), Boolean(session))
+          && await tokenVault.clearIfCurrent(generation)) unauthorizedListener?.();
+        throw createObservedHttpError(request.status, request.responseText);
       }
       cleanup();
       resolve();

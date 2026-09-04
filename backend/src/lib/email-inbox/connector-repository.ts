@@ -63,6 +63,7 @@ export function createConnectorRepository(database: Database = db) {
     async upsert(input: {
        organizationKey: string; scopeKey: string; provider?: EmailProvider; providerAccountId: string; email: string; scopes: string[];
       createdByMembershipKey: string; credentials: EmailConnectorCredentials;
+      billingUserKey?: string;
       initializeInactive?: boolean;
       expectedRevision?: string | null;
     }) {
@@ -72,9 +73,10 @@ export function createConnectorRepository(database: Database = db) {
       const encrypted = encryptEmailConnectorCredentials(input.credentials, binding);
       const { credentials: _credentials, initializeInactive = false, expectedRevision, ...persistedInput } = input;
       const fenceRevision = expectedRevision !== undefined;
-      const document = organizationConnectorSchema.parse({
-        key: newId(), ...persistedInput, provider, ...encrypted,
-         accessTokenFingerprint: tokenFingerprint(input.credentials.accessToken), status: initializeInactive ? 'error' : 'active', syncEnabled: !initializeInactive, syncStatus: 'idle',
+       const document = organizationConnectorSchema.parse({
+         key: newId(), ...persistedInput, provider, ...encrypted,
+          accessTokenFingerprint: tokenFingerprint(input.credentials.accessToken), status: initializeInactive ? 'error' : 'active', syncEnabled: !initializeInactive, syncStatus: 'idle',
+         ...(input.billingUserKey ? { billingUserKey: input.billingUserKey, ...(!initializeInactive ? { billingStatus: 'funded' as const, billingPeriodStartedAt: timestamp } : {}) } : {}),
         ...(initializeInactive ? { lastError: 'Email connector initialization is incomplete' } : {}),
         lastRefreshedAt: timestamp, createdAt: timestamp, updatedAt: timestamp,
       });
@@ -82,17 +84,24 @@ export function createConnectorRepository(database: Database = db) {
         const cursor = await database.query(`
           LET existing = FIRST(FOR connector IN @@collection FILTER connector.organizationKey == @organizationKey && connector.scopeKey == @scopeKey && connector.provider == @provider && connector.providerAccountId == @providerAccountId LIMIT 1 RETURN connector)
           FILTER !@fenceRevision || (existing == null ? @expectedRevision == null : existing._rev == @expectedRevision)
-          UPSERT { organizationKey: @organizationKey, scopeKey: @scopeKey, provider: @provider, providerAccountId: @providerAccountId }
-          INSERT @document
-            UPDATE MERGE(@document, { _key: OLD._key, createdAt: OLD.createdAt, initialSyncCompleted: false, revokedAt: null, historyId: null, pendingNotificationHistoryId: null, lastSyncedAt: null, syncError: null, syncLeaseToken: null, syncLeaseExpiresAt: null, syncPendingHistoryId: null, syncPendingThreadIds: null, watchRegisteredAt: null, watchExpiresAt: null, lastError: null })
-          IN @@collection OPTIONS { keepNull: false }
-          RETURN NEW
+           LET billingSuspended = existing != null && existing.billingStatus IN ["unfunded", "recovery-pending"]
+           LET startsBillingPeriod = !@initializeInactive && @billingUserKey != null && !billingSuspended && (existing == null || existing.status == "revoked" || existing.billingStatus == "disabled" || existing.billingUserKey == null)
+           UPSERT { organizationKey: @organizationKey, scopeKey: @scopeKey, provider: @provider, providerAccountId: @providerAccountId }
+           INSERT @document
+             UPDATE MERGE(@document, { _key: OLD._key, createdAt: OLD.createdAt, billingUserKey: OLD.billingUserKey == null ? @billingUserKey : OLD.billingUserKey, billingStatus: startsBillingPeriod ? "funded" : OLD.billingStatus, billingPeriodStartedAt: startsBillingPeriod ? @timestamp : OLD.billingPeriodStartedAt, status: billingSuspended ? OLD.status : @document.status, syncEnabled: billingSuspended ? false : @document.syncEnabled, initialSyncCompleted: false, revokedAt: null, historyId: null, pendingNotificationHistoryId: null, lastSyncedAt: null, syncError: null, syncLeaseToken: null, syncLeaseExpiresAt: null, syncPendingHistoryId: null, syncPendingThreadIds: null, watchRegisteredAt: null, watchExpiresAt: null, lastError: billingSuspended ? OLD.lastError : null })
+           IN @@collection OPTIONS { keepNull: false }
+           LET saved = NEW
+           LET period = FIRST(FOR ignored IN startsBillingPeriod ? [1] : [] INSERT { _key: SHA256(CONCAT("inbox-period\\u0000", saved._key, "\\u0000", @timestamp)), billingVersion: 1, connectorKey: saved._key, userKey: saved.billingUserKey, organizationKey: saved.organizationKey, scopeKey: saved.scopeKey, startedAt: @timestamp } INTO inboxBillingPeriods RETURN NEW)
+           RETURN saved
         `, {
           '@collection': ORGANIZATION_CONNECTORS_COLLECTION,
           organizationKey: input.organizationKey,
           scopeKey: input.scopeKey,
            providerAccountId: input.providerAccountId,
            provider,
+          billingUserKey: input.billingUserKey ?? null,
+          initializeInactive,
+          timestamp,
           fenceRevision,
           expectedRevision: expectedRevision ?? null,
           document: toArangoDoc(document),
@@ -124,7 +133,7 @@ export function createConnectorRepository(database: Database = db) {
     },
     async activateInitialization(key: string, accessTokenFingerprint: string, expectedRevision?: string) {
       const updatedAt = new Date().toISOString();
-      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && (@expectedRevision == null || connector._rev == @expectedRevision) && connector.accessTokenFingerprint == @accessTokenFingerprint && connector.status == "error" && connector.syncEnabled == false UPDATE connector WITH { status: "active", syncEnabled: true, lastError: null, updatedAt: @updatedAt } IN @@collection OPTIONS { keepNull: false } RETURN NEW', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, key, expectedRevision: expectedRevision ?? null, accessTokenFingerprint, updatedAt });
+      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && (@expectedRevision == null || connector._rev == @expectedRevision) && connector.accessTokenFingerprint == @accessTokenFingerprint && connector.status == "error" && connector.syncEnabled == false && connector.billingUserKey != null INSERT { _key: SHA256(CONCAT("inbox-period\\u0000", connector._key, "\\u0000", @updatedAt)), billingVersion: 1, connectorKey: connector._key, userKey: connector.billingUserKey, organizationKey: connector.organizationKey, scopeKey: connector.scopeKey, startedAt: @updatedAt } INTO inboxBillingPeriods UPDATE connector WITH { status: "active", syncEnabled: true, billingStatus: "funded", billingPeriodStartedAt: @updatedAt, lastError: null, updatedAt: @updatedAt } IN @@collection OPTIONS { keepNull: false } RETURN NEW', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, key, expectedRevision: expectedRevision ?? null, accessTokenFingerprint, updatedAt });
       const raw = await cursor.next();
       return raw ? { ...parse(raw), revision: revision(raw) } : null;
     },
@@ -132,9 +141,9 @@ export function createConnectorRepository(database: Database = db) {
       const timestamp = new Date().toISOString();
       const connectorMutation = input.previousConnector
         ? 'REPLACE connector WITH @previousConnector IN @@collection'
-        : 'UPDATE connector WITH { status: "revoked", syncEnabled: false, encryptedCredentials: "revoked", revokedAt: @timestamp, updatedAt: @timestamp } IN @@collection';
+        : 'UPDATE connector WITH { status: "revoked", billingStatus: "disabled", syncEnabled: false, encryptedCredentials: "revoked", revokedAt: @timestamp, updatedAt: @timestamp } IN @@collection';
       const inboxMutation = input.inboxRevision
-        ? input.previousInbox ? 'REPLACE inbox WITH @previousInbox IN @@inboxes' : 'REMOVE inbox IN @@inboxes'
+        ? input.previousInbox ? 'REPLACE inbox WITH @previousInbox IN @@inboxes' : 'LET cleanupInboxTags = (FOR assignment IN tagAssignments FILTER assignment.scopeKey == inbox.scopeKey && assignment.sourceType == "email-inbox" && assignment.sourceKey == inbox._key REMOVE assignment IN tagAssignments RETURN 1) REMOVE inbox IN @@inboxes'
         : '';
       const previousInbox = input.previousInbox ? inboxSchema.parse(input.previousInbox) : null;
       const cursor = await database.query(`
@@ -142,6 +151,7 @@ export function createConnectorRepository(database: Database = db) {
         LET inbox = DOCUMENT(@@inboxes, @inboxKey)
         FILTER connector != null && connector._rev == @connectorRevision
         FILTER @inboxRevision == null || (inbox != null && inbox.organizationKey == connector.organizationKey && inbox.scopeKey == connector.scopeKey && inbox.connectorKey == connector._key && inbox._rev == @inboxRevision)
+        LET rolledBackBillingPeriods = (FOR period IN inboxBillingPeriods FILTER period.connectorKey == connector._key && period.startedAt == connector.billingPeriodStartedAt && period.startedAt != @previousBillingPeriodStartedAt REMOVE period IN inboxBillingPeriods RETURN 1)
         ${connectorMutation}
         ${inboxMutation}
         RETURN true
@@ -150,6 +160,7 @@ export function createConnectorRepository(database: Database = db) {
         '@inboxes': EMAIL_INBOXES_COLLECTION,
         connectorKey: input.connectorKey, connectorRevision: input.connectorRevision, inboxKey: input.inboxKey ?? previousInbox?.key ?? (input.previousConnector ? emailInboxKey(input.previousConnector.scopeKey, input.connectorKey) : null), inboxRevision: input.inboxRevision ?? null, timestamp,
         previousConnector: input.previousConnector ? toArangoDoc(organizationConnectorSchema.parse(input.previousConnector)) : null,
+        previousBillingPeriodStartedAt: input.previousConnector?.billingPeriodStartedAt ?? null,
         previousInbox: previousInbox ? toArangoDoc(previousInbox) : null,
       });
       return (await cursor.next()) === true;
@@ -226,7 +237,7 @@ export function createConnectorRepository(database: Database = db) {
     },
     async claimDisconnect(key: string, expectedUpdatedAt: string) {
       const updatedAt = new Date().toISOString();
-      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.updatedAt == @expectedUpdatedAt && connector.status != "revoked" && (connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now) && (connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now) UPDATE connector WITH { status: "error", syncEnabled: false, syncStatus: "idle", lastError: "Email disconnect is pending", updatedAt: @updatedAt } IN @@collection RETURN NEW', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, key, expectedUpdatedAt, now: updatedAt, updatedAt });
+      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.updatedAt == @expectedUpdatedAt && connector.status != "revoked" && (connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now) && (connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now) LET closedPeriods = (FOR period IN inboxBillingPeriods FILTER period.connectorKey == connector._key && period.endedAt == null UPDATE period WITH { endedAt: @updatedAt } IN inboxBillingPeriods RETURN 1) UPDATE connector WITH { status: "error", billingStatus: "disabled", syncEnabled: false, syncStatus: "idle", lastError: "Email disconnect is pending", updatedAt: @updatedAt } IN @@collection RETURN NEW', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, key, expectedUpdatedAt, now: updatedAt, updatedAt });
       const raw = await cursor.next();
       return raw ? parse(raw) : null;
     },
@@ -247,10 +258,10 @@ export function createConnectorRepository(database: Database = db) {
     async revoke(key: string, expectedUpdatedAt: string) {
       const timestamp = new Date().toISOString();
       const update = {
-        status: 'revoked', syncEnabled: false, syncStatus: 'idle', revokedAt: timestamp, encryptedCredentials: 'revoked', accessTokenFingerprint: tokenFingerprint(`revoked:${key}:${timestamp}`),
+        status: 'revoked', billingStatus: 'disabled' as const, syncEnabled: false, syncStatus: 'idle', revokedAt: timestamp, encryptedCredentials: 'revoked', accessTokenFingerprint: tokenFingerprint(`revoked:${key}:${timestamp}`),
         historyId: null, pendingNotificationHistoryId: null, syncError: null, syncLeaseToken: null, syncLeaseExpiresAt: null, sendLeaseToken: null, sendLeaseExpiresAt: null, syncPendingHistoryId: null, syncPendingThreadIds: null, syncPendingSubscriptionMessages: null, watchRegisteredAt: null, watchExpiresAt: null, lastError: null, updatedAt: timestamp,
       };
-      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.updatedAt == @expectedUpdatedAt && connector.status != "revoked" && (connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now) && (connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now) UPDATE connector WITH @update IN @@collection OPTIONS { keepNull: false } RETURN true', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, key, expectedUpdatedAt, now: timestamp, update });
+       const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.updatedAt == @expectedUpdatedAt && connector.status != "revoked" && (connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now) && (connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now) LET closedPeriods = (FOR period IN inboxBillingPeriods FILTER period.connectorKey == connector._key && period.endedAt == null UPDATE period WITH { endedAt: @now } IN inboxBillingPeriods RETURN 1) UPDATE connector WITH @update IN @@collection OPTIONS { keepNull: false } RETURN true', { '@collection': ORGANIZATION_CONNECTORS_COLLECTION, key, expectedUpdatedAt, now: timestamp, update });
       return (await cursor.next()) === true;
     },
   };

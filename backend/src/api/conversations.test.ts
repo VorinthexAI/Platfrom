@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { newId } from '@/lib/ids';
 import { bindConversationStreamAbort, conversationDeltaEventSchema, conversationDoneEventSchema, conversationErrorEventSchema, conversationStartEventSchema, createConversationHandlers } from './conversations';
 import type { ToolContext } from '@/lib/ai/tools';
+import { SparkRepositoryError } from '@/lib/sparks/repository';
 
 describe('conversation HTTP contract', () => {
   test('uses strict correlated SSE payloads and safe message projections', () => {
@@ -94,5 +95,25 @@ describe('conversation HTTP contract', () => {
     const stream = await response.text();
     expect(stream).toContain('event: done');
     expect(stream).not.toContain('event: error');
+  });
+
+  test('preserves insufficient balance in JSON and turn SSE boundaries', async () => {
+    const organizationKey = 'organization', scopeKey = newId(), userKey = newId(), conversationKey = newId();
+    const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const insufficient = () => { throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'private'); };
+    const handlers = createConversationHandlers({
+      getIdentity: async () => ({ identityType: 'user', key: userKey }) as never,
+      authorize: async () => ({ context }),
+      service: { list: async () => insufficient() } as never,
+      createTurnService: () => ({ turn: async () => insufficient() }) as never,
+    });
+    const app = new Hono();
+    app.post('/conversations/list', handlers.list);
+    app.post('/conversations/:conversationKey/turn/stream', handlers.turn);
+    const json = await app.request('/conversations/list', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey }) });
+    expect(json.status).toBe(402);
+    expect(await json.json()).toEqual({ success: false, error: { code: 'INSUFFICIENT_BALANCE', message: 'billing.insufficientBalance', details: null } });
+    const stream = await app.request(`/conversations/${conversationKey}/turn/stream`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, message: 'hello', requestKey: 'request' }) });
+    expect(await stream.text()).toContain(JSON.stringify({ type: 'error', correlationKey: 'request', code: 'INSUFFICIENT_BALANCE', message: 'billing.insufficientBalance' }));
   });
 });

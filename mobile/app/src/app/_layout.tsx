@@ -20,6 +20,7 @@ import { BookPlaybackProvider } from "@/lib/book-playback";
 import { useAppsStore } from "@/state/apps";
 import { useInternetConnection } from "@/hooks/use-internet-connection";
 import { AppAvailabilitySheets } from "@/components/AppAvailabilitySheets";
+import { SparksBalanceSheet } from "@/components/SparksBalanceSheet";
 
 const APP_BOOTSTRAP_RETRY_MS = 1_000;
 
@@ -106,6 +107,7 @@ export default function RootLayout() {
                   }}
                 />
                 <AppAvailabilitySheets isOffline={isOffline} />
+                <SparksBalanceSheet isOffline={isOffline} />
               </BookPlaybackProvider>
             </BottomSheetScene>
           </ToastProvider>

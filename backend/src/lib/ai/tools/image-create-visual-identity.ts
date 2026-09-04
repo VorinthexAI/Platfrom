@@ -9,6 +9,7 @@ export interface ImageCreateVisualIdentityToolDependencies extends ExecuteAction
 export const imageCreateVisualIdentityTool = {
   name: 'image.create-visual-identity',
   inputSchema: visualIdentityDescriptionInputSchema,
+  isReadOnly: () => true,
   providerDefinition: {
     name: 'image.create-visual-identity',
     description: 'Create a detailed recognition profile for one specific visual subject from one or more reference image URLs.',

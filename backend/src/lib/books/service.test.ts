@@ -2,8 +2,11 @@ import { createHash } from 'node:crypto';
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
-import { bookCreateInputSchema, createBookService } from './service';
+import { z } from 'zod';
+import { bookCreateInputSchema, createBookService, isTerminalBookGenerationFailure } from './service';
 import { BookRepositoryError } from './repository';
+import { ProviderExecutionError } from '@/lib/ai/router';
+import { BookGenerationTerminalError } from './generation-errors';
 
 const organizationKey = 'organization'; const scopeKey = newId(); const userKey = newId(); const bookKey = newId(); const now = '2026-08-12T12:00:00.000Z';
 const input = { organizationKey, scopeKey, generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'I know the basics', writingTone: 'Clear and practical', language: 'English', narratorVoiceKey: 'clear' as const, narrationPace: 1, archiveDocumentKeys: [] };
@@ -13,6 +16,15 @@ const fingerprint = createHash('sha256').update(JSON.stringify((({ organizationK
 const row = (status: 'queued' | 'failed' | 'cancelled' | 'ready' = 'queued') => ({ book: { key: bookKey, scopeKey, title: input.topic, description: input.goal, goal: input.goal, audience: input.currentKnowledge, outcome: input.goal, language: input.language, narratorVoiceKey: input.narratorVoiceKey, narrationPace: 1, generationRequestKey: input.generationRequestKey, generationBriefFingerprint: fingerprint, generationInput: (({ organizationKey: _o, scopeKey: _s, generationRequestKey: _r, ...value }) => value)(parsedInput), generationOwnerKey: userKey, generationStage: 'accepted' as const, generationCompletedUnits: 0, generationTotalUnits: 34, generationAttempt: 0, estimatedMinutes: 0, chapterCount: 10, isFavorite: false, status, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: now, updatedAt: now }, chapters: [] });
 
 describe('book service asynchronous lifecycle', () => {
+  test('terminalizes only deterministic failures, never cancellation or infrastructure uncertainty', () => {
+    expect(isTerminalBookGenerationFailure(new BookGenerationTerminalError('invalid output'))).toBe(true);
+    expect(isTerminalBookGenerationFailure(new z.ZodError([]))).toBe(false);
+    expect(isTerminalBookGenerationFailure(new ProviderExecutionError('text', [{ modelId: 'm', providerId: 'p', externalModelId: 'e', code: 'invalid_input', message: 'invalid' }]))).toBe(true);
+    expect(isTerminalBookGenerationFailure(new ProviderExecutionError('text', [{ modelId: 'm', providerId: 'p', externalModelId: 'e', code: 'unknown', message: 'unknown' }]))).toBe(false);
+    expect(isTerminalBookGenerationFailure(new DOMException('cancelled', 'AbortError'))).toBe(false);
+    expect(isTerminalBookGenerationFailure(new BookRepositoryError('conflict', 'lease lost'))).toBe(false);
+    expect(isTerminalBookGenerationFailure(new Error('unclassified infrastructure failure'))).toBe(false);
+  });
   test('authorizes and generates ten creative topic suggestions through the AI action boundary', async () => {
     const calls: unknown[][] = [];
     const topics = Array.from({ length: 10 }, (_, index) => `Unexpected learning topic ${index + 1}`);
@@ -90,21 +102,38 @@ describe('book service asynchronous lifecycle', () => {
     expect(detached).toHaveLength(1);
   });
 
-  test('consumes detached failures, releases the lease, and persists only a safe error', async () => {
+  test('recovers a bounded batch of durable generations through the lease-claiming path', async () => {
+    const detached: Array<() => Promise<void>> = [];
+    const repository: any = { listRecoverableGenerations: async (_now: string, limit: number) => { expect(limit).toBe(25); return [{ bookKey, organizationKey, scopeKey, userKey }]; } };
+    const service = createBookService({ repository, generator: { create: async () => bookKey, write: async () => {} }, detach: (run) => detached.push(run), now: () => now });
+    await expect(service.recoverGenerations(25)).resolves.toEqual({ recovered: 1 });
+    expect(detached).toHaveLength(1);
+  });
+
+  test('keeps unknown detached failures recoverable without refunding', async () => {
     let current: any; const calls: string[] = []; const detached: Array<() => Promise<void>> = [];
     const repository: any = {
       authorize: async () => {}, findByGenerationRequest: async () => null, detail: async () => current,
       claimGeneration: async () => { calls.push('claim'); return true; }, renewGeneration: async () => true, isCancellationRequested: async () => false,
       releaseGeneration: async () => { calls.push('release'); return true; },
-      failGeneration: async (_job: unknown, message: string) => { calls.push(`fail:${message}`); current.book = { ...current.book, status: 'failed', generationError: message }; return true; },
+      terminalizeGeneration: async () => { calls.push('terminalize'); return true; },
     };
     const generator: any = { create: async () => { current = row(); return bookKey; }, write: async (_key: string, _input: unknown, context: any) => { calls.push(`write:${context.persistFailure}`); throw new Error('raw provider secret'); } };
     const service = createBookService({ repository, generator, detach: (run) => { detached.push(run); }, scheduleLeaseRenewal: () => () => {}, signUrl: async () => 'signed', publishChanged: async () => { calls.push('publish'); }, now: () => now });
     await expect(service.create(input, userKey)).resolves.toMatchObject({ status: 'queued' });
     expect(calls).toEqual(['publish']);
     await expect(detached[0]!()).resolves.toBeUndefined();
-    expect(calls).toEqual(['publish', 'claim', 'write:false', 'release', 'fail:Audio book generation failed. Retry the audio book to continue.', 'publish']);
-    expect(current.book.generationError).not.toContain('provider');
+    expect(calls).toEqual(['publish', 'claim', 'write:false', 'release', 'publish']);
+    expect(current.book.status).toBe('queued');
+  });
+
+  test('terminalizes deterministic detached validation failures exactly once', async () => {
+    let current: any; const detached: Array<() => Promise<void>> = []; const terminal: unknown[][] = [];
+    const repository: any = { authorize: async () => {}, findByGenerationRequest: async () => null, detail: async () => current, claimGeneration: async () => true, renewGeneration: async () => true, isCancellationRequested: async () => false, releaseGeneration: async () => true, terminalizeGeneration: async (...args: unknown[]) => { terminal.push(args); return true; } };
+    const generator: any = { create: async () => { current = row(); return bookKey; }, write: async () => { throw new BookGenerationTerminalError('invalid output'); } };
+    const service = createBookService({ repository, generator, detach: (run) => detached.push(run), scheduleLeaseRenewal: () => () => {}, signUrl: async () => 'signed', publishChanged: async () => {}, now: () => now, id: () => newId() });
+    await service.create(input, userKey); await detached[0]!();
+    expect(terminal).toHaveLength(1); expect(terminal[0]?.[0]).toMatchObject({ bookKey, scopeKey, userKey }); expect(terminal[0]?.[1]).toBeString(); expect(terminal[0]?.[2]).toContain('Retry');
   });
 
   test('retries in-process while cancellation and hard deletion remain durable-first', async () => {

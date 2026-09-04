@@ -1,5 +1,4 @@
 import type { Context } from 'hono';
-import { getUserOrganizationByOrganizationAndUser } from '@/lib/db/user-organization.node';
 import {
   galleryOperations,
   GalleryOperationError,
@@ -9,36 +8,61 @@ import {
 } from '@/lib/gallery/operations';
 import { getAuthIdentity } from './security';
 import { z } from 'zod';
+import { authorizeContentExecution } from '@/lib/ai/tools';
+import { observeToolExecution } from '@/lib/ai/events/runtime';
+import { toolEventService } from '@/lib/ai/events/service';
+import { sparkErrorResponse } from './errors';
+import type { ToolBillingDependencies } from '@/lib/ai/events/runtime';
+import type { ToolEventRecorder } from '@/lib/ai/events/service';
+import type { RunAuthenticatedContentToolOptions } from '@/lib/ai/tools';
+import type { ToolContext } from '@/lib/ai/tools/tool-context';
 
 const trustedContextSchema = z.object({ organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid() }).passthrough();
 const idempotencyKeySchema = z.string().trim().min(1).max(200);
 export const galleryHighlightListQuerySchema = z.object({ organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid(), collectionKey: z.string().cuid() }).strict();
 export const galleryMemoryListQuerySchema = galleryHighlightListQuerySchema;
 
-async function context(c: Context, organizationKey: string, scopeKey: string): Promise<GalleryOperationContext> {
-  const identity = await getAuthIdentity(c);
-  if (!identity) throw new GalleryOperationError(401, 'GALLERY_UNAUTHORIZED', 'Authentication required.');
-  if (identity.identityType !== 'user') throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'A user session is required.');
-  const membership = await getUserOrganizationByOrganizationAndUser(organizationKey, identity.key);
-  if (!membership) throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'Gallery scope access denied.');
-  const rawIdempotencyKey = c.req.header('idempotency-key')?.trim();
-  const idempotencyKey = rawIdempotencyKey ? idempotencyKeySchema.parse(rawIdempotencyKey) : undefined;
-  return { organizationKey, scopeKey, membership, ...(idempotencyKey ? { idempotencyKey } : {}), signal: c.req.raw.signal };
+interface GalleryHandlerDependencies {
+  getIdentity?: typeof getAuthIdentity;
+  authorize?: (input: { organizationKey: string; scopeKey: string }, options: Omit<RunAuthenticatedContentToolOptions, 'execute'>) => Promise<{ context: ToolContext }>;
+  operations?: Partial<Record<GalleryOperationName, (input: unknown, context: GalleryOperationContext) => Promise<unknown>>>;
+  recordEvent?: ToolEventRecorder;
+  billing?: ToolBillingDependencies;
 }
 
-function handler(name: GalleryOperationName, successStatus = 200, transformInput: (input: Record<string, unknown>) => unknown = (input) => input) {
+async function context(c: Context, organizationKey: string, scopeKey: string, dependencies: GalleryHandlerDependencies = {}) {
+  const identity = await (dependencies.getIdentity ?? getAuthIdentity)(c);
+  if (!identity) throw new GalleryOperationError(401, 'GALLERY_UNAUTHORIZED', 'Authentication required.');
+  if (identity.identityType !== 'user') throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'A user session is required.');
+  const { context: toolContext } = await (dependencies.authorize ?? authorizeContentExecution)({ organizationKey, scopeKey }, { authenticatedUserKey: identity.key });
+  if (toolContext.principal.kind !== 'member') throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'Gallery scope access denied.');
+  const rawIdempotencyKey = c.req.header('idempotency-key')?.trim();
+  const idempotencyKey = rawIdempotencyKey ? idempotencyKeySchema.parse(rawIdempotencyKey) : undefined;
+  const galleryContext: GalleryOperationContext = { organizationKey, scopeKey, membership: toolContext.principal.userOrganization, ...(idempotencyKey ? { idempotencyKey } : {}), signal: c.req.raw.signal };
+  return { galleryContext, toolContext, idempotencyKey };
+}
+
+export function createGalleryOperationHandler(name: GalleryOperationName, successStatus = 200, transformInput: (input: Record<string, unknown>) => unknown = (input) => input, billedSlug?: 'subject.create' | 'highlight.create' | 'image.create-memory', dependencies: GalleryHandlerDependencies = {}) {
   return async (c: Context) => {
     try {
       const { organizationKey, scopeKey, ...input } = trustedContextSchema.parse(await c.req.json());
-      const operation = galleryOperations[name] as (input: unknown, context: GalleryOperationContext) => Promise<unknown>;
-      const data = await operation(transformInput(input), await context(c, organizationKey, scopeKey));
+      const operation = (dependencies.operations?.[name] ?? galleryOperations[name]) as (input: unknown, context: GalleryOperationContext) => Promise<unknown>;
+      const transformed = transformInput(input);
+      const authorized = await context(c, organizationKey, scopeKey, dependencies);
+      const execute = () => operation(transformed, authorized.galleryContext);
+      const data = billedSlug
+        ? await observeToolExecution(billedSlug, authorized.toolContext, execute, { recorder: dependencies.recordEvent ?? toolEventService.record, idempotencyKey: z.string().trim().min(1).max(200).parse(authorized.idempotencyKey), input: transformed, ...dependencies.billing })
+        : await execute();
       return c.json({ success: true, data }, successStatus as 200);
     } catch (error) {
+      const billing = sparkErrorResponse(c, error); if (billing) return billing;
       const normalized = normalizeGalleryOperationError(error);
       return c.json({ success: false, error: { code: normalized.code, message: normalized.message } }, normalized.status);
     }
   };
 }
+
+const handler = createGalleryOperationHandler;
 
 export function duplicateSearchTransportInput<Input extends Record<string, unknown>>(input: Input) {
   return { ...input, duplicates: true as const };
@@ -73,14 +97,14 @@ export const findGalleryCollectionDuplicates = handler('search', 200, duplicateS
 export const deleteGalleryCollectionDuplicates = handler('deleteDuplicates');
 export const transferGalleryCollectionImages = handler('transferCollectionImages');
 export const listGallerySubjects = handler('listSubjects');
-export const createGallerySubject = handler('createSubject', 201);
+export const createGallerySubject = handler('createSubject', 201, (input) => input, 'subject.create');
 export const listGallerySubjectImages = handler('listSubjectImages');
 export const deleteGallerySubject = handler('deleteSubject');
-export const createGalleryHighlight = handler('createHighlight', 201);
+export const createGalleryHighlight = handler('createHighlight', 201, (input) => input, 'highlight.create');
 export const listGalleryHighlights = async (c: Context) => {
   try {
     const { organizationKey, scopeKey, ...input } = galleryHighlightListQuerySchema.parse(c.req.query());
-    const data = await galleryOperations.listHighlights(input, await context(c, organizationKey, scopeKey));
+    const data = await galleryOperations.listHighlights(input, (await context(c, organizationKey, scopeKey)).galleryContext);
     return c.json({ success: true, data }, 200);
   } catch (error) {
     const normalized = normalizeGalleryOperationError(error);
@@ -89,11 +113,11 @@ export const listGalleryHighlights = async (c: Context) => {
 };
 export const readGalleryHighlight = handler('readHighlight');
 export const deleteGalleryHighlight = handler('deleteHighlight');
-export const createGalleryMemory = handler('createMemory', 201);
+export const createGalleryMemory = handler('createMemory', 201, (input) => input, 'image.create-memory');
 export const listGalleryMemories = async (c: Context) => {
   try {
     const { organizationKey, scopeKey, ...input } = galleryMemoryListQuerySchema.parse(c.req.query());
-    const data = await galleryOperations.listMemories(input, await context(c, organizationKey, scopeKey));
+    const data = await galleryOperations.listMemories(input, (await context(c, organizationKey, scopeKey)).galleryContext);
     return c.json({ success: true, data }, 200);
   } catch (error) {
     const normalized = normalizeGalleryOperationError(error);

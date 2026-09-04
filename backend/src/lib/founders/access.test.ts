@@ -50,8 +50,8 @@ function sourceFor(state: FixtureState): FoundersAccessDataSource {
 function fixture() {
   const rootOrganization = organizationSchema.parse({ key: newId(), name: 'Vorinthex AI', is_root: true, createdAt: now, updatedAt: now });
   const otherOrganization = organizationSchema.parse({ key: newId(), name: 'Acme Labs', slug: 'acme', createdAt: now, updatedAt: now });
-  const founder = userSchema.parse({ key: newId(), organizationId: rootOrganization.key, email: 'founder@example.com', emailHash: 'h1', name: 'Founder One', createdAt: now, updatedAt: now });
-  const outsider = userSchema.parse({ key: newId(), organizationId: otherOrganization.key, email: 'outsider@example.com', emailHash: 'h2', createdAt: now, updatedAt: now });
+  const founder = userSchema.parse({ key: newId(), organizationId: rootOrganization.key, currentScopeKey: newId(), email: 'founder@example.com', emailHash: 'h1', name: 'Founder One', createdAt: now, updatedAt: now });
+  const outsider = userSchema.parse({ key: newId(), organizationId: otherOrganization.key, currentScopeKey: newId(), email: 'outsider@example.com', emailHash: 'h2', createdAt: now, updatedAt: now });
   const founderRootMembership = userOrganizationSchema.parse({ key: newId(), organizationId: rootOrganization.key, userId: founder.key, orgRole: 'owner', orgTitle: 'CEO', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
   const outsiderMembership = userOrganizationSchema.parse({ key: newId(), organizationId: otherOrganization.key, userId: outsider.key, orgRole: 'member', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
 

@@ -6,6 +6,7 @@ import { getRootOrganizationId } from '@/lib/db/organizations.node';
 import { normalizeEmail } from '@/api/users';
 import { sha256 } from '@/lib/crypto';
 import { getUserByEmailHash } from '@/lib/db/users.node';
+import { provisionPersonalAuthContext } from '@/lib/db/personal-auth-context.node';
 import { isProviderError } from '@/lib/ai/providers/errors';
 import {
   getUserOrganizationByOrganizationAndUser,
@@ -153,12 +154,19 @@ async function main() {
         rootOrganizationId ??= await getRootOrganizationId();
         doc.organizationId = rootOrganizationId;
       }
+      if (nodeName === 'users' && !doc.currentScopeKey) doc.currentScopeKey = newId();
 
       const resolved = resolveRefs(doc, idMap) as Record<string, unknown>;
       const saved = (await accessor.upsertByKey(resolved as never)) as { key: string };
       results.push({ node: nodeName, key: saved.key });
 
       if (nodeName === 'users') {
+        await provisionPersonalAuthContext({
+          key: saved.key,
+          name: typeof resolved.name === 'string' ? resolved.name : null,
+          email: String(resolved.email),
+          currentScopeKey: String(resolved.currentScopeKey),
+        }, { mainScopeKey: String(resolved.currentScopeKey) });
         const membership = await syncSeededOrganizationMembership({
           userId: saved.key,
           organizationId: resolved.organizationId,

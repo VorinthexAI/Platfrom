@@ -20,7 +20,7 @@ import { buildPlaceEmbeddingText, buildTripEmbeddingText, TRIP_EMBEDDING_CONTENT
 import { generatedPlaceDetailSchema } from '../lib/db/places.node';
 import { isProviderError, type ProviderError } from '../lib/ai/providers/errors';
 import { buildImageEmbeddingText } from '../lib/image-embedding';
-import { decodeEmailTone, decodeEmailToneContent, emailMessageSemanticText, emailToneSemanticText, encodeEmailToneContent } from '../lib/email-inbox/archive-payloads';
+import { decodeEmailTone, decodeEmailToneContent, emailMessageSemanticText, emailToneSemanticText, encodeEmailToneContent, legacyEmailArchiveContent } from '../lib/email-inbox/archive-payloads';
 import { bookGenerationInputSchema } from '../lib/books/schemas';
 import { LEGACY_BOOK_CHAPTER_WORD_MAX, LEGACY_BOOK_CHAPTER_WORD_MIN } from '../lib/db/book-chapters.node';
 import { emailArchiveRootFolderKey, emailMediaCollectionKey } from '../lib/email-inbox/export-container-keys';
@@ -59,9 +59,11 @@ export async function migrateEventAppKeys(targetDb: Pick<Database, 'query'>): Pr
         : null
       LET appKey = HAS(event, "domain") ? mappedAppKey : event.appKey
       LET app = IS_STRING(appKey) ? DOCUMENT(apps, appKey) : null
+      LET scopeKey = HAS(event, "scopeKey") ? event.scopeKey : event.scopeId
+      LET scope = IS_STRING(scopeKey) ? DOCUMENT(scopes, scopeKey) : null
       FILTER app == null
         OR !HAS(event, "userId")
-        OR !HAS(event, "scopeId")
+        OR scope == null
         OR !IS_STRING(event.slug)
         OR !REGEX_TEST(event.slug, "^[a-z][a-z0-9-]*(\\\\.[a-z][a-z0-9-]*)+$")
         OR HAS(event, "distinctId")
@@ -79,8 +81,180 @@ export async function migrateEventAppKeys(targetDb: Pick<Database, 'query'>): Pr
         : event.domain == "core" ? @coreKey
         : null
       LET appKey = HAS(event, "domain") ? mappedAppKey : event.appKey
-      UPDATE event WITH { appKey, domain: null } IN events OPTIONS { keepNull: false }
+      LET scopeKey = HAS(event, "scopeKey") ? event.scopeKey : event.scopeId
+      UPDATE event WITH {
+        appKey,
+        scopeKey,
+        status: event.status IN ["completed", "failed"] ? event.status : "completed",
+        microSparks: IS_NUMBER(event.microSparks) && event.microSparks >= 0 ? FLOOR(event.microSparks) : (IS_NUMBER(event.sparks) && event.sparks >= 0 ? FLOOR(event.sparks * 1000000) : 0),
+        sparkTransactionKey: IS_STRING(event.sparkTransactionKey) ? event.sparkTransactionKey : null,
+        domain: null,
+        scopeId: null,
+        sparks: null
+      } IN events OPTIONS { keepNull: false }
   `, Object.fromEntries(Object.entries(LEGACY_EVENT_APP_KEYS).map(([domain, key]) => [`${domain}Key`, key])));
+}
+
+export async function migrateUserCurrentScopes(targetDb: Pick<Database, 'query'>): Promise<void> {
+  const cursor = await targetDb.query<{ key: string; name?: string | null; email: string }>(`
+    FOR user IN users
+      RETURN { key: user._key, name: user.name, email: user.email }
+  `);
+  for (const user of await cursor.all()) {
+    const now = new Date().toISOString();
+    const fallbackName = user.email.split('@')[0]?.trim() || 'Personal';
+    const organizationName = `${user.name?.trim() || fallbackName}'s Organization`;
+    await targetDb.query(`
+      LET user = DOCUMENT(users, @userKey)
+      FILTER user != null
+      LET selectedScope = IS_STRING(user.currentScopeKey) ? DOCUMENT(scopes, user.currentScopeKey) : null
+      UPSERT { personalOwnerUserId: @userKey }
+        INSERT {
+          _key: @organizationKey, personalOwnerUserId: @userKey, name: @organizationName,
+          is_root: false, slug: @organizationSlug, description: null, isActive: true,
+          mfa_enabled: false, metadata: {}, createdAt: @now, updatedAt: @now, embedding: []
+        }
+        UPDATE { isActive: true, updatedAt: @now } IN organizations
+      LET organization = NEW
+      UPSERT { organizationId: organization._key, userId: @userKey }
+        INSERT {
+          _key: @membershipKey, organizationId: organization._key, userId: @userKey,
+          orgRole: "owner", orgTitle: "Owner", orchestratorKey: null, status: "active",
+          joinedAt: @now, isMfaEnabled: false, totpSecret: null, lastTotpTimeStep: null,
+          mfaVersion: 0, mfaRecoveryPending: false, createdAt: @now, updatedAt: @now, embedding: []
+        }
+        UPDATE { orgRole: "owner", status: "active", updatedAt: @now } IN userOrganizations
+      LET membership = NEW
+      UPSERT { organizationKey: organization._key, slug: "main" }
+        INSERT {
+          _key: @scopeKey, organizationKey: organization._key, slug: "main", name: "Main",
+          summary: "Main personal workspace", description: "Main personal workspace",
+          position: 1, level: 1, embedding: []
+        }
+        UPDATE {} IN scopes
+      LET scope = NEW
+      UPSERT { scopeKey: scope._key, userOrganizationKey: membership._key }
+        INSERT {
+          _key: @scopeMembershipKey, scopeKey: scope._key, userOrganizationKey: membership._key,
+          role: "owner", status: "active", source: "explicit"
+        }
+        UPDATE { role: "owner", status: "active" } IN scopeMembers
+      UPDATE user WITH {
+        currentScopeKey: selectedScope == null ? scope._key : selectedScope._key,
+        updatedAt: @now
+      } IN users
+    `, {
+      userKey: user.key,
+      organizationKey: newId(),
+      organizationName,
+      organizationSlug: `personal-${user.key}`,
+      membershipKey: newId(),
+      scopeKey: newId(),
+      scopeMembershipKey: newId(),
+      now,
+    });
+  }
+}
+
+export async function migrateSparkAccounts(targetDb: Pick<Database, 'query'>): Promise<void> {
+  const cursor = await targetDb.query<{ key: string; currentScopeKey: string }>(`
+    FOR user IN users
+      FILTER IS_STRING(user.currentScopeKey)
+      RETURN { key: user._key, currentScopeKey: user.currentScopeKey }
+  `);
+  for (const user of await cursor.all()) {
+    const transactionKey = newId();
+    const eventKey = newId();
+    const now = new Date().toISOString();
+    await targetDb.query(`
+      LET user = DOCUMENT(users, @userKey)
+      FILTER user != null
+      LET existing = FIRST(FOR item IN sparkTransactions FILTER item.userKey == @userKey && item.idempotencyKey == "account-grant:v1" LIMIT 1 RETURN item)
+      LET priorBalance = MAX([0, SUM(FOR item IN sparkTransactions FILTER item.userKey == @userKey RETURN item.deltaMicroSparks)])
+      LET appliedEventKey = existing == null ? @eventKey : existing.eventKey
+      LET analytics = DOCUMENT(events, appliedEventKey)
+      LET applied = existing == null ? FIRST(
+        INSERT {
+          _key: @transactionKey,
+          userKey: @userKey,
+          kind: "account-grant",
+          deltaMicroSparks: 50000000,
+          balanceAfterMicroSparks: priorBalance + 50000000,
+          idempotencyKey: "account-grant:v1",
+          requestHash: "account-grant:v1:50-sparks",
+          eventKey: appliedEventKey,
+          createdAt: @now
+        } INTO sparkTransactions
+        RETURN NEW
+      ) : existing
+      LET balance = priorBalance + (existing == null ? 50000000 : 0)
+      UPDATE user WITH { microSparkBalance: balance } IN users
+      LET insertedEvent = analytics == null ? FIRST(
+        INSERT {
+          _key: appliedEventKey,
+          userId: @userKey,
+          scopeKey: @scopeKey,
+          slug: "account.created",
+          appKey: @appKey,
+          status: "completed",
+          microSparks: 50000000,
+          sparkTransactionKey: applied._key,
+          createdAt: @now
+        } INTO events
+        RETURN NEW
+      ) : analytics
+      RETURN { transaction: applied._key, event: insertedEvent._key, balance }
+    `, { userKey: user.key, scopeKey: user.currentScopeKey, transactionKey, eventKey, appKey: APP_KEYS.CORE, now });
+  }
+}
+
+export async function migrateInboxBilling(targetDb: Pick<Database, 'query'>, goLiveAt = new Date().toISOString()): Promise<void> {
+  const timestamp = z.string().datetime().parse(goLiveAt);
+  await targetDb.query(`
+    FOR connector IN organizationConnectors
+      FILTER connector.provider == "gmail"
+      LET membership = DOCUMENT(userOrganizations, connector.createdByMembershipKey)
+      LET user = membership == null ? null : DOCUMENT(users, membership.userId)
+      LET scopeMembership = membership == null ? null : FIRST(FOR item IN scopeMembers FILTER item.scopeKey == connector.scopeKey && item.userOrganizationKey == membership._key && item.status == "active" LIMIT 1 RETURN item)
+      LET lifecycleActive = connector.status == "active" && connector.syncEnabled == true
+      LET ownershipValid = membership != null && membership.status == "active" && membership.organizationId == connector.organizationKey && user != null && scopeMembership != null
+      LET payerValid = connector.billingUserKey == null || (ownershipValid && connector.billingUserKey == user._key)
+      LET eligible = lifecycleActive && ownershipValid && payerValid
+      LET openPeriods = (FOR period IN inboxBillingPeriods FILTER period.connectorKey == connector._key && period.endedAt == null SORT period.startedAt DESC, period._key ASC RETURN period)
+      LET canonicalPeriod = eligible ? FIRST(FOR period IN openPeriods FILTER period.billingVersion == 1 && period.userKey == user._key && period.organizationKey == connector.organizationKey && period.scopeKey == connector.scopeKey && period.startedAt <= @goLiveAt LIMIT 1 RETURN period) : null
+      FOR period IN openPeriods
+        FILTER canonicalPeriod == null || period._key != canonicalPeriod._key
+        UPDATE period WITH { endedAt: period.startedAt } IN inboxBillingPeriods
+  `, { goLiveAt: timestamp });
+  await targetDb.query(`
+    FOR connector IN organizationConnectors
+      FILTER connector.provider == "gmail" && connector.status == "active" && connector.syncEnabled == true
+      LET membership = DOCUMENT(userOrganizations, connector.createdByMembershipKey)
+      LET user = membership == null ? null : DOCUMENT(users, membership.userId)
+      LET scopeMembership = membership == null ? null : FIRST(FOR item IN scopeMembers FILTER item.scopeKey == connector.scopeKey && item.userOrganizationKey == membership._key && item.status == "active" LIMIT 1 RETURN item)
+      LET ownershipValid = membership != null && membership.status == "active" && membership.organizationId == connector.organizationKey && user != null && scopeMembership != null
+      FILTER ownershipValid && (connector.billingUserKey == null || connector.billingUserKey == user._key)
+      LET canonicalPeriod = FIRST(FOR period IN inboxBillingPeriods FILTER period.connectorKey == connector._key && period.endedAt == null && period.billingVersion == 1 && period.userKey == user._key && period.organizationKey == connector.organizationKey && period.scopeKey == connector.scopeKey && period.startedAt <= @goLiveAt SORT period.startedAt DESC, period._key ASC LIMIT 1 RETURN period)
+      LET periodKey = SHA256(CONCAT("inbox-period\\u0000", connector._key, "\\u0000", @goLiveAt))
+      LET insertedPeriod = canonicalPeriod == null ? FIRST(INSERT { _key: periodKey, billingVersion: 1, connectorKey: connector._key, userKey: user._key, organizationKey: connector.organizationKey, scopeKey: connector.scopeKey, startedAt: @goLiveAt } INTO inboxBillingPeriods RETURN NEW) : canonicalPeriod
+      LET validPeriod = canonicalPeriod == null ? insertedPeriod : canonicalPeriod
+      UPDATE connector WITH { billingUserKey: user._key, billingStatus: "funded", billingPeriodStartedAt: validPeriod.startedAt } IN organizationConnectors
+  `, { goLiveAt: timestamp });
+  await targetDb.query(`
+    FOR connector IN organizationConnectors
+      FILTER connector.provider == "gmail"
+      LET membership = DOCUMENT(userOrganizations, connector.createdByMembershipKey)
+      LET user = membership == null ? null : DOCUMENT(users, membership.userId)
+      LET scopeMembership = membership == null ? null : FIRST(FOR item IN scopeMembers FILTER item.scopeKey == connector.scopeKey && item.userOrganizationKey == membership._key && item.status == "active" LIMIT 1 RETURN item)
+      LET lifecycleActive = connector.status == "active" && connector.syncEnabled == true
+      LET ownershipValid = membership != null && membership.status == "active" && membership.organizationId == connector.organizationKey && user != null && scopeMembership != null
+      LET eligible = lifecycleActive && ownershipValid && (connector.billingUserKey == null || connector.billingUserKey == user._key)
+      FILTER !eligible
+      UPDATE connector WITH (lifecycleActive
+        ? { billingStatus: "unfunded", syncEnabled: false, syncStatus: "idle", status: "error", lastError: "Connected inbox billing owner is unavailable", syncLeaseToken: null, syncLeaseExpiresAt: null, sendLeaseToken: null, sendLeaseExpiresAt: null, updatedAt: @goLiveAt }
+        : { billingStatus: "disabled", syncEnabled: false, syncStatus: "idle", syncLeaseToken: null, syncLeaseExpiresAt: null, sendLeaseToken: null, sendLeaseExpiresAt: null, updatedAt: @goLiveAt })
+      IN organizationConnectors OPTIONS { keepNull: false }
+  `, { goLiveAt: timestamp });
 }
 
 export async function migrateTicketTypes(targetDb: Pick<Database, 'query'>): Promise<void> {
@@ -247,10 +421,10 @@ export async function migrateContainerPresentations(targetDb: Database): Promise
   `, { communicationCollectionKeys });
 }
 
-/** Restores normal ownership semantics without overwriting a user-renamed Core collection. */
+/** Restores managed collection semantics without overwriting a user-renamed Core collection. */
 export async function migrateManagedGeneratedMedia(targetDb: Database): Promise<void> {
   await targetDb.query('FOR collection IN collections FILTER collection.purpose == "generated-media" && collection.name == "Generated media" UPDATE collection WITH { name: "Core" } IN collections');
-  await targetDb.query('FOR collection IN collections FILTER collection.purpose == "generated-media" && collection.mutationPolicy != "user" UPDATE collection WITH { mutationPolicy: "user" } IN collections');
+  await targetDb.query('FOR collection IN collections FILTER collection.purpose == "generated-media" && collection.mutationPolicy != "system-only" UPDATE collection WITH { mutationPolicy: "system-only" } IN collections');
   await targetDb.query('FOR imageKey IN UNIQUE(FOR relation IN collectionImages LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null && collection.purpose == "generated-media" RETURN relation.imageKey) LET image = DOCUMENT(images, imageKey) FILTER image != null && image.origin == "generated" && image.mutationPolicy == "system-only" UPDATE image WITH { mutationPolicy: "user" } IN images');
 }
 
@@ -780,6 +954,15 @@ export async function migrateCanonicalEmailPersistence(targetDb: Database): Prom
     LET value = { _key: binding._key, organizationKey: binding.organizationKey, scopeKey: binding.scopeKey, connectorKey: binding.connectorKey, providerMessageId: binding.providerMessageId, partPath: binding.partPath, contentHash: binding.contentHash, kind: binding.targetType, filename: binding.sourceFilename, mimeType: binding.sourceMimeType, sizeBytes: binding.sourceSize, storageKey, status: binding.status, leaseToken: binding.leaseToken, leaseExpiresAt: binding.leaseExpiresAt, archiveDocumentKey: binding.targetType == "document" ? binding.targetKey : null, galleryImageKey: binding.targetType == "image" ? binding.targetKey : null, createdAt: binding.createdAt, updatedAt: binding.updatedAt }
     UPSERT { _key: binding._key } INSERT value UPDATE {} IN emailAttachments OPTIONS { keepNull: false }`);
   await targetDb.query('FOR document IN documents FILTER document.mutationPolicy == "system-only" && IS_STRING(document.content) LET payload = JSON_PARSE(document.content) FILTER payload != null && STARTS_WITH(payload.kind || "", "mail-") UPDATE document WITH { managedPurpose: null, managedOwnerKey: null, mutationPolicy: "user", archiveVisibility: "visible" } IN documents OPTIONS { keepNull: false }');
+  const archivedEnvelopes = await (await targetDb.query<Record<string, unknown>>('FOR document IN documents FILTER IS_STRING(document.content) LET payload = JSON_PARSE(document.content) FILTER payload != null && payload.version == 1 && (STARTS_WITH(payload.kind || "", "mail-") || STARTS_WITH(payload.type || "", "mail-")) RETURN KEEP(document, "_key", "name", "content")')).all();
+  for (const document of archivedEnvelopes) {
+    if (typeof document._key !== 'string' || typeof document.name !== 'string' || typeof document.content !== 'string') continue;
+    const content = legacyEmailArchiveContent(document.content);
+    if (!content) continue;
+    const contentChunks = chunkDocumentContent(content);
+    const chunkEmbeddings = await generateEmbeddings(documentEmbeddingTexts(document.name, contentChunks));
+    await targetDb.query('UPDATE @key WITH { content: @content, embedding: @embedding, contentChunks: @contentChunks, chunkEmbeddings: @chunkEmbeddings, semanticChunkCount: @semanticChunkCount, semanticContentHash: @semanticContentHash } IN documents', { key: document._key, content, embedding: chunkEmbeddings[0], contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(content) });
+  }
   await targetDb.query('FOR folder IN folders FILTER STARTS_WITH(folder.purpose || "", "communication-mail-") || STARTS_WITH(folder.managedPurpose || "", "mail-") UPDATE folder WITH { purpose: null, managedPurpose: null, managedOwnerKey: null, mutationPolicy: "user", archiveVisibility: "visible" } IN folders OPTIONS { keepNull: false }');
   await targetDb.query('FOR collection IN collections FILTER collection.purpose == "email-media" UPDATE collection WITH { purpose: null, mutationPolicy: "user" } IN collections OPTIONS { keepNull: false }');
 }
@@ -959,6 +1142,17 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
     }
     throw new Error(`${collectionName} exact semantic migration verification failed for ${invalid} row(s).`);
   }
+}
+
+export async function migrateScopeTags(targetDb: Database): Promise<void> {
+  const tags = targetDb.collection('tags');
+  if (!await tags.exists()) return;
+  const assignments = targetDb.collection('tagAssignments');
+  if (await assignments.exists()) {
+    await targetDb.query('LET legacyTagKeys = (FOR tag IN tags FILTER !IS_STRING(tag.userKey) || LENGTH(TRIM(tag.userKey)) == 0 RETURN tag._key) LET removedAssignments = (FOR assignment IN tagAssignments FILTER assignment.tagKey IN legacyTagKeys REMOVE assignment IN tagAssignments RETURN 1) FOR tag IN tags FILTER tag._key IN legacyTagKeys REMOVE tag IN tags RETURN LENGTH(removedAssignments)');
+    return;
+  }
+  await targetDb.query('FOR tag IN tags FILTER !IS_STRING(tag.userKey) || LENGTH(TRIM(tag.userKey)) == 0 REMOVE tag IN tags');
 }
 
 export async function dropVerifiedLegacyInboxes(targetDb: Database) {
@@ -1577,7 +1771,7 @@ export async function removeLegacyTombstones(targetDb: Database): Promise<void> 
        'organizationConnectors', 'channels', 'threads', 'messages', 'messageMentions',
       'messageReactions', 'polls', 'pollOptions', 'pollVotes',
     ]) await removeBy(name, 'scopeKey', scopeKeys);
-    await removeBy('events', 'scopeId', scopeKeys);
+    await removeBy('events', 'scopeKey', scopeKeys);
     if (await exists('scopeScopes')) {
       await transaction.query('FOR relation IN scopeScopes FILTER relation.parentKey IN @keys || relation.childKey IN @keys REMOVE relation IN scopeScopes', { keys: scopeKeys });
     }
@@ -1701,8 +1895,34 @@ export const collections: CollectionSpec[] = [
       { fields: ['alias_slug'], unique: true, sparse: true },
       { fields: ['refreshTokenHash'], unique: true, sparse: true },
       { fields: ['profileStorageKey'], unique: true, sparse: true },
+      { fields: ['currentScopeKey'] },
     ],
   },
+  {
+    name: 'sparkTransactions',
+    skipEmbedding: true,
+    indexes: [
+      { fields: ['userKey', 'idempotencyKey'], unique: true },
+      { fields: ['userKey', 'createdAt'] },
+      { fields: ['eventKey'], unique: true, sparse: true },
+    ],
+  },
+  {
+    name: 'billingExecutions',
+    skipEmbedding: true,
+    indexes: [
+      { fields: ['userKey', 'executionIdentity'], unique: true },
+      { fields: ['status', 'leaseExpiresAt'] },
+      { fields: ['chargeTransactionKey'], unique: true },
+    ],
+  },
+  { name: 'storageObjects', skipEmbedding: true, indexes: [{ fields: ['storageKey', 'deletedAt'] }, { fields: ['userKey', 'storedAt'] }, { fields: ['storedAt'] }] },
+  { name: 'storageChargingHours', skipEmbedding: true, indexes: [{ fields: ['kind', 'hourEnd'] }, { fields: ['userKey', 'hourStart'], unique: true, sparse: true }, { fields: ['status', 'hourStart'] }] },
+  { name: 'storageChargingMeters', skipEmbedding: true, indexes: [{ fields: ['userKey'], unique: true }] },
+  { name: 'storageRetentionStates', skipEmbedding: true, indexes: [{ fields: ['userKey'], unique: true }, { fields: ['wipeDueAt'] }, { fields: ['fundedAt', 'wipedAt'] }] },
+  { name: 'inboxBillingPeriods', skipEmbedding: true, indexes: [{ fields: ['connectorKey', 'startedAt'], unique: true }, { fields: ['startedAt'] }, { fields: ['scopeKey'] }, { fields: ['userKey'] }] },
+  { name: 'inboxChargingHours', skipEmbedding: true, indexes: [{ fields: ['kind', 'hourEnd'] }, { fields: ['connectorKey', 'hourStart'], unique: true, sparse: true }, { fields: ['status', 'hourStart'] }] },
+  { name: 'inboxChargingMeters', skipEmbedding: true, indexes: [{ fields: ['connectorKey'], unique: true }] },
   // Private per-user visibility overlay. Never expose through the generic node registry.
   { name: 'userHiddens', skipEmbedding: true, indexes: [{ fields: ['userKey', 'source', 'sourceKey'], unique: true }, { fields: ['userKey', 'createdAt'] }, { fields: ['source', 'sourceKey'] }] },
   {
@@ -1722,7 +1942,7 @@ export const collections: CollectionSpec[] = [
       { fields: ['slug', 'createdAt'] },
       { fields: ['appKey', 'createdAt'] },
       { fields: ['userId', 'createdAt'], sparse: true },
-      { fields: ['scopeId', 'createdAt'], sparse: true },
+      { fields: ['scopeKey', 'createdAt'] },
     ],
   },
   {
@@ -1821,7 +2041,7 @@ export const collections: CollectionSpec[] = [
   { name: 'imageCollectionMemories', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'createdAt'] }] },
   { name: 'collectionMembers', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'memberKey'], unique: true }, { fields: ['scopeKey', 'collectionKey', 'role'] }, { fields: ['scopeKey', 'memberKey'] }] },
   { name: 'collectionInvites', skipEmbedding: true, indexes: [{ fields: ['tokenHash'], unique: true }, { fields: ['scopeKey', 'collectionKey'] }, { fields: ['expiresAt'] }, { fields: ['acceptedAt'], sparse: true }, { fields: ['revokedAt'], sparse: true }] },
-  { name: 'tags', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'name'] }] },
+  { name: 'tags', embedKeys: ['normalizedName', 'description'], indexes: [{ fields: ['scopeKey', 'userKey', 'normalizedName'], unique: true }] },
   { name: 'tagAssignments', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'tagKey', 'sourceType', 'sourceKey'], unique: true }, { fields: ['scopeKey', 'sourceType', 'sourceKey'] }, { fields: ['scopeKey', 'tagKey'] }] },
   { name: 'documents', embedKeys: ['name', 'content'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'folderKey'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['storageKey'], unique: true, sparse: true }, { fields: ['folderKey', 'name'] }, { fields: ['scopeKey', 'managedPurpose', 'managedOwnerKey'], unique: true, sparse: true }] },
   { name: 'documentVersions', embedKeys: ['label', 'content'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'documentKey'] }, { fields: ['documentKey', 'version'], unique: true }] },
@@ -1842,7 +2062,7 @@ export const collections: CollectionSpec[] = [
   { name: 'placeReferences', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'placeKey', 'kind', 'createdAt'] }, { fields: ['scopeKey', 'userKey', 'idempotencyKey'], unique: true }] },
   { name: 'placeHeroMedia', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'placeKey'], unique: true }, { fields: ['storageKey'], unique: true }] },
   { name: 'countries', embedKeys: ['name'], indexes: [{ fields: ['countryCode'], unique: true }, { fields: ['name'] }] },
-  { name: 'books', embedKeys: ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'status'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'generationRequestKey'], unique: true, sparse: true }, { fields: ['scopeKey', 'archiveFolderKey'], unique: true, sparse: true }] },
+  { name: 'books', embedKeys: ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'status'] }, { fields: ['status', 'generationLeaseExpiresAt'] }, { fields: ['scopeKey', 'isFavorite'] }, { fields: ['scopeKey', 'generationRequestKey'], unique: true, sparse: true }, { fields: ['scopeKey', 'archiveFolderKey'], unique: true, sparse: true }] },
   { name: 'bookContexts', embedKeys: ['userContext', 'priorKnowledge', 'priorBookContext', 'personalizationContext', 'researchContext', 'noveltyContext', 'generationBrief'], indexes: [{ fields: ['scopeKey', 'bookKey'], unique: true }] },
   { name: 'bookThemes', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'bookKey', 'position'], unique: true }, { fields: ['scopeKey', 'bookKey'] }] },
   { name: 'bookSources', embedKeys: ['title', 'content', 'relevance'], indexes: [{ fields: ['scopeKey', 'bookKey'] }, { fields: ['scopeKey', 'bookKey', 'sourceType'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey'], sparse: true }] },
@@ -1852,6 +2072,8 @@ export const collections: CollectionSpec[] = [
   { name: 'bookProgress', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'bookKey', 'chapterKey'], unique: true }, { fields: ['scopeKey', 'userKey', 'bookKey'] }, { fields: ['scopeKey', 'userKey', 'isCompleted'] }] },
   // Private durable extension intents consumed by the existing per-book generation queue.
   { name: 'bookExtensions', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'bookKey', 'requestKey'], unique: true }, { fields: ['scopeKey', 'bookKey', 'status'] }] },
+  // Private exact-once outbox for terminal fixed-charge refunds.
+  { name: 'bookRefundIntents', skipEmbedding: true, indexes: [{ fields: ['chargeTransactionKey'], unique: true }, { fields: ['status', 'createdAt'] }, { fields: ['leaseExpiresAt'], sparse: true }] },
   // Private Signal persistence. These collections are intentionally absent from NODE_REGISTRY.
   { name: 'emailInboxes', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'connectorKey'], unique: true }, { fields: ['organizationKey', 'scopeKey'] }] },
   { name: 'emailThreads', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'accountKey', 'providerThreadId'], unique: true }, { fields: ['scopeKey', 'accountKey', 'lastMessageAt'] }, { fields: ['scopeKey', 'accountKey', 'inboxCategory'] }] },
@@ -2177,7 +2399,10 @@ async function main() {
     }
     if (spec.name === 'images') await migrateExactSemanticRecords(targetDb, 'images', ['filename', 'caption']);
     if (spec.name === 'collections') await migrateExactSemanticRecords(targetDb, 'collections', ['name', 'description']);
-    if (spec.name === 'tags') await migrateExactSemanticRecords(targetDb, 'tags', ['name', 'description']);
+    if (spec.name === 'tags') {
+      await migrateScopeTags(targetDb);
+      await migrateExactSemanticRecords(targetDb, 'tags', ['normalizedName', 'description']);
+    }
     if (spec.name === 'visualIdentities') await migrateExactSemanticRecords(targetDb, 'visualIdentities', ['name', 'description']);
     if (spec.name === 'collections' || spec.name === 'tags') {
       await targetDb.query(`FOR resource IN @@collection FILTER IS_STRING(resource.description) && LENGTH(TRIM(resource.description)) == 0 UPDATE resource WITH { description: null } IN @@collection OPTIONS { keepNull: false }`, { '@collection': spec.name });
@@ -2906,6 +3131,7 @@ async function main() {
         || !HAS(u, "lastLoginAt")
         || !HAS(u, "isOnboarded")
         || !HAS(u, "guestBootstrapSecretHash")
+        || !HAS(u, "microSparkBalance")
         || HAS(u, "waitlistNumber")
         || HAS(u, "isOnWaitlist")
         || HAS(u, "isWaitlistApproved")
@@ -2922,7 +3148,8 @@ async function main() {
         refreshTokenExpiresAt: HAS(u, "refreshTokenExpiresAt") ? u.refreshTokenExpiresAt : null,
         lastLoginAt: HAS(u, "lastLoginAt") ? u.lastLoginAt : null,
         isOnboarded: HAS(u, "isOnboarded") ? u.isOnboarded : false,
-        guestBootstrapSecretHash: HAS(u, "guestBootstrapSecretHash") ? u.guestBootstrapSecretHash : null
+        guestBootstrapSecretHash: HAS(u, "guestBootstrapSecretHash") ? u.guestBootstrapSecretHash : null,
+        microSparkBalance: HAS(u, "microSparkBalance") && IS_NUMBER(u.microSparkBalance) ? MAX([0, u.microSparkBalance]) : 0
       } IN users OPTIONS { keepNull: false }
   `);
 
@@ -2970,6 +3197,8 @@ async function main() {
     }
     await usersCollection.update(user._key, patch);
   }
+  await migrateUserCurrentScopes(targetDb);
+  await migrateSparkAccounts(targetDb);
 
   // Presence funnel split: partition the old single `activeVisitors` ledger
   // into two clean funnels. Each session resolves to an identity — its parent
@@ -3147,6 +3376,7 @@ async function main() {
     reconciledScopeMemberships += reconciliation.created.length;
   }
   console.log(`Reconciled ${reconciledScopeMemberships} organization scope memberships`);
+  await migrateInboxBilling(targetDb);
 
   // Invitations are no longer part of organization membership. Strip the
   // retired field from every live document so the production database and

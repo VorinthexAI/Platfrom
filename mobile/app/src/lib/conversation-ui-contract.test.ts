@@ -134,7 +134,7 @@ test("renders lifecycle and failures without exposing the backend Pending placeh
   expect(ui).toContain("showToast");
   expect(ui).toContain("CONVERSATION_MESSAGE_MAX_LENGTH");
   expect(ui).toContain("CONVERSATION_NAME_MAX_LENGTH");
-  expect(ui).not.toContain("setInput(content)");
+  expect(ui).toContain("if (draftRevision.current === submittedDraftRevision) setInput(content)");
   expect(ui).toContain('import { RichText } from "@vorinthex/shared/ui/rich-text";');
   expect(ui).toContain('<RichText content={message.content} />');
   expect(ui).not.toContain("renderMessageContent");
@@ -255,7 +255,7 @@ test("keeps Chats beneath the bottom-opening filter and preserves a compact sear
   expect(ui).not.toContain('<Badge><Text style={styles.favoriteMark}>Favorite</Text></Badge>');
 });
 
-test("shows a persistent branded Core watermark without flashing message skeletons for a new chat", () => {
+test("shows the branded Core watermark after messages load without flashing skeletons for a new chat", () => {
   expect(ui).toContain("function ConversationWatermark()");
   expect(ui).toContain(">Core</Text>");
   expect(ui).toContain(">Your personal AI agent connecting Vorinthex AI</Text>");
@@ -265,7 +265,8 @@ test("shows a persistent branded Core watermark without flashing message skeleto
   expect(ui).toContain('coreWatermarkMark: { marginVertical: spacing.xs, opacity: 0.3 }');
   expect(ui).toContain('messageList: { flexGrow: 1, zIndex: 1 }');
   expect(ui).not.toContain('emptyCoreCard:');
-  expect(ui).toContain("<ConversationWatermark />");
+  expect(ui).toContain('pageBackdrop={messagesLoading ? undefined : <ConversationWatermark />}');
+  expect(ui).not.toContain('<View style={styles.conversation}>\n    <ConversationWatermark />');
   expect(ui).toContain("messageEmpty ? null");
   expectBefore(ui, "queryClient.setQueryData(conversationQueryKeys.messages(capturedContext, created.key)", "setSelected((value)");
 });

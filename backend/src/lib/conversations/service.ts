@@ -23,10 +23,12 @@ const conversationCursorSchema = z.object({ favorite: z.boolean(), updatedAt: z.
 const messageCursorSchema = z.object({ createdAt: z.string().datetime(), key: z.string().cuid() }).strict();
 const queryResultSchema = z.object({ messages: z.array(z.object({ key: z.string().cuid(), conversationKey: z.string().cuid(), role: z.enum(['USER', 'ASSISTANT']), content: z.string(), retrievals: z.array(appSearchRetrievalSchema).max(4), createdAt: z.string().datetime(), similarity: z.number().min(-1).max(1) }).strict()) }).strict();
 
-function exactAggregateFallback(result: AppSearchCountOutput | AppSearchSumOutput) {
-  if (result.operation === 'sum') return result.groups.map(({ sum, unit }) => `${sum} ${unit}`).join('\n');
-  if (result.groups.length === 1) return String(result.groups[0]!.count);
-  return result.groups.map(({ collectionSlug, count }) => `${collectionSlug}: ${count}`).join('\n');
+function exactAggregateFallback(results: readonly (AppSearchCountOutput | AppSearchSumOutput)[]) {
+  const sums = results.filter((result): result is AppSearchSumOutput => result.operation === 'sum');
+  if (sums.length) return sums.flatMap((result) => result.groups.map(({ matchedCount, sum, unit }) => `${matchedCount} matching resources; ${sum} ${unit}`)).join('\n');
+  const counts = results.flatMap((result) => result.operation === 'count' ? result.groups.map(({ collectionSlug, count }) => ({ collectionSlug, count })) : []);
+  if (counts.length === 1) return String(counts[0]!.count);
+  return counts.map(({ collectionSlug, count }) => `${collectionSlug}: ${count}`).join('\n');
 }
 
 export type ConversationTurnEvent =
@@ -187,8 +189,7 @@ export function createConversationService(dependencies: ConversationServiceDepen
         const retrievals: AppSearchRetrieval[] = [];
         let response: Awaited<ReturnType<typeof core>> | undefined;
         let agentError: unknown;
-        let successfulAggregate: AppSearchCountOutput | AppSearchSumOutput | undefined;
-        let successfulNonAggregateTool = false;
+        const successfulAggregates = new Map<string, AppSearchCountOutput | AppSearchSumOutput>();
         let successfulImageTurn: z.infer<typeof conversationImageTurnResultSchema> | undefined;
         for (let attempt = 0; attempt < 2 && !response; attempt += 1) {
           retrievals.length = 0;
@@ -205,19 +206,16 @@ export function createConversationService(dependencies: ConversationServiceDepen
                 if (slug === 'conversation.image.enqueue') {
                   const parsed = conversationImageTurnResultSchema.safeParse(result);
                   if (parsed.success) successfulImageTurn = parsed.data;
-                  successfulNonAggregateTool = true;
                   return;
                 }
                 if (slug === 'app.search') {
                   const aggregate = z.union([appSearchCountOutputSchema, appSearchSumOutputSchema]).safeParse(result);
-                  if (aggregate.success && aggregate.data.groups.length) successfulAggregate = aggregate.data;
-                  else successfulNonAggregateTool = true;
+                  if (aggregate.success && aggregate.data.groups.length) successfulAggregates.set(JSON.stringify(arguments_), aggregate.data);
                   if (retrievals.length >= 4) return;
                   const retrieval = projectAppSearchRetrieval(arguments_, result);
                   if (retrieval) retrievals.push(retrieval);
                   return;
                 }
-                successfulNonAggregateTool = true;
                 if (retrievals.length >= 4) return;
                 const retrieval = projectToolResultRetrieval(slug, result);
                 if (retrieval) retrievals.push(retrieval);
@@ -231,7 +229,7 @@ export function createConversationService(dependencies: ConversationServiceDepen
           }
         }
         if (!response) {
-          const fallback = successfulAggregate && !successfulNonAggregateTool ? exactAggregateFallback(successfulAggregate) : 'I could not complete that request reliably. Please try again.';
+          const fallback = successfulAggregates.size ? exactAggregateFallback([...successfulAggregates.values()]) : 'I could not complete that request reliably. Please try again.';
           await persistUserEmbedding;
           const completed = await repository.completeTurn(ownership, input.conversationKey, started.assistant.key, fallback, undefined, [], now());
           if (!completed) throw agentError ?? new ConversationError('FAILED', 'Conversation changed before the fallback response completed.');

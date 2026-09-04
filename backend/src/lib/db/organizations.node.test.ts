@@ -44,6 +44,7 @@ describe('organization node schema', () => {
       user: userSchema.parse({
         key: 'usr_1',
         organizationId: 'org_root',
+        currentScopeKey: 'cm1234567890123456789012345',
         email: 'user@example.com',
         emailHash: 'a'.repeat(64),
         createdAt: baseOrganization.createdAt,

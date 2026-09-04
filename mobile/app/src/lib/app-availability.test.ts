@@ -32,6 +32,7 @@ describe("app update prompt", () => {
 
 test("availability sheets use the shared sheet and cannot dismiss the offline overlay", () => {
   const component = read("../components/AppAvailabilitySheets.tsx");
+  const connectionHook = read("../hooks/use-internet-connection.ts");
   const root = read("../app/_layout.tsx");
   expect(component).toContain('dismissible={false}');
   expect(component).toContain('height="full"');
@@ -42,4 +43,9 @@ test("availability sheets use the shared sheet and cannot dismiss the offline ov
   expect(root).toContain("<AppAvailabilitySheets isOffline={isOffline} />");
   expect(root).toContain('isOffline || (status !== "bootstrapping"');
   expect(root).toContain("connectionResolved && !isOffline");
+  expect(connectionHook).toContain('AppState.addEventListener("change"');
+  expect(connectionHook).toContain("getNetworkStateAsync()");
+  expect(connectionHook).toContain("if (!active) return");
+  expect(connectionHook).toContain("token !== generation.current");
+  expect(connectionHook).toContain("setTimeout(() =>");
 });

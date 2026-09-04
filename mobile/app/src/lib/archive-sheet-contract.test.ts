@@ -49,7 +49,7 @@ test("keeps empty Archive views scrollable for pull-to-refresh", () => {
 
 test("fences pull-to-refresh results to the initiating Archive view", () => {
   const refresh = source.slice(source.indexOf("const refreshArchive = async"), source.indexOf("useEffect(() => { if (userHiddensQuery.data)", source.indexOf("const refreshArchive = async")));
-  expect(source).toContain("refreshViewKey.current = JSON.stringify([contentContextKey, workspaceMode, currentFolder?.key, folderContentTab, query.trim(), rootSearchQuery.trim(), documentKeyRef.current])");
+  expect(source).toContain("refreshViewKey.current = JSON.stringify([contentContextKey, workspaceMode, currentFolder?.key, folderContentTab, query.trim(), rootSearchQuery.trim(), selectedTagKeys, documentKeyRef.current])");
   expect(refresh).toContain("const navigationRequest = navigationGeneration.current");
   expect(refresh).toContain("refreshViewKey.current === viewKey && navigationGeneration.current === navigationRequest");
   expect(refresh).toContain("if (!isCurrent()) return;");
@@ -133,6 +133,22 @@ test("uses canonical app search for Archive folder and document pickers", () => 
   expect(source).toContain('activeSheet !== "folders" && activeSheet !== "documents"');
   expect(source).toContain('accessibilityLabel="Loading Archive folder picker search"');
   expect(source).toContain('accessibilityLabel="Loading Archive document picker search"');
+});
+
+test("integrates global tag filters only into primary Archive root and folder results", () => {
+  expect(source).toContain("const tagContextKey = tagFilterContextKey(contentContext)");
+  expect(source).toContain("state.selectedTagsByContext[tagContextKey] ?? EMPTY_SELECTED_TAGS");
+  expect(source.match(/<TagFilterLane context=\{contentContext\} \/>/g)).toHaveLength(2);
+  expect(source).toContain('<TagFilterSheet context={contentContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />');
+  expect(source).toContain('<BottomSheetItem onPress={openTagFilters} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem>');
+  expect(source).toContain("closeSheet();\n    requestAnimationFrame(() => setTagFilterOpen(true));");
+  expect(source).toContain("const rootSearchActive = Boolean(rootSearchQuery.trim() || selectedTags.length)");
+  expect(source).toContain("const folderSearchActive = Boolean(query.trim() || selectedTags.length)");
+  expect(source).toContain("searchContentMatches(normalized, controller.signal, undefined, false, { tagKeys: selectedTagKeys })");
+  expect(source).toContain("searchContentMatches(normalized, controller.signal, folderKey, false, { tagKeys: selectedTagKeys })");
+  expect(source).toContain("[hasContentContext, rootSearchQuery, rootSearchRevision, selectedTagKeys]");
+  expect(source).toContain("[currentFolder?.key, folderSearchRevision, hasContentContext, query, selectedTagKeys]");
+  expect(source).toContain("searchContentMatches(normalized, controller.signal, undefined, false).then((matches)");
 });
 
 test("appends processing documents and generated versions as full-pill skeletons", () => {
@@ -354,4 +370,13 @@ test("suppresses structural Archive actions for managed resources while retainin
   const folderActionsStart = source.lastIndexOf('{activeSheet === "folderActions" && selectedFolder');
   const folderActions = source.slice(folderActionsStart, source.indexOf('{activeSheet === "folderDetails"', folderActionsStart));
   expect(folderActions).toContain('setHiddenOptimistically("folder"');
+});
+
+test("opens bulk Archive tag assignment with the full content context and preserves selection", () => {
+  expect(source).toContain('import { ResourceTagsSheet } from "@/components/ResourceTagsSheet";');
+  expect(source).toContain('selectedFolders.map(({ key }) => ({ type: "folder" as const, key }))');
+  expect(source).toContain('selectedDocuments.map(({ key }) => ({ type: "document" as const, key }))');
+  expect(source).toContain('closeSheet(true);\n    requestAnimationFrame(() => setResourceTagsOpen(true));');
+  expect(source).toContain('<Button disabled={bulkLoading} onPress={openResourceTags} size="md" variant="secondary">Tags</Button>');
+  expect(source).toContain('<ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />');
 });

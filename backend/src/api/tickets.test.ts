@@ -52,7 +52,7 @@ describe('ticket HTTP API', () => {
       listFeedback: async (...args: unknown[]) => { calls.push(['list', ...args]); return { items: [safe], nextCursor: null }; },
       setFeedbackVote: async (...args: unknown[]) => { calls.push(['vote', ...args]); return safe; },
     } as unknown as TicketService;
-    const handlers = createFeedbackHandlers({ getIdentity: identity, authorize: async () => ({ context }), service });
+    const handlers = createFeedbackHandlers({ getIdentity: identity, authorize: async () => ({ context }), service, recordEvent: async () => {} });
     const app = new Hono().post('/feedback', handlers.create).post('/feedback/list', handlers.list).put('/feedback/:ticketKey/vote', handlers.vote);
     const headers = { 'content-type': 'application/json', 'idempotency-key': 'request-1' };
     expect((await app.request('/feedback', { method: 'POST', headers, body: JSON.stringify({ organizationKey, scopeKey, message: 'Dark mode' }) })).status).toBe(201);
@@ -67,7 +67,7 @@ describe('ticket HTTP API', () => {
   });
 
   test('maps AI-rejected feedback to a safe client error', async () => {
-    const handlers = createFeedbackHandlers({ getIdentity: identity, authorize: async () => ({ context }), service: { createFeedback: async () => { throw new TicketFeedbackRejectedError('Please submit a clear feature request or product improvement.'); } } as unknown as TicketService });
+    const handlers = createFeedbackHandlers({ getIdentity: identity, authorize: async () => ({ context }), service: { createFeedback: async () => { throw new TicketFeedbackRejectedError('Please submit a clear feature request or product improvement.'); } } as unknown as TicketService, recordEvent: async () => {} });
     const app = new Hono().post('/feedback', handlers.create);
     const response = await app.request('/feedback', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'request-1' }, body: JSON.stringify({ organizationKey, scopeKey, message: 'asdf' }) });
     expect(response.status).toBe(400);

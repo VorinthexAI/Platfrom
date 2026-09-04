@@ -5,14 +5,13 @@ import { createMediaLibraryService, mediaLibraryRequestFingerprint, hashMediaLib
 
 const now = '2026-08-07T12:00:00.000Z'; const later = '2026-08-08T12:00:00.000Z';
 function repository(overrides: Partial<MediaLibraryRepository> = {}): MediaLibraryRepository {
-  return { getImage: async () => null, getCollection: async () => null, ownsImage: async () => true, canAccessImage: async () => true, canAccessCollection: async () => true, canManageScope: async () => true, ownsCollection: async () => true, addImageToCollection: async (value) => value, copyImageToCollection: async (value) => value, moveImageBetweenCollections: async (_source, value) => value, leaveCollection: async () => true, createCollectionInvite: async (value, replay) => ({ invite: value, ...replay }), getAcceptedCollectionInviteMembership: async () => null, acceptCollectionInvite: async () => null, acceptCollectionInviteAtomic: async () => null, updateAcceptedCollectionInviteRole: async () => null, createTagAssignment: async (value) => value, setCollectionCoverImage: async () => null, createGlobalShare: async (value, _owner, replay) => ({ share: value, ...replay }), getActiveGlobalShareByTokenHash: async () => null, getTag: async () => null, ...overrides };
+  return { getImage: async () => null, getCollection: async () => null, ownsImage: async () => true, canAccessImage: async () => true, canAccessCollection: async () => true, canManageScope: async () => true, ownsCollection: async () => true, addImageToCollection: async (value) => value, copyImageToCollection: async (value) => value, moveImageBetweenCollections: async (_source, value) => value, leaveCollection: async () => true, createCollectionInvite: async (value, replay) => ({ invite: value, ...replay }), getAcceptedCollectionInviteMembership: async () => null, acceptCollectionInvite: async () => null, acceptCollectionInviteAtomic: async () => null, updateAcceptedCollectionInviteRole: async () => null, setCollectionCoverImage: async () => null, createGlobalShare: async (value, _owner, replay) => ({ share: value, ...replay }), getActiveGlobalShareByTokenHash: async () => null, ...overrides };
 }
 const requestFingerprint = (value: string) => mediaLibraryRequestFingerprint(value, Buffer.alloc(32, 9));
 describe('MediaLibrary service boundaries', () => {
   test('strictly rejects unknown fields', async () => { await expect(createMediaLibraryService({ repository: repository() }).leaveCollection({ scopeKey: newId(), collectionKey: newId(), actorKey: newId(), forged: true })).rejects.toThrow(); });
-  test('rejects retired trip polymorphism', async () => {
+  test('rejects retired trip sharing polymorphism', async () => {
     const service = createMediaLibraryService({ repository: repository() });
-    await expect(service.assignTag({ scopeKey: newId(), tagKey: newId(), sourceType: 'trip', sourceKey: newId(), actorKey: newId(), source: 'user', now })).rejects.toThrow();
     await expect(service.createGlobalShare({ scopeKey: newId(), sourceType: 'trip', sourceKey: newId(), ownerKey: newId(), now, idempotencyKey: 'trip-share' })).rejects.toThrow();
   });
   test('returns one-time tokens while removing persisted hashes', async () => {

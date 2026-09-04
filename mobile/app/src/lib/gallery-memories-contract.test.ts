@@ -57,15 +57,23 @@ test("guards auto-open and preserves typing across zoom and event refresh", () =
   expect(memories).not.toContain("LinearTransition");
 });
 
-test("matches bulk partial deletion and hard-removes detail caches", () => {
+test("uses selected-memory actions for tags and partial deletion while retaining selection", () => {
   expect(memories).toContain("Promise.allSettled(memoryKeys.map((memoryKey) => deleteGalleryCollectionMemory(memoryKey, collection.key)))");
   expect(memories).toContain('disabled={creating || opening || deleting}');
-  expect(memories).toContain('onPress={() => { listSheetOpen.current = false; setActiveSheet("confirmDelete"); }}');
+  expect(memories).toContain('accessibilityLabel="Selected memory actions"');
+  expect(memories).toContain('<MoreHorizontalIcon size="sm" />');
+  expect(memories).toContain('setActiveSheet("actions")');
+  expect(memories).toContain('type: "image-memory" as const, key');
+  expect(memories).toContain('<ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={open && resourceTagsOpen} targets={resourceTagTargets} />');
+  expect(memories).toContain('>Tags</BottomSheetItem>');
+  expect(memories).toContain('>Delete</BottomSheetItem>');
   expect(memories).toContain("queryClient.removeQueries({ queryKey: galleryQueryKeys.memory");
   expect(memories).toContain('title={`Delete ${selectedMemoryKeys.length === 1 ? "memory" : `${selectedMemoryKeys.length} memories`}?`}');
-  expect(memories).toContain('style={styles.bulkDeleteAction} textStyle={styles.bulkDeleteText} variant="secondary">Delete</Button>');
   expect(memories).toContain('bulkToolbar: { width: "100%", minHeight: 36, marginBottom: spacing.xs, padding: 3');
-  expect(memories).toContain('bulkDeleteText: { fontFamily: fonts.regular, fontSize: 11, letterSpacing: 0.4 }');
+  expect(memories).toContain('open={open && !detail && selectedMemoryKeys.length > 0 && activeSheet === "actions"}');
+  expect(memories).toContain('open={open && !detail && selectedMemoryKeys.length > 0 && activeSheet === "confirmDelete"}');
+  const tagAction = memories.slice(memories.indexOf('>Tags</BottomSheetItem>') - 200, memories.indexOf('>Tags</BottomSheetItem>'));
+  expect(tagAction).not.toContain('setSelectedMemoryKeys([])');
   expect(memories).toContain("finally {\n      if (generation === createRequest.current) setCreating(false);");
   expect(memories).toContain("createRequest.current += 1;");
   expect(memories).toContain("setTimeout(() => setCreating(false), 0)");
@@ -103,5 +111,5 @@ test("guards highlight post-create auto-open with the current list sheet ref", (
   expect(highlights).toContain('listSheetOpen.current = open && !detail && !opening && activeSheet === "player"');
   expect(highlights).toContain("if (listSheetOpen.current) void openHighlight(highlight)");
   expect(highlights).toContain('disabled={creating || opening || deleting}');
-  expect(highlights).toContain('onPress={() => { listSheetOpen.current = false; setActiveSheet("confirmDelete"); }}');
+  expect(highlights).toContain('onPress={() => { listSheetOpen.current = false; setActiveSheet("actions"); }}');
 });

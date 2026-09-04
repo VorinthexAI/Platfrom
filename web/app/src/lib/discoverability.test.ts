@@ -8,6 +8,7 @@ import {
   canonicalUrl,
 } from "@/lib/discoverability";
 import { buildLlmsFullText, buildLlmsText } from "@/lib/llms";
+import { PRIVACY_COPY, TERMS_COPY } from "@/lib/legal-copy";
 import { buildRobotsMetadata, buildRouteMetadata } from "@/lib/metadata";
 import {
   NEWCOMER_FREE_SPARKS,
@@ -54,7 +55,7 @@ describe("public discoverability registry", () => {
     expect(sitemap().map(({ url }) => url).sort()).toEqual(
       PUBLIC_ROUTES.map(({ path }) => canonicalUrl(path)).sort(),
     );
-    expect(sitemap().every(({ lastModified }) => lastModified === "2026-08-19")).toBe(
+    expect(sitemap().every(({ lastModified }) => lastModified === "2026-09-04")).toBe(
       true,
     );
   });
@@ -123,9 +124,12 @@ describe("generated answer-engine content", () => {
     for (const output of outputs) {
       expect(output).toContain("# Vorinthex AI");
       expect(output).toContain("> ");
-      expect(output).toContain("Last reviewed: 2026-08-19");
+      expect(output).toContain("Last reviewed: 2026-09-04");
       expect(output).toContain("personal AI");
       expect(output).toContain("Local taxes may be added where required");
+      expect(output).toContain("Prepaid Sparks remain available after subscription cancellation");
+      expect(output).toContain("balances never go below zero");
+      expect(output).toContain("hard-deleted after 90 consecutive unfunded days");
       expect(output).toContain(canonicalUrl("/terms"));
       expect(output).not.toMatch(/unlimited|most popular|app store|google play/i);
       expect(output).toContain(formatSparkCount(NEWCOMER_FREE_SPARKS));
@@ -142,6 +146,24 @@ describe("generated answer-engine content", () => {
       }
     }
 
+  });
+});
+
+describe("legal policy copy", () => {
+  test("states prepaid Spark and unfunded-storage terms without promising notices", () => {
+    const terms = JSON.stringify(TERMS_COPY);
+    const privacy = JSON.stringify(PRIVACY_COPY);
+
+    for (const copy of [terms, privacy]) {
+      expect(copy).toContain("prepaid Sparks");
+      expect(copy).toContain("no debt or grace-period backcharges accrue");
+      expect(copy).toContain("export, deletion, and recovery");
+      expect(copy).toContain("90 consecutive days");
+      expect(copy).not.toMatch(/notice/i);
+    }
+
+    expect(terms).toContain("remain available after you cancel a subscription");
+    expect(terms).toContain("balances never go below zero");
   });
 });
 

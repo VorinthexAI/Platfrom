@@ -26,6 +26,8 @@ export const countryCodeSchema = z.enum([
 export const userSchema = z.object({
   key: z.string(),
   organizationId: z.string(),
+  currentScopeKey: z.string().cuid(),
+  microSparkBalance: z.number().int().safe().nonnegative().default(0),
   email: z.string(),
   emailHash: z.string(),
   countryCode: countryCodeSchema.default('SE'),
@@ -62,7 +64,9 @@ export const insertUser = helpers.insert;
 export const getUserById = helpers.getById;
 export const updateUser = helpers.updateById;
 export async function deleteUser(userKey: string): Promise<void> {
-  await withTransaction(['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages', 'ticketVotes', 'tickets', 'events', 'storageDeletionJobs'], async (transaction) => {
+  await withTransaction(['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages', 'ticketVotes', 'tickets', 'events', 'sparkTransactions', 'storageDeletionJobs', 'tags', 'tagAssignments'], async (transaction) => {
+    await transaction.query('LET tagKeys = (FOR tag IN tags FILTER tag.userKey == @userKey RETURN tag._key) FOR assignment IN tagAssignments FILTER assignment.tagKey IN tagKeys REMOVE assignment IN tagAssignments', { userKey });
+    await transaction.query('FOR tag IN tags FILTER tag.userKey == @userKey REMOVE tag IN tags', { userKey });
     await transaction.query('FOR hidden IN userHiddens FILTER hidden.userKey == @userKey REMOVE hidden IN userHiddens', { userKey });
     await transaction.query('FOR generation IN userGenerations FILTER generation.userKey == @userKey REMOVE generation IN userGenerations', { userKey });
     await transaction.query('FOR message IN conversationMessages FILTER message.userKey == @userKey REMOVE message IN conversationMessages', { userKey });
@@ -78,6 +82,7 @@ export async function deleteUser(userKey: string): Promise<void> {
     `, { userKey });
     await transaction.query('FOR ticket IN tickets FILTER ticket.userKey == @userKey REMOVE ticket IN tickets', { userKey });
     await transaction.query('FOR event IN events FILTER event.userId == @userKey REMOVE event IN events', { userKey });
+    await transaction.query('FOR item IN sparkTransactions FILTER item.userKey == @userKey REMOVE item IN sparkTransactions', { userKey });
     await transaction.query('LET user = DOCUMENT(users, @userKey) FILTER user != null && IS_STRING(user.profileStorageKey) UPSERT { storageKey: user.profileStorageKey } INSERT { storageKey: user.profileStorageKey, createdAt: @now } UPDATE {} IN storageDeletionJobs', { userKey, now: new Date().toISOString() });
     const cursor = await transaction.query('REMOVE @userKey IN users RETURN OLD._key', { userKey });
     if (await cursor.next() === undefined) throw new Error(`User ${userKey} was not found.`);

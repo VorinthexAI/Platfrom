@@ -5,6 +5,12 @@ import { createEmailOAuthService, type EmailOAuthService } from '@/lib/email-inb
 import { createEmailService, EmailIdempotencyError, EmailRepositoryError, emailDraftComposeInputSchema, emailDraftComposeInputShape, emailDraftCreateInputSchema, emailDraftDeleteInputSchema, emailDraftUpdateInputSchema, emailMessageGeneratedListInputSchema, emailMessageSummarizeInputSchema, emailMessageSummaryDeleteInputSchema, emailMessageTranslationDeleteInputSchema, emailOverviewInputSchema, emailOverviewInputShape, emailReplyContextCreateInputSchema, emailReplyContextDeleteInputSchema, emailReplyContextUpdateInputSchema, emailSemanticSearchInputSchema, emailSimilarFindInputSchema, emailThreadFavoriteInputSchema, emailThreadReadStateInputSchema, emailThreadTrashInputSchema, emailToneCreateInputSchema, emailToneDeleteInputSchema, emailToneUpdateInputSchema, emailTrashClearInputSchema, inboxUpdateInputSchema, publicEmailDraftSchema, publicEmailGeneratedDeleteResultSchema, publicEmailInboxSchema, publicEmailOverviewSchema, publicEmailSummaryListResultSchema, publicEmailSummaryResultSchema, publicEmailTranslationListResultSchema, type EmailService } from '@/lib/email-inbox/service';
 import { getAuthIdentity } from './security';
 import { strictObject } from './validation';
+import { authorizeContentExecution, type RunAuthenticatedContentToolOptions } from '@/lib/ai/tools';
+import type { ToolContext } from '@/lib/ai/tools/tool-context';
+import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
+import { toolEventService, type ToolEventRecorder } from '@/lib/ai/events/service';
+import { sparkErrorResponse } from './errors';
+import { createHash } from 'node:crypto';
 
 const contextSchema = strictObject({ organizationKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid() });
 const threadKeySchema = z.string().cuid();
@@ -26,7 +32,7 @@ const legacySubscribeResultSchema = z.object({ watchExpiresAt: z.string().dateti
 const usesCurrentConnectorTransport = (c: Context) => c.req.header('x-vorinthex-email-transport') === '2';
 class EmailHttpError extends Error { constructor(readonly status: 400 | 401 | 403 | 404 | 409 | 503, readonly code: string, message: string) { super(message); } }
 
-export function createEmailHandlers(options: { service?: EmailService; oauth?: EmailOAuthService; getIdentity?: typeof getAuthIdentity } = {}) {
+export function createEmailHandlers(options: { service?: EmailService; oauth?: EmailOAuthService; getIdentity?: typeof getAuthIdentity; authorize?: (input: { organizationKey: string; scopeKey: string }, options: Omit<RunAuthenticatedContentToolOptions, 'execute'>) => Promise<{ context: ToolContext }>; authorizationOptions?: Omit<RunAuthenticatedContentToolOptions, 'authenticatedUserKey' | 'execute'>; recordEvent?: ToolEventRecorder; billing?: ToolBillingDependencies } = {}) {
   const service = options.service ?? createEmailService();
   const oauth = options.oauth ?? createEmailOAuthService();
   const getIdentity = options.getIdentity ?? getAuthIdentity;
@@ -45,9 +51,16 @@ export function createEmailHandlers(options: { service?: EmailService; oauth?: E
     const value = c.req.header('idempotency-key')?.trim();
     return value ? z.string().min(1).max(200).parse(value) : undefined;
   };
+  const observed = async <T>(slug: 'email.message.summarize' | 'email.draft.create' | 'email.draft.compose', c: Context, body: { organizationKey: string; scopeKey: string }, input: unknown, execute: (emailActor: { userKey: string; organizationKey: string; scopeKey: string }, executionKey: string) => Promise<T>) => {
+    const executionKey = z.string().trim().min(1).max(200).parse(requestKey(c) ?? createHash('sha256').update(JSON.stringify({ slug, input })).digest('hex'));
+    const emailActor = await actor(c, body);
+    const { context } = await (options.authorize ?? authorizeContentExecution)({ organizationKey: body.organizationKey, scopeKey: body.scopeKey }, { ...options.authorizationOptions, authenticatedUserKey: emailActor.userKey });
+    return observeToolExecution(slug, context, () => execute(emailActor, executionKey), { recorder: options.recordEvent ?? toolEventService.record, idempotencyKey: executionKey, input, ...options.billing });
+  };
   const run = (operation: (c: Context) => Promise<unknown>, status: 200 | 201 = 200) => async (c: Context) => {
     try { return c.json({ success: true, data: await operation(c) }, status); }
     catch (error) {
+      const billing = sparkErrorResponse(c, error); if (billing) return billing;
       if (error instanceof EmailHttpError) return c.json({ success: false, error: { code: error.code, message: error.message } }, error.status);
       if (error instanceof FoundersAccessError) return c.json({ success: false, error: { code: 'EMAIL_FORBIDDEN', message: 'Email scope access denied.' } }, 403);
       if (error instanceof EmailIdempotencyError) return c.json({ success: false, error: { code: error.code, message: error.message, retryable: error.retryable } }, 409);
@@ -119,26 +132,33 @@ export function createEmailHandlers(options: { service?: EmailService; oauth?: E
     findSimilar: run(async (c) => { const body = strictObject({ ...contextSchema.shape, limit: z.number().int().min(1).max(10).optional() }).parse(await c.req.json()); return service.findSimilar(await actor(c, body), emailSimilarFindInputSchema.parse({ messageKey: c.req.param('messageKey'), limit: body.limit })); }),
     listMessageTranslations: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return publicEmailTranslationListResultSchema.parse(await service.listMessageTranslations(await actor(c, body), emailMessageGeneratedListInputSchema.parse({ messageKey: c.req.param('messageKey') }))); }),
     deleteMessageTranslations: run(async (c) => { const body = strictObject({ ...contextSchema.shape, translationKeys: emailMessageTranslationDeleteInputSchema.shape.translationKeys }).parse(await c.req.json()); return publicEmailGeneratedDeleteResultSchema.parse(await service.deleteMessageTranslations(await actor(c, body), { messageKey: c.req.param('messageKey'), translationKeys: body.translationKeys }, requestKey(c))); }),
-    summarizeMessage: run(async (c) => { const body = strictObject({ ...contextSchema.shape, topic: emailMessageSummarizeInputSchema.shape.topic, style: emailMessageSummarizeInputSchema.shape.style.optional(), language: emailMessageSummarizeInputSchema.shape.language }).parse(await c.req.json()); return publicEmailSummaryResultSchema.parse(await service.summarizeMessage(await actor(c, body), { messageKey: c.req.param('messageKey'), topic: body.topic, style: body.style, language: body.language }, requestKey(c))); }, 201),
+    summarizeMessage: run(async (c) => { const body = strictObject({ ...contextSchema.shape, topic: emailMessageSummarizeInputSchema.shape.topic, style: emailMessageSummarizeInputSchema.shape.style.optional(), language: emailMessageSummarizeInputSchema.shape.language }).parse(await c.req.json()); const input = { messageKey: c.req.param('messageKey'), topic: body.topic, style: body.style, language: body.language }; return publicEmailSummaryResultSchema.parse(await observed('email.message.summarize', c, body, input, (emailActor, executionKey) => service.summarizeMessage(emailActor, input, executionKey))); }, 201),
     listMessageSummaries: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return publicEmailSummaryListResultSchema.parse(await service.listMessageSummaries(await actor(c, body), emailMessageGeneratedListInputSchema.parse({ messageKey: c.req.param('messageKey') }))); }),
     deleteMessageSummaries: run(async (c) => { const body = strictObject({ ...contextSchema.shape, summaryKeys: emailMessageSummaryDeleteInputSchema.shape.summaryKeys }).parse(await c.req.json()); return publicEmailGeneratedDeleteResultSchema.parse(await service.deleteMessageSummaries(await actor(c, body), { messageKey: c.req.param('messageKey'), summaryKeys: body.summaryKeys }, requestKey(c))); }),
     draft: run(async (c) => {
       const body = strictObject({ ...contextSchema.shape, ...emailDraftCreateInputSchema.shape }).parse(await c.req.json());
       const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...input } = body;
-      return publicEmailDraftSchema.parse(await service.draft(await actor(c, body), input, requestKey(c)));
+      return publicEmailDraftSchema.parse(await observed('email.draft.create', c, body, input, (emailActor, executionKey) => service.draft(emailActor, input, executionKey)));
     }, 201),
     draftNew: run(async (c) => {
       const body = strictObject({ ...contextSchema.shape, ...emailDraftComposeInputShape }).parse(await c.req.json());
       const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...rawInput } = body;
       const input = emailDraftComposeInputSchema.parse(rawInput);
-      return publicEmailDraftSchema.parse(await service.draftNew(await actor(c, body), input, requestKey(c)));
+      return publicEmailDraftSchema.parse(await observed('email.draft.compose', c, body, input, (emailActor, executionKey) => service.draftNew(emailActor, input, executionKey)));
     }, 201),
     tones: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return service.tones(await actor(c, body)); }),
     listReplyContext: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return service.listReplyContext(await actor(c, body)); }),
     createReplyContext: run(async (c) => { const body = strictObject({ ...contextSchema.shape, ...emailReplyContextCreateInputSchema.shape }).parse(await c.req.json()); const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...input } = body; return service.createReplyContext(await actor(c, body), input, requestKey(c)); }, 201),
     updateReplyContext: run(async (c) => { const body = strictObject({ ...contextSchema.shape, name: z.string().trim().min(1).max(255).optional(), text: z.string().trim().min(1).max(4_000).optional() }).parse(await c.req.json()); const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...patch } = body; return service.updateReplyContext(await actor(c, body), emailReplyContextUpdateInputSchema.parse({ noteKey: c.req.param('noteKey'), ...patch }), requestKey(c)); }),
     deleteReplyContext: run(async (c) => { const body = strictObject({ ...contextSchema.shape, noteKeys: z.array(threadKeySchema).min(1).max(20) }).parse(await c.req.json()); return service.deleteReplyContext(await actor(c, body), emailReplyContextDeleteInputSchema.parse({ noteKeys: body.noteKeys }), requestKey(c)); }),
-    createTone: run(async (c) => { const body = strictObject({ ...contextSchema.shape, ...emailToneCreateInputSchema.shape }).parse(await c.req.json()); const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...input } = body; return service.createTone(await actor(c, body), input, requestKey(c)); }, 201),
+    createTone: run(async (c) => {
+      const body = strictObject({ ...contextSchema.shape, ...emailToneCreateInputSchema.shape }).parse(await c.req.json());
+      const executionKey = z.string().trim().min(1).max(200).parse(requestKey(c));
+      const emailActor = await actor(c, body);
+      const { context } = await (options.authorize ?? authorizeContentExecution)({ organizationKey: body.organizationKey, scopeKey: body.scopeKey }, { ...options.authorizationOptions, authenticatedUserKey: emailActor.userKey });
+      const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...input } = body;
+      return observeToolExecution('email.tone.create', context, () => service.createTone(emailActor, input, executionKey), { recorder: options.recordEvent ?? toolEventService.record, idempotencyKey: executionKey, input, ...options.billing });
+    }, 201),
     updateTone: run(async (c) => { const transport = strictObject({ ...contextSchema.shape, name: z.string().trim().min(1).max(255).optional(), instruction: z.string().trim().min(1).max(20_000).optional(), isFavorite: z.boolean().optional() }).parse(await c.req.json()); const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...patch } = transport; const input = emailToneUpdateInputSchema.parse({ toneKey: c.req.param('toneKey'), ...patch }); return service.updateTone(await actor(c, transport), input, requestKey(c)); }),
     deleteTone: run(async (c) => { const body = contextSchema.parse(await c.req.json()); return service.deleteTone(await actor(c, body), emailToneDeleteInputSchema.parse({ toneKey: c.req.param('toneKey') }), requestKey(c)); }),
     updateInbox: run(async (c) => { const transport = strictObject({ ...contextSchema.shape, connectorKey: connectorKeySchema, name: z.string().trim().min(1).max(255).optional(), description: z.string().trim().min(1).max(10_000).nullable().optional(), coverImageKey: connectorKeySchema.nullable().optional(), isFavorite: z.boolean().optional() }).parse(await c.req.json()); const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...rawInput } = transport; const result = await service.updateInbox(await actor(c, transport), inboxUpdateInputSchema.parse(rawInput), requestKey(c)); return (usesCurrentConnectorTransport(c) ? publicEmailInboxSchema : legacyConnectorSchema).parse(result); }),

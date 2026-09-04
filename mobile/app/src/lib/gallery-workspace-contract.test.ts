@@ -58,7 +58,7 @@ test("opens collection-scoped image similarity in an invalidated full-screen she
 
 test("uses four-column cursor grids and one skeleton row for initial and append loading", () => {
   expect(source).toContain("const IMAGE_COLUMNS = 4");
-  expect(source).toContain("fetchGalleryOverview(collectionKey, cursor, 100, undefined, undefined, origin)");
+  expect(source).toContain("fetchGalleryOverview(collectionKey, cursor, 100)");
   expect(source).toContain("Array.from({ length: IMAGE_COLUMNS }");
   expect(source).toContain('loadingMore ? <View style={styles.grid}>');
   expect(source).toContain('key={`more-${index}`}');
@@ -72,13 +72,13 @@ test("groups collection images by created date", () => {
   expect(source).toContain("styles.dateHeading");
 });
 
-test("uses origin-bound collection tabs and focuses generated images after generation", () => {
-  expect(source).toContain('accessibilityLabel="Image origin"');
-  expect(source).toContain('>Uploaded</Button>');
-  expect(source).toContain('>Generated</Button>');
-  expect(source).toContain('galleryQueryKeys.overview(galleryContext, collectionKey, origin)');
-  expect(source).toContain('setImageOrigin("generated")');
-  expect(source).toContain('void load(activeCollection, true, "generated")');
+test("uses one origin-neutral collection image stream", () => {
+  expect(source).not.toContain('accessibilityLabel="Image origin"');
+  expect(source).not.toContain('>Uploaded</Button>');
+  expect(source).not.toContain('>Generated</Button>');
+  expect(source).not.toContain("imageOrigin");
+  expect(source).toContain("galleryQueryKeys.overview(galleryContext, collectionKey)");
+  expect(source).toContain("fetchGalleryOverview(collectionKey, cursor, 100)");
 });
 
 test("provides edit and confirmed delete flows for images and collections", () => {
@@ -132,7 +132,7 @@ test("closes and filters optimistically before image and collection delete reque
 test("uses canonical root collection search and filtering with the singleton cache", () => {
   expect(source).toContain("getGalleryCollections(queryClient");
   expect(source).toContain("setCachedGalleryCollections");
-  expect(source).toContain('searchGalleryCollections(normalized, false, controller.signal)');
+  expect(source).toContain('searchGalleryCollections(normalized, false, controller.signal, selectedTagKeys)');
   expect(source).toContain('accessibilityLabel="Search Gallery collections"');
   expect(source).toContain('accessibilityLabel="Filter Gallery"');
   expect(source).toContain('accessibilityLabel="Create in Gallery"');
@@ -146,7 +146,7 @@ test("keeps empty Gallery views scrollable for pull-to-refresh", () => {
 
 test("fences pull-to-refresh results to the initiating Gallery view", () => {
   const refresh = source.slice(source.indexOf("async function refreshGallery"), source.indexOf("const activeSubjects", source.indexOf("async function refreshGallery")));
-  expect(source).toContain("refreshViewKey.current = JSON.stringify([activeCollection?.key, imageOrigin, visibleGalleryView.current, collectionTab, query.trim(), rootSearchQuery.trim(), activeSubject?.key, activeIdentityFilter?.key])");
+  expect(source).toContain("refreshViewKey.current = JSON.stringify([activeCollection?.key, visibleGalleryView.current, collectionTab, query.trim(), rootSearchQuery.trim(), selectedTagKeys, activeSubject?.key, activeIdentityFilter?.key])");
   expect(source).toContain("isCurrentContextGeneration(generation, refreshContextGeneration.current) && isViewCurrent()");
   expect(refresh).toContain("const viewKey = refreshViewKey.current");
   expect(refresh).toContain("const viewGeneration = viewRequest.current");
@@ -154,12 +154,13 @@ test("fences pull-to-refresh results to the initiating Gallery view", () => {
   expect(refresh).toContain("refreshViewKey.current === viewKey && viewRequest.current === viewGeneration && searchRequest.current === searchGeneration");
 });
 
-test("uses direct plus actions for owned root and origin-specific empty states", () => {
+test("uses direct plus actions and one unified collection empty state", () => {
   expect(source).toContain('collectionTab === "mine" && canCreateCollections');
   expect(source).toContain('accessibilityLabel="Create collection"');
   expect(source).toContain('accessibilityLabel={`Upload images to ${activeCollection.name}`}');
-  expect(source).toContain('accessibilityLabel={`Generate images in ${activeCollection.name}`}');
-  expect(source).toContain('imageOrigin === "uploaded" ? <Button');
+  expect(source).toContain('activeCollection ? "No images yet."');
+  expect(source).not.toContain("No uploaded images yet.");
+  expect(source).not.toContain("No generated images yet.");
 });
 
 test("keeps Gallery favorites, hidden items, and search history in the root filter sheet", () => {
@@ -169,6 +170,35 @@ test("keeps Gallery favorites, hidden items, and search history in the root filt
   expect(filterSheet).toContain('>Show hidden</Text>');
   expect(filterSheet).not.toContain('>Visual identities</Button>');
   expect(filterSheet).toContain('>Search history</Button>');
+});
+
+test("integrates session tag filters into primary Gallery collection and image views", () => {
+  expect(source).toContain("const tagContextKey = tagFilterContextKey(contentContext)");
+  expect(source).toContain("state.selectedTagsByContext[tagContextKey] ?? EMPTY_SELECTED_TAGS");
+  expect(source.match(/<TagFilterLane context=\{contentContext\} \/>/g)).toHaveLength(2);
+  expect(source).toContain('<TagFilterSheet context={contentContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />');
+  expect(source).toContain("searchGalleryCollections(normalized, false, controller.signal, selectedTagKeys)");
+  expect(source).toContain("collectionKey: collection.key");
+  expect(source).toContain("tagKeys: selectedTagKeys");
+  expect(source).toContain(">Tags</BottomSheetItem>");
+  const transferStart = source.lastIndexOf('activeSheet === "transferDestination"');
+  expect(transferStart).toBeGreaterThanOrEqual(0);
+  const transferDestinations = source.slice(transferStart);
+  expect(transferDestinations).not.toContain("selectedTagKeys");
+  expect(transferDestinations).not.toContain("TagFilterLane");
+});
+
+test("opens resource tags for selected main images without adding tags to cleanup or picker flows", () => {
+  expect(source).toContain('<ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />');
+  expect(source).toContain('const resourceTagTargets = selectedImageKeys.map((key) => ({ type: "image" as const, key }))');
+  const bulkActions = sourceSection(source, '{activeSheet === "bulkActions" ? <BottomSheetMenu>', '{activeSheet === "bulkDelete" ? <View');
+  expect(bulkActions).toContain('onPress={openResourceTags}');
+  expect(bulkActions).toContain('>Tags</Button>');
+  const duplicates = sourceSection(source, 'activeSheet === "duplicates"', 'activeSheet === "cleanupMenu"');
+  expect(duplicates).not.toContain('openResourceTags');
+  const picker = sourceSection(source, 'activeSheet === "identityPicker"', 'activeSheet === "identityName"');
+  expect(picker).not.toContain('openResourceTags');
+  expect(sourceSection(source, 'function openResourceTags()', 'function pushSheet')).not.toContain('setSelectedImageKeys([])');
 });
 
 test("presents managed media with its persisted app identity and creator-owned Core image actions", () => {
@@ -462,7 +492,7 @@ test("patches authoritative server favorites across Gallery caches and candidate
 test("loads every collection page while the favorite-only filter is active", () => {
   expect(source).toContain("const loadMoreFavoriteImages = useEffectEvent(loadMoreImages)");
   expect(source).toContain("if (!showOnlyFavorites || loading)");
-  expect(source).toContain("if (!activeCollection || !nextCursor || loadingMore || query.trim() || activeSubject || showingSearchResults) return;");
+  expect(source).toContain("if (!activeCollection || !nextCursor || loadingMore || query.trim() || selectedTagKeys.length || activeSubject || showingSearchResults) return;");
   expect(source).toContain('const request = `${activeCollection.key}:${nextCursor}`');
   expect(source).toContain("if (favoritePageRequest.current === request) return;");
   expect(source).toContain("void loadMoreFavoriteImages();");
@@ -744,11 +774,11 @@ test("silently refreshes picker searches without history or selection loss", () 
   expect(source).toContain("await refreshIdentityPickerSearchSilently(identityPickerQuery, pickerCollection, generation)");
 });
 
-test("uses canonical unfiltered collection search with loading skeletons and no inline errors", () => {
+test("uses canonical collection search with loading skeletons and no inline errors", () => {
   const start = source.indexOf("async function search(value = query.trim()");
   const end = source.indexOf("function clearCollectionSearch", start);
   const search = source.slice(start, end);
-  expect(search).toContain("recordHistory: true");
+  expect(search).toContain("recordHistory: Boolean(value)");
   expect(search).toContain("setCollectionSearchResults(result.images)");
   expect(search).not.toContain("result.images.filter");
   expect(search).not.toContain("imageOrigin");

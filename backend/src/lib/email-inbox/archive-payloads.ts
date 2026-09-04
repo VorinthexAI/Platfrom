@@ -196,6 +196,53 @@ export function emailMessageSemanticText(message: Pick<EmailMessage, 'from' | 's
   return `${message.from.trim().toLowerCase()}\n\n${message.subject.replace(/\s+/g, ' ').trim()}\n\n${message.body.replace(/\r\n?/g, '\n').trim()}`;
 }
 
+function titledSections(sections: Array<[string, string | undefined]>) {
+  return sections.flatMap(([title, value]) => value?.trim() ? [`${title}\n\n${value.trim()}`] : []).join('\n\n');
+}
+
+export function emailArchivePayloadContent(payload: unknown) {
+  const parsed = emailArchivePayloadSchema.parse(payload);
+  switch (parsed.kind) {
+    case 'mail-message': return emailMessageSemanticText(parsed.data);
+    case 'mail-thread': return titledSections([['Summary', parsed.data.summary], ['Intent', parsed.data.intent], ['Action', parsed.data.action]]);
+    case 'mail-reply-draft': return parsed.data.finalContent?.trim() || parsed.data.generatedContent;
+    case 'mail-new-draft': return titledSections([['To', parsed.data.to.join(', ')], ['Subject', parsed.data.subject], ['Message', parsed.data.finalContent?.trim() || parsed.data.generatedContent]]);
+    case 'mail-tone': return `${parsed.data.name}\n\n${parsed.data.instruction}`;
+    case 'mail-reply-context': return emailReplyContextSemanticText(parsed.data);
+    case 'mail-writing-profile': return titledSections([['Description', parsed.data.description], ['Tone', parsed.data.tone], ['Style', parsed.data.style], ['Structure', parsed.data.structure], ['Vocabulary', parsed.data.vocabulary], ['Conventions', parsed.data.conventions]]);
+    case 'mail-contact': return titledSections([['Email', parsed.data.email], ['Relationship', parsed.data.relationship], ['Context', parsed.data.context]]);
+    case 'mail-rule': return titledSections([['Description', parsed.data.description], ['Condition', parsed.data.condition], ['Instruction', parsed.data.instruction], ['Action', parsed.data.action]]);
+  }
+}
+
+function legacyValueText(value: unknown, depth = 0): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return value.map((item) => legacyValueText(item, depth + 1)).filter(Boolean).map((item) => `- ${item}`).join('\n');
+  if (!value || typeof value !== 'object' || depth > 3) return '';
+  return Object.entries(value as Record<string, unknown>).flatMap(([field, item]) => {
+    if (['type', 'kind', 'version', 'emailDraftKey'].includes(field)) return [];
+    const rendered = legacyValueText(item, depth + 1);
+    if (!rendered) return [];
+    const label = field.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (letter) => letter.toUpperCase());
+    return [`${label}\n\n${rendered}`];
+  }).join('\n\n');
+}
+
+/** Converts persisted email envelopes from older Archive representations to user-facing text. */
+export function legacyEmailArchiveContent(content: string) {
+  let payload: unknown;
+  try { payload = JSON.parse(content); } catch { return null; }
+  const current = emailArchivePayloadSchema.safeParse(payload);
+  if (current.success) return emailArchivePayloadContent(current.data);
+  if (!payload || typeof payload !== 'object') return null;
+  const record = payload as Record<string, unknown>;
+  const kind = typeof record.type === 'string' ? record.type : typeof record.kind === 'string' ? record.kind : '';
+  if (record.version !== 1 || !kind.startsWith('mail-')) return null;
+  const rendered = legacyValueText(record);
+  return rendered || null;
+}
+
 export function encodeArchivePayload(payload: unknown) {
   return JSON.stringify(emailArchivePayloadSchema.parse(payload));
 }
@@ -258,7 +305,7 @@ export function prepareEmailReplyContextDocument(document: Document, note: z.inf
     semanticContentHash: documentSemanticHash(semanticText),
     emailReplyContextEmbeddingVersion: 1,
   });
-  decodeEmailReplyContext(value);
+  if (value.content !== semanticText) throw new Error('Prepared Archive reply context does not match its user-facing content.');
   return value;
 }
 
@@ -286,7 +333,7 @@ export function archiveDocument(input: {
   scopeKey: string;
   folderKey: string;
   name: string;
-  payload: unknown;
+  content: string;
   embedding?: z.input<typeof currentEmbeddingSchema>;
   representation?: PreparedDocumentRepresentation;
   createdAt: string;
@@ -296,8 +343,8 @@ export function archiveDocument(input: {
   developmentFixtureIdentifier?: string;
 }): Document {
   const { mutationPolicy = 'user', archiveVisibility = 'visible', representation, embedding, ...document } = input;
-  const content = JSON.stringify(document.payload);
-  if (representation && representation.content !== content) throw new Error('Prepared Archive representation does not match the email payload.');
+  const content = document.content.trim();
+  if (representation && representation.content !== content) throw new Error('Prepared Archive representation does not match the email content.');
   return documentSchema.parse({
     ...document,
     content,
