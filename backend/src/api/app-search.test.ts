@@ -11,7 +11,7 @@ const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind:
 
 function request(dependencies: Parameters<typeof createAppSearchHandler>[0], body: unknown) {
   const app = new Hono();
-  app.post('/app/search', createAppSearchHandler(dependencies));
+  app.post('/app/search', createAppSearchHandler({ recordEvent: async () => {}, ...dependencies }));
   return app.request('/app/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 }
 
@@ -134,7 +134,7 @@ describe('app search HTTP API', () => {
   test('HTTP and Core converge on the same canonical service method', async () => {
     const calls: unknown[][] = [];
     const service = { search: async (...args: any[]) => { calls.push(args); return { query: 'roadmap', groups: [] }; } } as never;
-    const input = { query: 'roadmap', collectionSlugs: ['folders'] as const, recordHistory: false };
+    const input = { query: 'roadmap', collectionSlugs: ['folders'] as const, recordHistory: false, limit: 10 };
     await runTool('app.search', '', input, { contentContext: context, appSearchService: service });
     await request({
       getIdentity: async () => ({ key: userKey, identityType: 'user' }),
@@ -145,5 +145,30 @@ describe('app search HTTP API', () => {
     expect(calls[0]?.[0]).toEqual(calls[1]?.[0]);
     expect(calls[0]?.[1]).toBe(context);
     expect(calls[1]?.[1]).toBe(context);
+  });
+
+  test('HTTP and Core preserve the same normalized tag filter contract', async () => {
+    const tagKey = newId(); const calls: unknown[] = [];
+    const service = { search: async (input: unknown) => { calls.push(input); return { operation: 'count', groups: [{ collectionSlug: 'books', count: 1 }] }; } } as never;
+    const input = { operation: 'count' as const, collectionSlugs: ['books'] as const, filters: { tagNames: ['  Ｗork  '] }, limit: 10 };
+    await runTool('app.search', '', input, { contentContext: context, appSearchService: service });
+    const response = await request({ getIdentity: async () => ({ key: userKey, identityType: 'user' }), authorize: async () => ({ input: { organizationKey, scopeKey }, context }), service }, { organizationKey, scopeKey, ...input });
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([
+      { ...input, recordHistory: true, filters: { tagNames: ['Work'], tagMatch: 'any' } },
+      { ...input, recordHistory: true, filters: { tagNames: ['Work'], tagMatch: 'any' } },
+    ]);
+    expect((await request({ getIdentity: async () => ({ key: userKey, identityType: 'user' }), authorize: async () => ({ input: { organizationKey, scopeKey }, context }), service }, { organizationKey, scopeKey, operation: 'count', collectionSlugs: ['books'], filters: { tagKeys: [tagKey] } })).status).toBe(200);
+    expect((await request({ getIdentity: async () => ({ key: userKey, identityType: 'user' }), authorize: async () => ({ input: { organizationKey, scopeKey }, context }), service }, { organizationKey, scopeKey, query: 'Europe', collectionSlugs: ['books', 'countries'], filters: { tagNames: ['Work'] } })).status).toBe(400);
+  });
+
+  test('HTTP and Core preserve one-call tag-assignment relationship queries', async () => {
+    const calls: unknown[] = [];
+    const service = { search: async (input: unknown) => { calls.push(input); return { operation: 'list', groups: [{ collectionSlug: 'tag-assignments', results: [] }] }; } } as never;
+    const input = { operation: 'list' as const, collectionSlugs: ['tag-assignments'] as const, filters: { tagNames: [' Work ', 'Priority'], tagMatch: 'all' as const, targetTypes: ['document'] as const }, limit: 10 };
+    await runTool('app.search', '', input, { contentContext: context, appSearchService: service });
+    const response = await request({ getIdentity: async () => ({ key: userKey, identityType: 'user' }), authorize: async () => ({ input: { organizationKey, scopeKey }, context }), service }, { organizationKey, scopeKey, ...input });
+    expect(response.status).toBe(200);
+    expect(calls).toEqual(Array.from({ length: 2 }, () => ({ ...input, recordHistory: true, filters: { tagNames: ['Work', 'Priority'], tagMatch: 'all', targetTypes: ['document'] } })));
   });
 });

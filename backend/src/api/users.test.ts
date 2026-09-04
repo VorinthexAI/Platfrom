@@ -39,6 +39,7 @@ describe('user helpers', () => {
     const user = userSchema.parse({
       key: 'usr_test',
       organizationId: 'org_root',
+      currentScopeKey: 'cm1234567890123456789012345',
       email: 'person@example.com',
       emailHash: 'hash',
       createdAt: '2026-07-03T00:00:00.000Z',

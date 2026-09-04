@@ -53,14 +53,14 @@ describe('Arango migration indexes', () => {
     expect(queries.slice(1).every(({ query }) => query.includes('presentation != null') && query.includes('presentation != presentation'))).toBe(true);
   });
 
-  test('renames the generated-media collection and makes its generated images user-mutable', async () => {
+  test('restores the generated-media collection policy while keeping its generated images user-mutable', async () => {
     const queries: string[] = [];
     await migrateManagedGeneratedMedia({ query: async (query: string) => { queries.push(query); return { all: async () => [] }; } } as never);
     expect(queries).toHaveLength(3);
     expect(queries[0]).toContain('collection.name == "Generated media"');
     expect(queries[0]).toContain('{ name: "Core" }');
     expect(queries[1]).toContain('collection.purpose == "generated-media"');
-    expect(queries[1]).toContain('{ mutationPolicy: "user" }');
+    expect(queries[1]).toContain('{ mutationPolicy: "system-only" }');
     expect(queries[2]).toContain('collection.purpose == "generated-media"');
     expect(queries[2]).toContain('{ mutationPolicy: "user" }');
   });
@@ -153,6 +153,32 @@ describe('Arango migration indexes', () => {
     ]));
     const registry = await Bun.file(new URL('../lib/db/registry.ts', import.meta.url)).text();
     expect(registry).not.toContain('userHiddens:');
+  });
+  test('declares private Spark ledger and hourly storage accounting indexes', async () => {
+    expect(collections.find(({ name }) => name === 'sparkTransactions')?.indexes).toEqual(expect.arrayContaining([
+      { fields: ['userKey', 'idempotencyKey'], unique: true },
+      { fields: ['eventKey'], unique: true, sparse: true },
+    ]));
+    expect(collections.find(({ name }) => name === 'billingExecutions')).toEqual({
+      name: 'billingExecutions',
+      skipEmbedding: true,
+      indexes: [
+        { fields: ['userKey', 'executionIdentity'], unique: true },
+        { fields: ['status', 'leaseExpiresAt'] },
+        { fields: ['chargeTransactionKey'], unique: true },
+      ],
+    });
+    const registry = await Bun.file(new URL('../lib/db/registry.ts', import.meta.url)).text();
+    expect(registry).not.toContain('billingExecutions:');
+    expect(collections.find(({ name }) => name === 'storageObjects')).toEqual({ name: 'storageObjects', skipEmbedding: true, indexes: [{ fields: ['storageKey', 'deletedAt'] }, { fields: ['userKey', 'storedAt'] }, { fields: ['storedAt'] }] });
+    expect(collections.find(({ name }) => name === 'storageChargingHours')?.indexes).toContainEqual({ fields: ['userKey', 'hourStart'], unique: true, sparse: true });
+    expect(collections.find(({ name }) => name === 'storageChargingMeters')?.indexes).toContainEqual({ fields: ['userKey'], unique: true });
+    expect(collections.find(({ name }) => name === 'storageRetentionStates')).toEqual({ name: 'storageRetentionStates', skipEmbedding: true, indexes: [{ fields: ['userKey'], unique: true }, { fields: ['wipeDueAt'] }, { fields: ['fundedAt', 'wipedAt'] }] });
+  });
+  test('declares private per-connector inbox period, hour, and remainder indexes', () => {
+    expect(collections.find(({ name }) => name === 'inboxBillingPeriods')?.indexes).toEqual(expect.arrayContaining([{ fields: ['connectorKey', 'startedAt'], unique: true }, { fields: ['userKey'] }]));
+    expect(collections.find(({ name }) => name === 'inboxChargingHours')?.indexes).toContainEqual({ fields: ['connectorKey', 'hourStart'], unique: true, sparse: true });
+    expect(collections.find(({ name }) => name === 'inboxChargingMeters')?.indexes).toContainEqual({ fields: ['connectorKey'], unique: true });
   });
   test('backfills legacy ticket types and declares private feedback vote indexes', async () => {
     const calls: string[] = [];
@@ -346,10 +372,11 @@ describe('Arango migration indexes', () => {
         { fields: ['scopeKey', 'targetType', 'targetKey'] },
       ],
     });
-    const bookNames = ['books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'bookExtensions'];
+    const bookNames = ['books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'bookExtensions', 'bookRefundIntents'];
     expect(collections.filter(({ name }) => bookNames.includes(name)).map(({ name }) => name)).toEqual(bookNames);
     expect(collections.find(({ name }) => name === 'bookChapters')?.indexes).toContainEqual({ fields: ['scopeKey', 'bookKey', 'position'], unique: true });
     expect(collections.find(({ name }) => name === 'bookExtensions')?.indexes).toContainEqual({ fields: ['scopeKey', 'bookKey', 'requestKey'], unique: true });
+    expect(collections.find(({ name }) => name === 'bookRefundIntents')).toEqual({ name: 'bookRefundIntents', skipEmbedding: true, indexes: [{ fields: ['chargeTransactionKey'], unique: true }, { fields: ['status', 'createdAt'] }, { fields: ['leaseExpiresAt'], sparse: true }] });
     expect(collections.find(({ name }) => name === 'folders')?.indexes).toContainEqual({ fields: ['scopeKey', 'managedPurpose', 'managedOwnerKey'], unique: true, sparse: true });
     const emailNames = ['emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'emailAttachments'];
     expect(collections.filter(({ name }) => emailNames.includes(name)).map(({ name }) => name)).toEqual(emailNames);
@@ -1002,7 +1029,7 @@ describe('Arango migration indexes', () => {
     expect(source).toContain('IN users OPTIONS { keepNull: false }');
     expect(source).toContain("name: 'events'");
     expect(source).toContain("{ fields: ['appKey', 'createdAt'] }");
-    expect(source).toContain("{ fields: ['scopeId', 'createdAt'], sparse: true }");
+    expect(source).toContain("{ fields: ['scopeKey', 'createdAt'] }");
     expect(isLegacyIndex('events', ['distinctId', 'createdAt'], [['appKey', 'createdAt']])).toBe(true);
     expect(isLegacyIndex('events', ['domain', 'createdAt'], [['appKey', 'createdAt']])).toBe(true);
     expect(source).toContain('OR HAS(event, "distinctId")');

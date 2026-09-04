@@ -13,20 +13,20 @@ import {
  */
 
 const TOOL_RESOURCE_SLUGS: Record<string, AppSearchCollectionSlug> = {
-  folder: 'folders', document: 'documents', file: 'files', collection: 'collections', image: 'images', inbox: 'inboxes', trip: 'trips', place: 'places', country: 'countries', book: 'books',
+  folder: 'folders', document: 'documents', file: 'files', collection: 'collections', image: 'images', inbox: 'inboxes', trip: 'trips', place: 'places', country: 'countries', book: 'books', tag: 'tags',
 };
 const EMAIL_SUB_SLUGS: Record<string, AppSearchCollectionSlug> = { draft: 'email-drafts', tone: 'email-tones', inbox: 'inboxes', message: 'email-messages', thread: 'email-messages' };
 const NON_RESOURCE_SEGMENTS = new Set(['member', 'members', 'invite', 'invites', 'share', 'shares', 'memory', 'memories', 'highlight', 'highlights', 'duplicate', 'duplicates', 'topic', 'topics', 'summary', 'summaries', 'version', 'versions', 'audio', 'playback', 'attachment', 'attachments', 'transcript', 'history']);
 const DELETE_ACTIONS = new Set(['delete', 'remove', 'discard', 'revoke', 'clear', 'cancel']);
 const CONTAINER_FIELD_SLUGS: Record<string, AppSearchCollectionSlug> = {
   folders: 'folders', documents: 'documents', files: 'files', collections: 'collections', images: 'images', inboxes: 'inboxes',
-  tones: 'email-tones', drafts: 'email-drafts', messages: 'email-messages', threads: 'email-messages', trips: 'trips', places: 'places', countries: 'countries', books: 'books',
+  tones: 'email-tones', drafts: 'email-drafts', messages: 'email-messages', threads: 'email-messages', trips: 'trips', places: 'places', countries: 'countries', books: 'books', tags: 'tags',
 };
 const GENERIC_CONTAINER_FIELDS = new Set(['items', 'results']);
 const LABEL_FIELDS = ['name', 'title', 'subject', 'filename', 'caption', 'label'] as const;
 const FALLBACK_LABELS: Record<AppSearchCollectionSlug, string> = {
   folders: 'Folder', documents: 'Document', files: 'File', collections: 'Collection', images: 'Image', inboxes: 'Inbox',
-  'email-tones': 'Email tone', 'email-messages': 'Email message', 'email-drafts': 'Email draft', places: 'Place', trips: 'Trip', countries: 'Country', books: 'Audio book',
+  'email-tones': 'Email tone', 'email-messages': 'Email message', 'email-drafts': 'Email draft', places: 'Place', trips: 'Trip', countries: 'Country', books: 'Audio book', tags: 'Tag', 'tag-assignments': 'Tagged resource',
 };
 const MAX_RESULTS_PER_GROUP = 50;
 

@@ -168,8 +168,16 @@ async function request<T>(method: "post" | "patch" | "delete", path: string, bod
 }
 
 export function fetchBooksOverview() { return request("post", "/books/overview", {}, overviewRequestSchema, overviewResponseSchema); }
-export async function searchBooks(query: string, signal?: AbortSignal, recordHistory = false) {
-  const output = await searchApp({ query, collectionSlugs: ["books"], recordHistory, limit: 50 }, signal);
+export async function searchBooks(query: string, signal?: AbortSignal, recordHistory = false, tagKeys: readonly string[] = []) {
+  const normalizedQuery = query.trim();
+  const normalizedTagKeys = [...new Set(tagKeys)].sort();
+  const output = await searchApp({
+    ...(normalizedQuery ? { query: normalizedQuery } : { operation: "list" as const }),
+    collectionSlugs: ["books"],
+    recordHistory: Boolean(normalizedQuery) && recordHistory,
+    limit: 50,
+    ...(normalizedTagKeys.length ? { filters: { tagKeys: normalizedTagKeys, tagMatch: "all" as const } } : {}),
+  }, signal);
   return appSearchResults(output, "books", bookSchema.extend({ score: z.number() })).map(({ score: _score, ...book }) => book);
 }
 export function suggestBookTopics(excludeTopics: string[] = []) { return request("post", "/books/topic-suggestions", { excludeTopics }, bookTopicSuggestionsRequestSchema, bookTopicSuggestionsResponseSchema, 50_000); }

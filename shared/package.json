@@ -80,6 +80,10 @@
       "react-native": "./packages/ui/components/action-pill/action-pill.mobile.tsx",
       "default": "./packages/ui/components/action-pill/action-pill.web.tsx"
     },
+    "./ui/filter-pill": {
+      "react-native": "./packages/ui/components/filter-pill/filter-pill.mobile.tsx",
+      "default": "./packages/ui/components/filter-pill/filter-pill.web.tsx"
+    },
     "./ui/slider": {
       "react-native": "./packages/ui/components/slider/slider.mobile.tsx",
       "default": "./packages/ui/components/slider/slider.web.tsx"

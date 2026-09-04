@@ -485,6 +485,37 @@ test("can request up to ten semantic matches without a score cutoff", async () =
   expect(calls[0]?.body).not.toHaveProperty("minimumScore");
 });
 
+test("lists all-tag Archive matches when the query is empty and projects stable scores", async () => {
+  responseForTool = () => ({ data: { success: true, data: { operation: "list", groups: [
+    { collectionSlug: "folders", results: [{ key: "folder", scopeKey: "scope-authenticated", name: "Plans", isFavorite: false, createdAt: "2026-08-10T00:00:00.000Z", updatedAt: "2026-08-10T00:00:00.000Z", tags: [{ key: "tag-work", name: "Work" }] }] },
+    { collectionSlug: "documents", results: [{ key: "document", scopeKey: "scope-authenticated", folderKey: "folder", name: "Roadmap", isFavorite: true, createdAt: "2026-08-10T00:00:00.000Z", updatedAt: "2026-08-10T00:00:00.000Z", tags: [{ key: "tag-work", name: "Work" }] }] },
+    { collectionSlug: "files", results: [] },
+  ] } } });
+
+  await expect(searchContentMatches("", undefined, "folder", false, { tagKeys: ["tag-work", "tag-priority"] })).resolves.toMatchObject({
+    query: "",
+    folders: [{ key: "folder", score: 0 }],
+    documents: [{ documentKey: "document", score: 0 }],
+  });
+  expect(calls[0]?.body).toEqual({
+    organizationKey: "org-authenticated",
+    scopeKey: "scope-authenticated",
+    operation: "list",
+    collectionSlugs: ["folders", "documents", "files"],
+    recordHistory: false,
+    limit: 50,
+    filters: { folderKey: "folder", includeDescendants: true, tagKeys: ["tag-work", "tag-priority"], tagMatch: "all" },
+  });
+});
+
+test("combines text search with all selected Archive tags", async () => {
+  responseForTool = () => ({ data: { success: true, data: { query: "roadmap", groups: [{ collectionSlug: "folders", results: [] }, { collectionSlug: "documents", results: [] }, { collectionSlug: "files", results: [] }] } } });
+
+  await searchContentMatches("roadmap", undefined, undefined, false, { tagKeys: ["tag-work"] });
+  expect(calls[0]?.body).toMatchObject({ query: "roadmap", filters: { tagKeys: ["tag-work"], tagMatch: "all" } });
+  expect(calls[0]?.body).not.toHaveProperty("operation");
+});
+
 test("finds semantic neighbors from exactly one Content source", async () => {
   const neighbors = { folders: [{ key: "folder", name: "Related" }], documents: [], files: [] };
   responseForTool = (tool) => tool === "content.neighbors" ? { data: { success: true, data: neighbors } } : undefined;

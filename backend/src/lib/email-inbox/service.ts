@@ -793,7 +793,7 @@ export function createEmailService(options: {
       embed: ({ text }) => runOperation(() => embed({ text }, organizationKey)),
     }),
   });
-  const persistProviderThread = async (actor: EmailActor, account: { key: string; email: string; createdByMembershipKey: string; provider?: string }, gmail: GmailClient, resource: GmailThreadResource, leaseToken: string, ensureLease: () => Promise<void>, runOperation: AsyncLimiter = runImmediately) => {
+  const persistProviderThread = async (actor: EmailActor, account: { key: string; email: string; createdByMembershipKey: string; billingUserKey?: string; provider?: string }, gmail: GmailClient, resource: GmailThreadResource, leaseToken: string, ensureLease: () => Promise<void>, runOperation: AsyncLimiter = runImmediately) => {
     const providerMessages = resource.messages ?? [];
     if (!providerMessages.length) return null;
     const resources = await mapConcurrent(providerMessages, PROVIDER_MESSAGE_CONCURRENCY, (metadata) => runOperation(() => gmail.message(metadata.id)));
@@ -807,11 +807,11 @@ export function createEmailService(options: {
         if (canonical !== null) return { refs: canonical, availability: parsed.hasAttachments ? 'complete' as const : 'none' as const };
       }
       if (attachmentIngestion.stageMessage) {
-        const attachments = await attachmentIngestion.stageMessage({ organizationKey: actor.organizationKey, scopeKey: actor.scopeKey, membershipKey: account.createdByMembershipKey, connectorKey: account.key, connectorLeaseToken: leaseToken, heartbeat: ensureLease, gmail, message: providerMessage });
+        const attachments = await attachmentIngestion.stageMessage({ organizationKey: actor.organizationKey, scopeKey: actor.scopeKey, membershipKey: account.createdByMembershipKey, ...(account.billingUserKey ? { billingUserKey: account.billingUserKey } : {}), connectorKey: account.key, connectorLeaseToken: leaseToken, heartbeat: ensureLease, gmail, message: providerMessage });
         stagedAttachments.push(...attachments.staged);
         return { refs: attachments.refs, availability: attachments.availability ?? (parsed.hasAttachments ? 'failed' : 'none'), unavailableCount: attachments.unavailableCount };
       }
-      const refs = await attachmentIngestion.ingestMessage({ organizationKey: actor.organizationKey, scopeKey: actor.scopeKey, membershipKey: account.createdByMembershipKey, connectorKey: account.key, gmail, message: providerMessage });
+      const refs = await attachmentIngestion.ingestMessage({ organizationKey: actor.organizationKey, scopeKey: actor.scopeKey, membershipKey: account.createdByMembershipKey, ...(account.billingUserKey ? { billingUserKey: account.billingUserKey } : {}), connectorKey: account.key, gmail, message: providerMessage });
       return { refs, availability: parsed.hasAttachments ? 'complete' as const : 'none' as const };
     }).catch(async (error) => {
       if (stagedAttachments.length && attachmentIngestion.compensate) await attachmentIngestion.compensate(stagedAttachments, actor.scopeKey);

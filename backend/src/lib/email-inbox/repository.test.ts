@@ -47,18 +47,22 @@ describe('canonical email persistence', () => {
       if (query.includes('IN folders')) return cursor({ _key: bindVars.key, scopeKey });
       return cursor();
     } };
+    const threadArchiveRepresentation = { content: 'sender@example.com\n\nRoadmap\n\nLatest thread message.', embedding, contentChunks: ['Latest thread message.'], chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: 'a'.repeat(64) };
+    const messageArchiveRepresentation = { content: 'sender@example.com\n\nRoadmap\n\nPlease review the roadmap.', embedding, contentChunks: ['Please review the roadmap.'], chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: 'b'.repeat(64) };
     const stored = await createEmailRepository(database as never).syncThread({
-      thread: { ...thread, key: undefined, createdAt: undefined, updatedAt: undefined } as never,
-      messages: [{ ...message, key: undefined, threadKey: undefined, createdAt: undefined, updatedAt: undefined } as never],
+      thread: { ...thread, key: undefined, createdAt: undefined, updatedAt: undefined, archiveRepresentation: threadArchiveRepresentation } as never,
+      messages: [{ ...message, key: undefined, threadKey: undefined, createdAt: undefined, updatedAt: undefined, archiveRepresentation: messageArchiveRepresentation } as never],
     });
     expect(stored.key).toBe(thread.key);
     expect(calls.some(({ query }) => query.includes('IN emailThreads'))).toBe(true);
     expect(calls.some(({ query }) => query.includes('IN emailMessages'))).toBe(true);
     const archive = calls.find(({ query }) => query.includes('IN documents'));
-    expect(archive?.query).toContain('UPDATE {}');
+    expect(archive?.query).toContain('UPDATE MERGE(value');
     expect(archive?.bindVars.values).toHaveLength(2);
     expect(archive?.bindVars.values.every((value: Record<string, unknown>) => value.mutationPolicy === 'user')).toBe(true);
     expect(archive?.bindVars.values.every((value: Record<string, unknown>) => value._key !== thread.key && value._key !== message.key)).toBe(true);
+    expect(archive?.bindVars.values.map((value: Record<string, unknown>) => value.content)).toEqual([threadArchiveRepresentation.content, messageArchiveRepresentation.content]);
+    expect(archive?.bindVars.values.every((value: Record<string, unknown>) => !String(value.content).startsWith('{'))).toBe(true);
   });
 
   test('reads thread detail from dedicated records and applies schema defaults', async () => {

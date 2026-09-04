@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { drainStorageDeletionJobs } from './storage-deletion';
+import { DeleteObjectsCommand } from '@aws-sdk/client-s3';
+import { deleteStorageObjectsBulk, drainStorageDeletionJobs } from './storage-deletion';
 
 describe('storage deletion outbox', () => {
   test('acknowledges only successful object deletion and retries retained jobs', async () => {
@@ -98,5 +99,35 @@ describe('storage deletion outbox', () => {
     });
     expect(result).toEqual({ deleted: 0, pending: 1 });
     expect(deleted).toBe(false);
+  });
+
+  test('sends exactly 1000 keys in one bulk S3 request and rejects larger requests', async () => {
+    const commands: DeleteObjectsCommand[] = [];
+    const keys = Array.from({ length: 1000 }, (_, index) => `objects/${index}`);
+    const client = { async send(command: DeleteObjectsCommand) { commands.push(command); return { Deleted: keys.map((Key) => ({ Key })) }; } };
+    await expect(deleteStorageObjectsBulk(keys, client, 'bucket')).resolves.toEqual({ succeeded: keys, failed: [] });
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toBeInstanceOf(DeleteObjectsCommand);
+    expect(commands[0]!.input.Delete?.Objects).toHaveLength(1000);
+    await expect(deleteStorageObjectsBulk([...keys, 'objects/1000'], client, 'bucket')).rejects.toThrow('at most 1000');
+  });
+
+  test('bulk deletion excludes referenced and lost claims, acknowledges successes, and releases only failures', async () => {
+    const token = '11111111-1111-4111-8111-111111111111';
+    const jobs = ['success', 'failed', 'referenced', 'lost'].map((key) => ({ key, storageKey: `objects/${key}`, createdAt: '2026-08-19T00:00:00.000Z', status: 'deleting' as const, claimToken: token, claimedAt: '2026-08-19T00:00:01.000Z' }));
+    const sent: string[][] = [], acknowledged: string[] = [], released: string[] = [], closed: string[][] = [];
+    const result = await drainStorageDeletionJobs(1000, {
+      list: async () => jobs,
+      resolveClaim: async (key) => key === 'referenced' ? 'referenced' : key === 'lost' ? 'lost' : 'unreferenced',
+      bulkDelete: async (keys) => { sent.push(keys); return { succeeded: ['objects/success'], failed: ['objects/failed'] }; },
+      acknowledge: async (key) => { acknowledged.push(key); return true; },
+      release: async (key) => { released.push(key); return true; },
+      closeInventory: async (keys) => { closed.push(keys); },
+    });
+    expect(sent).toEqual([['objects/success', 'objects/failed']]);
+    expect(acknowledged).toEqual(['success']);
+    expect(released).toEqual(['lost', 'failed']);
+    expect(closed).toEqual([['objects/success']]);
+    expect(result).toEqual({ deleted: 1, pending: 2 });
   });
 });

@@ -9,7 +9,7 @@ import { selectRoutes } from './select-route';
 import type { RouteRequestInput } from './route-request';
 import type { RouteDecision, RouterDependencies } from './types';
 import { coreChatInputSchema, type CoreChatInput } from '@/lib/ai/actions/core-chat';
-import { addToolTokenUsage } from '@/lib/ai/events/runtime';
+import { addToolTokenUsage, recordActionCost, recordActionUsage } from '@/lib/ai/events/runtime';
 
 export interface ExecuteRouteOptions<TInput> {
   decision: RouteDecision;
@@ -50,6 +50,7 @@ export interface RouteAttemptTelemetry {
 /** V1 executes exactly the selected deterministic route; there are no scored fallbacks. */
 export async function executeRoute<TInput, TOutput>(options: ExecuteRouteOptions<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
   const { decision } = options;
+  await recordActionCost(decision.actionSlug, options.input);
   const adapter = await resolveAdapter(decision, options.adapters, options.env);
   if (!adapter) throw new ProviderExecutionError(decision.actionSlug, [{ modelId: decision.modelSlug, providerId: decision.providerSlug, externalModelId: decision.providerModelId, code: 'adapter_unavailable', message: 'provider adapter is unavailable' }]);
   const startedAtMs = Date.now();
@@ -68,6 +69,7 @@ export async function executeRoute<TInput, TOutput>(options: ExecuteRouteOptions
     });
     const endedAtMs = Date.now();
     addToolTokenUsage(response.usage);
+    await recordActionUsage(decision.actionSlug, options.input, response.usage);
     await options.onAttempt?.({ ...attemptBase, callKey, status: 'completed', usage: response.usage, ...(response.costUsd !== undefined ? { costUsd: response.costUsd } : {}), endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs });
     return response;
   } catch (error) {
@@ -108,18 +110,23 @@ export async function executeAction<TInput, TOutput>(request: RouteRequestInput,
   });
   if (decisions[0]!.actionSlug === 'image') {
     const parsed = imageActionInputSchema.parse(input);
-    if (parsed.operation !== 'generate') return executeSelected<TInput, TOutput>(input);
+    if (parsed.operation !== 'generate') {
+      const response = await executeSelected<TInput, TOutput>(input);
+      return response;
+    }
     const responses = await Promise.all(Array.from({ length: parsed.count }, async () => {
       return executeSelected<typeof parsed, ImageOutput>({ ...parsed, count: 1 });
     }));
-    if (responses.length === 1) return responses[0] as ProviderExecuteResponse<TOutput>;
+    if (responses.length === 1) {
+      return responses[0] as ProviderExecuteResponse<TOutput>;
+    }
     const usage = tokenUsage(
       responses.reduce((sum, response) => sum + response.usage.inputTokens, 0),
       responses.reduce((sum, response) => sum + response.usage.outputTokens, 0),
       responses.reduce((sum, response) => sum + response.usage.totalTokens, 0),
     );
     const costs = responses.flatMap(({ costUsd }) => costUsd === undefined ? [] : [costUsd]);
-    return {
+    const response = {
       output: imageOutputSchema.parse({ images: responses.flatMap(({ output }) => output.images) }) as TOutput,
       usage,
       ...(costs.length ? { costUsd: costs.reduce((sum, cost) => sum + cost, 0) } : {}),
@@ -128,8 +135,10 @@ export async function executeAction<TInput, TOutput>(request: RouteRequestInput,
       externalModelId: responses[0]!.externalModelId,
       rawResponse: responses.map(({ rawResponse }) => rawResponse),
     };
+    return response;
   }
-  return executeSelected<TInput, TOutput>(input);
+  const response = await executeSelected<TInput, TOutput>(input);
+  return response;
 }
 
 /** Executes the canonical text action using the model selected by its provider-neutral mode. */
@@ -153,12 +162,18 @@ export async function executeWebSearch<TOutput>(organizationKey: string, input: 
 
 /** Streams normalized provider chunks over the selected route. */
 export async function* streamRoute<TInput>(options: ExecuteRouteOptions<TInput>): AsyncIterable<import('@/lib/ai/providers').ProviderStreamChunk> {
+  await recordActionCost(options.decision.actionSlug, options.input);
   const adapter = await resolveAdapter(options.decision, options.adapters, options.env);
   if (!adapter?.stream) throw new ProviderExecutionError(options.decision.actionSlug, [{ modelId: options.decision.modelSlug, providerId: options.decision.providerSlug, externalModelId: options.decision.providerModelId, code: 'adapter_unavailable', message: 'provider streaming adapter is unavailable' }]);
+  let usage: TokenUsage | undefined;
   try {
     for await (const chunk of adapter.stream({ actionId: options.decision.actionSlug, modelId: options.decision.modelSlug, externalModelId: options.decision.providerModelId, input: options.input, organizationKey: options.decision.organizationKey, timeoutMs: options.timeoutMs, signal: options.signal })) {
-      if (chunk.type === 'usage') addToolTokenUsage(chunk.usage);
+      if (chunk.type === 'usage') usage = chunk.usage;
       yield chunk;
+    }
+    if (usage) {
+      addToolTokenUsage(usage);
+      await recordActionUsage(options.decision.actionSlug, options.input, usage);
     }
   } catch (error) {
     const normalized = normalizeProviderError(options.decision.providerSlug, error);

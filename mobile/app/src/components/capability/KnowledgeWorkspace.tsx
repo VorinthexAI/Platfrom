@@ -51,7 +51,10 @@ import { MAX_DOCUMENT_SCAN_BYTES, scanSessionSize } from "@/lib/document-scan-se
 import { normalizeCapturedPng } from "@/lib/captured-image";
 import { normalizeStructurallyCoveredResources, partitionFavoriteContentSelection } from "@/lib/content-selection-ancestry";
 import { ChromeIcon } from "@/components/ChromeIcon";
+import { ResourceTagsSheet } from "@/components/ResourceTagsSheet";
 import { SearchHistorySheet } from "@/components/SearchHistorySheet";
+import { TagFilterLane } from "@/components/TagFilterLane";
+import { TagFilterSheet } from "@/components/TagFilterSheet";
 import { assistantIconSource, contentPresentationIconSource } from "@/data/capability-icons";
 import {
   hardDeleteContentSelection,
@@ -153,7 +156,9 @@ import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { useAuthStore } from "@/state/auth";
 import { languageForCountryCode } from "@/lib/auth-helpers";
 import { pauseOwnedPlayer } from "@/lib/audio-player-lifecycle";
+import { tagFilterContextKey } from "@/lib/tag-client";
 import { filterByHiddenView, hideUserSource, isUserHidden, listUserHiddens, revealUserSource, type HiddenViewFilters, type UserHiddenRecord, type UserHiddenSource } from "@/lib/user-hidden-client";
+import { EMPTY_SELECTED_TAGS, useUiStore } from "@/state/ui";
 
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
 type WorkspaceMode = "auto" | "folders" | "folder" | "editor" | "viewer";
@@ -320,7 +325,10 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   const reconnectContentContext = useAuthStore((state) => state.reconnectContentContext);
   const hasContentContext = isContentContextConfigured({ organizationKey, scopeKey });
   const contentContextKey = hasContentContext ? `${organizationKey}:${scopeKey}` : "";
-  const contentContext = { organizationKey, scopeKey, userKey: user?.key ?? "" };
+  const contentContext = useMemo(() => ({ organizationKey, scopeKey, userKey: user?.key ?? "" }), [organizationKey, scopeKey, user?.key]);
+  const tagContextKey = tagFilterContextKey(contentContext);
+  const selectedTags = useUiStore((state) => state.selectedTagsByContext[tagContextKey] ?? EMPTY_SELECTED_TAGS);
+  const selectedTagKeys = useMemo(() => selectedTags.map(({ key }) => key), [selectedTags]);
   const cachedInitialDocument = initialDocumentKey ? queryClient.getQueryData<ContentDocument>(contentQueryKeys.document(contentContext, initialDocumentKey)) : undefined;
   const cachedTargetFolderKey = cachedInitialDocument?.folderKey ?? initialFolderKey;
   const cachedInitialTree = cachedTargetFolderKey ? queryClient.getQueryData<ContentFolder[]>(contentQueryKeys.folderTree(contentContext)) : undefined;
@@ -335,6 +343,8 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   const [viewFilters, setViewFilters] = useState<HiddenViewFilters>({ favoritesOnly: false, showHidden: false });
   const [userHiddens, setUserHiddens] = useState<UserHiddenRecord[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [tagFilterOpen, setTagFilterOpen] = useState(false);
+  const [resourceTagsOpen, setResourceTagsOpen] = useState(false);
   const [sheetError, setSheetError] = useState<string>();
   const [sheetLoadError, setSheetLoadError] = useState<string>();
   const [editorFocused, setEditorFocused] = useState(false);
@@ -519,15 +529,16 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   folderStackRef.current = folderStack;
   workspaceModeRef.current = workspaceMode;
   const currentFolder = folderStack.at(-1);
-  refreshViewKey.current = JSON.stringify([contentContextKey, workspaceMode, currentFolder?.key, folderContentTab, query.trim(), rootSearchQuery.trim(), documentKeyRef.current]);
+  refreshViewKey.current = JSON.stringify([contentContextKey, workspaceMode, currentFolder?.key, folderContentTab, query.trim(), rootSearchQuery.trim(), selectedTagKeys, documentKeyRef.current]);
   const returnToTripAssets = returnTripKey ? () => router.replace({ pathname: "/capability/[slug]", params: { slug: "compass", tripKey: returnTripKey, openTripAssets: "1" } }) : undefined;
   const returnToSignalAttachments = returnSignalConnectorKey && returnSignalThreadKey && returnSignalMessageKey ? () => router.replace({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: returnSignalConnectorKey, signalReturn: "root", signalThreadKey: returnSignalThreadKey, signalMessageKey: returnSignalMessageKey, openSignalAttachments: "1" } }) : undefined;
   const showOnlyFavorites = viewFilters.favoritesOnly;
   const showHidden = viewFilters.showHidden;
-  const filtersActive = showOnlyFavorites || showHidden;
+  const filtersActive = showOnlyFavorites || showHidden || selectedTags.length > 0;
   const hidden = (source: UserHiddenSource | "file", sourceKey: string) => isUserHidden(userHiddens, source, sourceKey);
   const destinationFolder = destinationStack.at(-1);
   const contentSelection: ContentSelection = { folderKeys: selectedFolders.map(({ key }) => key), documentKeys: selectedDocuments.map(({ key }) => key) };
+  const resourceTagTargets = [...selectedFolders.map(({ key }) => ({ type: "folder" as const, key })), ...selectedDocuments.map(({ key }) => ({ type: "document" as const, key }))];
   const selectedCount = selectedFolders.length + selectedDocuments.length;
   const selectionActive = selectedCount > 0;
   const compactDelete = activeSheet === "bulkDelete" || activeSheet === "deleteDocument";
@@ -798,6 +809,16 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     setSheetOpen(true);
   };
 
+  const openTagFilters = () => {
+    closeSheet();
+    requestAnimationFrame(() => setTagFilterOpen(true));
+  };
+
+  const openResourceTags = () => {
+    closeSheet(true);
+    requestAnimationFrame(() => setResourceTagsOpen(true));
+  };
+
   const pushSheet = (sheet: ArchiveSheet) => {
     const current = activeSheetRef.current;
     if (current) sheetBackStack.current.push(current);
@@ -948,7 +969,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
       if (workspaceMode === "folder") folderSearchRequest.current?.abort();
       else rootSearchRequest.current?.abort();
       const [matches, location] = await Promise.all([
-        normalizedSearch ? searchContentMatches(normalizedSearch, controller.signal, folderKey, false) : undefined,
+        normalizedSearch || selectedTagKeys.length ? searchContentMatches(normalizedSearch, controller.signal, folderKey, false, { tagKeys: selectedTagKeys }) : undefined,
         refreshContentLocation(queryClient, contentContext, folderKey),
         userHiddensQuery.refetch(),
       ]);
@@ -2411,7 +2432,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   useEffect(() => {
     const normalized = rootSearchQuery.trim();
     rootSearchRequest.current?.abort();
-    if (!normalized || !hasContentContext) {
+    if ((!normalized && !selectedTagKeys.length) || !hasContentContext) {
       setRootSearching(false);
       setRootSearchResults(undefined);
       return;
@@ -2422,7 +2443,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     const timeout = setTimeout(() => {
       setRootSearching(true);
       setError(undefined);
-      void searchContentMatches(normalized, controller.signal, undefined, false).then((matches) => {
+      void searchContentMatches(normalized, controller.signal, undefined, false, { tagKeys: selectedTagKeys }).then((matches) => {
         if (!controller.signal.aborted) {
           setRootSearchResults(matches);
         }
@@ -2434,21 +2455,21 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
         if (!controller.signal.aborted) setRootSearching(false);
       });
     }, 300);
-    const historyTimeout = setTimeout(() => {
-      void searchContentMatches(normalized, controller.signal).catch(() => undefined);
-    }, 800);
+    const historyTimeout = normalized ? setTimeout(() => {
+      void searchContentMatches(normalized, controller.signal, undefined, true, { tagKeys: selectedTagKeys }).catch(() => undefined);
+    }, 800) : undefined;
     return () => {
       clearTimeout(timeout);
-      clearTimeout(historyTimeout);
+      if (historyTimeout) clearTimeout(historyTimeout);
       controller.abort();
     };
-  }, [hasContentContext, rootSearchQuery, rootSearchRevision]);
+  }, [hasContentContext, rootSearchQuery, rootSearchRevision, selectedTagKeys]);
 
   useEffect(() => {
     const normalized = query.trim();
     const folderKey = currentFolder?.key;
     folderSearchRequest.current?.abort();
-    if (!normalized || !hasContentContext || !folderKey) {
+    if ((!normalized && !selectedTagKeys.length) || !hasContentContext || !folderKey) {
       setFolderSearching(false);
       setFolderSearchResults(undefined);
       return;
@@ -2464,7 +2485,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     const timeout = setTimeout(() => {
       setFolderSearching(true);
       setError(undefined);
-      void searchContentMatches(normalized, controller.signal, folderKey, false).then((matches) => {
+      void searchContentMatches(normalized, controller.signal, folderKey, false, { tagKeys: selectedTagKeys }).then((matches) => {
         if (!controller.signal.aborted) {
           setFolderSearchResults(matches);
         }
@@ -2476,15 +2497,15 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
         if (!controller.signal.aborted) setFolderSearching(false);
       });
     }, 300);
-    const historyTimeout = setTimeout(() => {
-      void searchContentMatches(normalized, controller.signal, folderKey).catch(() => undefined);
-    }, 800);
+    const historyTimeout = normalized ? setTimeout(() => {
+      void searchContentMatches(normalized, controller.signal, folderKey, true, { tagKeys: selectedTagKeys }).catch(() => undefined);
+    }, 800) : undefined;
     return () => {
       clearTimeout(timeout);
-      clearTimeout(historyTimeout);
+      if (historyTimeout) clearTimeout(historyTimeout);
       controller.abort();
     };
-  }, [currentFolder?.key, folderSearchRevision, hasContentContext, query]);
+  }, [currentFolder?.key, folderSearchRevision, hasContentContext, query, selectedTagKeys]);
 
   const openSearchDocument = async (document: ContentSearchMatch) => {
     setError(undefined);
@@ -3812,7 +3833,9 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     {showOnlyFavorites ? <View style={styles.similarPill}><Text numberOfLines={1} style={styles.similarPillText}>Favorites</Text><Button accessibilityLabel="Close Favorites filter" contentMode="raw" onPress={() => setViewFilters((current) => ({ ...current, favoritesOnly: false }))} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View> : null}
     {showHidden ? <View style={styles.similarPill}><Text numberOfLines={1} style={styles.similarPillText}>Show hidden</Text><Button accessibilityLabel="Close Show hidden filter" contentMode="raw" onPress={() => setViewFilters((current) => ({ ...current, showHidden: false }))} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View> : null}
   </View>;
-  const rootSearchEmpty = Boolean(rootSearchQuery.trim() && !rootSearching && rootSearchResults && (folderContentTab === "folders" ? rootSearchFolders.length === 0 : rootSearchDocuments.length === 0));
+  const rootSearchActive = Boolean(rootSearchQuery.trim() || selectedTags.length);
+  const folderSearchActive = Boolean(query.trim() || selectedTags.length);
+  const rootSearchEmpty = Boolean(rootSearchActive && !rootSearching && rootSearchResults && (folderContentTab === "folders" ? rootSearchFolders.length === 0 : rootSearchDocuments.length === 0));
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}><WorkspaceAppSwitcher active="archive" /><ProfileHeaderRight /></View>
@@ -3842,6 +3865,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
               </View>
               <Button accessibilityLabel="Filter Archive" contentMode="raw" disabled={!hasContentContext} onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
             </View>
+            <TagFilterLane context={contentContext} />
             {bulkToolbar}
             {filterBadges}
             <View style={[styles.rootContent, rootSearchEmpty && styles.searchRootContent]}>
@@ -3850,7 +3874,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
                 <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "documents" }} onPress={() => setFolderContentTab("documents")} size="xs" style={styles.folderTab} variant={folderContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
                 <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "files" }} onPress={() => setFolderContentTab("files")} size="xs" style={styles.folderTab} variant={folderContentTab === "files" ? "secondary" : "ghost"}>Files</Button>
               </Tabs>
-              {rootSearchQuery.trim() ? rootSearching || !rootSearchResults ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folder search results" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.loadingGrid]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel="Loading search results" accessibilityRole="progressbar" style={styles.rootDocuments}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? <View accessibilityLiveRegion="polite" style={[styles.rootFolderGrid, rootSearchFolders.length === 0 && styles.searchEmptyContent]}>
+              {rootSearchActive ? rootSearching || !rootSearchResults ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folder search results" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.loadingGrid]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel="Loading search results" accessibilityRole="progressbar" style={styles.rootDocuments}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? <View accessibilityLiveRegion="polite" style={[styles.rootFolderGrid, rootSearchFolders.length === 0 && styles.searchEmptyContent]}>
                 {rootSearchFolders.map((folder) => { const selected = selectedFolders.some(({ key }) => key === folder.key); return <View key={folder.key} style={[styles.rootFolderCard, selected && styles.selectedItem, { width: archiveCardSize, height: archiveCardSize }]}><FolderCover folder={folder} /><Button accessibilityState={{ selected }} contentMode="raw" onLongPress={() => handleFolderLongPress(folder)} onPress={() => handleFolderPress(folder)} shape="rounded" size="xl" style={[styles.rootFolderMain, folderHasCover(folder) && styles.coveredFolderMain]} variant="ghost">{folderHasCover(folder) ? null : <FolderIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.archiveCardLabel, folderHasCover(folder) && styles.coveredFolderLabel]}>{folder.name}</Text></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>; })}
                 {rootSearchFolders.length === 0 ? <Text style={styles.empty}>No folders matched this search.</Text> : null}
               </View> : <View accessibilityLiveRegion="polite" style={[styles.rootDocuments, rootSearchDocuments.length === 0 && styles.searchEmptyContent]}>
@@ -3901,6 +3925,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
               </View>
               <Button accessibilityLabel={`Filter ${currentFolder?.name ?? "this folder"}`} contentMode="raw" disabled={!hasContentContext} onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
             </View>
+            <TagFilterLane context={contentContext} />
             {bulkToolbar}
             {filterBadges}
             <Tabs accessibilityRole="tablist" style={styles.folderTabs}>
@@ -3908,7 +3933,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
               <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "documents" }} onPress={() => setFolderContentTab("documents")} size="xs" style={styles.folderTab} variant={folderContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
               <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "files" }} onPress={() => setFolderContentTab("files")} size="xs" style={styles.folderTab} variant={folderContentTab === "files" ? "secondary" : "ghost"}>Files</Button>
             </Tabs>
-            {query.trim() ? folderSearching || !folderSearchResults ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folder search results" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.folderTabContent, styles.loadingGrid]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel="Loading search results" accessibilityRole="progressbar" style={[styles.folderDocuments, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
+            {folderSearchActive ? folderSearching || !folderSearchResults ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folder search results" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.folderTabContent, styles.loadingGrid]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel="Loading search results" accessibilityRole="progressbar" style={[styles.folderDocuments, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
               <View accessibilityLiveRegion="polite" style={[styles.rootFolderGrid, styles.folderTabContent, folderSearchFolders.length === 0 && styles.searchEmptyContent]}>
                 {folderSearchFolders.map((folder) => { const selected = selectedFolders.some(({ key }) => key === folder.key); return <View key={folder.key} style={[styles.rootFolderCard, selected && styles.selectedItem, { width: archiveCardSize, height: archiveCardSize }]}>
                   <FolderCover folder={folder} />
@@ -4081,6 +4106,8 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
       />
 
       <SearchHistorySheet error={sheetLoadError ?? sheetError} history={history} loading={historyLoading} onClose={closeSheet} onRemove={(item) => void removeHistoryQuery(item)} onSelect={useHistoryQuery} open={sheetOpen && activeSheet === "searchHistory"} removingQuery={removingHistoryQuery} />
+      <TagFilterSheet context={contentContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />
+      <ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />
 
       <BottomSheet
         description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "transform" ? documentTransformation === "enhance" ? "Review or adjust how this document should be enhanced." : "Review or adjust how this document should be translated." : activeSheet === "documentVersions" ? "Choose a document version to open." : activeSheet === "versions" ? `Choose an ${documentTransformation === "enhance" ? "enhancement" : "translation"} to open.` : activeSheet === "audioVersions" ? "Listen to your saved recordings." : activeSheet === "summarize" ? `Choose one of the ${selectedDocument?.extension ? "file's" : "document's"} primary topics to summarize.` : activeSheet === "summaryVersions" ? "View saved summaries or create a new one." : undefined}
@@ -4109,6 +4136,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
         ) : null}
         {activeSheet === "bulkActions" ? <BottomSheetMenu>
           <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void updateSelectionFavorite()} size="md" variant="secondary">{allSelectedFavorite ? "Unfavorite" : "Favorite"}</Button>
+          <Button disabled={bulkLoading} onPress={openResourceTags} size="md" variant="secondary">Tags</Button>
           {!selectionHasManaged ? <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("move")} size="md" variant="secondary">Move to folder</Button> : null}
           {!selectionHasManaged ? <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("copy")} size="md" variant="secondary">Copy to folder</Button> : null}
           {!selectionHasManaged ? <Button disabled={bulkLoading} onPress={() => pushSheet("bulkDelete")} size="md" variant="secondary">Delete</Button> : null}
@@ -4129,6 +4157,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
             <Switch accessibilityLabel="Show hidden Archive items" checked={showHidden} onCheckedChange={(checked) => { setViewFilters((current) => ({ ...current, showHidden: checked })); closeSheet(); }} />
             <Text style={styles.favoriteSwitchLabel}>Show hidden</Text>
           </View>
+          <BottomSheetItem onPress={openTagFilters} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem>
           <Button onPress={() => void openSearchHistory()} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button>
         </View> : null}
         {activeSheet === "similar" ? (

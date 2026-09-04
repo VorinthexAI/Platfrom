@@ -302,12 +302,6 @@ export async function findPlaces(query: string, signal?: AbortSignal) {
   ).then(({ results }) => results);
 }
 
-export async function searchPlaces(query: string, signal?: AbortSignal, recordHistory = true) {
-  const input = placeSearchInputSchema.parse({ query, recordHistory });
-  const output = await searchApp({ ...input, collectionSlugs: ["places"], limit: 50 }, signal);
-  return appSearchResults(output, "places", appSearchPlaceSchema).map(({ trips: _trips, ...place }) => place);
-}
-
 export function listTrips(signal?: AbortSignal) {
   return post(
     "/travel/trips/list",
@@ -365,9 +359,25 @@ export async function generatePlaceReference(placeKey: string, kind: PlaceRefere
   return reference;
 }
 
-export function searchTrips(query: string, signal?: AbortSignal, recordHistory = true) {
-  const input = placeSearchInputSchema.parse({ query, recordHistory });
-  return searchApp({ ...input, collectionSlugs: ["trips"], limit: 50 }, signal).then((output) => appSearchResults(output, "trips", tripSchema));
+function savedTravelSearchInput(query: string, recordHistory: boolean, tagKeys: string[]) {
+  const normalizedQuery = z.string().trim().max(500).parse(query);
+  const normalizedTagKeys = z.array(keySchema).max(20).refine((keys) => new Set(keys).size === keys.length, "Tag keys must be distinct.").parse([...tagKeys].sort());
+  if (!normalizedQuery && !normalizedTagKeys.length) throw new Error("Saved travel search requires a query or tags.");
+  if (normalizedQuery.length === 1) throw new Error("Saved travel search queries must contain at least two characters.");
+  return {
+    ...(normalizedQuery ? { query: normalizedQuery } : { operation: "list" as const }),
+    recordHistory,
+    ...(normalizedTagKeys.length ? { filters: { tagKeys: normalizedTagKeys, tagMatch: "all" as const } } : {}),
+  };
+}
+
+export async function searchPlaces(query: string, signal?: AbortSignal, recordHistory = true, tagKeys: string[] = []) {
+  const output = await searchApp({ ...savedTravelSearchInput(query, recordHistory, tagKeys), collectionSlugs: ["places"], limit: 50 }, signal);
+  return appSearchResults(output, "places", appSearchPlaceSchema).map(({ trips: _trips, ...place }) => place);
+}
+
+export function searchTrips(query: string, signal?: AbortSignal, recordHistory = true, tagKeys: string[] = []) {
+  return searchApp({ ...savedTravelSearchInput(query, recordHistory, tagKeys), collectionSlugs: ["trips"], limit: 50 }, signal).then((output) => appSearchResults(output, "trips", tripSchema));
 }
 
 export async function createTrip(input: CreateTripInput, signal?: AbortSignal) {

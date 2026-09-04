@@ -1,5 +1,5 @@
 export const SPARK_PRICING_CURRENCY = "USD" as const;
-export const NEWCOMER_FREE_SPARKS = 1_000;
+export const NEWCOMER_FREE_SPARKS = 100;
 
 export const SPARK_MONTHLY_PLANS = [
   { name: "Moon", price: 19.99, sparks: 1_000 },

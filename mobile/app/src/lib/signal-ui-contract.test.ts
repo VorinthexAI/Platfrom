@@ -300,7 +300,7 @@ test("root inboxes category renders only connected inbox cards", () => {
   expect(workspace).not.toContain("visibleUnassignedDrafts.map");
   expect(workspace).not.toContain('sheet === "assignDraft"');
   expect(workspace).not.toContain("assignEmailDraftForContext");
-  expect(workspace).toContain("No inboxes matched this search.");
+  expect(workspace).toContain("No inboxes matched these filters.");
 });
 
 test("Signal root inbox selection matches the Archive toolbar and disconnects only local inboxes", () => {
@@ -483,6 +483,17 @@ test("root Filter and Plus expose filtering, history, utility, and creation acti
   expect(workspace).toContain('inboxEditForm: { gap: spacing.lg }');
 });
 
+test("shares the session tag filter across Signal root and inbox lists", () => {
+  expect(workspace).toContain("const tagContextKey = tagFilterContextKey(historyContext)");
+  expect(workspace).toContain("state.selectedTagsByContext[tagContextKey] ?? EMPTY_SELECTED_TAGS");
+  expect(workspace).toContain("selectedTags.map(({ key }) => key).sort()");
+  expect(workspace.match(/<TagFilterLane context=\{historyContext\} \/>/g)).toHaveLength(2);
+  expect(workspace.match(/variant="secondary">Tags<\/Button>/g)).toHaveLength(2);
+  expect(workspace).toContain('<TagFilterSheet context={historyContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />');
+  expect(workspace).toContain("searchEmailMessagesForContext(emailContext, initialConnectorKey, nextQuery, options.recordHistory ?? false, undefined, selectedTagKeys)");
+  expect(workspace).toContain("signalQueryKeys.overview(emailContext, initialConnectorKey, initialConnectorKey ? nextQuery : undefined, undefined, selectedTagKeys)");
+});
+
 test("reply context manager uses full-height pills, guarded bulk delete, and one keyboard-safe editor", () => {
   expect(workspace).toContain("function ReplyContextSheets");
   expect(workspace).toContain('title="Reply context"');
@@ -581,7 +592,7 @@ test("tones expose guarded loading, error, and retry states", () => {
   expect(workspace).toContain("const toneError = metadataQuery.error ? messageFor(metadataQuery.error) : undefined");
   expect(workspace).toContain('accessibilityLabel="Loading Signal tones"');
   expect(workspace).toContain("Retry tones");
-  expect(workspace).toMatch(/tonesLoading \|\| normalizedRootQuery[\s\S]*?: rootSearchError \?[\s\S]*?: toneError && !toneRecords\.length \?[\s\S]*?visibleTones\.length/);
+  expect(workspace).toMatch(/tonesLoading \|\| rootFilterActive[\s\S]*?: rootSearchError \?[\s\S]*?: toneError && !toneRecords\.length \?[\s\S]*?visibleTones\.length/);
 });
 
 test("root and inbox keep controls while rendering only compact local loading and error states", () => {
@@ -599,18 +610,18 @@ test("root and inbox keep controls while rendering only compact local loading an
 });
 
 test("Signal scopes root and tone states without pairing errors with empty states", () => {
-  expect(workspace).toMatch(/rootTab === "inboxes" \? loading \|\| normalizedRootQuery[\s\S]*?loadError \? <View accessibilityRole="alert"/);
-  expect(workspace).toContain('!loadError && !visibleAccounts.length && !normalizedRootQuery');
+  expect(workspace).toMatch(/rootTab === "inboxes" \? loading \|\| rootFilterActive[\s\S]*?loadError \? <View accessibilityRole="alert"/);
+  expect(workspace).toContain('!loadError && !visibleAccounts.length && !rootFilterActive');
   expect(workspace).toContain('!loading && !inboxQueryPending && !initialSyncPending && !loadError && !overview?.threads.length');
   expect(workspace).toContain('!tonesLoading && !toneError && !visibleTones.length');
   expect(workspace).toContain('<View accessibilityRole="alert" style={styles.rootToneError}>');
-  expect(workspace).toMatch(/rootTab === "inboxes"[\s\S]*?: tonesLoading \|\| normalizedRootQuery[\s\S]*?Array\.from/);
+  expect(workspace).toMatch(/rootTab === "inboxes"[\s\S]*?: tonesLoading \|\| rootFilterActive[\s\S]*?Array\.from/);
 });
 
 test("Signal filtered lists use the centered text-only empty-state pattern", () => {
   expect(workspace).toContain('"No messages match these filters."');
-  expect(workspace).toContain('"No messages matched this search."');
-  expect(workspace).toContain('"No drafts matched this search."');
+  expect(workspace).toContain('"No messages matched these filters."');
+  expect(workspace).toContain('"No drafts matched these filters."');
   expect(workspace).toContain('<View style={styles.empty}><Text style={styles.centerText}>Trash is empty.</Text></View>');
   expect(workspace).not.toContain('<Text style={styles.emptyTitle}>No messages in this view</Text>');
   expect(workspace).not.toContain('<Text style={styles.emptyTitle}>No drafts</Text>');
@@ -623,12 +634,12 @@ test("Signal filtered lists use the centered text-only empty-state pattern", () 
 
 test("Signal root search is debounced, semantic, cancellable, and tab-specific", () => {
   expect(workspace).toContain("const rootSearchRequest = useRef<AbortController | undefined>(undefined)");
-  expect(workspace).toContain('searchEmailInboxesForContext(context, query, false, controller.signal)');
-  expect(workspace).toContain('searchEmailTonesForContext(context, query, false, controller.signal)');
-  expect(workspace).toContain('searchEmailInboxesForContext(context, query, true, controller.signal)');
-  expect(workspace).toContain('searchEmailTonesForContext(context, query, true, controller.signal)');
+  expect(workspace).toContain('searchEmailInboxesForContext(context, query, false, controller.signal, selectedTagKeys)');
+  expect(workspace).toContain('searchEmailTonesForContext(context, query, false, controller.signal, selectedTagKeys)');
+  expect(workspace).toContain('searchEmailInboxesForContext(context, query, true, controller.signal, selectedTagKeys)');
+  expect(workspace).toContain('searchEmailTonesForContext(context, query, true, controller.signal, selectedTagKeys)');
   expect(workspace).toContain('const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey }');
-  expect(workspace).toContain('setRootSearchResults(rootTab === "inboxes" ? { tab: rootTab, inboxes: [] } : { tab: rootTab, tones: [] })');
+  expect(workspace).toContain('setRootSearchResults(rootTab === "inboxes" ? { tab: rootTab, filterKey, inboxes: [] } : { tab: rootTab, filterKey, tones: [] })');
   expect(workspace).toContain('}, 300)');
   expect(workspace).toContain('}, 800)');
   expect(workspace).toContain('controller.abort()');
@@ -639,11 +650,11 @@ test("Signal root search is debounced, semantic, cancellable, and tab-specific",
   expect(client).toContain('collectionSlugs: ["email-drafts"]');
 });
 
-test("every Signal search runs after 300ms and records history after 800ms", () => {
+test("Signal text search is debounced while tagged lists load immediately and history waits", () => {
   expect(workspace).toContain('const searchLatest = useEffectEvent(search)');
-  expect(workspace).toContain('const timeout = setTimeout(() => { void searchLatest(next, false, controller.signal); }, 300)');
-  expect(workspace).toContain('searchEmailMessagesForContext(context, initialConnectorKey, nextQuery, true, controller.signal)');
-  expect(workspace).toContain('searchEmailDraftsForContext(context, initialConnectorKey, next, true, controller.signal)');
+  expect(workspace).toContain('const timeout = setTimeout(() => { void searchLatest(next, false, controller.signal); }, next ? 300 : 0)');
+  expect(workspace).toContain('searchEmailMessagesForContext(context, initialConnectorKey, nextQuery, true, controller.signal, selectedTagKeys)');
+  expect(workspace).toContain('searchEmailDraftsForContext(context, initialConnectorKey, next, true, controller.signal, selectedTagKeys)');
   expect(workspace).toContain('}, 800)');
   expect(workspace).toContain('onSubmitEditing={() => void search(query, false)}');
   expect(picker).toContain('query.trim() ? 300 : 0');
@@ -660,7 +671,7 @@ test("Signal mobile controls expose non-overlapping effective touch targets", ()
   expect(workspace).toContain('categoryTab: { minHeight: 28, flex: 1 }');
   expect(workspace).toContain('inboxFilterButton: { width: 44, height: 44, minHeight: 44 }');
   expect(workspace).toMatch(/accessibilityLabel="Filter Signal"[\s\S]{0,260}?size="sm" style=\{styles\.rootMenuButton\}/);
-  expect(workspace).toContain('<FilterIcon size="sm" variant={rootFavoritesOnly ? "accent" : "default"} />');
+  expect(workspace).toContain('<FilterIcon size="sm" variant={rootFavoritesOnly || selectedTags.length ? "accent" : "default"} />');
   expect(workspace).toContain('accessibilityLabel="Show only favorite Signal items"');
   expect(workspace).toContain('searchedAccounts.filter(({ isFavorite }) => !rootFavoritesOnly || isFavorite)');
   expect(workspace).toContain('searchedTones.filter(({ isFavorite }) => !rootFavoritesOnly || isFavorite)');
@@ -1154,7 +1165,7 @@ test("thread selection persists across views and exposes exact bulk actions", ()
   expect(workspace).toContain('onLongPress={() => handleThreadLongPress(thread)}');
   expect(workspace).toContain('accessibilityState={{ selected: selectedThreads.some(({ key }) => key === thread.key) }}');
   expect(workspace).toContain('{selectedThreads.length} selected');
-  for (const action of ["Favorite", "Unfavorite", "Mark read", "Mark unread", "Move to trash"]) expect(workspace).toContain(action);
+  for (const action of ["Tags", "Favorite", "Unfavorite", "Mark read", "Mark unread", "Move to trash"]) expect(workspace).toContain(action);
   expect(workspace).toContain('setEmailThreadsFavoriteForContext(context, threadKeys, isFavorite, requestKey)');
   expect(workspace).toContain('setEmailThreadsReadStateForContext(context, threadKeys, isRead, requestKey)');
   expect(workspace).toContain('trashEmailThreadsForContext(context, threadKeys, requestKey)');
@@ -1169,7 +1180,7 @@ test("email bulk selection matches the Archive toolbar and action-menu contract 
   expect(workspace).toContain('sheet === "bulkActions" ? ""');
   const bulkActions = workspace.slice(workspace.indexOf('sheet === "bulkActions" ? ('), workspace.indexOf(') : sheet === "bulkTrash"'));
   expect(bulkActions).not.toContain("icon={");
-  expect(bulkActions.match(/style=\{styles\.sheetAction\}/g)).toHaveLength(3);
+  expect(bulkActions.match(/style=\{styles\.sheetAction\}/g)).toHaveLength(4);
   const openBulkActions = workspace.slice(workspace.indexOf("async function openBulkActions()"), workspace.indexOf("async function toggleReadState()"));
   expect(openBulkActions).toContain("setBulkActionsLoading(true)");
   expect(openBulkActions).not.toContain("setBulkBusy(true)");
@@ -1273,6 +1284,26 @@ test("root inbox bulk actions reconcile authoritative snapshots and never restor
   expect(workspace).toContain("const receivedAttachmentCardSize = Math.floor(((receivedAttachmentGridWidth || width - 40) - 18) / 4)");
   expect(workspace).toContain('accessibilityLabel="Remove all attachments" contentMode="raw" disabled={newEmailSending || Boolean(newEmailReviewTransformation)} hitSlop={10}');
   expect(workspace).toContain('accessibilityLabel="Remove all reply attachments" contentMode="raw" disabled={replySending || Boolean(replyTransformation)} hitSlop={10}');
+});
+
+test("Signal bulk tag actions use only canonical inbox and thread targets and preserve selection", () => {
+  expect(workspace).toContain('import { ResourceTagsSheet } from "@/components/ResourceTagsSheet";');
+  expect(workspace).toContain('selectedInboxes.map((account) => ({ type: "email-inbox", key: account.key }))');
+  expect(workspace).not.toContain('type: "email-inbox", key: account.connectorKey');
+  expect(workspace).toContain('selectedThreads.map(({ key }) => ({ type: "email-thread", key }))');
+  expect(workspace).toContain('<BottomSheetItem disabled={rootBulkBusy || !permissions.canMutate} onPress={openSelectedInboxTags} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem>');
+  expect(workspace).toContain('<BottomSheetItem disabled={bulkBusy} onPress={openSelectedThreadTags} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem>');
+  expect(workspace).toContain('<ResourceTagsSheet context={historyContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />');
+  const inboxTags = workspace.slice(workspace.indexOf("function openSelectedInboxTags"), workspace.indexOf("function openSelectedThreadTags"));
+  const threadTags = workspace.slice(workspace.indexOf("function openSelectedThreadTags"), workspace.indexOf("function closeSearchHistory"));
+  for (const operation of [inboxTags, threadTags]) {
+    expect(operation).toContain("requestAnimationFrame(() => setResourceTagsOpen(true))");
+    expect(operation).not.toContain("setSelectedInboxes([])");
+    expect(operation).not.toContain("setSelectedThreads([])");
+  }
+  expect(workspace).not.toContain('type: "email-translation"');
+  expect(workspace).not.toContain('type: "email-summary"');
+  expect(workspace).not.toContain('type: "email-reply-context"');
 });
 
 test("all authoritative read, favorite, Trash, and bulk completions use one idempotent reconciler", () => {

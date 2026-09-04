@@ -9,6 +9,8 @@ import { MODEL_TOOL_NAMES, TOOL_DEFINITIONS } from '@/lib/ai/tools';
 import { resolveAgentAllowlist, runAgent } from './index';
 import { agentIntentPlanSchema, coreAgentToolInputSchema, internalAgentRequestSchema } from './schemas';
 import { APP_SEARCH_OVERLAPPING_TOOL_NAMES } from '@/lib/ai/tools/search-routing-policy';
+import { SparkRefundError } from '@/lib/ai/events/runtime';
+import { SparkRepositoryError } from '@/lib/sparks/repository';
 
 const organizationKey = newId(), scopeKey = newId(), userKey = newId();
 const toolContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
@@ -83,8 +85,14 @@ describe('internal agents', () => {
     expect(prompt).toContain('route every workspace resource lookup, exact count, and inventory through app.search');
     expect(prompt).toContain('never infer an exact total from a bounded list or search page');
     expect(prompt).toContain('use app.search sum');
+    expect(prompt).toContain('Complete every part of a compound read-only resource question');
+    expect(prompt).toContain('matchedCount, the exact number of matching resources');
     expect(prompt).toContain('sizeBytes for storage occupied by images, files, or stored document originals');
     expect(prompt).toContain('Never sum arbitrary public fields');
+    expect(prompt).toContain('filters.tagKeys for tag IDs explicitly supplied by the caller');
+    expect(prompt).toContain('every requested resource collection');
+    expect(prompt).toContain('Tags and tag assignments are discoverable only through app.search');
+    expect(prompt).toContain('never select tag.list, tag.create, tag.update, tag.delete, or tag.assignment.set');
     expect(prompt).toContain('client UI mode is presentation-only');
     expect(prompt).toContain('conversation.image.enqueue');
   });
@@ -136,6 +144,8 @@ describe('internal agents', () => {
       tools: { names: ['app.search'], definitions: [definition('app.search')], execute: async (_name, raw) => { calls.push(raw); return { query: 'research note', groups: [{ collectionSlug: 'documents', results: [] }] }; } },
     });
     expect(inputs[1]!.systemPrompt).toContain("grammatical singular or one/single in the user's language means 1");
+    expect(inputs[1]!.systemPrompt).toContain("Choose it from the user's requested answer target, not from plural evidence");
+    expect(inputs[1]!.systemPrompt).toContain('which collection contains these images?');
     expect(inputs[1]!.systemPrompt).toContain('reduce conversational wording to the distinguishing resource name or subject');
     expect(calls).toEqual([{ query: 'research note', collectionSlugs: ['documents'], limit: 1 }]);
   });
@@ -225,6 +235,57 @@ describe('internal agents', () => {
     expect(result.message).toBe('Your Gallery images use 1.5 GB.');
   });
 
+  test('executes compound app.search calls for every part of a contextual follow-up', async () => {
+    const collectionKey = newId(); const calls: unknown[] = []; const inputs: CoreChatInput[] = [];
+    const result = await executeCoreAgent(request({
+      context: [{ role: 'assistant', content: `Bilderna finns i samlingen Core.\n\nTyped historical resource references: [{"references":[{"collectionSlug":"collections","key":"${collectionKey}","label":"Core"}]}]`, createdAt: '2026-09-04T13:20:00.000Z' }],
+      message: 'Hur många bilder har vi i den collection och hur många mb?',
+    }), { toolContext }, {
+      stream: queue([
+        [text('{"tools":["app.search"],"message":""}'), done],
+        [
+          call('count-images', 'app.search', { operation: 'count', collectionSlugs: ['images'], filters: { collectionKey }, limit: 10 }),
+          call('sum-images', 'app.search', { operation: 'sum', collectionSlugs: ['images'], field: 'sizeBytes', filters: { collectionKey }, limit: 10 }),
+          done,
+        ],
+        [text('{"tools":[],"message":"Samlingen Core innehåller 20 bilder som använder 1,5 GB."}'), done],
+      ], inputs),
+      tools: { names: ['app.search'], definitions: [definition('app.search')], execute: async (_name, raw) => {
+        calls.push(raw);
+        return (raw as { operation: string }).operation === 'count'
+          ? { operation: 'count', groups: [{ collectionSlug: 'images', count: 20 }] }
+          : { operation: 'sum', groups: [{ collectionSlug: 'images', field: 'sizeBytes', sum: 1_500_000_000, unit: 'bytes', matchedCount: 20, valueCount: 20 }] };
+      } },
+    });
+    expect(calls).toEqual([
+      { operation: 'count', collectionSlugs: ['images'], filters: { collectionKey }, limit: 10 },
+      { operation: 'sum', collectionSlugs: ['images'], field: 'sizeBytes', filters: { collectionKey }, limit: 10 },
+    ]);
+    expect(inputs[2]!.messages.slice(-3).map(({ role }) => role)).toEqual(['assistant', 'tool', 'tool']);
+    expect(result.message).toBe('Samlingen Core innehåller 20 bilder som använder 1,5 GB.');
+  });
+
+  test('allows a scoped aggregate after refreshing a historical resource reference', async () => {
+    const collectionKey = newId(); const calls: unknown[] = [];
+    const result = await executeCoreAgent(request({ message: 'How many images and bytes are in that collection?' }), { toolContext }, {
+      stream: queue([
+        [text('{"tools":["app.search"],"message":""}'), done],
+        [call('refresh', 'app.search', { operation: 'search', query: 'Core', collectionSlugs: ['collections'], limit: 1 }), done],
+        [text('{"tools":["app.search"],"message":""}'), done],
+        [call('sum', 'app.search', { operation: 'sum', collectionSlugs: ['images'], field: 'sizeBytes', filters: { collectionKey }, limit: 10 }), done],
+        [text('{"tools":[],"message":"The collection contains 20 images using 1.5 GB."}'), done],
+      ]),
+      tools: { names: ['app.search'], definitions: [definition('app.search')], execute: async (_name, raw) => {
+        calls.push(raw);
+        return (raw as { operation: string }).operation === 'search'
+          ? { query: 'Core', groups: [{ collectionSlug: 'collections', results: [{ key: collectionKey, name: 'Core' }] }] }
+          : { operation: 'sum', groups: [{ collectionSlug: 'images', field: 'sizeBytes', sum: 1_500_000_000, unit: 'bytes', matchedCount: 20, valueCount: 20 }] };
+      } },
+    });
+    expect(calls).toHaveLength(2);
+    expect(result.message).toBe('The collection contains 20 images using 1.5 GB.');
+  });
+
   test('generates images through the current conversation without model-visible conversation identity', async () => {
     const conversationKey = newId(); const calls: unknown[] = [];
     const imageDefinition = TOOL_DEFINITIONS.find(({ name }) => name === 'conversation.image.enqueue')!;
@@ -288,9 +349,10 @@ describe('internal agents', () => {
     const modelNames = MODEL_TOOL_NAMES;
     const allowed = resolveAgentAllowlist(coreAgent.allowlist, modelNames, 'agents.core', coreAgent.excludedTools);
     const allowedSet = new Set(allowed);
-    for (const mutation of ['folder.create', 'folder.delete', 'folder.rename', 'document.create', 'document.update', 'document.delete', 'document.share', 'document.summarize', 'document.rewrite', 'document.restore-version', 'collection.create', 'collection.update', 'collection.delete', 'collection.invite.create', 'image.favorite', 'image.delete', 'trip.create', 'book.create', 'email.draft.send', 'content.search-history.delete', 'conversation.message.delete', 'app.enhance']) expect(allowedSet.has(mutation)).toBe(false);
+    for (const mutation of ['folder.create', 'folder.delete', 'folder.rename', 'document.create', 'document.update', 'document.delete', 'document.share', 'document.summarize', 'document.rewrite', 'document.restore-version', 'collection.create', 'collection.update', 'collection.delete', 'collection.invite.create', 'image.favorite', 'image.delete', 'trip.create', 'book.create', 'email.draft.send', 'content.search-history.delete', 'conversation.message.delete', 'app.enhance', 'tag.create', 'tag.update', 'tag.delete', 'tag.assignment.set']) expect(allowedSet.has(mutation)).toBe(false);
     for (const overlapping of APP_SEARCH_OVERLAPPING_TOOL_NAMES) expect(allowedSet.has(overlapping)).toBe(false);
     for (const capability of ['app.search', 'web.search', 'image.search', 'agent.query', 'conversation.image.enqueue']) expect(allowedSet.has(capability)).toBe(true);
+    for (const capability of ['tag.list', 'tag.create', 'tag.update', 'tag.delete', 'tag.assignment.set']) expect(allowedSet.has(capability)).toBe(false);
     for (const superseded of ['collection.list', 'document.read', 'document.find', 'document.list', 'folder.list', 'folder.find']) expect(allowedSet.has(superseded)).toBe(false);
     expect(coreAgent.excludedTools).toContain('collection.create');
     expect(coreAgent.excludedTools).toContain('document.update');
@@ -327,6 +389,21 @@ describe('internal agents', () => {
     expect(inputs[2]!.messages.at(-1)?.content[0]).toMatchObject({ type: 'tool-result', result: { slug: 'app.search', arguments: { forged: true }, status: 'failed', error: expect.any(String) } });
     expect(result.tools).toMatchObject([{ slug: 'app.search', status: 'failed' }]);
     expect(succeededHooks).toBe(0);
+  });
+
+  test('rethrows billing and refund failures instead of exposing them to the model', async () => {
+    const responses = () => [[text('{"tools":["app.search"],"message":""}'), done], [call('one', 'app.search', {}), done]];
+    const insufficient = new SparkRepositoryError('INSUFFICIENT_BALANCE', 'insufficient');
+    await expect(executeCoreAgent(request(), { toolContext }, {
+      stream: queue(responses()),
+      tools: { names: ['app.search'], definitions: [definition('app.search')], execute: async () => { throw insufficient; } },
+    })).rejects.toBe(insufficient);
+
+    const refund = new SparkRefundError(new Error('tool failed'), { cause: new Error('refund failed') });
+    await expect(executeCoreAgent(request(), { toolContext }, {
+      stream: queue(responses()),
+      tools: { names: ['app.search'], definitions: [definition('app.search')], execute: async () => { throw refund; } },
+    })).rejects.toBe(refund);
   });
 
   test('prevalidates production tool arguments and returns bounded repair guidance without dispatch', async () => {
@@ -394,9 +471,10 @@ describe('internal agents', () => {
         [text('{"tools":["app.search"],"message":""}'), done],
         [call('second', 'app.search', { query: 'second', collectionSlugs: ['documents'] }), done],
         [text('{"tools":["app.search"],"message":""}'), done],
+        [call('third', 'app.search', { query: 'third', collectionSlugs: ['documents'] }), done],
       ]),
       tools: { names: ['app.search'], definitions: [definition('app.search')], execute: async (_name, raw) => ({ query: (raw as { query: string }).query, groups: [{ collectionSlug: 'documents', results: [] }] }) },
-    })).rejects.toThrow('not allowed');
+    })).rejects.toThrow('retry limit');
   });
 
   test('canonicalizes a routing tool invocation before generating its arguments', async () => {
@@ -428,10 +506,45 @@ describe('internal agents', () => {
     expect(keys).toEqual(secondKeys); expect(keys.every((key) => /^[a-f0-9]{64}$/.test(key))).toBe(true); expect(keys[0]).not.toBe(keys[1]);
   });
 
+  test('combines different read-only operations in one native tool turn', async () => {
+    const calls: Array<{ name: string; raw: unknown }> = []; const inputs: CoreChatInput[] = [];
+    const result = await executeCoreAgent(request({ message: 'Compare my trip count with current travel guidance.' }), { toolContext }, {
+      stream: queue([
+        [text('{"tools":["app.search","web.search"],"message":""}'), done],
+        [
+          call('workspace', 'app.search', { operation: 'count', collectionSlugs: ['trips'], limit: 10 }),
+          call('web', 'web.search', { query: 'current travel guidance' }),
+          done,
+        ],
+        [text('{"tools":[],"message":"You have two trips. Current guidance is linked in the cited source."}'), done],
+      ], inputs),
+      tools: { names: ['app.search', 'web.search'], definitions: [definition('app.search'), definition('web.search')], execute: async (name, raw) => {
+        calls.push({ name, raw });
+        return name === 'app.search' ? { operation: 'count', groups: [{ collectionSlug: 'trips', count: 2 }] } : { text: 'Current guidance', citations: [] };
+      } },
+    });
+    expect(calls.map(({ name }) => name)).toEqual(['app.search', 'web.search']);
+    expect(inputs[1]!.systemPrompt).toContain('one or many selected tool calls when every call is read-only');
+    expect(inputs[1]!.systemPrompt).toContain('every other side-effecting capability must execute alone');
+    expect(inputs[2]!.messages.slice(-3).map(({ role }) => role)).toEqual(['assistant', 'tool', 'tool']);
+    expect(result.tools.map(({ slug }) => slug)).toEqual(['app.search', 'web.search']);
+  });
+
+  test('rejects a mixed read-write batch before dispatching any call', async () => {
+    const imageDefinition = TOOL_DEFINITIONS.find(({ name }) => name === 'conversation.image.enqueue')!; let executions = 0;
+    await expect(executeCoreAgent(request(), { toolContext }, {
+      stream: queue([
+        [text('{"tools":["app.search","conversation.image.enqueue"],"message":""}'), done],
+        [call('read', 'app.search', { operation: 'count', collectionSlugs: ['images'], limit: 10 }), call('write', 'conversation.image.enqueue', { prompt: 'A dog' }), done],
+      ]),
+      tools: { names: ['app.search', 'conversation.image.enqueue'], definitions: [definition('app.search'), imageDefinition], execute: async () => { executions += 1; } },
+    })).rejects.toThrow('every call must be read-only');
+    expect(executions).toBe(0);
+  });
+
   test('rejects invalid calls and forces a final answer after four executions', async () => {
     const scenarios: Array<[string, ProviderStreamChunk[][], string, number]> = [
       ['unknown', [[text('{"tools":["unknown.tool"],"message":""}'), done]], 'not allowed', 0],
-      ['multiple', [[text('{"tools":["app.search"],"message":""}'), done], [call('x', 'app.search', {}), call('y', 'app.search', {}), done]], 'more than one', 0],
       ['mixed', [[text('{"tools":["app.search"],"message":""}'), done], [text('leak'), call('x', 'app.search', {}), done]], 'mixed visible text', 0],
     ];
     for (const [, responses, expected, expectedCalls] of scenarios) { let executions = 0; await expect(executeCoreAgent(request(), { toolContext }, { stream: queue(responses), tools: { names: ['app.search', 'web.search'], definitions: [definition('app.search'), definition('web.search')], execute: async () => { executions += 1; } } })).rejects.toThrow(expected); expect(executions).toBe(expectedCalls); }

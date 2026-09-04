@@ -7,6 +7,8 @@ import { contentToolNameSchema } from './content-registry';
 import { runContentTool } from './content-runtime';
 import type { ContentToolDependencies } from './content-runtime';
 import { evaluateScopeAccess } from './domain-access-engine';
+import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
+import type { ToolEventRecorder } from '@/lib/ai/events/service';
 
 export const runAuthenticatedContentToolInputSchema = z.object({
   organizationKey: z.string().trim().min(1),
@@ -17,6 +19,9 @@ export const runAuthenticatedContentToolInputSchema = z.object({
 
 export interface RunAuthenticatedContentToolOptions {
   authenticatedUserKey: string;
+  requestKey?: string;
+  recordEvent?: ToolEventRecorder;
+  billing?: ToolBillingDependencies;
   resolveMembership?: typeof getUserOrganizationByOrganizationAndUser;
   resolveUser?: typeof getUserById;
   authorizeScope?: typeof evaluateScopeAccess;
@@ -55,5 +60,9 @@ export async function authorizeContentTool(rawInput: z.input<typeof runAuthentic
 /** Authenticated human boundary for invoking a registered Content tool. */
 export async function runAuthenticatedContentTool(rawInput: z.input<typeof runAuthenticatedContentToolInputSchema>, options: RunAuthenticatedContentToolOptions) {
   const { input, context } = await authorizeContentTool(rawInput, options);
-  return (options.execute ?? runContentTool)(input.tool, input.input, context, options.contentDependencies);
+  const inputIdempotencyKey = typeof input.input === 'object' && input.input !== null && 'idempotencyKey' in input.input && typeof input.input.idempotencyKey === 'string'
+    ? input.input.idempotencyKey
+    : undefined;
+  const idempotencyKey = options.requestKey ?? inputIdempotencyKey;
+  return observeToolExecution(input.tool, context, () => (options.execute ?? runContentTool)(input.tool, input.input, context, options.contentDependencies), { recorder: options.recordEvent, idempotencyKey, input: input.input, ...options.billing });
 }

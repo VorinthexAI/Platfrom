@@ -17,23 +17,26 @@ try {
   const names = ['images', 'collections', 'collectionImages', 'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'shares', 'folders', 'documents', 'places', 'scopes', 'scopeMembers', 'userOrganizations', 'users', 'documentShares'];
   await Promise.all(names.map((name) => database.createCollection(name)));
   for (const spec of collectionSpecs.filter(({ name }) => names.includes(name))) for (const index of spec.indexes ?? []) await database.collection(spec.name).ensureIndex({ type: 'persistent', sparse: false, unique: false, ...index });
-  const [{ createMediaLibraryRepository }, { createMediaLibraryService }, { processImage }, { imageSchema }] = await Promise.all([
-    import('../src/lib/media-library/repository'), import('../src/lib/media-library/service'), import('../src/lib/ai/image-processing'), import('../src/lib/db/images.node'),
+  const [{ createMediaLibraryRepository }, { createMediaLibraryService }, { createScopeTagRepository, createScopeTagService }, { processImage }, { imageSchema }] = await Promise.all([
+    import('../src/lib/media-library/repository'), import('../src/lib/media-library/service'), import('../src/lib/scope-tags'), import('../src/lib/ai/image-processing'), import('../src/lib/db/images.node'),
   ]);
   const transactionCollections = ['images', 'collections', 'collectionImages', 'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'shares', 'documents', 'places', 'scopes', 'scopeMembers', 'userOrganizations', 'users'];
   const repository = createMediaLibraryRepository(database, (operation) => withDatabaseTransaction(database, transactionCollections, (transaction) => operation(transaction)));
   let tokenSequence = 0;
   const service = createMediaLibraryService({ repository, token: () => `media-library-e2e-token-${String(++tokenSequence).padStart(32, '0')}` });
-  const scopeKey = newId(); const actorKey = newId(); const strangerKey = newId(); const collectionKey = newId(); const imageKey = newId(); const tagKey = newId(); const now = new Date().toISOString();
+  const scopeKey = newId(); const actorKey = newId(); const actorUserKey = newId(); const strangerKey = newId(); const collectionKey = newId(); const imageKey = newId(); const now = new Date().toISOString();
   await database.collection('scopes').save({ _key: scopeKey, organizationKey: 'media-library-e2e-org' });
-  await database.collection('userOrganizations').import([{ _key: actorKey, organizationId: 'media-library-e2e-org', userId: newId(), orgRole: 'member', status: 'active' }, { _key: strangerKey, organizationId: 'media-library-e2e-org', userId: newId(), orgRole: 'member', status: 'active' }]);
+  await database.collection('userOrganizations').import([{ _key: actorKey, organizationId: 'media-library-e2e-org', userId: actorUserKey, orgRole: 'member', status: 'active' }, { _key: strangerKey, organizationId: 'media-library-e2e-org', userId: newId(), orgRole: 'member', status: 'active' }]);
+  await database.collection('scopeMembers').save({ _key: newId(), scopeKey, userOrganizationKey: actorKey, role: 'member', status: 'active' });
   await database.collection('collections').save({ _key: collectionKey, scopeKey, name: 'Launch', description: 'Launch imagery', embedding: Array(EMBEDDING_DIMENSIONS).fill(0), isFavorite: false, createdAt: now, updatedAt: now });
   const sourceOwnerMembershipKey = newId();
   await database.collection('collectionMembers').save({ _key: sourceOwnerMembershipKey, scopeKey, collectionKey, memberKey: actorKey, role: 'owner', createdAt: now });
   await database.collection('images').save({ _key: imageKey, scopeKey, filename: 'launch.png', caption: 'A launch vehicle', storageKey: 'mediaLibrary/e2e.png', mimeType: 'image/png', sizeBytes: 24, width: 1, height: 1, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), origin: 'uploaded', isFavorite: false, createdAt: now, updatedAt: now });
-  await database.collection('tags').save({ _key: tagKey, scopeKey, name: 'Launch', embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: now, updatedAt: now });
   const membership = await service.addImageToCollection({ scopeKey, collectionKey, imageKey, actorKey, now });
-  const assignment = await service.assignTag({ scopeKey, tagKey, sourceType: 'image', sourceKey: imageKey, source: 'user', actorKey, now });
+  const tagService = createScopeTagService({ repository: createScopeTagRepository(database as never, (operation) => operation(database as never)), embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0), now: () => now });
+  const tagContext = { organizationKey: 'media-library-e2e-org', runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: actorUserKey }, userOrganization: { key: actorKey, userId: actorUserKey, organizationId: 'media-library-e2e-org', status: 'active' } } } as never;
+  const tag = await tagService.create({ name: 'Launch' }, tagContext);
+  const assignment = await tagService.setAssignments({ changes: [{ tagKey: tag.key, target: { type: 'image', key: imageKey }, assigned: true }] }, tagContext, { source: 'user' });
   const cover = await service.setCollectionCoverImage({ scopeKey, collectionKey, imageKey, ownerKey: actorKey, now });
   if (cover.coverImageKey !== imageKey) throw new Error('Collection cover membership verification failed.');
   const unrelatedImageKey = newId();
@@ -95,7 +98,7 @@ try {
   if (!shareReplayAfterAccessLossRejected) throw new Error('Removed image owner recovered a share token replay.');
   await database.collection('images').update(imageKey, { ownerKey: actorKey });
   await database.collection('collectionMembers').save({ _key: destinationOwnerMembershipKey, scopeKey, collectionKey: destinationCollectionKey, memberKey: actorKey, role: 'owner', createdAt: now });
-  if (membership.imageKey !== imageKey || assignment.sourceKey !== imageKey || 'tokenHash' in projected.share || 'passwordHash' in projected.share) throw new Error('MediaLibrary projection verification failed.');
+  if (membership.imageKey !== imageKey || assignment.changes[0]?.target.key !== imageKey || 'tokenHash' in projected.share || 'passwordHash' in projected.share) throw new Error('MediaLibrary projection verification failed.');
   const accessed = await service.accessGlobalShare({ token: projected.token, password: 'mediaLibrary password', at: now });
   if (accessed.share.key !== projected.share.key || 'tokenHash' in accessed.share || 'passwordHash' in accessed.share) throw new Error('MediaLibrary active share lookup leaked secrets or returned the wrong source.');
   await database.collection('shares').update(projected.share.key, { revokedAt: now, updatedAt: now });

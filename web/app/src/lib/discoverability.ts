@@ -1,5 +1,5 @@
 export const CANONICAL_ORIGIN = "https://vorinthex.com" as const;
-export const CONTENT_LAST_REVIEWED = "2026-08-19" as const;
+export const CONTENT_LAST_REVIEWED = "2026-09-04" as const;
 export const CONTACT_EMAIL = "contact@vorinthex.com" as const;
 
 export type PublicRoutePath =
@@ -125,7 +125,7 @@ export const PRODUCT_FACTS = {
   privacy:
     "Privacy and user control are central product principles for Core.",
   sparks:
-    "Sparks are the usage unit for Vorinthex services. Pricing is shown in USD, and local taxes may be added where required.",
+    "Sparks are the usage unit for Vorinthex services. Prepaid Sparks remain available after subscription cancellation, balances never go below zero, and storage is charged hourly from prepaid Sparks. Unfunded storage incurs no debt or backcharges; growth is blocked, existing data remains available for export, deletion, and recovery, and adding enough Sparks before deletion begins restores prospective charging. Once deletion begins, it cannot be reversed. Stored S3-backed data is hard-deleted after 90 consecutive unfunded days. Pricing is shown in USD, and local taxes may be added where required.",
   pricing: {
     currency: SPARK_PRICING_CURRENCY,
     newcomerAllocation: NEWCOMER_FREE_SPARKS,
@@ -155,9 +155,9 @@ export const PUBLIC_DISCOVERABILITY_REGISTRY = {
     path: "/pricing",
     title: "Sparks Pricing | Vorinthex AI",
     description:
-      "Explore Vorinthex Sparks monthly balances, one-time top-ups, and on-demand usage pricing in USD.",
+      "Explore Vorinthex Sparks pricing, prepaid balances, hourly storage charging, and unfunded-storage handling in USD.",
     summary:
-      "Vorinthex Sparks pricing includes monthly balances, one-time top-ups, and on-demand usage in USD.",
+      "Vorinthex Sparks pricing covers monthly balances, one-time top-ups, hourly prepaid storage charges, and unfunded-storage handling.",
     schemaPageType: "WebPage",
     status: "current",
     lastModified: CONTENT_LAST_REVIEWED,
@@ -189,9 +189,9 @@ export const PUBLIC_DISCOVERABILITY_REGISTRY = {
     path: "/privacy",
     title: "Privacy Policy | Vorinthex AI",
     description:
-      "Read how Vorinthex AI handles personal data, privacy requests, retention, security safeguards, and account deletion.",
+      "Read how Vorinthex AI handles personal data, privacy requests, retention, unfunded stored data, security safeguards, and deletion.",
     summary:
-      "Vorinthex AI's privacy policy describes data handling, safeguards, rights, retention, and deletion requests.",
+      "Vorinthex AI's privacy policy describes data handling, safeguards, rights, retention, and deletion, including the 90-day unfunded-storage policy.",
     schemaPageType: "WebPage",
     status: "current",
     lastModified: CONTENT_LAST_REVIEWED,
@@ -201,9 +201,9 @@ export const PUBLIC_DISCOVERABILITY_REGISTRY = {
     path: "/terms",
     title: "Terms | Vorinthex AI",
     description:
-      "Read the terms governing use of Vorinthex AI websites, apps, services, AI-assisted features, and intellectual property.",
+      "Read the terms governing Vorinthex AI services, prepaid Sparks, subscriptions, storage charging, AI-assisted features, and intellectual property.",
     summary:
-      "These terms govern lawful use of Vorinthex AI services and responsibility for reviewing AI-assisted outputs.",
+      "These terms govern Vorinthex AI services, including prepaid Spark balances and hourly storage charging without debt or backcharges.",
     schemaPageType: "WebPage",
     status: "current",
     lastModified: CONTENT_LAST_REVIEWED,

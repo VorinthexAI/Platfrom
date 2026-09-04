@@ -6,13 +6,14 @@ const organizationKey = 'organization';
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
 const membershipKey = 'cmrnlzf650002qc7k4p5zemb0';
 const connectorKey = 'cmrnlzf660003qc7kw1n9j93a';
-const common = { organizationKey, scopeKey, membershipKey, connectorKey, providerMessageId: 'provider-message' };
+const billingUserKey = 'cmrnlzf670004qc7kw1n9j94b';
+const common = { organizationKey, scopeKey, membershipKey, billingUserKey, connectorKey, providerMessageId: 'provider-message' };
 const at = new Date('2026-08-25T12:00:00.000Z');
 
 function fixture(options: { exportFailure?: boolean } = {}) {
   const bindings = new Map<string, EmailAttachmentBinding & { storageKey?: string }>();
   const events: string[] = [];
-  const uploads: string[] = [];
+  const uploads: Array<{ key: string; billingUserKey?: string }> = [];
   const deleted: string[] = [];
   const repository: EmailAttachmentRepository = {
     async activeMembership(input) { return input.preferredMembershipKey; },
@@ -59,7 +60,7 @@ function fixture(options: { exportFailure?: boolean } = {}) {
   const service = createEmailAttachmentIngestionService({
     repository,
     storage: {
-      async upload(input) { uploads.push(input.key); events.push('upload'); return { storageKey: input.key }; },
+      async upload(input) { uploads.push({ key: input.key, billingUserKey: input.billingUserKey }); events.push('upload'); return { storageKey: input.key }; },
       async delete(key) { deleted.push(key); events.push('delete'); },
       async download() { return { bytes: new Uint8Array() }; },
       async copy(input) { return { storageKey: input.destinationKey }; },
@@ -75,7 +76,7 @@ function fixture(options: { exportFailure?: boolean } = {}) {
     },
     parse: async () => ({ document: {} as never }),
     sanitizeImage: async (bytes) => ({ bytes: Uint8Array.from(bytes), coordinates: undefined }),
-    processImage: async (input) => { expect(input.origin).toBe('uploaded'); return { key: input.imageKey } as never; },
+    processImage: async (input) => { expect(input).toMatchObject({ origin: 'uploaded', billingUserKey }); return { key: input.imageKey } as never; },
     now: () => at,
   });
   return { service, repository, bindings, events, uploads, deleted };
@@ -87,8 +88,8 @@ describe('canonical email attachment ingestion', () => {
     const result = await f.service.ingest({ ...common, part: { path: '0.1', type: 'document', mimeType: 'text/plain', filename: 'notes.txt', size: 5, data: 'aGVsbG8' }, bytes: new TextEncoder().encode('hello') });
     expect(result).toEqual({ type: 'document', key: expect.any(String) });
     expect(f.events).toEqual(['claim', 'upload', 'persist', 'export', 'complete']);
-    expect(f.uploads[0]).toStartWith(`email/${scopeKey}/${connectorKey}/`);
-    expect([...f.bindings.values()][0]).toMatchObject({ status: 'completed', storageKey: f.uploads[0] });
+    expect(f.uploads[0]).toEqual({ key: expect.stringMatching(new RegExp(`^email/${scopeKey}/${connectorKey}/`)), billingUserKey });
+    expect([...f.bindings.values()][0]).toMatchObject({ status: 'completed', storageKey: f.uploads[0]!.key });
   });
 
   test('does not let an export failure roll back canonical ingestion', async () => {

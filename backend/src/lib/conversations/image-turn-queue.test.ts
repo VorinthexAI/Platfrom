@@ -3,6 +3,7 @@ import { newId } from '@/lib/ids';
 import { conversationImageTurnJobId, conversationImageTurnJobSchema, enqueueConversationImageTurn, processConversationImageTurn, recoverConversationImageTurnQueue } from './image-turn-queue';
 import type { ConversationMessage } from './schemas';
 import type { ConversationRepository } from './repository';
+import { recordActionCost, recordActionUsage } from '@/lib/ai/events/runtime';
 
 const organizationKey = 'organization', scopeKey = newId(), userKey = newId(), actorKey = newId(), conversationKey = newId(), assistantMessageKey = newId();
 const input = { prompt: 'A quiet observatory', referenceImageKeys: [], size: '1024x1024' as const, quality: 'medium' as const, mode: 'default' as const };
@@ -24,6 +25,19 @@ describe('conversation image turn queue', () => {
     expect(result).toEqual({ imageKey: 'c123456789' });
     expect(completed[0]).toEqual([{ organizationKey, scopeKey, userKey }, conversationKey, assistantMessageKey, 'c123456789', '2026-09-03T00:00:00.000Z']);
     expect(events).toEqual([[userKey, 'conversation.changed']]);
+  });
+
+  test('re-establishes action billing in the worker with the durable request identity', async () => {
+    const charges: Record<string, unknown>[] = [];
+    const repository = { completeImageTurn: async () => ({} as never), failTurn: async () => {} } as unknown as ConversationRepository;
+    await processConversationImageTurn(job(), {
+      repository,
+      images: { generateManaged: async () => { await recordActionCost('image', { operation: 'generate', count: 1 }); await recordActionUsage('image', { operation: 'generate', count: 1 }, { inputTokens: 0, outputTokens: 0, totalTokens: 0 }); return { images: [{ key: 'c123456789' }] }; } } as never,
+      publishChanged: async () => {}, recordEvent: async () => {},
+      billing: { getBalance: async () => 100_000_000, charge: async (_key, input) => { charges.push(input); return { status: 'applied', transaction: { key: newId() } } as never; } },
+    });
+    expect(charges).toHaveLength(1);
+    expect(charges[0]).toMatchObject({ kind: 'action', actionSlug: 'image', microSparks: 30_000_000 });
   });
 
   test('marks only terminal failures and recovery re-enqueues missing pending turns', async () => {

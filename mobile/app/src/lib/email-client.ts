@@ -71,6 +71,7 @@ export const emailToneRecordSchema = z.strictObject({
 });
 export type EmailToneRecord = z.infer<typeof emailToneRecordSchema>;
 const emailSemanticSearchInputSchema = z.strictObject({ query: z.string().trim().min(1).max(500), limit: z.number().int().min(1).max(50).default(50), recordHistory: z.boolean().default(true) });
+const emailSearchTagKeysSchema = z.array(keySchema).max(20).refine((keys) => new Set(keys).size === keys.length, "Tag keys must be distinct.");
 export const emailReplyContextSchema = z.strictObject({
   key: keySchema,
   name: z.string().min(1).max(255),
@@ -290,29 +291,36 @@ async function requestForContext<T>(context: EmailContext, method: EmailRequestM
 export type EmailOverviewInput = z.input<typeof emailOverviewInputSchema>;
 export function fetchEmailOverview(input: EmailOverviewInput = {}) { return request("post", "/email/overview", emailOverviewInputSchema.parse(input), overviewSchema); }
 export function fetchEmailOverviewForContext(context: EmailContext, input: EmailOverviewInput = {}) { return requestForContext(context, "post", "/email/overview", emailOverviewInputSchema.parse(input), overviewSchema); }
-export async function searchEmailInboxesForContext(_context: EmailContext, query: string, recordHistory = true, signal?: AbortSignal) {
-  const input = emailSemanticSearchInputSchema.parse({ query, recordHistory });
-  const output = await searchApp({ ...input, collectionSlugs: ["inboxes"] }, signal);
+function emailAppSearchInput(query: string, recordHistory: boolean, tagKeys: readonly string[]) {
+  const normalizedQuery = query.trim();
+  const normalizedTagKeys = emailSearchTagKeysSchema.parse([...new Set(tagKeys)].sort());
+  return {
+    ...(normalizedQuery ? emailSemanticSearchInputSchema.parse({ query: normalizedQuery, recordHistory }) : { operation: "list" as const, recordHistory: false, limit: 50 }),
+    ...(normalizedTagKeys.length ? { filters: { tagKeys: normalizedTagKeys, tagMatch: "all" as const } } : {}),
+  };
+}
+export async function searchEmailInboxesForContext(_context: EmailContext, query: string, recordHistory = true, signal?: AbortSignal, tagKeys: readonly string[] = []) {
+  const output = await searchApp({ ...emailAppSearchInput(query, recordHistory, tagKeys), collectionSlugs: ["inboxes"] }, signal);
   return emailInboxSearchResponseSchema.parse({ inboxes: appSearchResults(output, "inboxes", emailConnectorSchema.extend({ score: z.number().min(-1).max(1) }).strict()) });
 }
-export async function searchEmailTonesForContext(_context: EmailContext, query: string, recordHistory = true, signal?: AbortSignal) {
-  const input = emailSemanticSearchInputSchema.parse({ query, recordHistory });
-  const output = await searchApp({ ...input, collectionSlugs: ["email-tones"] }, signal);
+export async function searchEmailTonesForContext(_context: EmailContext, query: string, recordHistory = true, signal?: AbortSignal, tagKeys: readonly string[] = []) {
+  const output = await searchApp({ ...emailAppSearchInput(query, recordHistory, tagKeys), collectionSlugs: ["email-tones"] }, signal);
   return emailToneSearchResponseSchema.parse({ tones: appSearchResults(output, "email-tones", emailToneRecordSchema.extend({ score: z.number().min(-1).max(1) }).strict()) });
 }
-export async function searchEmailMessagesForContext(_context: EmailContext, connectorKey: string, query: EmailOverviewQuery, recordHistory = true, signal?: AbortSignal) {
+export async function searchEmailMessagesForContext(_context: EmailContext, connectorKey: string, query: EmailOverviewQuery, recordHistory = true, signal?: AbortSignal, tagKeys: readonly string[] = []) {
+  const normalizedTagKeys = emailSearchTagKeysSchema.parse([...new Set(tagKeys)].sort());
   const output = await searchApp({
-    query: query.search,
+    ...(query.search ? { query: query.search } : { operation: "list" as const }),
     collectionSlugs: ["email-messages"],
-    recordHistory,
+    recordHistory: Boolean(query.search) && recordHistory,
     limit: 50,
-    filters: { connectorKey, readState: query.readState, emailFacets: [...query.facets] },
+    filters: { connectorKey, readState: query.readState, ...(query.facets.length ? { emailFacets: [...query.facets] } : {}), ...(normalizedTagKeys.length ? { tagKeys: normalizedTagKeys, tagMatch: "all" as const } : {}) },
   }, signal);
   return appSearchResults(output, "email-messages", emailThreadSchema.extend({ score: z.number() }).strict()).map(({ score: _score, ...thread }) => thread);
 }
-export async function searchEmailDraftsForContext(_context: EmailContext, connectorKey: string, query: string, recordHistory = true, signal?: AbortSignal) {
-  const input = emailSemanticSearchInputSchema.parse({ query, recordHistory, limit: 50 });
-  const output = await searchApp({ ...input, collectionSlugs: ["email-drafts"], filters: { connectorKey } }, signal);
+export async function searchEmailDraftsForContext(_context: EmailContext, connectorKey: string, query: string, recordHistory = true, signal?: AbortSignal, tagKeys: readonly string[] = []) {
+  const input = emailAppSearchInput(query, recordHistory, tagKeys);
+  const output = await searchApp({ ...input, collectionSlugs: ["email-drafts"], filters: { connectorKey, ...input.filters } }, signal);
   return appSearchResults(output, "email-drafts", z.object({ score: z.number() }).passthrough()).map(({ score: _score, ...draft }) => emailDraftSchema.parse(draft));
 }
 export async function askEmailAssistantForContext(context: EmailContext, message: string, requestKey: string) {

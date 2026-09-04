@@ -5,6 +5,9 @@ import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { createImageGenerationService, imageGenerateModelInputSchema, imageGenerationHistoryDeleteInputSchema, ImageGenerationAccessError, ImageGenerationIdempotencyError, ImageGenerationReferenceError, type ImageGenerationService } from '@/lib/image-generation/service';
 import { getAuthIdentity } from './security';
 import { parseJson, parseQuery } from './validation';
+import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
+import { toolEventService, type ToolEventRecorder } from '@/lib/ai/events/service';
+import { sparkErrorResponse } from './errors';
 
 const selectors = z.object({ organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid() }).strict();
 export const imageGenerateHttpInputSchema = selectors.extend(imageGenerateModelInputSchema.shape).strict();
@@ -18,6 +21,8 @@ export interface ImageGenerationHandlerDependencies {
   authorizationOptions?: Omit<RunAuthenticatedContentToolOptions, 'authenticatedUserKey' | 'execute'>;
   service?: ImageGenerationService;
   createService?: typeof createImageGenerationService;
+  recordEvent?: ToolEventRecorder;
+  billing?: ToolBillingDependencies;
 }
 
 async function authorized(c: Context, dependencies: ImageGenerationHandlerDependencies, organizationKey: string, scopeKey: string) {
@@ -29,6 +34,7 @@ async function authorized(c: Context, dependencies: ImageGenerationHandlerDepend
 }
 
 function failure(c: Context, error: unknown) {
+  const billing = sparkErrorResponse(c, error); if (billing) return billing;
   if (error instanceof ContentError) return c.json({ success: false, error: error.toJSON() }, error.code === 'CONTENT_FORBIDDEN' ? 403 : 400);
   if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ success: false, error: 'invalid image generation request' }, 400);
   if (error instanceof ImageGenerationAccessError) return c.json({ success: false, error: { code: error.code, message: error.message } }, 403);
@@ -47,7 +53,8 @@ export function createImageGenerateHandler(dependencies: ImageGenerationHandlerD
       const { organizationKey, scopeKey, ...input } = await parseJson(c, imageGenerateHttpInputSchema);
       const result = await authorized(c, dependencies, organizationKey, scopeKey);
       if ('response' in result) return result.response;
-      return c.json({ success: true, data: await service(c, dependencies).generate(input, result.context, requestKey) }, 201);
+      const data = await observeToolExecution('image.generate', result.context, () => service(c, dependencies).generate(input, result.context, requestKey), { recorder: dependencies.recordEvent ?? toolEventService.record, idempotencyKey: requestKey, input, ...dependencies.billing });
+      return c.json({ success: true, data }, 201);
     } catch (error) { return failure(c, error); }
   };
 }

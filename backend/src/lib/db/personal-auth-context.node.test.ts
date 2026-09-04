@@ -15,4 +15,9 @@ describe('personal context provisioning', () => {
     expect(provisioningSource).not.toContain('My Images');
     expect(provisioningSource).not.toContain("'collections', 'collectionMembers', 'folders'");
   });
+
+  test('stores the personal Main scope as the user current scope in the provisioning transaction', () => {
+    expect(provisioningSource).toContain("['users', 'organizations', 'userOrganizations', 'scopes', 'scopeMembers']");
+    expect(provisioningSource).toContain('UPDATE ${user.key} WITH { currentScopeKey: scope._key');
+  });
 });

@@ -18,6 +18,13 @@ const domain = {
 
 const input = { surface: 'knowledge-workspace' as const, message: 'Help me', currentNote: { title: 'Notes', content: 'Existing text' } };
 const response = (output: unknown) => ({ output });
+const billingFixture = {
+  recordEvent: async () => {},
+  billing: {
+    charge: async (_userKey: string, billingInput: Record<string, unknown>) => ({ status: 'applied', transaction: { key: newId(), eventKey: billingInput.eventKey } }) as never,
+    refund: async () => ({ status: 'applied', transaction: { key: newId() } }) as never,
+  },
+};
 
 describe('personal assistant runtime', () => {
   test('rejects direct model answers before a scoped tool executes', async () => {
@@ -137,7 +144,7 @@ describe('personal assistant runtime', () => {
     const result = await runPersonalAssistant({ ...input, surface: 'media-workspace', message: 'Show me photos of the red dog in snow' }, domain, {
       execute: async (_request, nextInput) => {
         modelCalls += 1;
-        if (modelCalls === 1) return response({ text: '', toolCalls: [{ id: 'image-search-1', name: 'app.search', arguments: { query: 'red dog in snow', collectionSlugs: ['images'] } }], stopReason: 'tool_use' });
+        if (modelCalls === 1) return response({ text: '', toolCalls: [{ id: 'image-search-1', name: 'app.search', arguments: { query: 'red dog in snow', collectionSlugs: ['images'], limit: 1 } }], stopReason: 'tool_use' });
         expect(nextInput.messages.at(-1)).toMatchObject({ role: 'tool', content: [{ type: 'tool-result', toolCallId: 'image-search-1' }] });
         return response({ text: 'I found one matching image of a red dog in snow.', toolCalls: [], stopReason: 'end_turn' });
       },
@@ -147,7 +154,7 @@ describe('personal assistant runtime', () => {
       } } as any,
     });
 
-    expect(searchInput).toEqual({ query: 'red dog in snow', collectionSlugs: ['images'], recordHistory: true, limit: 10 });
+    expect(searchInput).toEqual({ query: 'red dog in snow', collectionSlugs: ['images'], recordHistory: true, limit: 1 });
     expect(modelCalls).toBe(2);
     expect(result).toEqual({ type: 'answer', message: 'I found one matching image of a red dog in snow.', sources: [] });
   });
@@ -158,7 +165,7 @@ describe('personal assistant runtime', () => {
     const result = await runPersonalAssistant(input, domain, {
       execute: async (_request, nextInput) => {
         modelCalls += 1;
-        if (modelCalls === 1) return response({ text: '', toolCalls: [{ id: 'search-1', name: 'app.search', arguments: { query: 'roadmap', collectionSlugs: ['documents'] } }], stopReason: 'tool_use' });
+        if (modelCalls === 1) return response({ text: '', toolCalls: [{ id: 'search-1', name: 'app.search', arguments: { query: 'roadmap', collectionSlugs: ['documents'], limit: 1 } }], stopReason: 'tool_use' });
         expect(nextInput.messages.at(-1)).toMatchObject({ role: 'tool', content: [{ type: 'tool-result', toolCallId: 'search-1' }] });
         return response({ text: 'The launch is in October.', toolCalls: [], stopReason: 'end_turn' });
       },
@@ -168,7 +175,7 @@ describe('personal assistant runtime', () => {
       } } as any,
     });
 
-    expect(searchInput).toEqual({ query: 'roadmap', collectionSlugs: ['documents'], recordHistory: true, limit: 10 });
+    expect(searchInput).toEqual({ query: 'roadmap', collectionSlugs: ['documents'], recordHistory: true, limit: 1 });
     expect(modelCalls).toBe(2);
     expect(result).toEqual({ type: 'answer', message: 'The launch is in October.', sources: [{ documentKey, name: 'Roadmap' }] });
   });
@@ -179,7 +186,7 @@ describe('personal assistant runtime', () => {
       execute: async () => {
         modelCalls += 1;
         return modelCalls === 1
-          ? response({ text: '<thinking>I should search first.</thinking>', toolCalls: [{ id: 'search-1', name: 'app.search', arguments: { query: 'roadmap', collectionSlugs: ['documents'] } }], stopReason: 'tool_use' })
+          ? response({ text: '<thinking>I should search first.</thinking>', toolCalls: [{ id: 'search-1', name: 'app.search', arguments: { query: 'roadmap', collectionSlugs: ['documents'], limit: 1 } }], stopReason: 'tool_use' })
           : response({ text: '<thinking>The launch is in October.</thinking>\n<response>The saved roadmap says the launch is in October.</response>', toolCalls: [], stopReason: 'end_turn' });
       },
       appSearch: { search: async () => ({ query: 'roadmap', groups: [{ collectionSlug: 'documents', results: [{ key: documentKey, scopeKey, name: 'Roadmap', score: 0.9 }] }] }) } as any,
@@ -193,7 +200,7 @@ describe('personal assistant runtime', () => {
       execute: async () => {
         modelCalls += 1;
         return modelCalls === 1
-          ? response({ text: '', toolCalls: [{ id: 'image-1', name: 'app.search', arguments: { query: 'red dog', collectionSlugs: ['images'] } }], stopReason: 'tool_use' })
+          ? response({ text: '', toolCalls: [{ id: 'image-1', name: 'app.search', arguments: { query: 'red dog', collectionSlugs: ['images'], limit: 1 } }], stopReason: 'tool_use' })
           : response({ text: '<analysis>I found an image but forgot the response.</analysis>', toolCalls: [], stopReason: 'end_turn' });
       },
       appSearch: { search: async () => ({ query: 'red dog', groups: [{ collectionSlug: 'images', results: [] }] }) } as any,
@@ -207,7 +214,7 @@ describe('personal assistant runtime', () => {
       execute: async () => {
         modelCalls += 1;
         return modelCalls === 1
-          ? response({ text: '', toolCalls: [{ id: 'search-1', name: 'app.search', arguments: { query: 'roadmap', collectionSlugs: ['documents'] } }], stopReason: 'tool_use' })
+          ? response({ text: '', toolCalls: [{ id: 'search-1', name: 'app.search', arguments: { query: 'roadmap', collectionSlugs: ['documents'], limit: 1 } }], stopReason: 'tool_use' })
           : response({ text: '&lt;thinking&gt;Internal reasoning&lt;/thinking&gt;\n<response<The roadmap launches in October.</response<', toolCalls: [], stopReason: 'end_turn' });
       },
       appSearch: { search: async () => ({ query: 'roadmap', groups: [{ collectionSlug: 'documents', results: [{ key: documentKey, scopeKey, name: 'Roadmap', score: 0.9 }] }] }) } as any,
@@ -246,6 +253,7 @@ describe('personal assistant runtime', () => {
     const serviceCalls: unknown[][] = [];
     let modelCalls = 0;
     const result = await runPersonalAssistant({ ...input, surface: 'book-workspace', requestKey: 'book-request-1', message: 'Create a short book about decision making for leaders.' }, domain, {
+      ...billingFixture,
       execute: async (_request, nextInput) => {
         modelCalls += 1;
         if (modelCalls === 1) {
@@ -267,6 +275,7 @@ describe('personal assistant runtime', () => {
   test('allows at most one book creation per assistant request', async () => {
     let call = 0;
     await expect(runPersonalAssistant({ ...input, surface: 'book-workspace' }, domain, {
+      ...billingFixture,
       execute: async () => {
         call += 1;
         return response({ text: '', toolCalls: [{ id: `create-${call}`, name: 'book.create', arguments: { topic: 'Topic', goal: 'Goal', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1 } }], stopReason: 'tool_use' });
@@ -325,7 +334,7 @@ describe('personal assistant runtime', () => {
     await expect(runPersonalAssistant(input, domain, {
       execute: async () => {
         calls += 1;
-        return response({ text: '', toolCalls: [{ id: `search-${calls}`, name: 'app.search', arguments: { query: 'roadmap', collectionSlugs: ['documents'] } }], stopReason: 'tool_use' });
+        return response({ text: '', toolCalls: [{ id: `search-${calls}`, name: 'app.search', arguments: { query: 'roadmap', collectionSlugs: ['documents'], limit: 1 } }], stopReason: 'tool_use' });
       },
       appSearch: { search: async () => ({ query: 'roadmap', groups: [{ collectionSlug: 'documents', results: [] }] }) } as any,
     })).rejects.toThrow('iteration limit');
@@ -340,4 +349,5 @@ describe('personal assistant runtime', () => {
     }).registerSurface('knowledge-workspace', ['future.capability']);
     expect(registry.resolve('knowledge-workspace').map(({ definition }) => definition.name)).toEqual(['future.capability']);
   });
+
 });

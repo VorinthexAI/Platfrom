@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import { fixedChargeReceiptSchema } from './books.node';
 
 export const BOOK_EXTENSIONS_COLLECTION = 'bookExtensions';
-export const bookExtensionStatusSchema = z.enum(['pending', 'generating', 'complete']);
+export const bookExtensionStatusSchema = z.enum(['pending', 'generating', 'complete', 'failed']);
 export const bookExtensionSchema = z.object({
   key: z.string().cuid(),
   scopeKey: z.string().cuid(),
@@ -13,6 +14,7 @@ export const bookExtensionSchema = z.object({
   baseChapterCount: z.number().int().nonnegative(),
   targetChapterCount: z.number().int().positive(),
   status: bookExtensionStatusSchema,
+  fixedChargeReceipt: fixedChargeReceiptSchema.optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

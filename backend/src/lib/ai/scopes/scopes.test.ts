@@ -176,7 +176,8 @@ describe('scope repository', () => {
     expect(teardown).toContain('FOR item IN tickets FILTER item.scopeKey == @scopeKey REMOVE item IN tickets');
     expect(teardown).toContain('FOR item IN ticketVotes FILTER item.scopeKey == @scopeKey REMOVE item IN ticketVotes');
     expect(teardown.indexOf('REMOVE item IN ticketVotes')).toBeLessThan(teardown.indexOf('REMOVE item IN tickets'));
-    expect(teardown).toContain('FOR item IN events FILTER item.scopeId == @scopeKey REMOVE item IN events');
+    expect(teardown).toContain('FOR item IN events FILTER item.scopeKey == @scopeKey REMOVE item IN events');
+    expect(source).toContain('FILTER user.currentScopeKey == @scopeKey');
     expect(teardown.indexOf('LET cleanupFolderCovers')).toBeLessThan(teardown.indexOf('LET cleanupImages'));
   });
   test('does not eagerly create Compass or Signal export folders with a scope', async () => {
@@ -205,6 +206,7 @@ describe('scope repository', () => {
       collection: () => ({ document: async () => ({ _key: scopeKey, organizationKey: newId(), slug: 'scope', name: 'Scope', summary: 'Summary', description: null, position: 1, level: 1, embedding: [] }), save: async () => ({}), update: async () => ({}), remove: async () => ({}) }),
       query: async (query) => {
         if (query.trim().startsWith('FOR document')) return { all: async () => [], next: async () => undefined };
+        if (query.includes('user.currentScopeKey')) return { all: async () => [], next: async () => 0 };
         teardownQuery = query;
         const binding = state.bindings.get(bindingKey);
         const image = binding?.targetType === 'image' ? state.images.get(binding.targetKey) : undefined;

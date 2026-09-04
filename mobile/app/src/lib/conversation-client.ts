@@ -5,6 +5,7 @@ import { apiClient } from "./api-client";
 import * as apiTransport from "./api-client";
 import { publishUserSearchHistoryAppend } from "./user-search-history-events";
 import type { ServerSentEvent } from "./sse";
+import { observeDomainError } from "./domain-error-observer";
 
 export const CONVERSATION_PAGE_SIZE = 25;
 export const CONVERSATION_MESSAGE_PAGE_SIZE = 10;
@@ -263,7 +264,7 @@ export async function streamConversationTurnWithTransport(transport: Conversatio
     onEvent(event);
   }, signal);
   if (!terminal) throw new Error("Conversation stream ended before a terminal event.");
-  if (terminal.type === "error") throw Object.assign(new Error(terminal.message), { code: terminal.code });
+  if (terminal.type === "error") throw observeDomainError(Object.assign(new Error(terminal.message), { code: terminal.code }));
 }
 
 export function streamConversationTurn(context: ConversationContext, input: { conversationKey: string; message: string; requestKey: string; attachmentKeys?: string[]; referenceImageKeys?: string[] }, onEvent: (event: ConversationTurnEvent) => void, signal?: AbortSignal) {

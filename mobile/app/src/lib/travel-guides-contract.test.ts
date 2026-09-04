@@ -24,7 +24,7 @@ test("renders exact guide actions, server-confirmed cache updates, and detail na
   expect(workspace.indexOf("const guide = await generateTripGuide")).toBeLessThan(workspace.indexOf("setSelectedTripGuide(guide)"));
   expect(workspace).toContain('title: "Travel guide request complete"');
   expect(workspace).toContain("showToast({ title: errorMessage(error)");
-  expect(workspace).toContain('<GeneratedDocumentSheets appendGeneration createLabel="Request new" documents={tripGuidesQuery.data}');
+  expect(workspace).toContain('<GeneratedDocumentSheets appendGeneration contentContext={contentContext} createLabel="Request new" documents={tripGuidesQuery.data}');
   expect(workspace).toContain("open={open && (!generating || appendGeneration)}");
   expect(workspace).toContain('onDetailClose={() => setSelectedTripGuide(undefined)}');
   expect(workspace).toContain('title={generating && !appendGeneration ? `Creating ${singular.toLocaleLowerCase()}`');
@@ -32,7 +32,11 @@ test("renders exact guide actions, server-confirmed cache updates, and detail na
   expect(workspace).toContain("Array.from({ length: 3 }");
   expect(workspace).toContain("if (!appendGeneration) return");
   expect(workspace).toContain("deleteContentDocument(key)");
-  expect(workspace).toContain("setRemoveConfirmOpen(true)");
+  expect(workspace).toContain('accessibilityLabel="Selected document actions"');
+  expect(workspace).toContain('<BottomSheetItem onPress={() => { setDocumentActionsOpen(false); requestAnimationFrame(() => setResourceTagsOpen(true)); }');
+  expect(workspace).toContain('targets={activeSelectedKeys.map((key) => ({ type: "document", key }))}');
+  expect(workspace).toContain('contentContext: ContentContext');
+  expect(workspace).not.toContain('textStyle={styles.bulkRemoveText} variant="secondary">Remove</Button>');
   expect(workspace).toContain("open={open && appendGeneration && activeSelectedKeys.length > 0 && removeConfirmOpen}");
 });
 

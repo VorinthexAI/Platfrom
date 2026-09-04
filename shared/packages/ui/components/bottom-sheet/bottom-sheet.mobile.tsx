@@ -209,8 +209,8 @@ export function BottomSheet({
         toValue: show ? 1 : 0,
         useNativeDriver: true,
       }),
-    ]).start(({ finished }) => {
-      if (finished && !show && !openRef.current) setVisible(false);
+    ]).start(() => {
+      if (!show && !openRef.current) setVisible(false);
     });
   };
 

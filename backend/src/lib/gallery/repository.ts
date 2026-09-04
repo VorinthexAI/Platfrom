@@ -42,7 +42,7 @@ export interface GalleryRepository {
   addImageToCollection(relation: CollectionImage): Promise<CollectionImage>;
   attachGeneratedImages(scopeKey: string, collectionKey: string, imageKeys: string[], actorKey: string, now: string): Promise<boolean>;
   ensureGeneratedMediaCollection(scopeKey: string, actorKey: string, embedding: number[], now: string): Promise<Collection | null>;
-  attachGeneratedMedia(scopeKey: string, collectionKey: string, imageKey: string, actorKey: string, now: string): Promise<boolean>;
+  attachGeneratedMedia(scopeKey: string, collectionKey: string, imageKeys: string[], actorKey: string, now: string): Promise<boolean>;
   createCollection(collection: Collection, member: CollectionMember): Promise<boolean>;
   listOverview(input: { scopeKey: string; actorKey: string; collectionKey?: string; origin?: z.infer<typeof imageOriginSchema>; maxCaptionScore?: number; createdFrom?: string; createdTo?: string; cursor?: string; limit: number }): Promise<{ collections: Array<GalleryCollectionRow & { role: GalleryCollectionRole }>; images: CursorPage<Image> }>;
   searchAccessibleCollections(input: { scopeKey: string; actorKey: string; embedding: number[]; minimumScore: number; createdFrom?: string; createdTo?: string; limit: number }): Promise<GalleryCollectionSearchRow[]>;
@@ -260,19 +260,19 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
     },
     async ensureGeneratedMediaCollection(scopeKey, actorKey, embedding, now) {
       const key = `c${createHash('sha256').update(`generated-media\0${scopeKey}`).digest('hex').slice(0, 24)}`;
-      const collection = toArangoDoc(collectionSchema.parse({ key, scopeKey, name: 'Core', purpose: 'generated-media', mutationPolicy: 'user', embedding, isFavorite: false, createdAt: now, updatedAt: now }));
-      const member = toArangoDoc(collectionMemberSchema.parse({ key: newId(), scopeKey, collectionKey: key, memberKey: actorKey, role: 'owner', createdAt: now }));
-      return transaction({ read: ['userOrganizations', 'scopes', 'scopeMembers', 'scopeScopes'], write: ['collections', 'collectionMembers'] }, async (tx) => {
+      const collection = toArangoDoc(collectionSchema.parse({ key, scopeKey, name: 'Core', purpose: 'generated-media', mutationPolicy: 'system-only', embedding, isFavorite: false, createdAt: now, updatedAt: now }));
+      return transaction({ read: ['userOrganizations', 'scopes', 'scopeMembers', 'scopeScopes'], write: ['collections'] }, async (tx) => {
         if (!await hasEffectiveScopeAccess(tx, scopeKey, actorKey)) return null;
-        const value = (await all(tx, `UPSERT { scopeKey: @scopeKey, purpose: "generated-media" } INSERT @collection UPDATE { mutationPolicy: "user", embedding: @embedding, updatedAt: @now } IN collections LET generated = NEW UPSERT { scopeKey: @scopeKey, collectionKey: generated._key, memberKey: @actorKey } INSERT @member UPDATE { role: "owner" } IN collectionMembers RETURN generated`, { scopeKey, actorKey, collection, member, embedding, now }))[0];
+        const value = (await all(tx, `UPSERT { scopeKey: @scopeKey, purpose: "generated-media" } INSERT @collection UPDATE { mutationPolicy: "system-only", embedding: @embedding, updatedAt: @now } IN collections RETURN NEW`, { scopeKey, collection, embedding, now }))[0];
         return value ? parse(collectionSchema, value) : null;
       });
     },
-    attachGeneratedMedia(scopeKey, collectionKey, imageKey, actorKey, now) {
-      const relation = toArangoDoc(collectionImageSchema.parse({ key: newId(), scopeKey, collectionKey, imageKey, addedByKey: actorKey, createdAt: now }));
+    attachGeneratedMedia(scopeKey, collectionKey, imageKeys, actorKey, now) {
+      const relations = imageKeys.map((imageKey) => toArangoDoc(collectionImageSchema.parse({ key: newId(), scopeKey, collectionKey, imageKey, addedByKey: actorKey, createdAt: now })));
       return transaction({ read: ['images', 'collections', 'scopes', 'scopeMembers', 'scopeScopes', 'userOrganizations'], write: ['collectionImages'] }, async (tx) => {
         if (!await hasEffectiveScopeAccess(tx, scopeKey, actorKey)) return false;
-        return Boolean((await all(tx, `LET collection = DOCUMENT(collections, @collectionKey) LET image = DOCUMENT(images, @imageKey) FILTER collection != null && collection.scopeKey == @scopeKey && collection.purpose == "generated-media" && collection.mutationPolicy == "user" FILTER image != null && image.scopeKey == @scopeKey && image.origin == "generated" && image.mutationPolicy == "user" && image.createdByKey == @actorKey UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: @imageKey } INSERT @relation UPDATE {} IN collectionImages RETURN true`, { scopeKey, collectionKey, imageKey, actorKey, relation }))[0]);
+        const attached = await all(tx, `LET collection = DOCUMENT(collections, @collectionKey) LET eligible = collection != null && collection.scopeKey == @scopeKey && collection.purpose == "generated-media" && collection.mutationPolicy == "system-only" ? (FOR relation IN @relations LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.origin == "generated" && image.mutationPolicy == "user" && image.createdByKey == @actorKey RETURN relation) : [] FILTER LENGTH(eligible) == LENGTH(@relations) FOR relation IN eligible UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: relation.imageKey } INSERT relation UPDATE {} IN collectionImages RETURN relation.imageKey`, { scopeKey, collectionKey, actorKey, relations });
+        return attached.length === imageKeys.length;
       });
     },
     createCollection(collection, member) {
@@ -776,9 +776,9 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
             };
           const memoryRelations = (await all(
             tx,
-            "FOR memory IN imageCollectionMemories FILTER memory.scopeKey == @scopeKey && memory.imageKey IN @imageKeys LET collectionKeys = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == memory.imageKey RETURN DISTINCT relation.collectionKey) RETURN { imageKey: memory.imageKey, collectionKeys }",
+            "FOR memory IN imageCollectionMemories FILTER memory.scopeKey == @scopeKey && memory.imageKey IN @imageKeys LET collectionKeys = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == memory.imageKey RETURN DISTINCT relation.collectionKey) RETURN { memoryKey: memory._key, imageKey: memory.imageKey, collectionKeys }",
             { scopeKey, imageKeys: removedImageKeys },
-          )) as Array<{ imageKey: string; collectionKeys: string[] }>;
+          )) as Array<{ memoryKey: string; imageKey: string; collectionKeys: string[] }>;
           await tx.query(
             "FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == @collectionKey && relation.imageKey IN @imageKeys REMOVE relation IN collectionImages",
             { imageKeys: removedImageKeys, scopeKey, collectionKey },
@@ -816,6 +816,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
             "FOR memory IN imageCollectionMemories FILTER memory.scopeKey == @scopeKey && memory.imageKey IN @imageKeys REMOVE memory IN imageCollectionMemories",
             { scopeKey, imageKeys: deletedImageKeys },
           );
+          await tx.query('FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "image-memory" && assignment.sourceKey IN @memoryKeys REMOVE assignment IN tagAssignments', { scopeKey, memoryKeys: memoryRelations.filter(({ imageKey }) => deleted.has(imageKey)).map(({ memoryKey }) => memoryKey) });
           await tx.query("FOR trip IN trips FILTER trip.scopeKey == @scopeKey && trip.coverImageKey IN @imageKeys UPDATE trip WITH { coverImageKey: null, updatedAt: @now } IN trips OPTIONS { keepNull: false }", { scopeKey, imageKeys: deletedImageKeys, now });
           await tx.query("FOR folder IN folders FILTER folder.scopeKey == @scopeKey && folder.managedPurpose == 'mail-inbox' && folder.coverImageKey IN @imageKeys UPDATE folder WITH { coverImageKey: null, updatedAt: @now } IN folders OPTIONS { keepNull: false }", { scopeKey, imageKeys: deletedImageKeys, now });
           await tx.query("FOR document IN documents FILTER document.scopeKey == @scopeKey && document.coverImageKey IN @imageKeys UPDATE document WITH { coverImageKey: null, updatedAt: @now } IN documents OPTIONS { keepNull: false }", { scopeKey, imageKeys: deletedImageKeys, now });
@@ -926,6 +927,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
             "FOR memory IN imageCollectionMemories FILTER memory.scopeKey == @scopeKey && memory.imageKey IN @imageKeys FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == memory.imageKey RETURN DISTINCT relation.collectionKey",
             { scopeKey, imageKeys: deletedImageKeys },
           )) as string[];
+          const memoryKeys = await all(tx, 'FOR memory IN imageCollectionMemories FILTER memory.scopeKey == @scopeKey && memory.imageKey IN @imageKeys RETURN memory._key', { scopeKey, imageKeys: deletedImageKeys }) as string[];
           const hadUnfiledImages = Boolean(
             (
               await all(
@@ -957,6 +959,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
             "FOR memory IN imageCollectionMemories FILTER memory.scopeKey == @scopeKey && memory.imageKey IN @imageKeys REMOVE memory IN imageCollectionMemories",
             { scopeKey, imageKeys: deletedImageKeys },
           );
+          await tx.query('FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "image-memory" && assignment.sourceKey IN @memoryKeys REMOVE assignment IN tagAssignments', { scopeKey, memoryKeys });
           await tx.query("FOR trip IN trips FILTER trip.scopeKey == @scopeKey && trip.coverImageKey IN @imageKeys UPDATE trip WITH { coverImageKey: null, updatedAt: @now } IN trips OPTIONS { keepNull: false }", { scopeKey, imageKeys: deletedImageKeys, now });
           await tx.query("FOR folder IN folders FILTER folder.scopeKey == @scopeKey && folder.managedPurpose == 'mail-inbox' && folder.coverImageKey IN @imageKeys UPDATE folder WITH { coverImageKey: null, updatedAt: @now } IN folders OPTIONS { keepNull: false }", { scopeKey, imageKeys: deletedImageKeys, now });
           await tx.query("FOR document IN documents FILTER document.scopeKey == @scopeKey && document.coverImageKey IN @imageKeys UPDATE document WITH { coverImageKey: null, updatedAt: @now } IN documents OPTIONS { keepNull: false }", { scopeKey, imageKeys: deletedImageKeys, now });
@@ -1496,6 +1499,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
           const loaded = rows[0];
           if (!loaded) return null;
           if (loaded.isFavorite) return { status: "favorite" as const };
+          const highlightKeys = await all(tx, 'FOR highlight IN imageCollecitionHightlights FILTER highlight.scopeKey == @scopeKey && highlight.collectionKey == @collectionKey RETURN highlight._key', { scopeKey, collectionKey }) as string[];
           const affectedTripKeys = await all(tx, 'FOR attachment IN tripAttachments FILTER attachment.scopeKey == @scopeKey && attachment.targetType == "collection" && attachment.targetKey == @collectionKey RETURN DISTINCT attachment.tripKey', { scopeKey, collectionKey }) as string[];
           await tx.query(
             "FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == @collectionKey REMOVE relation IN collectionImages",
@@ -1519,9 +1523,10 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
           );
           await tx.query('FOR trip IN trips FILTER trip.scopeKey == @scopeKey && trip._key IN @tripKeys UPDATE trip WITH { updatedAt: @now } IN trips', { scopeKey, tripKeys: affectedTripKeys, now });
           await tx.query(
-            'FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "collection" && assignment.sourceKey == @collectionKey REMOVE assignment IN tagAssignments',
+            'FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "image-collection" && assignment.sourceKey == @collectionKey REMOVE assignment IN tagAssignments',
             { scopeKey, collectionKey },
           );
+          await tx.query('FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "image-highlight" && assignment.sourceKey IN @highlightKeys REMOVE assignment IN tagAssignments', { scopeKey, highlightKeys });
           await tx.query(
             'FOR share IN shares FILTER share.scopeKey == @scopeKey && share.sourceType == "collection" && share.sourceKey == @collectionKey REMOVE share IN shares',
             { scopeKey, collectionKey },
@@ -1707,7 +1712,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
     async deleteHighlight(scopeKey, highlightKey, actorKey) {
       const mutable = await all(database, 'LET highlight = DOCUMENT(imageCollecitionHightlights, @highlightKey) LET collection = highlight == null ? null : DOCUMENT(collections, highlight.collectionKey) FILTER highlight != null && highlight.scopeKey == @scopeKey && collection != null && collection.mutationPolicy != "system-only" RETURN true', { scopeKey, highlightKey });
       if (!mutable.length) return null;
-      const value = (await all(database, 'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET highlight = DOCUMENT(imageCollecitionHightlights, @highlightKey) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey && highlight != null && highlight.scopeKey == @scopeKey LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) LET owner = FIRST(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == highlight.collectionKey && member.memberKey == @actorKey && member.role == "owner" LIMIT 1 RETURN member) FILTER actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || owner != null REMOVE highlight IN imageCollecitionHightlights RETURN OLD', { scopeKey, highlightKey, actorKey }))[0];
+      const value = (await all(database, 'LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET highlight = DOCUMENT(imageCollecitionHightlights, @highlightKey) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey && highlight != null && highlight.scopeKey == @scopeKey LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) LET owner = FIRST(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == highlight.collectionKey && member.memberKey == @actorKey && member.role == "owner" LIMIT 1 RETURN member) FILTER actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || owner != null LET cleanupTags = (FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "image-highlight" && assignment.sourceKey == @highlightKey REMOVE assignment IN tagAssignments RETURN 1) REMOVE highlight IN imageCollecitionHightlights RETURN OLD', { scopeKey, highlightKey, actorKey }))[0];
       return value ? parse(imageCollectionHighlightSchema, value) : null;
     },
     async listMemoryCandidates(scopeKey, collectionKey, actorKey) {
@@ -1816,7 +1821,7 @@ export function createGalleryRepository(database: MediaLibraryDatabase = db, tra
     },
     async deleteAccessibleMemory(scopeKey, memoryKey, collectionKey, actorKey) {
       if (!await userMutableCollection(database, scopeKey, collectionKey) || !await userMutableMemory(database, scopeKey, memoryKey)) return null;
-      return ((await memoryRows('LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET memory = DOCUMENT(imageCollectionMemories, @memoryKey) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey && memory != null && memory.scopeKey == @scopeKey LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) LET requestedCollection = DOCUMENT(collections, @collectionKey) LET requestedRelation = FIRST(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == @collectionKey && relation.imageKey == memory.imageKey LIMIT 1 RETURN relation) LET owner = FIRST(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == @collectionKey && member.memberKey == @actorKey && member.role == "owner" LIMIT 1 RETURN member) FILTER requestedCollection != null && requestedCollection.scopeKey == @scopeKey && requestedRelation != null FILTER actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || owner != null LET collectionKeys = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == memory.imageKey RETURN DISTINCT relation.collectionKey) LET image = DOCUMENT(images, memory.imageKey) FILTER image != null && image.scopeKey == @scopeKey REMOVE memory IN imageCollectionMemories RETURN { memory: OLD, image, collectionKeys }', { scopeKey, memoryKey, collectionKey, actorKey })))[0] ?? null;
+      return ((await memoryRows('LET actor = DOCUMENT(userOrganizations, @actorKey) LET scope = DOCUMENT(scopes, @scopeKey) LET memory = DOCUMENT(imageCollectionMemories, @memoryKey) FILTER actor != null && actor.status == "active" && scope != null && actor.organizationId == scope.organizationKey && memory != null && memory.scopeKey == @scopeKey LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @actorKey && member.status == "active" LIMIT 1 RETURN member.role) LET requestedCollection = DOCUMENT(collections, @collectionKey) LET requestedRelation = FIRST(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == @collectionKey && relation.imageKey == memory.imageKey LIMIT 1 RETURN relation) LET owner = FIRST(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == @collectionKey && member.memberKey == @actorKey && member.role == "owner" LIMIT 1 RETURN member) FILTER requestedCollection != null && requestedCollection.scopeKey == @scopeKey && requestedRelation != null FILTER actor.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || owner != null LET collectionKeys = (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == memory.imageKey RETURN DISTINCT relation.collectionKey) LET image = DOCUMENT(images, memory.imageKey) FILTER image != null && image.scopeKey == @scopeKey LET cleanupTags = (FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && assignment.sourceType == "image-memory" && assignment.sourceKey == @memoryKey REMOVE assignment IN tagAssignments RETURN 1) REMOVE memory IN imageCollectionMemories RETURN { memory: OLD, image, collectionKeys }', { scopeKey, memoryKey, collectionKey, actorKey })))[0] ?? null;
     },
   };
 }

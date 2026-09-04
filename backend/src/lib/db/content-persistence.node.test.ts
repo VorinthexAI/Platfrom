@@ -61,7 +61,8 @@ describe('scoped Content persistence', () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const executor: ContentQueryExecutor = { async query(query, bindVars) { calls.push({ query, bindVars }); return { async next() { return folderKey; } }; } };
     expect(await createContentPersistence(executor).deleteFolder(scopeKey, folderKey)).toBe(true);
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
+    expect(calls[2]?.bindVars).toMatchObject({ sourceType: 'folder', removedKey: folderKey });
     expect(calls[0]?.query).toContain('RETURN OLD._key');
     expect(calls[0]?.query).toContain('attachment.targetType == @attachmentType');
     expect(calls[0]?.query).toContain('LET affectedTripKeys');
@@ -82,8 +83,9 @@ describe('scoped Content persistence', () => {
     expect(calls[1]?.query).toContain('hidden.source == @hiddenSource');
     expect(calls[1]?.bindVars).toEqual({ hiddenSource: 'document', removedKey: folderKey });
     expect(calls[2]?.query).toContain('assignment.scopeKey == @scopeKey');
-    expect(calls[2]?.query).toContain('assignment.sourceType == "document"');
-    expect(calls[2]?.bindVars).toEqual({ scopeKey, removedKey: folderKey });
+    expect(calls[2]?.query).toContain('assignment.sourceType == @sourceType');
+    expect(calls[2]?.bindVars).toMatchObject({ sourceType: 'document' });
+    expect(calls[2]?.bindVars).toEqual({ scopeKey, sourceType: 'document', removedKey: folderKey });
     expect(calls[0]?.bindVars).toMatchObject({ attachmentType: null });
   });
 

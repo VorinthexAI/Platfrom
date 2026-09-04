@@ -8,19 +8,19 @@ const editorMobile = await Bun.file(new URL("../../../../shared/packages/ui/comp
 const editorWeb = await Bun.file(new URL("../../../../shared/packages/ui/components/ai-text-editor/ai-text-editor.web.tsx", import.meta.url)).text();
 const normalize = (source: string) => source.replace(/\s+/g, "").replace(/,([}\]])/g, "$1").replace(/\?\((?=<)/g, "?");
 
-test("generation is contribution-gated and uses independent optimistic skeleton requests", () => {
+test("generation is contribution-gated and stays visible in the unified image grid", () => {
   expect(workspace).toContain("Generate images");
   expect(workspace).toContain('collectionRole !== "viewer" && activeCollection?.access.canContribute');
   expect(workspace).toContain("generationPlaceholders.filter");
-  expect(workspace).toContain('if (activeCollectionKey.current === input.collectionKey) showImageOrigin("generated")');
-  expect(workspace).toContain('const visibleGenerationPlaceholders = imageOrigin === "generated"');
-  expect(workspace).toContain('accessibilityLabel={`Generate images in ${activeCollection.name}`}');
-  expect(workspace).toContain('onPress={() => setGenerationOpen(true)}');
+  expect(workspace).toContain('const visibleGenerationPlaceholders = generationPlaceholders.filter');
+  expect(workspace).toContain('setImages((current) => prependGeneratedGalleryImages(current, generated))');
+  expect(workspace).toContain("setGenerationOpen(true)");
   expect(normalize(workspace)).toContain(normalize('&& visibleGenerationPlaceholders.length === 0 ? <View accessibilityLabel='));
   expect(workspace).toContain("visibleGenerationPlaceholders.length === 0 && normalCollectionView");
   expect(workspace).toContain("removeGalleryGenerationPlaceholder(current, requestKey)");
   expect(workspace).toContain('const message = errorMessage(error);\n        setStatus(message);\n        notify(message);');
   expect(workspace).not.toContain("optimistic-generated-image");
+  expect(workspace).not.toContain("showImageOrigin");
 });
 
 test("composer exposes count, prompt history, and eight image-only context references", () => {

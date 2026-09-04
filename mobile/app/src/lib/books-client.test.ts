@@ -58,6 +58,15 @@ test("searches books through app.search without recording history for result ref
   expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", query: "practice", collectionSlugs: ["books"], recordHistory: false, limit: 50 }, config: { signal: controller.signal, timeout: 15_000 } });
 });
 
+test("filters book searches and empty-query lists by every normalized tag", async () => {
+  await client.searchBooks("practice", undefined, true, ["tag-b", "tag-a"]);
+  await client.searchBooks("", undefined, true, ["tag-b", "tag-a"]);
+  expect(calls.map(({ body }) => body)).toEqual([
+    { organizationKey: "org-key", scopeKey: "scope-key", query: "practice", collectionSlugs: ["books"], recordHistory: true, limit: 50, filters: { tagKeys: ["tag-a", "tag-b"], tagMatch: "all" } },
+    { organizationKey: "org-key", scopeKey: "scope-key", operation: "list", collectionSlugs: ["books"], recordHistory: false, limit: 50, filters: { tagKeys: ["tag-a", "tag-b"], tagMatch: "all" } },
+  ]);
+});
+
 test("strictly parses app.search retrieval destinations and rejects unsafe metadata", () => {
   const result = appSearchClient.appSearchOutputSchema.parse({
     query: "roadmap",

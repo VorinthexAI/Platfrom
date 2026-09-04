@@ -88,6 +88,7 @@ function userDoc(key: string, organizationId: string) {
   return {
     _key: key,
     organizationId,
+    currentScopeKey: newId(),
     email: 'oscar@example.com',
     emailHash: 'hash',
     name: 'Oscar',

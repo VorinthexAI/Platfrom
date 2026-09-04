@@ -6,6 +6,17 @@ import { createBookHandlers } from './books';
 import { registerRoutes } from './routes';
 import { defaultAssistantCapabilityRegistry } from '@/lib/ai/personal-assistant/capabilities';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
+import { runTool } from '@/lib/ai/tools';
+import { SparkRepositoryError } from '@/lib/sparks/repository';
+
+const billingFixture = {
+  recordEvent: async () => {},
+  billing: {
+    charge: async (_userKey: string, input: Record<string, unknown>) => ({ status: 'applied' as const, transaction: { key: newId(), eventKey: input.eventKey } }) as never,
+    refund: async () => ({ status: 'applied' as const, transaction: { key: newId() } }) as never,
+  },
+};
+const toolDomain = (organizationKey: string, scopeKey: string, userKey: string) => ({ organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } }) as unknown as ToolContext;
 
 describe('book HTTP handlers', () => {
   test('requires a user session and maps strict input failures', async () => {
@@ -28,16 +39,37 @@ describe('book HTTP handlers', () => {
     const body = { organizationKey: 'organization', scopeKey: newId(), generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1 };
     const calls: unknown[][] = [];
     const app = new Hono();
-    app.post('/books', createBookHandlers({ service: { create: async (...args: unknown[]) => { calls.push(args); return { key: newId() }; } } as never, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }).create);
+    app.post('/books', createBookHandlers({ ...billingFixture, service: { create: async (...args: unknown[]) => { calls.push(args); return { key: newId() }; } } as never, getIdentity: async () => ({ key: userKey, identityType: 'user' }), authorize: async () => ({ context: toolDomain(body.organizationKey, body.scopeKey, userKey) }) }).create);
     const response = await app.request('/books', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     expect(response.status).toBe(202);
     expect(calls).toEqual([[body, userKey]]);
   });
 
+  test('HTTP and Core share book acceptance debits and insufficient-balance behavior', async () => {
+    const organizationKey = 'organization', scopeKey = newId(), userKey = newId();
+    const body = { organizationKey, scopeKey, generationRequestKey: 'http-book', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1 };
+    const modelInput = { topic: body.topic, goal: body.goal, currentKnowledge: body.currentKnowledge, writingTone: body.writingTone, language: body.language, archiveDocumentKeys: body.archiveDocumentKeys, narratorVoiceKey: body.narratorVoiceKey, narrationPace: body.narrationPace };
+    const context = toolDomain(organizationKey, scopeKey, userKey);
+    const charges: Record<string, unknown>[] = [];
+    const service = { create: async () => ({ key: newId(), status: 'queued' }) } as never;
+    const billing = { charge: async (_key: string, input: Record<string, unknown>) => { charges.push(input); return { status: 'applied', transaction: { key: newId(), eventKey: input.eventKey } } as never; } };
+    await runTool('book.create', '', modelInput, { contentContext: context, bookService: service, requestKey: 'core-book', recordEvent: async () => {}, billing });
+    const app = new Hono().post('/books', createBookHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }), authorize: async () => ({ context }), recordEvent: async () => {}, billing }).create);
+    expect((await app.request('/books', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(202);
+    expect(charges).toHaveLength(2);
+    expect(charges.every((charge) => charge.toolSlug === 'book.create' && charge.microSparks === 100_000_000)).toBe(true);
+    expect(charges.every((charge) => (charge.metadata as { paidOutcome?: string }).paidOutcome === 'queue-accepted')).toBe(true);
+
+    const insufficientBilling = { charge: async () => { throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'private'); } };
+    await expect(runTool('book.create', '', modelInput, { contentContext: context, bookService: service, requestKey: 'core-insufficient', recordEvent: async () => {}, billing: insufficientBilling })).rejects.toMatchObject({ code: 'INSUFFICIENT_BALANCE' });
+    const insufficient = new Hono().post('/books', createBookHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }), authorize: async () => ({ context }), recordEvent: async () => {}, billing: insufficientBilling }).create);
+    expect((await insufficient.request('/books', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, generationRequestKey: 'http-insufficient' }) })).status).toBe(402);
+  });
+
   test('keeps topic suggestion HTTP and Core callers on the same canonical service method', async () => {
     const organizationKey = newId(); const scopeKey = newId(); const userKey = newId(); const calls: unknown[][] = [];
     const service = { suggestTopics: async (...args: unknown[]) => { calls.push(args); return { topics: Array.from({ length: 10 }, (_, index) => `Topic ${index + 1}`) }; } } as never;
-    const handlers = createBookHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) });
+    const handlers = createBookHandlers({ ...billingFixture, service, getIdentity: async () => ({ key: userKey, identityType: 'user' }), authorize: async () => ({ context: toolDomain(organizationKey, scopeKey, userKey) }) });
     const app = new Hono(); app.post('/books/topic-suggestions', handlers.topicSuggestions);
     const body = { organizationKey, scopeKey, excludeTopics: ['Old idea'] };
     expect((await app.request('/books/topic-suggestions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(200);
@@ -51,7 +83,7 @@ describe('book HTTP handlers', () => {
   test('keeps goal suggestion HTTP and Core callers on the same canonical service method', async () => {
     const organizationKey = newId(); const scopeKey = newId(); const userKey = newId(); const calls: unknown[][] = [];
     const service = { suggestGoals: async (...args: unknown[]) => { calls.push(args); return { goals: Array.from({ length: 10 }, (_, index) => `Goal ${index + 1}`) }; } } as never;
-    const handlers = createBookHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) });
+    const handlers = createBookHandlers({ ...billingFixture, service, getIdentity: async () => ({ key: userKey, identityType: 'user' }), authorize: async () => ({ context: toolDomain(organizationKey, scopeKey, userKey) }) });
     const app = new Hono(); app.post('/books/goal-suggestions', handlers.goalSuggestions);
     const body = { organizationKey, scopeKey, topic: 'Decision making', excludeGoals: ['Old goal'] };
     expect((await app.request('/books/goal-suggestions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(200);
@@ -63,9 +95,11 @@ describe('book HTTP handlers', () => {
   });
 
   test('maps generation request key conflicts to HTTP 409', async () => {
+    const userKey = newId();
+    const body = { organizationKey: 'organization', scopeKey: newId(), generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1 };
     const app = new Hono();
-    app.post('/books', createBookHandlers({ service: { create: async () => { throw new BookRepositoryError('conflict', 'Generation request key was reused with a different brief.'); } } as never, getIdentity: async () => ({ key: newId(), identityType: 'user' }) }).create);
-    const response = await app.request('/books', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    app.post('/books', createBookHandlers({ ...billingFixture, service: { create: async () => { throw new BookRepositoryError('conflict', 'Generation request key was reused with a different brief.'); } } as never, getIdentity: async () => ({ key: userKey, identityType: 'user' }), authorize: async () => ({ context: toolDomain(body.organizationKey, body.scopeKey, userKey) }) }).create);
+    const response = await app.request('/books', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ error: { code: 'BOOK_CONFLICT' } });
   });
@@ -88,7 +122,7 @@ describe('book HTTP handlers', () => {
   test('keeps extension HTTP and Core callers on the canonical service with trusted context and request key injection', async () => {
     const organizationKey = newId(); const scopeKey = newId(); const userKey = newId(); const bookKey = newId(); const calls: unknown[][] = [];
     const service: any = { extend: async (...args: unknown[]) => { calls.push(args); return args[1] && (args[1] as any).mode === 'preview' ? { titles: ['Next'] } : { key: bookKey }; } };
-    const handlers = createBookHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }); const app = new Hono(); app.post('/books/:bookKey/extension/preview', handlers.extensionPreview); app.post('/books/:bookKey/extension', handlers.extensionGenerate);
+    const handlers = createBookHandlers({ ...billingFixture, service, getIdentity: async () => ({ key: userKey, identityType: 'user' }), authorize: async () => ({ context: toolDomain(organizationKey, scopeKey, userKey) }) }); const app = new Hono(); app.post('/books/:bookKey/extension/preview', handlers.extensionPreview); app.post('/books/:bookKey/extension', handlers.extensionGenerate);
     const context = { organizationKey, scopeKey };
     expect((await app.request(`/books/${bookKey}/extension/preview`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, chapterCount: 1 }) })).status).toBe(200);
     expect((await app.request(`/books/${bookKey}/extension`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...context, chapterCount: 1, titles: ['Next'], requestKey: 'http-request' }) })).status).toBe(202);

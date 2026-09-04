@@ -58,6 +58,7 @@ import { formatConversationRetrievalSummary, mergeConversationRetrievalResults, 
 import { deleteContentSearchHistory, type ContentSearchHistoryItem } from "@/lib/content-client";
 import { readConversationSelection, writeConversationSelection } from "@/lib/conversation-selection-vault";
 import { getUserSearchHistory, promoteCachedUserSearchHistory, removeCachedUserSearchHistory, userSearchHistoryQueryKey } from "@/lib/user-search-history-cache";
+import { isInsufficientBalanceError } from "@/lib/domain-error-observer";
 import { useAuthStore } from "@/state/auth";
 import { useAppsStore } from "@/state/apps";
 import { assistantIconSource } from "@/data/capability-icons";
@@ -189,6 +190,7 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
   const pendingScroll = useRef<{ animated: boolean } | undefined>(undefined);
   const composerFocused = useRef(false);
   const draftAttachmentsRef = useRef<DraftAttachment[]>([]);
+  const draftRevision = useRef(0);
 
   const openMessageRetrievals = useCallback((message: OptimisticMessage) => {
     if (!mergeConversationRetrievalResults(message.retrievals).length) return;
@@ -559,6 +561,7 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
     const content = input.trim();
     if (!content || !configured) return;
     if (turnBusy.current) return;
+    const submittedDraftRevision = draftRevision.current;
     turnBusy.current = true; followLatest.current = true; setTurning(true); setInput(""); setTurnError(undefined); nearBottom.current = true;
     dismissFailedMessages();
     const capturedIdentity = identity; const capturedContext = context; const generation = ++turnGeneration.current;
@@ -611,10 +614,11 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
       restoreSentAttachments(submittedAttachments);
       if (submittedReferenceImageKey) setEditReferenceImageKey((current) => current ?? submittedReferenceImageKey);
       const message = error instanceof Error ? error.message : "Core could not complete this response.";
+      if (draftRevision.current === submittedDraftRevision) setInput(content);
       setTurnError(message);
       setPendingMessages((current) => current.filter(({ key }) => ![optimisticUserKey, optimisticAssistantKey, userMessageKey, assistantMessageKey].includes(key)));
       if (activeConversation) void queryClient.invalidateQueries({ queryKey: conversationQueryKeys.messages(capturedContext, activeConversation.key) });
-      showToast({ title: message, duration: 2_000 });
+      if (!isInsufficientBalanceError(error)) showToast({ title: message, duration: 2_000 });
       scheduleScrollToEnd(true);
     } finally {
       if (generation === turnGeneration.current && isConversationContextCurrent(capturedIdentity, identityRef)) { scheduleScrollToEnd(true); releaseFollowLatest(); turnBusy.current = false; setTurning(false); turnController.current = undefined; }
@@ -760,7 +764,6 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
   const messageEmpty = !messagesLoading && !messagesInitialError && messages.length === 0;
   const olderMessagesHeader = useMemo(() => isFetchingOlderMessages ? <OlderMessageSkeletons /> : isFetchNextPageError ? <Button onPress={fetchOlderMessages} size="sm" variant="secondary">Retry older messages</Button> : null, [fetchOlderMessages, isFetchNextPageError, isFetchingOlderMessages]);
   const conversation = useMemo(() => <View style={styles.conversation}>
-    <ConversationWatermark />
     {turnError ? <Text accessibilityRole="alert" style={styles.error}>{turnError}</Text> : null}
     {messagesLoading ? <InitialMessageSkeletons /> : messagesInitialError ? <View style={styles.centerError}><Text accessibilityRole="alert" style={styles.error}>Messages could not be loaded.</Text><Button onPress={retryMessages} size="sm" variant="secondary">Retry</Button></View> : messageEmpty ? null : <FlatList contentContainerStyle={styles.messageList} data={messages} initialNumToRender={10} ItemSeparatorComponent={MessageSeparator} keyExtractor={messageKey} ListFooterComponent={<View style={styles.messageListFooter} />} ListHeaderComponent={olderMessagesHeader} maintainVisibleContentPosition={{ minIndexForVisible: 0 }} maxToRenderPerBatch={10} onContentSizeChange={handleListContentSizeChange} onLayout={handleListLayout} onScroll={handleMessageScroll} ref={mountMessageList} renderItem={renderMessage} scrollEventThrottle={80} showsVerticalScrollIndicator={false} updateCellsBatchingPeriod={50} windowSize={5} />}
   </View>, [handleMessageScroll, handleListContentSizeChange, handleListLayout, messageEmpty, messages, messagesInitialError, messagesLoading, mountMessageList, olderMessagesHeader, renderMessage, retryMessages, turnError]);
@@ -768,7 +771,7 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
   const modeSelector = <View style={styles.modeRow}><Tabs accessibilityLabel="Core mode" accessibilityRole="tablist" style={styles.modeTabs}><Button accessibilityRole="tab" accessibilityState={{ selected: mode === "chat" }} onPress={() => setMode("chat")} size="xs" style={styles.modeTab} variant={mode === "chat" ? "secondary" : "ghost"}>Chat</Button><Button accessibilityRole="tab" accessibilityState={{ selected: mode === "image" }} onPress={() => setMode("image")} size="xs" style={styles.modeTab} variant={mode === "image" ? "secondary" : "ghost"}>Images</Button></Tabs></View>;
 
   return <>
-    <CoreComposer {...props} disabled={!configured || turning} editable={configured && !turning && !sheet} expandedAccessory={attachmentPills} expandedFooter={modeSelector} expandedLeading={<PlusIcon size="sm" />} expandedLeadingAccessibilityLabel="Add attachment" expandedLeadingDisabled={!configured || turning} expandedPrompts={editReferenceImageKey ? ["Edit this image..."] : mode === "image" ? ["Generate image..."] : undefined} focusRequest={composerFocusRequest} loading={turning} maxLength={CONVERSATION_MESSAGE_MAX_LENGTH} message={conversation} onChangeText={setInput} onExpandedLeadingPress={() => openSheet("attachments")} onFocusChange={handleCoreFocusChange} onSubmit={() => void submit()} pageActions={pageActions} pageIdentity={(closePage) => <View style={styles.coreIdentity}><View style={styles.coreIdentityApp}>{props.pageIdentity(closePage)}</View><ProfileHeaderRight /></View>} value={input} />
+    <CoreComposer {...props} disabled={!configured || turning} editable={configured && !turning && !sheet} expandedAccessory={attachmentPills} expandedFooter={modeSelector} expandedLeading={<PlusIcon size="sm" />} expandedLeadingAccessibilityLabel="Add attachment" expandedLeadingDisabled={!configured || turning} expandedPrompts={editReferenceImageKey ? ["Edit this image..."] : mode === "image" ? ["Generate image..."] : undefined} focusRequest={composerFocusRequest} loading={turning} maxLength={CONVERSATION_MESSAGE_MAX_LENGTH} message={conversation} onChangeText={(value) => { draftRevision.current += 1; setInput(value); }} onExpandedLeadingPress={() => openSheet("attachments")} onFocusChange={handleCoreFocusChange} onSubmit={() => void submit()} pageActions={pageActions} pageBackdrop={messagesLoading ? undefined : <ConversationWatermark />} pageIdentity={(closePage) => <View style={styles.coreIdentity}><View style={styles.coreIdentityApp}>{props.pageIdentity(closePage)}</View><ProfileHeaderRight /></View>} value={input} />
     <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "attachments"} title=""><BottomSheetMenu><BottomSheetItem onPress={() => void pickImages()} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Upload images</BottomSheetItem><BottomSheetItem onPress={() => void pickFiles()} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Upload files</BottomSheetItem><BottomSheetItem onPress={() => { openSheet(undefined); setCameraOpen(true); }} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Capture image</BottomSheetItem></BottomSheetMenu></BottomSheet>
     {cameraOpen ? <BrandedCameraModal count={0} maximum={1} onCapture={captureImage} onClose={() => setCameraOpen(false)} title="Capture for Core" /> : null}
     <BottomSheet footer={<><Button disabled={creating} onPress={openNewChat} size="md" variant="primary">New chat</Button><Button onPress={() => openSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open && sheet === "chats") setSheet(undefined); }} open={sheet === "chats" || sheet === "filter"} title="Chats">
@@ -789,7 +792,7 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
 }
 
 const styles = StyleSheet.create({
-  coreIdentity: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", width: "100%" }, coreIdentityApp: { minWidth: 0, flex: 1 }, headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.xs }, conversation: { flex: 1, minHeight: 0, paddingTop: spacing.md, position: "relative" }, coreWatermark: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", justifyContent: "center", gap: spacing.sm, paddingHorizontal: spacing.xl, zIndex: 0 }, coreWatermarkMark: { marginVertical: spacing.xs, opacity: 0.3 }, coreWatermarkText: { color: palette.muted, fontSize: 13, lineHeight: 19, maxWidth: 320, opacity: 0.3, textAlign: "center" }, messageList: { flexGrow: 1, zIndex: 1 }, messageSeparator: { height: spacing.md }, messageListFooter: { height: spacing.xl },
+  coreIdentity: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", width: "100%" }, coreIdentityApp: { minWidth: 0, flex: 1 }, headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.xs }, conversation: { flex: 1, minHeight: 0, paddingTop: spacing.md, position: "relative" }, coreWatermark: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm, paddingHorizontal: spacing.xl }, coreWatermarkMark: { marginVertical: spacing.xs, opacity: 0.3 }, coreWatermarkText: { color: palette.muted, fontSize: 13, lineHeight: 19, maxWidth: 320, opacity: 0.3, textAlign: "center" }, messageList: { flexGrow: 1, zIndex: 1 }, messageSeparator: { height: spacing.md }, messageListFooter: { height: spacing.xl },
   messageRow: { width: "100%", flexDirection: "row", alignItems: "flex-start" }, assistantRow: { justifyContent: "flex-start", paddingRight: spacing.lg, gap: spacing.sm }, userRow: { justifyContent: "flex-end", paddingLeft: 52 }, assistantMark: { marginTop: 4 }, messageContent: { minWidth: 0, gap: spacing.xs }, messageBox: { maxWidth: "100%", borderRadius: radii.md, paddingVertical: 4 }, messageButton: { minHeight: 0, alignItems: "stretch", borderWidth: 0, justifyContent: "flex-start" }, assistantMessage: { minWidth: 0, flex: 1, backgroundColor: "transparent" }, userMessage: { backgroundColor: "transparent" }, failedMessage: { borderWidth: 1, borderColor: palette.danger, paddingHorizontal: spacing.sm }, messageText: { color: palette.text, fontSize: 14, lineHeight: 20 }, retrievalSummary: { minWidth: 0, flex: 1, color: palette.muted, fontSize: 12 },
   olderSkeletons: { gap: spacing.md }, messageSkeleton: { height: 18, marginTop: 3, borderRadius: radii.sm }, assistantSkeleton: { width: "76%" }, userSkeleton: { width: "62%" }, thinkingText: { flex: 1, marginTop: 3 }, skeletonCard: { borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.hairlineBright, opacity: 0.72, overflow: "hidden" }, error: { color: palette.danger, fontSize: 12, marginBottom: spacing.xs }, centerError: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm }, emptyText: { color: palette.muted, fontSize: 13, textAlign: "center" },
   searchActions: { flexDirection: "row", alignItems: "center", gap: spacing.xs }, search: { minHeight: 44, flex: 1, flexDirection: "row", alignItems: "center", gap: 7, paddingLeft: 12, paddingRight: 8, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.page }, searchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 13 },

@@ -5,6 +5,9 @@ import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { feedbackListInputSchema, feedbackVoteInputSchema, getDefaultTicketService, ticketIdempotencyKeySchema, ticketSubmitInputSchema, TicketAccessError, TicketFeedbackRejectedError, TicketIdempotencyError, TicketNotFoundError, type TicketService } from '@/lib/tickets/service';
 import { getAuthIdentity } from './security';
 import { parseJson } from './validation';
+import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
+import { toolEventService, type ToolEventRecorder } from '@/lib/ai/events/service';
+import { sparkErrorResponse } from './errors';
 
 export const ticketHttpInputSchema = z.object({
   organizationKey: z.string().cuid(),
@@ -19,6 +22,8 @@ export interface TicketHandlerDependencies {
   authorize?: (input: { organizationKey: string; scopeKey: string }, options: Omit<RunAuthenticatedContentToolOptions, 'execute'>) => Promise<{ context: ToolContext }>;
   authorizationOptions?: Omit<RunAuthenticatedContentToolOptions, 'authenticatedUserKey' | 'execute'>;
   service?: TicketService;
+  recordEvent?: ToolEventRecorder;
+  billing?: ToolBillingDependencies;
 }
 
 export function createTicketHandler(dependencies: TicketHandlerDependencies = {}) {
@@ -54,6 +59,7 @@ async function authorizedRequest(c: Context, dependencies: TicketHandlerDependen
 }
 
 function feedbackError(c: Context, error: unknown) {
+  const billing = sparkErrorResponse(c, error); if (billing) return billing;
   if (error instanceof TicketIdempotencyError) return c.json({ success: false, error: { code: error.code, message: error.message } }, 409);
   if (error instanceof TicketNotFoundError) return c.json({ success: false, error: { code: error.code, message: error.message } }, 404);
   if (error instanceof TicketFeedbackRejectedError) return c.json({ success: false, error: { code: error.code, message: error.message } }, 400);
@@ -72,7 +78,7 @@ export function createFeedbackHandlers(dependencies: TicketHandlerDependencies =
         const request = await authorizedRequest(c, dependencies, ticketHttpInputSchema);
         if ('response' in request) return request.response;
         const input = ticketSubmitInputSchema.parse(request.body);
-        const ticket = await (dependencies.service ?? getDefaultTicketService()).createFeedback(input, request.context, idempotencyKey);
+        const ticket = await observeToolExecution('feedback.create', request.context, () => (dependencies.service ?? getDefaultTicketService()).createFeedback(input, request.context, idempotencyKey), { recorder: dependencies.recordEvent ?? toolEventService.record, idempotencyKey, input, ...dependencies.billing });
         return c.json({ success: true, data: ticket }, 201);
       } catch (error) { return feedbackError(c, error); }
     },

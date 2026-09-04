@@ -1,5 +1,5 @@
 import { CONTENT_TOOL_DEFINITIONS, contentToolModelInputSchemas, hasContentIdempotencyKey, hasPrimaryModelScope } from './content-registry';
-import { runContentTool, type ContentToolDependencies } from './content-runtime';
+import { isContentMutation, runContentTool, type ContentToolDependencies } from './content-runtime';
 import type { ContentToolName } from './content-schemas';
 import type { ToolContext } from './tool-context';
 
@@ -21,6 +21,7 @@ export function createPublicToolDefinition<Name extends ContentToolName>(name: N
     name,
     inputSchema,
     providerDefinition,
+    isReadOnly(rawInput: unknown) { return !isContentMutation(name, inputSchema.parse(rawInput)); },
     async execute(rawInput: unknown, dependencies: PublicToolDependencies) {
       const input = inputSchema.parse(rawInput) as Record<string, unknown>;
       const canonicalInput = name === 'folder.create'

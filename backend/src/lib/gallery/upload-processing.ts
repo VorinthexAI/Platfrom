@@ -91,7 +91,8 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
       if (object.bytes.byteLength !== upload.sizeBytes) throw new Error(`Uploaded image size changed for ${upload.key}.`);
       const sanitized = await sanitizeImage(object.bytes);
       const stagingKey = `${upload.storageKey}.sanitized.png`;
-      await storage.upload({ key: stagingKey, bytes: sanitized.bytes, mimeType: 'image/png' });
+      const billingUserKey = actorUsers.get(upload.actorKey);
+      await storage.upload({ key: stagingKey, bytes: sanitized.bytes, mimeType: 'image/png', ...(billingUserKey ? { billingUserKey } : {}) });
       stagedKeys.push(stagingKey);
       let location = upload.city || upload.country || upload.countryCode ? { ...(upload.city ? { city: upload.city } : {}), ...(upload.country ? { country: upload.country } : {}), ...(upload.countryCode ? { countryCode: upload.countryCode } : {}) } : undefined;
       if (sanitized.coordinates) location = await reverseGeocode(sanitized.coordinates);
@@ -111,6 +112,7 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
     const images = await processBatch(uploads.map((upload, index) => ({
       scopeKey: upload.scopeKey,
       ownerKey: upload.actorKey,
+      ...(actorUsers.get(upload.actorKey) ? { billingUserKey: actorUsers.get(upload.actorKey) } : {}),
       origin: 'uploaded' as const,
       imageKey: upload.imageKey,
       file: { filename: `${upload.filename.replace(/\.[^.]+$/, '').slice(0, 251) || 'image'}.png`, mimeType: 'image/png', sizeBytes: stored[index]!.bytes.byteLength, bytes: stored[index]!.bytes },

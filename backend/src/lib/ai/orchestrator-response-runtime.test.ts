@@ -3,6 +3,9 @@ import { ProviderExecutionError } from '@/lib/ai/router';
 import type { ProviderErrorCode } from '@/lib/ai/providers/errors';
 import type { ProviderStreamChunk } from '@/lib/ai/providers';
 import { orchestratorResponseRuntime } from './orchestrator-response-runtime';
+import { observeToolExecution } from './events/runtime';
+import { newId } from '@/lib/ids';
+import type { ToolContext } from './tools/tool-context';
 
 function completed(text: string): () => AsyncIterable<ProviderStreamChunk> {
   return async function* () {
@@ -134,5 +137,24 @@ describe('orchestrator response runtime', () => {
     const route = routes([failed('aborted'), completed('must not run')]);
     await expect(collect(route.dependencies)).rejects.toMatchObject({ attempts: [{ code: 'aborted' }] });
     expect(route.selections).toEqual([{ modelSlug: 'google.gemini-3.1-flash-lite', providerSlug: 'openrouter' }]);
+  });
+
+  test('records successful text usage on the direct orchestrator stream path', async () => {
+    const organizationKey = newId(), userKey = newId();
+    const context = { organizationKey, runtimeScopeKey: newId(), principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    let charge: Record<string, unknown> | undefined;
+    const events: Record<string, unknown>[] = [];
+    await observeToolExecution('app.translate', context, async () => {
+      await collect({
+        organizationKey,
+        selectRoute: async () => ({ organizationKey, actionSlug: 'text', modelSlug: 'google.gemini-3.1-flash-lite', providerSlug: 'openrouter', providerModelId: 'google/gemini-3.1-flash-lite' }),
+        adapters: { openrouter: { id: 'openrouter', name: 'OpenRouter', async execute() { throw new Error('unused'); }, async *stream() { yield { type: 'text-delta' as const, text: 'answer' }; yield { type: 'usage' as const, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } }; yield { type: 'done' as const }; } } },
+      });
+    }, {
+      idempotencyKey: 'orchestrator-request', recorder: async (event) => { events.push(event as Record<string, unknown>); },
+      charge: async (_key, input) => { charge = input; return { status: 'applied', transaction: { key: 'charge', eventKey: input.eventKey } } as never; },
+    });
+    expect(charge).toMatchObject({ kind: 'action', actionSlug: 'text', microSparks: 550 });
+    expect(events[0]).toMatchObject({ inputTokens: 1, outputTokens: 1, totalTokens: 2 });
   });
 });

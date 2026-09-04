@@ -25,19 +25,26 @@ function personalOrganizationName(name: string | null, email: string) {
 }
 
 /** Creates the complete personal workspace atomically after identity verification. */
-export async function provisionPersonalAuthContext(user: { key: string; name: string | null; email: string; guestBootstrapSecretHash?: string | null }): Promise<PersonalAuthContext> {
+export async function provisionPersonalAuthContext(
+  user: { key: string; name: string | null; email: string; currentScopeKey?: string; guestBootstrapSecretHash?: string | null },
+  options: { mainScopeKey?: string } = {},
+): Promise<PersonalAuthContext> {
   const existing = await getPersonalAuthContext(user.key);
   if (existing) {
+    if (!user.currentScopeKey) {
+      const { db } = await import('./client');
+      await db.query(aql`UPDATE ${user.key} WITH { currentScopeKey: ${existing.scope.key} } IN users`);
+    }
     await ensurePersonalMailDefaults(existing.scope.key);
     return existing;
   }
   const now = new Date().toISOString();
   const organizationKey = newId();
   const membershipKey = newId();
-  const scopeKey = newId();
+  const scopeKey = options.mainScopeKey ?? newId();
   const scopeMembershipKey = newId();
   const result = await withTransaction(
-    ['organizations', 'userOrganizations', 'scopes', 'scopeMembers'],
+    ['users', 'organizations', 'userOrganizations', 'scopes', 'scopeMembers'],
     async (transaction) => {
       const cursor = await transaction.query(aql`
         UPSERT { personalOwnerUserId: ${user.key} }
@@ -73,6 +80,7 @@ export async function provisionPersonalAuthContext(user: { key: string; name: st
           }
           UPDATE { role: "owner", status: "active" } IN scopeMembers
         LET scopeMembership = NEW
+        UPDATE ${user.key} WITH { currentScopeKey: scope._key, updatedAt: ${now} } IN users
         RETURN { organization, membership, scope, scopeMembership }
       `);
       return cursor.next();

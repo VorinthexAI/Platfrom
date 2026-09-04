@@ -6,8 +6,25 @@ import { runTool } from '@/lib/ai/tools';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { GuideGenerationError } from '@/lib/travel/service';
 import { TravelRepositoryError } from '@/lib/travel/repository';
+import { SparkRepositoryError } from '@/lib/sparks/repository';
 import { createTravelHandlers } from './travel';
 import { registerRoutes } from './routes';
+
+const billingFixture = {
+  recordEvent: async () => {},
+  billing: {
+    charge: async (_userKey: string, input: Record<string, unknown>) => ({ status: 'applied', transaction: { key: newId(), eventKey: input.eventKey } }) as never,
+    refund: async () => ({ status: 'applied', transaction: { key: newId() } }) as never,
+  },
+};
+const billingContext = (organizationKey: string, scopeKey: string, userKey: string) => ({ organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } }) as unknown as ToolContext;
+const pricedOptions = (service: unknown, userKey: string) => ({
+  ...billingFixture,
+  service: service as never,
+  getIdentity: async () => ({ key: userKey, identityType: 'user' as const }),
+  authorize: async ({ organizationKey, scopeKey }: { organizationKey: string; scopeKey: string }) => ({ context: billingContext(organizationKey, scopeKey, userKey) }),
+});
+const pricedHeaders = { 'content-type': 'application/json', 'idempotency-key': 'http-priced-request' };
 
 function appWith(handler: ReturnType<typeof createTravelHandlers>['overview']) {
   const app = new Hono();
@@ -32,11 +49,19 @@ describe('travel HTTP handlers', () => {
     expect(await response.json()).toMatchObject({ success: false, error: { code: 'TRAVEL_INVALID_INPUT' } });
   });
 
+  test('preserves the shared insufficient-balance projection in route-local catches', async () => {
+    const service = { overview: async () => { throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'private'); } } as never;
+    const app = appWith(createTravelHandlers({ service, getIdentity: async () => ({ key: newId(), identityType: 'user' }) }).overview);
+    const response = await app.request('/travel/overview', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(response.status).toBe(402);
+    expect(await response.json()).toEqual({ success: false, error: { code: 'INSUFFICIENT_BALANCE', message: 'billing.insufficientBalance', details: null } });
+  });
+
   test('routes place.find to the canonical service with trusted user identity and cancellation', async () => {
     const calls: unknown[][] = [];
     const service = { findPlaces: async (...args: unknown[]) => { calls.push(args); return { results: [{ name: 'Japan' }] }; } } as never;
     const app = new Hono();
-    app.post('/travel/places/find', createTravelHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).findPlaces);
+    app.post('/travel/places/find', createTravelHandlers(pricedOptions(service, 'trusted-user')).findPlaces);
     const body = { organizationKey: 'organization', scopeKey: newId(), query: 'Japan' };
     const response = await app.request('/travel/places/find', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     expect(response.status).toBe(200);
@@ -51,11 +76,11 @@ describe('travel HTTP handlers', () => {
     const calls: unknown[][] = [];
     const service = { findPlaceGuide: async (...args: unknown[]) => { calls.push(args); return { place: { title: 'Japan' } }; } } as never;
     const app = new Hono();
-    app.post('/travel/places/guide', createTravelHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }).findPlaceGuide);
+    app.post('/travel/places/guide', createTravelHandlers(pricedOptions(service, userKey)).findPlaceGuide);
     const body = { organizationKey, scopeKey, query: 'Japan' };
-    expect((await app.request('/travel/places/guide', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(200);
+    expect((await app.request('/travel/places/guide', { method: 'POST', headers: pricedHeaders, body: JSON.stringify(body) })).status).toBe(200);
     const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
-    await runTool('place.guide.find', '', { query: 'Japan' }, { contentContext: context, travelService: service });
+    await runTool('place.guide.find', '', { query: 'Japan' }, { ...billingFixture, contentContext: context, travelService: service, requestKey: 'guide-request' });
     expect(calls.map((call) => call.slice(0, 2))).toEqual([[body, userKey], [body, userKey]]);
   });
 
@@ -63,13 +88,13 @@ describe('travel HTTP handlers', () => {
     const calls: unknown[][] = [];
     const service = { createPlace: async (...args: unknown[]) => { calls.push(args); return { place: { name: 'Japan' } }; } } as never;
     const app = new Hono();
-    app.post('/travel/places', createTravelHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).createPlace);
+    app.post('/travel/places', createTravelHandlers(pricedOptions(service, 'trusted-user')).createPlace);
     const body = { organizationKey: 'organization', scopeKey: newId(), name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2, imageRequestToken: 'token' };
-    const response = await app.request('/travel/places', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const response = await app.request('/travel/places', { method: 'POST', headers: pricedHeaders, body: JSON.stringify(body) });
     expect(response.status).toBe(200);
     expect(calls[0]?.slice(0, 2)).toEqual([body, 'trusted-user']);
     expect((calls[0]?.[2] as { signal?: AbortSignal }).signal).toBeInstanceOf(AbortSignal);
-    expect((await app.request('/travel/places', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, userKey: 'untrusted' }) })).status).toBe(400);
+    expect((await app.request('/travel/places', { method: 'POST', headers: pricedHeaders, body: JSON.stringify({ ...body, userKey: 'untrusted' }) })).status).toBe(400);
   });
 
   test('keeps HTTP and Core place.create adapters in parity on the same canonical service', async () => {
@@ -78,10 +103,10 @@ describe('travel HTTP handlers', () => {
     const calls: unknown[][] = [];
     const service = { createPlace: async (...args: unknown[]) => { calls.push(args); return { place: input }; } } as never;
     const app = new Hono();
-    app.post('/travel/places', createTravelHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }).createPlace);
-    await app.request('/travel/places', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, ...input }) });
+    app.post('/travel/places', createTravelHandlers(pricedOptions(service, userKey)).createPlace);
+    await app.request('/travel/places', { method: 'POST', headers: pricedHeaders, body: JSON.stringify({ organizationKey, scopeKey, ...input }) });
     const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
-    await runTool('place.create', '', input, { contentContext: context, travelService: service });
+    await runTool('place.create', '', input, { ...billingFixture, contentContext: context, travelService: service, requestKey: 'place-request' });
     expect(calls.map((call) => call.slice(0, 2))).toEqual([
       [{ organizationKey, scopeKey, ...input }, userKey],
       [{ organizationKey, scopeKey, ...input }, userKey],
@@ -103,7 +128,7 @@ describe('travel HTTP handlers', () => {
       updatePlace: async (...args: unknown[]) => { calls.push(['place-update', ...args]); return { place: {} }; },
       deletePlace: async (...args: unknown[]) => { calls.push(['place-delete', ...args]); return { placeKey }; },
     } as never;
-    const handlers = createTravelHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) });
+    const handlers = createTravelHandlers({ ...pricedOptions(service, userKey) });
     const app = new Hono();
     app.post('/travel/places/find', handlers.findPlaces);
     app.post('/travel/places/search', handlers.searchPlaces);
@@ -144,7 +169,7 @@ describe('travel HTTP handlers', () => {
     await runTool('place.search', '', { query: search.query }, { contentContext: context, travelService: service });
     await runTool('trip.list', '', {}, { contentContext: context, travelService: service });
     await runTool('trip.search', '', { query: search.query }, { contentContext: context, travelService: service });
-    await runTool('trip.create', '', { name: create.name, placeKeys: create.placeKeys }, { contentContext: context, travelService: service, requestKey: 'core-request-1' });
+    await runTool('trip.create', '', { name: create.name, placeKeys: create.placeKeys }, { ...billingFixture, contentContext: context, travelService: service, requestKey: 'core-request-1' });
     await runTool('trip.update', '', { tripKey: placeKey, description: null, status: 'completed', isFavorite: true, placeKeys: [placeKey] }, { contentContext: context, travelService: service });
     await runTool('trip.delete', '', { tripKey: placeKey }, { contentContext: context, travelService: service });
     await runTool('trip.attachment.set', '', { tripKey: placeKey, attachments: attachmentInput.attachments }, { contentContext: context, travelService: service });
@@ -165,7 +190,7 @@ describe('travel HTTP handlers', () => {
       generateTripGuide: async (...args: unknown[]) => { calls.push(['generate', ...args]); return { guide: {} }; },
       listTripGuides: async (...args: unknown[]) => { calls.push(['list', ...args]); return { guides: [] }; },
     } as never;
-    const handlers = createTravelHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) });
+    const handlers = createTravelHandlers(pricedOptions(service, userKey));
     const app = new Hono();
     app.post('/travel/trips/guides/generate', handlers.generateTripGuide);
     app.post('/travel/trips/guides/list', handlers.listTripGuides);
@@ -193,7 +218,7 @@ describe('travel HTTP handlers', () => {
       generatePlaceReference: async (...args: unknown[]) => { calls.push(['generate', ...args]); return { reference: {} }; },
       listPlaceReferences: async (...args: unknown[]) => { calls.push(['list', ...args]); return { references: [] }; },
     } as never;
-    const handlers = createTravelHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) });
+    const handlers = createTravelHandlers(pricedOptions(service, userKey));
     const app = new Hono();
     app.post('/travel/places/references/generate', handlers.generatePlaceReference);
     app.post('/travel/places/references/list', handlers.listPlaceReferences);
@@ -218,7 +243,7 @@ describe('travel HTTP handlers', () => {
     const organizationKey = newId(), scopeKey = newId(), userKey = newId(), placeKey = newId();
     const service = { createTrip: async () => { throw new TravelRepositoryError('conflict'); } } as never;
     const app = new Hono();
-    app.post('/travel/trips', createTravelHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }).createTrip);
+    app.post('/travel/trips', createTravelHandlers(pricedOptions(service, userKey)).createTrip);
     const response = await app.request('/travel/trips', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, name: 'Route', placeKeys: [placeKey], idempotencyKey: 'request-1' }) });
     expect(response.status).toBe(409);
     const body = await response.json() as any;
@@ -256,15 +281,15 @@ describe('travel HTTP handlers', () => {
     const service = { findCity: async (...args: unknown[]) => { calls.push(args); return { city: { title: 'Tokyo' } }; } } as any;
     const app = new Hono();
     const organizationKey = newId(), scopeKey = newId(), userKey = newId();
-    app.post('/travel/cities/find', createTravelHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }).findCity);
+    app.post('/travel/cities/find', createTravelHandlers(pricedOptions(service, userKey)).findCity);
     const input = { city: 'Tokyo', country: { name: 'Japan', code: 'JP', continent: 'Asia', lat: 36.2, lon: 138.2 } };
     const body = { organizationKey, scopeKey, ...input };
     expect((await app.request('/travel/cities/find', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, userKey: 'untrusted' }) })).status).toBe(400);
-    const response = await app.request('/travel/cities/find', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const response = await app.request('/travel/cities/find', { method: 'POST', headers: pricedHeaders, body: JSON.stringify(body) });
     expect(response.status).toBe(200);
     const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     await expect(runTool('place.find-city', '', { ...input, scopeKey }, { contentContext: context, travelService: service })).rejects.toThrow('Unrecognized key');
-    await runTool('place.find-city', '', input, { contentContext: context, travelService: service });
+    await runTool('place.find-city', '', input, { ...billingFixture, contentContext: context, travelService: service, requestKey: 'city-request' });
     expect(calls.map((call) => call.slice(0, 2))).toEqual([[body, userKey], [body, userKey]]);
   });
 
@@ -273,7 +298,7 @@ describe('travel HTTP handlers', () => {
     const calls: unknown[][] = [];
     const service = { findChildren: async (...args: unknown[]) => { calls.push(args); return { cities: [] }; } } as never;
     const app = new Hono();
-    app.post('/travel/places/children/find', createTravelHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }).findChildren);
+    app.post('/travel/places/children/find', createTravelHandlers(pricedOptions(service, userKey)).findChildren);
     const body = { organizationKey, scopeKey, childrenRequestToken: 'children-token' };
     expect((await app.request('/travel/places/children/find', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, userKey: 'untrusted' }) })).status).toBe(400);
     const response = await app.request('/travel/places/children/find', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -288,8 +313,8 @@ describe('travel HTTP handlers', () => {
   test('maps transient place lookup failures to retryable HTTP responses', async () => {
     const service = { findPlaceGuide: async () => { throw new ProviderExecutionError('ask', [{ modelId: 'model', providerId: 'openrouter', externalModelId: 'model', code: 'timeout', message: 'timed out' }]); } } as never;
     const app = new Hono();
-    app.post('/travel/places/guide', createTravelHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).findPlaceGuide);
-    const response = await app.request('/travel/places/guide', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), query: 'Japan' }) });
+    app.post('/travel/places/guide', createTravelHandlers(pricedOptions(service, 'trusted-user')).findPlaceGuide);
+    const response = await app.request('/travel/places/guide', { method: 'POST', headers: pricedHeaders, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), query: 'Japan' }) });
     expect(response.status).toBe(504);
     expect(await response.json()).toMatchObject({ success: false, error: { code: 'TRAVEL_LOOKUP_TIMEOUT' } });
   });
@@ -297,8 +322,8 @@ describe('travel HTTP handlers', () => {
   test('maps malformed provider recommendations to an upstream response error', async () => {
     const service = { findPlaceGuide: async () => { throw new GuideGenerationError('country', 'invalid provider output'); } } as never;
     const app = new Hono();
-    app.post('/travel/places/guide', createTravelHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).findPlaceGuide);
-    const response = await app.request('/travel/places/guide', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), query: 'Japan' }) });
+    app.post('/travel/places/guide', createTravelHandlers(pricedOptions(service, 'trusted-user')).findPlaceGuide);
+    const response = await app.request('/travel/places/guide', { method: 'POST', headers: pricedHeaders, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), query: 'Japan' }) });
     expect(response.status).toBe(502);
     expect(await response.json()).toMatchObject({ success: false, error: { code: 'COUNTRY_PROVIDER_INVALID_RESPONSE', message: 'Country generation returned an invalid response. Try again.' } });
   });
@@ -306,8 +331,8 @@ describe('travel HTTP handlers', () => {
   test('identifies malformed city recommendations as city generation failures', async () => {
     const service = { findCity: async () => { throw new GuideGenerationError('city', 'invalid provider output'); } } as never;
     const app = new Hono();
-    app.post('/travel/cities/find', createTravelHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).findCity);
-    const response = await app.request('/travel/cities/find', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), city: 'Toronto', country: { name: 'Canada', code: 'CA', continent: 'North America', lat: 56.1, lon: -106.3 } }) });
+    app.post('/travel/cities/find', createTravelHandlers(pricedOptions(service, 'trusted-user')).findCity);
+    const response = await app.request('/travel/cities/find', { method: 'POST', headers: pricedHeaders, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), city: 'Toronto', country: { name: 'Canada', code: 'CA', continent: 'North America', lat: 56.1, lon: -106.3 } }) });
     expect(response.status).toBe(502);
     expect(await response.json()).toMatchObject({ success: false, error: { code: 'CITY_PROVIDER_INVALID_RESPONSE', message: 'City generation returned an invalid response. Try again.' } });
   });
@@ -315,16 +340,16 @@ describe('travel HTTP handlers', () => {
   test('uses the place-specific unavailable provider message', async () => {
     const service = { findPlaceGuide: async () => { throw new ProviderExecutionError('ask', [{ modelId: 'model', providerId: 'openrouter', externalModelId: 'model', code: 'provider_unavailable', message: 'offline' }]); } } as never;
     const app = new Hono();
-    app.post('/travel/places/guide', createTravelHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).findPlaceGuide);
-    const response = await app.request('/travel/places/guide', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), query: 'Japan' }) });
+    app.post('/travel/places/guide', createTravelHandlers(pricedOptions(service, 'trusted-user')).findPlaceGuide);
+    const response = await app.request('/travel/places/guide', { method: 'POST', headers: pricedHeaders, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), query: 'Japan' }) });
     expect(await response.json()).toMatchObject({ error: { message: 'Country generation is temporarily unavailable.' } });
   });
 
   test('identifies provider credential failures instead of reporting an outage', async () => {
     const service = { findPlaceGuide: async () => { throw new ProviderExecutionError('ask', [{ modelId: 'model', providerId: 'openrouter', externalModelId: 'model', code: 'authentication_failed', message: 'failed with status 401' }]); } } as never;
     const app = new Hono();
-    app.post('/travel/places/guide', createTravelHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).findPlaceGuide);
-    const response = await app.request('/travel/places/guide', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), query: 'Japan' }) });
+    app.post('/travel/places/guide', createTravelHandlers(pricedOptions(service, 'trusted-user')).findPlaceGuide);
+    const response = await app.request('/travel/places/guide', { method: 'POST', headers: pricedHeaders, body: JSON.stringify({ organizationKey: 'organization', scopeKey: newId(), query: 'Japan' }) });
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ error: { code: 'TRAVEL_PROVIDER_CONFIGURATION_REQUIRED', message: 'Country generation is unavailable because the AI service is not configured.' } });
   });
@@ -334,7 +359,7 @@ describe('travel HTTP handlers', () => {
     const calls: unknown[][] = [];
     const service = { generatePlaceHeroImage: async (...args: unknown[]) => { calls.push(args); return { status: 'ready', image: { title: 'Japan' }, durationMs: 1, costUsd: null }; } } as never;
     const app = new Hono();
-    app.post('/travel/places/image', createTravelHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }).generatePlaceHeroImage);
+    app.post('/travel/places/image', createTravelHandlers(pricedOptions(service, userKey)).generatePlaceHeroImage);
     const place = { imageRequestToken: 'opaque-token' };
     const response = await app.request('/travel/places/image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, ...place }) });
     expect(response.status).toBe(200);

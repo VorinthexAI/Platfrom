@@ -22,22 +22,23 @@ describe('Gallery repository transactions', () => {
   });
 
   test('idempotently creates and attaches only through the exact generated-media policy', async () => {
-    const scopeKey = newId(), actorKey = newId(), imageKey = newId(), now = '2026-09-03T00:00:00.000Z';
+    const scopeKey = newId(), actorKey = newId(), imageKeys = [newId(), newId()], now = '2026-09-03T00:00:00.000Z';
     const parentScopeKey = newId();
     const embedding = Array(EMBEDDING_DIMENSIONS).fill(0); const queries: string[] = []; const transactions: unknown[] = [];
-    const database: MediaLibraryDatabase = { async query(value, variables) { queries.push(value); const collection = (variables as any)?.collection; return { async all() { return value.includes('RETURN { elevated:') ? [{ elevated: false, memberScopes: [parentScopeKey], relations: [{ parentKey: parentScopeKey, childKey: scopeKey }] }] : value.includes('UPSERT { scopeKey: @scopeKey, purpose: "generated-media" }') ? [{ ...collection, _key: collection._key }] : [true]; } }; } };
+    const database: MediaLibraryDatabase = { async query(value, variables) { queries.push(value); const collection = (variables as any)?.collection; return { async all() { return value.includes('RETURN { elevated:') ? [{ elevated: false, memberScopes: [parentScopeKey], relations: [{ parentKey: parentScopeKey, childKey: scopeKey }] }] : value.includes('UPSERT { scopeKey: @scopeKey, purpose: "generated-media" }') ? [{ ...collection, _key: collection._key }] : value.includes('LENGTH(eligible) == LENGTH(@relations)') ? imageKeys : [true]; } }; } };
     const repository = createGalleryRepository(database, async (names, operation) => { transactions.push(names); return operation(database); });
     const collection = await repository.ensureGeneratedMediaCollection(scopeKey, actorKey, embedding, now);
-    expect(collection).toMatchObject({ scopeKey, purpose: 'generated-media', mutationPolicy: 'user', name: 'Core' });
-    await expect(repository.attachGeneratedMedia(scopeKey, collection!.key, imageKey, actorKey, now)).resolves.toBe(true);
+    expect(collection).toMatchObject({ scopeKey, purpose: 'generated-media', mutationPolicy: 'system-only', name: 'Core' });
+    await expect(repository.attachGeneratedMedia(scopeKey, collection!.key, imageKeys, actorKey, now)).resolves.toBe(true);
     expect(queries.filter((query) => query.includes('RETURN { elevated:'))).toHaveLength(2);
     expect(queries.find((query) => query.includes('purpose: "generated-media" }'))).toContain('UPSERT { scopeKey: @scopeKey, purpose: "generated-media" }');
     const attachment = queries.find((query) => query.includes('collection.purpose == "generated-media"'))!;
-    expect(attachment).toContain('collection.purpose == "generated-media" && collection.mutationPolicy == "user"');
+    expect(attachment).toContain('collection.purpose == "generated-media" && collection.mutationPolicy == "system-only"');
     expect(attachment).toContain('image.origin == "generated" && image.mutationPolicy == "user"');
+    expect(attachment).toContain('LENGTH(eligible) == LENGTH(@relations)');
     expect(queries.find((query) => query.includes('purpose: "generated-media" }'))).not.toContain('UPDATE { name: "Core"');
-    expect(queries.find((query) => query.includes('purpose: "generated-media" }'))).toContain('INSERT @member UPDATE { role: "owner" }');
-    expect(transactions).toContainEqual({ read: ['userOrganizations', 'scopes', 'scopeMembers', 'scopeScopes'], write: ['collections', 'collectionMembers'] });
+    expect(queries.find((query) => query.includes('purpose: "generated-media" }'))).not.toContain('collectionMembers');
+    expect(transactions).toContainEqual({ read: ['userOrganizations', 'scopes', 'scopeMembers', 'scopeScopes'], write: ['collections'] });
     expect(transactions).toContainEqual({ read: ['images', 'collections', 'scopes', 'scopeMembers', 'scopeScopes', 'userOrganizations'], write: ['collectionImages'] });
   });
 
@@ -54,7 +55,7 @@ describe('Gallery repository transactions', () => {
     expect(source).toContain('upload.collectionKey == null || (collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only")');
     const mediaSource = await Bun.file(new URL('../media-library/repository.ts', import.meta.url)).text();
     expect(mediaSource).toContain('target.mutationPolicy != "system-only"');
-    expect(mediaSource).toContain('@sourceType NOT IN ["image", "collection"] || target.mutationPolicy != "system-only"');
+    expect(mediaSource).not.toContain('createTagAssignment');
   });
   test('accepts an invite with separate valid transaction queries and returns the upserted membership', async () => {
     const scopeKey = newId(), collectionKey = newId(), inviteKey = newId(), actorKey = newId(), memberKey = newId(), ownerKey = newId(), now = '2026-08-18T12:00:00.000Z';

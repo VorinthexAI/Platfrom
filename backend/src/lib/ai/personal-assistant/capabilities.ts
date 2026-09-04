@@ -15,6 +15,7 @@ import type { AppTransformationService } from '@/lib/app-transformation/service'
 import type { AppSpeechService } from '@/lib/app-speech/service';
 import type { AccountProfileService } from '@/lib/account-profile/service';
 import type { TicketService } from '@/lib/tickets/service';
+import type { ScopeTagService } from '@/lib/scope-tags/service';
 import { APP_SEARCH_OVERLAPPING_TOOL_NAME_SET } from '@/lib/ai/tools/search-routing-policy';
 import { appSpeechCapability, appEnhanceCapability, appSearchCapability, appTranslateCapability, archiveCapabilities, ascendCapabilities, compassCapabilities, hiddenListCapability, platformCapabilities, signalCapabilities } from './service-capabilities';
 import { galleryAssistantCapabilities } from './gallery-capabilities';
@@ -56,14 +57,17 @@ export interface AssistantCapabilityContext {
   appSpeech?: AppSpeechService;
   accountProfile?: AccountProfileService;
   tickets?: TicketService;
+  scopeTags?: ScopeTagService;
 }
 
 export type MutationWorkspace = 'archive' | 'gallery' | 'signal' | 'compass' | 'ascend';
+export type MutationWorkspaces = MutationWorkspace | readonly MutationWorkspace[];
 
 export interface AssistantCapability<Schema extends z.ZodTypeAny = z.ZodTypeAny> {
   inputSchema: Schema;
   definition: CoreChatToolDefinition;
-  mutationWorkspace?: MutationWorkspace | ((input: unknown) => MutationWorkspace | undefined);
+  mutationWorkspace?: MutationWorkspaces | ((input: unknown) => MutationWorkspaces | undefined);
+  executionEffect?: 'read' | 'write' | ((input: unknown) => 'read' | 'write');
   execute(input: unknown, context: AssistantCapabilityContext): Promise<AssistantCapabilityResult>;
 }
 

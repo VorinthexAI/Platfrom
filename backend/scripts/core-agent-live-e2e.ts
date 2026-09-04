@@ -35,6 +35,7 @@ function successfulAgentResponse(value: string, label: string) {
 interface TurnResult {
   content: string;
   deltaCount: number;
+  retrievals: unknown[];
 }
 
 const suffix = crypto.randomUUID().replaceAll('-', '');
@@ -43,6 +44,7 @@ const originalFolderName = `Core agent E2E ${shortSuffix}`;
 const renamedFolderName = `Core agent E2E renamed ${shortSuffix}`;
 const originalDescription = `Temporary Core agent E2E resource ${shortSuffix}`;
 const updatedDescription = `Updated by Core agent E2E ${shortSuffix}`;
+const tagName = `E2E tag ${shortSuffix}`;
 const directMarker = `DIRECT_${shortSuffix.toUpperCase()}`;
 
 let accessToken = '';
@@ -51,6 +53,7 @@ let organizationKey = '';
 let scopeKey = '';
 let conversationKey: string | undefined;
 let folderKey: string | undefined;
+let tagKey: string | undefined;
 
 function authHeaders(): Record<string, string> {
   return {
@@ -150,9 +153,10 @@ async function turn(label: string, message: string): Promise<TurnResult> {
     const completedMessage = object(done.message, `${label} completed message`);
     if (completedMessage.role !== 'ASSISTANT' || completedMessage.status !== 'COMPLETED' || completedMessage.key !== start.assistantMessageKey) throw new Error(`${label} turn completed with an invalid assistant message.`);
     const content = string(completedMessage.content, `${label} assistant content`);
+    const retrievals = array(completedMessage.retrievals ?? [], `${label} retrievals`);
     if (deltas.length && deltas.join('') !== content) throw new Error(`${label} turn deltas did not reconstruct the completed assistant content.`);
     console.log(`${label} passed in ${Math.round(performance.now() - startedAt)}ms (${deltas.length} deltas): ${content}`);
-    return { content, deltaCount: deltas.length };
+    return { content, deltaCount: deltas.length, retrievals };
   } finally {
     clearTimeout(timeout);
   }
@@ -198,11 +202,30 @@ try {
   const conversation = await api('/conversations', { organizationKey, scopeKey, name: `Core agent live E2E ${shortSuffix}` });
   conversationKey = string(conversation.key, 'conversation key');
 
+  const createdFolder = await tool('folder.create', { folders: [{ scopeKey, name: originalFolderName, description: originalDescription }], idempotencyKey: `core-agent-e2e-folder-${suffix}` });
+  const createdFolderResult = object(array(createdFolder.results, 'folder.create results')[0], 'folder.create result');
+  if (createdFolderResult.success !== true) throw new Error(`Folder creation failed: ${JSON.stringify(createdFolderResult)}`);
+  folderKey = string(object(object(createdFolderResult.data, 'folder.create data').folder, 'created folder').key, 'created folder key');
+
+  const createdTag = await api('/tags', { organizationKey, scopeKey, name: tagName, description: `Temporary exact-search tag ${shortSuffix}` });
+  tagKey = string(createdTag.key, 'created tag key');
+  await api('/tags/assignments?action=tag', { organizationKey, scopeKey, targets: [{ type: 'folder', key: folderKey }], tagKeys: [tagKey] });
+
   const direct = await turn('direct', `Do not use any tools. Reply with exactly this text and nothing else: ${directMarker}`);
   if (direct.content.trim() !== directMarker) throw new Error(`Direct response was not exact: ${JSON.stringify(direct.content)}`);
 
+  const singularFolder = await turn('singular-folder-limit', `Which folder is named "${originalFolderName}"? Do not modify anything.`);
+  if (singularFolder.content.includes(folderKey)) throw new Error('Singular folder answer exposed its internal key.');
+  const singularRetrieval = object(singularFolder.retrievals[0], 'singular folder retrieval');
+  if (singularFolder.retrievals.length !== 1) throw new Error(`Expected one singular-folder retrieval, received ${singularFolder.retrievals.length}.`);
+  if (singularRetrieval.limit !== 1) throw new Error(`Expected the live model to select limit 1, received ${JSON.stringify(singularRetrieval.limit)}.`);
+  if (JSON.stringify(singularRetrieval.searchCollectionSlugs) !== JSON.stringify(['folders'])) throw new Error(`Expected a folders-only search, received ${JSON.stringify(singularRetrieval.searchCollectionSlugs)}.`);
+  const singularResults = array(singularRetrieval.groups, 'singular folder groups').flatMap((value, index) => array(object(value, `singular folder group ${index + 1}`).results, `singular folder group ${index + 1} results`));
+  if (singularResults.length !== 1 || object(singularResults[0], 'singular folder result').key !== folderKey) throw new Error(`Singular folder retrieval did not contain only ${folderKey}: ${JSON.stringify(singularResults)}`);
+
   const searched = await turn('search', `Use app.search with collectionSlugs ["folders", "documents", "files"] to find resources matching "${directMarker}". Do not modify anything.`);
   if (!searched.content.trim()) throw new Error('Search response was empty.');
+  if (searched.content.includes(folderKey)) throw new Error('Search answer exposed a historical internal key.');
 
   const signalSearch = await turn('signal-search', `Use app.search with collectionSlugs ["inboxes", "email-tones", "email-messages", "email-drafts"] to find resources matching "${directMarker}". Do not modify anything.`);
   if (!signalSearch.content.trim()) throw new Error('Signal search response was empty.');
@@ -219,13 +242,31 @@ try {
   const bookDates = await turn('favorite-book-dates', 'When were my favorite audio books created? Use the exact workspace data and do not modify anything.');
   if (!bookDates.content.trim()) throw new Error('Favorite book dates response was empty.');
 
+  const taggedFolder = await turn('tagged-folder-search', `Find the folder named "${originalFolderName}" that is tagged "${tagName}". Use app.search only with exact tagNames filtering and do not modify anything.`);
+  if (taggedFolder.content.includes(folderKey) || taggedFolder.content.includes(tagKey)) throw new Error('Tagged folder answer exposed an internal key.');
+  const taggedRetrieval = object(taggedFolder.retrievals[0], 'tagged folder retrieval');
+  const taggedFilters = object(taggedRetrieval.filters, 'tagged folder filters');
+  if (!array(taggedFilters.tagNames, 'tagged folder tag names').includes(tagName)) throw new Error(`Tagged folder search did not use the created tag name: ${JSON.stringify(taggedFilters)}`);
+  if ('tagKeys' in taggedFilters) throw new Error(`Tagged folder search exposed tag keys to Core: ${JSON.stringify(taggedFilters)}`);
+  const taggedResults = array(taggedRetrieval.groups, 'tagged folder groups').flatMap((value, index) => array(object(value, `tagged folder group ${index + 1}`).results, `tagged folder group ${index + 1} results`));
+  if (!taggedResults.some((value) => object(value, 'tagged folder result').key === folderKey)) throw new Error(`Tagged folder retrieval did not contain ${folderKey}.`);
+
+  const assigned = await turn('tag-assignment-list', `What is under tag "${tagName}"? Use exactly one app.search list call with collectionSlugs ["tag-assignments"] and filters.tagNames. Do not call any direct tag tool and do not modify anything.`);
+  includesExact(assigned.content, originalFolderName, 'Tag assignment answer');
+  if (assigned.content.includes(folderKey) || assigned.content.includes(tagKey)) throw new Error('Tag assignment answer exposed an internal key.');
+  if (assigned.retrievals.length !== 0) throw new Error(`Tag-assignment list unexpectedly produced search retrievals: ${JSON.stringify(assigned.retrievals)}`);
+
   const messages = await api(`/conversations/${conversationKey}/messages/list`, { organizationKey, scopeKey, limit: 20 });
   const persisted = array(messages.items, 'persisted messages');
-  if (persisted.length !== 14) throw new Error(`Expected 14 persisted messages for seven turns, received ${persisted.length}.`);
+  if (persisted.length !== 20) throw new Error(`Expected 20 persisted messages for ten turns, received ${persisted.length}.`);
   if (persisted.some((value) => object(value, 'persisted message').status !== 'COMPLETED')) throw new Error('At least one persisted message was not completed.');
 
-  console.log('Core agent live E2E passed: direct answer, app search/list/count, SSE protocol, canonical persistence checks, and conversation history.');
+  console.log('Core agent live E2E passed: direct answer, live singular-limit inference, exact private-tag search and assignment listing through app.search, app search/list/count, SSE protocol, canonical persistence checks, and conversation history.');
 } finally {
+  if (tagKey && accessToken) {
+    try { await api(`/tags/${tagKey}`, { organizationKey, scopeKey }, 'DELETE'); }
+    catch (error) { console.error('Core agent E2E tag cleanup failed.', error); }
+  }
   if (folderKey && accessToken) {
     try { await deleteFolderDirect(folderKey); }
     catch (error) { console.error('Core agent E2E folder cleanup failed.', error); }

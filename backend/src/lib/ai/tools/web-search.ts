@@ -16,6 +16,7 @@ export interface WebSearchToolDependencies extends ExecuteActionOptions {
 export const webSearchTool = {
   name: 'web.search',
   inputSchema: webSearchInputSchema,
+  isReadOnly: () => true,
   providerDefinition: {
     name: 'web.search',
     description: 'Search the public web for current or externally verifiable information and return a grounded answer with source citations. Use for recent events, changing facts, live information, or claims that require lookup outside the workspace.',

@@ -18,6 +18,7 @@ describe('organization connector indexes', () => {
     await ensureOrganizationConnectorsCollection({ collection: () => collection, query: async () => ({ next: async () => 0 }) } as never);
     expect(dropped).toEqual(['legacy']);
     expect(ensured[0]).toEqual({ type: 'persistent', fields: ['organizationKey', 'scopeKey', 'provider', 'providerAccountId'], unique: true });
+    expect(ensured).toContainEqual({ type: 'persistent', fields: ['billingStatus'] });
     expect(operations.slice(0, 2)).toEqual(['ensure', 'drop:legacy']);
   });
 

@@ -20,7 +20,7 @@ test("generated bulk toolbars retain Gallery styling with sheet-safe controls", 
   expect(style(workspace, "generatedBulkToolbarClose")).toContain("height: 42, width: 42");
   expect(style(workspace, "generatedBulkSelectionText")).toBe(style(highlights, "bulkSelectionText"));
   expect(style(workspace, "generatedBulkDeleteAction")).not.toContain("height: 30");
-  expect(style(workspace, "generatedBulkDeleteText")).toBe(style(highlights, "bulkDeleteText"));
+  expect(style(workspace, "generatedBulkDeleteText")).toBe(" fontFamily: fonts.regular, fontSize: 11, letterSpacing: 0.4 ");
   expect(style(workspace, "generatedVersionSelected")).toBe(style(highlights, "cardSelected"));
   expect(style(workspace, "generatedSelectionBadge")).toBe(style(highlights, "selectionBadge"));
   expect(workspace).toContain('<CheckIcon size="sm" variant="inverse" />');

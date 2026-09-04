@@ -48,4 +48,10 @@ describe('platform internal-data output policy', () => {
     expect(disclosesPlatformInternals(message)).toBe(false);
     expect(protectPlatformOutput(message)).toBe(message);
   });
+
+  test('redacts internal resource identifiers from user-facing answers', () => {
+    const key = 'c123456789012345678901234';
+    expect(protectPlatformOutput(`The folder is Project Atlas (ID: ${key}).`)).toBe('The folder is Project Atlas.');
+    expect(protectPlatformOutput(`Reference ${key} is available.`)).toBe('Reference [internal identifier hidden] is available.');
+  });
 });

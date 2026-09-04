@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useEffectEvent, useRef, useState, type ComponentProps, type ComponentRef, type SetStateAction } from "react";
+import { forwardRef, useEffect, useEffectEvent, useMemo, useRef, useState, type ComponentProps, type ComponentRef, type SetStateAction } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { randomUUID } from "expo-crypto";
@@ -48,8 +48,11 @@ import { useToast } from "@vorinthex/shared/ui/toast";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { EmailAttachmentPicker, type EmailAttachmentImageUrls, type EmailAttachmentLabels } from "@/components/capability/EmailAttachmentPicker";
+import { ResourceTagsSheet } from "@/components/ResourceTagsSheet";
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import { SearchHistorySheet } from "@/components/SearchHistorySheet";
+import { TagFilterLane } from "@/components/TagFilterLane";
+import { TagFilterSheet } from "@/components/TagFilterSheet";
 import { assistantIconSource } from "@/data/capability-icons";
 import { type CapabilitySlug } from "@/data/registry";
 import { subscribeAppEvent } from "@/lib/app-events";
@@ -58,6 +61,7 @@ import { languageForCountryCode } from "@/lib/auth-helpers";
 import { deleteContentSearchHistory, getContentContext, type ContentDocument, type ContentSearchHistoryItem } from "@/lib/content-client";
 import { getContentDocument } from "@/lib/content-query-cache";
 import { getUserSearchHistory, promoteCachedUserSearchHistory, removeCachedUserSearchHistory, userSearchHistoryQueryKey } from "@/lib/user-search-history-cache";
+import { tagFilterContextKey, type ResourceTagTarget } from "@/lib/tag-client";
 import {
   askEmailAssistantForContext,
   BUILT_IN_EMAIL_TONES,
@@ -155,6 +159,7 @@ import {
 import { normalizeCapturedPng } from "@/lib/captured-image";
 import { fetchGalleryOverview, fetchGalleryUploadStatus, getGalleryContext, searchGalleryImages, uploadGalleryImages, type GalleryCollection, type GalleryImage, type GalleryOverview } from "@/lib/gallery-client";
 import { useAuthStore } from "@/state/auth";
+import { EMPTY_SELECTED_TAGS, useUiStore } from "@/state/ui";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { appendCursorItems, isNearScrollEnd } from "@vorinthex/shared/lib/pagination";
 
@@ -259,7 +264,10 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const { showToast } = useToast();
   const countryCode = useAuthStore((state) => state.user?.countryCode);
   const userKey = useAuthStore((state) => state.user?.key ?? "");
-  const historyContext = { ...emailContext, userKey };
+  const historyContext = useMemo(() => ({ ...emailContext, userKey }), [emailContext.organizationKey, emailContext.scopeKey, userKey]);
+  const tagContextKey = tagFilterContextKey(historyContext);
+  const selectedTags = useUiStore((state) => state.selectedTagsByContext[tagContextKey] ?? EMPTY_SELECTED_TAGS);
+  const selectedTagKeys = useMemo(() => selectedTags.map(({ key }) => key).sort(), [selectedTags]);
   const notify = (title: string) => {
     showToast({ title, duration: 2_000 });
   };
@@ -342,7 +350,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const [rootTab, setRootTab] = useState<RootTab>(initialCollectionKind === "email-tones" || initialToneKey ? "tones" : "inboxes");
   const [rootFavoritesOnly, setRootFavoritesOnly] = useState(false);
   const [rootSearchFocusable, setRootSearchFocusable] = useState(true);
-  const [rootSearchResults, setRootSearchResults] = useState<{ tab: RootTab; inboxes?: EmailConnector[]; tones?: EmailToneRecord[] }>();
+  const [rootSearchResults, setRootSearchResults] = useState<{ tab: RootTab; filterKey: string; inboxes?: EmailConnector[]; tones?: EmailToneRecord[] }>();
   const [rootSearching, setRootSearching] = useState(false);
   const [rootSearchError, setRootSearchError] = useState<string>();
   const [rootGridWidth, setRootGridWidth] = useState(0);
@@ -350,6 +358,8 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const [rootBulkBusy, setRootBulkBusy] = useState(false);
   const [rootBulkMenuOpen, setRootBulkMenuOpen] = useState(false);
   const [rootDisconnectOpen, setRootDisconnectOpen] = useState(false);
+  const [resourceTagsOpen, setResourceTagsOpen] = useState(false);
+  const [resourceTagTargets, setResourceTagTargets] = useState<readonly ResourceTagTarget[]>([]);
   const rootLongPressedInbox = useRef<string | undefined>(undefined);
   const selectedInboxesRef = useRef<EmailConnector[]>([]);
   const rootSelectionGeneration = useRef(0);
@@ -426,6 +436,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const [openingThreadKey, setOpeningThreadKey] = useState<string>();
   const [sheet, setSheet] = useState<Sheet>("plus");
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [tagFilterOpen, setTagFilterOpen] = useState(false);
   const [replyContextsOpen, setReplyContextsOpen] = useState(false);
   const [loadingMoreThreads, setLoadingMoreThreads] = useState(false);
   const [sheetError, setSheetError] = useState<string>();
@@ -453,7 +464,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const [selectedInboxDraftKey, setSelectedInboxDraftKey] = useState<string | undefined>(initialDraftKey);
   const [draftBody, setDraftBody] = useState("");
   const [draftSending, setDraftSending] = useState(false);
-  const [draftSearchResults, setDraftSearchResults] = useState<{ connectorKey: string; query: string; drafts: EmailDraft[] }>();
+  const [draftSearchResults, setDraftSearchResults] = useState<{ connectorKey: string; query: string; tagKeys: string; drafts: EmailDraft[] }>();
   const [draftSearching, setDraftSearching] = useState(false);
   const [draftSearchError, setDraftSearchError] = useState<string>();
   const [toneName, setToneName] = useState("");
@@ -494,8 +505,9 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   });
   const inboxDrafts = draftsQuery.data ?? overview?.drafts ?? [];
   const normalizedInboxSearch = query.trim();
-  const activeDraftSearchResults = draftSearchResults && draftSearchResults.connectorKey === initialConnectorKey && draftSearchResults.query === normalizedInboxSearch ? draftSearchResults : undefined;
-  const visibleInboxDrafts = normalizedInboxSearch && activeDraftSearchResults ? activeDraftSearchResults.drafts : inboxDrafts;
+  const selectedTagKey = selectedTagKeys.join(",");
+  const activeDraftSearchResults = draftSearchResults && draftSearchResults.connectorKey === initialConnectorKey && draftSearchResults.query === normalizedInboxSearch && draftSearchResults.tagKeys === selectedTagKey ? draftSearchResults : undefined;
+  const visibleInboxDrafts = (normalizedInboxSearch || selectedTagKeys.length) && activeDraftSearchResults ? activeDraftSearchResults.drafts : inboxDrafts;
   const selectedInboxDraft = draftDetailQuery.data;
   useEffect(() => {
     if (restoredInitialDraft.current || !initialDraftKey || selectedInboxDraft?.key !== initialDraftKey) return;
@@ -512,8 +524,10 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const reviewAttachmentCardSize = Math.floor(((reviewAttachmentGridWidth || width - 40) - 18) / 4);
   const receivedAttachmentCardSize = Math.floor(((receivedAttachmentGridWidth || width - 40) - 18) / 4);
   const normalizedRootQuery = rootQuery.trim();
-  const searchedAccounts = normalizedRootQuery && rootSearchResults?.tab === "inboxes" ? rootSearchResults.inboxes ?? [] : metadataAccounts;
-  const searchedTones = normalizedRootQuery && rootSearchResults?.tab === "tones" ? rootSearchResults.tones ?? [] : toneRecords;
+  const rootFilterKey = JSON.stringify([normalizedRootQuery, selectedTagKeys]);
+  const rootFilterActive = Boolean(normalizedRootQuery || selectedTagKeys.length);
+  const searchedAccounts = rootFilterActive && rootSearchResults?.tab === "inboxes" && rootSearchResults.filterKey === rootFilterKey ? rootSearchResults.inboxes ?? [] : rootFilterActive ? [] : metadataAccounts;
+  const searchedTones = rootFilterActive && rootSearchResults?.tab === "tones" && rootSearchResults.filterKey === rootFilterKey ? rootSearchResults.tones ?? [] : rootFilterActive ? [] : toneRecords;
   const visibleAccounts = searchedAccounts.filter(({ isFavorite }) => !rootFavoritesOnly || isFavorite);
   // Keep the removed projection bound while Metro retires pre-change render closures.
   const visibleUnassignedDrafts: EmailDraft[] = [];
@@ -644,14 +658,14 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     setReplySending(false);
   }
   async function loadOverviewForContext(context: typeof emailContext, connectorKey: string, nextQuery: EmailOverviewQuery) {
-    const queryKey = signalQueryKeys.overview(context, connectorKey, nextQuery);
+    const queryKey = signalQueryKeys.overview(context, connectorKey, nextQuery, undefined, selectedTagKeys);
     const value = await queryClient.fetchQuery({
       queryKey,
       queryFn: async () => {
-        if (!nextQuery.search) return filterSignalTombstonedOverview(context, connectorKey, await fetchEmailOverviewForContext(context, { connectorKey, readState: nextQuery.readState, facets: [...nextQuery.facets], limit: 50 }));
+        if (!nextQuery.search && !selectedTagKeys.length) return filterSignalTombstonedOverview(context, connectorKey, await fetchEmailOverviewForContext(context, { connectorKey, readState: nextQuery.readState, facets: [...nextQuery.facets], limit: 50 }));
         const [base, threads] = await Promise.all([
           fetchEmailOverviewForContext(context, { connectorKey, readState: nextQuery.readState, facets: [...nextQuery.facets], limit: 50 }),
-          searchEmailMessagesForContext(context, connectorKey, nextQuery, false),
+          searchEmailMessagesForContext(context, connectorKey, nextQuery, false, undefined, selectedTagKeys),
         ]);
         return filterSignalTombstonedOverview(context, connectorKey, { ...base, threads, nextCursor: null });
       },
@@ -698,7 +712,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   async function load(nextQuery = inboxQuery, options: { cursor?: string; commitQuery?: boolean; recordHistory?: boolean } = {}) {
     const continuation = Boolean(options.cursor);
     const request = continuation ? overviewRequest.current : ++overviewRequest.current;
-    const loadIdentity = initialConnectorKey ? `${nextQuery.readState}:${nextQuery.facets.join(",")}:${nextQuery.search}` : "root";
+    const loadIdentity = initialConnectorKey ? `${nextQuery.readState}:${nextQuery.facets.join(",")}:${nextQuery.search}:${selectedTagKey}` : "root";
     if (!continuation && overviewLoadQuery.current !== loadIdentity) {
       overviewLoadQuery.current = loadIdentity;
       overviewGeneration.current += 1;
@@ -712,8 +726,8 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     }
     try {
       const queryKey = options.cursor
-        ? signalQueryKeys.overviewPage(emailContext, initialConnectorKey, nextQuery, options.cursor!)
-        : signalQueryKeys.overview(emailContext, initialConnectorKey, initialConnectorKey ? nextQuery : undefined);
+        ? signalQueryKeys.overviewPage(emailContext, initialConnectorKey, nextQuery, options.cursor!, undefined, selectedTagKeys)
+        : signalQueryKeys.overview(emailContext, initialConnectorKey, initialConnectorKey ? nextQuery : undefined, undefined, selectedTagKeys);
       const value = await queryClient.fetchQuery({
         queryKey,
         queryFn: async () => {
@@ -726,8 +740,8 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
           } : {};
           const base = await fetchEmailOverviewForContext(emailContext, input);
           if (!initialConnectorKey) return base;
-          if (!nextQuery.search || options.cursor) return filterSignalTombstonedOverview(emailContext, initialConnectorKey, base);
-          const threads = await searchEmailMessagesForContext(emailContext, initialConnectorKey, nextQuery, options.recordHistory ?? false);
+          if ((!nextQuery.search && !selectedTagKeys.length) || options.cursor) return filterSignalTombstonedOverview(emailContext, initialConnectorKey, base);
+          const threads = await searchEmailMessagesForContext(emailContext, initialConnectorKey, nextQuery, options.recordHistory ?? false, undefined, selectedTagKeys);
           return filterSignalTombstonedOverview(emailContext, initialConnectorKey, { ...base, threads, nextCursor: null });
         },
       });
@@ -972,38 +986,39 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const query = rootQuery.trim();
     const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
     rootSearchRequest.current?.abort();
-    if (!query) {
+    if (!query && !selectedTagKeys.length) {
       setRootSearchResults(undefined);
       setRootSearching(false);
       setRootSearchError(undefined);
       return;
     }
     const controller = new AbortController();
+    const filterKey = JSON.stringify([query, selectedTagKeys]);
     rootSearchRequest.current = controller;
     setRootSearchResults(undefined);
     setRootSearchError(undefined);
     const timeout = setTimeout(() => {
       setRootSearching(true);
       const request = rootTab === "inboxes"
-        ? searchEmailInboxesForContext(context, query, false, controller.signal).then(({ inboxes }) => { if (!controller.signal.aborted) setRootSearchResults({ tab: rootTab, inboxes }); })
-        : searchEmailTonesForContext(context, query, false, controller.signal).then(({ tones }) => { if (!controller.signal.aborted) setRootSearchResults({ tab: rootTab, tones }); });
-      void request.catch((failure: unknown) => {
+        ? queryClient.fetchQuery({ queryKey: signalQueryKeys.rootSearch(context, rootTab, query, selectedTagKeys), queryFn: () => searchEmailInboxesForContext(context, query, false, controller.signal, selectedTagKeys).then(({ inboxes }) => ({ inboxes })), staleTime: 0 })
+        : queryClient.fetchQuery({ queryKey: signalQueryKeys.rootSearch(context, rootTab, query, selectedTagKeys), queryFn: () => searchEmailTonesForContext(context, query, false, controller.signal, selectedTagKeys).then(({ tones }) => ({ tones })), staleTime: 0 });
+      void request.then((result) => { if (!controller.signal.aborted) setRootSearchResults({ tab: rootTab, filterKey, ...result }); }).catch((failure: unknown) => {
         if (!controller.signal.aborted) {
-          setRootSearchResults(rootTab === "inboxes" ? { tab: rootTab, inboxes: [] } : { tab: rootTab, tones: [] });
+          setRootSearchResults(rootTab === "inboxes" ? { tab: rootTab, filterKey, inboxes: [] } : { tab: rootTab, filterKey, tones: [] });
           setRootSearchError(messageFor(failure));
         }
       }).finally(() => {
         if (!controller.signal.aborted) setRootSearching(false);
       });
     }, 300);
-    const historyTimeout = setTimeout(() => {
+    const historyTimeout = query ? setTimeout(() => {
       const request = rootTab === "inboxes"
-        ? searchEmailInboxesForContext(context, query, true, controller.signal)
-        : searchEmailTonesForContext(context, query, true, controller.signal);
+        ? searchEmailInboxesForContext(context, query, true, controller.signal, selectedTagKeys)
+        : searchEmailTonesForContext(context, query, true, controller.signal, selectedTagKeys);
       void request.catch(() => undefined);
-    }, 800);
-    return () => { clearTimeout(timeout); clearTimeout(historyTimeout); controller.abort(); };
-  }, [emailContext.organizationKey, emailContext.scopeKey, rootQuery, rootTab]);
+    }, 800) : undefined;
+    return () => { clearTimeout(timeout); if (historyTimeout) clearTimeout(historyTimeout); controller.abort(); };
+  }, [emailContext.organizationKey, emailContext.scopeKey, queryClient, rootQuery, rootTab, selectedTagKeys]);
   useEffect(() => {
     if (!initialConnectorKey) return;
     const next = query.trim();
@@ -1011,14 +1026,14 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
     const controller = new AbortController();
     const historyTimeout = setTimeout(() => {
-      if (inboxTab === "drafts") void searchEmailDraftsForContext(context, initialConnectorKey, next, true, controller.signal).catch(() => undefined);
+      if (inboxTab === "drafts") void searchEmailDraftsForContext(context, initialConnectorKey, next, true, controller.signal, selectedTagKeys).catch(() => undefined);
       else {
         const nextQuery = normalizeEmailOverviewQuery({ ...requestedInboxQuery.current, search: next });
-        void searchEmailMessagesForContext(context, initialConnectorKey, nextQuery, true, controller.signal).catch(() => undefined);
+        void searchEmailMessagesForContext(context, initialConnectorKey, nextQuery, true, controller.signal, selectedTagKeys).catch(() => undefined);
       }
     }, 800);
     return () => { clearTimeout(historyTimeout); controller.abort(); };
-  }, [emailContext.organizationKey, emailContext.scopeKey, initialConnectorKey, inboxTab, query]);
+  }, [emailContext.organizationKey, emailContext.scopeKey, initialConnectorKey, inboxTab, query, selectedTagKeys]);
   useEffect(() => {
     const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
     return navigation.addListener("focus", () => {
@@ -1142,6 +1157,20 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     } finally {
       if (generation === historyGeneration.current) setSearchHistoryLoading(false);
     }
+  }
+  function openTagFilters() {
+    setSheetOpen(false);
+    requestAnimationFrame(() => setTagFilterOpen(true));
+  }
+  function openSelectedInboxTags() {
+    setResourceTagTargets(selectedInboxes.map((account) => ({ type: "email-inbox", key: account.key })));
+    setRootBulkMenuOpen(false);
+    requestAnimationFrame(() => setResourceTagsOpen(true));
+  }
+  function openSelectedThreadTags() {
+    setResourceTagTargets(selectedThreads.map(({ key }) => ({ type: "email-thread", key })));
+    setSheetOpen(false);
+    requestAnimationFrame(() => setResourceTagsOpen(true));
   }
   function closeSearchHistory() {
     historyGeneration.current += 1;
@@ -1479,7 +1508,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const next = nextQuery.trim();
     setQuery(next);
     if (inboxTab === "drafts") {
-      if (!next || !initialConnectorKey) {
+      if ((!next && !selectedTagKeys.length) || !initialConnectorKey) {
         setDraftSearchResults(undefined);
         setDraftSearchError(undefined);
         return;
@@ -1487,8 +1516,8 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       setDraftSearching(true);
       setDraftSearchError(undefined);
       try {
-        const drafts = await searchEmailDraftsForContext(emailContext, initialConnectorKey, next, recordHistory, signal);
-        if (!signal?.aborted) setDraftSearchResults({ connectorKey: initialConnectorKey, query: next, drafts });
+        const drafts = await searchEmailDraftsForContext(emailContext, initialConnectorKey, next, recordHistory, signal, selectedTagKeys);
+        if (!signal?.aborted) setDraftSearchResults({ connectorKey: initialConnectorKey, query: next, tagKeys: selectedTagKey, drafts });
       } catch (failure) {
         if (!signal?.aborted) setDraftSearchError(messageFor(failure));
       } finally {
@@ -1505,18 +1534,22 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   useEffect(() => {
     if (!initialConnectorKey) return;
     const next = query.trim();
-    if (!next) {
+    if (!next && !selectedTagKeys.length) {
       if (inboxTab === "drafts") {
         setDraftSearchResults(undefined);
         setDraftSearching(false);
         setDraftSearchError(undefined);
-      } else if (requestedInboxQuery.current.search) void searchLatest("", false);
+      } else {
+        const current = requestedInboxQuery.current;
+        const loadIdentity = `${current.readState}:${current.facets.join(",")}:${current.search}:${selectedTagKey}`;
+        if (current.search || overviewLoadQuery.current !== loadIdentity) void searchLatest("", false);
+      }
       return;
     }
     const controller = new AbortController();
-    const timeout = setTimeout(() => { void searchLatest(next, false, controller.signal); }, 300);
+    const timeout = setTimeout(() => { void searchLatest(next, false, controller.signal); }, next ? 300 : 0);
     return () => { clearTimeout(timeout); controller.abort(); };
-  }, [emailContext.organizationKey, emailContext.scopeKey, initialConnectorKey, inboxTab, query]);
+  }, [emailContext.organizationKey, emailContext.scopeKey, initialConnectorKey, inboxTab, query, selectedTagKeys]);
   async function loadMore() {
     const cursor = overview?.nextCursor;
     if (!cursor || loadingMore.current || loadingOverview.current || loading || loadError) return;
@@ -2993,20 +3026,20 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         queryClient.setQueryData(signalQueryKeys.detail(emailContext, initialConnectorKey, threadKey), visibleDetail);
         setSelected((current) => current?.thread.key === threadKey ? visibleDetail : current);
       } else if (!initialConnectorKey) {
-        if (normalizedRootQuery) {
+        if (rootFilterActive) {
           if (rootTab === "inboxes") {
-            const { inboxes } = await searchEmailInboxesForContext(emailContext, normalizedRootQuery, false);
-            setRootSearchResults({ tab: rootTab, inboxes });
+            const { inboxes } = await searchEmailInboxesForContext(emailContext, normalizedRootQuery, false, undefined, selectedTagKeys);
+            setRootSearchResults({ tab: rootTab, filterKey: rootFilterKey, inboxes });
           } else {
-            const { tones } = await searchEmailTonesForContext(emailContext, normalizedRootQuery, false);
-            setRootSearchResults({ tab: rootTab, tones });
+            const { tones } = await searchEmailTonesForContext(emailContext, normalizedRootQuery, false, undefined, selectedTagKeys);
+            setRootSearchResults({ tab: rootTab, filterKey: rootFilterKey, tones });
           }
           setRootSearchError(undefined);
         } else {
           await Promise.all([metadataQuery.refetch(), rootTab === "inboxes" ? load() : Promise.resolve()]);
         }
       } else if (inboxTab === "drafts") {
-        if (normalizedInboxSearch) await search(normalizedInboxSearch, false);
+        if (normalizedInboxSearch || selectedTagKeys.length) await search(normalizedInboxSearch, false);
         else await draftsQuery.refetch();
       } else {
         await load(inboxQuery, { recordHistory: false });
@@ -3077,8 +3110,8 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     <Button disabled={replySending || Boolean(replyTransformation) || !replyBody.trim()} onPress={requestSuggestedReplySend} size="md" variant="primary">Reply</Button>
     <Button disabled={replySending || Boolean(replyTransformation)} onPress={closeReplyEditor} size="md" variant="secondary">Close</Button>
   </>;
-  const draftSearchEmpty = Boolean(inboxTab === "drafts" && normalizedInboxSearch && !draftsQuery.isPending && !draftSearching && !draftsQuery.error && !draftSearchError && !visibleInboxDrafts.length);
-  const messageSearchEmpty = Boolean(inboxTab !== "drafts" && inboxQuery.search && !loading && !inboxQueryPending && !initialSyncPending && !loadError && !overview?.threads.length);
+  const draftSearchEmpty = Boolean(inboxTab === "drafts" && (normalizedInboxSearch || selectedTagKeys.length) && !draftsQuery.isPending && !draftSearching && !draftsQuery.error && !draftSearchError && !visibleInboxDrafts.length);
+  const messageSearchEmpty = Boolean(inboxTab !== "drafts" && (inboxQuery.search || selectedTagKeys.length) && !loading && !inboxQueryPending && !initialSyncPending && !loadError && !overview?.threads.length);
   return (
     <View style={styles.root}>
       <View accessibilityElementsHidden={readerSheetOpen} importantForAccessibility={readerSheetOpen ? "no-hide-descendants" : "auto"} pointerEvents={readerSheetOpen ? "none" : "auto"} style={styles.workspaceSurface}>
@@ -3163,9 +3196,10 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
               ) : null}
             </View>
             <Button accessibilityLabel="Filter Signal" contentMode="raw" onPress={() => { setSheetError(undefined); setSheet("rootFilter"); setSheetOpen(true); }} size="sm" style={styles.rootMenuButton} variant="icon">
-              <FilterIcon size="sm" variant={rootFavoritesOnly ? "accent" : "default"} />
+              <FilterIcon size="sm" variant={rootFavoritesOnly || selectedTags.length ? "accent" : "default"} />
             </Button>
           </View>
+          <TagFilterLane context={historyContext} />
           <View style={styles.rootContent}>
             <Tabs accessibilityLabel="Signal root categories" accessibilityRole="tablist" style={styles.rootTabs}>
               <Button accessibilityRole="tab" accessibilityState={{ selected: rootTab === "inboxes" }} onPress={() => setRootTab("inboxes")} size="xs" style={styles.rootTab} variant={rootTab === "inboxes" ? "secondary" : "ghost"}>Inboxes</Button>
@@ -3182,7 +3216,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
             showsVerticalScrollIndicator={false}
             style={styles.rootScroll}
           >
-            {rootTab === "inboxes" ? loading || normalizedRootQuery && (rootSearching || rootSearchResults?.tab !== "inboxes") ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading Signal cards" accessibilityRole="progressbar" key={index} style={[styles.rootCardSkeleton, { width: rootCardSize, height: rootCardSize }]} />) : (
+            {rootTab === "inboxes" ? loading || rootFilterActive && (rootSearching || rootSearchResults?.tab !== "inboxes" || rootSearchResults?.filterKey !== rootFilterKey) ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading Signal cards" accessibilityRole="progressbar" key={index} style={[styles.rootCardSkeleton, { width: rootCardSize, height: rootCardSize }]} />) : (
               <>
                 {loadError ? <View accessibilityRole="alert" style={styles.rootInlineNotice}><Text style={styles.inlineNoticeText}>{loadError}</Text><Button onPress={() => void load()} size="md" variant="secondary">Retry</Button></View> : null}
                 {rootSearchError ? <View accessibilityRole="alert" style={styles.rootInlineNotice}><Text style={styles.inlineNoticeText}>{rootSearchError}</Text></View> : null}
@@ -3208,15 +3242,15 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
                   </Button>
                   </View>
                 ); })}
-                {!loadError && !rootSearchError && !visibleAccounts.length && normalizedRootQuery ? <Text style={styles.rootEmpty}>No inboxes matched this search.</Text> : null}
-                {!loadError && !visibleAccounts.length && !normalizedRootQuery ? (
+                {!loadError && !rootSearchError && !visibleAccounts.length && rootFilterActive ? <Text style={styles.rootEmpty}>No inboxes matched these filters.</Text> : null}
+                {!loadError && !visibleAccounts.length && !rootFilterActive ? (
                   <View style={styles.rootEmptyState}>
                     <Text style={styles.rootEmpty}>{rootFavoritesOnly ? "No favorite inboxes." : "No connected inbox yet."}</Text>
                     {permissions.canManageConnector ? <Button accessibilityLabel="Connect Gmail" contentMode="raw" onPress={openConnectForm} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : <Text style={styles.rootEmptyHelp}>Ask an organization administrator to connect an inbox.</Text>}
                   </View>
                 ) : null}
               </>
-            ) : tonesLoading || normalizedRootQuery && (rootSearching || rootSearchResults?.tab !== "tones") ? Array.from({ length: 3 }, (_, index) => (
+            ) : tonesLoading || rootFilterActive && (rootSearching || rootSearchResults?.tab !== "tones" || rootSearchResults?.filterKey !== rootFilterKey) ? Array.from({ length: 3 }, (_, index) => (
               <Skeleton accessibilityLabel="Loading Signal tones" accessibilityRole="progressbar" key={index} style={{ width: rootCardSize, height: rootCardSize }} />
             )) : rootSearchError ? <View accessibilityRole="alert" style={styles.rootToneError}><Text style={styles.rootEmpty}>{rootSearchError}</Text></View> : toneError && !toneRecords.length ? (
               <View accessibilityRole="alert" style={styles.rootToneError}>
@@ -3239,7 +3273,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
                 <Text ellipsizeMode="tail" numberOfLines={1} style={styles.rootCardTitle}>{record.name}</Text>
               </Button>
               </View>
-            )) : normalizedRootQuery ? <Text style={styles.rootEmpty}>No tones matched this search.</Text> : (
+            )) : rootFilterActive ? <Text style={styles.rootEmpty}>No tones matched these filters.</Text> : (
               <View style={styles.rootEmptyState}>
                 <Text style={styles.rootEmpty}>{rootFavoritesOnly ? "No favorite tones." : "No tones yet."}</Text>
                 {permissions.canMutate ? <Button accessibilityLabel="Create email tone" contentMode="raw" onPress={openToneCreate} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : <Text style={styles.rootEmptyHelp}>Ask a scope moderator to create an email tone.</Text>}
@@ -3258,8 +3292,9 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
               <TextInput accessibilityLabel={inboxTab === "drafts" ? "Search drafts" : "Search email"} editable={!workspaceBusy} onChangeText={setQuery} onSubmitEditing={() => void search(query, false)} placeholder="Search..." returnKeyType="search" style={styles.searchInput} value={query} />
               {query.trim() ? <Button accessibilityLabel="Clear email search" contentMode="raw" hitSlop={8} iconOnly onPress={() => { setQuery(""); void search("", false); }} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}
             </View>
-            <Button accessibilityLabel="Filter inbox" contentMode="raw" onPress={() => { setSheet("inboxFilter"); setSheetOpen(true); }} size="sm" style={styles.inboxFilterButton} variant="icon"><FilterIcon size="sm" variant={inboxControlsQuery.facets.length ? "accent" : "default"} /></Button>
+            <Button accessibilityLabel="Filter inbox" contentMode="raw" onPress={() => { setSheet("inboxFilter"); setSheetOpen(true); }} size="sm" style={styles.inboxFilterButton} variant="icon"><FilterIcon size="sm" variant={inboxControlsQuery.facets.length || selectedTags.length ? "accent" : "default"} /></Button>
           </View>
+          <TagFilterLane context={historyContext} />
           {bulkToolbar}
           <View style={styles.categoryTabsFrame}>
             <Tabs accessibilityLabel="Email read state" accessibilityRole="tablist" style={styles.categoryTabs}>
@@ -3286,7 +3321,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
             scrollEventThrottle={120}
             showsVerticalScrollIndicator={false}
           >
-            {inboxTab === "drafts" ? draftsQuery.isPending || draftSearching || Boolean(normalizedInboxSearch && !activeDraftSearchResults) ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading drafts" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : visibleInboxDrafts.map((saved) => <Button accessibilityLabel={`${saved.variant === "new" ? saved.subject : "Reply"}, to ${saved.to.join(", ")}`} contentMode="raw" key={saved.key} onPress={() => openInboxDraft(saved)} shape="pill" size="sm" style={styles.threadCard} variant="secondary"><MailIcon size="sm" /><View style={styles.threadBody}><Text numberOfLines={1} style={styles.subject}>{saved.variant === "new" ? saved.subject : "Reply"}</Text><Text numberOfLines={1} style={styles.rowSubtitle}>To: {saved.to.join(", ")}</Text></View></Button>) : loading || inboxQueryPending || initialSyncPending ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading inbox messages" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : overview?.threads.map((thread) => (
+            {inboxTab === "drafts" ? draftsQuery.isPending || draftSearching || Boolean((normalizedInboxSearch || selectedTagKeys.length) && !activeDraftSearchResults) ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading drafts" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : visibleInboxDrafts.map((saved) => <Button accessibilityLabel={`${saved.variant === "new" ? saved.subject : "Reply"}, to ${saved.to.join(", ")}`} contentMode="raw" key={saved.key} onPress={() => openInboxDraft(saved)} shape="pill" size="sm" style={styles.threadCard} variant="secondary"><MailIcon size="sm" /><View style={styles.threadBody}><Text numberOfLines={1} style={styles.subject}>{saved.variant === "new" ? saved.subject : "Reply"}</Text><Text numberOfLines={1} style={styles.rowSubtitle}>To: {saved.to.join(", ")}</Text></View></Button>) : loading || inboxQueryPending || initialSyncPending ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading inbox messages" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : overview?.threads.map((thread) => (
               <Button
                 accessibilityActions={[{ name: "longpress", label: selectedThreads.some(({ key }) => key === thread.key) ? `Deselect ${thread.subject}` : `Select ${thread.subject}` }]}
                 accessibilityLabel={`${!thread.isRead ? "Unread, " : ""}${shortAddress(thread.latestFrom)}, ${thread.subject}`}
@@ -3313,12 +3348,12 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
                 </View>
               </Button>
             ))}
-            {inboxTab === "drafts" && !draftsQuery.isPending && !draftSearching && !draftsQuery.error && !draftSearchError && !visibleInboxDrafts.length ? <View style={styles.empty}><Text style={styles.centerText}>{normalizedInboxSearch ? "No drafts matched this search." : "No drafts here yet."}</Text></View> : null}
+            {inboxTab === "drafts" && !draftsQuery.isPending && !draftSearching && !draftsQuery.error && !draftSearchError && !visibleInboxDrafts.length ? <View style={styles.empty}><Text style={styles.centerText}>{normalizedInboxSearch || selectedTagKeys.length ? "No drafts matched these filters." : "No drafts here yet."}</Text></View> : null}
             {inboxTab !== "drafts" && !loading && !inboxQueryPending && !initialSyncPending && !loadError && !overview?.threads.length ? (
               <View style={styles.empty}>
                 <Text style={styles.centerText}>
-                  {inboxQuery.search
-                    ? "No messages matched this search."
+                  {inboxQuery.search || selectedTagKeys.length
+                    ? "No messages matched these filters."
                     : inboxQuery.facets.length === 0 ? "Choose one or more facets to show messages." : "No messages match these filters."}
                 </Text>
               </View>
@@ -3400,10 +3435,12 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         </ScrollView>
       </BottomSheet>
 
-      <BottomSheet hideHeading onOpenChange={setRootBulkMenuOpen} open={rootBulkMenuOpen && selectedInboxes.length > 0} title="Selected inbox actions"><BottomSheetMenu><BottomSheetItem disabled={rootBulkBusy || !permissions.canMutate} onPress={() => { setRootBulkMenuOpen(false); void setSelectedInboxesFavorite(); }} style={styles.sheetAction} variant="secondary">{selectedInboxes.every(({ isFavorite }) => isFavorite) ? "Unfavorite" : "Favorite"}</BottomSheetItem>{permissions.canManageConnector ? <BottomSheetItem disabled={rootBulkBusy} onPress={() => { setRootBulkMenuOpen(false); setRootDisconnectOpen(true); }} style={styles.sheetAction} variant="secondary">Disconnect</BottomSheetItem> : null}</BottomSheetMenu></BottomSheet>
+      <BottomSheet hideHeading onOpenChange={setRootBulkMenuOpen} open={rootBulkMenuOpen && selectedInboxes.length > 0} title="Selected inbox actions"><BottomSheetMenu><BottomSheetItem disabled={rootBulkBusy || !permissions.canMutate} onPress={openSelectedInboxTags} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem><BottomSheetItem disabled={rootBulkBusy || !permissions.canMutate} onPress={() => { setRootBulkMenuOpen(false); void setSelectedInboxesFavorite(); }} style={styles.sheetAction} variant="secondary">{selectedInboxes.every(({ isFavorite }) => isFavorite) ? "Unfavorite" : "Favorite"}</BottomSheetItem>{permissions.canManageConnector ? <BottomSheetItem disabled={rootBulkBusy} onPress={() => { setRootBulkMenuOpen(false); setRootDisconnectOpen(true); }} style={styles.sheetAction} variant="secondary">Disconnect</BottomSheetItem> : null}</BottomSheetMenu></BottomSheet>
       <BottomSheet dismissible={!rootBulkBusy} onOpenChange={(open) => { if (!open && !rootBulkBusy) setRootDisconnectOpen(false); }} open={rootDisconnectOpen && selectedInboxes.length > 0} title={`Disconnect ${selectedInboxes.length === 1 ? "inbox" : `${selectedInboxes.length} inboxes`}?`}><View style={styles.sheetItems}><Text style={styles.confirmText}>This removes the selected Signal inbox connection and local Signal data. It does not delete messages from Gmail.</Text><Button disabled={rootBulkBusy} onPress={() => void performRootInboxDisconnect()} size="md" variant="danger">Disconnect</Button><Button disabled={rootBulkBusy} onPress={() => setRootDisconnectOpen(false)} size="md" variant="secondary">Cancel</Button></View></BottomSheet>
 
       <SearchHistorySheet error={searchHistoryError} history={searchHistory} loading={searchHistoryLoading} onClose={closeSearchHistory} onRemove={(item) => void removeSearchHistory(item)} onSelect={applySearchHistory} open={sheetOpen && sheet === "searchHistory"} removingQuery={removingHistoryQuery} />
+      <TagFilterSheet context={historyContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />
+      <ResourceTagsSheet context={historyContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />
       <BottomSheet
         description={selectedInboxDraft ? `To: ${selectedInboxDraft.to.join(", ")}` : undefined}
         dismissible={!draftSending && !draftTransformation}
@@ -3461,6 +3498,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         {sheet === "inboxFilter" ? (
           <View style={styles.rootFilterPanel}>
             {INBOX_FACETS.map(({ facet, label }) => <View key={facet} style={styles.favoriteRow}><Switch accessibilityLabel={`Filter ${label} email`} checked={inboxControlsQuery.facets.includes(facet)} onCheckedChange={() => toggleFacet(facet)} /><Text style={styles.favoriteLabel}>{label}</Text></View>)}
+            <Button onPress={openTagFilters} size="md" style={styles.searchHistoryOption} variant="secondary">Tags</Button>
             <Button onPress={() => void openSearchHistory()} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button>
           </View>
         ) : sheet === "rootFilter" ? (
@@ -3469,6 +3507,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
               <Switch accessibilityLabel="Show only favorite Signal items" checked={rootFavoritesOnly} onCheckedChange={(checked) => { setRootFavoritesOnly(checked); setSheetOpen(false); }} />
               <Text style={styles.favoriteLabel}>Favorites</Text>
             </View>
+            <Button onPress={openTagFilters} size="md" style={styles.searchHistoryOption} variant="secondary">Tags</Button>
             <Button onPress={() => void openSearchHistory()} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button>
           </View>
         ) : sheet === "toneDelete" ? (
@@ -3564,6 +3603,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
           </BottomSheetMenu>
         ) : sheet === "bulkActions" ? (
           <BottomSheetMenu>
+            <BottomSheetItem disabled={bulkBusy} onPress={openSelectedThreadTags} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem>
             <BottomSheetItem disabled={bulkBusy} onPress={() => void runBulkAction("favorite")} style={styles.sheetAction} variant="secondary">{selectedThreads.every((thread) => thread.isFavorite) ? "Unfavorite" : "Favorite"}</BottomSheetItem>
             <BottomSheetItem disabled={bulkBusy} onPress={() => void runBulkAction("read")} style={styles.sheetAction} variant="secondary">{selectedThreads.every((thread) => thread.isRead) ? "Mark unread" : "Mark read"}</BottomSheetItem>
             <BottomSheetItem disabled={bulkBusy || selectedThreads.every((thread) => thread.labels?.includes("TRASH"))} onPress={() => setSheet("bulkTrash")} style={styles.sheetAction} variant="secondary">Move to trash</BottomSheetItem>

@@ -55,12 +55,23 @@ test("matches Archive root search, history, favorite, empty, and focus behavior"
   expect(workspace).toContain('accessibilityLabel="Create audio book"');
   expect(workspace).not.toContain("KeyboardAvoidingView");
   expect(workspace).toContain('setRootSearchFocusable(false)');
-  expect(workspace).toContain('queryFn: ({ signal }) => searchBooks(searchTerm, signal, true)');
+  expect(workspace).toContain('queryFn: ({ signal }) => searchBooks(searchTerm, signal, Boolean(searchTerm), selectedTagKeys)');
   expect(workspace).toContain('const BOOK_SEARCH_DEBOUNCE_MS = 300');
   expect(workspace).toContain('accessibilityLabel={searchActive ? "Searching audio books" : "Loading audio books"}');
   expect(workspace).not.toContain('`${book.title} ${book.subtitle} ${book.description}`');
   expect(workspace).toContain('style={[styles.state, searchActive && styles.searchEmptyState]}');
   expect(workspace).toContain('searchEmptyState: { flexGrow: 1 }');
+});
+
+test("shares the session tag filter across the primary book list", () => {
+  expect(workspace).toContain("const tagContextKey = tagFilterContextKey(contentContext)");
+  expect(workspace).toContain("state.selectedTagsByContext[tagContextKey] ?? EMPTY_SELECTED_TAGS");
+  expect(workspace).toContain("selectedTags.map(({ key }) => key).sort()");
+  expect(workspace).toContain('<TagFilterLane context={contentContext} />');
+  expect(workspace).toContain('variant="secondary">Tags</Button>');
+  expect(workspace).toContain('<TagFilterSheet context={contentContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />');
+  expect(workspace).toContain("ascendQueryKeys.search(context, searchTerm, selectedTagKeys)");
+  expect(workspace).toContain("Boolean(normalizedQuery || selectedTagKeys.length)");
 });
 
 test("keeps context selection explicit and generation asynchronous", () => {
@@ -315,6 +326,7 @@ test("optimistically removes a single deleted audio book without a loading butto
 });
 
 test("matches Archive bulk actions and uses cover-backed progress surfaces", () => {
+  expect(workspace).toContain('import { ResourceTagsSheet } from "@/components/ResourceTagsSheet";');
   expect(workspace).toContain('accessibilityLabel="Selected audio book toolbar"');
   expect(workspace).toContain('accessibilityLabel="Clear selection"');
   expect(workspace).toContain('accessibilityLabel="Selected audio book actions"');
@@ -326,6 +338,16 @@ test("matches Archive bulk actions and uses cover-backed progress surfaces", () 
   expect(workspace).toContain('sheet === "bulkActions"');
   expect(workspace).toContain('setBookFavorite(book.key, isFavorite)');
   expect(workspace).toContain('allSelectedFavorite ? "Unfavorite" : "Favorite"');
+  expect(workspace).toContain('selectedBookKeys.map((key) => ({ type: "book" as const, key }))');
+  expect(workspace).toContain('<ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />');
+  const bulkTags = workspace.slice(workspace.indexOf("function openSelectedBookTags"), workspace.indexOf("function closeCreationSheets"));
+  expect(bulkTags).toContain("setSheetOpen(false)");
+  expect(bulkTags).toContain("setSheet(undefined)");
+  expect(bulkTags).toContain("requestAnimationFrame(() => setResourceTagsOpen(true))");
+  expect(bulkTags).not.toContain("setSelectedBookKeys([])");
+  const bulkActions = workspace.slice(workspace.indexOf('{sheet === "bulkActions"'), workspace.indexOf('{sheet === "bulkDelete"'));
+  expect(bulkActions).toContain('<Button disabled={bulkLoading} onPress={openSelectedBookTags} size="md" variant="secondary">Tags</Button>');
+  expect(bulkActions.indexOf('>Tags</Button>')).toBeLessThan(bulkActions.indexOf('>Delete</Button>'));
   expect(workspace).toContain('sheet === "bulkDelete"');
   expect(workspace).toContain('styles.compactSheetActions');
   expect(workspace).toContain('favorites = selectedBooks.filter(({ isFavorite }) => isFavorite)');

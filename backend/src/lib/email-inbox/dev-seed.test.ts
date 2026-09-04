@@ -37,12 +37,15 @@ describe('mail development seed safety', () => {
     expect(first.exportFolders.filter(({ parentFolderKey }) => parentFolderKey == null).every(({ presentation }) => presentation === 'communication')).toBe(true);
     expect(first.exportFolders.filter(({ parentFolderKey }) => parentFolderKey != null).every(({ presentation }) => presentation == null)).toBe(true);
     expect(first.exportFolders.filter(({ name }) => name === 'Files')).toHaveLength(3);
-    const threadDocuments = first.documents.filter((document) => document.content.startsWith('{') && JSON.parse(document.content).kind === 'mail-thread');
+    const threadExportKeys = new Set(first.emailThreads.map((thread) => mailDevFixtureKey('email-archive-thread-export', thread.key)));
+    const messageExportKeys = new Set(first.emailMessages.map((message) => mailDevFixtureKey('email-archive-message-export', message.key)));
+    const threadDocuments = first.documents.filter((document) => threadExportKeys.has(document.key));
     expect(threadDocuments).toHaveLength(27);
     expect(threadDocuments.every(({ key }) => !first.emailThreads.some((thread) => thread.key === key))).toBe(true);
     const inboxExportKeys = new Set(first.inboxes.map(({ connectorKey }) => mailDevFixtureKey('email-archive-export-inbox', scopeKey, connectorKey)));
     expect(threadDocuments.every(({ folderKey }) => typeof folderKey === 'string' && inboxExportKeys.has(folderKey))).toBe(true);
-    expect(first.documents.filter((document) => document.content.startsWith('{') && JSON.parse(document.content).kind === 'mail-message').every(({ folderKey }) => typeof folderKey === 'string' && inboxExportKeys.has(folderKey))).toBe(true);
+    expect(first.documents.filter((document) => messageExportKeys.has(document.key)).every(({ folderKey }) => typeof folderKey === 'string' && inboxExportKeys.has(folderKey))).toBe(true);
+    expect(first.documents.every(({ content }) => !content.trim().startsWith('{'))).toBe(true);
     expect(first.documents.every(({ mutationPolicy }) => mutationPolicy === 'user')).toBe(true);
     expect(new Set(first.documents.map(({ key }) => key)).size).toBe(first.documents.length);
     expect(first.documents.every(({ scopeKey: value, createdAt, updatedAt }) => value === scopeKey && createdAt === updatedAt)).toBe(true);

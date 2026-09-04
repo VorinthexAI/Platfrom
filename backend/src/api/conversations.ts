@@ -7,6 +7,9 @@ import { conversationCreateInputSchema, conversationFavoriteInputSchema, convers
 import { getAuthIdentity } from './security';
 import { parseJson } from './validation';
 import { publishUserEvent } from './events';
+import { projectSparkError, sparkErrorResponse } from './errors';
+import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
+import type { ToolEventRecorder } from '@/lib/ai/events/service';
 
 const selector = { organizationKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid() };
 const selected = <T extends z.ZodRawShape>(shape: T) => z.object({ ...selector, ...shape }).strict();
@@ -29,6 +32,8 @@ export interface ConversationHandlerDependencies {
   service?: ConversationService;
   createTurnService?: (signal: AbortSignal) => ConversationService;
   publishChanged?: typeof publishUserEvent;
+  recordEvent?: ToolEventRecorder;
+  billing?: ToolBillingDependencies;
 }
 
 async function authenticated(c: Context, organizationKey: string, scopeKey: string, dependencies: ConversationHandlerDependencies): Promise<ToolContext | Response> {
@@ -39,6 +44,7 @@ async function authenticated(c: Context, organizationKey: string, scopeKey: stri
   return (await authorize({ organizationKey, scopeKey }, { authenticatedUserKey: identity.key })).context;
 }
 function failure(c: Context, error: unknown) {
+  const billing = sparkErrorResponse(c, error); if (billing) return billing;
   if (error instanceof ContentError) return c.json({ success: false, error: error.toJSON() }, error.code === 'CONTENT_FORBIDDEN' ? 403 : 400);
   if (error instanceof ConversationError) return c.json({ success: false, error: { code: error.code, message: error.message } }, error.code === 'FORBIDDEN' ? 403 : error.code === 'NOT_FOUND' ? 404 : error.code === 'CONFLICT' ? 409 : 500);
   if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ success: false, error: 'invalid conversation request' }, 400);
@@ -83,7 +89,7 @@ export function createConversationHandlers(dependencies: ConversationHandlerDepe
         const service = dependencies.createTurnService?.(abort.signal) ?? createConversationService({ router: { signal: abort.signal } });
         let correlationKey = body.requestKey;
         try {
-          await service.turn(input, context, async (event: ConversationTurnEvent) => {
+          await observeToolExecution('conversation.message.send', context, () => service.turn(input, context, async (event: ConversationTurnEvent) => {
             if (!abort.active()) return;
             correlationKey = event.correlationKey;
             const schema = event.type === 'start' ? conversationStartEventSchema : event.type === 'delta' ? conversationDeltaEventSchema : conversationDoneEventSchema;
@@ -93,11 +99,12 @@ export function createConversationHandlers(dependencies: ConversationHandlerDepe
                 console.error('conversation change publication failed', { conversationKey: input.conversationKey, correlationKey, error });
               });
             }
-          });
+          }), { recorder: dependencies.recordEvent, idempotencyKey: body.requestKey, input, ...dependencies.billing });
         } catch (error) {
           if (!abort.active()) return;
           console.error('conversation turn failed', { conversationKey: input.conversationKey, correlationKey, error });
-          const event = conversationErrorEventSchema.parse({ type: 'error', correlationKey, code: error instanceof ConversationError ? error.code : 'FAILED', message: error instanceof ConversationError ? error.message : 'Conversation turn failed.' });
+          const billing = projectSparkError(error);
+          const event = conversationErrorEventSchema.parse({ type: 'error', correlationKey, code: billing?.body.error.code ?? (error instanceof ConversationError ? error.code : 'FAILED'), message: billing?.body.error.message ?? (error instanceof ConversationError ? error.message : 'Conversation turn failed.') });
           await stream.writeSSE({ event: 'error', data: JSON.stringify(event), id: correlationKey });
         } finally { abort.dispose(); }
       });

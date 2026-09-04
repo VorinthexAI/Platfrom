@@ -55,6 +55,7 @@ export type CoreComposerProps = {
   onSubmit: () => void;
   openRequest?: number;
   pageActions?: ReactNode;
+  pageBackdrop?: ReactNode;
   pageIdentity: (closePage: () => void) => ReactNode;
   prompts: readonly string[];
   sendIcon: ReactNode;
@@ -174,6 +175,7 @@ type CorePageProps = {
   leftInset: number;
   message?: ReactNode;
   pageActions?: ReactNode;
+  pageBackdrop?: ReactNode;
   pageIdentity: (closePage: () => void) => ReactNode;
   releaseSelection: () => void;
   rightInset: number;
@@ -181,7 +183,7 @@ type CorePageProps = {
   topInset: number;
 };
 
-function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, message, pageActions, pageIdentity, releaseSelection, rightInset, style, topInset }: CorePageProps) {
+function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, message, pageActions, pageBackdrop, pageIdentity, releaseSelection, rightInset, style, topInset }: CorePageProps) {
   const keyboard = useAnimatedKeyboard();
   const keyboardInsetStyle = useAnimatedStyle(() => {
     const keyboardMoving = [KeyboardState.OPENING, KeyboardState.OPEN, KeyboardState.CLOSING].includes(keyboard.state.value);
@@ -212,18 +214,21 @@ function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, messa
       paddingLeft: Math.max(leftInset, spacing.md),
       paddingRight: Math.max(rightInset, spacing.md),
     }]}>{pageIdentity(closePage)}</View>
-    <Reanimated.View style={[styles.pageContent, style, keyboardInsetStyle, {
-      paddingLeft: Math.max(leftInset, spacing.md),
-      paddingRight: Math.max(rightInset, spacing.md),
-    }]}>
-      <View style={styles.pageTitleRow}>
-        <Button accessibilityLabel="Back from Core" contentMode="raw" onPress={closePage} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
-        <Text numberOfLines={1} style={styles.pageTitle}>Core</Text>
-        {pageActions ?? <View style={styles.pageTitleSpacer} />}
-      </View>
-      <View style={styles.pageConversation}>{message}</View>
-      <View>{composer}</View>
-    </Reanimated.View>
+    <View style={styles.pageBody}>
+      {pageBackdrop ? <View pointerEvents="none" style={styles.pageBackdrop}>{pageBackdrop}</View> : null}
+      <Reanimated.View style={[styles.pageContent, style, keyboardInsetStyle, {
+        paddingLeft: Math.max(leftInset, spacing.md),
+        paddingRight: Math.max(rightInset, spacing.md),
+      }]}>
+        <View style={styles.pageTitleRow}>
+          <Button accessibilityLabel="Back from Core" contentMode="raw" onPress={closePage} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
+          <Text numberOfLines={1} style={styles.pageTitle}>Core</Text>
+          {pageActions ?? <View style={styles.pageTitleSpacer} />}
+        </View>
+        <View style={styles.pageConversation}>{message}</View>
+        <View>{composer}</View>
+      </Reanimated.View>
+    </View>
   </View>;
 }
 
@@ -253,6 +258,7 @@ export function CoreComposer({
   onSubmit,
   openRequest = 0,
   pageActions,
+  pageBackdrop,
   pageIdentity,
   prompts,
   sendIcon,
@@ -481,7 +487,7 @@ export function CoreComposer({
       }]}>
         {accessory}{composer(false)}
       </View> : null}
-      {pageOpen ? <CorePage bottomInset={insets.bottom} closePage={closePage} composer={composer(true)} inputRef={inputRef} leftInset={insets.left} message={message} pageActions={pageActions} pageIdentity={pageIdentity} releaseSelection={releaseInputSelection} rightInset={insets.right} style={style} topInset={insets.top} /> : null}
+      {pageOpen ? <CorePage bottomInset={insets.bottom} closePage={closePage} composer={composer(true)} inputRef={inputRef} leftInset={insets.left} message={message} pageActions={pageActions} pageBackdrop={pageBackdrop} pageIdentity={pageIdentity} releaseSelection={releaseInputSelection} rightInset={insets.right} style={style} topInset={insets.top} /> : null}
     </>
   );
 }
@@ -509,10 +515,20 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.hairline,
     borderBottomWidth: 1,
   },
+  pageBody: { flex: 1, position: "relative" },
+  pageBackdrop: {
+    bottom: 0,
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 0,
+    zIndex: 0,
+  },
   pageContent: {
     flex: 1,
     gap: spacing.md,
     paddingTop: spacing.md,
+    zIndex: 1,
   },
   pageTitleRow: {
     minHeight: 48,

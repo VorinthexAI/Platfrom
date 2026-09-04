@@ -193,6 +193,18 @@ test("searches Gallery collections through app.search without a score cutoff", a
   expect(calls[0]?.body).not.toHaveProperty("minimumScore");
 });
 
+test("lists and searches tag-filtered Gallery collections and images through app.search with all-tag matching", async () => {
+  await searchGalleryCollections("", false, undefined, ["summer", "family"]);
+  await searchGalleryImages({ query: "", collectionKey: "collection", recordHistory: false, limit: 50, tagKeys: ["summer", "family"] });
+  await searchGalleryImages({ query: "rain", collectionKey: "collection", recordHistory: false, limit: 50, tagKeys: ["summer", "family"] });
+
+  expect(calls.map(({ path, body }) => ({ path, body }))).toEqual([
+    { path: "/app/search", body: { organizationKey: "organization", scopeKey: "scope", operation: "list", collectionSlugs: ["collections"], recordHistory: false, limit: 50, filters: { tagKeys: ["summer", "family"], tagMatch: "all" } } },
+    { path: "/app/search", body: { organizationKey: "organization", scopeKey: "scope", operation: "list", collectionSlugs: ["images"], recordHistory: false, limit: 50, filters: { collectionKey: "collection", tagKeys: ["summer", "family"], tagMatch: "all" } } },
+    { path: "/app/search", body: { organizationKey: "organization", scopeKey: "scope", query: "rain", collectionSlugs: ["images"], recordHistory: false, limit: 50, filters: { collectionKey: "collection", tagKeys: ["summer", "family"], tagMatch: "all" } } },
+  ]);
+});
+
 test("can request up to ten image matches without a score cutoff", async () => {
   await searchGalleryImages({ query: "rain", recordHistory: false, limit: 10 });
 

@@ -14,11 +14,12 @@ import { newId } from '@/lib/ids';
 import { userHiddenOperations } from '@/lib/user-hiddens/operations';
 import type { AssistantCapability, AssistantCapabilityContext } from './capabilities';
 import { ASSISTANT_RAW_RESULT } from './capability-result';
-import { APP_SEARCH_COLLECTION_ADAPTERS, appSearchInputSchema, createAppSearchService, projectAppSearchModelResult } from '@/lib/app-search/service';
+import { APP_SEARCH_COLLECTION_ADAPTERS, appSearchModelInputSchema, createAppSearchService, projectAppSearchModelResult } from '@/lib/app-search/service';
 import { appTextEnhanceInputSchema, appTextTranslateInputSchema, createAppTransformationService } from '@/lib/app-transformation/service';
 import { appSpeechInputSchema, createAppSpeechService } from '@/lib/app-speech/service';
 import { accountProfileService, profileNameUpdateInputSchema, safeProfileUpdateResultSchema } from '@/lib/account-profile/service';
 import { feedbackListInputSchema, feedbackVoteInputSchema, getDefaultTicketService, ticketSubmitInputSchema } from '@/lib/tickets/service';
+import { scopeTagCreateInputSchema, scopeTagDeleteInputSchema, scopeTagListInputSchema, scopeTagService, scopeTagSetAssignmentsInputSchema, scopeTagUpdateInputSchema } from '@/lib/scope-tags/service';
 
 const key = z.string().cuid();
 const name = z.string().trim().min(1).max(255);
@@ -63,10 +64,11 @@ function projectSignalOutput(name: string, value: unknown) {
     : redacted;
 }
 
-function capability<Schema extends z.ZodTypeAny>(name: string, description: string, schema: Schema, execute: (input: z.output<Schema>, context: AssistantCapabilityContext) => Promise<unknown>, mutationWorkspace?: AssistantCapability['mutationWorkspace']): AssistantCapability<Schema> {
+function capability<Schema extends z.ZodTypeAny>(name: string, description: string, schema: Schema, execute: (input: z.output<Schema>, context: AssistantCapabilityContext) => Promise<unknown>, mutationWorkspace?: AssistantCapability['mutationWorkspace'], executionEffect?: AssistantCapability['executionEffect']): AssistantCapability<Schema> {
   return {
     inputSchema: schema,
     mutationWorkspace,
+    executionEffect,
     definition: { name, description, inputSchema: contentZodToJsonSchema(schema) },
     async execute(rawInput, context) {
       const result = await execute(schema.parse(rawInput), context);
@@ -105,15 +107,15 @@ function hiddenCapability(source: 'folder' | 'document', operation: 'hide' | 're
   return capability(`${source}.${operation}`, `${operation === 'hide' ? 'Hide' : 'Reveal'} an accessible Archive ${source} for the current user.`, z.object({ sourceKey: key }).strict(), async ({ sourceKey }, context) => userHiddenOperations[operation]({ source, sourceKey }, hiddenContext(context)), 'archive');
 }
 
-export const appSearchCapability: AssistantCapability<typeof appSearchInputSchema> = {
-  inputSchema: appSearchInputSchema,
+export const appSearchCapability: AssistantCapability<typeof appSearchModelInputSchema> = {
+  inputSchema: appSearchModelInputSchema,
   definition: {
     name: 'app.search',
     description: `The single workspace resource query capability. Resolve resource meaning across any language, code-switching, ordinary misspellings, inflection, synonyms, paraphrases, and unambiguous recent references, then map it to the narrowest canonical collectionSlugs without requiring a product-area name or platform vocabulary. Normalize obvious mistakes in intent and resource-type words, but preserve possible resource names, proper names, and title words in the user's language. Infer the operation from the intended outcome rather than trigger words: use search for semantic discovery, list for query-free inventories and questions about user-visible resource properties, count for exact filtered totals, get for an exact known key, and summarize for a non-persisting Archive document summary. Search only resource kinds supported by the user's meaning; combine collectionSlugs only for genuine cross-resource requests, never merely because collections are related. If materially different resource interpretations remain, ask a concise clarification instead of guessing. For search, reduce conversational wording to the distinguishing resource name or subject while preserving possible title words. Set limit to the requested quantity: grammatical singular or one/single in the user's language means 1, an explicit number means that number up to 50, and an unspecified plural uses the default. Use limit 50 when a user-visible property question asks about every matching resource. For email-message and email-draft list/count, first resolve the inbox and pass its authorized connectorKey filter. Convert time ranges to filters.createdFrom/createdTo for every registered timestamped collection; countries have no creation lifecycle and do not accept date filters. Use status and isFavorite filters only where registered; never guess enum values or field names. Registered collection adapters: ${(Object.entries(APP_SEARCH_COLLECTION_ADAPTERS) as Array<[string, { operations: readonly string[]; filters: readonly string[]; fields: readonly string[]; statuses?: readonly string[] }]>).map(([slug, adapter]) => `${slug} [operations: ${adapter.operations.join(', ')}; filters: ${adapter.filters.join(', ') || 'none'}; fields: ${adapter.fields.join(', ')}${adapter.statuses ? `; status values: ${adapter.statuses.join(', ')}` : ''}]`).join('; ')}.`,
-    inputSchema: contentZodToJsonSchema(appSearchInputSchema),
+    inputSchema: contentZodToJsonSchema(appSearchModelInputSchema),
   },
   async execute(rawInput, context) {
-    const input = appSearchInputSchema.parse(rawInput);
+    const input = appSearchModelInputSchema.parse(rawInput);
     const output = await (context.appSearch ?? createAppSearchService()).search(input, context.domain, {
       signal: context.signal,
       timeoutMs: context.timeoutMs,
@@ -130,6 +132,11 @@ export const appSearchCapability: AssistantCapability<typeof appSearchInputSchem
     return { kind: 'continue', result: projectAppSearchModelResult(output), [ASSISTANT_RAW_RESULT]: output, sources };
   },
 };
+
+appSearchCapability.definition.description = appSearchCapability.definition.description.replace(
+  'Set limit to the requested quantity: grammatical singular or one/single in the user\'s language means 1, an explicit number means that number up to 50, and an unspecified plural uses the default.',
+  'Always set limit to the requested quantity: grammatical singular or one/single in the user\'s language means 1, an explicit number means that number up to 50, and an unspecified plural requires a reasonable bounded limit, usually 10.',
+);
 
 export const appEnhanceCapability = capability('app.enhance', 'Improve spelling, grammar, punctuation, and wording while preserving the source meaning.', appEnhanceInputSchema, async ({ text, documentKey, instruction, save }, context) => {
   if (text) return (context.appTransformation ?? createAppTransformationService()).enhance({ text, instruction }, context.domain.organizationKey, { signal: context.signal, timeoutMs: context.timeoutMs });
@@ -167,15 +174,15 @@ export const platformCapabilities = [
     const { userKey } = identity(context);
     const { profile } = await (context.accountProfile ?? accountProfileService).updateName(input, userKey);
     return safeProfileUpdateResultSchema.parse({ profile: { name: profile.name } });
-  }),
+  }, undefined, 'write'),
   capability('ticket.create', 'Submit an issue ticket for the authenticated user in the current organization and scope.', ticketSubmitInputSchema, async (input, context) => {
     identity(context);
     return (context.tickets ?? getDefaultTicketService()).submit(input, context.domain, context.requestKey ?? newId());
-  }),
+  }, undefined, 'write'),
   capability('feedback.create', 'Submit product feedback for the authenticated user in the current organization and scope.', ticketSubmitInputSchema, async (input, context) => {
     identity(context);
     return (context.tickets ?? getDefaultTicketService()).createFeedback(input, context.domain, context.requestKey ?? newId());
-  }),
+  }, undefined, 'write'),
   capability('feedback.list', 'List recent product feedback and the authenticated user\'s vote in the current organization and scope.', feedbackListInputSchema, async (input, context) => {
     identity(context);
     return (context.tickets ?? getDefaultTicketService()).listFeedback(input, context.domain);
@@ -183,6 +190,26 @@ export const platformCapabilities = [
   capability('feedback.vote', 'Set, change, or clear the authenticated user\'s vote on product feedback in the current organization and scope.', feedbackVoteInputSchema, async (input, context) => {
     identity(context);
     return (context.tickets ?? getDefaultTicketService()).setFeedbackVote(input, context.domain, context.requestKey ?? newId());
+  }, undefined, 'write'),
+] as const;
+
+const allTagWorkspaces = ['archive', 'gallery', 'compass', 'signal', 'ascend'] as const;
+const tagTargetWorkspace = {
+  folder: 'archive', document: 'archive',
+  'image-collection': 'gallery', image: 'gallery', 'image-highlight': 'gallery', 'image-memory': 'gallery',
+  place: 'compass', trip: 'compass',
+  'email-inbox': 'signal', 'email-tone': 'signal', 'email-thread': 'signal', 'email-message': 'signal', 'email-draft': 'signal',
+  book: 'ascend',
+} as const;
+
+export const tagCapabilities = [
+  capability('tag.list', 'List the authenticated user\'s private tags in the current scope for authorized non-Core callers, optionally limited to one target or with direct assignment state for distinct targets.', scopeTagListInputSchema, (input, context) => (context.scopeTags ?? scopeTagService).list(input, context.domain)),
+  capability('tag.create', 'Create a tag in the current scope.', scopeTagCreateInputSchema, (input, context) => (context.scopeTags ?? scopeTagService).create(input, context.domain), allTagWorkspaces),
+  capability('tag.update', 'Update a tag name or description in the current scope.', scopeTagUpdateInputSchema, (input, context) => (context.scopeTags ?? scopeTagService).update(input, context.domain), allTagWorkspaces),
+  capability('tag.delete', 'Delete a tag and its assignments in the current scope.', scopeTagDeleteInputSchema, (input, context) => (context.scopeTags ?? scopeTagService).delete(input, context.domain), allTagWorkspaces),
+  capability('tag.assignment.set', 'Set the desired assigned or unassigned state for distinct tag and target pairs.', scopeTagSetAssignmentsInputSchema, (input, context) => (context.scopeTags ?? scopeTagService).setAssignments(input, context.domain, { source: 'ai' }), (raw) => {
+    const { changes } = scopeTagSetAssignmentsInputSchema.parse(raw);
+    return [...new Set(changes.map(({ target }) => tagTargetWorkspace[target.type]))];
   }),
 ] as const;
 

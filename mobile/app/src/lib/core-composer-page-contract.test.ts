@@ -12,6 +12,11 @@ const [core, switcher, routeLayout, archive, gallery, compass, signal, ascend] =
   read("../components/capability/AscendWorkspace.tsx"),
 ]);
 
+function expectBefore(source: string, first: string, second: string) {
+  expect(source.indexOf(first)).toBeGreaterThanOrEqual(0);
+  expect(source.indexOf(first)).toBeLessThan(source.indexOf(second));
+}
+
 test("opens Core as an in-layout page and returns without routing", () => {
   expect(core).not.toContain("BottomSheet");
   expect(core).not.toContain("<Modal");
@@ -87,6 +92,14 @@ test("delays focus by 100ms and keeps the horizontal page inset above the keyboa
   expect(core).not.toContain("keyboardSpacerStyle");
   expect(core).not.toContain("KeyboardAvoidingView");
   expect(core).not.toContain("withTiming");
+});
+
+test("keeps the page backdrop outside the keyboard-responsive content", () => {
+  expect(core).toContain('pageBackdrop?: ReactNode');
+  expect(core).toContain('<View pointerEvents="none" style={styles.pageBackdrop}>{pageBackdrop}</View>');
+  expect(core).toContain('pageBody: { flex: 1, position: "relative" }');
+  expect(core).toContain('pageBackdrop: {');
+  expectBefore(core, 'style={styles.pageBackdrop}', '<Reanimated.View style={[styles.pageContent, style, keyboardInsetStyle');
 });
 
 test("keeps workspace keyboard avoidance from competing with the Core page", () => {

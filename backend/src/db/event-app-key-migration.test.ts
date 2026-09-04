@@ -10,6 +10,7 @@ describe('event app-key migration', () => {
     expect(apps).toEqual({ name: 'apps', skipEmbedding: true, indexes: [{ fields: ['slug'], unique: true }] });
     expect(collections.indexOf(apps!)).toBeLessThan(collections.indexOf(events!));
     expect(events?.indexes).toContainEqual({ fields: ['appKey', 'createdAt'] });
+    expect(events?.indexes).toContainEqual({ fields: ['scopeKey', 'createdAt'] });
     expect(events?.indexes).not.toContainEqual({ fields: ['domain', 'createdAt'] });
     expect(isLegacyIndex('events', ['domain', 'createdAt'], events?.indexes?.map(({ fields }) => fields) ?? [])).toBe(true);
   });
@@ -27,8 +28,11 @@ describe('event app-key migration', () => {
     await migrateEventAppKeys({ query: async (query: string, bindVars: Record<string, string>) => { queries.push({ query, bindVars }); return {} as never; } } as never);
     expect(queries).toHaveLength(2);
     expect(queries[0]!.query).toContain('FILTER app == null');
+    expect(queries[0]!.query).toContain('OR scope == null');
     expect(queries[0]!.query).toContain('REMOVE event IN events');
-    expect(queries[1]!.query).toContain('UPDATE event WITH { appKey, domain: null }');
+    expect(queries[1]!.query).toContain('microSparks: IS_NUMBER(event.microSparks)');
+    expect(queries[1]!.query).toContain('scopeId: null');
+    expect(queries[1]!.query).toContain('sparks: null');
     expect(queries[1]!.query).toContain('OPTIONS { keepNull: false }');
     expect(queries[0]!.bindVars.signalKey).toBe(APP_KEYS.SIGNAL);
   });

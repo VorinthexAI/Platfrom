@@ -18,13 +18,13 @@ describe('MediaLibrary node contracts', () => {
   test('uses the global current embedding contract', () => {
     expect(EMBEDDING_DIMENSIONS).toBe(1_536);
     expect(currentEmbeddingSchema.safeParse(embedding).success).toBe(true); expect(currentEmbeddingSchema.safeParse(embedding.slice(1)).success).toBe(false);
-    expect(imagesEmbeddingFields).toEqual(['filename', 'caption', 'placeName', 'placeSummary', 'country', 'countryCode']); expect(collectionsEmbeddingFields).toEqual(['name', 'description']); expect(tagsEmbeddingFields).toEqual(['name', 'description']);
+    expect(imagesEmbeddingFields).toEqual(['filename', 'caption', 'placeName', 'placeSummary', 'country', 'countryCode']); expect(collectionsEmbeddingFields).toEqual(['name', 'description']); expect(tagsEmbeddingFields).toEqual(['normalizedName', 'description']);
   });
   test('strips Arango internals and unknown persisted fields by default', () => {
     const parsed = collectionSchema.parse({ _key: key, key, scopeKey, name: 'Launch', embedding, createdAt: now, updatedAt: now, unexpected: true });
     expect(parsed).not.toHaveProperty('_key'); expect(parsed).not.toHaveProperty('unexpected');
     expect(imageSchema.safeParse({ key, scopeKey, filename: 'x.png', caption: ' ', storageKey: 'x', mimeType: 'image/png', sizeBytes: 1, width: 1, height: 1, embedding, createdAt: now, updatedAt: now }).success).toBe(false);
-    expect(tagSchema.safeParse({ key, scopeKey, name: 'Tag', embedding, createdAt: now, updatedAt: now }).success).toBe(true);
+    expect(tagSchema.safeParse({ key, scopeKey, userKey: key, name: 'Tag', normalizedName: 'tag', embedding, createdAt: now, updatedAt: now }).success).toBe(true);
     expect(imageCaptionRecordSchema.safeParse({ key, scopeKey, sourceImageKey: key, caption: 'A caption.', embedding, perceptualHash: '0123456789abcdef', hashAlgorithm: 'phash-64-dct-v1', hashSegment0: '0123', hashSegment1: '4567', hashSegment2: '89ab', hashSegment3: 'cdef', createdAt: now, updatedAt: now }).success).toBe(true);
     expect(imageCaptionRecordSchema.safeParse({ key, scopeKey, sourceImageKey: key, caption: ' ', embedding, perceptualHash: null, hashAlgorithm: null, hashSegment0: null, hashSegment1: null, hashSegment2: null, hashSegment3: null, createdAt: now, updatedAt: now }).success).toBe(false);
   });
@@ -34,7 +34,7 @@ describe('MediaLibrary node contracts', () => {
     expect(collectionInviteSchema.safeParse(invite).success).toBe(false);
     const share = shareSchema.parse({ key, scopeKey, sourceType: 'image', sourceKey: key, permission: 'read', tokenHash: 'b'.repeat(64), token: 'plaintext', responseCiphertext: 'v1:private:replay:value', createdAt: now, updatedAt: now });
     expect(share).not.toHaveProperty('token'); expect(share).not.toHaveProperty('responseCiphertext'); expect(share).not.toHaveProperty('embedding');
-    expect(sourceTypeSchema.safeParse('place').success).toBe(true); expect(sourceTypeSchema.safeParse('trip').success).toBe(false);
+    expect(sourceTypeSchema.safeParse('place').success).toBe(true); expect(sourceTypeSchema.safeParse('trip').success).toBe(true); expect(sourceTypeSchema.safeParse('file').success).toBe(false);
     expect(shareSourceTypeSchema.safeParse('place').success).toBe(true); expect(shareSourceTypeSchema.safeParse('trip').success).toBe(false);
   });
 });
