@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const ORGANIZATION_CONNECTORS_COLLECTION = 'organizationConnectors';
+export const TEAM_CONNECTORS_COLLECTION = 'teamConnectors';
 
 export const emailProviderSchema = z.literal('gmail');
 export type EmailProvider = z.infer<typeof emailProviderSchema>;
@@ -15,9 +15,9 @@ export const emailConnectorCredentialsSchema = oauthEmailConnectorCredentialsSch
 export type EmailConnectorCredentials = z.infer<typeof emailConnectorCredentialsSchema>;
 export type OAuthEmailConnectorCredentials = z.infer<typeof oauthEmailConnectorCredentialsSchema>;
 
-export const organizationConnectorSchema = z.object({
+export const teamConnectorSchema = z.object({
   key: z.string().cuid(),
-  organizationKey: z.string().min(1),
+  teamKey: z.string().min(1),
   scopeKey: z.string().cuid(),
   provider: emailProviderSchema,
   providerAccountId: z.string().min(1),
@@ -26,10 +26,9 @@ export const organizationConnectorSchema = z.object({
   encryptionKeyId: z.string().min(1),
   accessTokenFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   scopes: z.array(z.string().min(1)).min(1),
-  createdByMembershipKey: z.string().cuid(),
+  createdByTeamMembershipKey: z.string().cuid(),
   billingUserKey: z.string().cuid().optional(),
-  billingStatus: z.enum(['funded', 'unfunded', 'recovery-pending', 'disabled']).optional(),
-  billingPeriodStartedAt: z.string().datetime().optional(),
+  initialSyncChargeKey: z.string().cuid().optional(),
   status: z.enum(['active', 'error', 'revoked']),
   syncEnabled: z.boolean().default(true),
   initialSyncCompleted: z.boolean().default(false),
@@ -53,4 +52,4 @@ export const organizationConnectorSchema = z.object({
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 }).strict();
-export type OrganizationConnector = z.infer<typeof organizationConnectorSchema>;
+export type TeamConnector = z.infer<typeof teamConnectorSchema>;

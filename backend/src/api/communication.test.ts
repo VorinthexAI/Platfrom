@@ -5,9 +5,9 @@ import { buildMentionRoster, createCommunicationHandlers, orchestratorPromptMess
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
 import { orchestratorResponseRuntime } from '@/lib/ai/orchestrator-response-runtime';
 
-const organizationKey = 'root-org';
+const teamKey = 'root-team';
 const channelKey = newId();
-const actor = { organizationKey, membershipKey: newId(), name: 'Anton' };
+const actor = { teamKey, teamMembershipKey: newId(), name: 'Anton' };
 
 function parseSse(text: string) {
   return text.trim().split('\n\n').map((block) => {
@@ -57,14 +57,14 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
         ...dependencies,
         embedRetrievalQuery: async () => [1, 0],
         queryRetrieval: async (query, bindVars) => { retrievalQueries.push({ query, bindVars }); return { all: async () => [{ key: 'prior-message', fields: { content: 'The launch is Friday.' }, createdAt: '2026-07-28T12:00:00.000Z', score: 0.9 }] }; },
-        stream: async function* (_organizationKey, chatInput) { novaInputs.push(chatInput); yield { type: 'text-delta', text: 'Retrieved answer' }; yield { type: 'done' }; },
+        stream: async function* (_teamKey, chatInput) { novaInputs.push(chatInput); yield { type: 'text-delta', text: 'Retrieved answer' }; yield { type: 'done' }; },
       });
       return (async function* () { if (options.abort) throw new DOMException('cancelled', 'AbortError'); if (options.fail || (options.failSkill && skill.includes(options.failSkill))) throw new Error('provider unavailable'); yield { type: 'text-delta', text: options.output ?? 'Hi ' }; if (options.gate) await Promise.race([options.gate, new Promise((_, reject) => dependencies.signal?.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true }))]); if (options.partialFail) throw new Error('provider interrupted'); if (!options.output) yield { type: 'text-delta', text: 'there' }; yield { type: 'done' }; })();
     },
     listScopes: async (resolved) => {
       expect(resolved).toEqual(actor);
       if (options.failScopes) throw new Error('malformed scope data');
-      return [{ name: 'HQ', description: 'The organization workspace.' }, { name: 'Ignored', description: null }];
+      return [{ name: 'HQ', description: 'The team workspace.' }, { name: 'Ignored', description: null }];
     },
     publishTyping: async (event) => { typingEvents.push(event); },
     channelLease: {
@@ -75,11 +75,11 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   });
   const app = new Hono();
   app.onError((_error, c) => c.json({ error: 'invalid request' }, 400));
-  app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages', handlers.postMessage);
-  app.get('/founders/organizations/:organizationKey/communication/reactions', handlers.frequentReactions);
-  app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/typing', handlers.typing);
-  app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages/:messageKey/replies', handlers.readReplies);
-  app.patch('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages/:messageKey', handlers.editMessage);
+  app.post('/founders/teams/:teamKey/communication/channels/:channelKey/messages', handlers.postMessage);
+  app.get('/founders/teams/:teamKey/communication/reactions', handlers.frequentReactions);
+  app.post('/founders/teams/:teamKey/communication/channels/:channelKey/typing', handlers.typing);
+  app.get('/founders/teams/:teamKey/communication/channels/:channelKey/messages/:messageKey/replies', handlers.readReplies);
+  app.patch('/founders/teams/:teamKey/communication/channels/:channelKey/messages/:messageKey', handlers.editMessage);
   return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, orchestrators, retrievalQueries, novaInputs, typingEvents, replyReads, edits, leaseEvents };
 }
 
@@ -87,7 +87,7 @@ describe('Communication SSE API', () => {
   test('reads replies by their recursive parent message', async () => {
     const { app, replyReads } = appFor();
     const messageKey = newId();
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages/${messageKey}/replies`);
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages/${messageKey}/replies`);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ parentMessageKey: messageKey, messages: [] });
@@ -97,7 +97,7 @@ describe('Communication SSE API', () => {
   test('edits a message with a strict content-only body', async () => {
     const { app, edits } = appFor();
     const messageKey = newId();
-    const url = `/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages/${messageKey}`;
+    const url = `/founders/teams/${teamKey}/communication/channels/${channelKey}/messages/${messageKey}`;
     const response = await app.request(url, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Updated message' }) });
     const invalid = await app.request(url, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Updated again', author: 'forged' }) });
 
@@ -128,7 +128,7 @@ describe('Communication SSE API', () => {
 
   test('returns 401 before parsing a message for an unauthenticated request', async () => {
     const { app } = appFor({ authenticated: false });
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: 'authentication required' });
   });
@@ -136,7 +136,7 @@ describe('Communication SSE API', () => {
   test('accepts opaque public channel keys when posting a message', async () => {
     const opaqueChannelKey = 'channel_general';
     const { app, persisted } = appFor();
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${opaqueChannelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${opaqueChannelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
 
     expect(response.status).toBe(200);
     expect(await response.text()).toContain('event: complete');
@@ -147,7 +147,7 @@ describe('Communication SSE API', () => {
     const { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, orchestrators, typingEvents } = appFor({ orchestratorCount: 2 });
     const threadKey = newId();
     const replyToMessageKey = newId();
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@ATLAS, @Nova; @Atlas: @Vincent hello', threadKey, replyToMessageKey }) });
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@ATLAS, @Nova; @Atlas: @Vincent hello', threadKey, replyToMessageKey }) });
     const text = await response.text();
     const events = parseSse(text);
     expect(response.headers.get('content-type')).toContain('text/event-stream');
@@ -161,7 +161,7 @@ describe('Communication SSE API', () => {
     expect(persisted).toEqual(['user', 'assistant', 'assistant']);
     expect(streamInputs).toEqual([{ message: '@Vincent hello' }, { message: '@Vincent hello' }]);
     expect(events[0]?.data).toMatchObject({ userMessage: { content: '@ATLAS, @Nova; @Atlas: @Vincent hello' } });
-    expect(streamDependencies[0]).toMatchObject({ organizationKey, retrievalContext: { organizationKey, membershipKey: actor.membershipKey, exclude: { messages: [expect.any(String)] } } });
+    expect(streamDependencies[0]).toMatchObject({ teamKey, retrievalContext: { teamKey, teamMembershipKey: actor.teamMembershipKey, exclude: { messages: [expect.any(String)] } } });
     expect((streamDependencies[1] as { retrievalContext: { exclude: { messages: string[] } } }).retrievalContext.exclude.messages).toEqual([(events[0]?.data.userMessage as { key: string }).key]);
     expect(assistantCalls[0]?.slice(2)).toEqual(['Hi there', threadKey, replyToMessageKey, (events[0]?.data.userMessage as { key: string }).key]);
     expect(assistantCalls[1]?.slice(2)).toEqual(['Hi there', threadKey, replyToMessageKey, (events[0]?.data.userMessage as { key: string }).key]);
@@ -180,37 +180,37 @@ describe('Communication SSE API', () => {
       expect(skill).toContain('Do not describe yourself in the third person or answer on behalf of a group.');
       expect(skill).toContain('detailed, self-contained plain-text answer');
       expect(skill).toContain('Other orchestrator mentions only select independent recipients');
-      expect(skill).toContain('## Organization scopes\nHQ: The organization workspace.');
+      expect(skill).toContain('## Team scopes\nHQ: The team workspace.');
       expect(skill).not.toContain('Ignored');
     }
   });
 
   test('runs authorized retrieval before the orchestrator Nova chat response', async () => {
     const { app, retrievalQueries, novaInputs } = appFor({ throughResponseRuntime: true });
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas explain the launch' }) });
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas explain the launch' }) });
     const events = parseSse(await response.text());
     expect(events.map(({ event }) => event)).toEqual(['start', 'assistant-start', 'token', 'done', 'complete']);
     expect(events[2]?.data).toMatchObject({ text: 'Retrieved answer' });
-    expect(retrievalQueries[0]?.bindVars).toMatchObject({ organizationKey, membershipKey: actor.membershipKey, excludeKeys: [expect.any(String)], filterOrganizationKey: organizationKey, dimensions: 2, limit: 50 });
+    expect(retrievalQueries[0]?.bindVars).toMatchObject({ teamKey, teamMembershipKey: actor.teamMembershipKey, excludeKeys: [expect.any(String)], filterTeamKey: teamKey, dimensions: 2, limit: 50 });
     expect(retrievalQueries[0]?.bindVars).not.toHaveProperty('collectionName');
     expect(novaInputs[0]).toMatchObject({ systemPrompt: expect.stringContaining('The launch is Friday.'), messages: [{ role: 'user', content: [{ type: 'text', text: '@Atlas explain the launch' }] }] });
   });
 
   test('continues with empty scope context when listing scopes fails', async () => {
     const { app, persisted, streamSkills } = appFor({ failScopes: true });
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
     const text = await response.text();
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/event-stream');
     expect(text).toContain('event: complete');
     expect(text).not.toContain('malformed scope data');
     expect(persisted).toEqual(['user', 'assistant']);
-    expect(streamSkills[0]).not.toContain('Organization scopes');
+    expect(streamSkills[0]).not.toContain('Team scopes');
   });
 
   test('emits one complete event when no orchestrator is selected', async () => {
     const { app, persisted } = appFor({ orchestratorCount: 0 });
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
     const text = await response.text();
     expect(text).toContain('event: start');
     expect(text).not.toContain('event: assistant-start');
@@ -221,7 +221,7 @@ describe('Communication SSE API', () => {
 
   test('reports a missing canonical orchestrator instead of completing silently', async () => {
     const { app, persisted } = appFor({ orchestratorCount: 0 });
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas hello' }) });
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas hello' }) });
     const events = parseSse(await response.text());
     expect(events.map(({ event }) => event)).toEqual(['start', 'error']);
     expect(events[1]?.data.error).toBe('mentioned orchestrator is unavailable');
@@ -230,29 +230,29 @@ describe('Communication SSE API', () => {
 
   test('lists the ten most-used reactions for the authenticated user', async () => {
     const { app } = appFor();
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/reactions`);
+    const response = await app.request(`/founders/teams/${teamKey}/communication/reactions`);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ reactions: [{ reaction: '🔥', count: 3 }] });
   });
 
   test('publishes authenticated member typing state for the channel', async () => {
     const { app, typingEvents } = appFor();
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/typing`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ active: true }) });
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/typing`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ active: true }) });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
-    expect(typingEvents).toEqual([expect.objectContaining({ organizationKey, channelKey, participantKey: expect.any(String), type: 'user', name: 'Anton', active: true, expiresAt: expect.any(Number) })]);
+    expect(typingEvents).toEqual([expect.objectContaining({ teamKey, channelKey, participantKey: expect.any(String), type: 'user', name: 'Anton', active: true, expiresAt: expect.any(Number) })]);
   });
 
   test('keeps founder-gate denial distinct from authentication denial', async () => {
     const { app } = appFor({ forbidden: true });
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: 'founders gate access required' });
   });
 
   test('bounds provider output consistently across streaming and persistence', async () => {
     const { app, assistantCalls } = appFor({ output: `${'x'.repeat(8_100)}😀` });
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
     const events = parseSse(await response.text());
     const tokens = events.filter(({ event }) => event === 'token').map(({ data }) => data.text).join('');
     const canonical = (events.find(({ event }) => event === 'done')?.data.message as { content: string }).content;
@@ -263,7 +263,7 @@ describe('Communication SSE API', () => {
 
   test('keeps partial provider output identical across tokens, persistence, and done', async () => {
     const { app, assistantCalls } = appFor({ partialFail: true });
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
     const events = parseSse(await response.text());
     const tokens = events.filter(({ event }) => event === 'token').map(({ data }) => data.text).join('');
     const canonical = (events.find(({ event }) => event === 'done')?.data.message as { content: string }).content;
@@ -274,7 +274,7 @@ describe('Communication SSE API', () => {
 
   test('persists a fallback when the provider aborts without a client cancellation', async () => {
     const { app, persisted } = appFor({ abort: true });
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
     const events = parseSse(await response.text());
     expect(events.map(({ event }) => event)).toEqual(['start', 'assistant-start', 'token', 'done', 'complete']);
     expect(events[2]?.data.text).toBe('I could not generate a response right now. Please try again.');
@@ -285,7 +285,7 @@ describe('Communication SSE API', () => {
     const gate = new Promise<void>(() => {});
     const controller = new AbortController();
     const { app, persisted } = appFor({ gate });
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }), signal: controller.signal });
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }), signal: controller.signal });
     const consuming = response.text();
     await new Promise((resolve) => setTimeout(resolve, 0));
     controller.abort();
@@ -297,7 +297,7 @@ describe('Communication SSE API', () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const { app, streamSkills } = appFor({ orchestratorCount: 2, gate });
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas @Nova compare plans' }) });
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas @Nova compare plans' }) });
     const consuming = response.text();
     for (let attempt = 0; attempt < 20 && streamSkills.length < 2; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 0));
     expect(streamSkills).toHaveLength(2);
@@ -311,7 +311,7 @@ describe('Communication SSE API', () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const { app } = appFor({ gate });
-    const request = () => app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
+    const request = () => app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
     const first = await request();
     const consuming = first.text();
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -325,14 +325,14 @@ describe('Communication SSE API', () => {
 
   test('rejects a channel held by another process and caps provider fan-out', async () => {
     const held = appFor({ leaseUnavailable: true });
-    const heldResponse = await held.app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas hello' }) });
+    const heldResponse = await held.app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas hello' }) });
     expect(heldResponse.status).toBe(409);
     expect(held.persisted).toEqual([]);
     expect(held.leaseEvents).toEqual(['acquire']);
 
     const capped = appFor({ orchestratorCount: 5 });
     const mentions = CANONICAL_ORCHESTRATOR_NAMES.slice(0, 5).map((name) => `@${name}`).join(' ');
-    const cappedResponse = await capped.app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: mentions }) });
+    const cappedResponse = await capped.app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: mentions }) });
     expect(cappedResponse.status).toBe(400);
     expect(capped.persisted).toEqual([]);
     expect(capped.leaseEvents).toEqual([]);
@@ -340,12 +340,12 @@ describe('Communication SSE API', () => {
 
   test('deduplicates the resolved roster and caps the actual resolved recipients before persistence', async () => {
     const duplicate = appFor({ orchestratorCount: 1, duplicateResolved: true });
-    const events = parseSse(await (await duplicate.app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) })).text());
+    const events = parseSse(await (await duplicate.app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) })).text());
     expect(events.filter(({ event }) => event === 'assistant-start')).toHaveLength(1);
     expect(duplicate.assistantCalls).toHaveLength(1);
 
     const overflow = appFor({ orchestratorCount: 5 });
-    const response = await overflow.app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
+    const response = await overflow.app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
     expect(response.status).toBe(400);
     expect(overflow.persisted).toEqual([]);
     expect(overflow.leaseEvents).toEqual([]);
@@ -353,7 +353,7 @@ describe('Communication SSE API', () => {
 
   test('aborts and joins every worker before release when lease refresh fails', async () => {
     const failed = appFor({ orchestratorCount: 2, leaseRefreshFails: true });
-    const events = parseSse(await (await failed.app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas @Nova hello' }) })).text());
+    const events = parseSse(await (await failed.app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas @Nova hello' }) })).text());
     expect(failed.persisted).toEqual(['user']);
     expect(events.some(({ event }) => event === 'done' || event === 'complete' || event === 'assistant-error' || event === 'error')).toBe(false);
     expect(failed.leaseEvents.at(-1)).toBe('release');
@@ -361,22 +361,22 @@ describe('Communication SSE API', () => {
 
   test('suppresses done and completion when the lease is lost during persistence', async () => {
     const lost = appFor({ leaseRefreshResults: [true, false] });
-    const events = parseSse(await (await lost.app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas hello' }) })).text());
+    const events = parseSse(await (await lost.app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas hello' }) })).text());
     expect(lost.persisted).toEqual(['user', 'assistant']);
     expect(events.some(({ event }) => event === 'done' || event === 'complete' || event === 'assistant-error' || event === 'error')).toBe(false);
     expect(lost.leaseEvents.at(-1)).toBe('release');
   });
 
-  test('scopes local locks by organization and settles workers before lease release', async () => {
+  test('scopes local locks by team and settles workers before lease release', async () => {
     const source = await Bun.file(new URL('./communication.ts', import.meta.url)).text();
-    expect(source).toContain('const localChannelKey = `${resolved.organizationKey}:${channelKey}`');
+    expect(source).toContain('const localChannelKey = `${resolved.teamKey}:${channelKey}`');
     expect(source).toContain('await Promise.allSettled(workers)');
     expect(source.indexOf('await Promise.allSettled(workers)', source.indexOf('finally {'))).toBeLessThan(source.indexOf('await lease.release', source.indexOf('finally {')));
   });
 
   test('persists a truthful response for every mentioned orchestrator when all providers fail', async () => {
     const { app, persisted, assistantCalls, streamSkills, orchestrators } = appFor({ orchestratorCount: 3, fail: true });
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
     const text = await response.text();
     const events = parseSse(text);
     expect(events.filter(({ event }) => event === 'done').map(({ data }) => data.orchestratorKey)).toEqual(orchestrators.map(({ key }) => key));
@@ -385,20 +385,20 @@ describe('Communication SSE API', () => {
     expect(persisted).toEqual(['user', 'assistant', 'assistant', 'assistant']);
     expect(assistantCalls.map((call) => call[2])).toEqual(orchestrators.map(() => 'I could not generate a response right now. Please try again.'));
     expect(streamSkills).toHaveLength(3);
-    const retried = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'retry' }) });
+    const retried = await app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'retry' }) });
     expect(retried.status).toBe(200);
   });
 
   test('isolates provider and persistence failures between concurrent recipients', async () => {
     const providerFailure = appFor({ orchestratorCount: 2, failSkill: 'Lead.' });
-    const providerEvents = parseSse(await (await providerFailure.app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas @Nova answer independently' }) })).text());
+    const providerEvents = parseSse(await (await providerFailure.app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas @Nova answer independently' }) })).text());
     const atlasDone = providerEvents.find(({ event, data }) => event === 'done' && data.orchestratorKey === providerFailure.orchestrators[0]!.key);
     const novaDone = providerEvents.find(({ event, data }) => event === 'done' && data.orchestratorKey === providerFailure.orchestrators[1]!.key);
     expect((atlasDone?.data.message as { content: string }).content).toContain('could not generate');
     expect((novaDone?.data.message as { content: string }).content).toBe('Hi there');
 
     const persistenceFailure = appFor({ orchestratorCount: 2, failPersistenceSkill: 'Lead.' });
-    const persistenceEvents = parseSse(await (await persistenceFailure.app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas @Nova persist independently' }) })).text());
+    const persistenceEvents = parseSse(await (await persistenceFailure.app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas @Nova persist independently' }) })).text());
     expect(persistenceEvents.some(({ event, data }) => event === 'assistant-error' && data.orchestratorKey === persistenceFailure.orchestrators[0]!.key)).toBe(true);
     expect(persistenceEvents.some(({ event, data }) => event === 'done' && data.orchestratorKey === persistenceFailure.orchestrators[1]!.key)).toBe(true);
     expect(persistenceEvents.at(-1)?.event).toBe('complete');
@@ -406,17 +406,17 @@ describe('Communication SSE API', () => {
 
   test('emits assistant-error when the fallback response cannot be persisted', async () => {
     const { app, persisted, orchestrators } = appFor({ fail: true, failPersistence: true });
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
     const events = parseSse(await response.text());
     expect(events.some(({ event, data }) => event === 'assistant-error' && data.orchestratorKey === orchestrators[0]!.key)).toBe(true);
     expect(events.some(({ event }) => event === 'done')).toBe(false);
     expect(persisted).toEqual(['user']);
   });
 
-  test('uses the shared founder gate and founder user key for target organization access', async () => {
+  test('uses the shared founder gate and founder user key for target team access', async () => {
     const source = await Bun.file(new URL('./communication.ts', import.meta.url)).text();
     expect(source).toContain('await requireFounder(c)');
-    expect(source).toContain('requireOrganizationAccess(auth.founder.user.key, requestedOrganizationKey)');
+    expect(source).toContain('requireTeamAccess(auth.founder.user.key, requestedTeamKey)');
     expect(source).not.toContain("identity.identityType !== 'user'");
   });
 

@@ -12,13 +12,13 @@ import { createAppSearchService, type AppSearchInput, type AppSearchResult, type
 const id = (value: number) => `c${String(value).padStart(24, '0')}`;
 const at = '2026-09-03T10:00:00.000Z';
 const oldAt = '2026-05-10T08:00:00.000Z';
-const organizationKey = id(1), scopeKey = id(2), userKey = id(3), membershipKey = id(4), conversationKey = id(5);
+const teamKey = id(1), scopeKey = id(2), userKey = id(3), teamMembershipKey = id(4), conversationKey = id(5);
 const workTag = { key: id(130), scopeKey, userKey, name: 'Work', normalizedName: 'work', description: 'Professional projects', embedding: Array(EMBEDDING_DIMENSIONS).fill(0.01), createdAt: oldAt, updatedAt: at };
 const priorityTag = { key: id(131), scopeKey, userKey, name: 'Priority', normalizedName: 'priority', description: 'Important items', embedding: Array(EMBEDDING_DIMENSIONS).fill(0.02), createdAt: at, updatedAt: at };
 const context = {
-  organizationKey,
+  teamKey,
   runtimeScopeKey: scopeKey,
-  principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: membershipKey, organizationId: organizationKey, userId: userKey, status: 'active' } },
+  principal: { kind: 'member', user: { key: userKey }, userTeam: { key: teamMembershipKey, teamKey: teamKey, userId: userKey, status: 'active' } },
 } as unknown as ToolContext;
 const embedding = Array(EMBEDDING_DIMENSIONS).fill(0.01);
 
@@ -33,8 +33,8 @@ const documents = [
   { key: id(23), scopeKey, name: 'Travel Tickets.pdf', folderKey: folders[1]!.key, folder: { key: folders[1]!.key, name: folders[1]!.name }, extension: 'pdf', mimeType: 'application/pdf', sizeBytes: 500, isFavorite: false, content: 'Rail tickets for Stockholm.', createdAt: at, updatedAt: at },
 ];
 const galleryCollections = [
-  { key: id(30), name: 'Coastal Days', description: 'Sea and lighthouse photos', purpose: null, mutationPolicy: 'user', presentation: 'travel', isFavorite: true, count: 2, coverUrl: null, memberKey: membershipKey, isOwned: true, role: 'owner', access: { canRead: true, canContribute: true, canManage: true }, createdAt: oldAt, updatedAt: at },
-  { key: id(31), name: 'Family', description: 'Family photos', purpose: null, mutationPolicy: 'user', isFavorite: false, count: 1, coverUrl: null, memberKey: membershipKey, isOwned: true, role: 'owner', access: { canRead: true, canContribute: true, canManage: true }, createdAt: at, updatedAt: at },
+  { key: id(30), name: 'Coastal Days', description: 'Sea and lighthouse photos', purpose: null, mutationPolicy: 'user', presentation: 'travel', isFavorite: true, count: 2, coverUrl: null, actorKey: teamMembershipKey, isOwned: true, role: 'owner', access: { canRead: true, canContribute: true, canManage: true }, createdAt: oldAt, updatedAt: at },
+  { key: id(31), name: 'Family', description: 'Family photos', purpose: null, mutationPolicy: 'user', isFavorite: false, count: 1, coverUrl: null, actorKey: teamMembershipKey, isOwned: true, role: 'owner', access: { canRead: true, canContribute: true, canManage: true }, createdAt: at, updatedAt: at },
 ] as const;
 const image = (key: string, filename: string, caption: string, sizeBytes: number, collections: Array<{ key: string; name: string }>) => ({
   key, filename, caption, imageCaptionKey: null, mimeType: 'image/jpeg', sizeBytes, width: 1_600, height: 900,
@@ -58,7 +58,7 @@ const tones = [
 const messages = [
   { key: id(70), connectorKey: inboxes[0].connectorKey, subject: 'Launch code', summary: 'Production launch credentials', intent: 'Review the launch code', priority: 'urgent', state: 'needs_action', lastMessageAt: at, unread: true, isRead: false, isFavorite: true, inboxCategory: 'Urgent', createdAt: oldAt, updatedAt: at, score: 0.95 },
   { key: id(71), connectorKey: inboxes[0].connectorKey, subject: 'Quarterly review', summary: 'Review agenda', intent: 'Attend review', priority: 'normal', state: 'informational', lastMessageAt: at, unread: true, isRead: false, isFavorite: false, inboxCategory: 'Important', createdAt: at, updatedAt: at, score: 0.8 },
-  { key: id(72), connectorKey: inboxes[0].connectorKey, subject: 'Old receipt', summary: 'Receipt archive', intent: 'Archive', priority: 'low', state: 'done', lastMessageAt: oldAt, unread: false, isRead: true, isFavorite: false, inboxCategory: 'Filtered', createdAt: oldAt, updatedAt: oldAt, score: 0.7 },
+  { key: id(72), connectorKey: inboxes[0].connectorKey, subject: 'Old receipt', summary: 'Receipt archive', intent: 'Archive', priority: 'low', state: 'done', lastMessageAt: oldAt, unread: false, isRead: true, isFavorite: false, inboxCategory: 'Purchases', createdAt: oldAt, updatedAt: oldAt, score: 0.7 },
 ] as const;
 const drafts = [
   { key: id(80), variant: 'new', connectorKey: inboxes[0].connectorKey, to: ['team@example.test'], subject: 'Lisbon itinerary', instruction: 'Share the itinerary', generatedContent: 'Here is the Lisbon itinerary.', status: 'generated', createdAt: oldAt, updatedAt: at, score: 0.9 },
@@ -125,7 +125,7 @@ function createSeededAppSearchService() {
     }
     throw new Error(`Unexpected content tool ${tool}`);
   };
-  const overviewCounts = { all: messages.length, important: 1, urgent: 1, needsAction: 1, filtered: 1, unread: 2, favorite: 1, trash: 0 };
+  const overviewCounts = { all: messages.length, important: 1, urgent: 1, purchases: 1, needsAction: 1, filtered: 0, unread: 2, favorite: 1, trash: 0 };
   return createAppSearchService({
     scopeTags,
     executeEmbedding: async () => ({ embedding }),
@@ -139,7 +139,7 @@ function createSeededAppSearchService() {
     email: {
       overview: async (_actor: unknown, raw: any = {}) => {
         const connectorMessages = messages.filter((item) => !raw.connectorKey || item.connectorKey === raw.connectorKey);
-        const selected = inDateRange(connectorMessages, raw).filter((item) => (!raw.readState || (raw.readState === 'unread' ? item.unread : !item.unread)) && (!raw.facets?.length || raw.facets.every((facet: string) => facet === 'urgent' ? item.inboxCategory === 'Urgent' : facet === 'important' ? item.inboxCategory === 'Important' : facet === 'filtered' ? item.inboxCategory === 'Filtered' : item.isFavorite)));
+        const selected = inDateRange(connectorMessages, raw).filter((item) => (!raw.readState || (raw.readState === 'unread' ? item.unread : !item.unread)) && (!raw.facets?.length || raw.facets.every((facet: string) => facet === 'urgent' ? item.inboxCategory === 'Urgent' : facet === 'important' ? item.inboxCategory === 'Important' : facet === 'purchases' ? item.inboxCategory === 'Purchases' : (facet as string) === 'filtered' ? String(item.inboxCategory) === 'Filtered' : item.isFavorite)));
         return { accounts: inboxes, tones, threads: selected, drafts, counts: overviewCounts, nextCursor: null };
       },
       searchInboxes: async (_actor: unknown, raw: any) => ({ inboxes: inDateRange(inboxes, raw).filter((item) => contains(item, raw.query)) }),
@@ -342,7 +342,7 @@ const evaluationCases = scenarios.flatMap((scenario) => locales.map(({ locale, m
 })));
 
 const rawAnswerFragments = [
-  organizationKey, scopeKey, userKey, membershipKey, conversationKey,
+  teamKey, scopeKey, userKey, teamMembershipKey, conversationKey,
   ...folders.map(({ key }) => key), ...documents.map(({ key }) => key), ...galleryCollections.map(({ key }) => key),
   ...images.map(({ key }) => key), ...inboxes.flatMap(({ key, connectorKey }) => [key, connectorKey]),
   ...tones.map(({ key }) => key), ...messages.flatMap(({ key, connectorKey }) => [key, connectorKey]),
@@ -352,7 +352,7 @@ const rawAnswerFragments = [
 ];
 
 function providerQueue(responses: ProviderStreamChunk[][], inputs: CoreChatInput[]) {
-  return async function* (_organization: string, input: CoreChatInput) {
+  return async function* (_team: string, input: CoreChatInput) {
     inputs.push(input);
     const response = responses.shift();
     if (!response) throw new Error('The deterministic provider received an unexpected request.');

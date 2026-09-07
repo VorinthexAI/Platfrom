@@ -46,17 +46,17 @@ export async function findReusableImageCaption(
   const hash = perceptualHashSchema.parse(perceptualHash);
   const segments = perceptualHashSegments(hash);
   const cursor = await database.query(`
-    LET actorMembership = DOCUMENT(userOrganizations, @actorKey)
+    LET actorMembership = DOCUMENT(userTeams, @actorKey)
     LET actorScope = DOCUMENT(scopes, @scopeKey)
     LET active = actorMembership != null
       && actorScope != null
       && actorMembership.status == "active"
-      && actorMembership.organizationId == actorScope.organizationKey
-    LET elevated = active && actorMembership.orgRole IN ["owner", "admin"]
+      && actorMembership.teamKey == actorScope.teamKey
+    LET elevated = active && actorMembership.teamRole IN ["owner", "admin"]
     LET scoped = active && LENGTH(
       FOR scopeMember IN scopeMembers
         FILTER scopeMember.scopeKey == @scopeKey
-        FILTER scopeMember.userOrganizationKey == @actorKey
+        FILTER scopeMember.userTeamKey == @actorKey
         FILTER scopeMember.status == "active"
         LIMIT 1
         RETURN 1
@@ -79,12 +79,9 @@ export async function findReusableImageCaption(
               FILTER relation.imageKey == image._key
               LET collection = DOCUMENT(collections, relation.collectionKey)
               FILTER collection != null && collection.scopeKey == @scopeKey
-              FOR member IN collectionMembers
-                FILTER member.scopeKey == @scopeKey
-                FILTER member.collectionKey == relation.collectionKey
-                FILTER member.memberKey == @actorKey
-                LIMIT 1
-                RETURN 1
+              FILTER collection.ownerKey == @actorKey
+              LIMIT 1
+              RETURN 1
           ) > 0
           FILTER elevated || scoped || collectionAccess
           LIMIT 1

@@ -3,7 +3,6 @@ import { countryCodeSchema, initializeUserNameIfMissing, userSchema } from './us
 
 const baseUser = {
   key: 'usr_test',
-  organizationId: 'org_root',
   currentScopeKey: 'cm1234567890123456789012345',
   email: 'user@example.com',
   emailHash: 'a'.repeat(64),
@@ -12,6 +11,10 @@ const baseUser = {
 };
 
 describe('user node schema', () => {
+  test('defaults the durable account deletion fence to inactive', () => {
+    expect(userSchema.parse(baseUser).deletionRequestedAt).toBeNull();
+    expect(userSchema.parse({ ...baseUser, deletionRequestedAt: '2026-09-06T10:00:00.000Z' }).deletionRequestedAt).toBe('2026-09-06T10:00:00.000Z');
+  });
   test('requires a current scope key', () => {
     expect(() => userSchema.parse({ ...baseUser, currentScopeKey: undefined })).toThrow();
   });
@@ -29,17 +32,14 @@ describe('user node schema', () => {
     expect(() => countryCodeSchema.parse('ZZ')).toThrow();
   });
 
-  test('keeps organization role and MFA fields off ordinary users', () => {
+  test('keeps team role and MFA fields off ordinary users', () => {
     const user = userSchema.parse(baseUser);
 
-    expect(user.refreshTokenExpiresAt).toBeNull();
-    expect(user.refreshFounderMembershipKey).toBeNull();
-    expect(user.refreshFounderMfaVersion).toBeNull();
     expect(user.isOnboarded).toBe(false);
     expect('settings' in user).toBe(false);
 
-    expect('organization_role' in user).toBe(false);
-    expect('organization_title' in user).toBe(false);
+    expect('team_role' in user).toBe(false);
+    expect('team_title' in user).toBe(false);
     expect('isMfaEnabled' in user).toBe(false);
     expect('has_request_mfa_reset_link' in user).toBe(false);
     expect('totpSecret' in user).toBe(false);
@@ -47,34 +47,13 @@ describe('user node schema', () => {
     expect('requested_mfa_reset_link_at' in user).toBe(false);
   });
 
-  test('strips legacy organization and MFA fields', () => {
-    const user = userSchema.parse({
-      ...baseUser,
-      organization_role: 'viewer',
-      organization_title: 'Operator',
-      isMfaEnabled: true,
-      totpSecret: 'secret',
-      lastTotpTimeStep: 123,
-      is_platform_member: true,
-      is_platform_owner: true,
-    });
-
-    expect('organization_role' in user).toBe(false);
-    expect('organization_title' in user).toBe(false);
-    expect('isMfaEnabled' in user).toBe(false);
-    expect('totpSecret' in user).toBe(false);
-    expect('lastTotpTimeStep' in user).toBe(false);
-    expect('is_platform_member' in user).toBe(false);
-    expect('is_platform_owner' in user).toBe(false);
-  });
-
   test('strips the retired settings blob', () => {
     expect(userSchema.parse({ ...baseUser, settings: { archive: { showOnlyFavorites: true } } })).not.toHaveProperty('settings');
   });
 
-  test('hard deletion atomically removes user generation history', async () => {
+  test('hard deletion atomically removes user generation and private commerce history', async () => {
     const source = await Bun.file(new URL('./users.node.ts', import.meta.url)).text();
-    expect(source).toContain("withTransaction(['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages', 'ticketVotes', 'tickets', 'events', 'sparkTransactions', 'storageDeletionJobs', 'tags', 'tagAssignments']");
+    expect(source).toContain("'checkoutHandoffs', 'paymentCheckouts', 'paymentOrders', 'subscriptions'");
     expect(source).toContain('FOR tag IN tags FILTER tag.userKey == @userKey REMOVE tag IN tags');
     expect(source.indexOf('REMOVE assignment IN tagAssignments')).toBeLessThan(source.indexOf('REMOVE tag IN tags'));
     expect(source).toContain('FOR generation IN userGenerations FILTER generation.userKey == @userKey REMOVE generation IN userGenerations');
@@ -84,6 +63,13 @@ describe('user node schema', () => {
     expect(source).toContain('upvotes = SUM(vote.vote == "up"');
     expect(source).toContain('FOR event IN events FILTER event.userId == @userKey REMOVE event IN events');
     expect(source).toContain('FOR item IN sparkTransactions FILTER item.userKey == @userKey REMOVE item IN sparkTransactions');
+    expect(source).toContain('FOR reward IN referralRewards FILTER reward.referrerUserKey == @userKey || reward.referredUserKey == @userKey REMOVE reward IN referralRewards');
+    expect(source).toContain('FOR attribution IN referralAttributions FILTER attribution.referrerUserKey == @userKey || attribution.referredUserKey == @userKey REMOVE attribution IN referralAttributions');
+    expect(source).toContain('FOR code IN referralCodes FILTER code.ownerUserKey == @userKey REMOVE code IN referralCodes');
+    expect(source).toContain('FOR handoff IN checkoutHandoffs FILTER handoff.userKey == @userKey REMOVE handoff IN checkoutHandoffs');
+    expect(source).toContain('FOR checkout IN paymentCheckouts FILTER checkout.userKey == @userKey REMOVE checkout IN paymentCheckouts');
+    expect(source).toContain('FOR order IN paymentOrders FILTER order.userKey == @userKey REMOVE order IN paymentOrders');
+    expect(source).toContain('FOR subscription IN subscriptions FILTER subscription.userKey == @userKey REMOVE subscription IN subscriptions');
     expect(source).toContain('IS_STRING(user.profileStorageKey) UPSERT { storageKey: user.profileStorageKey }');
     expect(source.indexOf('REMOVE generation IN userGenerations')).toBeLessThan(source.indexOf('REMOVE @userKey IN users'));
     expect(source.indexOf('REMOVE vote IN ticketVotes')).toBeLessThan(source.indexOf('REMOVE ticket IN tickets'));

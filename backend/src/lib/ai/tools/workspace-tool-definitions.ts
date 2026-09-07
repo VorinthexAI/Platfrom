@@ -13,6 +13,7 @@ import {
   compassCapabilities,
   hiddenListCapability,
   platformCapabilities,
+  scopeMutationCapabilities,
   signalCapabilities,
   tagCapabilities,
 } from '@/lib/ai/personal-assistant/service-capabilities';
@@ -24,6 +25,8 @@ import type { ToolContext } from './tool-context';
 import type { AppSearchService } from '@/lib/app-search/service';
 import type { AppTransformationService } from '@/lib/app-transformation/service';
 import type { AppSpeechService } from '@/lib/app-speech/service';
+import type { CommerceService } from '@/lib/commerce/service';
+import type { CostService } from '@/lib/costs/service';
 
 export interface WorkspaceToolDependencies {
   context: ToolContext;
@@ -43,6 +46,11 @@ export interface WorkspaceToolDependencies {
   scopeTags?: AssistantCapabilityContext['scopeTags'];
   accountProfile?: AssistantCapabilityContext['accountProfile'];
   tickets?: AssistantCapabilityContext['tickets'];
+  referrals?: AssistantCapabilityContext['referrals'];
+  commerce?: CommerceService;
+  costs?: CostService;
+  scopes?: AssistantCapabilityContext['scopes'];
+  appNotifications?: AssistantCapabilityContext['appNotifications'];
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -78,6 +86,11 @@ function publicDefinition(capability: AssistantCapability) {
         appSpeech: dependencies.appSpeech,
         accountProfile: dependencies.accountProfile,
         tickets: dependencies.tickets,
+        referrals: dependencies.referrals,
+        commerce: dependencies.commerce,
+        costs: dependencies.costs,
+        scopes: dependencies.scopes,
+        appNotifications: dependencies.appNotifications,
         scopeTags: dependencies.scopeTags,
         signal: dependencies.signal,
         timeoutMs: dependencies.timeoutMs,
@@ -96,6 +109,7 @@ const WORKSPACE_CAPABILITIES = Object.freeze([
   appSpeechCapability,
   hiddenListCapability,
   ...platformCapabilities,
+  ...scopeMutationCapabilities,
   ...tagCapabilities,
   ...archiveCapabilities,
   ...galleryAssistantCapabilities,
@@ -104,9 +118,10 @@ const WORKSPACE_CAPABILITIES = Object.freeze([
   ...ascendCapabilities,
 ]);
 
-export const WORKSPACE_MUTATION_TOOL_NAMES = Object.freeze(WORKSPACE_CAPABILITIES.filter((capability) => Boolean(capability.mutationWorkspace)).map((capability) => capability.definition.name));
+export const WORKSPACE_MUTATION_TOOL_NAMES = Object.freeze(WORKSPACE_CAPABILITIES.filter((capability) => Boolean(capability.mutationWorkspace) || capability.executionEffect === 'write').map((capability) => capability.definition.name));
 
 export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze(WORKSPACE_CAPABILITIES.filter(({ definition }) => !new Set([
+    'referral.summary.read',
     'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy',
     'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-versions', 'document.restore-version', 'document.download',
     'content.neighbors', 'content.search-history.delete',

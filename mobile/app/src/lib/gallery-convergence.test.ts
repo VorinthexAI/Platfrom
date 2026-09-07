@@ -2,8 +2,6 @@ import { expect, test } from "bun:test";
 import { GalleryRefreshCoalescer, galleryRefreshPlan, isCurrentContextGeneration, mergeGalleryRefreshPlans, reconcileDestination, reconcileGalleryPermissions, reconcileGalleryState, reconcileKeys, reconcileOptimisticUploads, reconcilePaginatedKeys, reconcilePaginatedSelected, reconcileSelected, reconcileUploadJobRegistry, recoverAssistantSearchMode, recoverContextualSearchFailure, replayPaginatedWindow, shouldRunGalleryAssistantTextSearch } from "./gallery-convergence";
 
 test("maps audited slugs to precise cache and mode families", () => {
-  expect([...galleryRefreshPlan("collection.invites.changed")]).toEqual(["collectionInvites", "incomingInvites"]);
-  expect([...galleryRefreshPlan("collection.shares.changed")]).toEqual(["shares"]);
   expect([...galleryRefreshPlan("subject.changed")]).toEqual(["subjects", "search"]);
   expect(galleryRefreshPlan("image.changed")).toEqual(new Set(["current", "search", "duplicates", "cleanup", "subjects", "upload", "highlights", "memories"]));
   expect(galleryRefreshPlan("upload.changed")).toEqual(new Set(["current", "search", "duplicates", "cleanup", "upload", "subjects"]));
@@ -13,25 +11,22 @@ test("maps audited slugs to precise cache and mode families", () => {
 });
 
 test("gates network families precisely by slug", () => {
-  expect([...galleryRefreshPlan("collection.index.changed")]).toEqual(["root", "access"]);
+  expect([...galleryRefreshPlan("collection.index.changed")]).toEqual(["root"]);
   expect([...galleryRefreshPlan("collection.content.changed")]).toEqual(["current", "search", "duplicates", "cleanup", "highlights", "memories"]);
-  expect([...galleryRefreshPlan("collection.access.changed")]).toEqual(["root", "access", "members", "cleanup"]);
-  expect([...galleryRefreshPlan("collection.invites.changed")]).not.toContain("root");
-  expect([...galleryRefreshPlan("collection.shares.changed")]).not.toContain("current");
 });
 
 test("reconnect is a complete recovery plan", () => {
   const recovery = galleryRefreshPlan("reconnect");
-  for (const family of ["root", "current", "access", "members", "collectionInvites", "incomingInvites", "shares", "subjects", "search", "duplicates", "cleanup", "upload", "highlights", "memories"] as const) expect(recovery.has(family)).toBe(true);
+  for (const family of ["root", "current", "subjects", "search", "duplicates", "cleanup", "upload", "highlights", "memories"] as const) expect(recovery.has(family)).toBe(true);
 });
 
 test("coalesces bursts and keeps one deferred refresh while busy", () => {
   const coordinator = new GalleryRefreshCoalescer();
   coordinator.add(galleryRefreshPlan("image.changed"));
-  coordinator.add(galleryRefreshPlan("collection.shares.changed"));
+  coordinator.add(galleryRefreshPlan("subject.changed"));
   expect(coordinator.takeIfReady(true)).toBeUndefined();
   expect(coordinator.hasPending).toBe(true);
-  expect(coordinator.takeIfReady(false)).toEqual(mergeGalleryRefreshPlans(galleryRefreshPlan("image.changed"), galleryRefreshPlan("collection.shares.changed")));
+  expect(coordinator.takeIfReady(false)).toEqual(mergeGalleryRefreshPlans(galleryRefreshPlan("image.changed"), galleryRefreshPlan("subject.changed")));
   expect(coordinator.hasPending).toBe(false);
 });
 
@@ -39,33 +34,32 @@ test("reconciles selected images, detail records, and writable destinations", ()
   expect(reconcileKeys(["gone", "kept"], ["kept", "other"])).toEqual(["kept"]);
   expect(reconcileSelected({ key: "kept", value: 1 }, [{ key: "kept", value: 2 }])).toEqual({ key: "kept", value: 2 });
   expect(reconcileSelected({ key: "gone" }, [{ key: "kept" }])).toBeUndefined();
-  const collections = [{ key: "source", role: "owner", access: { canContribute: true } }, { key: "viewer", role: "viewer", access: { canContribute: true } }, { key: "target", role: "collaborator", access: { canContribute: true } }];
+  const collections = [{ key: "source", access: { canContribute: true } }, { key: "read-only", access: { canContribute: false } }, { key: "target", access: { canContribute: true } }];
   expect(reconcileDestination("source", collections, "source")).toBeUndefined();
-  expect(reconcileDestination("viewer", collections)).toBeUndefined();
+  expect(reconcileDestination("read-only", collections)).toBeUndefined();
   expect(reconcileDestination("target", collections)).toBe("target");
 });
 
 test("rejects stale destination arrays whose capabilities are missing", () => {
-  expect(reconcileDestination("stale", [{ key: "stale", role: "collaborator" }])).toBeUndefined();
-  expect(reconcileDestination("viewer", [{ key: "viewer", role: "viewer", access: { canContribute: true } }])).toBeUndefined();
+  expect(reconcileDestination("stale", [{ key: "stale" }])).toBeUndefined();
 });
 
 test("preserves contextual mode while reconciling authoritative collection state", () => {
-  const collections = [{ key: "active", role: "owner", access: { canRead: true, canContribute: true } }, { key: "target", role: "collaborator", access: { canRead: true, canContribute: true } }];
+  const collections = [{ key: "active", access: { canRead: true, canContribute: true } }, { key: "target", access: { canRead: true, canContribute: true } }];
   expect(reconcileGalleryState({ mode: { kind: "similar", sourceKey: "source" }, activeCollectionKey: "active", selectedImageKeys: ["kept", "gone"], destinationCollectionKey: "target" }, collections, ["kept"])).toEqual({
     mode: { kind: "similar", sourceKey: "source" }, activeCollection: collections[0], accessLost: false, selectedImageKeys: ["kept"], destinationCollectionKey: "target",
   });
 });
 
 test("reports access loss and clears invalid state immediately", () => {
-  const collections = [{ key: "viewer", role: "viewer", access: { canRead: true, canContribute: false } }];
-  expect(reconcileGalleryState({ mode: "duplicates", activeCollectionKey: "removed", selectedImageKeys: ["gone"], destinationCollectionKey: "viewer" }, collections, [])).toEqual({
+  const collections = [{ key: "read-only", access: { canRead: true, canContribute: false } }];
+  expect(reconcileGalleryState({ mode: "duplicates", activeCollectionKey: "removed", selectedImageKeys: ["gone"], destinationCollectionKey: "read-only" }, collections, [])).toEqual({
     mode: "duplicates", activeCollection: undefined, accessLost: true, selectedImageKeys: [], destinationCollectionKey: undefined,
   });
 });
 
 test("does not crash while reconciling an active legacy collection without access", () => {
-  const legacy = { key: "active", role: "owner" };
+  const legacy = { key: "active" };
   expect(reconcileGalleryState({ mode: "collection", activeCollectionKey: "active", selectedImageKeys: [], destinationCollectionKey: "active" }, [legacy], [])).toEqual({
     mode: "collection", activeCollection: undefined, accessLost: true, selectedImageKeys: [], destinationCollectionKey: undefined,
   });
@@ -84,15 +78,10 @@ test("preserves off-page selections and detail until pagination is complete", ()
   expect(reconcilePaginatedSelected(selected, [{ key: "first", filename: "first.jpg" }], true)).toBeUndefined();
 });
 
-test("cleans restricted state after owner and contributor downgrades", () => {
-  expect(reconcileGalleryPermissions({ role: "collaborator", activeSheet: "duplicates", selectedImageKeys: ["own", "other"], mutableImageKeys: ["own"], destinationCollectionKey: "target" })).toMatchObject({ activeSheet: undefined, selectedImageKeys: ["own"], closeSheet: true });
-  expect(reconcileGalleryPermissions({ role: "viewer", activeSheet: "transferDestination", selectedImageKeys: ["image"], mutableImageKeys: [], destinationCollectionKey: "target" })).toEqual({ activeSheet: undefined, selectedImageKeys: [], destinationCollectionKey: undefined, closeSheet: true });
-  expect(reconcileGalleryPermissions({ role: "collaborator", canContribute: false, activeSheet: "actions", selectedImageKeys: [], mutableImageKeys: [] })).toEqual({ activeSheet: undefined, selectedImageKeys: [], destinationCollectionKey: undefined, closeSheet: true });
-  expect(reconcileGalleryPermissions({ role: "viewer", activeSheet: "cleanup", selectedImageKeys: [], mutableImageKeys: [] })).toMatchObject({ activeSheet: undefined, closeSheet: true });
-  expect(reconcileGalleryPermissions({ role: "collaborator", activeSheet: "cleanup", selectedImageKeys: [], mutableImageKeys: [] })).toMatchObject({ activeSheet: undefined, closeSheet: true });
-  expect(reconcileGalleryPermissions({ role: "collaborator", activeSheet: "cleanupMenu", selectedImageKeys: [], mutableImageKeys: [] })).toMatchObject({ activeSheet: "cleanupMenu", closeSheet: false });
-  expect(reconcileGalleryPermissions({ role: "collaborator", activeSheet: "confirmCleanupDelete", selectedImageKeys: [], mutableImageKeys: [] })).toMatchObject({ activeSheet: undefined, closeSheet: true });
-  expect(reconcileGalleryPermissions({ role: "owner", activeSheet: "cleanup", selectedImageKeys: [], mutableImageKeys: [] })).toMatchObject({ activeSheet: "cleanup", closeSheet: false });
+test("cleans restricted state when owner capabilities change", () => {
+  expect(reconcileGalleryPermissions({ hasCollection: true, canManage: false, activeSheet: "duplicates", selectedImageKeys: ["own", "other"], mutableImageKeys: ["own"], destinationCollectionKey: "target" })).toMatchObject({ activeSheet: undefined, selectedImageKeys: ["own"], closeSheet: true });
+  expect(reconcileGalleryPermissions({ hasCollection: true, canContribute: false, activeSheet: "actions", selectedImageKeys: [], mutableImageKeys: [] })).toEqual({ activeSheet: undefined, selectedImageKeys: [], destinationCollectionKey: undefined, closeSheet: true });
+  expect(reconcileGalleryPermissions({ hasCollection: true, canManage: true, activeSheet: "cleanup", selectedImageKeys: [], mutableImageKeys: [] })).toMatchObject({ activeSheet: "cleanup", closeSheet: false });
 });
 
 test("describes clean recovery for deleted identity and similar sources", () => {
@@ -101,8 +90,8 @@ test("describes clean recovery for deleted identity and similar sources", () => 
 });
 
 test("replays the loaded pagination window from page one", async () => {
-  const cursors: Array<string | undefined> = [];
-  const pages = new Map<string | undefined, { items: Array<{ key: string }>; nextCursor: string | null }>([
+  const cursors: (string | undefined)[] = [];
+  const pages = new Map<string | undefined, { items: { key: string }[]; nextCursor: string | null }>([
     [undefined, { items: [{ key: "a" }, { key: "b" }], nextCursor: "two" }],
     ["two", { items: [{ key: "c" }, { key: "d" }], nextCursor: "three" }],
     ["three", { items: [{ key: "e" }], nextCursor: null }],

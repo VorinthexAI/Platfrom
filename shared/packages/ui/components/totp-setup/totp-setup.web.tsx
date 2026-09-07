@@ -1,6 +1,7 @@
 import type { ImgHTMLAttributes, ReactNode } from "react";
 
 import { cn } from "../../utils";
+import { Button } from "../button/button.web";
 
 export type TotpSetupProps = {
   accountLabel?: string;
@@ -16,11 +17,18 @@ export type TotpSetupProps = {
   qrCodeImageSrc: string;
 };
 
+export function isValidTotpUri(value: string) {
+  try {
+    const uri = new URL(value);
+    return uri.protocol === "otpauth:" && uri.hostname === "totp" && Boolean(uri.pathname.replace(/^\//, ""));
+  } catch { return false; }
+}
+
 export function TotpSetup({
   accountLabel,
   children,
   className,
-  deepLinkLabel = "On mobile? Click here to set up.",
+  deepLinkLabel = "Open authenticator app",
   issuerLabel = "Authenticator app",
   otpauthUri,
   qrCodeImageProps,
@@ -48,9 +56,9 @@ export function TotpSetup({
         />
       </div>
 
-      <a className="vui-totp-setup-deep-link" href={otpauthUri}>
-        {deepLinkLabel}
-      </a>
+      <Button asChild disabled={!isValidTotpUri(otpauthUri)} size="md" variant="primary">
+        <a className="vui-totp-setup-deep-link" href={isValidTotpUri(otpauthUri) ? otpauthUri : undefined}>{deepLinkLabel}</a>
+      </Button>
 
       {children ? <div className="vui-totp-setup-extra">{children}</div> : null}
     </section>

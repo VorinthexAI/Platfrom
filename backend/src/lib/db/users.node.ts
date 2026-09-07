@@ -25,9 +25,10 @@ export const countryCodeSchema = z.enum([
 
 export const userSchema = z.object({
   key: z.string(),
-  organizationId: z.string(),
   currentScopeKey: z.string().cuid(),
   microSparkBalance: z.number().int().safe().nonnegative().default(0),
+  microSparkDebt: z.number().int().safe().nonnegative().default(0),
+  pendingReferralCode: z.string().regex(/^[A-F0-9]{12}$/).nullable().default(null),
   email: z.string(),
   emailHash: z.string(),
   countryCode: countryCodeSchema.default('SE'),
@@ -42,11 +43,9 @@ export const userSchema = z.object({
   is_subscribed_to_updates: z.boolean().default(true),
   is_subscribed_to_updates_unsubscribe_token_hash: z.string().nullable().default(null),
   is_subscribed_to_updates_unsubscribe_requested_at: z.string().nullable().default(null),
-  refreshTokenHash: z.string().nullable().default(null),
-  refreshTokenExpiresAt: z.string().datetime().nullable().default(null),
-  refreshFounderMembershipKey: z.string().nullable().default(null),
-  refreshFounderMfaVersion: z.number().int().nonnegative().nullable().default(null),
-  lastLoginAt: z.string().nullable().default(null),
+  deletionRequestedAt: z.string().datetime().nullable().default(null),
+  lastLoginAt: z.string().datetime().nullable().default(null),
+  lastSeenAt: z.string().datetime().nullable().default(null),
   createdAt: z.string(),
   updatedAt: z.string(),
   embedding: z.array(z.number()).default([]),
@@ -64,7 +63,7 @@ export const insertUser = helpers.insert;
 export const getUserById = helpers.getById;
 export const updateUser = helpers.updateById;
 export async function deleteUser(userKey: string): Promise<void> {
-  await withTransaction(['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages', 'ticketVotes', 'tickets', 'events', 'sparkTransactions', 'storageDeletionJobs', 'tags', 'tagAssignments'], async (transaction) => {
+  await withTransaction(['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages', 'ticketVotes', 'tickets', 'events', 'sparkTransactions', 'referralCodes', 'referralAttributions', 'referralRewards', 'checkoutHandoffs', 'paymentCheckouts', 'paymentOrders', 'subscriptions', 'storageDeletionJobs', 'tags', 'tagAssignments'], async (transaction) => {
     await transaction.query('LET tagKeys = (FOR tag IN tags FILTER tag.userKey == @userKey RETURN tag._key) FOR assignment IN tagAssignments FILTER assignment.tagKey IN tagKeys REMOVE assignment IN tagAssignments', { userKey });
     await transaction.query('FOR tag IN tags FILTER tag.userKey == @userKey REMOVE tag IN tags', { userKey });
     await transaction.query('FOR hidden IN userHiddens FILTER hidden.userKey == @userKey REMOVE hidden IN userHiddens', { userKey });
@@ -83,6 +82,13 @@ export async function deleteUser(userKey: string): Promise<void> {
     await transaction.query('FOR ticket IN tickets FILTER ticket.userKey == @userKey REMOVE ticket IN tickets', { userKey });
     await transaction.query('FOR event IN events FILTER event.userId == @userKey REMOVE event IN events', { userKey });
     await transaction.query('FOR item IN sparkTransactions FILTER item.userKey == @userKey REMOVE item IN sparkTransactions', { userKey });
+    await transaction.query('FOR reward IN referralRewards FILTER reward.referrerUserKey == @userKey || reward.referredUserKey == @userKey REMOVE reward IN referralRewards', { userKey });
+    await transaction.query('FOR attribution IN referralAttributions FILTER attribution.referrerUserKey == @userKey || attribution.referredUserKey == @userKey REMOVE attribution IN referralAttributions', { userKey });
+    await transaction.query('FOR code IN referralCodes FILTER code.ownerUserKey == @userKey REMOVE code IN referralCodes', { userKey });
+    await transaction.query('FOR handoff IN checkoutHandoffs FILTER handoff.userKey == @userKey REMOVE handoff IN checkoutHandoffs', { userKey });
+    await transaction.query('FOR checkout IN paymentCheckouts FILTER checkout.userKey == @userKey REMOVE checkout IN paymentCheckouts', { userKey });
+    await transaction.query('FOR order IN paymentOrders FILTER order.userKey == @userKey REMOVE order IN paymentOrders', { userKey });
+    await transaction.query('FOR subscription IN subscriptions FILTER subscription.userKey == @userKey REMOVE subscription IN subscriptions', { userKey });
     await transaction.query('LET user = DOCUMENT(users, @userKey) FILTER user != null && IS_STRING(user.profileStorageKey) UPSERT { storageKey: user.profileStorageKey } INSERT { storageKey: user.profileStorageKey, createdAt: @now } UPDATE {} IN storageDeletionJobs', { userKey, now: new Date().toISOString() });
     const cursor = await transaction.query('REMOVE @userKey IN users RETURN OLD._key', { userKey });
     if (await cursor.next() === undefined) throw new Error(`User ${userKey} was not found.`);
@@ -91,6 +97,28 @@ export async function deleteUser(userKey: string): Promise<void> {
 export const upsertUserByKey = helpers.upsertByKey;
 export const getAllUsersChunked = helpers.getAllChunked;
 export const listUsersPage = helpers.listPage;
+
+export async function touchUserLastSeen(userKey: string, seenAt: string): Promise<boolean> {
+  const timestamp = z.string().datetime().parse(seenAt);
+  const cursor = await db.query(`
+    FOR user IN users
+      FILTER user._key == @userKey && user.deletionRequestedAt == null
+      UPDATE user WITH { lastSeenAt: user.lastSeenAt == null || user.lastSeenAt < @seenAt ? @seenAt : user.lastSeenAt } IN users
+      RETURN true
+  `, { userKey, seenAt: timestamp });
+  return await cursor.next() === true;
+}
+
+export async function touchUserLastLogin(userKey: string, loginAt: string): Promise<boolean> {
+  const timestamp = z.string().datetime().parse(loginAt);
+  const cursor = await db.query(`
+    FOR user IN users
+      FILTER user._key == @userKey && user.deletionRequestedAt == null
+      UPDATE user WITH { lastLoginAt: user.lastLoginAt == null || user.lastLoginAt < @loginAt ? @loginAt : user.lastLoginAt } IN users
+      RETURN true
+  `, { userKey, loginAt: timestamp });
+  return await cursor.next() === true;
+}
 
 type UserDatabase = Pick<typeof db, 'query'>;
 
@@ -149,33 +177,6 @@ export async function getUserByAliasSlug(aliasSlug: string): Promise<User | null
   `);
   const doc = await cursor.next();
   return doc ? userSchema.parse(withArangoKey(doc)) : null;
-}
-
-export async function getUserByRefreshTokenHash(refreshTokenHash: string): Promise<User | null> {
-  const cursor = await db.query(aql`
-    FOR u IN ${db.collection(USERS_COLLECTION)}
-      FILTER u.refreshTokenHash == ${refreshTokenHash}
-      LIMIT 1
-      RETURN u
-  `);
-  const doc = await cursor.next();
-  return doc ? userSchema.parse(withArangoKey(doc)) : null;
-}
-
-export async function revokeLegacyRefreshToken(userId: string, refreshTokenHash: string, updatedAt: string): Promise<boolean> {
-  const cursor = await db.query(aql`
-    FOR u IN ${db.collection(USERS_COLLECTION)}
-      FILTER u._key == ${userId} && u.refreshTokenHash == ${refreshTokenHash}
-      UPDATE u WITH {
-        refreshTokenHash: null,
-        refreshTokenExpiresAt: null,
-        refreshFounderMembershipKey: null,
-        refreshFounderMfaVersion: null,
-        updatedAt: ${updatedAt}
-      } IN ${db.collection(USERS_COLLECTION)}
-      RETURN NEW
-  `);
-  return Boolean(await cursor.next());
 }
 
 export async function getUserByUpdatesUnsubscribeTokenHash(tokenHash: string): Promise<User | null> {

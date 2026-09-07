@@ -1,12 +1,12 @@
 import { aql } from 'arangojs';
 import { closeDb, db } from './client';
 import { newId } from '@/lib/ids';
-import { getRootOrganization, insertOrganization, updateOrganization, type Organization } from './organizations.node';
-import { getUserOrganizationByOrganizationAndUser, updateUserOrganization } from './user-organization.node';
+import { getRootTeam, insertTeam, updateTeam, type Team } from './teams.node';
+import { getUserTeamByTeamAndUser, updateUserTeam } from './user-team.node';
 import { getUserByEmail } from './users.node';
 import { getOrchestratorByName, insertOrchestrator, updateOrchestrator, type Orchestrator } from './orchestrators.node';
-import { getDefaultScopeRepository, NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
-import { reconcileOrganizationScopeMemberships } from '@/lib/ai/scopes/membership-invariant';
+import { createScopeRepository, MOTHER_SCOPE_KEY } from '@/lib/ai/scopes';
+import { reconcileTeamScopeMemberships } from '@/lib/ai/scopes/membership-invariant';
 import { SEEDED_ORCHESTRATOR_SKILLS } from '@/lib/orchestrators/seeded-skills';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
 import { COUNTRY_CATALOG } from '@/lib/travel/country-catalog';
@@ -14,7 +14,11 @@ import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { isProviderError } from '@/lib/ai/providers/errors';
-import { seedApps } from '@/lib/apps/registry';
+import { CANONICAL_APP_BY_SLUG, CANONICAL_APPS } from '@/lib/apps/registry';
+import { toArangoDoc } from './base';
+import { COMMERCE_CATALOG } from '@/lib/commerce/catalog';
+import { productSchema } from '@/lib/commerce/contracts';
+import { managedScopeDirectoryProduct, reconcileManagedScopeDirectory, type ManagedScopeDirectoryTargets } from '@/lib/managed-scope-directory';
 
 export type SeedResult = {
   collection: string;
@@ -31,6 +35,26 @@ export class SeedReferenceError extends Error {
 
 const now = () => new Date().toISOString();
 
+export async function seedCommerceCatalog(database: Pick<typeof db, 'query'> = db): Promise<SeedResult[]> {
+  const results: SeedResult[] = [];
+  for (const rawProduct of COMMERCE_CATALOG) {
+    const product = productSchema.parse(rawProduct);
+    const existingCursor = await database.query<{ key: string; providerProductId?: string | null; createdAt?: string }>('FOR item IN products FILTER item.productId == @productId LIMIT 1 RETURN { key: item._key, providerProductId: item.providerProductId, createdAt: item.createdAt }', { productId: product.productId });
+    const existing = await existingCursor.next();
+    const seeded = productSchema.parse({ ...product, key: existing?.key ?? product.key, providerProductId: existing?.providerProductId ?? null, createdAt: existing?.createdAt ?? product.createdAt });
+    const cursor = await database.query<{ key: string; created: boolean }>(`
+      UPSERT { _key: @key }
+        INSERT @product
+        UPDATE UNSET(@product, "_key") IN products
+      RETURN { key: NEW._key, created: @created }
+    `, { key: seeded.key, product: toArangoDoc(seeded), created: existing == null });
+    const saved = await cursor.next();
+    if (!saved) throw new Error(`Failed to seed commerce product ${product.productId}.`);
+    results.push({ collection: 'products', key: saved.key, status: saved.created ? 'created' : 'updated' });
+  }
+  return results;
+}
+
 async function updateSemanticSeed(collection: string, key: string, update: () => Promise<unknown>): Promise<SeedResult> {
   try {
     await update();
@@ -41,44 +65,36 @@ async function updateSemanticSeed(collection: string, key: string, update: () =>
   return { collection, key, status: 'updated' };
 }
 
-export const SEEDED_ORGANIZATION = {
-  name: 'Vorinthex AI',
+export const SEEDED_TEAM = {
+  name: 'Founders',
+  slug: 'founders',
   is_root: true,
+  mfa_enabled: true,
   metadata: {},
 };
 
-export { NEXUS_SCOPE_KEY };
+export { MOTHER_SCOPE_KEY };
+
+function productScopePresentation(slug: string) {
+  const product = CANONICAL_APP_BY_SLUG.get(slug);
+  if (!product) throw new Error(`Missing canonical product presentation for ${slug}.`);
+  return { slug: product.slug, name: product.name, summary: product.description, description: product.detailedDescription };
+}
 
 export const SEEDED_SCOPES = [
   {
-    key: NEXUS_SCOPE_KEY,
-    slug: 'nexus',
-    name: 'Nexus',
-    summary: 'Vorinthex is an AI native platform that unifies intelligence, knowledge and execution into a single system that helps people and organizations think, build and achieve more with artificial intelligence.',
-    description: `Vorinthex is an AI native platform designed to become the intelligence layer for modern work and life. Its purpose is to bring together reasoning, knowledge, memory and execution into a single unified system that grows more capable over time.
-
-Instead of treating artificial intelligence as a collection of isolated chatbots and disconnected tools, Vorinthex organizes intelligence into specialized Orchestrators that collaborate to solve complex problems across engineering, marketing, finance, operations, creativity and many other domains. Every Orchestrator focuses on a specific area while sharing context through a common knowledge graph, allowing the platform to understand how information, decisions and work are connected.
-
-Every interaction contributes to a persistent understanding of the user, the organization and the projects being built. Rather than starting from an empty conversation each time, Vorinthex continuously builds knowledge, preserves context and improves future reasoning through accumulated experience. This allows intelligence to compound instead of being reset with every new task.
-
-The platform is designed to coordinate both human and artificial intelligence. Large objectives can be transformed into structured plans, broken into smaller tasks and executed through specialized agents that work together toward a shared goal. As work progresses, new knowledge is captured, summarized and connected back into the system, creating an intelligence network that becomes increasingly valuable over time.
-
-Vorinthex is built to remain flexible as artificial intelligence continues to evolve. New intelligence capabilities can be integrated behind a single consistent experience without requiring people to change how they work.
-
-The long term vision is to create a new way of interacting with software. Rather than opening dozens of separate applications for different tasks, people will work alongside an intelligent system that understands their objectives, coordinates specialized capabilities and continuously learns from every action. Vorinthex represents a future where intelligence is persistent, collaborative and deeply integrated into everything people create, allowing individuals and organizations to focus less on software and more on achieving meaningful outcomes.`,
+    key: MOTHER_SCOPE_KEY,
+    ...productScopePresentation('vorinthex-ai'),
     position: 1,
     level: 1,
     parentKey: null,
   },
   {
     key: 'cmrnlzf640001qc7kazsr96k5',
-    slug: 'core',
-    name: 'Core',
-    summary: 'Your personal AI brain for memory, knowledge, reasoning, and everyday productivity across work and life.',
-    description: 'Your personal AI brain for memory, knowledge, reasoning, and everyday productivity across work and life.',
+    ...productScopePresentation('core'),
     position: 1,
     level: 2,
-    parentKey: NEXUS_SCOPE_KEY,
+    parentKey: MOTHER_SCOPE_KEY,
   },
   {
     key: 'cmrnlzf640004qc7kdvj99uva',
@@ -88,17 +104,17 @@ The long term vision is to create a new way of interacting with software. Rather
     description: 'A command center with 20 AI executive orchestrators, led by Atlas and spanning operations, intelligence, growth, product, finance, security, and more, leading the work while you lead the vision.',
     position: 2,
     level: 2,
-    parentKey: NEXUS_SCOPE_KEY,
+    parentKey: MOTHER_SCOPE_KEY,
   },
   {
     key: 'cmrnlzf640005qc7kefvra0bn',
     slug: 'hq',
     name: 'HQ',
-    summary: 'The organization workspace for communication, collaboration, planning, and coordinated work.',
-    description: 'HQ is the shared operating space for an organization. Bring conversations, plans, projects, decisions, knowledge, and coordinated work into one focused headquarters.',
+    summary: 'The team workspace for communication, collaboration, planning, and coordinated work.',
+    description: 'HQ is the shared operating space for a team. Bring conversations, plans, projects, decisions, knowledge, and coordinated work into one focused headquarters.',
     position: 3,
     level: 2,
-    parentKey: NEXUS_SCOPE_KEY,
+    parentKey: MOTHER_SCOPE_KEY,
   },
   {
     key: 'cmrnlzf640007qc7kd6a2g0o8',
@@ -108,7 +124,7 @@ The long term vision is to create a new way of interacting with software. Rather
     description: 'Pilot is the Vorinthex learning platform for the AI era, built to help people develop the understanding and practical fluency they need to move forward.',
     position: 4,
     level: 2,
-    parentKey: NEXUS_SCOPE_KEY,
+    parentKey: MOTHER_SCOPE_KEY,
   },
   {
     key: 'cmrnlzf640003qc7k4n8zesyz',
@@ -118,7 +134,7 @@ The long term vision is to create a new way of interacting with software. Rather
     description: 'Every leading AI model in one interface, chat, image, video, music, voice, code, documents, and research in a single creative workspace.',
     position: 5,
     level: 2,
-    parentKey: NEXUS_SCOPE_KEY,
+    parentKey: MOTHER_SCOPE_KEY,
   },
   {
     key: 'cmrnlzf640002qc7kfp2qelhq',
@@ -128,7 +144,7 @@ The long term vision is to create a new way of interacting with software. Rather
     description: 'A lightweight platform to create agents, automations, and workflows, then deploy them everywhere your work happens.',
     position: 6,
     level: 2,
-    parentKey: NEXUS_SCOPE_KEY,
+    parentKey: MOTHER_SCOPE_KEY,
   },
   {
     key: 'cmrnlzf640006qc7kfjl23jc3',
@@ -138,14 +154,14 @@ The long term vision is to create a new way of interacting with software. Rather
     description: 'Replica is the Vorinthex sandbox for experiencing a product before you connect, giving you a clear place to explore what it can do first.',
     position: 7,
     level: 2,
-    parentKey: NEXUS_SCOPE_KEY,
+    parentKey: MOTHER_SCOPE_KEY,
   },
-  { key: 'cmrnlzf650001qc7k4p5zem5w', slug: 'archive', name: 'Archive', summary: 'Capture notes, ideas, research, labels, folders, semantic search, and knowledge graph connections.', description: 'Archive lets you capture, organize, semantically search, and connect your notes through folders, labels, backlinks, and graph traversal.', position: 1, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
-  { key: 'cmrnlzf650002qc7k4p5zem5w', slug: 'gallery', name: 'Gallery', summary: 'A smart image and memory library with albums, clusters, sharing links, QR invites, and AI powered discovery.', description: 'Gallery organizes memories and images into smart albums, clusters, shared links, QR invites, and AI powered discovery.', position: 2, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
-  { key: 'cmrnlzf650003qc7k4p5zem5w', slug: 'signal', name: 'Signal', summary: 'An AI inbox guard across email and messages that filters noise, prioritizes what matters, and can reply in your tone.', description: 'Signal is an AI inbox guard that filters noise across connected inboxes, prioritizes important messages, and can reply in your tone when approved.', position: 3, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
-  { key: 'cmrnlzf650004qc7k4p5zem5w', slug: 'compass', name: 'Compass', summary: 'An interactive 3D globe for exploring countries and viewing available cities.', description: 'Compass turns country discovery into a clear map of available destination cities.', position: 4, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
-  { key: 'cmrnlzf650005qc7k4p5zem5w', slug: 'ascend', name: 'Ascend', summary: 'A personal AI coach for mental goals, habits, health, routines, finance, and custom learning books.', description: 'Ascend is a personal AI coach for goals, habits, health, routines, finance, and custom books and learning journeys.', position: 5, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
-  { key: 'cmrnlzf650026qc7k4p5zem5w', slug: 'chorus', name: 'Chorus', summary: 'Communication intelligence for messaging, channels, threads, and real time collaboration between people and AI.', description: 'Chorus is an AI native communication workspace for messaging, channels, threads, announcements, direct messages, and real time collaboration. It understands conversations semantically so people can search by meaning, summarize discussions, identify action items, translate messages, and recover important context without manual organization. Chorus supports reactions, mentions, attachments, presence, and persistent conversation history.', position: 6, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
+  { key: 'cmrnlzf650001qc7k4p5zem5w', ...productScopePresentation('archive'), position: 1, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
+  { key: 'cmrnlzf650002qc7k4p5zem5w', ...productScopePresentation('gallery'), position: 2, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
+  { key: 'cmrnlzf650003qc7k4p5zem5w', ...productScopePresentation('signal'), position: 3, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
+  { key: 'cmrnlzf650004qc7k4p5zem5w', ...productScopePresentation('compass'), position: 4, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
+  { key: 'cmrnlzf650005qc7k4p5zem5w', ...productScopePresentation('ascend'), position: 5, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
+  { key: 'cmrnlzf650026qc7k4p5zem5w', slug: 'chorus', name: 'Chorus', summary: 'Communication intelligence for messaging, channels, threads, and real time collaboration between people and AI.', description: 'Chorus is an AI native communication workspace for messaging, channels, threads, announcements, direct messages, and real time collaboration. It understands conversations semantically so people can search by meaning, summarize discussions, identify action items, translate messages, and recover important context without manual filing. Chorus supports reactions, mentions, attachments, presence, and persistent conversation history.', position: 6, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
   { key: 'cmrnlzf650027qc7k4p5zem5w', slug: 'cadence', name: 'Cadence', summary: 'Temporal intelligence for calendars, schedules, meetings, availability, reminders, and recurring events.', description: 'Cadence is an intelligent planning system for calendars, events, meetings, reminders, availability, deadlines, recurring schedules, reservations, and planning windows. It understands relationships between commitments, priorities, people, and resources, then helps resolve conflicts, suggest useful times, prepare agendas, protect focus time, and maintain clear follow through. Cadence treats time as structured information rather than a simple chronological list.', position: 7, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
   { key: 'cmrnlzf650029qc7k4p5zem5w', slug: 'prism', name: 'Prism', summary: 'Meeting and presence intelligence for voice, video, screen sharing, recordings, transcription, and collaborative sessions.', description: 'Prism is a real time meeting workspace for voice calls, video sessions, screen sharing, recordings, live transcription, captions, and AI assistance. It understands conversations as they happen, making discussions searchable and turning decisions, follow up items, and important context into durable knowledge. Prism preserves the full meeting experience through participants, recordings, transcripts, summaries, and collaborative session metadata.', position: 8, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
   { key: 'cmrnlzf650006qc7k4p5zem5w', slug: 'atlas', name: 'Atlas', summary: 'Vision, leadership, direction, executive strategy, and company wide decisions.', description: 'Vision, leadership, direction, executive strategy, and company wide decisions.', position: 1, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
@@ -154,9 +170,9 @@ The long term vision is to create a new way of interacting with software. Rather
   { key: 'cmrnlzf650009qc7k4p5zem5w', slug: 'phoenix', name: 'Phoenix', summary: 'Growth, market insight, acquisition, activation, retention, and durable commercial value.', description: 'Growth, market insight, acquisition, activation, retention, and durable commercial value.', position: 4, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
   { key: 'cmrnlzf650010qc7k4p5zem5w', slug: 'apollo', name: 'Apollo', summary: 'Strategy, foresight, growth, market direction, and long range planning.', description: 'Strategy, foresight, growth, market direction, and long range planning.', position: 5, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
   { key: 'cmrnlzf650011qc7k4p5zem5w', slug: 'iris', name: 'Iris', summary: 'Communication, brand, voice, PR, messaging, and internal and external communications.', description: 'Communication, brand, voice, PR, messaging, and internal and external communications.', position: 6, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
-  { key: 'cmrnlzf650012qc7k4p5zem5w', slug: 'echo', name: 'Echo', summary: 'Institutional learning, expertise reuse, durable guidance, knowledge discovery, and trusted organizational memory.', description: 'Institutional learning, expertise reuse, durable guidance, knowledge discovery, and trusted organizational memory.', position: 7, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650012qc7k4p5zem5w', slug: 'echo', name: 'Echo', summary: 'Institutional learning, expertise reuse, durable guidance, knowledge discovery, and trusted team memory.', description: 'Institutional learning, expertise reuse, durable guidance, knowledge discovery, and trusted team memory.', position: 7, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
   { key: 'cmrnlzf650013qc7k4p5zem5w', slug: 'matrix', name: 'Matrix', summary: 'Data governance, lineage, ownership, quality, definitions, and decision ready data assets.', description: 'Data governance, lineage, ownership, quality, definitions, and decision ready data assets.', position: 8, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
-  { key: 'cmrnlzf650014qc7k4p5zem5w', slug: 'harmony', name: 'Harmony', summary: 'People systems, talent, culture, organizational structure, capability, and sustained high quality work.', description: 'People systems, talent, culture, organizational structure, capability, and sustained high quality work.', position: 9, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650014qc7k4p5zem5w', slug: 'harmony', name: 'Harmony', summary: 'People systems, talent, culture, team structure, capability, and sustained high quality work.', description: 'People systems, talent, culture, team structure, capability, and sustained high quality work.', position: 9, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
   { key: 'cmrnlzf650015qc7k4p5zem5w', slug: 'ledger', name: 'Ledger', summary: 'Finance, capital, budgets, cash flow, forecasting, and financial risk.', description: 'Finance, capital, budgets, cash flow, forecasting, and financial risk.', position: 10, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
   { key: 'cmrnlzf650016qc7k4p5zem5w', slug: 'orbit', name: 'Orbit', summary: 'Marketing, growth, demand, branding, content, campaigns, SEO, and social.', description: 'Marketing, growth, demand, branding, content, campaigns, SEO, and social.', position: 11, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
   { key: 'cmrnlzf650017qc7k4p5zem5w', slug: 'mercury', name: 'Mercury', summary: 'Revenue, analytics, MRR, forecasting, sales patterns, churn, and retention.', description: 'Revenue, analytics, MRR, forecasting, sales patterns, churn, and retention.', position: 12, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
@@ -195,29 +211,33 @@ const SEEDED_FOUNDER_ORCHESTRATORS = {
   'anton@vorinthex.com': 'Apollo',
 } as const;
 
-async function upsertSeedOrganization(seed: typeof SEEDED_ORGANIZATION): Promise<SeedResult> {
-  const existing = await getRootOrganization();
+async function upsertSeedTeam(seed: typeof SEEDED_TEAM): Promise<SeedResult> {
+  const existing = await getRootTeam();
   if (!existing) {
     const key = newId();
-    await insertOrganization({
+    await insertTeam({
       key,
       name: seed.name,
+      slug: seed.slug,
       is_root: seed.is_root,
+      mfa_enabled: seed.mfa_enabled,
       metadata: seed.metadata,
       createdAt: now(),
       updatedAt: now(),
     });
-    return { collection: 'organizations', key, status: 'created' };
+    return { collection: 'teams', key, status: 'created' };
   }
-  if (existing.name === seed.name && existing.is_root === seed.is_root && isDeepStrictEqual(existing.metadata, seed.metadata)) return { collection: 'organizations', key: existing.key, status: 'updated' };
+  if (existing.name === seed.name && existing.slug === seed.slug && existing.is_root === seed.is_root && existing.mfa_enabled === seed.mfa_enabled && isDeepStrictEqual(existing.metadata, seed.metadata)) return { collection: 'teams', key: existing.key, status: 'updated' };
 
-  const patch: Partial<Omit<Organization, 'key' | 'embedding'>> = {
+  const patch: Partial<Omit<Team, 'key' | 'embedding'>> = {
     name: seed.name,
+    slug: seed.slug,
     is_root: seed.is_root,
+    mfa_enabled: seed.mfa_enabled,
     metadata: seed.metadata,
     updatedAt: now(),
   };
-  return updateSemanticSeed('organizations', existing.key, () => updateOrganization(existing.key, patch));
+  return updateSemanticSeed('teams', existing.key, () => updateTeam(existing.key, patch));
 }
 
 async function upsertSeedOrchestrator(seed: (typeof SEEDED_ORCHESTRATOR_SOURCES)[number]): Promise<SeedResult> {
@@ -244,7 +264,7 @@ async function upsertSeedOrchestrator(seed: (typeof SEEDED_ORCHESTRATOR_SOURCES)
   return updateSemanticSeed('orchestrators', existing.key, () => updateOrchestrator(existing.key, patch));
 }
 
-async function assignSeededFounderOrchestrators(rootOrganizationKey: string): Promise<SeedResult[]> {
+async function assignSeededFounderOrchestrators(rootTeamKey: string): Promise<SeedResult[]> {
   const results: SeedResult[] = [];
   for (const [email, orchestratorName] of Object.entries(SEEDED_FOUNDER_ORCHESTRATORS)) {
     const [user, orchestrator] = await Promise.all([
@@ -252,16 +272,17 @@ async function assignSeededFounderOrchestrators(rootOrganizationKey: string): Pr
       getOrchestratorByName(orchestratorName),
     ]);
     if (!user || !orchestrator) continue;
-    const membership = await getUserOrganizationByOrganizationAndUser(rootOrganizationKey, user.key);
+    const membership = await getUserTeamByTeamAndUser(rootTeamKey, user.key);
     if (!membership || membership.orchestratorKey === orchestrator.key) continue;
-    await updateUserOrganization(membership.key, { orchestratorKey: orchestrator.key, updatedAt: now() });
-    results.push({ collection: 'userOrganizations', key: membership.key, status: 'updated' });
+    await updateUserTeam(membership.key, { orchestratorKey: orchestrator.key, updatedAt: now() });
+    results.push({ collection: 'userTeams', key: membership.key, status: 'updated' });
   }
   return results;
 }
 
 export async function seedCoreDbNodes(): Promise<SeedResult[]> {
-  const results: SeedResult[] = [...await seedApps()];
+  const results: SeedResult[] = [];
+  results.push(...await seedCommerceCatalog());
   for (const country of COUNTRY_CATALOG) {
     const semanticHash = createHash('sha256').update(country.name).digest('hex');
     const currentCursor = await db.query<{ key: string; semanticVersion?: number; semanticHash?: string }>('FOR country IN countries FILTER country.countryCode == @countryCode LIMIT 1 RETURN { key: country._key, semanticVersion: country.semanticVersion, semanticHash: country.semanticHash }', { countryCode: country.countryCode });
@@ -283,36 +304,36 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
     results.push({ collection: 'countries', key: String(await cursor.next()), status: current ? 'updated' : 'created' });
   }
 
-  results.push(await upsertSeedOrganization(SEEDED_ORGANIZATION));
-  const rootOrganization = await getRootOrganization();
-  if (!rootOrganization) throw new SeedReferenceError('organization', 'root', 'core seed');
+  results.push(await upsertSeedTeam(SEEDED_TEAM));
+  const rootTeam = await getRootTeam();
+  if (!rootTeam) throw new SeedReferenceError('team', 'root', 'core seed');
   await db.query(aql`
     LET hasHq = LENGTH((
       FOR existing IN ${db.collection('scopes')}
-        FILTER existing.organizationKey == ${rootOrganization.key} AND existing.slug == ${'hq'}
+        FILTER existing.teamKey == ${rootTeam.key} AND existing.slug == ${'hq'}
         RETURN 1
     ))
     FOR scope IN ${db.collection('scopes')}
-      FILTER scope.organizationKey == ${rootOrganization.key}
+      FILTER scope.teamKey == ${rootTeam.key}
       FILTER scope.slug == ${'head-quarters'}
       FILTER hasHq == 0
       UPDATE scope WITH { slug: 'hq' } IN ${db.collection('scopes')}
   `);
-  const scopes = getDefaultScopeRepository();
-  const organizationScopes = [...await scopes.listScopes(rootOrganization.key)];
-  const scopesBySlug = new Map(organizationScopes.map((scope) => [scope.slug, scope]));
+  const scopes = createScopeRepository(db, undefined, { allowProductHierarchyMutation: true });
+  const teamScopes = [...await scopes.listScopes(rootTeam.key)];
+  const scopesBySlug = new Map(teamScopes.map((scope) => [scope.slug, scope]));
   const actualKeysBySeedKey = new Map<string, string>();
   for (const seed of SEEDED_SCOPES) {
-    // Legacy scope rows can be omitted from the organization listing while
+    // Legacy scope rows can be omitted from the team listing while
     // still occupying their deterministic seed key. Reuse that row instead
     // of attempting a duplicate insert during deployment.
     let existing = scopesBySlug.get(seed.slug) ?? await scopes.getScopeByKey(seed.key);
     if (existing) {
-      if (existing.name !== seed.name || existing.summary !== seed.summary || existing.description !== seed.description || existing.position !== seed.position || existing.level !== seed.level) {
-        existing = await scopes.updateScope(existing.key, { name: seed.name, summary: seed.summary, description: seed.description, position: seed.position, level: seed.level });
+      if (existing.slug !== seed.slug || existing.name !== seed.name || existing.summary !== seed.summary || existing.description !== seed.description || existing.position !== seed.position || existing.level !== seed.level) {
+        existing = await scopes.updateScope(existing.key, { slug: seed.slug, name: seed.name, summary: seed.summary, description: seed.description, position: seed.position, level: seed.level });
         scopesBySlug.set(existing.slug, existing);
-        const index = organizationScopes.findIndex((scope) => scope.key === existing!.key);
-        if (index >= 0) organizationScopes[index] = existing;
+        const index = teamScopes.findIndex((scope) => scope.key === existing!.key);
+        if (index >= 0) teamScopes[index] = existing;
         results.push({ collection: 'scopes', key: existing.key, status: 'updated' });
       }
       actualKeysBySeedKey.set(seed.key, existing.key);
@@ -320,7 +341,7 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
     }
     const scope = await scopes.createScope({
       key: seed.key,
-      organizationKey: rootOrganization.key,
+      teamKey: rootTeam.key,
       slug: seed.slug,
       name: seed.name,
       summary: seed.summary,
@@ -328,14 +349,14 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
       position: seed.position,
       level: seed.level,
     });
-    organizationScopes.push(scope);
+    teamScopes.push(scope);
     scopesBySlug.set(scope.slug, scope);
     actualKeysBySeedKey.set(seed.key, scope.key);
     results.push({ collection: 'scopes', key: scope.key, status: 'created' });
   }
 
   const relationsByChild = new Map<string, { parentKey: string; childKey: string }>();
-  for (const scope of organizationScopes) {
+  for (const scope of teamScopes) {
     for (const relation of await scopes.listChildRelations(scope.key)) {
       relationsByChild.set(relation.childKey, relation);
     }
@@ -357,7 +378,15 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
     results.push({ collection: 'scopeScopes', key: relation.key, status: 'created' });
   }
 
-  const membershipReconciliation = await reconcileOrganizationScopeMemberships(rootOrganization.key);
+  const productScopeKeys = Object.fromEntries(CANONICAL_APPS.map((product) => {
+    const scope = scopesBySlug.get(product.slug);
+    if (!scope) throw new SeedReferenceError('scope', product.slug, 'managed scope directory');
+    return [product.slug, scope.key];
+  })) as ManagedScopeDirectoryTargets;
+  const directory = await reconcileManagedScopeDirectory({ products: CANONICAL_APPS.map(managedScopeDirectoryProduct), targetScopeKeys: productScopeKeys });
+  results.push({ collection: 'managedScopeDirectory', key: scopesBySlug.get('vorinthex-ai')!.key, status: directory.records.created > 0 ? 'created' : 'updated' });
+
+  const membershipReconciliation = await reconcileTeamScopeMemberships(rootTeam.key);
   results.push(...membershipReconciliation.created.map(({ key }) => ({ collection: 'scopeMembers', key, status: 'created' as const })));
 
   for (const orchestrator of SEEDED_ORCHESTRATOR_SOURCES) {
@@ -366,11 +395,11 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   const hqScope = await scopes.getScopeByKey(actualKeysBySeedKey.get('cmrnlzf640005qc7kefvra0bn') ?? 'cmrnlzf640005qc7kefvra0bn');
   if (!hqScope) throw new SeedReferenceError('scope', 'hq', 'general channel');
   const generalCursor = await db.query<{ key: string }>(`
-    UPSERT { organizationKey: @organizationKey, kind: "group", name: "general" }
-      INSERT { _key: @key, organizationKey: @organizationKey, scopeKey: @scopeKey, kind: "group", name: "general", description: "Organization-wide conversation", position: 0, createdAt: @now, updatedAt: @now, embedding: [] }
+    UPSERT { teamKey: @teamKey, kind: "group", name: "general" }
+      INSERT { _key: @key, teamKey: @teamKey, scopeKey: @scopeKey, kind: "group", name: "general", description: "Team-wide conversation", position: 0, createdAt: @now, updatedAt: @now, embedding: [] }
       UPDATE { scopeKey: @scopeKey, archivedAt: null, updatedAt: @now } IN channels OPTIONS { keepNull: false }
       RETURN { key: NEW._key }
-  `, { key: newId(), organizationKey: rootOrganization.key, scopeKey: hqScope.key, now: now() });
+  `, { key: newId(), teamKey: rootTeam.key, scopeKey: hqScope.key, now: now() });
   const general = (await generalCursor.next())!;
   results.push({ collection: 'channels', key: general.key, status: 'updated' });
   const orchestratorCursor = await db.query<{ key: string }>('FOR orchestrator IN orchestrators FILTER orchestrator.name IN @names SORT orchestrator.name ASC, orchestrator._key ASC RETURN { key: orchestrator._key }', { names: CANONICAL_ORCHESTRATOR_NAMES });
@@ -385,7 +414,7 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
     const participant = (await participantCursor.next())!;
     results.push({ collection: 'channelParticipants', key: participant.key, status: participant.key === participantKey ? 'created' : 'updated' });
   }
-  results.push(...await assignSeededFounderOrchestrators(rootOrganization.key));
+  results.push(...await assignSeededFounderOrchestrators(rootTeam.key));
 
   return results;
 }

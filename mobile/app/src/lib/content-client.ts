@@ -18,7 +18,7 @@ import {
 export type { ContentSelection } from "./content-selection-plans";
 
 export type ContentContext = {
-  organizationKey: string;
+  teamKey: string;
   scopeKey: string;
   userKey?: string;
 };
@@ -242,14 +242,14 @@ function assertSingleBatchSuccess(outcome: ContentBatchOutcome, fallback: string
 export function getContentContext(): ContentContext {
   const state = useAuthStore.getState();
   return {
-    organizationKey: recordKey(state.organization),
+    teamKey: recordKey(state.team),
     scopeKey: recordKey(state.scope),
     userKey: state.user?.key ?? "",
   };
 }
 
 export function isContentContextConfigured(context: ContentContext) {
-  return [context.organizationKey, context.scopeKey].every((value) => value.trim().length > 0);
+  return [context.teamKey, context.scopeKey].every((value) => value.trim().length > 0);
 }
 
 export function createContentMutationKey() {
@@ -295,7 +295,7 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>, 
   if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
   try {
     const response = await apiClient.post<ToolResponse<T>>(`/api/v1/content/tools/${tool}`, {
-      organizationKey: contentContext.organizationKey,
+      teamKey: contentContext.teamKey,
       scopeKey: contentContext.scopeKey,
       input,
     }, { signal, timeout: tool === "document.parse" || tool === "document.scan" ? 5 * 60_000 : tool === "document.summarize" || tool === "document.topics" ? 4 * 60_000 : 60_000 });
@@ -312,7 +312,7 @@ export async function enhanceContentDocument(documentKey: string, instruction?: 
   const context = getContentContext();
   const response = await apiClient.post<ToolResponse<{
     results: { success: boolean; data?: { text: string; persistedDocumentKey?: string }; error?: { message: string } }[];
-  }>>("/app/enhance", { organizationKey: context.organizationKey, scopeKey: context.scopeKey, input: { documentKey, instruction, save: false } }, { headers: { "Idempotency-Key": createContentMutationKey() }, timeout: 30 * 60_000 });
+  }>>("/app/enhance", { teamKey: context.teamKey, scopeKey: context.scopeKey, input: { documentKey, instruction, save: false } }, { headers: { "Idempotency-Key": createContentMutationKey() }, timeout: 30 * 60_000 });
   if (!response.data.success) throw contentToolError(response.data.error);
   const data = response.data.data;
   const result = data.results[0];
@@ -325,7 +325,7 @@ export async function askPersonalAssistant(message: string, currentNote: { docum
   if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
   try {
     const response = await apiClient.post<ToolResponse<PersonalAssistantResponse>>("/api/v1/assistant/respond", {
-      organizationKey: contentContext.organizationKey,
+      teamKey: contentContext.teamKey,
       scopeKey: contentContext.scopeKey,
       input: { surface: "knowledge-workspace", message, currentNote, requestKey: createContentMutationKey(), ...(folderKey ? { folderKey } : {}) },
     }, { signal, timeout: 4 * 60_000 });
@@ -342,7 +342,7 @@ export async function translateContentDocument(documentKey: string, targetLangua
   const context = getContentContext();
   const response = await apiClient.post<ToolResponse<{
     results: { success: boolean; data?: { text: string; persistedDocumentKey?: string }; error?: { message: string } }[];
-  }>>("/app/translate", { organizationKey: context.organizationKey, scopeKey: context.scopeKey, input: { documentKey, targetLanguage, instruction, save: false } }, { headers: { "Idempotency-Key": createContentMutationKey() }, timeout: 30 * 60_000 });
+  }>>("/app/translate", { teamKey: context.teamKey, scopeKey: context.scopeKey, input: { documentKey, targetLanguage, instruction, save: false } }, { headers: { "Idempotency-Key": createContentMutationKey() }, timeout: 30 * 60_000 });
   if (!response.data.success) throw contentToolError(response.data.error);
   const data = response.data.data;
   const result = data.results[0];
@@ -392,7 +392,7 @@ export async function listContentDocumentAudioVersions(documentKey: string) {
 export async function generateContentDocumentAudio(documentKey: string, voice: "calm" | "clear" | "warm" = "clear", pace = 1) {
   const context = getContentContext();
   const response = await apiClient.post<ToolResponse<ContentDocumentAudioVersion>>("/app/speech", {
-    organizationKey: context.organizationKey,
+    teamKey: context.teamKey,
     scopeKey: context.scopeKey,
     input: { documentKey, voice, pace, includeTitle: true, includeCode: false },
   }, { timeout: 5 * 60_000 });

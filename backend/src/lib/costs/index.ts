@@ -1,18 +1,25 @@
 export const MICRO_SPARKS_PER_SPARK = 1_000_000;
 export const ACCOUNT_GRANT_SPARKS = 100;
 export const ACCOUNT_GRANT_MICRO_SPARKS = ACCOUNT_GRANT_SPARKS * MICRO_SPARKS_PER_SPARK;
-export const STORAGE_SPARKS_PER_GIB_MONTH = 24;
-export const BYTES_PER_GIB = 1_073_741_824;
+export const REFERRAL_PROGRAM_VERSION = 'v1' as const;
+export const REFERRAL_SIGNUP_REWARD_MICRO_SPARKS = 50_000_000;
+export const REFERRAL_PAID_REWARD_MICRO_SPARKS = 100_000_000;
+export const STORAGE_SPARKS_PER_GB_MONTH = 30;
+export const INBOX_INITIAL_SYNC_SPARKS = 100;
+export const INBOX_NEW_EMAIL_SPARKS = 1;
+export const BYTES_PER_GB = 1_000_000_000;
 export const HOURS_PER_BILLING_MONTH = 730;
 
-export const STORAGE_MICRO_SPARK_NUMERATOR = BigInt(STORAGE_SPARKS_PER_GIB_MONTH * MICRO_SPARKS_PER_SPARK);
-export const STORAGE_MICRO_SPARK_DENOMINATOR = BigInt(BYTES_PER_GIB) * BigInt(HOURS_PER_BILLING_MONTH);
+export const STORAGE_MICRO_SPARK_NUMERATOR = BigInt(STORAGE_SPARKS_PER_GB_MONTH * MICRO_SPARKS_PER_SPARK);
+export const STORAGE_MICRO_SPARK_DENOMINATOR = BigInt(BYTES_PER_GB) * BigInt(HOURS_PER_BILLING_MONTH);
 export const STORAGE_BYTE_MILLISECOND_DENOMINATOR = STORAGE_MICRO_SPARK_DENOMINATOR * 3_600_000n;
 const DOTTED_SLUG = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)+$/;
 const ACTION_SLUG = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*$/;
 
-export type CostQuantity = 'invocation' | 'documents' | 'images';
+export type CostQuantity = 'invocation' | 'documents' | 'images' | 'new-email';
 export type FixedCostRule = Readonly<{ type: 'fixed'; microSparks: number; quantity?: CostQuantity }>;
+export type PublicFixedCostRule = FixedCostRule & Readonly<{ name: string; description: string; showInPricing?: false }>;
+export type PurchaseGrantRule = Readonly<{ microSparks: number }>;
 export type CostRuleSource = 'tool' | 'action';
 export type ResolvedCostRule = Readonly<{ source: CostRuleSource; slug: string; rule: FixedCostRule }>;
 export type ToolCostPolicy = Readonly<{ mode: 'fixed' | 'outcome'; rule: FixedCostRule; paidOutcome: 'operation-completed' | 'queue-accepted' }> | Readonly<{ mode: 'action' | 'free' }>;
@@ -20,29 +27,50 @@ export type ToolCostPolicy = Readonly<{ mode: 'fixed' | 'outcome'; rule: FixedCo
 // A capability-level tool price wins over its underlying action price so one
 // invocation can never be charged at both levels.
 export const COST_RULE_PRECEDENCE = Object.freeze(['tool', 'action'] as const);
-const sparks = (value: number, quantity?: CostQuantity): FixedCostRule => Object.freeze({
-  type: 'fixed', microSparks: value * MICRO_SPARKS_PER_SPARK, ...(quantity ? { quantity } : {}),
+const sparks = (value: number, name: string, description: string, quantity?: CostQuantity, showInPricing?: false): PublicFixedCostRule => Object.freeze({
+  type: 'fixed', microSparks: value * MICRO_SPARKS_PER_SPARK, name, description, ...(quantity ? { quantity } : {}), ...(showInPricing === false ? { showInPricing } : {}),
+});
+const purchaseGrant = (value: number): PurchaseGrantRule => Object.freeze({ microSparks: value * MICRO_SPARKS_PER_SPARK });
+
+export const PURCHASE_GRANT_RULES: Readonly<Record<string, PurchaseGrantRule>> = Object.freeze({
+  'nova.weekly': purchaseGrant(200),
+  'nova.monthly': purchaseGrant(1_000),
+  'nova.monthly.discounted': purchaseGrant(1_000),
+  'topup.small': purchaseGrant(200),
 });
 
-export const TOOL_COST_RULES: Readonly<Record<string, FixedCostRule>> = Object.freeze({
-  'book.create': sparks(100),
-  'book.extend': sparks(30),
-  'highlight.create': sparks(20),
-  'image.create-memory': sparks(10),
-  'subject.create': sparks(15),
-  'email.tone.create': sparks(25),
-  'trip.create': sparks(15),
-  'place.create': sparks(5),
-  'place.guide.find': sparks(5),
-  'place.find-city': sparks(5),
-  'document.parse': sparks(2, 'documents'),
-  'document.scan': sparks(5, 'documents'),
-  'web.search': sparks(25),
-  'image.caption': sparks(5, 'images'),
+export function lookupPurchaseGrant(productId: string): PurchaseGrantRule | null {
+  const rule = PURCHASE_GRANT_RULES[assertDottedSlug(productId)];
+  if (!rule) return null;
+  if (!Number.isSafeInteger(rule.microSparks) || rule.microSparks <= 0) throw new RangeError('A purchase grant must contain a positive safe integer number of microSparks.');
+  return rule;
+}
+
+export function resolvePurchaseGrantMicroSparks(productId: string): number {
+  const rule = lookupPurchaseGrant(productId);
+  if (!rule) throw new RangeError(`No purchase grant is configured for product: ${productId}`);
+  return rule.microSparks;
+}
+
+export const TOOL_COST_RULES: Readonly<Record<string, PublicFixedCostRule>> = Object.freeze({
+  'book.create': sparks(100, 'Create an audio book', 'Generate and save a complete audio book.'),
+  'book.extend': sparks(30, 'Extend an audio book', 'Generate and save an additional audio book chapter.'),
+  'highlight.create': sparks(20, 'Create a highlight', 'Create a generated highlight from an image collection.'),
+  'image.create-memory': sparks(10, 'Create a memory', 'Create a generated memory for an image.'),
+  'subject.create': sparks(15, 'Create a subject', 'Create a visual subject from selected images.'),
+  'email.tone.create': sparks(25, 'Create an email tone', 'Build a reusable writing tone from email examples.'),
+  'trip.create': sparks(15, 'Create a trip', 'Create and save a generated trip plan.'),
+  'place.create': sparks(5, 'Save a place', 'Create a saved place with generated details.'),
+  'place.guide.find': sparks(5, 'Find a place guide', 'Find a guide for a place.'),
+  'place.find-city': sparks(5, 'Find a city', 'Find and prepare a city for exploration.'),
+  'place.find-children': sparks(5, 'Explore nearby places', 'Find places within a selected destination.'),
+  'document.parse': sparks(2, 'Upload a document', 'Upload a document and extract its readable content.', 'documents'),
+  'document.scan': sparks(5, 'Scan a document', 'Scan an uploaded document with optical character recognition.', 'documents'),
+  'web.search': sparks(25, 'Search the web', 'Search the live web for relevant sources.', undefined, false),
 });
 export const ACTION_COST_RULES: Readonly<Record<string, FixedCostRule>> = Object.freeze({});
 
-export const ACTION_METERED_TOOL_SLUGS = Object.freeze([
+export const ACTION_PRICED_OPERATION_TOOL_SLUGS = Object.freeze([
   'agents.core', 'app.enhance', 'app.search', 'app.speech', 'app.translate',
   'book.goal.suggest', 'book.topic.suggest',
   'conversation.image.enqueue', 'conversation.message.send',
@@ -55,37 +83,38 @@ export const ACTION_METERED_TOOL_SLUGS = Object.freeze([
   'trip.guide.generate',
 ] as const);
 
-export const OUTCOME_METERED_TOOL_SLUGS = Object.freeze([
+export const OUTCOME_PRICED_OPERATION_TOOL_SLUGS = Object.freeze([
   'place.find-children', 'place.find-city', 'place.guide.find',
 ] as const);
 
 // This list is intentionally exhaustive rather than a fallback. Adding a public
 // tool without choosing fixed, action, or free billing must fail registry tests.
 export const FREE_TOOL_SLUGS = Object.freeze([
-  'agent.query', 'billing.summary.read',
-  'book.chapter.progress', 'book.delete', 'book.detail', 'book.favorite', 'book.generation.cancel', 'book.generation.retry', 'book.list', 'book.share.detail', 'book.share.update',
-  'collection.create', 'collection.delete', 'collection.duplicates.delete', 'collection.hide', 'collection.image.transfer', 'collection.invite.accept', 'collection.invite.create', 'collection.invite.pending.list', 'collection.invite.reject', 'collection.invite.revoke', 'collection.leave', 'collection.list', 'collection.member.list', 'collection.member.remove', 'collection.member.role.update', 'collection.reveal', 'collection.share.activate', 'collection.share.create', 'collection.share.list', 'collection.share.revoke', 'collection.share.update', 'collection.update',
+  'agent.guide', 'agent.query', 'app.notify', 'billing.summary.read', 'catalog.list', 'notification.list', 'payment.checkout.create', 'pricing.read', 'referral.summary.read', 'subscription.current.cancel', 'subscription.current.read', 'subscription.current.restore',
+  'book.chapter.progress', 'book.delete', 'book.detail', 'book.favorite', 'book.generation.cancel', 'book.generation.retry', 'book.list',
+  'collection.create', 'collection.delete', 'collection.duplicates.delete', 'collection.hide', 'collection.image.transfer', 'collection.list', 'collection.reveal', 'collection.update',
   'content.hidden.list', 'content.neighbors', 'content.search', 'content.search-history.delete', 'content.search-history.list',
   'conversation.create', 'conversation.delete', 'conversation.favorite', 'conversation.list', 'conversation.message.delete', 'conversation.message.list', 'conversation.rename', 'conversation.search',
   'country.search',
-  'document.audio.playback.clear', 'document.audio.playback.update', 'document.copy', 'document.create', 'document.create-version', 'document.delete', 'document.delete-version', 'document.download', 'document.export', 'document.find', 'document.find-summary', 'document.find-version', 'document.hide', 'document.list', 'document.list-audio-versions', 'document.list-shares', 'document.list-summaries', 'document.list-versions', 'document.move', 'document.read', 'document.rename', 'document.restore-version', 'document.reveal', 'document.search', 'document.search-all', 'document.share', 'document.unshare', 'document.update',
+  'document.audio.playback.clear', 'document.audio.playback.update', 'document.copy', 'document.create', 'document.create-version', 'document.delete', 'document.delete-version', 'document.download', 'document.export', 'document.find', 'document.find-summary', 'document.find-version', 'document.hide', 'document.list', 'document.list-audio-versions', 'document.list-summaries', 'document.list-versions', 'document.move', 'document.read', 'document.rename', 'document.restore-version', 'document.reveal', 'document.search', 'document.search-all', 'document.update',
   'email.draft.assign', 'email.draft.delete', 'email.draft.send', 'email.draft.update', 'email.message.summary.delete', 'email.message.summary.list', 'email.message.translation.delete', 'email.message.translation.list', 'email.overview', 'email.reply-context.create', 'email.reply-context.delete', 'email.reply-context.list', 'email.reply-context.update', 'email.similar.find', 'email.thread.favorite', 'email.thread.read', 'email.thread.read-state', 'email.thread.trash', 'email.tone.delete', 'email.tone.list', 'email.tone.search', 'email.tone.update', 'email.trash.clear',
   'feedback.list', 'feedback.vote',
   'folder.copy', 'folder.create', 'folder.delete', 'folder.find', 'folder.hide', 'folder.list', 'folder.move', 'folder.rename', 'folder.reveal', 'folder.update',
   'highlight.delete', 'highlight.list', 'highlight.read',
-  'image.delete', 'image.favorite', 'image.generation-history.delete', 'image.generation-history.list', 'image.hide', 'image.memory.delete', 'image.memory.list', 'image.memory.read', 'image.reveal', 'image.search', 'image.update',
+  'image.caption', 'image.delete', 'image.favorite', 'image.generation-history.delete', 'image.generation-history.list', 'image.hide', 'image.memory.delete', 'image.memory.list', 'image.memory.read', 'image.reveal', 'image.search', 'image.update',
   'inbox.refresh', 'inbox.search', 'inbox.update',
   'place.delete', 'place.list', 'place.open', 'place.reference.list', 'place.search', 'place.update',
   'profile.update', 'subject.delete', 'subject.image.list', 'subject.list',
-  'tag.assignment.set', 'tag.create', 'tag.delete', 'tag.list', 'tag.update', 'ticket.create',
+  'scope.create', 'scope.list', 'scope.select',
+  'tag.assignment.set', 'tag.create', 'tag.delete', 'tag.list', 'tag.update', 'team.list', 'team.select', 'ticket.create',
   'trip.attachment.set', 'trip.delete', 'trip.guide.list', 'trip.list', 'trip.search', 'trip.update',
 ] as const);
 
 export const TOOL_COST_POLICIES: Readonly<Record<string, ToolCostPolicy>> = Object.freeze({
   ...Object.fromEntries(FREE_TOOL_SLUGS.map((slug) => [slug, Object.freeze({ mode: 'free' as const })])),
-  ...Object.fromEntries(ACTION_METERED_TOOL_SLUGS.map((slug) => [slug, Object.freeze({ mode: 'action' as const })])),
-  ...Object.fromEntries(OUTCOME_METERED_TOOL_SLUGS.map((slug) => [slug, Object.freeze({ mode: 'outcome' as const, rule: slug === 'place.find-children' ? TOOL_COST_RULES['place.find-city']! : TOOL_COST_RULES[slug]!, paidOutcome: 'operation-completed' as const })])),
-  ...Object.fromEntries(Object.entries(TOOL_COST_RULES).filter(([slug]) => !OUTCOME_METERED_TOOL_SLUGS.includes(slug as never)).map(([slug, rule]) => [slug, Object.freeze({ mode: 'fixed' as const, rule, paidOutcome: slug === 'book.create' || slug === 'book.extend' ? 'queue-accepted' as const : 'operation-completed' as const })])),
+  ...Object.fromEntries(ACTION_PRICED_OPERATION_TOOL_SLUGS.map((slug) => [slug, Object.freeze({ mode: 'action' as const })])),
+  ...Object.fromEntries(OUTCOME_PRICED_OPERATION_TOOL_SLUGS.map((slug) => [slug, Object.freeze({ mode: 'outcome' as const, rule: TOOL_COST_RULES[slug]!, paidOutcome: 'operation-completed' as const })])),
+  ...Object.fromEntries(Object.entries(TOOL_COST_RULES).filter(([slug]) => !OUTCOME_PRICED_OPERATION_TOOL_SLUGS.includes(slug as never)).map(([slug, rule]) => [slug, Object.freeze({ mode: 'fixed' as const, rule, paidOutcome: slug === 'book.create' || slug === 'book.extend' ? 'queue-accepted' as const : 'operation-completed' as const })])),
 });
 
 export function lookupToolCostPolicy(toolSlug: string, input?: unknown): ToolCostPolicy | null {
@@ -196,7 +225,9 @@ export function fixedCostQuantity(rule: FixedCostRule, input: unknown): number {
   if (!rule.quantity || rule.quantity === 'invocation') return 1;
   const count = rule.quantity === 'images'
     ? arrayLength(input, ['images', 'imageUrls', 'imageKeys', 'items'])
-    : arrayLength(input, ['documents', 'documentKeys', 'items']);
+    : rule.quantity === 'documents'
+      ? arrayLength(input, ['documents', 'documentKeys', 'items'])
+      : arrayLength(input, ['messages', 'messageIds', 'items']);
   return count ?? 1;
 }
 

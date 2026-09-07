@@ -3,9 +3,9 @@ import { newId } from '@/lib/ids';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { createAppSpeechService } from './service';
 
-const organizationKey = newId(), scopeKey = newId(), userKey = newId(), documentKey = newId(), audioKey = newId();
+const teamKey = newId(), scopeKey = newId(), userKey = newId(), documentKey = newId(), audioKey = newId();
 const timestamp = '2026-08-27T12:00:00.000Z';
-const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
 const document = { key: documentKey, scopeKey, name: 'Architecture', content: 'Read this.\n```ts\nconst secret = true;\n```', embedding: [], mutationPolicy: 'user', archiveVisibility: 'visible', isFavorite: false, createdAt: timestamp, updatedAt: timestamp } as any;
 const authorized = async () => ({ results: [{ success: true, data: { document: { ...document, content: document.content } } }] }) as any;
 
@@ -33,7 +33,7 @@ describe('canonical app audio service', () => {
       storage: { upload: async ({ key }) => ({ storageKey: key }), delete: async (key) => { deleted.push(key); } },
       speech: async () => ({ bytes: new Uint8Array([1]), mimeType: 'audio/mpeg', durationSeconds: 9 }),
     });
-    await expect(service.generateForTarget({ organizationKey, storageKey: 'audio/failure.mp3', text: 'Narrate this.', voice: 'clear', pace: 1 }, { persist: async () => { throw new Error('lease lost'); } })).rejects.toThrow('lease lost');
+    await expect(service.generateForTarget({ teamKey, storageKey: 'audio/failure.mp3', text: 'Narrate this.', voice: 'clear', pace: 1 }, { persist: async () => { throw new Error('lease lost'); } })).rejects.toThrow('lease lost');
     expect(deleted).toEqual(['audio/failure.mp3']);
   });
 
@@ -42,16 +42,16 @@ describe('canonical app audio service', () => {
       speech: async () => ({ bytes: new Uint8Array([1]), mimeType: 'audio/mpeg' }),
       storage: { upload: async ({ key }) => ({ storageKey: key }), delete: async () => {} },
     });
-    const output = await service.generateForTarget({ organizationKey, storageKey: 'audio/five-minutes.mp3', text: Array(810).fill('word').join(' '), voice: 'clear', pace: 1 }, { persist: async (audio) => audio });
+    const output = await service.generateForTarget({ teamKey, storageKey: 'audio/five-minutes.mp3', text: Array(810).fill('word').join(' '), voice: 'clear', pace: 1 }, { persist: async (audio) => audio });
     expect(output).toMatchObject({ storageKey: 'audio/five-minutes.mp3', durationSeconds: 300 });
   });
 
   test('does not upload after provider failure or persist after storage failure', async () => {
     let uploads = 0, persists = 0;
     const providerFailure = createAppSpeechService({ speech: async () => { throw new Error('provider failed'); }, storage: { upload: async ({ key }) => { uploads += 1; return { storageKey: key }; }, delete: async () => {} } });
-    await expect(providerFailure.generateForTarget({ organizationKey, storageKey: 'audio/provider.mp3', text: 'Narrate.', voice: 'clear', pace: 1 }, { persist: async () => { persists += 1; } })).rejects.toThrow('provider failed');
+    await expect(providerFailure.generateForTarget({ teamKey, storageKey: 'audio/provider.mp3', text: 'Narrate.', voice: 'clear', pace: 1 }, { persist: async () => { persists += 1; } })).rejects.toThrow('provider failed');
     const storageFailure = createAppSpeechService({ speech: async () => ({ bytes: new Uint8Array([1]), mimeType: 'audio/mpeg' }), storage: { upload: async () => { uploads += 1; throw new Error('storage failed'); }, delete: async () => {} } });
-    await expect(storageFailure.generateForTarget({ organizationKey, storageKey: 'audio/storage.mp3', text: 'Narrate.', voice: 'clear', pace: 1 }, { persist: async () => { persists += 1; } })).rejects.toThrow('storage failed');
+    await expect(storageFailure.generateForTarget({ teamKey, storageKey: 'audio/storage.mp3', text: 'Narrate.', voice: 'clear', pace: 1 }, { persist: async () => { persists += 1; } })).rejects.toThrow('storage failed');
     expect({ uploads, persists }).toEqual({ uploads: 1, persists: 0 });
   });
 
@@ -59,7 +59,7 @@ describe('canonical app audio service', () => {
     let speeches = 0;
     const service = createAppSpeechService({ repository: { getDocument: async () => document, createAudioVersion: async () => { throw new Error('unexpected'); } }, executeContent: authorized, speech: async () => { speeches += 1; return { bytes: new Uint8Array([1]), mimeType: 'audio/mpeg' }; } });
     const principal = context.principal as Extract<ToolContext['principal'], { kind: 'member' }>;
-    await expect(service.generateDocument({ documentKey }, { ...context, principal: { ...principal, userOrganization: { ...principal.userOrganization, status: 'inactive' } } } as ToolContext)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
+    await expect(service.generateDocument({ documentKey }, { ...context, principal: { ...principal, userTeam: { ...principal.userTeam, status: 'inactive' } } } as ToolContext)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
     await expect(service.generateDocument({ documentKey }, { ...context, runtimeScopeKey: newId() })).rejects.toMatchObject({ code: 'CONTENT_NOT_FOUND' });
     expect(speeches).toBe(0);
   });

@@ -2,7 +2,7 @@ export {
   SCOPE_SCOPES_COLLECTION,
   SCOPE_MEMBERS_COLLECTION,
   SCOPES_COLLECTION,
-  NEXUS_SCOPE_KEY,
+  MOTHER_SCOPE_KEY,
   scopeSchema,
   scopeScopeSchema,
   scopeMemberSchema,
@@ -21,7 +21,8 @@ export {
   ScopeAlreadyHasParentError,
   ScopeCycleError,
   ScopeNotFoundError,
-  ScopeOrganizationMismatchError,
+  ScopeTeamMismatchError,
+  ProductScopeMutationError,
   ScopeRelationNotFoundError,
   type CreateScopeInput,
   type ScopeRepository,
@@ -33,9 +34,10 @@ export { createScopeMemberRepository, getDefaultScopeMemberRepository } from './
 export {
   DuplicateScopeMemberError,
   ScopeMemberNotFoundError,
-  ScopeMemberOrganizationMismatchError,
+  ScopeMemberTeamMismatchError,
   ScopeMembershipNotFoundError,
   type ScopeMemberRepository,
   type ScopeMemberView,
 } from './members';
 export { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from './indexes';
+export { createScopeService, resolveScopeManagementContext, scopeCreateInputSchema, scopeListInputSchema, scopeSelectInputSchema, scopeService, ScopeServiceError, type PublicScope, type ScopeService } from './service';

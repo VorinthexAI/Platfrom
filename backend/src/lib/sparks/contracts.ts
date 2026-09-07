@@ -14,7 +14,7 @@ const actionSlugSchema = z.string().max(200).refine((value) => {
 const metadataValueSchema = z.union([z.string().max(500), z.boolean(), safeIntegerSchema, z.null()]);
 
 export const sparkTransactionKindSchema = z.enum([
-  'account-grant', 'tool', 'action', 'storage', 'recurring-service', 'refund', 'adjustment', 'expiration',
+  'account-grant', 'referral-reward', 'purchase', 'tool', 'action', 'storage', 'recurring-service', 'refund', 'adjustment', 'expiration',
 ]);
 
 export const sparkMetadataSchema = z.record(z.string().min(1).max(64), metadataValueSchema).superRefine((value, context) => {

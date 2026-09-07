@@ -2,14 +2,14 @@ import { z } from 'zod';
 import { appSearchRetrievalSchema } from '@/lib/app-search/service';
 
 export const conversationSchema = z.object({
-  key: z.string().cuid(), organizationKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(),
+  key: z.string().cuid(), teamKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(),
   userKey: z.string().cuid(), name: z.string().trim().min(1).max(200), isFavorite: z.boolean(),
   createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 }).strict();
 export type Conversation = z.infer<typeof conversationSchema>;
 
 export const conversationMessageBaseSchema = z.object({
-  key: z.string().cuid(), conversationKey: z.string().cuid(), organizationKey: z.string().trim().min(1).max(160),
+  key: z.string().cuid(), conversationKey: z.string().cuid(), teamKey: z.string().trim().min(1).max(160),
   scopeKey: z.string().cuid(), userKey: z.string().cuid(), turnKey: z.string().trim().min(1).max(180),
   requestHash: z.string().regex(/^[a-f0-9]{64}$/),
   type: z.enum(['TEXT', 'IMAGE']).default('TEXT'),
@@ -62,10 +62,10 @@ export const conversationImageTurnModelInputSchema = z.object(conversationImageT
 export const conversationImageTurnInputSchema = z.object({ ...conversationImageTurnShape, requestKey: conversationImageTurnRequestKeySchema }).strict().refine(uniqueImageReferences, { path: ['referenceImageKeys'], message: 'Reference image keys must be unique.' });
 export const agentQueryInputSchema = z.object({ query: z.string().trim().min(1).max(20_000), limit: z.number().int().min(1).max(20).default(20) }).strict();
 
-export const conversationSafeMessageSchema = conversationMessageBaseSchema.omit({ embedding: true, organizationKey: true, scopeKey: true, userKey: true, requestHash: true }).superRefine((message, context) => validateConversationMessage({ ...message, organizationKey: 'safe', scopeKey: message.conversationKey, userKey: message.key, requestHash: '0'.repeat(64) }, context));
+export const conversationSafeMessageSchema = conversationMessageBaseSchema.omit({ embedding: true, teamKey: true, scopeKey: true, userKey: true, requestHash: true }).superRefine((message, context) => validateConversationMessage({ ...message, teamKey: 'safe', scopeKey: message.conversationKey, userKey: message.key, requestHash: '0'.repeat(64) }, context));
 export const conversationImageTurnResultSchema = z.object({ user: conversationSafeMessageSchema, assistant: conversationSafeMessageSchema, replayed: z.boolean() }).strict();
 export function projectConversationMessage(message: ConversationMessage) {
-  const { embedding: _embedding, organizationKey: _organizationKey, scopeKey: _scopeKey, userKey: _userKey, requestHash: _requestHash, ...safe } = message;
+  const { embedding: _embedding, teamKey: _teamKey, scopeKey: _scopeKey, userKey: _userKey, requestHash: _requestHash, ...safe } = message;
   return conversationSafeMessageSchema.parse(safe);
 }
 export function encodeCursor(value: Record<string, unknown>) { return Buffer.from(JSON.stringify(value)).toString('base64url'); }

@@ -25,7 +25,7 @@ describe('Arango communication repository structure', () => {
 
   test('declares read and write collections for the shared channel, reactions, and votes', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
-    expect(source).toContain("read: ['userOrganizations', 'orchestrators', 'scopes', 'users']");
+    expect(source).toContain("read: ['userTeams', 'orchestrators', 'scopes', 'users']");
     expect(source).toContain("write: ['channels', 'channelParticipants']");
     expect(source).toContain("{ read: ['messages', 'channelParticipants'], write: ['messageReactions'] }");
     expect(source).toContain("{ read: ['messages', 'pollOptions'], write: ['polls', 'pollVotes'] }");
@@ -36,19 +36,19 @@ describe('Arango communication repository structure', () => {
     expect(source.match(/NOT_NULL\(user\.name, user\.alias, user\.email, "Member"\)/g)).toHaveLength(5);
   });
 
-  test('uses one organization-scoped general channel', async () => {
+  test('uses one team-scoped general channel', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
-    expect(source).toContain('UPSERT { organizationKey: @organizationKey, kind: "group", name: "general" }');
+    expect(source).toContain('UPSERT { teamKey: @teamKey, kind: "group", name: "general" }');
     expect(source).toContain("name: 'general'");
     expect(source.match(/POSITION\(@orchestratorNames, orchestrator\.name, true\)/g)).toHaveLength(2);
   });
 
-  test('deduplicates organization members and lists orchestrators independently', async () => {
+  test('deduplicates team members and lists orchestrators independently', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     expect(source.match(/COLLECT userKey = memberLink\.userId INTO memberships = memberLink/g)).toHaveLength(2);
     expect(source).toContain('LET agents = (FOR orchestrator IN orchestrators FILTER orchestrator.name IN @orchestratorNames');
     expect(source).not.toContain('FOR participant IN channelParticipants FILTER participant.channelKey == @channelKey && participant.orchestratorKey != null');
-    expect(source).not.toMatch(/LET membership = DOCUMENT\([^\n]+\)[\s\S]{0,800}FOR membership IN userOrganizations/);
+    expect(source).not.toMatch(/LET membership = DOCUMENT\([^\n]+\)[\s\S]{0,800}FOR membership IN userTeams/);
     expect(source.match(/memberLink\.status == "active"/g)).toHaveLength(2);
     expect(source.match(/memberLink\.userId != (?:@)?viewerUserKey/g)).toHaveLength(2);
   });
@@ -82,15 +82,15 @@ describe('Arango communication repository structure', () => {
     expect(source).not.toContain('await indexMessage(stored)');
     expect(source).toContain('SORT usage.count DESC, usage.updatedAt DESC, usage.reactionSlug ASC LIMIT @limit');
     expect(source.match(/canEdit: participant\._key == @viewerParticipantKey/g)).toHaveLength(3);
-    expect(source.match(/viewerMembership\.orgRole == "owner" \|\| viewerMembership\.orgRole == "admin"/g)).toHaveLength(3);
+    expect(source.match(/viewerMembership\.teamRole == "owner" \|\| viewerMembership\.teamRole == "admin"/g)).toHaveLength(3);
   });
 
   test('hard-deletes reply trees and dependent communication records while restricting edits to the author', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     expect(source).toContain('message.replyToMessageKey IN @parentKeys');
     expect(source).toContain('message.threadKey == @threadKey');
-    expect(source).toContain('author.userOrganizationKey == @membershipKey || membership.orgRole == "owner" || membership.orgRole == "admin"');
-    expect(source).toContain('FILTER author.userOrganizationKey == @membershipKey');
+    expect(source).toContain('author.userTeamKey == @teamMembershipKey || membership.teamRole == "owner" || membership.teamRole == "admin"');
+    expect(source).toContain('FILTER author.userTeamKey == @teamMembershipKey');
     expect(source).toContain('editedAt: @now, updatedAt: @now');
     expect(source).toContain('current.updatedAt == @updatedAt && current.content == @content');
     for (const mutation of [

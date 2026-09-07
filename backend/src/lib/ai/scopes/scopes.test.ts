@@ -1,19 +1,40 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
-import { createScopeRepository } from './repository';
+import { withDatabaseTransaction } from '@/lib/db/client';
+import { createScopeRepository, SCOPE_KEYED_REMOVAL_COLLECTIONS, SCOPE_REMOVAL_WRITE_COLLECTIONS } from './repository';
 import { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from './indexes';
 import { SCOPE_MEMBERS_COLLECTION, SCOPES_COLLECTION, SCOPE_SCOPES_COLLECTION, scopeSchema, scopesEmbedKeys, scopeScopeSchema } from './schema';
-import { createHash } from 'node:crypto';
 import {
   DuplicateScopeSlugError,
+  ProductScopeMutationError,
   ScopeAlreadyHasParentError,
   ScopeCycleError,
-  ScopeOrganizationMismatchError,
+  ScopeTeamMismatchError,
   ScopeRelationNotFoundError,
   type ScopesDatabase,
   type ScopesSetupDatabase,
 } from './types';
+
+test('designated root product scopes cannot be deleted or reparented through the generic repository', async () => {
+  const productKey = 'cmrnlzf640000qc7k4p5zem5w';
+  const parentKey = 'cmrnlzf640004qc7kdvj99uva';
+  const documents: Record<string, Record<string, unknown>> = {
+    [productKey]: { _key: productKey, teamKey: 'root', slug: 'vorinthex-ai', name: 'Vorinthex AI', summary: 'Summary', description: 'Description', position: 1, level: 1, embedding: [] },
+    [parentKey]: { _key: parentKey, teamKey: 'root', slug: 'command', name: 'Command', summary: 'Summary', description: 'Description', position: 2, level: 1, embedding: [] },
+  };
+  const database = {
+    collection: () => ({ document: async (key: string) => documents[key] }),
+    query: async (query: string) => query.includes('scope.slug IN @productSlugs')
+      ? { all: async () => [], next: async () => 1 }
+      : { all: async () => [], next: async () => undefined },
+  } as never;
+  const repository = createScopeRepository(database, async () => []);
+  await expect(repository.removeScope(productKey)).rejects.toBeInstanceOf(ProductScopeMutationError);
+  await expect(repository.updateScope(productKey, { slug: 'renamed-product' })).rejects.toBeInstanceOf(ProductScopeMutationError);
+  await expect(repository.addScopeRelation(parentKey, productKey)).rejects.toBeInstanceOf(ProductScopeMutationError);
+  await expect(repository.removeScopeRelation(parentKey, productKey)).rejects.toBeInstanceOf(ProductScopeMutationError);
+});
 
 function createFakeDb() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
@@ -28,14 +49,18 @@ function createFakeDb() {
 
   const fake: ScopesDatabase = {
     async query(query: string, bindVars: Record<string, unknown> = {}) {
-      if (query.includes('LET cleanupScopeRelations')) {
-        for (const collection of [SCOPE_SCOPES_COLLECTION, SCOPE_MEMBERS_COLLECTION]) {
-          for (const [key, doc] of [...store(collection).entries()]) {
-            if (doc.parentKey === bindVars.scopeKey || doc.childKey === bindVars.scopeKey || doc.scopeKey === bindVars.scopeKey) store(collection).delete(key);
-          }
+      if (query.includes('RETURN DOCUMENT(scopes, @scopeKey)')) return { all: async () => [], next: async () => store(SCOPES_COLLECTION).has(String(bindVars.scopeKey)) ? 1 : 0 };
+      if (query.includes('user.currentScopeKey')) return { all: async () => [], next: async () => 0 };
+      if (query.includes('LET storageKeys =')) return { all: async () => [], next: async () => [] };
+      if (query.includes('FOR relation IN scopeScopes')) {
+        for (const [key, doc] of [...store(SCOPE_SCOPES_COLLECTION).entries()]) {
+          if (doc.parentKey === bindVars.scopeKey || doc.childKey === bindVars.scopeKey) store(SCOPE_SCOPES_COLLECTION).delete(key);
         }
-        store(SCOPES_COLLECTION).delete(String(bindVars.scopeKey));
-        return { all: async () => [], next: async () => true };
+        return { all: async () => [], next: async () => undefined };
+      }
+      if (query.includes('FOR scope IN scopes') && query.includes('REMOVE scope IN scopes')) {
+        const deleted = store(SCOPES_COLLECTION).delete(String(bindVars.scopeKey));
+        return { all: async () => [], next: async () => deleted ? bindVars.scopeKey : undefined };
       }
       const docs = store(String(bindVars['@collection']));
       if (query.includes('REMOVE')) {
@@ -50,8 +75,8 @@ function createFakeDb() {
       }
 
       let rows = [...docs.values()];
-      if (query.includes('scope.organizationKey == @organizationKey')) {
-        rows = rows.filter((doc) => doc.organizationKey === bindVars.organizationKey);
+      if (query.includes('scope.teamKey == @teamKey')) {
+        rows = rows.filter((doc) => doc.teamKey === bindVars.teamKey);
         if (query.includes('REGEX_TEST(scope._key')) {
           rows = rows.filter((doc) => scopeSchema.shape.key.safeParse(doc._key).success);
         }
@@ -71,7 +96,7 @@ function createFakeDb() {
         async save(doc: Record<string, unknown>) {
           const duplicate = [...docs.values()].some((existing) => {
             if (name === SCOPES_COLLECTION) {
-              return existing.organizationKey === doc.organizationKey && existing.slug === doc.slug;
+              return existing.teamKey === doc.teamKey && existing.slug === doc.slug;
             }
             if (name === SCOPE_SCOPES_COLLECTION) {
               return existing.childKey === doc.childKey;
@@ -108,10 +133,10 @@ function createFakeDb() {
 }
 
 describe('scope schemas', () => {
-  test('scope carries organization ownership and semantic embedding fields', () => {
+  test('scope carries team ownership and semantic embedding fields', () => {
     const scope = scopeSchema.parse({
       key: newId(),
-      organizationKey: newId(),
+      teamKey: newId(),
       slug: 'core',
       name: 'Core',
       summary: 'Conversational intelligence.',
@@ -120,7 +145,7 @@ describe('scope schemas', () => {
     });
     expect(scope).toEqual({
       key: scope.key,
-      organizationKey: scope.organizationKey,
+      teamKey: scope.teamKey,
       slug: 'core',
       name: 'Core',
       summary: 'Conversational intelligence.',
@@ -133,7 +158,7 @@ describe('scope schemas', () => {
     expect(scopeSchema.parse({ ...scope, description: 'x'.repeat(10_000) }).description).toHaveLength(10_000);
     expect(scopeSchema.parse({ ...scope, description: null }).description).toBeNull();
     expect(() => scopeSchema.parse({ ...scope, slug: 'Not Valid' })).toThrow();
-    expect(scopeSchema.parse({ ...scope, organizationKey: 'legacy-root-key' }).organizationKey).toBe('legacy-root-key');
+    expect(scopeSchema.parse({ ...scope, teamKey: 'legacy-root-key' }).teamKey).toBe('legacy-root-key');
   });
 
   test('scope relation rejects self-parenting', () => {
@@ -150,35 +175,47 @@ describe('scope schemas', () => {
 });
 
 describe('scope repository', () => {
-  test('hard-deletes managed place media and queues permanent object deletion during scope teardown', async () => {
-    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
-    const teardown = source.slice(source.indexOf('async removeScope(scopeKey)'), source.indexOf('async addScopeRelation'));
-    for (const collection of ['generatedDocumentBindings', 'ticketVotes', 'tickets', 'tripAttachments', 'tripCreationReceipts', 'tripGuides', 'placeReferences', 'placeHeroMedia', 'placeImages', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'collectionInvites', 'collectionMembers', 'tagAssignments', 'shares', 'userHiddens', 'places', 'images', 'imageCaptions', 'collections', 'documentSummaryAudio', 'documentSummaries', 'documentAudioVersions', 'documentVersions', 'documentShares', 'emailAttachmentBindings', 'emailAttachments', 'emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'events', 'folders', 'scopeScopes', 'scopeMembers', 'scopes']) expect(teardown).toContain(collection);
-    expect(teardown).toContain('folder.managedPurpose IN ["mail-attachment", "mail-inbox", "mail-inbox-files", "mail-thread"]');
-    expect(teardown).not.toContain('FOR inbox IN inboxes');
-    expect(teardown.indexOf('LET cleanupMailVersions')).toBeLessThan(teardown.indexOf('LET cleanupMailDocuments'));
-    expect(teardown).toContain('FOR storageKey IN UNIQUE(UNION(mailStorageKeys');
-    expect(teardown).toContain('UPSERT { storageKey }');
-    expect(teardown).toContain('storageDeletionJobs');
-    expect(teardown).toContain('collection.purpose IN ["place-media", "email-media", "generated-media"] && collection.mutationPolicy == "system-only"');
-    expect(teardown).toContain('LET canonicalStorageKeys = UNIQUE(UNION(');
-    expect(teardown).toContain('LET ordinaryStorageKeys = UNIQUE(UNION(');
-    expect(teardown).not.toContain('decodeEmailTone');
-    expect(teardown).not.toContain('JSON_PARSE(document.content)');
-    expect(teardown).not.toContain('@toneFolderKey');
-    expect(teardown).toContain('document.sourceStorageKeys');
-    expect(teardown).toContain('document.speechStorageKeys');
-    expect(teardown).toContain('LET mailDocumentKeys =');
-    expect(teardown).toContain('summary.documentKey IN mailDocumentKeys');
-    expect(teardown).toContain('audio.summaryKey IN mailSummaryKeys');
-    expect(teardown.indexOf('LET mailDeletionJobs')).toBeLessThan(teardown.indexOf('LET cleanupMailDocuments'));
-    expect(teardown).toContain('FOR folder IN folders FILTER folder.scopeKey == @scopeKey && folder.coverImageKey IN imageKeys');
-    expect(teardown).toContain('FOR item IN tickets FILTER item.scopeKey == @scopeKey REMOVE item IN tickets');
-    expect(teardown).toContain('FOR item IN ticketVotes FILTER item.scopeKey == @scopeKey REMOVE item IN ticketVotes');
-    expect(teardown.indexOf('REMOVE item IN ticketVotes')).toBeLessThan(teardown.indexOf('REMOVE item IN tickets'));
-    expect(teardown).toContain('FOR item IN events FILTER item.scopeKey == @scopeKey REMOVE item IN events');
-    expect(source).toContain('FILTER user.currentScopeKey == @scopeKey');
-    expect(teardown.indexOf('LET cleanupFolderCovers')).toBeLessThan(teardown.indexOf('LET cleanupImages'));
+  test('derives one generic deletion pass for every ordinary scope-owned collection', () => {
+    expect(new Set(SCOPE_REMOVAL_WRITE_COLLECTIONS).size).toBe(SCOPE_REMOVAL_WRITE_COLLECTIONS.length);
+    expect(SCOPE_KEYED_REMOVAL_COLLECTIONS).toContain('generatedDocumentBindings');
+    expect(SCOPE_KEYED_REMOVAL_COLLECTIONS).toContain('collectionImages');
+    expect(SCOPE_KEYED_REMOVAL_COLLECTIONS).not.toContain('users');
+    expect(SCOPE_KEYED_REMOVAL_COLLECTIONS).not.toContain('scopes');
+    expect(SCOPE_KEYED_REMOVAL_COLLECTIONS).not.toContain('scopeScopes');
+    expect(SCOPE_KEYED_REMOVAL_COLLECTIONS).not.toContain('userTeams');
+    expect(SCOPE_KEYED_REMOVAL_COLLECTIONS).not.toContain('storageDeletionJobs');
+    expect(SCOPE_KEYED_REMOVAL_COLLECTIONS).not.toContain('bookRefundIntents');
+  });
+
+  test('uses separate statements for storage discovery and every collection modification across scopes', async () => {
+    const scopeKeys = [newId(), newId()];
+    const queries: Array<{ query: string; bindVars: Record<string, unknown> }> = [];
+    const database = {
+      async query(query: string, bindVars: Record<string, unknown> = {}) {
+        queries.push({ query, bindVars });
+        if (query.includes('scope.slug IN @productSlugs')) return { next: async () => 0 };
+        if (query.includes('RETURN DOCUMENT(scopes, @scopeKey)')) return { next: async () => 1 };
+        if (query.includes('user.currentScopeKey')) return { next: async () => 0 };
+        if (query.includes('LET storageKeys =')) return { next: async () => [`objects/${bindVars.scopeKey}`] };
+        if (query.includes('REMOVE scope IN scopes')) return { next: async () => bindVars.scopeKey };
+        return { next: async () => undefined };
+      },
+    } as never;
+    const repository = createScopeRepository(database);
+
+    for (const scopeKey of scopeKeys) await repository.removeScope(scopeKey);
+
+    for (const scopeKey of scopeKeys) {
+      const scopeQueries = queries.filter(({ bindVars }) => bindVars.scopeKey === scopeKey);
+      const genericDeletes = scopeQueries.filter(({ query }) => query.includes('REMOVE item IN @@collection'));
+      expect(genericDeletes.map(({ bindVars }) => bindVars['@collection'])).toEqual(SCOPE_KEYED_REMOVAL_COLLECTIONS);
+      expect(genericDeletes.filter(({ bindVars }) => bindVars['@collection'] === 'generatedDocumentBindings')).toHaveLength(1);
+      expect(genericDeletes.filter(({ bindVars }) => bindVars['@collection'] === 'collectionImages')).toHaveLength(1);
+      expect(scopeQueries.findIndex(({ query }) => query.includes('LET storageKeys ='))).toBeLessThan(scopeQueries.findIndex(({ query }) => query.includes('IN storageDeletionJobs')));
+      expect(scopeQueries.findIndex(({ query }) => query.includes('IN storageDeletionJobs'))).toBeLessThan(scopeQueries.findIndex(({ query }) => query.includes('REMOVE item IN @@collection')));
+    }
+    expect(queries.every(({ query }) => (query.match(/\bREMOVE\b/g) ?? []).length <= 1)).toBe(true);
+    expect(queries.every(({ query }) => !query.includes('REMOVE') || (!query.includes('UPDATE') && !query.includes('UPSERT')))).toBe(true);
   });
   test('does not eagerly create Compass or Signal export folders with a scope', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
@@ -189,58 +226,14 @@ describe('scope repository', () => {
     expect(seed).not.toContain('ensureGeneratedDocumentFolders');
     expect(seed).not.toContain('ensureMailFolders');
   });
-  test('scope teardown deletes an unbound processing attachment image from its receipt ownership', async () => {
-    const scopeKey = newId();
-    const bindingKey = newId();
-    const targetKey = `c${createHash('sha256').update(['email-attachment-target', bindingKey].join('\0')).digest('hex').slice(0, 24)}`;
-    const state = {
-      images: new Map([[targetKey, { key: targetKey, scopeKey, mutationPolicy: 'system-only', storageKey: 'attachments/unbound.jpg', imageCaptionKey: newId() }]]),
-      bindings: new Map([[bindingKey, { key: bindingKey, scopeKey, targetType: 'image', targetKey, status: 'processing' }]]),
-      memories: new Map([[newId(), { scopeKey, imageKey: targetKey }]]),
-      highlights: new Map([[newId(), { scopeKey, collectionKey: newId(), imageKeys: [targetKey, newId()] }]]),
-      folders: new Map([[newId(), { scopeKey, coverImageKey: targetKey as string | undefined }]]),
-      deletionJobs: new Set<string>(),
-    };
-    let teardownQuery = '';
-    const database: ScopesDatabase = {
-      collection: () => ({ document: async () => ({ _key: scopeKey, organizationKey: newId(), slug: 'scope', name: 'Scope', summary: 'Summary', description: null, position: 1, level: 1, embedding: [] }), save: async () => ({}), update: async () => ({}), remove: async () => ({}) }),
-      query: async (query) => {
-        if (query.trim().startsWith('FOR document')) return { all: async () => [], next: async () => undefined };
-        if (query.includes('user.currentScopeKey')) return { all: async () => [], next: async () => 0 };
-        teardownQuery = query;
-        const binding = state.bindings.get(bindingKey);
-        const image = binding?.targetType === 'image' ? state.images.get(binding.targetKey) : undefined;
-        if (image && query.includes('LET boundAttachmentImages') && query.includes('UNION(boundAttachmentImages, relatedManagedImages)')) {
-          state.deletionJobs.add(image.storageKey);
-          state.images.delete(image.key);
-          state.bindings.delete(bindingKey);
-          for (const [key, memory] of state.memories) if (memory.imageKey === image.key) state.memories.delete(key);
-          for (const highlight of state.highlights.values()) highlight.imageKeys = highlight.imageKeys.filter((key) => key !== image.key);
-          for (const folder of state.folders.values()) if (folder.coverImageKey === image.key) folder.coverImageKey = undefined;
-        }
-        return { all: async () => [], next: async () => true };
-      },
-    };
-    await createScopeRepository(database).removeScope(scopeKey);
-    expect(teardownQuery).toContain('binding.targetKey == CONCAT("c", LEFT(SHA256');
-    expect(teardownQuery).not.toContain('\0');
-    expect(teardownQuery).toContain('CONCAT_SEPARATOR("\\u0000", "email-attachment-target"');
-    expect(state.images.has(targetKey)).toBe(false);
-    expect(state.bindings.has(bindingKey)).toBe(false);
-    expect(state.memories.size).toBe(0);
-    expect([...state.highlights.values()][0]?.imageKeys).not.toContain(targetKey);
-    expect([...state.folders.values()][0]?.coverImageKey).toBeUndefined();
-    expect(state.deletionJobs).toContain('attachments/unbound.jpg');
-    expect(teardownQuery.indexOf('LET cleanupFolderCovers')).toBeLessThan(teardownQuery.indexOf('LET cleanupImages'));
-  });
-  const organizationKey = newId();
+  const teamKey = newId();
   const generateEmbedding = async (text: string) => {
     const vector = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0);
     vector[0] = [...text].reduce((hash, character) => Math.imul(hash ^ character.charCodeAt(0), 16_777_619), 2_166_136_261);
     return vector;
   };
-  const input = (overrides: Partial<{ organizationKey: string; slug: string; name: string; summary: string; description: string; position: number }> = {}) => ({
-    organizationKey,
+  const input = (overrides: Partial<{ teamKey: string; slug: string; name: string; summary: string; description: string; position: number }> = {}) => ({
+    teamKey,
     slug: 'core',
     name: 'Core',
     summary: 'Conversational intelligence.',
@@ -249,7 +242,7 @@ describe('scope repository', () => {
     ...overrides,
   });
 
-  test('creates and lists scopes per organization with unique slugs', async () => {
+  test('creates and lists scopes per team with unique slugs', async () => {
     const { fake, stores } = createFakeDb();
     const repository = createScopeRepository(fake, generateEmbedding);
     const core = await repository.createScope(input());
@@ -260,10 +253,10 @@ describe('scope repository', () => {
     const resummarized = await repository.updateScope(core.key, { summary: 'A new semantic summary.' });
     expect(resummarized.embedding).not.toEqual(core.embedding);
     await repository.createScope(input({ slug: 'command', name: 'Command' }));
-    await repository.createScope(input({ organizationKey: newId() }));
+    await repository.createScope(input({ teamKey: newId() }));
     stores.get(SCOPES_COLLECTION)?.set('legacy_scope', {
       _key: 'legacy_scope',
-      organizationKey,
+      teamKey,
       slug: 'legacy',
       name: 'Legacy',
       description: 'Retired pre-CUID scope.',
@@ -271,7 +264,7 @@ describe('scope repository', () => {
       embedding: [],
     });
 
-    expect((await repository.listScopes(organizationKey)).map((scope) => scope.slug)).toEqual(['command', 'core']);
+    expect((await repository.listScopes(teamKey)).map((scope) => scope.slug)).toEqual(['command', 'core']);
     expect(await repository.getScopeByKey(core.key)).toEqual(resummarized);
     await expect(repository.createScope(input())).rejects.toBeInstanceOf(DuplicateScopeSlugError);
   });
@@ -304,14 +297,14 @@ describe('scope repository', () => {
     ]);
   });
 
-  test('enforces organization boundaries, strict parents, and cycles', async () => {
+  test('enforces team boundaries, strict parents, and cycles', async () => {
     const { fake } = createFakeDb();
     const repository = createScopeRepository(fake, generateEmbedding);
     const root = await repository.createScope(input({ slug: 'root', name: 'Root' }));
     const core = await repository.createScope(input());
     const command = await repository.createScope(input({ slug: 'command', name: 'Command' }));
     const nested = await repository.createScope(input({ slug: 'nested', name: 'Nested' }));
-    const foreign = await repository.createScope(input({ organizationKey: newId(), slug: 'foreign', name: 'Foreign' }));
+    const foreign = await repository.createScope(input({ teamKey: newId(), slug: 'foreign', name: 'Foreign' }));
 
     await repository.addScopeRelation(root.key, core.key);
     await repository.addScopeRelation(root.key, command.key);
@@ -322,7 +315,7 @@ describe('scope repository', () => {
     ]);
 
     await expect(repository.addScopeRelation(command.key, core.key)).rejects.toBeInstanceOf(ScopeAlreadyHasParentError);
-    await expect(repository.addScopeRelation(root.key, foreign.key)).rejects.toBeInstanceOf(ScopeOrganizationMismatchError);
+    await expect(repository.addScopeRelation(root.key, foreign.key)).rejects.toBeInstanceOf(ScopeTeamMismatchError);
     await expect(repository.addScopeRelation(root.key, newId())).rejects.toThrow();
     await expect(repository.addScopeRelation(command.key, root.key)).rejects.toBeInstanceOf(ScopeCycleError);
   });
@@ -340,12 +333,16 @@ describe('scope repository', () => {
     stores.set(SCOPE_MEMBERS_COLLECTION, new Map([[newId(), {
       _key: newId(),
       scopeKey: core.key,
-      userOrganizationKey: newId(),
+      userTeamKey: newId(),
       role: 'owner',
     }]]));
+    stores.set('generatedDocumentBindings', new Map([[newId(), { _key: newId(), scopeKey: core.key }]]));
+    stores.set('collectionImages', new Map([[newId(), { _key: newId(), scopeKey: core.key }]]));
     await repository.removeScope(core.key);
     expect(stores.get(SCOPE_SCOPES_COLLECTION)?.size).toBe(0);
     expect(stores.get(SCOPE_MEMBERS_COLLECTION)?.size).toBe(0);
+    expect(stores.get('generatedDocumentBindings')?.size).toBe(0);
+    expect(stores.get('collectionImages')?.size).toBe(0);
   });
 });
 
@@ -369,15 +366,52 @@ describe('scope index setup', () => {
 
     expect(created).toEqual([SCOPES_COLLECTION, SCOPE_SCOPES_COLLECTION, SCOPE_MEMBERS_COLLECTION]);
     expect(ensured.filter((index) => index.unique).map((index) => `${index.collection}:${index.fields.join('+')}`)).toEqual([
-      `${SCOPES_COLLECTION}:organizationKey+slug`,
+      `${SCOPES_COLLECTION}:teamKey+slug`,
       `${SCOPE_SCOPES_COLLECTION}:parentKey+childKey`,
       `${SCOPE_SCOPES_COLLECTION}:childKey`,
-      `${SCOPE_MEMBERS_COLLECTION}:scopeKey+userOrganizationKey`,
+      `${SCOPE_MEMBERS_COLLECTION}:scopeKey+userTeamKey`,
     ]);
     expect(ensured).toContainEqual({
       collection: SCOPES_COLLECTION,
-      fields: ['organizationKey', 'position'],
+      fields: ['teamKey', 'position'],
       unique: false,
     });
   });
+});
+
+const liveArangoSuite = process.env.ARANGO_URL && process.env.ARANGO_USERNAME && process.env.ARANGO_ROOT_PASSWORD !== undefined ? describe : describe.skip;
+
+liveArangoSuite('scope removal live Arango', () => {
+  test('removes multiple scopes in one stream transaction without repeated collection access', async () => {
+    const { Database } = await import('arangojs');
+    const temporaryName = `scope_removal_${crypto.randomUUID().replaceAll('-', '')}`;
+    const root = new Database({
+      url: process.env.ARANGO_URL!,
+      auth: { username: process.env.ARANGO_USERNAME!, password: process.env.ARANGO_ROOT_PASSWORD! },
+    });
+    await root.createDatabase(temporaryName);
+    const temporary = root.database(temporaryName);
+    const scopeKeys = [newId(), newId()];
+    try {
+      for (const name of new Set([...SCOPE_REMOVAL_WRITE_COLLECTIONS, 'teams'])) await temporary.createCollection(name);
+      await temporary.collection('scopes').import(scopeKeys.map((key, index) => ({ _key: key, teamKey: 'team-live', slug: `scope-${index}`, name: `Scope ${index}`, summary: 'Live teardown test', description: null, position: index, level: 1, embedding: [] })));
+      for (const scopeKey of scopeKeys) {
+        await temporary.collection('generatedDocumentBindings').save({ _key: newId(), scopeKey });
+        await temporary.collection('collectionImages').save({ _key: newId(), scopeKey });
+      }
+
+      await withDatabaseTransaction(temporary, { read: ['teams'], write: [...SCOPE_REMOVAL_WRITE_COLLECTIONS] }, async (transaction) => {
+        const repository = createScopeRepository(transaction as never, async () => []);
+        for (const scopeKey of scopeKeys) await repository.removeScope(scopeKey);
+      });
+
+      expect(await (await temporary.query<number>('RETURN LENGTH(scopes)')).next()).toBe(0);
+      expect(await (await temporary.query<number>('RETURN LENGTH(generatedDocumentBindings)')).next()).toBe(0);
+      expect(await (await temporary.query<number>('RETURN LENGTH(collectionImages)')).next()).toBe(0);
+    } finally {
+      temporary.close();
+      await root.dropDatabase(temporaryName);
+      root.close();
+    }
+  }, 30_000);
 });

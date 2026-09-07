@@ -9,19 +9,21 @@ import { sparkErrorResponse } from './errors';
 import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
 import { toolEventService, type ToolEventRecorder } from '@/lib/ai/events/service';
 import { createHash } from 'node:crypto';
+import { authenticatedTeamContext } from './auth';
 
 export const appSearchHttpInputSchema = z.object({ ...appSearchInputShape,
-  organizationKey: z.string().trim().min(1),
+  teamKey: z.string().trim().min(1),
   scopeKey: z.string().cuid(),
 }).strict().superRefine(validateAppSearchInput);
 
 export interface AppSearchHandlerDependencies {
   getIdentity?: typeof getAuthIdentity;
-  authorize?: (input: { organizationKey: string; scopeKey: string }, options: Omit<RunAuthenticatedContentToolOptions, 'execute'>) => Promise<{ input: { organizationKey: string; scopeKey: string }; context: ToolContext }>;
+  authorize?: (input: { teamKey: string; scopeKey: string }, options: Omit<RunAuthenticatedContentToolOptions, 'execute'>) => Promise<{ input: { teamKey: string; scopeKey: string }; context: ToolContext }>;
   authorizationOptions?: Omit<RunAuthenticatedContentToolOptions, 'authenticatedUserKey' | 'execute'>;
   service?: AppSearchService;
   searchDependencies?: AppSearchDependencies;
   recordEvent?: ToolEventRecorder;
+  appScopeKey?: string;
   billing?: ToolBillingDependencies;
 }
 
@@ -29,18 +31,17 @@ export function createAppSearchHandler(dependencies: AppSearchHandlerDependencie
   return async (c: Context) => {
     const identity = await (dependencies.getIdentity ?? getAuthIdentity)(c);
     if (!identity) return c.json({ success: false, error: 'authentication required' }, 401);
-    if (identity.identityType !== 'user') return c.json({ success: false, error: 'user session required' }, 403);
     try {
-      const { organizationKey, scopeKey, ...input } = await parseJson(c, appSearchHttpInputSchema);
-      const { context } = await (dependencies.authorize ?? authorizeContentExecution)({ organizationKey, scopeKey }, {
+      const { teamKey, scopeKey, ...input } = await parseJson(c, appSearchHttpInputSchema);
+      const { context } = await (dependencies.authorize ?? authorizeContentExecution)({ teamKey, scopeKey }, {
         ...dependencies.authorizationOptions,
-        authenticatedUserKey: identity.key,
+        ...authenticatedTeamContext(identity),
       });
-      const idempotencyKey = z.string().trim().min(1).max(200).parse(c.req.header('idempotency-key') ?? createHash('sha256').update(JSON.stringify({ organizationKey, scopeKey, input })).digest('hex'));
+      const idempotencyKey = z.string().trim().min(1).max(200).parse(c.req.header('idempotency-key') ?? createHash('sha256').update(JSON.stringify({ teamKey, scopeKey, input })).digest('hex'));
       const output = await observeToolExecution('app.search', context, () => (dependencies.service ?? createAppSearchService()).search(input, context, {
         ...dependencies.searchDependencies,
         signal: c.req.raw.signal,
-      }), { recorder: dependencies.recordEvent ?? toolEventService.record, idempotencyKey, input, ...dependencies.billing });
+      }), { recorder: dependencies.recordEvent ?? toolEventService.record, appScopeKey: dependencies.appScopeKey, idempotencyKey, input, ...dependencies.billing });
       return c.json({ success: true, data: { ...output, retrieval: projectAppSearchRetrieval(input, output) } });
     } catch (error) {
       const billing = sparkErrorResponse(c, error); if (billing) return billing;

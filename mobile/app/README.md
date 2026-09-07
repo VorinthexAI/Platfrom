@@ -5,9 +5,9 @@ expo-router. Native projects are generated on demand and are not committed.
 
 ## Flow
 
-Splash → five-card onboarding (swipe left = skip, right = enable; state in
-Zustand) → Building Your Personal AI → personal AI tree → capability screens
-(Archive, Gallery, Signal, Compass, Ascend). No bottom navigation.
+Splash → mission and server-registry app introduction (Core, Archive, Gallery,
+Signal, Compass, Ascend) → plans and referral paywall → capability screens.
+Onboarding completes only after the paywall flow completes. No bottom navigation.
 
 ## Run
 
@@ -53,13 +53,13 @@ MFA links remain web-only at `https://vorinthex.com/auth/mfa`.
 ## Structure
 
 - `src/app` — expo-router routes (thin screens)
-- `src/components` — card stack, capability shell, chrome icon treatment
+- `src/components` — onboarding sequence, capability shell, chrome icon treatment
   (UI animation via Reanimated)
 - `src/components/three` — all 3D rendered with three.js via
   @react-three/fiber (expo-gl on native, DOM canvas on web), including the
   luminous personal AI tree and capability detail fields
 - `src/data` — Zod-validated capability registry + mock content
-- `src/state` — Zustand stores (onboarding decisions, local UI state)
+- `src/state` — Zustand stores (authenticated, registry, and local UI state)
 - `src/theme` — tokens extending `@vorinthex/shared/ui/tokens`, motion vocabulary
 - `assets/brand` — approved chrome icons and the Vorinthex mark, copied
   from `web/app/public/logos` (never redrawn)

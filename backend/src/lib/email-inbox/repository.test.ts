@@ -65,6 +65,47 @@ describe('canonical email persistence', () => {
     expect(archive?.bindVars.values.every((value: Record<string, unknown>) => !String(value.content).startsWith('{'))).toBe(true);
   });
 
+  test('atomically debits one Spark for each absent subscription email before persistence', async () => {
+    const calls: Array<{ query: string; bindVars: Record<string, any> }> = [];
+    const second = { ...message, key: emailMessageKey(scopeKey, accountKey, 'provider-message-2'), providerMessageId: 'provider-message-2' };
+    const database = { query: async (query: string, bindVars: Record<string, any>) => {
+      calls.push({ query, bindVars });
+      if (query.includes('LET billableIds')) return cursor({ chargedEmailCount: 2, transactionKey: 'charge' });
+      if (query.includes('IN emailThreads RETURN NEW')) return cursor(bindVars.value);
+      if (query.includes('IN folders')) return cursor({ _key: bindVars.key, scopeKey });
+      return cursor();
+    } };
+    await createEmailRepository(database as never).syncThread({
+      thread: { ...thread, key: undefined, createdAt: undefined, updatedAt: undefined } as never,
+      messages: [{ ...message, key: undefined, threadKey: undefined, createdAt: undefined, updatedAt: undefined }, { ...second, key: undefined, threadKey: undefined, createdAt: undefined, updatedAt: undefined }] as never,
+      subscriptionBilling: { userKey: accountKey, providerMessageIds: [second.providerMessageId, message.providerMessageId, message.providerMessageId] },
+    });
+    const chargeIndex = calls.findIndex(({ query }) => query.includes('LET billableIds'));
+    const persistIndex = calls.findIndex(({ query }) => query.includes('IN emailThreads RETURN NEW'));
+    expect(chargeIndex).toBeGreaterThanOrEqual(0);
+    expect(chargeIndex).toBeLessThan(persistIndex);
+    expect(calls[chargeIndex]!.query).toContain('DOCUMENT(emailMessages, message._key) == null');
+    expect(calls[chargeIndex]!.query).toContain('LENGTH(billableIds) * @microSparksPerEmail');
+    expect(calls[chargeIndex]!.bindVars).toMatchObject({ providerMessageIds: ['provider-message', 'provider-message-2'], microSparksPerEmail: 1_000_000, userKey: accountKey });
+  });
+
+  test('does not persist subscription email outcomes when the atomic debit is unfunded', async () => {
+    const calls: string[] = [];
+    const database = { query: async (query: string) => {
+      calls.push(query);
+      if (query.includes('LET billableIds')) return cursor();
+      if (query.includes('LET user = DOCUMENT(users')) return cursor({ balance: 0, debt: 0 });
+      return cursor();
+    } };
+    await expect(createEmailRepository(database as never).syncThread({
+      thread: { ...thread, key: undefined, createdAt: undefined, updatedAt: undefined } as never,
+      messages: [{ ...message, key: undefined, threadKey: undefined, createdAt: undefined, updatedAt: undefined }] as never,
+      subscriptionBilling: { userKey: accountKey, providerMessageIds: [message.providerMessageId] },
+    })).rejects.toThrow('insufficient');
+    expect(calls.some((query) => query.includes('IN emailThreads RETURN NEW'))).toBe(false);
+    expect(calls.some((query) => query.includes('IN emailMessages'))).toBe(false);
+  });
+
   test('reads thread detail from dedicated records and applies schema defaults', async () => {
     const database = { query: async (query: string) => query.includes('DOCUMENT(@@collection') ? cursor(arango({ ...thread, isFavorite: undefined, inboxCategory: undefined })) : cursor(undefined, [arango({ ...message, unread: undefined, inboxCategory: undefined, attachmentAvailability: undefined })]) };
     const detail = await createEmailRepository(database as never).thread(scopeKey, thread.key);
@@ -79,6 +120,7 @@ describe('canonical email persistence', () => {
     expect(call?.bindVars).toMatchObject({ scopeKey, connectorKey: accountKey, query: 'roadmap', readState: 'unread', facets: ['favorite', 'important'], createdFrom: at, createdTo: at });
     expect(call?.query).toContain('FOR message IN emailMessages');
     expect(call?.query).toContain('DOCUMENT(emailThreads, message.threadKey)');
+    expect(call?.query).toContain('["urgent", "important", "purchases", "filtered"]');
     expect(call!.query.indexOf('thread.createdAt >= @createdFrom')).toBeLessThan(call!.query.indexOf('COSINE_SIMILARITY'));
     expect(call!.query.indexOf('thread.createdAt <= @createdTo')).toBeLessThan(call!.query.indexOf('LIMIT @limit'));
     expect(result).toMatchObject([{ thread: { key: thread.key }, score: 0.8 }]);

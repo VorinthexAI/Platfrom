@@ -18,6 +18,10 @@ describe('new account newcomer grant', () => {
     const reconcile = source.slice(start, source.indexOf('const existing =', start));
     expect(reconcile).not.toContain('sparkService.adjust');
     expect(reconcile).toContain('recoverNewcomerGrantEvent');
+    expect(reconcile).toContain('referralService.ensurePersonalCode');
+    const initialization = source.slice(source.indexOf('async function initializeNewAccount'), source.indexOf('async function recordAccountCreatedEvent'));
+    expect(initialization).toContain('referralService.ensurePersonalCode');
+    expect(initialization.indexOf('sparkService.adjust')).toBeLessThan(initialization.indexOf('referralService.ensurePersonalCode'));
     expect(source).toContain('return initializeNewAccount(await getUserById(user.key) ?? user)');
   });
 });

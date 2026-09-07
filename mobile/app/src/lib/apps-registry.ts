@@ -18,6 +18,8 @@ export const serverAppSchema = z.strictObject({
   slug: z.string().min(1).max(100).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   name: z.string().trim().min(1).max(100),
   description: z.string().trim().min(1).max(300),
+  detailedDescription: z.string().trim().min(1).max(5_000),
+  logoUrl: z.url(),
   version: z.string().regex(/^\d+\.\d+\.\d+$/),
   createdAt: z.string().datetime({ offset: true }),
   updatedAt: z.string().datetime({ offset: true }),

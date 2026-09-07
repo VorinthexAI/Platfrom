@@ -2,12 +2,12 @@ import { describe, expect, test } from 'bun:test';
 import { createEmailAttachmentIngestionService, EmailAttachmentIngestionError, type EmailAttachmentRepository } from './attachment-ingestion';
 import type { EmailAttachmentBinding } from './attachment-binding-schema';
 
-const organizationKey = 'organization';
+const teamKey = 'team';
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
-const membershipKey = 'cmrnlzf650002qc7k4p5zemb0';
+const teamMembershipKey = 'cmrnlzf650002qc7k4p5zemb0';
 const connectorKey = 'cmrnlzf660003qc7kw1n9j93a';
 const billingUserKey = 'cmrnlzf670004qc7kw1n9j94b';
-const common = { organizationKey, scopeKey, membershipKey, billingUserKey, connectorKey, providerMessageId: 'provider-message' };
+const common = { teamKey, scopeKey, teamMembershipKey, billingUserKey, connectorKey, providerMessageId: 'provider-message' };
 const at = new Date('2026-08-25T12:00:00.000Z');
 
 function fixture(options: { exportFailure?: boolean } = {}) {
@@ -16,14 +16,14 @@ function fixture(options: { exportFailure?: boolean } = {}) {
   const uploads: Array<{ key: string; billingUserKey?: string }> = [];
   const deleted: string[] = [];
   const repository: EmailAttachmentRepository = {
-    async activeMembership(input) { return input.preferredMembershipKey; },
+    async activeMembership(input) { return input.preferredTeamMembershipKey; },
     async completed(input) {
       const value = bindings.get(input.key);
       if (!value || value.status !== 'completed') return null;
       if (value.sourceFilename !== input.sourceFilename || value.sourceMimeType !== input.sourceMimeType || value.sourceSize !== input.sourceSize) throw new EmailAttachmentIngestionError('ATTACHMENT_CONFLICT', 'changed metadata', false);
       return value;
     },
-    async claim(input, _membershipKey, leaseToken, now, leaseExpiresAt) {
+    async claim(input, _teamMembershipKey, leaseToken, now, leaseExpiresAt) {
       const existing = bindings.get(input.key);
       if (existing && (existing.contentHash !== input.contentHash || existing.sourceFilename !== input.sourceFilename || existing.sourceMimeType !== input.sourceMimeType || existing.sourceSize !== input.sourceSize)) throw new EmailAttachmentIngestionError('ATTACHMENT_CONFLICT', 'changed source', false);
       if (existing?.status === 'completed') return { status: 'replay', binding: existing };
@@ -40,7 +40,7 @@ function fixture(options: { exportFailure?: boolean } = {}) {
       return true;
     },
     async renew() { return true; },
-    async complete(key, token, type, targetKey, _collectionKey, _membershipKey, now) {
+    async complete(key, token, type, targetKey, _collectionKey, _teamMembershipKey, now) {
       const current = bindings.get(key);
       if (!current || current.leaseToken !== token || targetKey !== key || current.targetType !== type || !current.storageKey) return false;
       bindings.set(key, { ...current, status: 'completed', leaseToken: undefined, leaseExpiresAt: undefined, updatedAt: now });

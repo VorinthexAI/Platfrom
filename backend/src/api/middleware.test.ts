@@ -3,9 +3,11 @@ import { Hono } from 'hono';
 import { FOUNDER_ACCESS_MAX_AGE_SECONDS, FOUNDER_REFRESH_MAX_AGE_SECONDS } from './auth';
 import { isResendWebhookPath } from './resend';
 import { isGmailWebhookPath } from './email-webhook';
-import { createAutoRefreshAuthTokens, createBindEventApp, isPublicBookSharePath, isPublicFounderAuthPath, rateLimitByIp, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
-import { currentEventAppKey } from '@/lib/ai/events/runtime';
+import { isPolarWebhookPath } from './polar-webhook';
+import { bindEventIdentifier, createAutoRefreshAuthTokens, createBindEventApp, isOnboardingSandboxPath, isPublicFounderAuthPath, isPublicProductPath, rateLimitByIp, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
+import { currentEventAppKey, currentEventAppScopeKey } from '@/lib/ai/events/runtime';
 import { APP_KEYS } from '@/lib/apps/registry';
+import { currentEventIdentifier } from '@/lib/ai/events/event-identifier';
 
 function middlewareContext(path: string, headers: Record<string, string> = {}, search = '', method = 'GET') {
   return {
@@ -25,11 +27,17 @@ function middlewareContext(path: string, headers: Record<string, string> = {}, s
 }
 
 describe('application key middleware', () => {
-  const bindEventApp = createBindEventApp(async (key) => key === APP_KEYS.GALLERY || key === APP_KEYS.CORE);
+  const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
+  const bindEventApp = createBindEventApp(async (key) => {
+    if (key !== APP_KEYS.GALLERY && key !== APP_KEYS.CORE) throw new Error('unknown');
+    return { aliasKey: key, scopeKey };
+  });
   test('binds a valid app key for the full request', async () => {
     let appKey: string | undefined;
-    await bindEventApp(middlewareContext('/api/v1/app/search', { 'x-vorinthex-app-key': ` ${APP_KEYS.GALLERY} ` }), async () => { appKey = currentEventAppKey(); });
+    let resolvedScopeKey: string | null = null;
+    await bindEventApp(middlewareContext('/api/v1/app/search', { 'x-vorinthex-app-key': ` ${APP_KEYS.GALLERY} ` }), async () => { appKey = currentEventAppKey(); resolvedScopeKey = currentEventAppScopeKey(); });
     expect(appKey).toBe(APP_KEYS.GALLERY);
+    expect(String(resolvedScopeKey)).toBe(scopeKey);
   });
 
   test('defaults missing headers to Core and rejects malformed or unknown keys', async () => {
@@ -43,16 +51,45 @@ describe('application key middleware', () => {
     expect(legacyHeaderAppKey).toBe(APP_KEYS.CORE);
   });
 
-  test('does not query the registry when defaulting trusted and backward clients to Core', async () => {
-    const bindDefault = createBindEventApp(async () => { throw new Error('must not query'); });
+  test('resolves the default Core alias to a live product scope', async () => {
+    let resolutions = 0;
+    const bindDefault = createBindEventApp(async (aliasKey) => { resolutions += 1; return { aliasKey, scopeKey }; });
     let appKey: string | undefined;
     await bindDefault(middlewareContext('/api/v1/app/search'), async () => { appKey = currentEventAppKey(); });
     expect(appKey).toBe(APP_KEYS.CORE);
+    expect(resolutions).toBe(1);
   });
 
   test('does not look up apps for health or the public registry', async () => {
     const exempt = createBindEventApp(async () => { throw new Error('must not query'); });
     for (const path of ['/api/v1/health', '/api/v1/apps']) await exempt(middlewareContext(path), async () => undefined);
+  });
+});
+
+describe('event identifier middleware', () => {
+  test('is globally registered before routes and allowed by CORS', async () => {
+    const source = await Bun.file(new URL('./index.ts', import.meta.url)).text();
+    expect(source).toContain('EVENT_IDENTIFIER_HEADER,');
+    expect(source.indexOf("app.use('*', bindEventIdentifier)")).toBeLessThan(source.indexOf('registerRoutes(api)'));
+  });
+
+  test('binds a valid header through asynchronous request work and allows absence', async () => {
+    const identifier = 'a'.repeat(128);
+    const seen: { value: string | null } = { value: null };
+    await bindEventIdentifier(middlewareContext('/api/v1/events', { 'x-vorinthex-event-identifier': identifier }), async () => {
+      await Promise.resolve();
+      seen.value = currentEventIdentifier();
+    });
+    expect(seen.value).toBe(identifier);
+    let absentCalls = 0;
+    await bindEventIdentifier(middlewareContext('/api/v1/health'), async () => { absentCalls += 1; });
+    expect(absentCalls).toBe(1);
+  });
+
+  test('rejects malformed, uppercase, and padded identifiers', async () => {
+    for (const identifier of ['a'.repeat(127), 'A'.repeat(128), ` ${'a'.repeat(128)} `]) {
+      expect((await bindEventIdentifier(middlewareContext('/api/v1/events', { 'x-vorinthex-event-identifier': identifier }), async () => undefined))?.status).toBe(400);
+    }
   });
 });
 
@@ -71,18 +108,30 @@ describe('api middleware webhook exemptions', () => {
     expect(isGmailWebhookPath('/api/webhooks/gmail/pubsub')).toBe(false);
   });
 
+  test('recognizes only the v1 Polar webhook and public product GET paths', () => {
+    expect(isPolarWebhookPath('/api/v1/webhooks/polar')).toBe(true);
+    expect(isPolarWebhookPath('/api/v1/webhooks/polar/')).toBe(true);
+    expect(isPolarWebhookPath('/api/webhooks/polar')).toBe(false);
+    expect(isPublicProductPath('/api/v1/products', 'GET')).toBe(true);
+    expect(isPublicProductPath('/api/v1/products/', 'GET')).toBe(true);
+    expect(isPublicProductPath('/api/v1/products', 'POST')).toBe(false);
+    expect(isPublicProductPath('/api/v1/costs', 'GET')).toBe(true);
+    expect(isPublicProductPath('/api/v1/costs/', 'GET')).toBe(true);
+    expect(isPublicProductPath('/api/v1/costs', 'POST')).toBe(false);
+  });
+
   test('does not require the global API key for provider webhooks', async () => {
     const previousApiKey = process.env.API_KEY;
     process.env.API_KEY = 'server-key';
     let nextCalls = 0;
 
     try {
-      for (const path of ['/api/v1/webhooks/resend', '/api/v1/webhooks/resend/', '/api/v1/webhooks/gmail/pubsub', '/api/v1/webhooks/gmail/pubsub/']) {
+      for (const path of ['/api/v1/webhooks/resend', '/api/v1/webhooks/resend/', '/api/v1/webhooks/gmail/pubsub', '/api/v1/webhooks/gmail/pubsub/', '/api/v1/webhooks/polar', '/api/v1/webhooks/polar/', '/api/v1/products']) {
         await requireEnvApiKey(middlewareContext(path), async () => {
           nextCalls += 1;
         });
       }
-      expect(nextCalls).toBe(4);
+      expect(nextCalls).toBe(7);
     } finally {
       if (previousApiKey === undefined) delete process.env.API_KEY;
       else process.env.API_KEY = previousApiKey;
@@ -106,32 +155,12 @@ describe('api middleware webhook exemptions', () => {
   });
 });
 
-describe('public book share middleware', () => {
-  test('exempts only exact read and stream paths from the API key and validates stream query strictly', async () => {
-    expect(isPublicBookSharePath('/api/v1/public/books/shares/read')).toBe(true);
-    expect(isPublicBookSharePath('/api/v1/public/books/shares/stream/')).toBe(true);
-    expect(isPublicBookSharePath('/api/v1/public/books/shares/other')).toBe(false);
-    const previousApiKey = process.env.API_KEY; process.env.API_KEY = 'server-key'; let calls = 0;
-    try {
-      await requireEnvApiKey(middlewareContext('/api/v1/public/books/shares/read', {}, '', 'POST'), async () => { calls += 1; });
-      expect(calls).toBe(1);
-      await expect(validateQueryParams(middlewareContext('/api/v1/public/books/shares/stream', {}, `?token=${'A'.repeat(43)}&forged=true`), async () => {})).rejects.toBeDefined();
-      await expect(validateQueryParams(middlewareContext('/api/v1/public/books/shares/stream', {}, `?token=${'A'.repeat(43)}`), async () => {})).resolves.toBeUndefined();
-    } finally { if (previousApiKey === undefined) delete process.env.API_KEY; else process.env.API_KEY = previousApiKey; }
-  });
-
-  test('does not let stale user-session credentials block share-token authentication', async () => {
-    let verified = 0; let nextCalls = 0;
-    const middleware = createAutoRefreshAuthTokens({
-      verifyAccessToken: async () => { verified += 1; return null; },
-      refreshAccessToken: async () => null,
-    });
-    const app = new Hono();
-    app.use('*', middleware);
-    app.post('/api/v1/public/books/shares/read', (c) => { nextCalls += 1; return c.json({ success: true }); });
-    expect((await app.request('/api/v1/public/books/shares/read', { method: 'POST', headers: { authorization: 'Bearer stale' } })).status).toBe(200);
-    expect(verified).toBe(0);
-    expect(nextCalls).toBe(1);
+describe('onboarding sandbox middleware', () => {
+  test('recognizes only the two exact POST endpoints', () => {
+    expect(isOnboardingSandboxPath('/api/v1/onboarding/sandbox/sessions', 'POST')).toBe(true);
+    expect(isOnboardingSandboxPath('/api/v1/onboarding/sandbox/answers/', 'POST')).toBe(true);
+    expect(isOnboardingSandboxPath('/api/v1/onboarding/sandbox/sessions', 'GET')).toBe(false);
+    expect(isOnboardingSandboxPath('/api/v1/onboarding/sandbox/other', 'POST')).toBe(false);
   });
 });
 
@@ -206,7 +235,7 @@ describe('validateQueryParams', () => {
     let nextCalls = 0;
 
     await validateQueryParams(
-      middlewareContext('/api/v1/auth/oauth/start', {}, `?provider=google&redirect_uri=${redirectUri}`),
+      middlewareContext('/api/v1/auth/oauth/start', {}, `?provider=google&redirect_uri=${redirectUri}&referral_code=0123456789ab`),
       async () => {
         nextCalls += 1;
       },
@@ -246,7 +275,7 @@ describe('validateQueryParams', () => {
   test('applies highlight selectors only to GET requests', async () => {
     let nextCalls = 0;
     await validateQueryParams(
-      middlewareContext('/api/v1/gallery/highlights', {}, '?organizationKey=organization&scopeKey=scope&collectionKey=collection'),
+      middlewareContext('/api/v1/gallery/highlights', {}, '?teamKey=team&scopeKey=scope&collectionKey=collection'),
       async () => { nextCalls += 1; },
     );
     await validateQueryParams(
@@ -259,11 +288,11 @@ describe('validateQueryParams', () => {
   test('allows strict generation-history selectors on GET requests', async () => {
     let nextCalls = 0;
     await validateQueryParams(
-      middlewareContext('/api/v1/images/generation-history', {}, '?organizationKey=organization&scopeKey=cm0000000000000000000000&limit=20'),
+      middlewareContext('/api/v1/images/generation-history', {}, '?teamKey=team&scopeKey=cm0000000000000000000000&limit=20'),
       async () => { nextCalls += 1; },
     );
     await expect(validateQueryParams(
-      middlewareContext('/api/v1/images/generation-history', {}, '?organizationKey=organization&scopeKey=cm0000000000000000000000&limit=20&userKey=forged'),
+      middlewareContext('/api/v1/images/generation-history', {}, '?teamKey=team&scopeKey=cm0000000000000000000000&limit=20&userKey=forged'),
       async () => { nextCalls += 1; },
     )).rejects.toThrow();
     expect(nextCalls).toBe(1);
@@ -355,7 +384,7 @@ describe('backend session cookies', () => {
     expect(response.headers.get('x-refresh-token-max-age')).toBe('43200');
   });
 
-  test('refreshes an expired Nexus access token from its forwarded refresh token', async () => {
+  test('refreshes an expired access token from its forwarded refresh token', async () => {
     const app = new Hono<{ Variables: { authIdentity: { key: string; identityType: 'user' | 'member' | 'superAdmin' }; userId: string } }>();
     const rotatedTokens = {
       accessToken: 'vrtx_access_rotated',

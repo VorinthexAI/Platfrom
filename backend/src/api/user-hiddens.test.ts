@@ -3,8 +3,8 @@ import { Hono } from 'hono';
 import { newId } from '@/lib/ids';
 import { createUserHiddenHandlers } from './user-hiddens';
 
-const userKey = newId(), organizationKey = newId(), membershipKey = newId(), sourceKey = newId();
-const authContext = { organization: { key: organizationKey }, membership: { key: membershipKey, userId: userKey, organizationId: organizationKey, status: 'active' } } as any;
+const userKey = newId(), teamKey = newId(), teamMembershipKey = newId(), sourceKey = newId();
+const authContext = { team: { key: teamKey }, membership: { key: teamMembershipKey, userId: userKey, teamKey: teamKey, status: 'active' } } as any;
 
 function appWith(options: Parameters<typeof createUserHiddenHandlers>[0]) {
   const handlers = createUserHiddenHandlers(options);
@@ -31,12 +31,12 @@ describe('user hidden HTTP handlers', () => {
     expect((await app.request(`/auth/me/hiddens?source=image&sourceKey=${sourceKey}`, { method: 'DELETE' })).status).toBe(200);
     expect(calls.map((call) => (call as any[])[0])).toEqual(['list', 'hide', 'reveal']);
     expect(JSON.stringify(calls)).toContain(userKey);
-    expect(calls[0]).toEqual(['list', { userKey, organizationKey, membershipKey, service }]);
+    expect(calls[0]).toEqual(['list', { userKey, teamKey, teamMembershipKey, service }]);
   });
 
   test('requires a user identity', async () => {
     const service = {} as any;
     expect((await appWith({ service, getIdentity: async () => null }).request('/auth/me/hiddens')).status).toBe(401);
-    expect((await appWith({ service, getIdentity: async () => ({ key: membershipKey, identityType: 'member' }) }).request('/auth/me/hiddens')).status).toBe(403);
+    expect((await appWith({ service, getIdentity: async () => ({ key: teamMembershipKey, identityType: 'member' }) }).request('/auth/me/hiddens')).status).toBe(403);
   });
 });

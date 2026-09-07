@@ -2,8 +2,10 @@ import { z } from 'zod';
 import { aql } from 'arangojs';
 import { db, withTransaction } from './client';
 import { createNodeHelpers, isArangoNotFoundError, withArangoKey } from './base';
-import { USER_ORGANIZATION_COLLECTION } from './user-organization.node';
+import { USER_TEAM_COLLECTION } from './user-team.node';
 import { USERS_COLLECTION } from './users.node';
+import { AUTH_SESSIONS_COLLECTION } from './auth-sessions.node';
+import { rawReferralCodeSchema } from '@/lib/referrals/contracts';
 
 export const AUTH_CHALLENGES_COLLECTION = 'authChallenges';
 export const authIdentityTypeSchema = z.enum(['user', 'member', 'superAdmin']);
@@ -14,6 +16,7 @@ export const authChallengeKindSchema = z.enum([
   'founder_totp',
   'founder_setup',
   'founder_recovery',
+  'team_recovery',
 ]);
 const DEFAULT_CHUNK_SIZE = 500;
 const DEFAULT_PAGE_SIZE = 50;
@@ -22,7 +25,9 @@ export const authChallengeSchema = z.object({
   key: z.string(),
   identityKey: z.string(),
   identityType: authIdentityTypeSchema,
-  membershipKey: z.string().nullable().default(null),
+  teamMembershipKey: z.string().nullable().default(null),
+  scopeKey: z.string().nullable().default(null),
+  referralCode: rawReferralCodeSchema.nullable().default(null),
   kind: authChallengeKindSchema,
   tokenHash: z.string(),
   expiresAt: z.string(),
@@ -41,12 +46,7 @@ export const authChallengeSchema = z.object({
 export type AuthChallenge = z.infer<typeof authChallengeSchema>;
 
 export function parseAuthChallenge(doc: Record<string, unknown>): AuthChallenge {
-  const legacyUserId = typeof doc.userId === 'string' && doc.userId.length > 0 ? doc.userId : undefined;
-  return authChallengeSchema.parse({
-    ...doc,
-    identityKey: doc.identityKey ?? legacyUserId,
-    identityType: doc.identityType ?? (legacyUserId ? 'user' : undefined),
-  });
+  return authChallengeSchema.parse(doc);
 }
 
 // A short-lived security artifact — tokenHash is a secret and must never be
@@ -184,23 +184,26 @@ export async function consumeAuthChallengeByTokenHash(
 export async function consumeTotpChallengeAndAdvanceMembership(input: {
   tokenHash: string;
   kind: z.infer<typeof authChallengeKindSchema>;
-  membershipKey: string;
+  teamMembershipKey: string;
   timeStep: number;
   consumedAt: string;
   completeSetup?: boolean;
 }): Promise<boolean> {
-  return withTransaction([AUTH_CHALLENGES_COLLECTION, USER_ORGANIZATION_COLLECTION], async (transaction) => {
+  return withTransaction({
+    read: ['teams', 'scopes', 'scopeMembers'],
+    write: [AUTH_CHALLENGES_COLLECTION, USER_TEAM_COLLECTION, USERS_COLLECTION],
+  }, async (transaction) => {
     const membershipCursor = await transaction.query(aql`
-      FOR link IN ${db.collection(USER_ORGANIZATION_COLLECTION)}
-        FILTER link._key == ${input.membershipKey}
+      FOR link IN ${db.collection(USER_TEAM_COLLECTION)}
+        FILTER link._key == ${input.teamMembershipKey}
           && link.status == "active"
           && (!HAS(link, "lastTotpTimeStep") || link.lastTotpTimeStep == null || link.lastTotpTimeStep < ${input.timeStep})
         LIMIT 1
         UPDATE link WITH MERGE(
           { lastTotpTimeStep: ${input.timeStep}, updatedAt: ${input.consumedAt} },
-          ${input.completeSetup === true} ? { isMfaEnabled: true, mfaRecoveryPending: false } : {}
+          ${input.completeSetup === true} ? { isMfaEnabled: true, teamMfaRecoveryPending: false } : {}
         )
-          IN ${db.collection(USER_ORGANIZATION_COLLECTION)}
+          IN ${db.collection(USER_TEAM_COLLECTION)}
         RETURN NEW
     `);
     if (!await membershipCursor.next()) return false;
@@ -209,7 +212,7 @@ export async function consumeTotpChallengeAndAdvanceMembership(input: {
       FOR challenge IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
         FILTER challenge.tokenHash == ${input.tokenHash}
           && challenge.kind == ${input.kind}
-          && challenge.membershipKey == ${input.membershipKey}
+          && challenge.teamMembershipKey == ${input.teamMembershipKey}
           && (!HAS(challenge, "consumedAt") || challenge.consumedAt == null)
           && DATE_TIMESTAMP(challenge.expiresAt) > DATE_TIMESTAMP(${input.consumedAt})
         LIMIT 1
@@ -217,10 +220,29 @@ export async function consumeTotpChallengeAndAdvanceMembership(input: {
           IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
         RETURN NEW
     `);
-    if (!await challengeCursor.next()) throw new Error('TOTP challenge is no longer usable');
+    const challenge = await challengeCursor.next() as AuthChallenge | undefined;
+    if (!challenge) throw new Error('TOTP challenge is no longer usable');
+    if (challenge.scopeKey) {
+      const selectionCursor = await transaction.query(aql`
+        LET membership = DOCUMENT(userTeams, ${input.teamMembershipKey})
+        LET team = membership == null ? null : DOCUMENT(teams, membership.teamKey)
+        LET scope = DOCUMENT(scopes, ${challenge.scopeKey})
+        LET direct = membership == null ? null : FIRST(
+          FOR item IN scopeMembers
+            FILTER item.scopeKey == ${challenge.scopeKey} && item.userTeamKey == membership._key && item.status == "active"
+            LIMIT 1 RETURN item
+        )
+        FILTER membership != null && team != null && team.isActive == true
+          && scope != null && scope.teamKey == team._key
+          && (membership.teamRole IN ["owner", "admin"] || direct != null)
+        UPDATE membership.userId WITH { currentScopeKey: scope._key, updatedAt: ${input.consumedAt} } IN users
+        RETURN true
+      `);
+      if (!await selectionCursor.next()) throw new Error('TOTP challenge scope is no longer authorized');
+    }
     return true;
   }).catch((error) => {
-    if (error instanceof Error && error.message === 'TOTP challenge is no longer usable') return false;
+    if (error instanceof Error && (error.message === 'TOTP challenge is no longer usable' || error.message === 'TOTP challenge scope is no longer authorized')) return false;
     throw error;
   });
 }
@@ -229,7 +251,7 @@ export async function exchangeFounderTotpForRecovery(input: {
   sourceTokenHash: string;
   identityKey: string;
   identityType: z.infer<typeof authIdentityTypeSchema>;
-  membershipKey: string;
+  teamMembershipKey: string;
   exchangedAt: string;
   recoveryChallenge: Omit<AuthChallenge, 'embedding' | 'consumedAt' | 'handoffTokenHash' | 'approvedAt' | 'handoffClaimedAt' | 'handoffClaimLeaseAt'>;
 }): Promise<boolean> {
@@ -237,10 +259,10 @@ export async function exchangeFounderTotpForRecovery(input: {
     const sourceCursor = await transaction.query(aql`
       FOR challenge IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
         FILTER challenge.tokenHash == ${input.sourceTokenHash}
-          && challenge.kind == "founder_totp"
+          && challenge.kind IN ["totp", "founder_totp"]
           && challenge.identityKey == ${input.identityKey}
           && challenge.identityType == ${input.identityType}
-          && challenge.membershipKey == ${input.membershipKey}
+          && challenge.teamMembershipKey == ${input.teamMembershipKey}
           && (!HAS(challenge, "consumedAt") || challenge.consumedAt == null)
           && DATE_TIMESTAMP(challenge.expiresAt) > DATE_TIMESTAMP(${input.exchangedAt})
         LIMIT 1
@@ -253,16 +275,23 @@ export async function exchangeFounderTotpForRecovery(input: {
       FOR challenge IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
         FILTER challenge.identityKey == ${input.identityKey}
           && challenge.identityType == ${input.identityType}
-          && challenge.kind == "founder_recovery"
+          && challenge.teamMembershipKey == ${input.teamMembershipKey}
+          && challenge.kind IN ["team_recovery", "founder_recovery"]
+          && challenge._key != ${input.recoveryChallenge.key}
           && (!HAS(challenge, "consumedAt") || challenge.consumedAt == null)
         UPDATE challenge WITH { consumedAt: ${input.exchangedAt} }
           IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
     `);
-    const insertCursor = await transaction.query(aql`
-      INSERT ${input.recoveryChallenge} INTO ${db.collection(AUTH_CHALLENGES_COLLECTION)}
-      RETURN NEW
+    const recoveryCursor = await transaction.query(aql`
+      FOR challenge IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
+        FILTER challenge._key == ${input.recoveryChallenge.key}
+          && challenge.identityKey == ${input.identityKey}
+          && challenge.teamMembershipKey == ${input.teamMembershipKey}
+          && challenge.kind IN ["team_recovery", "founder_recovery"]
+          && challenge.consumedAt == null
+        LIMIT 1 RETURN true
     `);
-    if (!await insertCursor.next()) throw new Error('MFA recovery challenge was not created');
+    if (!await recoveryCursor.next()) throw new Error('MFA recovery challenge was not created');
     return true;
   });
 }
@@ -271,22 +300,22 @@ export async function consumeFounderRecoveryAndStartSetup(input: {
   recoveryTokenHash: string;
   identityKey: string;
   identityType: z.infer<typeof authIdentityTypeSchema>;
-  membershipKey: string;
+  teamMembershipKey: string;
   expectedMfaVersion: number;
   encryptedSecret: string;
   startedAt: string;
   setupChallenge: Omit<AuthChallenge, 'embedding' | 'consumedAt' | 'handoffTokenHash' | 'approvedAt' | 'handoffClaimedAt' | 'handoffClaimLeaseAt'>;
 }): Promise<boolean> {
   return withTransaction(
-    [AUTH_CHALLENGES_COLLECTION, USER_ORGANIZATION_COLLECTION, USERS_COLLECTION],
+    [AUTH_CHALLENGES_COLLECTION, USER_TEAM_COLLECTION, USERS_COLLECTION, AUTH_SESSIONS_COLLECTION],
     async (transaction) => {
       const recoveryCursor = await transaction.query(aql`
         FOR challenge IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
           FILTER challenge.tokenHash == ${input.recoveryTokenHash}
-            && challenge.kind == "founder_recovery"
+            && challenge.kind IN ["team_recovery", "founder_recovery"]
             && challenge.identityKey == ${input.identityKey}
             && challenge.identityType == ${input.identityType}
-            && challenge.membershipKey == ${input.membershipKey}
+            && challenge.teamMembershipKey == ${input.teamMembershipKey}
             && (!HAS(challenge, "consumedAt") || challenge.consumedAt == null)
             && DATE_TIMESTAMP(challenge.expiresAt) > DATE_TIMESTAMP(${input.startedAt})
           LIMIT 1
@@ -297,36 +326,31 @@ export async function consumeFounderRecoveryAndStartSetup(input: {
       if (!await recoveryCursor.next()) return false;
 
       const membershipCursor = await transaction.query(aql`
-        FOR membership IN ${db.collection(USER_ORGANIZATION_COLLECTION)}
-          FILTER membership._key == ${input.membershipKey}
+        FOR membership IN ${db.collection(USER_TEAM_COLLECTION)}
+          FILTER membership._key == ${input.teamMembershipKey}
             && membership.userId == ${input.identityKey}
             && membership.status == "active"
-            && (membership.isMfaEnabled == true || membership.mfaRecoveryPending == true)
-            && (HAS(membership, "mfaVersion") ? membership.mfaVersion : 0) == ${input.expectedMfaVersion}
+            && (membership.isMfaEnabled == true || membership.teamMfaRecoveryPending == true)
+            && (HAS(membership, "teamMfaVersion") ? membership.teamMfaVersion : 0) == ${input.expectedMfaVersion}
           LIMIT 1
           UPDATE membership WITH {
             isMfaEnabled: false,
-            mfaRecoveryPending: true,
+            teamMfaRecoveryPending: true,
             totpSecret: ${input.encryptedSecret},
             lastTotpTimeStep: null,
-            mfaVersion: ${input.expectedMfaVersion + 1},
+            teamMfaVersion: ${input.expectedMfaVersion + 1},
             updatedAt: ${input.startedAt}
-          } IN ${db.collection(USER_ORGANIZATION_COLLECTION)}
+          } IN ${db.collection(USER_TEAM_COLLECTION)}
           RETURN NEW
       `);
       if (!await membershipCursor.next()) throw new Error('MFA membership is no longer recoverable');
 
       await transaction.query(aql`
-        FOR user IN ${db.collection(USERS_COLLECTION)}
-          FILTER user._key == ${input.identityKey}
-          LIMIT 1
-          UPDATE user WITH {
-            refreshTokenHash: null,
-            refreshTokenExpiresAt: null,
-            refreshFounderMembershipKey: null,
-            refreshFounderMfaVersion: null,
-            updatedAt: ${input.startedAt}
-          } IN ${db.collection(USERS_COLLECTION)}
+        FOR session IN ${db.collection(AUTH_SESSIONS_COLLECTION)}
+          FILTER session.userId == ${input.identityKey} && session.revokedAt == null
+            && session.teamMembershipKey == ${input.teamMembershipKey}
+          UPDATE session WITH { revokedAt: ${input.startedAt}, updatedAt: ${input.startedAt} }
+            IN ${db.collection(AUTH_SESSIONS_COLLECTION)}
       `);
       const insertCursor = await transaction.query(aql`
         INSERT ${input.setupChallenge} INTO ${db.collection(AUTH_CHALLENGES_COLLECTION)}
@@ -343,19 +367,19 @@ export async function consumeSetupAuthorizationAndStartSetup(input: {
   sourceKind: 'totp' | 'founder_setup';
   identityKey: string;
   identityType: z.infer<typeof authIdentityTypeSchema>;
-  membershipKey: string;
+  teamMembershipKey: string;
   encryptedSecret: string;
   startedAt: string;
   setupChallenge: Omit<AuthChallenge, 'embedding' | 'consumedAt' | 'handoffTokenHash' | 'approvedAt' | 'handoffClaimedAt' | 'handoffClaimLeaseAt'>;
 }): Promise<boolean> {
-  return withTransaction([AUTH_CHALLENGES_COLLECTION, USER_ORGANIZATION_COLLECTION], async (transaction) => {
+  return withTransaction([AUTH_CHALLENGES_COLLECTION, USER_TEAM_COLLECTION], async (transaction) => {
     const sourceCursor = await transaction.query(aql`
       FOR challenge IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
         FILTER challenge.tokenHash == ${input.sourceTokenHash}
           && challenge.kind == ${input.sourceKind}
           && challenge.identityKey == ${input.identityKey}
           && challenge.identityType == ${input.identityType}
-          && challenge.membershipKey == ${input.membershipKey}
+          && challenge.teamMembershipKey == ${input.teamMembershipKey}
           && (!HAS(challenge, "consumedAt") || challenge.consumedAt == null)
           && DATE_TIMESTAMP(challenge.expiresAt) > DATE_TIMESTAMP(${input.startedAt})
         LIMIT 1
@@ -366,20 +390,20 @@ export async function consumeSetupAuthorizationAndStartSetup(input: {
     if (!await sourceCursor.next()) return false;
 
     const membershipCursor = await transaction.query(aql`
-      FOR membership IN ${db.collection(USER_ORGANIZATION_COLLECTION)}
-        FILTER membership._key == ${input.membershipKey}
+      FOR membership IN ${db.collection(USER_TEAM_COLLECTION)}
+        FILTER membership._key == ${input.teamMembershipKey}
           && membership.userId == ${input.identityKey}
           && membership.status == "active"
           && membership.isMfaEnabled != true
-          && membership.mfaRecoveryPending != true
+          && membership.teamMfaRecoveryPending != true
         LIMIT 1
         UPDATE membership WITH {
           isMfaEnabled: false,
-          mfaRecoveryPending: false,
+          teamMfaRecoveryPending: false,
           totpSecret: ${input.encryptedSecret},
           lastTotpTimeStep: null,
           updatedAt: ${input.startedAt}
-        } IN ${db.collection(USER_ORGANIZATION_COLLECTION)}
+        } IN ${db.collection(USER_TEAM_COLLECTION)}
         RETURN NEW
     `);
     if (!await membershipCursor.next()) throw new Error('MFA membership is no longer available for setup');

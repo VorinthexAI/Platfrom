@@ -10,8 +10,8 @@ describe('auth session persistence contract', () => {
       refreshTokenHash: 'a'.repeat(64),
       expiresAt: '2027-08-08T00:00:00.000Z',
       revokedAt: null,
-      founderMembershipKey: null,
-      founderMfaVersion: null,
+      teamMembershipKey: null,
+      teamMfaVersion: null,
       createdAt: '2026-08-08T00:00:00.000Z',
       updatedAt: '2026-08-08T00:00:00.000Z',
     });
@@ -20,6 +20,8 @@ describe('auth session persistence contract', () => {
     expect(session.identityType).toBe('user');
     expect('refreshToken' in session).toBe(false);
     expect(session.revokedAt).toBeNull();
+    expect(session.teamMembershipKey).toBeNull();
+    expect(session.teamMfaVersion).toBeNull();
   });
 
   test('accepts legacy sessions without an identity type during migration', () => {

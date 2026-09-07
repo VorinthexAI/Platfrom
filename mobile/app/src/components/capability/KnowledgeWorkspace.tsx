@@ -319,13 +319,13 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   const { width } = useWindowDimensions();
   const archiveCardSize = Math.floor((width - spacing.md * 2 - 20) / 3);
   const destinationCardSize = Math.floor((width - 42 - 20) / 3);
-  const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "");
+  const teamKey = useAuthStore((state) => typeof state.team?.key === "string" ? state.team.key : "");
   const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
   const user = useAuthStore((state) => state.user);
   const reconnectContentContext = useAuthStore((state) => state.reconnectContentContext);
-  const hasContentContext = isContentContextConfigured({ organizationKey, scopeKey });
-  const contentContextKey = hasContentContext ? `${organizationKey}:${scopeKey}` : "";
-  const contentContext = useMemo(() => ({ organizationKey, scopeKey, userKey: user?.key ?? "" }), [organizationKey, scopeKey, user?.key]);
+  const hasContentContext = isContentContextConfigured({ teamKey, scopeKey });
+  const contentContextKey = hasContentContext ? `${teamKey}:${scopeKey}` : "";
+  const contentContext = useMemo(() => ({ teamKey, scopeKey, userKey: user?.key ?? "" }), [teamKey, scopeKey, user?.key]);
   const tagContextKey = tagFilterContextKey(contentContext);
   const selectedTags = useUiStore((state) => state.selectedTagsByContext[tagContextKey] ?? EMPTY_SELECTED_TAGS);
   const selectedTagKeys = useMemo(() => selectedTags.map(({ key }) => key), [selectedTags]);
@@ -396,6 +396,8 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   const [removingHistoryQuery, setRemovingHistoryQuery] = useState<string>();
   const [selectedSummary, setSelectedSummary] = useState<ContentDocumentSummary>();
   const [selectedDocument, setSelectedDocument] = useState<ContentDocument>();
+  const [editorDocumentKey, setEditorDocumentKey] = useState<string>();
+  const [editorDocumentUpdatedAt, setEditorDocumentUpdatedAt] = useState<string>();
   const [filePreviewError, setFilePreviewError] = useState<string>();
   const [filePreviewUri, setFilePreviewUri] = useState<string>();
   const [documentSearchQuery, setDocumentSearchQuery] = useState("");
@@ -525,11 +527,14 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   const folderStackRef = useRef(folderStack);
   const workspaceModeRef = useRef(workspaceMode);
   const refreshViewKey = useRef("");
-  contentContextKeyRef.current = contentContextKey;
-  folderStackRef.current = folderStack;
-  workspaceModeRef.current = workspaceMode;
   const currentFolder = folderStack.at(-1);
-  refreshViewKey.current = JSON.stringify([contentContextKey, workspaceMode, currentFolder?.key, folderContentTab, query.trim(), rootSearchQuery.trim(), selectedTagKeys, documentKeyRef.current]);
+  const currentRefreshViewKey = JSON.stringify([contentContextKey, workspaceMode, currentFolder?.key, folderContentTab, query.trim(), rootSearchQuery.trim(), selectedTagKeys, editorDocumentKey]);
+  useEffect(() => {
+    contentContextKeyRef.current = contentContextKey;
+    folderStackRef.current = folderStack;
+    workspaceModeRef.current = workspaceMode;
+    refreshViewKey.current = currentRefreshViewKey;
+  }, [contentContextKey, currentRefreshViewKey, folderStack, workspaceMode]);
   const returnToTripAssets = returnTripKey ? () => router.replace({ pathname: "/capability/[slug]", params: { slug: "compass", tripKey: returnTripKey, openTripAssets: "1" } }) : undefined;
   const returnToSignalAttachments = returnSignalConnectorKey && returnSignalThreadKey && returnSignalMessageKey ? () => router.replace({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: returnSignalConnectorKey, signalReturn: "root", signalThreadKey: returnSignalThreadKey, signalMessageKey: returnSignalMessageKey, openSignalAttachments: "1" } }) : undefined;
   const showOnlyFavorites = viewFilters.favoritesOnly;
@@ -549,13 +554,13 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   const allSelectedFavorite = selectionActive && [...selectedFolders, ...selectedDocuments].every((item) => Boolean(item.isFavorite));
   const selectionHasManaged = [...selectedFolders, ...selectedDocuments].some((item) => item.managed);
   const selectionMetadataLoading = hydratingFolderKeys.length > 0 || hydratingDocumentKeys.length > 0;
-  const activeDocument = documentKeyRef.current
-    ? [...documents, ...rootDocuments].find((document) => document.key === documentKeyRef.current)
-      ?? (selectedDocument?.key === documentKeyRef.current ? selectedDocument : {
-        key: documentKeyRef.current,
+  const activeDocument = editorDocumentKey
+    ? [...documents, ...rootDocuments].find((document) => document.key === editorDocumentKey)
+      ?? (selectedDocument?.key === editorDocumentKey ? selectedDocument : {
+        key: editorDocumentKey,
         name: title,
         isFavorite: false,
-        updatedAt: updatedAtRef.current ?? new Date().toISOString(),
+        updatedAt: editorDocumentUpdatedAt ?? "",
       })
     : undefined;
   const archiveLocationLoading = locationLoading;
@@ -631,7 +636,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     setSelectedAudioVersionKey(undefined);
     setNarrationScrubValue(undefined);
     setNarrationError(undefined);
-  }, [narrationPlayer]);
+  }, [narrationPlayer, setSelectedAudioVersionKey]);
 
   const queueAudioPlaybackUpdate = (audioVersionKey: string, documentKey: string, playbackPositionMs: number) => {
     const operation = audioPlaybackWrites.current.catch(() => undefined).then(async () => {
@@ -641,6 +646,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     audioPlaybackWrites.current = operation.catch(() => undefined);
     return operation;
   };
+  const queueAudioPlaybackUpdateEvent = useEffectEvent(queueAudioPlaybackUpdate);
 
   const dismissNarration = () => {
     const documentKey = narrationDocumentKey.current;
@@ -691,7 +697,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     const playbackPositionMs = Math.round(narrationElapsed * 1_000);
     if (Math.abs(playbackPositionMs - persistedNarrationPositionMs.current) < 5_000) return;
     persistedNarrationPositionMs.current = playbackPositionMs;
-    void queueAudioPlaybackUpdate(audioVersionKey, documentKey, playbackPositionMs).catch(() => setNarrationError("Playback progress could not be saved."));
+    void queueAudioPlaybackUpdateEvent(audioVersionKey, documentKey, playbackPositionMs).catch(() => setNarrationError("Playback progress could not be saved."));
   }, [narrationAudio.playing, narrationElapsed]);
 
   const seekNarration = (seconds: number) => {
@@ -903,6 +909,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     workspaceModeRef.current = nextMode;
     setWorkspaceMode(nextMode);
   }
+  const completeEditorExitEvent = useEffectEvent(completeEditorExit);
 
   useEffect(() => navigation.addListener("beforeRemove", (event) => {
     if (allowNavigation.current) {
@@ -920,7 +927,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     if (saveState !== "saved" && saveState !== "local") return;
     if (pendingEditorExit.current) {
       pendingEditorExit.current = false;
-      completeEditorExit();
+      completeEditorExitEvent();
     }
     if (pendingNavigationAction.current) {
       const action = pendingNavigationAction.current;
@@ -991,7 +998,11 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     }
   };
 
-  useEffect(() => { if (userHiddensQuery.data) setUserHiddens(userHiddensQuery.data); }, [userHiddensQuery.data]);
+  useEffect(() => {
+    if (!userHiddensQuery.data) return;
+    const timeout = setTimeout(() => setUserHiddens(userHiddensQuery.data), 0);
+    return () => clearTimeout(timeout);
+  }, [userHiddensQuery.data]);
 
   function setHiddenOptimistically(source: "folder" | "document", sourceKey: string, shouldHide: boolean, label: "Folder" | "Document" | "File") {
     const previous = userHiddens;
@@ -1104,6 +1115,8 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
       dirty.current = false;
       documentKeyRef.current = undefined;
       updatedAtRef.current = undefined;
+      setEditorDocumentKey(undefined);
+      setEditorDocumentUpdatedAt(undefined);
       pendingCreate.current = undefined;
       createVersionOnNextSave.current = false;
       titleRef.current = "Untitled document";
@@ -1189,7 +1202,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
           setLocationLoading(false);
         }
       });
-  }, [contentContextKey, hasContentContext, initialDocumentKey, initialFolderKey, stopNarration]);
+  }, [contentContext, contentContextKey, hasContentContext, initialDocumentKey, initialFolderKey, queryClient, stopNarration]);
 
   const queueDocumentSave = (session = editorSession.current) => {
     const previous = saveInFlight.current;
@@ -1228,6 +1241,8 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
         activeCurrentVersionKey = created.currentVersionKey ?? null;
         documentKeyRef.current = created.key;
         updatedAtRef.current = created.updatedAt;
+        setEditorDocumentKey(created.key);
+        setEditorDocumentUpdatedAt(created.updatedAt);
         savedTitleRef.current = pending.name;
         savedContentRef.current = pending.content;
       }
@@ -1240,6 +1255,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
         activeUpdatedAt = saved.updatedAt;
         activeCurrentVersionKey = saved.currentVersionKey ?? null;
         updatedAtRef.current = saved.updatedAt;
+        setEditorDocumentUpdatedAt(saved.updatedAt);
         savedContentRef.current = nextContent;
       }
       if (activeKey && nextTitle !== savedTitleRef.current) {
@@ -1247,10 +1263,12 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
         if (session !== editorSession.current) return;
         activeUpdatedAt = renamed.updatedAt;
         updatedAtRef.current = renamed.updatedAt;
+        setEditorDocumentUpdatedAt(renamed.updatedAt);
         savedTitleRef.current = nextTitle;
       }
       if (activeKey && topicSourceChanged) await invalidateContentDocumentTopics(queryClient, contentContext, activeKey);
       updatedAtRef.current = activeUpdatedAt;
+      setEditorDocumentUpdatedAt(activeUpdatedAt);
       savedTitleRef.current = nextTitle;
       savedContentRef.current = nextContent;
       setError(undefined);
@@ -1291,6 +1309,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     });
     return save;
   };
+  const queueDocumentSaveEvent = useEffectEvent(queueDocumentSave);
 
   const flushDocumentSave = async () => {
     const session = editorSession.current;
@@ -1307,7 +1326,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     const session = editorSession.current;
     const delay = saveImmediately.current || !documentKeyRef.current ? 0 : 500;
     saveImmediately.current = false;
-    const timeout = setTimeout(() => { void queueDocumentSave(session).catch(() => undefined); }, delay);
+    const timeout = setTimeout(() => { void queueDocumentSaveEvent(session).catch(() => undefined); }, delay);
     return () => clearTimeout(timeout);
   }, [content, contentContextKey, currentFolder?.key, hasContentContext, saveRetry, title]);
 
@@ -1570,6 +1589,8 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     createVersionOnNextSave.current = false;
     documentKeyRef.current = document.key;
     updatedAtRef.current = document.updatedAt;
+    setEditorDocumentKey(document.key);
+    setEditorDocumentUpdatedAt(document.updatedAt);
     titleRef.current = document.name;
     contentRef.current = document.content;
     savedTitleRef.current = document.name;
@@ -1776,6 +1797,8 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     documentKeyRef.current = undefined;
     selectedDocumentKeyRef.current = undefined;
     updatedAtRef.current = undefined;
+    setEditorDocumentKey(undefined);
+    setEditorDocumentUpdatedAt(undefined);
     pendingCreate.current = undefined;
     createVersionOnNextSave.current = false;
     titleRef.current = nextTitle;
@@ -2375,40 +2398,44 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     setWorkspaceMode(nextMode);
   };
 
+  const handleHardwareBack = useEffectEvent(() => {
+    if (selectionActive) {
+      clearSelection();
+      return true;
+    }
+    if (workspaceModeRef.current === "editor") {
+      leaveEditor();
+      return true;
+    }
+    if (workspaceModeRef.current === "viewer") {
+      leaveFileViewer();
+      return true;
+    }
+    if (workspaceModeRef.current === "folder") {
+      void goBackFolder();
+      return true;
+    }
+    return false;
+  });
+
   useEffect(() => {
     if (Platform.OS !== "android") return;
-    return BackHandler.addEventListener("hardwareBackPress", () => {
-      if (selectionActive) {
-        clearSelection();
-        return true;
-      }
-      if (workspaceModeRef.current === "editor") {
-        leaveEditor();
-        return true;
-      }
-      if (workspaceModeRef.current === "viewer") {
-        leaveFileViewer();
-        return true;
-      }
-      if (workspaceModeRef.current === "folder") {
-        void goBackFolder();
-        return true;
-      }
-      return false;
-    }).remove;
-  }, [folderStack, hasContentContext, selectionActive]);
+    return BackHandler.addEventListener("hardwareBackPress", handleHardwareBack).remove;
+  }, []);
 
   useEffect(() => {
     const normalized = libraryQuery.trim();
     librarySearchRequest.current?.abort();
     if (!normalized || !hasContentContext || activeSheet !== "folders" && activeSheet !== "documents") {
-      setLibrarySearching(false);
-      setLibrarySearchResults(undefined);
-      return;
+      const resetTimeout = setTimeout(() => {
+        setLibrarySearching(false);
+        setLibrarySearchResults(undefined);
+      }, 0);
+      return () => clearTimeout(resetTimeout);
     }
     const controller = new AbortController();
     librarySearchRequest.current = controller;
-    setLibrarySearchResults(undefined);
+    const resetTimeout = setTimeout(() => setLibrarySearchResults(undefined), 0);
     const timeout = setTimeout(() => {
       setLibrarySearching(true);
       void searchContentMatches(normalized, controller.signal, undefined, false).then((matches) => {
@@ -2425,6 +2452,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     return () => {
       clearTimeout(timeout);
       clearTimeout(historyTimeout);
+      clearTimeout(resetTimeout);
       controller.abort();
     };
   }, [activeSheet, hasContentContext, libraryQuery]);
@@ -2433,11 +2461,13 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     const normalized = rootSearchQuery.trim();
     rootSearchRequest.current?.abort();
     if ((!normalized && !selectedTagKeys.length) || !hasContentContext) {
-      setRootSearching(false);
-      setRootSearchResults(undefined);
-      return;
+      const resetTimeout = setTimeout(() => {
+        setRootSearching(false);
+        setRootSearchResults(undefined);
+      }, 0);
+      return () => clearTimeout(resetTimeout);
     }
-    setRootSearchResults(undefined);
+    const resetTimeout = setTimeout(() => setRootSearchResults(undefined), 0);
     const controller = new AbortController();
     rootSearchRequest.current = controller;
     const timeout = setTimeout(() => {
@@ -2460,6 +2490,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     }, 800) : undefined;
     return () => {
       clearTimeout(timeout);
+      clearTimeout(resetTimeout);
       if (historyTimeout) clearTimeout(historyTimeout);
       controller.abort();
     };
@@ -2470,16 +2501,20 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     const folderKey = currentFolder?.key;
     folderSearchRequest.current?.abort();
     if ((!normalized && !selectedTagKeys.length) || !hasContentContext || !folderKey) {
-      setFolderSearching(false);
-      setFolderSearchResults(undefined);
-      return;
+      const resetTimeout = setTimeout(() => {
+        setFolderSearching(false);
+        setFolderSearchResults(undefined);
+      }, 0);
+      return () => clearTimeout(resetTimeout);
     }
     if (pendingFolderCreates.current.has(folderKey)) {
-      setFolderSearching(false);
-      setFolderSearchResults({ query: normalized, cached: true, folders: [], documents: [] });
-      return;
+      const resetTimeout = setTimeout(() => {
+        setFolderSearching(false);
+        setFolderSearchResults({ query: normalized, cached: true, folders: [], documents: [] });
+      }, 0);
+      return () => clearTimeout(resetTimeout);
     }
-    setFolderSearchResults(undefined);
+    const resetTimeout = setTimeout(() => setFolderSearchResults(undefined), 0);
     const controller = new AbortController();
     folderSearchRequest.current = controller;
     const timeout = setTimeout(() => {
@@ -2502,6 +2537,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     }, 800) : undefined;
     return () => {
       clearTimeout(timeout);
+      clearTimeout(resetTimeout);
       if (historyTimeout) clearTimeout(historyTimeout);
       controller.abort();
     };
@@ -2662,7 +2698,6 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   const openSearchHistory = async () => {
     if (!hasContentContext) return;
     const generation = ++historyGeneration.current;
-    const folderKey = undefined;
     const key = userSearchHistoryQueryKey(contentContext.userKey);
     const cached = queryClient.getQueryData<ContentSearchHistoryItem[]>(key);
     const invalidated = queryClient.getQueryState(key)?.isInvalidated === true;
@@ -2699,7 +2734,6 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
 
   const removeHistoryQuery = async (item: ContentSearchHistoryItem) => {
     if (removingHistoryQuery) return;
-    const folderKey = undefined;
     const previous = removeCachedUserSearchHistory(queryClient, contentContext, item.normalizedQuery);
     setHistory((current) => current.filter(({ normalizedQuery }) => normalizedQuery !== item.normalizedQuery));
     setRemovingHistoryQuery(item.normalizedQuery);
@@ -2815,7 +2849,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
 
   const pickAndUpload = async (folderKey?: string) => {
     const requestContext = getContentContext();
-    const requestContextKey = `${requestContext.organizationKey}:${requestContext.scopeKey}`;
+    const requestContextKey = `${requestContext.teamKey}:${requestContext.scopeKey}`;
     const generation = ++uploadGeneration.current;
     setSheetError(undefined);
     try {
@@ -2905,7 +2939,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
 
   const submitDocumentScan = async (pages: DocumentScanPage[]) => {
     const requestContext = getContentContext();
-    const requestContextKey = `${requestContext.organizationKey}:${requestContext.scopeKey}`;
+    const requestContextKey = `${requestContext.teamKey}:${requestContext.scopeKey}`;
     const folderKey = scanFolderKey;
     const generation = ++scanGeneration.current;
     const name = `Scanned document ${new Date().toISOString().slice(0, 10)}`;
@@ -2956,7 +2990,6 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     const action = destinationAction;
     const first = { folder: destinationFolder, stack: destinationStack };
     const destinationKeys = [destinationFolder?.key];
-    const choices = [first];
     const selectedFoldersSnapshot = [...selectedFolders];
     const selectedDocumentsSnapshot = [...selectedDocuments];
     const directFolder = destinationUsesDirectSelection && selectedFoldersSnapshot.length === 1 && selectedDocumentsSnapshot.length === 0
@@ -3545,7 +3578,10 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
         return updated;
       })();
       const updated = await trackActiveDocumentMutation(previous.key, operation, (result) => {
-        if (result.key === documentKeyRef.current) updatedAtRef.current = result.updatedAt;
+        if (result.key === documentKeyRef.current) {
+          updatedAtRef.current = result.updatedAt;
+          setEditorDocumentUpdatedAt(result.updatedAt);
+        }
       });
       if (generation !== documentActionGeneration.current) return;
       replaceDocument(updated);
@@ -3556,7 +3592,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
         setTitle(updated.name);
       }
       void invalidateContentLocations(queryClient, contentContext, [updated.folderKey]);
-    } catch (cause) {
+    } catch {
       if (generation !== documentActionGeneration.current) return;
       let restored = previous;
       try {
@@ -3701,63 +3737,57 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     setEditorEditing(false);
   };
 
-  function mutationFooter() {
-    const close = (disabled: boolean) => <Button disabled={disabled} onPress={() => closeSheet()} size="md" variant="secondary">Close</Button>;
-    const managedDocument = activeDocument?.managed || selectedDocument?.managed;
-    if (activeSheet === "transform") return <>
-      {!managedDocument ? <Button disabled={!documentKeyRef.current || (documentTransformation === "enhance" ? !documentTransformationPrompt.trim() : !translationTargetLanguage.trim())} onPress={() => void generateDocumentTransformation()} size="md" variant="primary">{documentTransformation === "enhance" ? "Enhance" : "Translate"}</Button> : null}
-      {close(false)}
+  const closeFooter = (disabled: boolean) => <Button disabled={disabled} onPress={() => closeSheet()} size="md" variant="secondary">Close</Button>;
+  const managedDocument = activeDocument?.managed || selectedDocument?.managed;
+  let mutationFooter: ReactNode = null;
+  if (activeSheet === "transform") mutationFooter = <>
+      {!managedDocument ? <Button disabled={!editorDocumentKey || (documentTransformation === "enhance" ? !documentTransformationPrompt.trim() : !translationTargetLanguage.trim())} onPress={() => void generateDocumentTransformation()} size="md" variant="primary">{documentTransformation === "enhance" ? "Enhance" : "Translate"}</Button> : null}
+      {closeFooter(false)}
     </>;
-    if (activeSheet === "versions") return <>
+  else if (activeSheet === "versions") mutationFooter = <>
       {!managedDocument && !documentActionLoading ? <Button disabled={loadingVersions} onPress={() => { if (documentTransformation === "enhance") void generateDocumentTransformation(); else pushSheet("transform"); }} size="md" variant="primary">{documentTransformation === "enhance" ? "Enhance" : "Translate"}</Button> : null}
-      {close(false)}
+      {closeFooter(false)}
     </>;
-    if (activeSheet === "documentVersions") return close(loadingVersions);
-    if (activeSheet === "summarize") return <>
+  else if (activeSheet === "documentVersions") mutationFooter = closeFooter(loadingVersions);
+  else if (activeSheet === "summarize") mutationFooter = <>
       {sheetLoadError ? <Button disabled={loadingSummaryTopics || generatingSummary} loading={loadingSummaryTopics} onPress={() => void loadSummaryTopics()} size="md" variant="primary">Retry</Button> : null}
-      {close(false)}
+      {closeFooter(false)}
     </>;
-    if (activeSheet === "summaryVersions") return <>
+  else if (activeSheet === "summaryVersions") mutationFooter = <>
       {!managedDocument && !loadingSummaries && summaries.length === 0 ? <Button disabled={generatingSummary} onPress={() => void requestDocumentAiAction("summarize")} size="md" variant="primary">Create summary</Button> : null}
-      {close(false)}
+      {closeFooter(false)}
     </>;
-    if (activeSheet === "summaryReader") return <>
-      {summaryNarrationIsland}
+  else if (activeSheet === "summaryReader") mutationFooter = <>
       {generatingSummary ? <LoadingText text="Generating summary..." /> : null}
       {selectedSummary?.audio ? <Button disabled={generatingSummary || narrationStatus === "SUMMARY AUDIO" && narrationState === "playing"} onPress={controlSummaryAudio} size="md" variant="primary">Listen</Button> : null}
-      {close(false)}
+      {closeFooter(false)}
     </>;
-    if (activeSheet === "audioVersions") return <>
-      {documentNarrationIsland}
+  else if (activeSheet === "audioVersions") mutationFooter = <>
       {!managedDocument ? <Button disabled={loadingAudioVersions || generatingDocumentAudio || saveState !== "saved"} loading={generatingDocumentAudio} onPress={() => void generateSelectedDocumentAudio()} size="md" variant="primary">Generate audio</Button> : null}
-      {close(generatingDocumentAudio)}
+      {closeFooter(generatingDocumentAudio)}
     </>;
-    if (activeSheet === "folderDetails") return <>
+  else if (activeSheet === "folderDetails") mutationFooter = <>
       <Button disabled={!folderDetailsName.trim()} onPress={() => void submitFolderDetails()} size="md" variant="primary">Save</Button>
-      {close(false)}
+      {closeFooter(false)}
     </>;
-    if (activeSheet === "documentDetails") return <>
+  else if (activeSheet === "documentDetails") mutationFooter = <>
       <Button disabled={!documentDetailsName.trim()} onPress={() => void submitDocumentDetails()} size="md" variant="primary">Save</Button>
-      {close(false)}
+      {closeFooter(false)}
     </>;
-    if (activeSheet === "deleteDocument") return null;
-    if (activeSheet === "bulkDelete") return null;
-    if (activeSheet === "destinationBrowser") return <>
+  else if (activeSheet === "destinationBrowser") mutationFooter = <>
       {destinationAction !== "upload" && (destinationAtInitialLocation || destinationIsBlocked)
         ? <Text style={styles.invalidDestinationHelp}>Invalid destination. Choose another folder to {destinationAction} to.</Text>
         : <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="md" variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : "Copy here"}</Button>}
-      {close(bulkLoading)}
+      {closeFooter(bulkLoading)}
     </>;
-    if (activeSheet === "destination" && destinationAction === "upload") return <>
+  else if (activeSheet === "destination" && destinationAction === "upload") mutationFooter = <>
       <Button disabled={destinationLoading} loading={destinationLoading} onPress={() => void selectDestination()} size="md" variant="primary">Choose files for this folder</Button>
-      {close(destinationLoading)}
+      {closeFooter(destinationLoading)}
     </>;
-    if (activeSheet === "folder") return <>
+  else if (activeSheet === "folder") mutationFooter = <>
       <Button disabled={!folderName.trim()} onPress={() => void submitFolder()} size="md" variant="primary">Create folder</Button>
-      {close(false)}
+      {closeFooter(false)}
     </>;
-    return null;
-  }
 
   const controlSelectedAudioVersion = () => {
     if (narrationStateRef.current === "playing") {
@@ -3818,6 +3848,8 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
       {narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
     </View>
   ) : null;
+  if (activeSheet === "summaryReader") mutationFooter = <>{summaryNarrationIsland}{mutationFooter}</>;
+  else if (activeSheet === "audioVersions") mutationFooter = <>{documentNarrationIsland}{mutationFooter}</>;
   const narrationAccessory = activeSheet !== "audioVersions" ? documentNarrationIsland : undefined;
   const tripReturnAccessory = returnToTripAssets ? <Button accessibilityLabel={`Back to ${returnTripName ?? "trip"} assets`} contentMode="raw" onPress={returnToTripAssets} size="sm" style={styles.tripReturn} variant="secondary"><Text numberOfLines={1} style={styles.tripReturnText}>{returnTripName ?? "Trip"}</Text><ChevronRightIcon size="sm" /></Button> : undefined;
   const signalReturnAccessory = returnToSignalAttachments ? <Button accessibilityLabel="Back to Signal attachments" contentMode="raw" onPress={returnToSignalAttachments} size="sm" style={styles.tripReturn} variant="secondary"><Text numberOfLines={1} style={styles.tripReturnText}>Signal attachments</Text><ChevronRightIcon size="sm" /></Button> : undefined;
@@ -4004,7 +4036,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
             </View>
           ) : null}
 
-          <ScrollView alwaysBounceVertical contentContainerStyle={styles.editorReadDocument} keyboardShouldPersistTaps="handled" nestedScrollEnabled onLayout={(event) => { editorDocumentViewportHeight.current = event.nativeEvent.layout.height; }} ref={editorDocumentScroll} refreshControl={<PullToRefresh enabled={Boolean(documentKeyRef.current) && !editorEditing && !dirty.current && saveState === "saved"} onRefresh={refreshArchive} refreshing={userRefreshing} />} showsVerticalScrollIndicator={false} style={styles.editorReadScroll}>
+          <ScrollView alwaysBounceVertical contentContainerStyle={styles.editorReadDocument} keyboardShouldPersistTaps="handled" nestedScrollEnabled onLayout={(event) => { editorDocumentViewportHeight.current = event.nativeEvent.layout.height; }} ref={editorDocumentScroll} refreshControl={<PullToRefresh enabled={Boolean(editorDocumentKey) && !editorEditing && saveState === "saved"} onRefresh={refreshArchive} refreshing={userRefreshing} />} showsVerticalScrollIndicator={false} style={styles.editorReadScroll}>
             {editorEditing ? <>
               <View style={[styles.editorFrame, (editorFocused || aiInputFocused) && styles.editorFrameFocused]}>
                 <TextInput
@@ -4112,7 +4144,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
       <BottomSheet
         description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "transform" ? documentTransformation === "enhance" ? "Review or adjust how this document should be enhanced." : "Review or adjust how this document should be translated." : activeSheet === "documentVersions" ? "Choose a document version to open." : activeSheet === "versions" ? `Choose an ${documentTransformation === "enhance" ? "enhancement" : "translation"} to open.` : activeSheet === "audioVersions" ? "Listen to your saved recordings." : activeSheet === "summarize" ? `Choose one of the ${selectedDocument?.extension ? "file's" : "document's"} primary topics to summarize.` : activeSheet === "summaryVersions" ? "View saved summaries or create a new one." : undefined}
         dismissible={!destinationLoading && !bulkLoading && (!documentActionLoading || documentActionLoading === "enhance" || documentActionLoading === "translate")}
-        footer={mutationFooter()}
+        footer={mutationFooter}
         focusKey={activeSheet}
         hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "filter" || activeSheet === "folderActions" || activeSheet === "bulkActions"}
         height={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "searchHistory" || activeSheet === "similar" || activeSheet === "transform" || activeSheet === "documentVersions" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "summarize" || activeSheet === "summaryVersions" || activeSheet === "summaryReader" || activeSheet === "scanSources" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "documentDetails" ? "full" : undefined}

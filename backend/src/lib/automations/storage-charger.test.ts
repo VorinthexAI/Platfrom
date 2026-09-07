@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { HOUR_MS, STORAGE_CHARGE_DENOMINATOR, BYTES_PER_GIB, calculateStorageCharge, closedStorageHours, floorUtcHour, latestClosedStorageHour, processStorageChargingHour, storageHourWindowSchema, type PreparedStorageCharge, type StorageByteUsage, type StorageHourWindow, type StorageUsageRepository } from './storage-charger';
+import { HOUR_MS, STORAGE_CHARGE_DENOMINATOR, BYTES_PER_GB, calculateStorageCharge, closedStorageHours, floorUtcHour, latestClosedStorageHour, processStorageChargingHour, storageHourWindowSchema, type PreparedStorageCharge, type StorageByteUsage, type StorageHourWindow, type StorageUsageRepository } from './storage-charger';
 import { createStorageChargeService } from './storage-charger-queue';
 import { SparkRepositoryError } from '@/lib/sparks/repository';
 
@@ -26,8 +26,8 @@ describe('storage charging windows', () => {
 });
 
 describe('exact storage charge arithmetic', () => {
-  test('charges exactly 24 Sparks per GiB across 730 full hours', () => {
-    const usage = BYTES_PER_GIB * BigInt(HOUR_MS);
+  test('charges exactly 30 Sparks per GB across 730 full hours', () => {
+    const usage = BYTES_PER_GB * BigInt(HOUR_MS);
     let remainder = '0';
     let total = 0n;
     for (let index = 0; index < 730; index += 1) {
@@ -35,14 +35,14 @@ describe('exact storage charge arithmetic', () => {
       total += BigInt(charge.amountMicroSparks);
       remainder = charge.remainder;
     }
-    expect(total).toBe(24_000_000n);
+    expect(total).toBe(30_000_000n);
     expect(remainder).toBe('0');
   });
 
   test('preserves fractional micros and accepts values beyond safe integers', () => {
     const first = calculateStorageCharge(1n);
     expect(first.amountMicroSparks).toBe('0');
-    expect(first.remainder).toBe('24000000');
+    expect(first.remainder).toBe('30000000');
     const huge = calculateStorageCharge(BigInt(Number.MAX_SAFE_INTEGER) * BigInt(HOUR_MS), first.remainder);
     expect(BigInt(huge.remainder)).toBeLessThan(STORAGE_CHARGE_DENOMINATOR);
     expect(BigInt(huge.amountMicroSparks)).toBeGreaterThan(0n);
@@ -76,7 +76,7 @@ describe('storage hour processing', () => {
   const now = () => new Date('2026-09-04T12:10:00.000Z');
 
   test('creates one deterministic user charge and safely replays a completed hour', async () => {
-    const repository = memoryRepository([{ userKey: 'user-1', byteMilliseconds: (BYTES_PER_GIB * BigInt(HOUR_MS)).toString() }]);
+    const repository = memoryRepository([{ userKey: 'user-1', byteMilliseconds: (BYTES_PER_GB * BigInt(HOUR_MS)).toString() }]);
     const calls: unknown[] = [];
     const chargeService = { async charge(input: unknown) { calls.push(input); } } as any;
     await processStorageChargingHour(window, { repository, chargeService, now });
@@ -86,7 +86,7 @@ describe('storage hour processing', () => {
   });
 
   test('leaves a prepared transaction pending when charging fails so BullMQ can retry it', async () => {
-    const repository = memoryRepository([{ userKey: 'user-1', byteMilliseconds: (BYTES_PER_GIB * BigInt(HOUR_MS)).toString() }]);
+    const repository = memoryRepository([{ userKey: 'user-1', byteMilliseconds: (BYTES_PER_GB * BigInt(HOUR_MS)).toString() }]);
     const ids: string[] = [];
     await expect(processStorageChargingHour(window, { repository, chargeService: { async charge() { throw new Error('temporary'); } }, now })).rejects.toThrow('temporary');
     expect([...repository.records.values()][0]?.status).toBe('pending');
@@ -98,8 +98,8 @@ describe('storage hour processing', () => {
 
   test('terminates only an insufficient user-hour and continues charging other users', async () => {
     const repository = memoryRepository([
-      { userKey: 'user-1', byteMilliseconds: (BYTES_PER_GIB * BigInt(HOUR_MS)).toString() },
-      { userKey: 'user-2', byteMilliseconds: (BYTES_PER_GIB * BigInt(HOUR_MS)).toString() },
+      { userKey: 'user-1', byteMilliseconds: (BYTES_PER_GB * BigInt(HOUR_MS)).toString() },
+      { userKey: 'user-2', byteMilliseconds: (BYTES_PER_GB * BigInt(HOUR_MS)).toString() },
     ]);
     const charged: string[] = [];
     await processStorageChargingHour(window, { repository, now, chargeService: { async charge(input) {
@@ -113,7 +113,7 @@ describe('storage hour processing', () => {
   });
 
   test('replays an unfunded hour without retrying the debit or extending retention', async () => {
-    const repository = memoryRepository([{ userKey: 'user-1', byteMilliseconds: (BYTES_PER_GIB * BigInt(HOUR_MS)).toString() }]);
+    const repository = memoryRepository([{ userKey: 'user-1', byteMilliseconds: (BYTES_PER_GB * BigInt(HOUR_MS)).toString() }]);
     let chargeCalls = 0, unfundedTransitions = 0;
     const mark = repository.markUserHourUnfunded.bind(repository);
     repository.markUserHourUnfunded = async (...args) => { unfundedTransitions += 1; await mark(...args); };
@@ -141,7 +141,7 @@ describe('storage hour processing', () => {
   });
 
   test('replays one debit and completes the hour after analytics recovers', async () => {
-    const repository = memoryRepository([{ userKey: 'user-1', byteMilliseconds: (BYTES_PER_GIB * BigInt(HOUR_MS)).toString() }]);
+    const repository = memoryRepository([{ userKey: 'user-1', byteMilliseconds: (BYTES_PER_GB * BigInt(HOUR_MS)).toString() }]);
     let appliedDebits = 0, chargeCalls = 0, eventCalls = 0; let originalEventKey = '';
     const chargeService = createStorageChargeService({
       id: () => `event-${chargeCalls + 1}`, hash: async () => 'a'.repeat(64),
@@ -151,6 +151,7 @@ describe('storage hour processing', () => {
         return { status: 'replayed', transaction: { key: 'transaction-1', eventKey: originalEventKey } } as never;
       },
       getUser: async () => ({ key: 'user-1', currentScopeKey: 'scope-1' }) as never,
+      appScopeKey: 'cmrnlzf640001qc7kazsr96k5',
       record: async (_input, options) => { eventCalls += 1; expect(options?.key).toBe(originalEventKey); if (eventCalls === 1) throw new Error('analytics unavailable'); },
     });
     await expect(processStorageChargingHour(window, { repository, chargeService, now })).rejects.toThrow('analytics unavailable');

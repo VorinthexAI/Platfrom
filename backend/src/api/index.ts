@@ -3,7 +3,8 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { websocket } from 'hono/bun';
 import { errorHandler } from './errors';
-import { autoRefreshAuthTokens, bindEventApp, rateLimitByIp, requestLogger, requireEnvApiKey, validateQueryParams } from './middleware';
+import { autoRefreshAuthTokens, bindEventApp, bindEventIdentifier, rateLimitByIp, requestLogger, requireEnvApiKey, validateQueryParams } from './middleware';
+import { EVENT_IDENTIFIER_HEADER } from '@/lib/ai/events/event-identifier';
 import { handleResendWebhook, RESEND_WEBHOOK_V1_PATH } from './resend';
 import { GMAIL_WEBHOOK_V1_PATH, handleGmailWebhook } from './email-webhook';
 import { closeEmailSyncQueue, enqueueEmailWatchRenewal, recoverEmailSyncQueue, startEmailSyncWorker } from '@/lib/email-inbox/sync-queue';
@@ -13,6 +14,9 @@ import { closeConversationImageTurnQueue, recoverConversationImageTurnQueue, sta
 import { closeAutomations, startAutomations } from '@/lib/automations';
 import { closeBookRefundWorker, startBookRefundWorker } from '@/lib/books/refund-worker';
 import { defaultBookService } from '@/lib/books/default-service';
+import { handlePolarWebhook, POLAR_WEBHOOK_V1_PATH } from './polar-webhook';
+import { polarConfiguration } from '@/lib/commerce/polar';
+import { closeAppNotificationQueue, recoverAppNotificationQueue, startAppNotificationWorker } from '@/lib/app-notifications/queue';
 
 export const app = new Hono();
 const api = app.basePath('/api/v1');
@@ -31,7 +35,7 @@ app.use('*', cors({
     return configuredOrigins[0] ?? '';
   },
   credentials: true,
-  allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: [
     'Authorization',
     'Content-Type',
@@ -40,13 +44,18 @@ app.use('*', cors({
     'X-Vorinthex-API-Key',
     'X-Vorinthex-Session-Transport',
     'X-Vorinthex-App-Key',
+    EVENT_IDENTIFIER_HEADER,
     'X-Refresh-Token',
     'svix-id',
     'svix-timestamp',
     'svix-signature',
+    'webhook-id',
+    'webhook-timestamp',
+    'webhook-signature',
   ],
   exposeHeaders: ['WWW-Authenticate', 'X-Access-Token', 'X-Refresh-Token', 'X-Access-Token-Max-Age', 'X-Refresh-Token-Max-Age'],
 }));
+app.use('*', bindEventIdentifier);
 app.use('*', requestLogger);
 app.use('*', rateLimitByIp);
 app.use('*', requireEnvApiKey);
@@ -60,8 +69,15 @@ app.post(RESEND_WEBHOOK_V1_PATH, handleResendWebhook);
 app.post(`${RESEND_WEBHOOK_V1_PATH}/`, handleResendWebhook);
 app.post(GMAIL_WEBHOOK_V1_PATH, handleGmailWebhook);
 app.post(`${GMAIL_WEBHOOK_V1_PATH}/`, handleGmailWebhook);
+app.post(POLAR_WEBHOOK_V1_PATH, handlePolarWebhook);
+app.post(`${POLAR_WEBHOOK_V1_PATH}/`, handlePolarWebhook);
 
 if (import.meta.main) {
+  if (process.env.NODE_ENV === 'production') {
+    polarConfiguration();
+    if (!process.env.POLAR_WEBHOOK_SECRET?.trim()) throw new Error('POLAR_WEBHOOK_SECRET is required in production.');
+  }
+  await startAutomations();
   const port = Number(process.env.PORT ?? 3001);
   const server = serve({
     hostname: '0.0.0.0',
@@ -74,13 +90,14 @@ if (import.meta.main) {
   const emailWorker = startEmailSyncWorker();
   const galleryWorker = startGalleryUploadWorker();
   const conversationImageWorker = startConversationImageTurnWorker();
+  const appNotificationWorker = startAppNotificationWorker();
   startBookRefundWorker();
-  void startAutomations().catch((error) => console.error('automation startup failed', { error }));
   void recoverGalleryUploadQueue().catch((error) => console.error('gallery upload queue recovery failed', { error }));
   void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error }));
   void recoverEmailSyncQueue().catch((error) => console.error('email synchronization queue recovery failed', { error }));
   void recoverConversationImageTurnQueue().catch((error) => console.error('conversation image queue recovery failed', { error }));
   void defaultBookService.recoverGenerations().catch((error) => console.error('book generation recovery failed', { error }));
+  void recoverAppNotificationQueue().catch((error) => console.error('app notification queue recovery failed', { error }));
   const renewalTimer = setInterval(() => { void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error })); }, 6 * 60 * 60_000);
   const emailRecoveryTimer = setInterval(() => { void recoverEmailSyncQueue().catch((error) => console.error('email synchronization queue recovery failed', { error })); }, 60_000);
   const conversationImageRecoveryTimer = setInterval(() => { void recoverConversationImageTurnQueue().catch((error) => console.error('conversation image queue recovery failed', { error })); }, 60_000);
@@ -98,9 +115,11 @@ if (import.meta.main) {
     await emailWorker.close();
     await galleryWorker.close();
     await conversationImageWorker.close();
+    await appNotificationWorker.close();
     await closeEmailSyncQueue();
     await closeGalleryUploadQueue();
     await closeConversationImageTurnQueue();
+    await closeAppNotificationQueue();
     await closeBookRefundWorker();
     await closeAutomations();
     process.exit(0);

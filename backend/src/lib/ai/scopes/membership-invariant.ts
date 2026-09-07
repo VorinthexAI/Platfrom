@@ -8,58 +8,58 @@ type QueryDatabase = {
 
 type ScopeMembershipCandidate = {
   scopeKey: string;
-  userOrganizationKey: string;
-  orgRole: string;
+  userTeamKey: string;
+  teamRole: string;
   existing: { _key: string } | null;
 };
 
 export type ScopeMembershipReconciliation = {
-  created: Array<{ key: string; scopeKey: string; userOrganizationKey: string; role: ScopeMemberRole }>;
+  created: Array<{ key: string; scopeKey: string; userTeamKey: string; role: ScopeMemberRole }>;
 };
 
-export function scopeRoleForOrganizationRole(orgRole: string): ScopeMemberRole {
-  return orgRole === 'owner' || orgRole === 'admin' || orgRole === 'moderator' ? orgRole : 'viewer';
+export function scopeRoleForTeamRole(teamRole: string): ScopeMemberRole {
+  return teamRole === 'owner' || teamRole === 'admin' || teamRole === 'moderator' ? teamRole : 'viewer';
 }
 
-export async function reconcileOrganizationScopeMemberships(
-  organizationKey: string,
-  options: { scopeKeys?: readonly string[]; userOrganizationKeys?: readonly string[] } = {},
+export async function reconcileTeamScopeMemberships(
+  teamKey: string,
+  options: { scopeKeys?: readonly string[]; userTeamKeys?: readonly string[] } = {},
   database: QueryDatabase = db,
 ): Promise<ScopeMembershipReconciliation> {
   const cursor = await database.query<ScopeMembershipCandidate>(`
-    FOR membership IN userOrganizations
-      FILTER membership.organizationId == @organizationKey
+    FOR membership IN userTeams
+      FILTER membership.teamKey == @teamKey
       FILTER membership.status == "active"
-      FILTER @userOrganizationKeys == null || membership._key IN @userOrganizationKeys
+      FILTER @userTeamKeys == null || membership._key IN @userTeamKeys
       FOR scope IN scopes
-        FILTER scope.organizationKey == @organizationKey
+        FILTER scope.teamKey == @teamKey
         FILTER @scopeKeys == null || scope._key IN @scopeKeys
-        LET existing = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == scope._key && member.userOrganizationKey == membership._key LIMIT 1 RETURN KEEP(member, "_key"))
-        RETURN { scopeKey: scope._key, userOrganizationKey: membership._key, orgRole: membership.orgRole, existing }
+        LET existing = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == scope._key && member.userTeamKey == membership._key LIMIT 1 RETURN KEEP(member, "_key"))
+        RETURN { scopeKey: scope._key, userTeamKey: membership._key, teamRole: membership.teamRole, existing }
   `, {
-    organizationKey,
+    teamKey,
     scopeKeys: options.scopeKeys ? [...options.scopeKeys] : null,
-    userOrganizationKeys: options.userOrganizationKeys ? [...options.userOrganizationKeys] : null,
+    userTeamKeys: options.userTeamKeys ? [...options.userTeamKeys] : null,
   });
   const candidates = await cursor.all();
   const documents = candidates.map((row) => ({
     key: newId(),
     scopeKey: row.scopeKey,
-    userOrganizationKey: row.userOrganizationKey,
-    role: scopeRoleForOrganizationRole(row.orgRole),
+    userTeamKey: row.userTeamKey,
+    role: scopeRoleForTeamRole(row.teamRole),
   }));
   const created = documents.filter((_, index) => !candidates[index]!.existing);
   if (documents.length) {
     await database.query(`
       FOR document IN @documents
-        UPSERT { scopeKey: document.scopeKey, userOrganizationKey: document.userOrganizationKey }
+        UPSERT { scopeKey: document.scopeKey, userTeamKey: document.userTeamKey }
         INSERT {
           _key: document.key,
           scopeKey: document.scopeKey,
-          userOrganizationKey: document.userOrganizationKey,
+          userTeamKey: document.userTeamKey,
            role: document.role,
           status: "active",
-          source: "organization"
+          source: "team"
         }
         UPDATE {}
         IN scopeMembers
@@ -68,8 +68,8 @@ export async function reconcileOrganizationScopeMemberships(
       FOR document IN @documents
         FOR member IN scopeMembers
           FILTER member.scopeKey == document.scopeKey
-          FILTER member.userOrganizationKey == document.userOrganizationKey
-          FILTER member.source == "organization"
+          FILTER member.userTeamKey == document.userTeamKey
+          FILTER member.source == "team"
           UPDATE member WITH { role: document.role, status: "active" }
           IN scopeMembers
     `, { documents });

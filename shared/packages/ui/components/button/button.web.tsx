@@ -19,6 +19,7 @@ export type ButtonShape = "pill" | "rounded";
 export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   asChild?: boolean;
   icon?: ReactNode;
+  trailingIcon?: ReactNode;
   iconOnly?: boolean;
   loading?: boolean;
   shape?: ButtonShape;
@@ -42,6 +43,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     className,
     disabled,
     icon,
+    trailingIcon,
     iconOnly = false,
     loading = false,
     shape = "pill",
@@ -84,6 +86,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     >
       {loading ? <span aria-hidden="true" className="vui-button-fill" /> : icon}
       {variant === "icon" || iconOnly ? <span className="sr-only">{children}</span> : children}
+      {trailingIcon}
     </button>
   );
 });

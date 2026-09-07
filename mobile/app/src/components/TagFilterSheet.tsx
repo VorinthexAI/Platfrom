@@ -16,7 +16,7 @@ type TagFilterSheetProps = { context: ContentContext; onClose: () => void; open:
 
 export function TagFilterSheet({ context, onClose, open }: TagFilterSheetProps) {
   const queryClient = useQueryClient();
-  const { organizationKey, scopeKey, userKey } = context;
+  const { teamKey, scopeKey, userKey } = context;
   const contextKey = tagFilterContextKey(context);
   const selected = useUiStore((state) => state.selectedTagsByContext[contextKey] ?? EMPTY_SELECTED_TAGS);
   const setSelectedTags = useUiStore((state) => state.setSelectedTags);
@@ -29,18 +29,20 @@ export function TagFilterSheet({ context, onClose, open }: TagFilterSheetProps) 
   useEffect(() => {
     if (!open) return;
     const request = ++requestRef.current;
-    setDraftKeys(selected.map(({ key }) => key));
-    setLoading(true);
-    setError(undefined);
-    void refreshScopeTags(queryClient, { organizationKey, scopeKey, userKey }).then((items) => {
-      if (request === requestRef.current) setTags(items);
-    }).catch((caught) => {
-      if (request === requestRef.current) setError(caught instanceof Error ? caught.message : "Tags could not be loaded.");
-    }).finally(() => {
-      if (request === requestRef.current) setLoading(false);
-    });
-    return () => { requestRef.current += 1; };
-  }, [open, organizationKey, queryClient, scopeKey, selected, userKey]);
+    const timeout = setTimeout(() => {
+      setDraftKeys(selected.map(({ key }) => key));
+      setLoading(true);
+      setError(undefined);
+      void refreshScopeTags(queryClient, { teamKey, scopeKey, userKey }).then((items) => {
+        if (request === requestRef.current) setTags(items);
+      }).catch((caught) => {
+        if (request === requestRef.current) setError(caught instanceof Error ? caught.message : "Tags could not be loaded.");
+      }).finally(() => {
+        if (request === requestRef.current) setLoading(false);
+      });
+    }, 0);
+    return () => { clearTimeout(timeout); requestRef.current += 1; };
+  }, [open, teamKey, queryClient, scopeKey, selected, userKey]);
 
   const toggle = (key: string) => setDraftKeys((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
   const apply = () => {
@@ -57,7 +59,7 @@ export function TagFilterSheet({ context, onClose, open }: TagFilterSheetProps) 
       <ScrollView contentContainerStyle={[styles.list, !loading && tags.length === 0 && styles.emptyContent]} showsVerticalScrollIndicator={false} style={styles.scroll}>
         {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
         {loading ? <View accessibilityLabel="Loading tags" accessibilityRole="progressbar" style={styles.list}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.skeleton} />)}</View> : null}
-        {!loading && !error && tags.length === 0 ? <Text style={styles.empty}>No tags yet. Create a tag from an item's Tags menu, then return here to filter.</Text> : null}
+        {!loading && !error && tags.length === 0 ? <Text style={styles.empty}>No tags yet. Create a tag from an item&apos;s Tags menu, then return here to filter.</Text> : null}
         {!loading ? tags.map((tag) => <FilterPill fullWidth key={tag.key} label={tag.name} onPress={() => toggle(tag.key)} selected={draftKeys.includes(tag.key)} />) : null}
       </ScrollView>
     </BottomSheet>

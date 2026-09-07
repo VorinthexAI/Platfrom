@@ -8,7 +8,7 @@ export const PROCESSED_WEBHOOK_EVENTS_COLLECTION = 'processedWebhookEvents';
 
 export const processedWebhookEventSchema = z.object({
   key: z.string(),
-  provider: z.literal('resend'),
+  provider: z.enum(['resend', 'polar']),
   eventId: z.string(),
   eventType: z.string(),
   status: z.enum(['processing', 'processed']).default('processed'),
@@ -69,7 +69,7 @@ export type WebhookClaim = 'claimed' | 'duplicate' | 'in_progress';
  * be taken over, so the event is retried instead of being lost forever.
  */
 export async function claimWebhookEvent(
-  provider: 'resend',
+  provider: 'resend' | 'polar',
   eventId: string,
   eventType: string,
   staleMs: number,

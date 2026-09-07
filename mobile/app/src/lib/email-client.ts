@@ -5,24 +5,27 @@ import { appSearchResults, searchApp } from "@/lib/app-search-client";
 
 import { apiClient } from "@/lib/api-client";
 import { assistantChangesSchema } from "@/lib/assistant-changes";
+import { fetchBillingSummary } from "@/lib/billing-client";
+import { INSUFFICIENT_BALANCE_CODE, observeDomainError } from "@/lib/domain-error-observer";
 import { useAuthStore } from "@/state/auth";
+import { useAppsStore } from "@/state/apps";
 
 const keySchema = z.string().min(1);
 const dateSchema = z.iso.datetime();
-const contextSchema = z.strictObject({ organizationKey: keySchema, scopeKey: keySchema });
+const contextSchema = z.strictObject({ teamKey: keySchema, scopeKey: keySchema });
 export type EmailContext = z.infer<typeof contextSchema>;
 const EMAIL_RETURN_URI = "https://vorinthex.com/capability/signal";
 
-export const emailFilterSchema = z.enum(["all", "important", "urgent", "needs_action", "filtered", "unread", "favorite", "trash"]);
+export const emailFilterSchema = z.enum(["all", "important", "urgent", "purchases", "needs_action", "filtered", "unread", "favorite", "trash"]);
 export type EmailFilter = z.infer<typeof emailFilterSchema>;
 export const emailReadStateSchema = z.enum(["read", "unread"]);
 export type EmailReadState = z.infer<typeof emailReadStateSchema>;
-export const emailFacetSchema = z.enum(["urgent", "important", "filtered", "favorite"]);
+export const emailFacetSchema = z.enum(["urgent", "important", "purchases", "filtered", "favorite"]);
 export type EmailFacet = z.infer<typeof emailFacetSchema>;
-const EMAIL_FACET_ORDER: readonly EmailFacet[] = ["urgent", "important", "filtered", "favorite"];
+const EMAIL_FACET_ORDER: readonly EmailFacet[] = ["urgent", "important", "purchases", "filtered", "favorite"];
 export type EmailOverviewQuery = Readonly<{ readState: EmailReadState; facets: readonly EmailFacet[]; search: string }>;
 export function normalizeEmailOverviewQuery(input: { readState?: EmailReadState; facets?: readonly EmailFacet[]; search?: string } = {}): EmailOverviewQuery {
-  const selected = new Set(input.facets ?? ["urgent", "important"]);
+  const selected = new Set(input.facets ?? ["urgent", "important", "purchases"]);
   return Object.freeze({
     readState: emailReadStateSchema.parse(input.readState ?? "unread"),
     facets: Object.freeze(EMAIL_FACET_ORDER.filter((facet) => selected.has(facet))),
@@ -40,7 +43,7 @@ export const emailOverviewInputSchema = z.strictObject({
   connectorKey: keySchema.optional(),
   filter: emailFilterSchema.optional(),
   readState: emailReadStateSchema.optional(),
-  facets: z.array(emailFacetSchema).max(4).optional(),
+  facets: z.array(emailFacetSchema).max(5).optional(),
   search: z.string().trim().max(200).optional(),
   cursor: z.string().min(1).max(2_000).optional(),
   limit: z.number().int().min(1).max(50).optional(),
@@ -54,7 +57,7 @@ export const emailOverviewInputSchema = z.strictObject({
   const normalized = normalizeEmailOverviewQuery(value);
   return { ...value, readState: normalized.readState, facets: [...normalized.facets] };
 });
-export const emailInboxCategorySchema = z.enum(["Urgent", "Important", "Filtered"]);
+export const emailInboxCategorySchema = z.enum(["Urgent", "Important", "Purchases", "Filtered"]);
 export type EmailInboxCategory = z.infer<typeof emailInboxCategorySchema>;
 export const emailToneSchema = z.string().trim().min(1).max(255);
 export type EmailTone = z.infer<typeof emailToneSchema>;
@@ -192,7 +195,7 @@ const overviewSchema = z.strictObject({
   accounts: z.array(emailConnectorSchema), selectedAccount: emailConnectorSchema.nullable(), threads: z.array(emailThreadSchema), drafts: z.array(emailDraftSchema),
   tones: z.array(emailToneRecordSchema).default([]),
   unassignedDrafts: z.array(emailDraftSchema).default([]),
-  counts: z.strictObject({ all: z.number().int(), important: z.number().int(), urgent: z.number().int(), needsAction: z.number().int(), filtered: z.number().int(), unread: z.number().int(), favorite: z.number().int(), trash: z.number().int() }),
+  counts: z.strictObject({ all: z.number().int(), important: z.number().int(), urgent: z.number().int(), purchases: z.number().int(), needsAction: z.number().int(), filtered: z.number().int(), unread: z.number().int(), favorite: z.number().int(), trash: z.number().int() }),
   nextCursor: z.string().min(1).nullable(),
 });
 const threadDetailSchema = z.strictObject({ thread: emailThreadSchema, messages: z.array(emailMessageSchema.extend({ bodyTruncated: z.boolean() }).strict()), nextCursor: z.string().min(1).nullable(), truncated: z.boolean() });
@@ -240,18 +243,18 @@ export type EmailBulkThreadReport = z.infer<typeof emailBulkThreadReportSchema>;
 function recordKey(value: Record<string, unknown> | null) { return typeof value?.key === "string" ? value.key : ""; }
 export function getEmailContext() {
   const state = useAuthStore.getState();
-  const parsed = contextSchema.safeParse({ organizationKey: recordKey(state.organization), scopeKey: recordKey(state.scope) });
+  const parsed = contextSchema.safeParse({ teamKey: recordKey(state.team), scopeKey: recordKey(state.scope) });
   if (!parsed.success) throw new Error("Email is unavailable for this session.");
   return parsed.data;
 }
 
 export function getEmailPermissions() {
   const state = useAuthStore.getState();
-  const organizationRole = typeof state.organization?.role === "string" ? state.organization.role : "viewer";
+  const teamRole = typeof state.team?.role === "string" ? state.team.role : "viewer";
   const scopeRole = typeof state.scope?.role === "string" ? state.scope.role : "viewer";
   return {
-    canManageConnector: organizationRole === "owner" || organizationRole === "admin",
-    canMutate: organizationRole === "owner" || organizationRole === "admin" || scopeRole === "owner" || scopeRole === "admin" || scopeRole === "moderator",
+    canManageConnector: teamRole === "owner" || teamRole === "admin",
+    canMutate: teamRole === "owner" || teamRole === "admin" || scopeRole === "owner" || scopeRole === "admin" || scopeRole === "moderator",
   };
 }
 
@@ -420,6 +423,14 @@ export function exchangeEmailConnection(code: string) {
 
 export async function launchEmailConnection(connection: z.input<typeof emailConnectionMetadataSchema>) {
   const input = emailConnectionMetadataSchema.parse(connection);
+  const inboxCost = useAppsStore.getState().sparkCosts.find(({ key }) => key === "inbox.sync");
+  if (inboxCost?.kind === "static") {
+    const billing = await fetchBillingSummary();
+    const requiredMicroSparks = Number(inboxCost.sparkCost) * 1_000_000;
+    if (billing.spendingBlocked || billing.microSparkBalance < requiredMicroSparks) {
+      throw observeDomainError(Object.assign(new Error("You need more Sparks to connect an inbox."), { code: INSUFFICIENT_BALANCE_CODE }));
+    }
+  }
   const start = await request("post", "/email/connect", { provider: "gmail", returnUri: EMAIL_RETURN_URI, ...input }, z.strictObject({ authorizationUrl: z.string().url() }));
   const result = await WebBrowser.openAuthSessionAsync(start.authorizationUrl, EMAIL_RETURN_URI);
   if (result.type !== "success") return null;

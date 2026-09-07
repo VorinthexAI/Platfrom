@@ -63,7 +63,7 @@ export async function executeRoute<TInput, TOutput>(options: ExecuteRouteOptions
       modelId: decision.modelSlug,
       externalModelId: decision.providerModelId,
       input: options.input,
-      organizationKey: decision.organizationKey,
+      teamKey: decision.teamKey,
       timeoutMs: options.timeoutMs,
       signal: options.signal,
     });
@@ -142,21 +142,21 @@ export async function executeAction<TInput, TOutput>(request: RouteRequestInput,
 }
 
 /** Executes the canonical text action using the model selected by its provider-neutral mode. */
-export async function executeAsk<TOutput>(organizationKey: string, input: CoreChatInput, options: ExecuteActionOptions = {}) {
+export async function executeAsk<TOutput>(teamKey: string, input: CoreChatInput, options: ExecuteActionOptions = {}) {
   const { mode, ...providerInput } = coreChatInputSchema.parse(input);
   const request: RouteRequestInput = {
     mode: 'auto',
-    organizationKey,
+    teamKey,
     actionSlug: 'text',
   };
   return executeAction<typeof providerInput, TOutput>(request, providerInput, options);
 }
 
 /** Executes grounded web search using the model selected by its provider-neutral mode. */
-export async function executeWebSearch<TOutput>(organizationKey: string, input: WebInput, options: ExecuteActionOptions = {}) {
+export async function executeWebSearch<TOutput>(teamKey: string, input: WebInput, options: ExecuteActionOptions = {}) {
   const { mode, ...providerInput } = webInputSchema.parse(input);
   return executeAction<typeof providerInput, TOutput>({
-    mode: 'auto', organizationKey, actionSlug: 'web',
+    mode: 'auto', teamKey, actionSlug: 'web',
   }, providerInput, options);
 }
 
@@ -167,7 +167,7 @@ export async function* streamRoute<TInput>(options: ExecuteRouteOptions<TInput>)
   if (!adapter?.stream) throw new ProviderExecutionError(options.decision.actionSlug, [{ modelId: options.decision.modelSlug, providerId: options.decision.providerSlug, externalModelId: options.decision.providerModelId, code: 'adapter_unavailable', message: 'provider streaming adapter is unavailable' }]);
   let usage: TokenUsage | undefined;
   try {
-    for await (const chunk of adapter.stream({ actionId: options.decision.actionSlug, modelId: options.decision.modelSlug, externalModelId: options.decision.providerModelId, input: options.input, organizationKey: options.decision.organizationKey, timeoutMs: options.timeoutMs, signal: options.signal })) {
+    for await (const chunk of adapter.stream({ actionId: options.decision.actionSlug, modelId: options.decision.modelSlug, externalModelId: options.decision.providerModelId, input: options.input, teamKey: options.decision.teamKey, timeoutMs: options.timeoutMs, signal: options.signal })) {
       if (chunk.type === 'usage') usage = chunk.usage;
       yield chunk;
     }
@@ -182,9 +182,9 @@ export async function* streamRoute<TInput>(options: ExecuteRouteOptions<TInput>)
 }
 
 /** Streams the canonical provider-neutral text action over its selected server-owned route. */
-export async function* streamAsk(organizationKey: string, input: CoreChatInput, options: ExecuteActionOptions = {}) {
+export async function* streamAsk(teamKey: string, input: CoreChatInput, options: ExecuteActionOptions = {}) {
   const { mode: _mode, ...providerInput } = coreChatInputSchema.parse(input);
-  const decision = (await selectRoutes({ mode: 'auto', organizationKey, actionSlug: 'text' }, options, options.providers))[0]!;
+  const decision = (await selectRoutes({ mode: 'auto', teamKey, actionSlug: 'text' }, options, options.providers))[0]!;
   const attempts = options.retry?.attempts ?? 3;
   const intervalMs = options.retry?.intervalMs ?? 2_000;
   for (let attempt = 0; ; attempt += 1) {

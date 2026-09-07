@@ -16,7 +16,7 @@ const jobOptions: JobsOptions = {
 };
 export const conversationImageTurnJobSchema = z.object({
   schemaVersion: z.literal(1), assistantMessageKey: z.string().cuid(), conversationKey: z.string().cuid(),
-  organizationKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(), userKey: z.string().cuid(), actorKey: z.string().cuid(),
+  teamKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(), userKey: z.string().cuid(), actorKey: z.string().cuid(),
   requestKey: z.string().trim().min(1).max(180), input: managedImageGenerateInputSchema,
 }).strict();
 export type ConversationImageTurnJob = z.infer<typeof conversationImageTurnJobSchema>;
@@ -47,28 +47,29 @@ export async function processConversationImageTurn(raw: unknown, dependencies: {
   images?: Pick<ImageGenerationService, 'generateManaged'>;
   publishChanged?: typeof publishUserEvent;
   recordEvent?: ToolEventRecorder;
+  appScopeKey?: string;
   billing?: ToolBillingDependencies;
   terminalFailure?: boolean;
   now?: () => string;
 } = {}) {
   const job = conversationImageTurnJobSchema.parse(raw);
   const repository = dependencies.repository ?? getDefaultConversationRepository();
-  const context = { organizationKey: job.organizationKey, runtimeScopeKey: job.scopeKey, principal: { kind: 'member' as const, user: { key: job.userKey }, userOrganization: { key: job.actorKey, organizationId: job.organizationKey, userId: job.userKey, status: 'active' as const }, scopeMember: null } };
+  const context = { teamKey: job.teamKey, runtimeScopeKey: job.scopeKey, principal: { kind: 'member' as const, user: { key: job.userKey }, userTeam: { key: job.actorKey, teamKey: job.teamKey, userId: job.userKey, status: 'active' as const }, scopeMember: null } };
   try {
     const output = await observeToolExecution(
       'conversation.image.enqueue',
       context as never,
       () => (dependencies.images ?? createImageGenerationService()).generateManaged(job.input, context as never, job.requestKey),
-      { recorder: dependencies.recordEvent ?? (dependencies.images ? undefined : toolEventService.record), idempotencyKey: job.requestKey, input: job.input, ...dependencies.billing },
+      { recorder: dependencies.recordEvent ?? (dependencies.images ? undefined : toolEventService.record), appScopeKey: dependencies.appScopeKey, idempotencyKey: job.requestKey, input: job.input, ...dependencies.billing },
     );
     if (output.images.length !== 1) throw new Error('Conversation image generation must produce exactly one image.');
-    const completed = await repository.completeImageTurn({ organizationKey: job.organizationKey, scopeKey: job.scopeKey, userKey: job.userKey }, job.conversationKey, job.assistantMessageKey, output.images[0]!.key, (dependencies.now ?? (() => new Date().toISOString()))());
+    const completed = await repository.completeImageTurn({ teamKey: job.teamKey, scopeKey: job.scopeKey, userKey: job.userKey }, job.conversationKey, job.assistantMessageKey, output.images[0]!.key, (dependencies.now ?? (() => new Date().toISOString()))());
     if (!completed) throw new Error('Conversation image response changed before completion.');
     await (dependencies.publishChanged ?? publishUserEvent)(job.userKey, 'conversation.changed').catch(() => undefined);
     return { imageKey: output.images[0]!.key };
   } catch (error) {
     if (dependencies.terminalFailure ?? true) {
-      await repository.failTurn({ organizationKey: job.organizationKey, scopeKey: job.scopeKey, userKey: job.userKey }, job.conversationKey, job.assistantMessageKey, (dependencies.now ?? (() => new Date().toISOString()))());
+      await repository.failTurn({ teamKey: job.teamKey, scopeKey: job.scopeKey, userKey: job.userKey }, job.conversationKey, job.assistantMessageKey, (dependencies.now ?? (() => new Date().toISOString()))());
       await (dependencies.publishChanged ?? publishUserEvent)(job.userKey, 'conversation.changed').catch(() => undefined);
     }
     throw error;
@@ -90,7 +91,7 @@ export async function recoverConversationImageTurnQueue(dependencies: { reposito
   let enqueued = 0;
   for (const { message, actorKey } of pending) {
     if (queued.has(message.key)) continue;
-    await enqueueConversationImageTurn({ schemaVersion: 1, assistantMessageKey: message.key, conversationKey: message.conversationKey, organizationKey: message.organizationKey, scopeKey: message.scopeKey, userKey: message.userKey, actorKey, requestKey: message.key, input: JSON.parse(message.content) }, targetQueue);
+    await enqueueConversationImageTurn({ schemaVersion: 1, assistantMessageKey: message.key, conversationKey: message.conversationKey, teamKey: message.teamKey, scopeKey: message.scopeKey, userKey: message.userKey, actorKey, requestKey: message.key, input: JSON.parse(message.content) }, targetQueue);
     enqueued += 1;
   }
   return { enqueued };

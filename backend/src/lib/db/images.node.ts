@@ -18,6 +18,7 @@ export const imageSchema = z.object({
   placeName: z.string().trim().min(1).nullable().optional(), placeSummary: z.string().trim().min(1).nullable().optional(),
   latitude: z.number().finite().min(-90).max(90).nullable().optional(), longitude: z.number().finite().min(-180).max(180).nullable().optional(),
   locationSource: z.enum(['exif', 'supplied', 'place']).nullable().optional(), origin: imageOriginSchema, mutationPolicy: mutationPolicySchema.default('user'),
+  managedPurpose: z.literal('scope-directory').optional(), managedOwnerKey: z.string().cuid().optional(), contentChecksum: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   isFavorite: z.boolean().default(false), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type Image = z.infer<typeof imageSchema>;
@@ -62,7 +63,7 @@ export async function insertPreparedImageWithCaption(input: {
     throw new Error('Image caption relation does not match the prepared image.');
   }
   return (options.runTransaction ?? withTransaction)({
-    read: ['userOrganizations', 'scopes', 'scopeMembers', 'collectionImages', 'collections', 'collectionMembers'],
+    read: ['userTeams', 'scopes', 'scopeMembers', 'collectionImages', 'collections'],
     write: ['images', 'imageCaptions'],
   }, async (transaction) => {
     if (caption) {

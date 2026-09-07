@@ -4,7 +4,7 @@ import type { db } from '@/lib/db/client';
 
 export interface CreateScopeInput {
   key?: string;
-  organizationKey: string;
+  teamKey: string;
   slug: string;
   name: string;
   summary: string;
@@ -15,10 +15,10 @@ export interface CreateScopeInput {
 
 export interface ScopeRepository {
   createScope(input: CreateScopeInput): Promise<Scope>;
-  updateScope(scopeKey: string, input: Partial<Pick<CreateScopeInput, 'name' | 'summary' | 'description' | 'position' | 'level'>>): Promise<Scope>;
+  updateScope(scopeKey: string, input: Partial<Pick<CreateScopeInput, 'slug' | 'name' | 'summary' | 'description' | 'position' | 'level'>>): Promise<Scope>;
   getScopeByKey(scopeKey: string): Promise<Scope | null>;
-  listScopes(organizationKey: string): Promise<readonly Scope[]>;
-  removeScope(scopeKey: string): Promise<void>;
+  listScopes(teamKey: string): Promise<readonly Scope[]>;
+  removeScope(scopeKey: string, exclusiveOwnerUserKey?: string): Promise<void>;
 
   addScopeRelation(parentKey: string, childKey: string): Promise<ScopeScope>;
   removeScopeRelation(parentKey: string, childKey: string): Promise<void>;
@@ -26,8 +26,8 @@ export interface ScopeRepository {
 }
 
 export class DuplicateScopeSlugError extends AiError {
-  constructor(organizationKey: string, slug: string) {
-    super('duplicate_scope_slug', `Organization ${organizationKey} already has scope slug ${slug}`);
+  constructor(teamKey: string, slug: string) {
+    super('duplicate_scope_slug', `Team ${teamKey} already has scope slug ${slug}`);
   }
 }
 
@@ -37,11 +37,11 @@ export class ScopeNotFoundError extends AiError {
   }
 }
 
-export class ScopeOrganizationMismatchError extends AiError {
+export class ScopeTeamMismatchError extends AiError {
   constructor(parentKey: string, childKey: string) {
     super(
-      'scope_organization_mismatch',
-      `Scopes ${parentKey} and ${childKey} belong to different organizations`,
+      'scope_team_mismatch',
+      `Scopes ${parentKey} and ${childKey} belong to different teams`,
     );
   }
 }
@@ -67,6 +67,12 @@ export class ScopeCycleError extends AiError {
 export class ScopeRelationNotFoundError extends AiError {
   constructor(parentKey: string, childKey: string) {
     super('scope_relation_not_found', `Scope relation ${parentKey} -> ${childKey} was not found`);
+  }
+}
+
+export class ProductScopeMutationError extends AiError {
+  constructor(scopeKey: string) {
+    super('product_scope_protected', `Designated product scope ${scopeKey} cannot be deleted or reparented`);
   }
 }
 

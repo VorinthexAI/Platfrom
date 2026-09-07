@@ -2,8 +2,9 @@ import type { Context } from 'hono';
 import { Webhook } from 'svix';
 import { z } from 'zod';
 import { claimWebhookEvent, deleteProcessedWebhookEventByProviderAndEventId, updateProcessedWebhookEventByProviderAndEventId } from '@/lib/db/processed-webhook-events.node';
-import { deleteUser, getUserByEmailHash } from '@/lib/db/users.node';
+import { getUserByEmailHash } from '@/lib/db/users.node';
 import { hashUserEmail } from './users';
+import { ACCOUNT_DELETE_CONFIRMATION, accountDeletionService, type AccountDeletionService } from '@/lib/account-deletion/service';
 
 export const RESEND_WEBHOOK_V1_PATH = '/api/v1/webhooks/resend';
 export const RESEND_WEBHOOK_PUBLIC_PATHS = [RESEND_WEBHOOK_V1_PATH] as const;
@@ -40,13 +41,13 @@ export function recipientEmailFromResendEvent(payload: unknown) {
 
 export interface ResendWebhookDeps {
   getUserByEmailHash: typeof getUserByEmailHash;
-  deleteUser: typeof deleteUser;
+  deleteAccount: AccountDeletionService['delete'];
   hashUserEmail: typeof hashUserEmail;
 }
 
 const defaultDeps: ResendWebhookDeps = {
   getUserByEmailHash,
-  deleteUser,
+  deleteAccount: accountDeletionService.delete,
   hashUserEmail,
 };
 
@@ -68,7 +69,7 @@ export async function processResendEmailEvent(
   // A permanent bounce means the mailbox does not exist, so purge the account.
   // Transient and unclassified bounces leave the account intact.
   if (bounce?.type?.toLowerCase() === 'permanent') {
-    await deps.deleteUser(user.key);
+    await deps.deleteAccount({ confirmation: ACCOUNT_DELETE_CONFIRMATION }, user.key);
     return { processed: true, matched: true, deleted: true };
   }
 

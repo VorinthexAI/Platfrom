@@ -3,19 +3,20 @@ import { newId } from '@/lib/ids';
 import { createUserHiddenRepository } from './repository';
 
 describe('user hidden repository', () => {
-  test('lists only rows accessible through the active matching organization membership', async () => {
-    const actor = { userKey: newId(), organizationKey: newId(), membershipKey: newId() };
+  test('lists only rows accessible through the active matching team membership', async () => {
+    const actor = { userKey: newId(), teamKey: newId(), teamMembershipKey: newId() };
     const accessible = { key: newId(), userKey: actor.userKey, source: 'image' as const, sourceKey: newId(), createdAt: '2026-08-18T12:00:00.000Z' };
     let call: { query: string; bindVars?: Record<string, unknown> } | undefined;
     const database = { async query(query: string, bindVars?: Record<string, unknown>) { call = { query, bindVars }; return { async all() { return [{ ...accessible, _key: accessible.key }]; } }; } };
     await expect(createUserHiddenRepository(database).list(actor)).resolves.toEqual([accessible]);
     expect(call?.bindVars).toEqual(actor);
-    expect(call?.query).toContain('membership.userId == @userKey && membership.organizationId == @organizationKey && membership.status == "active"');
-    expect(call?.query).toContain('scope.organizationKey == @organizationKey');
+    expect(call?.query).toContain('membership.userId == @userKey && membership.teamKey == @teamKey && membership.status == "active"');
+    expect(call?.query).toContain('scope.teamKey == @teamKey');
     expect(call?.query).toContain('target != null && (!HAS(target, "_internalDeletion") || target._internalDeletion == null)');
     expect(call?.query).toContain('hidden.source == "collection" ? (privileged || collectionAccess)');
     expect(call?.query).toContain('hidden.source == "image" ? (target.mutationPolicy != "system-only" && (privileged || imageAccess))');
-    expect(call?.query).toContain('member.memberKey == @membershipKey');
+    expect(call?.query).toContain('target.ownerKey == @teamMembershipKey');
+    expect(call?.query).not.toContain('collectionMembers');
   });
 
   test('uses one user-scoped upsert identity and exact user-scoped reveal', async () => {
@@ -29,23 +30,23 @@ describe('user hidden repository', () => {
     expect(calls[1]?.query).toContain('hidden.userKey == @userKey && hidden.source == @source && hidden.sourceKey == @sourceKey');
   });
 
-  test('accepts shared Gallery content through existing member read access instead of ownership', async () => {
+  test('accepts Gallery content through ownership', async () => {
     let query = '';
     const database = { async query(value: string) { query = value; return { async all() { return [true]; } }; } };
     const repository = createUserHiddenRepository(database);
-    await expect(repository.canAccess({ userKey: newId(), organizationKey: newId(), membershipKey: newId() }, 'collection', newId())).resolves.toBe(true);
-    expect(query).toContain('member.memberKey == @membershipKey');
-    expect(query).not.toContain('member.role == "owner"');
+    await expect(repository.canAccess({ userKey: newId(), teamKey: newId(), teamMembershipKey: newId() }, 'collection', newId())).resolves.toBe(true);
+    expect(query).toContain('target.ownerKey == @teamMembershipKey');
+    expect(query).not.toContain('collectionMembers');
   });
 
-  test('uses the same organization, membership, scope, and media access filters for list and canAccess', async () => {
+  test('uses the same team, membership, scope, and media access filters for list and canAccess', async () => {
     const queries: string[] = [];
     const database = { async query(query: string) { queries.push(query); return { async all() { return []; } }; } };
     const repository = createUserHiddenRepository(database);
-    const actor = { userKey: newId(), organizationKey: newId(), membershipKey: newId() };
+    const actor = { userKey: newId(), teamKey: newId(), teamMembershipKey: newId() };
     await repository.list(actor);
     await repository.canAccess(actor, 'image', newId());
-    for (const fragment of ['membership.userId == @userKey', 'membership.organizationId == @organizationKey', 'membership.status == "active"', 'scope.organizationKey == @organizationKey', 'collectionAccess', 'imageAccess']) {
+    for (const fragment of ['membership.userId == @userKey', 'membership.teamKey == @teamKey', 'membership.status == "active"', 'scope.teamKey == @teamKey', 'collectionAccess', 'imageAccess']) {
       expect(queries[0]).toContain(fragment);
       expect(queries[1]).toContain(fragment);
     }

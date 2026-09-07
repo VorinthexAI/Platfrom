@@ -12,15 +12,15 @@ import { APP_SEARCH_OVERLAPPING_TOOL_NAMES } from '@/lib/ai/tools/search-routing
 import { SparkRefundError } from '@/lib/ai/events/runtime';
 import { SparkRepositoryError } from '@/lib/sparks/repository';
 
-const organizationKey = newId(), scopeKey = newId(), userKey = newId();
-const toolContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+const teamKey = newId(), scopeKey = newId(), userKey = newId();
+const toolContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
 const request = (overrides: Record<string, unknown> = {}) => ({ systemPrompt: coreAgent.systemPrompt, message: 'Help me', currentDate: '2026-09-01T00:00:00.000Z', requestKey: 'request-1', ...overrides });
 const definition = (name: string): CoreChatToolDefinition => ({ name, description: `Definition ${name}`, inputSchema: { type: 'object', additionalProperties: false } });
 const text = (value: string): ProviderStreamChunk => ({ type: 'text-delta', text: value });
 const call = (id: string, name: string, args: unknown): ProviderStreamChunk => ({ type: 'tool-call', toolCall: { id, name, arguments: args } });
 const done: ProviderStreamChunk = { type: 'done' };
 function queue(responses: ProviderStreamChunk[][], inputs: CoreChatInput[] = [], options: unknown[] = []) {
-  return async function* (_organization: string, input: CoreChatInput, streamOptions?: unknown) { inputs.push(input); options.push(streamOptions); const chunks = responses.shift(); if (!chunks) throw new Error('Unexpected stream'); for (const chunk of chunks) yield chunk; };
+  return async function* (_team: string, input: CoreChatInput, streamOptions?: unknown) { inputs.push(input); options.push(streamOptions); const chunks = responses.shift(); if (!chunks) throw new Error('Unexpected stream'); for (const chunk of chunks) yield chunk; };
 }
 
 describe('internal agents', () => {
@@ -40,7 +40,7 @@ describe('internal agents', () => {
     expect(internalAgentRequestSchema.parse(request())).toMatchObject({ generateName: false });
     expect(() => internalAgentRequestSchema.parse({ ...request(), extra: true })).toThrow('Unrecognized key');
     expect(coreAgentToolInputSchema.parse({ message: 'hello' })).toEqual({ message: 'hello', generateName: false });
-    for (const field of ['systemPrompt', 'currentDate', 'requestKey', 'organizationKey', 'scopeKey', 'userKey', 'membership']) expect(() => coreAgentToolInputSchema.parse({ message: 'hello', [field]: 'forged' })).toThrow('Unrecognized key');
+    for (const field of ['systemPrompt', 'currentDate', 'requestKey', 'teamKey', 'scopeKey', 'userKey', 'membership']) expect(() => coreAgentToolInputSchema.parse({ message: 'hello', [field]: 'forged' })).toThrow('Unrecognized key');
     expect(coreAgent.systemPrompt).toContain('Use web.search when the user asks for current, changing, live, or externally verifiable information');
     expect(coreAgent.systemPrompt).toContain('include relevant Markdown source links from its citations');
     expect(coreAgent.systemPrompt).toContain('re-run app.search before relying on the current state');
@@ -349,10 +349,11 @@ describe('internal agents', () => {
     const modelNames = MODEL_TOOL_NAMES;
     const allowed = resolveAgentAllowlist(coreAgent.allowlist, modelNames, 'agents.core', coreAgent.excludedTools);
     const allowedSet = new Set(allowed);
-    for (const mutation of ['folder.create', 'folder.delete', 'folder.rename', 'document.create', 'document.update', 'document.delete', 'document.share', 'document.summarize', 'document.rewrite', 'document.restore-version', 'collection.create', 'collection.update', 'collection.delete', 'collection.invite.create', 'image.favorite', 'image.delete', 'trip.create', 'book.create', 'email.draft.send', 'content.search-history.delete', 'conversation.message.delete', 'app.enhance', 'tag.create', 'tag.update', 'tag.delete', 'tag.assignment.set']) expect(allowedSet.has(mutation)).toBe(false);
+    for (const mutation of ['folder.create', 'folder.delete', 'folder.rename', 'document.create', 'document.update', 'document.delete', 'document.summarize', 'document.rewrite', 'document.restore-version', 'collection.create', 'collection.update', 'collection.delete', 'image.favorite', 'image.delete', 'trip.create', 'book.create', 'email.draft.send', 'content.search-history.delete', 'conversation.message.delete', 'app.enhance', 'tag.create', 'tag.update', 'tag.delete', 'tag.assignment.set']) expect(allowedSet.has(mutation)).toBe(false);
     for (const overlapping of APP_SEARCH_OVERLAPPING_TOOL_NAMES) expect(allowedSet.has(overlapping)).toBe(false);
-    for (const capability of ['app.search', 'web.search', 'image.search', 'agent.query', 'conversation.image.enqueue']) expect(allowedSet.has(capability)).toBe(true);
+    for (const capability of ['app.search', 'web.search', 'image.search', 'agent.guide', 'agent.query', 'conversation.image.enqueue']) expect(allowedSet.has(capability)).toBe(true);
     for (const capability of ['tag.list', 'tag.create', 'tag.update', 'tag.delete', 'tag.assignment.set']) expect(allowedSet.has(capability)).toBe(false);
+    for (const capability of ['scope.create', 'scope.select']) expect(allowedSet.has(capability)).toBe(false);
     for (const superseded of ['collection.list', 'document.read', 'document.find', 'document.list', 'folder.list', 'folder.find']) expect(allowedSet.has(superseded)).toBe(false);
     expect(coreAgent.excludedTools).toContain('collection.create');
     expect(coreAgent.excludedTools).toContain('document.update');
@@ -361,8 +362,8 @@ describe('internal agents', () => {
   test('rejects inactive or mismatched membership before provider execution', async () => {
     let streams = 0;
     const stream = async function* () { streams += 1; yield done; };
-    const inactive = { ...toolContext, principal: { ...toolContext.principal, userOrganization: { ...(toolContext.principal as any).userOrganization, status: 'inactive' } } } as ToolContext;
-    const mismatched = { ...toolContext, principal: { ...toolContext.principal, userOrganization: { ...(toolContext.principal as any).userOrganization, userId: newId() } } } as ToolContext;
+    const inactive = { ...toolContext, principal: { ...toolContext.principal, userTeam: { ...(toolContext.principal as any).userTeam, status: 'inactive' } } } as ToolContext;
+    const mismatched = { ...toolContext, principal: { ...toolContext.principal, userTeam: { ...(toolContext.principal as any).userTeam, userId: newId() } } } as ToolContext;
     await expect(executeCoreAgent(request(), { toolContext: inactive }, { stream, tools: { names: ['folder.list'], definitions: [definition('folder.list')] } })).rejects.toThrow('active user');
     await expect(executeCoreAgent(request(), { toolContext: mismatched }, { stream, tools: { names: ['folder.list'], definitions: [definition('folder.list')] } })).rejects.toThrow('does not match');
     expect(streams).toBe(0);
@@ -432,7 +433,7 @@ describe('internal agents', () => {
     expect(result.message).toBe('Found trips.');
     expect(metrics).toHaveLength(3);
     expect(metrics).toEqual(expect.arrayContaining([expect.objectContaining({ stage: 'initial', outcome: 'selected', confidence: 'high' }), expect.objectContaining({ stage: 'tool', outcome: 'succeeded' }), expect.objectContaining({ stage: 'continuation', outcome: 'answered' })]));
-    expect(JSON.stringify(metrics)).not.toMatch(/Find my trips|organizationKey|scopeKey|arguments|results|requestKey/);
+    expect(JSON.stringify(metrics)).not.toMatch(/Find my trips|teamKey|scopeKey|arguments|results|requestKey/);
   });
 
   test('reformulates an empty search once without broadening its collections or filters', async () => {

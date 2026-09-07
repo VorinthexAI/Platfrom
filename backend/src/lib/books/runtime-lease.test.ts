@@ -3,34 +3,34 @@ import { newId } from '@/lib/ids';
 import { createBookRuntime } from './runtime';
 import { BookRepositoryError } from './repository';
 
-const organizationKey = 'organization'; const scopeKey = newId(); const userKey = newId(); const bookKey = newId();
-const input = { organizationKey, scopeKey, topic: 'Thinking', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', chapterCount: 10 as const, language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear' as const, narrationPace: 1 };
+const teamKey = 'team'; const scopeKey = newId(); const userKey = newId(); const bookKey = newId();
+const input = { teamKey, scopeKey, topic: 'Thinking', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', chapterCount: 10 as const, language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear' as const, narrationPace: 1 };
 
 describe('book runtime generation lease fencing', () => {
   test('requires a generation lease token before runtime writes', async () => {
     const runtime = createBookRuntime({ repository: {} as never });
-    await expect(runtime.write(bookKey, input, { organizationKey, scopeKey, userKey } as never)).rejects.toThrow('lease token');
+    await expect(runtime.write(bookKey, input, { teamKey, scopeKey, userKey } as never)).rejects.toThrow('lease token');
   });
 
   test('stops before model or storage effects when cancellation is durable', async () => {
     let asked = false; let uploaded = false;
     const repository: any = { isCancellationRequested: async () => true, updateBook: async () => { throw new Error('unexpected write'); } };
     const runtime = createBookRuntime({ repository, ask: async () => { asked = true; return ''; }, storage: { upload: async () => { uploaded = true; return { storageKey: 'x' }; }, delete: async () => {}, copy: async () => ({ storageKey: 'x' }), download: async () => ({ bytes: new Uint8Array(), mimeType: 'text/plain' }) } });
-    await expect(runtime.write(bookKey, input, { organizationKey, scopeKey, userKey, generationLeaseToken: 'owner' })).rejects.toThrow('cancelled');
+    await expect(runtime.write(bookKey, input, { teamKey, scopeKey, userKey, generationLeaseToken: 'owner' })).rejects.toThrow('cancelled');
     expect(asked).toBe(false); expect(uploaded).toBe(false);
   });
 
   test('preserves repository fencing errors from the first stage write', async () => {
     const repository: any = { isCancellationRequested: async () => false, detail: async () => ({ book: {}, chapters: [] }), sources: async () => [], updateBook: async () => { throw new BookRepositoryError('conflict', 'Book generation lease was lost.'); } };
     const runtime = createBookRuntime({ repository });
-    await expect(runtime.write(bookKey, input, { organizationKey, scopeKey, userKey, generationLeaseToken: 'stale' })).rejects.toMatchObject({ reason: 'conflict' });
+    await expect(runtime.write(bookKey, input, { teamKey, scopeKey, userKey, generationLeaseToken: 'stale' })).rejects.toMatchObject({ reason: 'conflict' });
   });
 
   test('stops an active worker when its book is hard-deleted during provider work', async () => {
     let checks = 0; let uploaded = false;
     const repository: any = { detail: async () => ({ book: {}, chapters: [] }), sources: async () => [], updateBook: async () => ({}), isCancellationRequested: async () => { checks += 1; if (checks > 1) throw new BookRepositoryError('not_found'); return false; }, enqueueUnreferencedStorage: async () => {} };
     const runtime = createBookRuntime({ repository, ask: async () => JSON.stringify({ title: 'Book', description: 'Description', outcome: 'Outcome', summary: 'Summary' }), storage: { upload: async () => { uploaded = true; return { storageKey: 'x' }; }, delete: async () => {}, copy: async () => ({ storageKey: 'x' }), download: async () => ({ bytes: new Uint8Array(), mimeType: 'text/plain' }) }, publishChanged: async () => {} });
-    await expect(runtime.write(bookKey, input, { organizationKey, scopeKey, userKey, generationLeaseToken: 'owner' })).rejects.toMatchObject({ reason: 'not_found' });
+    await expect(runtime.write(bookKey, input, { teamKey, scopeKey, userKey, generationLeaseToken: 'owner' })).rejects.toMatchObject({ reason: 'not_found' });
     expect(uploaded).toBe(false);
   });
 });

@@ -11,8 +11,8 @@ const MAX_CATCHUP_PASSES = 5;
 // These are the existing semantic collections intentionally approved for external embedding.
 export const SEMANTIC_COLLECTION_ALLOWLIST = [
   'users', 'orchestrators', 'voices',
-  'organizations', 'scopes', 'channels', 'threads', 'messages', 'messageReactions', 'polls', 'pollOptions', 'folders',
-  'documents', 'documentVersions', 'places', 'trips', 'tickets',
+  'teams', 'scopes', 'channels', 'threads', 'messages', 'messageReactions', 'polls', 'pollOptions', 'folders',
+  'documents', 'documentVersions', 'places', 'trips', 'tickets', 'appNotifications',
 ] as const;
 
 type SemanticSpec = { name: string; embedKeys: string[]; includeMetadata: boolean };

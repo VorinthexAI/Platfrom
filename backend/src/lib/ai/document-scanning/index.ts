@@ -37,12 +37,12 @@ export function isReliableDocumentOcr(result: { text: string; metadata?: Record<
   return Boolean(result.text.trim()) && Number.isFinite(average) && average >= RELIABLE_AVERAGE_CONFIDENCE && Number.isFinite(minimum) && minimum >= RELIABLE_MINIMUM_CONFIDENCE;
 }
 
-export async function scanDocumentImages(input: DocumentScanInput, organizationKey: string, dependencies: DocumentScanDependencies = {}) {
+export async function scanDocumentImages(input: DocumentScanInput, teamKey: string, dependencies: DocumentScanDependencies = {}) {
   const storage = dependencies.storage ?? documentStorage;
   const fileAction = dependencies.fileAction ?? awsFileAction;
   const caption = dependencies.caption ?? imageCaptionTool.execute;
   const documentKey = documentKeyForRequest(input.scopeKey, input.folderKey, input.idempotencyKey);
-  const storageKeys = input.pages.map((_, index) => `content/${organizationKey}/${input.scopeKey}/${documentKey}/scan/page-${String(index + 1).padStart(2, '0')}.png`);
+  const storageKeys = input.pages.map((_, index) => `content/${teamKey}/${input.scopeKey}/${documentKey}/scan/page-${String(index + 1).padStart(2, '0')}.png`);
   const uploaded: string[] = [];
   try {
     const pages = await Promise.all(input.pages.map(async (page) => new Uint8Array(await sharp(page.bytes, { animated: false, failOn: 'error', limitInputPixels: 100_000_000 }).rotate().png().toBuffer())));
@@ -51,7 +51,7 @@ export async function scanDocumentImages(input: DocumentScanInput, organizationK
       await storage.upload({ key: storageKeys[index]!, bytes, mimeType: 'image/png' });
       uploaded.push(storageKeys[index]!);
     }));
-    const fileResults = await Promise.all(storageKeys.map((storageKey, index) => fileAction.execute({ operation: 'scan', storageKey, mimeType: 'image/png', bytes: pages[index]! }, organizationKey)));
+    const fileResults = await Promise.all(storageKeys.map((storageKey, index) => fileAction.execute({ operation: 'scan', storageKey, mimeType: 'image/png', bytes: pages[index]! }, teamKey)));
     const textractPages = fileResults.map((result) => result.text);
     const visualPages = textractPages.map(() => '');
     const unifiedPages = textractPages.map(normalizeDocumentTranscription);
@@ -59,7 +59,7 @@ export async function scanDocumentImages(input: DocumentScanInput, organizationK
       if (isReliableDocumentOcr(result)) return;
       const url = imageDataUrl(pages[index]!, 'image/png');
       try {
-        visualPages[index] = (await caption({ imageUrls: [url], purpose: 'document-transcription' }, { organizationKey })).results[0]?.caption.trim() ?? '';
+        visualPages[index] = (await caption({ imageUrls: [url], purpose: 'document-transcription' }, { teamKey })).results[0]?.caption.trim() ?? '';
       } catch {
         return;
       }
@@ -67,7 +67,7 @@ export async function scanDocumentImages(input: DocumentScanInput, organizationK
       const secondary = normalizeDocumentTranscription(visualPages[index]!);
       if (!secondary) return;
       try {
-        unifiedPages[index] = normalizeDocumentTranscription((await caption({ imageUrls: [url], purpose: 'document-reconciliation', referenceTexts: [{ primary, secondary }] }, { organizationKey })).results[0]?.caption ?? '') || primary || secondary;
+        unifiedPages[index] = normalizeDocumentTranscription((await caption({ imageUrls: [url], purpose: 'document-reconciliation', referenceTexts: [{ primary, secondary }] }, { teamKey })).results[0]?.caption ?? '') || primary || secondary;
       } catch {
         unifiedPages[index] = primary || secondary;
       }

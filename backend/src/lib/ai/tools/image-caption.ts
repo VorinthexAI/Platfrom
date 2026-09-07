@@ -9,9 +9,9 @@ import {
 import { MAX_IMAGE_CAPTION_URLS } from '@/lib/image-caption-constants';
 
 export interface ImageCaptionToolDependencies extends ExecuteActionOptions {
-  organizationKey?: string;
+  teamKey?: string;
   executeImageCaption?: (
-    organizationKey: string,
+    teamKey: string,
     input: ImageCaptionInput,
   ) => Promise<ProviderExecuteResponse<ImageCaptionOutput>>;
 }
@@ -44,12 +44,12 @@ export const imageCaptionTool = {
     dependencies: ImageCaptionToolDependencies = {},
   ): Promise<ImageCaptionOutput> {
     const input = imageCaptionInputSchema.parse(rawInput);
-    const organizationKey = dependencies.organizationKey ?? 'nexus';
+    const teamKey = dependencies.teamKey ?? 'nexus';
     const response = dependencies.executeImageCaption
-      ? await dependencies.executeImageCaption(organizationKey, input)
+      ? await dependencies.executeImageCaption(teamKey, input)
       : await executeAction<ImageCaptionInput & { operation: 'caption' }, ImageCaptionOutput>({
           mode: 'auto',
-          organizationKey,
+          teamKey,
           actionSlug: 'image',
         }, { operation: 'caption', ...input }, { providers: ['image.primary'], ...dependencies });
     const output = imageCaptionOutputSchema.parse(response.output);

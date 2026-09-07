@@ -2,23 +2,50 @@ import { create } from "zustand";
 
 import type { CapabilitySlug } from "@/data/registry";
 import { fetchAppsRegistry, type ServerApp } from "@/lib/apps-registry";
+import { fetchSparkCosts, type SparkCharge } from "@/lib/cost-client";
+import { fetchPublicBootstrap, type MobileProduct } from "@/lib/product-client";
 
 export type AppBootstrapStatus = "idle" | "bootstrapping" | "ready" | "failed";
+export type ProductBootstrapStatus = "idle" | "loading" | "ready" | "unavailable";
 
 type AppsState = {
   apps: ServerApp[];
+  products: MobileProduct[];
+  sparkCosts: SparkCharge[];
+  sparkCostsStatus: ProductBootstrapStatus;
+  sparkCostsError: string | null;
+  productsStatus: ProductBootstrapStatus;
+  productsError: string | null;
   bootstrapStatus: AppBootstrapStatus;
   bootstrapError: string | null;
   selectedApp: ServerApp | null;
   currentAppKey: string | null;
   workspaceSelection: CapabilitySlug | null;
   bootstrap: () => Promise<void>;
+  refreshProducts: () => Promise<void>;
   enterWorkspace: (slug: CapabilitySlug) => void;
   enterCore: () => void;
   leaveCore: () => void;
 };
 
 let bootstrapPromise: Promise<void> | null = null;
+let productsPromise: Promise<void> | null = null;
+
+function refreshProducts(set: (patch: Partial<AppsState>) => void) {
+  if (productsPromise) return productsPromise;
+  set({ productsStatus: "loading", productsError: null, sparkCostsStatus: "loading", sparkCostsError: null });
+  productsPromise = Promise.allSettled([fetchPublicBootstrap(), fetchSparkCosts()])
+    .then(([productsResult, costsResult]) => {
+      set(productsResult.status === "fulfilled"
+        ? { products: productsResult.value, productsStatus: "ready", productsError: null }
+        : { products: [], productsStatus: "unavailable", productsError: productsResult.reason instanceof Error ? productsResult.reason.message : "Product catalog is unavailable." });
+      set(costsResult.status === "fulfilled"
+        ? { sparkCosts: costsResult.value.charges, sparkCostsStatus: "ready", sparkCostsError: null }
+        : { sparkCosts: [], sparkCostsStatus: "unavailable", sparkCostsError: costsResult.reason instanceof Error ? costsResult.reason.message : "Spark costs are unavailable." });
+    })
+    .finally(() => { productsPromise = null; });
+  return productsPromise;
+}
 
 function appForSlug(apps: ServerApp[], slug: string): ServerApp {
   const app = apps.find((candidate) => candidate.slug === slug);
@@ -32,6 +59,12 @@ function selectedAppState(app: ServerApp) {
 
 export const useAppsStore = create<AppsState>((set, get) => ({
   apps: [],
+  products: [],
+  sparkCosts: [],
+  sparkCostsStatus: "idle",
+  sparkCostsError: null,
+  productsStatus: "idle",
+  productsError: null,
   bootstrapStatus: "idle",
   bootstrapError: null,
   selectedApp: null,
@@ -41,19 +74,21 @@ export const useAppsStore = create<AppsState>((set, get) => ({
     if (get().bootstrapStatus === "ready") return Promise.resolve();
     if (bootstrapPromise) return bootstrapPromise;
     set({ bootstrapStatus: "bootstrapping", bootstrapError: null });
+    void refreshProducts(set);
     bootstrapPromise = fetchAppsRegistry()
       .then((apps) => {
         const core = appForSlug(apps, "core");
         set({ apps, bootstrapStatus: "ready", bootstrapError: null, ...selectedAppState(core) });
       })
       .catch((error: unknown) => {
-        set({ bootstrapStatus: "failed", bootstrapError: error instanceof Error ? error.message : "App registry bootstrap failed." });
+        set({ apps: [], selectedApp: null, currentAppKey: null, bootstrapStatus: "failed", bootstrapError: error instanceof Error ? error.message : "App registry bootstrap failed." });
       })
       .finally(() => {
         bootstrapPromise = null;
       });
     return bootstrapPromise;
   },
+  refreshProducts: () => refreshProducts(set),
   enterWorkspace: (slug) => set((state) => ({
     ...selectedAppState(appForSlug(state.apps, slug)),
     workspaceSelection: slug,

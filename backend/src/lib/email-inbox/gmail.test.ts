@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { deterministicEmailClassification, emailLabelsVisibleInInbox, inboxCategoryFor } from './classification';
+import { classifyEmailWithFallback, deterministicEmailClassification, emailLabelsVisibleInInbox, inboxCategoryFor } from './classification';
 import { buildGmailAuthorizationUrl, createGmailClient, decodeGmailAttachmentData, decodeRfc2047Words, discoverGmailAttachmentParts, emailAddresses, emailAddressWithName, gmailAttachmentParts, GmailApiError, GmailPermanentAttachmentError, isRetryableGmailError, MAX_GMAIL_ATTACHMENT_BYTES, MAX_GMAIL_ATTACHMENTS, messageBodies, normalizeGmailAttachmentFilename } from './gmail';
 
 describe('Gmail connector protocol', () => {
@@ -97,16 +97,39 @@ describe('Gmail connector protocol', () => {
   });
 
   test('classifies provider labels and urgent subjects deterministically', () => {
-    expect(deterministicEmailClassification({ labels: ['CATEGORY_PROMOTIONS'], subject: 'Sale', from: 'shop@example.com', direction: 'inbound' })).toMatchObject({ priority: 'low', state: 'filtered', category: 'promotions' });
-    expect(deterministicEmailClassification({ labels: ['INBOX'], subject: 'Urgent: review today', from: 'lead@example.com', direction: 'inbound' })).toMatchObject({ priority: 'urgent', state: 'needs_action' });
-    expect(inboxCategoryFor(['TRASH'], { priority: 'urgent', state: 'needs_action' })).toBe('Filtered');
-    expect(inboxCategoryFor([], { priority: 'normal', state: 'filtered' })).toBe('Filtered');
-    expect(inboxCategoryFor([], { priority: 'urgent', state: 'needs_action' })).toBe('Urgent');
-    expect(inboxCategoryFor([], { priority: 'high', state: 'needs_action' })).toBe('Important');
+    expect(deterministicEmailClassification({ labels: ['CATEGORY_PROMOTIONS'], subject: 'Sale', body: 'Limited offer', from: 'shop@example.com', direction: 'inbound' })).toMatchObject({ priority: 'low', state: 'filtered', category: 'promotions', isPurchase: false });
+    expect(deterministicEmailClassification({ labels: ['INBOX'], subject: 'Urgent: review today', body: 'Please review', from: 'lead@example.com', direction: 'inbound' })).toMatchObject({ priority: 'urgent', state: 'needs_action', isPurchase: false });
+    expect(deterministicEmailClassification({ labels: ['INBOX', 'CATEGORY_UPDATES'], subject: 'Your order confirmation', body: 'Order #A-123 is confirmed.', from: 'shop@example.com', direction: 'inbound' })).toMatchObject({ category: 'updates', isPurchase: true });
+    expect(deterministicEmailClassification({ labels: ['INBOX', 'CATEGORY_PROMOTIONS'], subject: 'Your receipt', body: 'Payment received.', from: 'shop@example.com', direction: 'inbound' })).toMatchObject({ category: 'promotions', isPurchase: true });
+    for (const [subject, body] of [
+      ['Invoice INV-42', 'Total: 10 USD'],
+      ['Your receipt', 'Thanks for your payment'],
+      ['Order confirmation', 'Order #A-123'],
+      ['Purchase confirmation', 'Your purchase is complete'],
+      ['Account update', 'Your payment has been confirmed'],
+    ]) expect(deterministicEmailClassification({ labels: ['INBOX', 'CATEGORY_UPDATES'], subject, body, from: 'billing@example.com', direction: 'inbound' })).toMatchObject({ isPurchase: true });
+    expect(deterministicEmailClassification({ labels: ['TRASH', 'CATEGORY_UPDATES'], subject: 'Invoice 42', body: 'Amount due: 10 USD', from: 'shop@example.com', direction: 'inbound' })).toMatchObject({ state: 'filtered', isPurchase: false });
+    expect(inboxCategoryFor(['TRASH'], { priority: 'urgent', state: 'needs_action', isPurchase: true })).toBe('Filtered');
+    expect(inboxCategoryFor([], { priority: 'normal', state: 'filtered', isPurchase: true })).toBe('Filtered');
+    expect(inboxCategoryFor([], { priority: 'urgent', state: 'needs_action', isPurchase: true })).toBe('Purchases');
+    expect(inboxCategoryFor([], { priority: 'urgent', state: 'needs_action', isPurchase: false })).toBe('Urgent');
+    expect(inboxCategoryFor([], { priority: 'high', state: 'needs_action', isPurchase: false })).toBe('Important');
     expect(emailLabelsVisibleInInbox(['INBOX'])).toBe(true);
     expect(emailLabelsVisibleInInbox(['SPAM'])).toBe(true);
     expect(emailLabelsVisibleInInbox(['TRASH'])).toBe(true);
     expect(emailLabelsVisibleInInbox(['SENT'])).toBe(false);
+  });
+
+  test('requires an explicit purchase signal from AI classification and defaults it safely on failure', async () => {
+    let prompt = '';
+    const classified = await classifyEmailWithFallback('team', { labels: [], subject: 'Account notice', from: 'sender@example.com', body: 'Please review this notice.', direction: 'inbound' }, (async (_team: string, input: { systemPrompt: string }) => {
+      prompt = input.systemPrompt;
+      return { output: { text: '{"priority":"normal","state":"informational","category":"updates","isPurchase":true,"intent":"Payment confirmation"}' } };
+    }) as never);
+    expect(prompt).toContain('isPurchase');
+    expect(classified.isPurchase).toBe(true);
+    const fallback = await classifyEmailWithFallback('team', { labels: [], subject: 'Account notice', from: 'sender@example.com', body: 'Please review this notice.', direction: 'inbound' }, (async () => ({ output: { text: '{"priority":"normal","state":"informational","category":"updates","intent":"Missing signal"}' } })) as never);
+    expect(fallback.isPurchase).toBe(false);
   });
 
   test('requests an authoritative all-mail snapshot and incremental history without exposing tokens in URLs', async () => {

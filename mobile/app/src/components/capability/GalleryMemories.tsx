@@ -1,9 +1,9 @@
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
-import Animated, { Easing, interpolate, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from "react-native-reanimated";
+import Animated, { Easing, interpolate, useAnimatedStyle, useDerivedValue, useReducedMotion, withTiming } from "react-native-reanimated";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CheckIcon, CloseIcon, MoreHorizontalIcon } from "@vorinthex/shared/ui/icons-mobile";
@@ -11,7 +11,7 @@ import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { useToast } from "@vorinthex/shared/ui/toast";
 
-import { createGalleryCollectionMemory, deleteGalleryCollectionMemory, fetchGalleryCollectionMemory, getGalleryContext, isGalleryClientErrorCode, isGalleryCollectionOwned, isGalleryMemoryExhaustion, listGalleryCollectionMemories, type GalleryCollection, type GalleryMemory } from "@/lib/gallery-client";
+import { createGalleryCollectionMemory, deleteGalleryCollectionMemory, fetchGalleryCollectionMemory, getGalleryContext, isGalleryClientErrorCode, isGalleryMemoryExhaustion, listGalleryCollectionMemories, type GalleryCollection, type GalleryMemory } from "@/lib/gallery-client";
 import { galleryMemoryTypedText, galleryMemoryTypingDuration, splitGalleryMemoryText } from "@/lib/gallery-memory-typing";
 import { fitContainedMediaSize } from "@/lib/media-layout";
 import { subscribeAppEvent } from "@/lib/app-events";
@@ -30,8 +30,9 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const galleryContext = getGalleryContext();
+  const { teamKey, scopeKey } = galleryContext;
   const userKey = useAuthStore((state) => String(state.user?.key ?? ""));
-  const contentContext = useMemo(() => ({ ...galleryContext, userKey }), [galleryContext.organizationKey, galleryContext.scopeKey, userKey]);
+  const contentContext = { teamKey, scopeKey, userKey };
   const reducedMotion = useReducedMotion();
   const { width } = useWindowDimensions();
   const [gridWidth, setGridWidth] = useState(0);
@@ -52,14 +53,14 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [customCreateOpen, setCustomCreateOpen] = useState(false);
   const [resourceTagsOpen, setResourceTagsOpen] = useState(false);
-  const imageExpansion = useSharedValue(0);
+  const imageExpansion = useDerivedValue(() => reducedMotion ? Number(showImage) : withTiming(Number(showImage), { duration: 420, easing: Easing.inOut(Easing.cubic) }), [reducedMotion, showImage]);
   const listRequest = useRef(0);
   const detailRequest = useRef(0);
   const createRequest = useRef(0);
   const listLoaded = useRef(false);
   const listSheetOpen = useRef(open && !detail && !opening && activeSheet === "list");
   const longPressedMemory = useRef<string | undefined>(undefined);
-  const owner = isGalleryCollectionOwned(collection);
+  const owner = true;
   const cardWidth = Math.floor(((gridWidth || width - 40) - GAP * (COLUMNS - 1)) / COLUMNS);
   const expandedImageHeight = Math.max(120, detailViewportHeight - spacing.lg * 2);
   const expandedImageSize = detail ? fitContainedMediaSize(detail.image, { width: detailImageWidth, height: expandedImageHeight }) : { width: detailImageWidth, height: expandedImageHeight };
@@ -184,6 +185,13 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
     }
   }
 
+  const loadListOnOpen = useEffectEvent(() => void loadList(true));
+  const refreshFromEvent = useEffectEvent(() => {
+    if (!open || creating || deleting || opening) return;
+    if (detail) void refreshDetail(detail.key);
+    else void loadList();
+  });
+
   useEffect(() => {
     listSheetOpen.current = open && !detail && !opening && activeSheet === "list" && !createMenuOpen && !customCreateOpen && !resourceTagsOpen;
   }, [activeSheet, createMenuOpen, customCreateOpen, detail, open, opening, resourceTagsOpen]);
@@ -194,10 +202,8 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
       const timer = setTimeout(() => setCreating(false), 0);
       return () => clearTimeout(timer);
     }
-    const timer = setTimeout(() => void loadList(true), 0);
+    const timer = setTimeout(loadListOnOpen, 0);
     return () => clearTimeout(timer);
-    // Opening the feature is the list freshness boundary.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collection.key, open]);
 
   useEffect(() => {
@@ -221,20 +227,11 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
     return () => clearInterval(timer);
   }, [reducedMotion, typingRun, typingText]);
 
-  useEffect(() => {
-    // Reanimated shared values are synchronized through their mutable value API.
-    // eslint-disable-next-line react-hooks/immutability
-    imageExpansion.value = reducedMotion ? Number(showImage) : withTiming(Number(showImage), { duration: 420, easing: Easing.inOut(Easing.cubic) });
-  }, [imageExpansion, reducedMotion, showImage]);
-
   useEffect(() => subscribeAppEvent((event) => {
-    if (!open || creating || deleting || opening) return;
+    if (!open) return;
     if (event.type !== "event-stream.connected" && (event.type !== "gallery.changed" || !["memory.created", "memory.deleted", "image.changed", "collection.content.changed"].includes(event.slug))) return;
-    if (detail) void refreshDetail(detail.key);
-    else void loadList();
-    // Refreshing detail deliberately does not call restartTyping.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [collection.key, creating, deleting, detail?.key, open, opening]);
+    refreshFromEvent();
+  }), [open]);
 
   const close = () => { listSheetOpen.current = false; listRequest.current += 1; detailRequest.current += 1; createRequest.current += 1; setDetail(undefined); setCreating(false); setDeleting(false); setSelectedMemoryKeys([]); setActiveSheet("list"); setCreateMenuOpen(false); setCustomCreateOpen(false); setResourceTagsOpen(false); onClose(); };
   const listFooter = <>{owner ? <Button disabled={creating || listLoading || opening} loading={creating} onPress={() => { listSheetOpen.current = false; setCreateMenuOpen(true); }} size="md" variant="primary">Create</Button> : null}<Button disabled={creating} onPress={close} size="md" variant="secondary">Close</Button></>;

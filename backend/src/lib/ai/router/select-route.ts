@@ -38,7 +38,7 @@ export async function selectRoutes(input: RouteRequestInput, deps: RouterDepende
     const providerModelId = getExternalModelId(binding.model, binding.provider);
     const available = deps.adapters?.[binding.provider] || isProviderAvailable(binding.provider, deps.env ?? process.env);
     if (!providerModelId || !available) continue;
-    decisions.push({ organizationKey: request.organizationKey, actionSlug: action.id, modelSlug: binding.model, providerSlug: binding.provider, providerModelId });
+    decisions.push({ teamKey: request.teamKey, actionSlug: action.id, modelSlug: binding.model, providerSlug: binding.provider, providerModelId });
   }
   if (!decisions.length) throw new NoEligibleRouteError(request.actionSlug, 'no registered priority route has valid environment configuration');
   return decisions;

@@ -1,18 +1,29 @@
 import type { Context, MiddlewareHandler } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { z } from 'zod';
+import { referralCodeTransportSchema } from './auth-referral-code';
 import { timingSafeEqual } from '@/lib/crypto';
 import { isResendWebhookPath } from './resend';
 import { isGmailWebhookPath } from './email-webhook';
+import { isPolarWebhookPath } from './polar-webhook';
 import { strictObject } from './validation';
 import { refreshAccessToken, refreshTokenMatchesIdentity, verifyAccessToken, type AuthIdentity, type SessionTokens } from './auth';
 import { runWithEventApp, TOOL_APP_KEY_HEADER } from '@/lib/ai/events/runtime';
 import { APP_KEYS } from '@/lib/apps/registry';
-import { appKeySchema, appsRepository } from '@/lib/db/apps.node';
+import { appsService } from '@/lib/apps/service';
+import { EVENT_IDENTIFIER_HEADER, eventIdentifierSchema, runWithEventIdentifier } from '@/lib/ai/events/event-identifier';
 
 export const ACCESS_COOKIE = 'vorinthex_access';
 export const REFRESH_COOKIE = 'vorinthex_refresh';
 export const HEADER_SESSION_TRANSPORT = 'header';
+
+export const bindEventIdentifier: MiddlewareHandler = async (c, next) => {
+  const rawIdentifier = c.req.header(EVENT_IDENTIFIER_HEADER);
+  if (rawIdentifier === undefined) return next();
+  const parsed = eventIdentifierSchema.safeParse(rawIdentifier);
+  if (!parsed.success) return c.json({ error: 'invalid event identifier' }, 400);
+  return runWithEventIdentifier(parsed.data, next);
+};
 
 const PUBLIC_AUTH_PATHS = new Set([
   '/api/v1/auth/login',
@@ -32,18 +43,22 @@ const PUBLIC_AUTH_PATHS = new Set([
   '/api/v1/auth/totp/setup/complete',
   '/api/v1/auth/totp/verify',
 ]);
-const isProviderWebhookPath = (path: string) => isResendWebhookPath(path) || isGmailWebhookPath(path);
-export const isPublicBookSharePath = (path: string) => /^\/api\/v1\/public\/books\/shares\/(read|stream)\/?$/.test(path);
+const isProviderWebhookPath = (path: string) => isResendWebhookPath(path) || isGmailWebhookPath(path) || isPolarWebhookPath(path);
+export const isPublicProductPath = (path: string, method = 'GET') => method === 'GET' && ['/api/v1/products', '/api/v1/costs'].includes(path.replace(/\/+$/, ''));
+export const isOnboardingSandboxPath = (path: string, method = 'GET') => method === 'POST' && /^\/api\/v1\/onboarding\/sandbox\/(sessions|answers)\/?$/.test(path);
 
-export function createBindEventApp(appExists: (appKey: string) => Promise<boolean> = async (appKey) => Boolean(await appsRepository.getByKey(appKey))): MiddlewareHandler {
+export function createBindEventApp(resolveApp: (appKey: string) => Promise<{ aliasKey: string; scopeKey: string }> = (appKey) => appsService.resolveAlias(appKey)): MiddlewareHandler {
   return async (c, next) => {
     const exempt = /^\/api\/v1\/(health|apps)\/?$/.test(c.req.path);
     const rawAppKey = c.req.header(TOOL_APP_KEY_HEADER);
     const appKey = rawAppKey === undefined ? APP_KEYS.CORE : rawAppKey.trim();
-    const parsed = appKeySchema.safeParse(appKey);
-    if (!parsed.success) return c.json({ error: 'invalid app key' }, 400);
-    if (rawAppKey !== undefined && !exempt && !await appExists(parsed.data)) return c.json({ error: 'unknown app key' }, 400);
-    return runWithEventApp(parsed.data, next);
+    if (exempt) return next();
+    try {
+      const resolved = await resolveApp(appKey);
+      return runWithEventApp(resolved.aliasKey, resolved.scopeKey, next);
+    } catch {
+      return c.json({ error: 'unknown app key or product scope' }, 400);
+    }
   };
 }
 
@@ -159,10 +174,11 @@ function querySchemaForPath(path: string, method: string) {
     return strictObject({
       provider: z.enum(['google', 'apple']),
       redirect_uri: z.string().url(),
+      referral_code: referralCodeTransportSchema.optional(),
     });
   }
   if (/^\/auth\/mobile\/oauth\/(google|apple)$/.test(apiPath)) {
-    return strictObject({ redirect_uri: z.string().url() });
+    return strictObject({ redirect_uri: z.string().url(), referral_code: referralCodeTransportSchema.optional() });
   }
   if (/^\/auth\/mobile\/oauth\/(google|apple)\/callback$/.test(apiPath)) {
     return strictObject({
@@ -172,17 +188,16 @@ function querySchemaForPath(path: string, method: string) {
   if (apiPath === '/email/connectors/gmail/callback') {
     return strictObject({ code: z.string().min(1).optional(), state: z.string().min(1), error: z.string().optional(), scope: z.string().optional(), authuser: z.string().optional(), prompt: z.string().optional(), hd: z.string().optional(), error_description: z.string().optional(), error_subtype: z.string().optional(), session_state: z.string().optional() });
   }
-  if (/^\/founders\/organizations\/[^/]+\/communication\/channels\/[^/]+\/messages$/.test(apiPath)) {
+  if (/^\/founders\/teams\/[^/]+\/communication\/channels\/[^/]+\/messages$/.test(apiPath)) {
     return strictObject({ limit: z.string().regex(/^\d+$/).optional() });
   }
   if (method === 'DELETE' && apiPath === '/auth/me/hiddens') return strictObject({ source: z.enum(['collection', 'document', 'image', 'folder']), sourceKey: z.string().cuid() });
-  if (method === 'GET' && apiPath === '/gallery/highlights') return strictObject({ organizationKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
-  if (method === 'GET' && apiPath === '/gallery/memories') return strictObject({ organizationKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
-  if (method === 'GET' && apiPath === '/images/generation-history') return strictObject({ organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid(), limit: z.string().regex(/^\d+$/).optional() });
+  if (method === 'GET' && apiPath === '/gallery/highlights') return strictObject({ teamKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
+  if (method === 'GET' && apiPath === '/gallery/memories') return strictObject({ teamKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
+  if (method === 'GET' && apiPath === '/images/generation-history') return strictObject({ teamKey: z.string().trim().min(1), scopeKey: z.string().cuid(), limit: z.string().regex(/^\d+$/).optional() });
   if (method === 'POST' && apiPath === '/tags/assignments') return strictObject({ action: z.enum(['tag', 'untag']) });
   if (/^\/content\/tools\/[^/]+$/.test(apiPath)) return strictObject({});
-  if (method === 'GET' && apiPath === '/public/books/shares/stream') return strictObject({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/) });
-  if (apiPath === '/books' || apiPath === '/books/overview' || apiPath === '/books/topic-suggestions' || apiPath === '/books/goal-suggestions' || /^\/books\/[^/]+(?:\/detail|\/(?:retry|cancel|favorite)|\/share\/(?:detail|update))?$/.test(apiPath) || /^\/books\/[^/]+\/chapters\/[^/]+\/progress$/.test(apiPath)) return strictObject({});
+  if (apiPath === '/books' || apiPath === '/books/overview' || apiPath === '/books/topic-suggestions' || apiPath === '/books/goal-suggestions' || /^\/books\/[^/]+(?:\/detail|\/(?:retry|cancel|favorite))?$/.test(apiPath) || /^\/books\/[^/]+\/chapters\/[^/]+\/progress$/.test(apiPath)) return strictObject({});
   return strictObject({});
 }
 
@@ -195,6 +210,7 @@ export const validateQueryParams: MiddlewareHandler = async (c, next) => {
 export const requireEnvApiKey: MiddlewareHandler = async (c, next) => {
   // Provider webhooks authenticate via signature verification, not our API key.
   if (isProviderWebhookPath(c.req.path)) return next();
+  if (isPublicProductPath(c.req.path, c.req.method)) return next();
   // Health checks are hit by Docker/Caddy probes that can't carry the API key.
   if (c.req.path === '/api/v1/health') return next();
   // Guest bootstrap creates a revocable per-install session and is protected by
@@ -203,7 +219,6 @@ export const requireEnvApiKey: MiddlewareHandler = async (c, next) => {
   // OAuth providers redirect here directly and cannot attach application headers.
   if (/^\/api\/v1\/auth\/mobile\/oauth\/(google|apple)\/callback\/?$/.test(c.req.path)) return next();
   if (/^\/api\/v1\/email\/connectors\/gmail\/callback\/?$/.test(c.req.path)) return next();
-  if (isPublicBookSharePath(c.req.path)) return next();
   const expected = process.env.API_KEY;
   if (!expected) {
     if (process.env.NODE_ENV === 'production') {
@@ -263,12 +278,13 @@ export function createAutoRefreshAuthTokens(dependencies: AutoRefreshDependencie
     const accessToken = headerTransport ? bearerToken : cookieAccessToken;
     const refreshToken = headerTransport ? headerRefreshToken : cookieRefreshToken;
     const hadSessionCredentials = Boolean(accessToken || refreshToken);
+    c.set('authCredentialsPresented', hadSessionCredentials);
     c.set('authSessionTransport', headerTransport ? HEADER_SESSION_TRANSPORT : 'cookie');
     if (refreshToken) c.set('authRefreshToken', refreshToken);
 
     // Public authentication handlers issue their own session and only need the
     // selected response transport; stale credentials must not block sign-in.
-    if (isPublicFounderAuthPath(c.req.path) || isPublicBookSharePath(c.req.path) || c.req.path === '/api/v1/health' || isProviderWebhookPath(c.req.path)) {
+    if (isPublicFounderAuthPath(c.req.path) || isPublicProductPath(c.req.path, c.req.method) || c.req.path === '/api/v1/health' || isProviderWebhookPath(c.req.path)) {
       return next();
     }
 
@@ -314,18 +330,18 @@ export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
   if (isProviderWebhookPath(c.req.path)) return next();
 
   const authPath = isPublicFounderAuthPath(c.req.path);
-  const publicBookShare = isPublicBookSharePath(c.req.path);
-  if (!authPath && !publicBookShare && process.env.RATE_LIMIT_ENABLED !== 'true') return next();
+  const onboardingSandbox = isOnboardingSandboxPath(c.req.path, c.req.method);
+  if (!authPath && !onboardingSandbox && process.env.RATE_LIMIT_ENABLED !== 'true') return next();
   const handoffRead = /^\/api\/v1\/auth\/handoff\/(stream|status)\/?$/.test(c.req.path);
 
-  const limit = publicBookShare
-    ? 60
+  const limit = onboardingSandbox
+    ? 15
     : handoffRead
     ? 120
     : authPath
       ? 20
     : Number(process.env.RATE_LIMIT_MAX_REQUESTS ?? process.env.RATE_LIMIT_REQ_PER_MIN ?? 60);
-  const windowSeconds = authPath
+  const windowSeconds = authPath || onboardingSandbox
     ? 5 * 60
     : Number(process.env.RATE_LIMIT_WINDOW_SECONDS ?? 60);
   if (!Number.isInteger(limit) || limit < 1) {
@@ -336,7 +352,7 @@ export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
   }
 
   const ip = getClientIp(c);
-  const bucket = publicBookShare ? 'public-book-share' : handoffRead ? 'auth-handoff-read' : authPath ? 'auth' : 'global';
+  const bucket = onboardingSandbox ? 'onboarding-sandbox' : handoffRead ? 'auth-handoff-read' : authPath ? 'auth' : 'global';
   const key = `rate-limit:${bucket}:${ip}:${Math.floor(Date.now() / (windowSeconds * 1000))}`;
 
   try {
@@ -353,7 +369,7 @@ export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
     }
   } catch (error) {
     console.warn('rate limit check failed', error);
-    if (authPath || publicBookShare) return c.json({ error: 'service temporarily unavailable' }, 503);
+    if (authPath || onboardingSandbox) return c.json({ error: 'service temporarily unavailable' }, 503);
   }
 
   return next();

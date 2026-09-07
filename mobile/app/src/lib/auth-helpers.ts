@@ -11,7 +11,9 @@ export type AuthUser = {
 
 export type AuthContext = {
   user: AuthUser | null;
-  organization: Record<string, unknown> | null;
+  team: Record<string, unknown> | null;
+  teamMembership: Record<string, unknown> | null;
+  teamSelectionEnabled: boolean;
   scope: Record<string, unknown> | null;
 };
 
@@ -94,15 +96,17 @@ export function normalizeAuthContext(value: unknown): AuthContext {
   } : null;
   return {
     user,
-    organization: record(body?.organization) ?? record(body?.org),
-    scope: record(body?.scope) ?? record(body?.main_scope),
+    team: record(body?.team),
+    teamMembership: record(body?.teamMembership),
+    teamSelectionEnabled: body?.teamSelectionEnabled === true,
+    scope: record(body?.scope),
   };
 }
 
 export function hasCompleteAuthContext(context: AuthContext | null) {
   return Boolean(
     context?.user &&
-    stringValue(record(context.organization), "key") &&
+    stringValue(record(context.team), "key") &&
     stringValue(record(context.scope), "key"),
   );
 }

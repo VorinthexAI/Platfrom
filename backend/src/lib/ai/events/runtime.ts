@@ -1,8 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { TokenUsage } from '@/lib/ai/shared/usage';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
-import { APP_KEYS } from '@/lib/apps/registry';
-import { appKeySchema } from '@/lib/db/apps.node';
+import { APP_KEYS, parseAppAliasKey } from '@/lib/apps/registry';
+import { appsService } from '@/lib/apps/service';
 import { calculateActionCostMicroSparks, calculateFixedCost, lookupCostRule, lookupToolCostPolicy } from '@/lib/costs';
 import { sha256 } from '@/lib/crypto';
 import { newId } from '@/lib/ids';
@@ -18,6 +18,7 @@ export interface ToolBillingDependencies {
   complete?: typeof sparkService.completeExecution;
   renew?: typeof sparkService.renewExecution;
   getBalance?: typeof sparkService.getBalance;
+  getDebt?: typeof sparkService.getDebt;
   id?: () => string;
   hash?: typeof sha256;
 }
@@ -38,6 +39,7 @@ interface CostContext {
   complete: typeof sparkService.completeExecution;
   renew: typeof sparkService.renewExecution;
   getBalance: typeof sparkService.getBalance;
+  getDebt: typeof sparkService.getDebt;
   actionSequence: number;
   actionPreflighted: boolean;
   actionCharges: Array<{ amount: number; executionIdentity: string; result: ApplySparkResult; accepted: boolean }>;
@@ -47,7 +49,7 @@ interface CostContext {
   fixedChargeReceipt?: FixedChargeReceipt;
   fixedOutcomeAccepted: boolean;
 }
-interface EventRuntimeContext { appKey: string; recorder: ToolEventRecorder; usage?: MutableUsage; cost?: CostContext }
+interface EventRuntimeContext { appKey: string; appScopeKey?: string; recorder: ToolEventRecorder; usage?: MutableUsage; cost?: CostContext }
 
 const storage = new AsyncLocalStorage<EventRuntimeContext>();
 const USAGE_PRICED_ACTIONS = new Set(['text', 'image', 'speech']);
@@ -67,6 +69,7 @@ export class SparkExecutionPendingError extends Error {
 }
 
 export function currentEventAppKey(): string { return storage.getStore()?.appKey ?? APP_KEYS.CORE }
+export function currentEventAppScopeKey(): string | null { return storage.getStore()?.appScopeKey ?? null }
 export function currentBillingUserKey(): string | null { return storage.getStore()?.cost?.userKey ?? null }
 export interface FixedChargeReceipt { userKey: string; toolSlug: string; microSparks: number; transactionKey: string; executionIdentity: string; replayed: boolean }
 export function currentFixedChargeReceipt(toolSlug?: string): FixedChargeReceipt | null {
@@ -78,8 +81,8 @@ export function markFixedChargeOutcomeAccepted(toolSlug?: string) {
   if (!cost?.fixedChargeReceipt || toolSlug && cost.fixedChargeReceipt.toolSlug !== toolSlug) throw new Error('A matching fixed Spark charge is not active.');
   cost.fixedOutcomeAccepted = true;
 }
-export function runWithEventApp<T>(appKey: string, execute: () => T, recorder: ToolEventRecorder = toolEventService.record) {
-  return storage.run({ appKey: appKeySchema.parse(appKey), recorder }, execute);
+export function runWithEventApp<T>(appKey: string, appScopeKey: string, execute: () => T, recorder: ToolEventRecorder = toolEventService.record) {
+  return storage.run({ appKey: parseAppAliasKey(appKey), appScopeKey, recorder }, execute);
 }
 
 export function addToolTokenUsage(usage: TokenUsage) {
@@ -101,6 +104,7 @@ export async function recordActionCost(actionSlug: string, _input?: unknown) {
   if (priced && !active.actionPreflighted) {
     const balance = await active.getBalance(active.userKey);
     if (balance === null) throw new SparkRepositoryError('USER_NOT_FOUND', 'Spark account user was not found.');
+    if ((await active.getDebt(active.userKey) ?? 0) > 0) throw new SparkRepositoryError('OUTSTANDING_DEBT', 'Spark spending is blocked until refund debt is resolved.');
     if (balance <= 0) throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'Spark balance is insufficient for this execution.');
     active.actionPreflighted = true;
   }
@@ -184,6 +188,7 @@ export async function observeToolExecution<T>(
   execute: () => Promise<T>,
   options: {
     appKey?: string;
+    appScopeKey?: string;
     recorder?: ToolEventRecorder;
     idempotencyKey?: string;
     input?: unknown;
@@ -193,13 +198,15 @@ export async function observeToolExecution<T>(
     complete?: ToolBillingDependencies['complete'];
     renew?: ToolBillingDependencies['renew'];
     getBalance?: ToolBillingDependencies['getBalance'];
+    getDebt?: ToolBillingDependencies['getDebt'];
     id?: ToolBillingDependencies['id'];
     hash?: ToolBillingDependencies['hash'];
   } = {},
 ): Promise<T> {
   const parent = storage.getStore();
   const recorder = options.recorder ?? parent?.recorder;
-  const appKey = appKeySchema.parse(options.appKey ?? parent?.appKey ?? APP_KEYS.CORE);
+  const appKey = parseAppAliasKey(options.appKey ?? parent?.appKey ?? APP_KEYS.CORE);
+  const appScopeKey = options.appScopeKey ?? parent?.appScopeKey ?? (recorder ? (await appsService.resolveAlias(appKey)).scopeKey : undefined);
   const usage: MutableUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0, observed: false };
   const userKey = context.principal.kind === 'member' ? context.principal.user.key : null;
   const lookup = options.lookupCost ?? lookupCostRule;
@@ -218,11 +225,12 @@ export async function observeToolExecution<T>(
   const charge = options.charge ?? sparkService.chargeExecution;
   const complete = options.complete ?? sparkService.completeExecution;
   const getBalance = options.getBalance ?? (options.charge ? async () => Number.MAX_SAFE_INTEGER : sparkService.getBalance);
+  const getDebt = options.getDebt ?? (options.charge ? async () => 0 : sparkService.getDebt);
   let eventKey: string | undefined;
   if (userKey && recorder && (policy.mode === 'action' || policy.mode === 'outcome')) eventKey = (options.id ?? newId)();
   const cost: CostContext = {
     toolSlug: slug, actionUsage: [], userKey, idempotencyKey, billingMode: policy.mode, lookupCost: lookup,
-    recorderAvailable: Boolean(recorder), executionIdentity, hash, charge, complete, renew: options.renew ?? sparkService.renewExecution, getBalance,
+    recorderAvailable: Boolean(recorder), executionIdentity, hash, charge, complete, renew: options.renew ?? sparkService.renewExecution, getBalance, getDebt,
     actionSequence: 0, actionPreflighted: false, actionCharges: [], actionLeaseRenewal: Promise.resolve(true), eventKey, fixedOutcomeAccepted: false,
   };
   const ledgerKey = executionIdentity ? `execution:${executionIdentity}` : undefined;
@@ -257,7 +265,7 @@ export async function observeToolExecution<T>(
         leaseTimer.unref?.();
       }
     }
-    result = await storage.run({ appKey, recorder: recorder ?? toolEventService.record, usage, cost }, execute);
+    result = await storage.run({ appKey, appScopeKey, recorder: recorder ?? toolEventService.record, usage, cost }, execute);
     if (userKey && toolMicroSparks && precharge?.status === 'applied' && precharge.claimOwner) {
       if (leaseTimer) clearInterval(leaseTimer);
       if (!await leaseRenewal) throw new Error(`Spark execution lease renewal failed for ${slug}.`);
@@ -316,8 +324,9 @@ export async function observeToolExecution<T>(
     }
   } finally {
     if (recorder) {
+      if (!appScopeKey) throw new Error(`Product scope attribution was not resolved for ${slug}.`);
       const metrics = usage.observed ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens } : {};
-      await recorder({ ...actor(context), slug, appKey, status, microSparks: status === 'completed' ? chargedAmount : 0, sparkTransactionKey: status === 'completed' ? sparkTransactionKey : null, ...metrics }, eventKey ? { key: eventKey } : undefined)
+      await recorder({ ...actor(context), slug, appScopeKey, status, microSparks: status === 'completed' ? chargedAmount : 0, sparkTransactionKey: status === 'completed' ? sparkTransactionKey : null, ...metrics }, eventKey ? { key: eventKey } : undefined)
         .catch((error) => console.warn('tool event recording failed', error instanceof Error ? error.message : String(error)));
     }
   }

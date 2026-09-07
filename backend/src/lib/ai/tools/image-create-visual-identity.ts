@@ -2,8 +2,8 @@ import { executeAction, type ExecuteActionOptions } from '@/lib/ai/router';
 import { visualIdentityDescriptionInputSchema, visualIdentityDescriptionOutputSchema, type ProviderExecuteResponse, type VisualIdentityDescriptionInput, type VisualIdentityDescriptionOutput } from '@/lib/ai/providers';
 
 export interface ImageCreateVisualIdentityToolDependencies extends ExecuteActionOptions {
-  organizationKey?: string;
-  executeDescription?: (organizationKey: string, input: VisualIdentityDescriptionInput) => Promise<ProviderExecuteResponse<VisualIdentityDescriptionOutput>>;
+  teamKey?: string;
+  executeDescription?: (teamKey: string, input: VisualIdentityDescriptionInput) => Promise<ProviderExecuteResponse<VisualIdentityDescriptionOutput>>;
 }
 
 export const imageCreateVisualIdentityTool = {
@@ -19,11 +19,11 @@ export const imageCreateVisualIdentityTool = {
   },
   async execute(rawInput: unknown, dependencies: ImageCreateVisualIdentityToolDependencies = {}): Promise<VisualIdentityDescriptionOutput> {
     const input = visualIdentityDescriptionInputSchema.parse(rawInput);
-    const organizationKey = dependencies.organizationKey;
-    if (!organizationKey) throw new Error('image.create-visual-identity requires an authorized organization.');
+    const teamKey = dependencies.teamKey;
+    if (!teamKey) throw new Error('image.create-visual-identity requires an authorized team.');
     const response = dependencies.executeDescription
-      ? await dependencies.executeDescription(organizationKey, input)
-      : await executeAction<VisualIdentityDescriptionInput & { operation: 'describe-visual-identity' }, VisualIdentityDescriptionOutput>({ mode: 'auto', organizationKey, actionSlug: 'image' }, { operation: 'describe-visual-identity', ...input }, { providers: ['image.primary'], ...dependencies });
+      ? await dependencies.executeDescription(teamKey, input)
+      : await executeAction<VisualIdentityDescriptionInput & { operation: 'describe-visual-identity' }, VisualIdentityDescriptionOutput>({ mode: 'auto', teamKey, actionSlug: 'image' }, { operation: 'describe-visual-identity', ...input }, { providers: ['image.primary'], ...dependencies });
     return visualIdentityDescriptionOutputSchema.parse(response.output);
   },
 } as const;

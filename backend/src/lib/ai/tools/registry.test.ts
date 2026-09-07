@@ -7,6 +7,7 @@ import { defaultAssistantCapabilityRegistry } from '@/lib/ai/personal-assistant/
 
 const billingFixture = {
   recordEvent: async () => {},
+  appScopeKey: 'cmrnlzf640001qc7kazsr96k5',
   billing: {
     charge: async (_userKey: string, input: Record<string, unknown>) => ({ status: 'applied', transaction: { key: newId(), eventKey: input.eventKey } }) as never,
     refund: async () => ({ status: 'applied', transaction: { key: newId() } }) as never,
@@ -17,10 +18,10 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(190);
-    expect(MODEL_TOOL_NAMES).toHaveLength(187);
-    expect(TOOL_DEFINITIONS).toHaveLength(187);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 142);
+    expect(TOOL_NAMES).toHaveLength(187);
+    expect(MODEL_TOOL_NAMES).toHaveLength(183);
+    expect(TOOL_DEFINITIONS).toHaveLength(183);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 141);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...MODEL_TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -33,26 +34,30 @@ describe('unified tool registry', () => {
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'image.search')).toHaveLength(1);
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'web.search')).toHaveLength(1);
     expect(toolInputSchemas['web.search'].parse({ query: 'latest Gemini release' })).toEqual({ query: 'latest Gemini release' });
-    for (const field of ['organizationKey', 'scopeKey', 'userKey', 'model', 'provider', 'engine', 'apiKey']) expect(() => toolInputSchemas['web.search'].parse({ query: 'latest Gemini release', [field]: 'forged' })).toThrow('Unrecognized key');
+    for (const field of ['teamKey', 'scopeKey', 'userKey', 'model', 'provider', 'engine', 'apiKey']) expect(() => toolInputSchemas['web.search'].parse({ query: 'latest Gemini release', [field]: 'forged' })).toThrow('Unrecognized key');
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'app.search')).toHaveLength(1);
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['app.enhance', 'app.translate', 'app.speech']));
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['tag.list', 'tag.create', 'tag.update', 'tag.delete', 'tag.assignment.set']));
     expect(toolInputSchemas['tag.list'].parse({})).toEqual({ limit: 50 });
-    for (const name of ['tag.list', 'tag.create', 'tag.update', 'tag.delete', 'tag.assignment.set']) expect(() => toolInputSchemas[name].parse({ organizationKey: 'forged' })).toThrow('Unrecognized key');
-    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['billing.summary.read', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote']));
+    for (const name of ['tag.list', 'tag.create', 'tag.update', 'tag.delete', 'tag.assignment.set']) expect(() => toolInputSchemas[name].parse({ teamKey: 'forged' })).toThrow('Unrecognized key');
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['billing.summary.read', 'referral.summary.read', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote']));
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['pricing.read', 'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore']));
+    expect(toolInputSchemas['payment.checkout.create'].parse({ productId: 'topup.small' })).toEqual({ productId: 'topup.small' });
+    expect(() => toolInputSchemas['payment.checkout.create'].parse({ productId: 'topup.small', providerProductId: 'forged' })).toThrow('Unrecognized key');
+    expect(toolInputSchemas['referral.summary.read'].parse({})).toEqual({});
+    expect(() => toolInputSchemas['referral.summary.read'].parse({ userKey: newId() })).toThrow('Unrecognized key');
     expect(toolInputSchemas['feedback.create'].parse({ message: 'Add dark mode' })).toEqual({ message: 'Add dark mode' });
     expect(toolInputSchemas['feedback.list'].parse({})).toEqual({ limit: 20 });
     expect(toolInputSchemas['feedback.vote'].parse({ ticketKey: newId(), vote: null })).toMatchObject({ vote: null });
     for (const name of ['feedback.create', 'feedback.list', 'feedback.vote']) expect(() => toolInputSchemas[name].parse({ userKey: newId() })).toThrow('Unrecognized key');
-    for (const name of ['profile.update', 'ticket.create']) for (const field of ['organizationKey', 'scopeKey', 'userKey', 'membershipKey', 'idempotencyKey']) {
+    for (const name of ['profile.update', 'ticket.create']) for (const field of ['teamKey', 'scopeKey', 'userKey', 'teamMembershipKey', 'idempotencyKey']) {
       const input = name === 'profile.update' ? { name: 'Ada Lovelace', [field]: 'forged' } : { message: 'Please help', [field]: 'forged' };
       expect(() => toolInputSchemas[name].parse(input)).toThrow('Unrecognized key');
     }
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'app.speech')).toHaveLength(1);
-    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['book.extend', 'book.share.detail', 'book.share.update']));
-    expect(() => toolInputSchemas['book.share.update'].parse({ bookKey: newId(), active: true, scopeKey: newId() })).toThrow('Unrecognized key');
+    expect(TOOL_NAMES).toContain('book.extend');
     expect(toolInputSchemas['app.speech'].parse({ documentKey: newId() })).toMatchObject({ voice: 'clear', pace: 1, includeTitle: true, includeCode: false });
-    for (const field of ['organizationKey', 'scopeKey', 'userKey', 'model', 'provider', 'storageKey', 'text']) expect(() => toolInputSchemas['app.speech'].parse({ documentKey: newId(), [field]: 'forged' })).toThrow('Unrecognized key');
+    for (const field of ['teamKey', 'scopeKey', 'userKey', 'model', 'provider', 'storageKey', 'text']) expect(() => toolInputSchemas['app.speech'].parse({ documentKey: newId(), [field]: 'forged' })).toThrow('Unrecognized key');
     expect(TOOL_NAMES).not.toContain('document.enhance');
     expect(TOOL_NAMES).not.toContain('document.translate');
     expect(TOOL_NAMES).not.toContain('email.message.translate');
@@ -85,7 +90,7 @@ describe('unified tool registry', () => {
     expect(TOOL_NAMES.filter((name) => name.startsWith('image.upload.'))).toEqual([]);
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['highlight.create', 'highlight.list', 'highlight.read', 'highlight.delete']));
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['document.search-all', 'document.search', 'content.search', 'content.search-history.list', 'content.search-history.delete']));
-    for (const name of ['organization.document.search', 'scope.document.search', 'scope.content.search', 'scope.content.search-history', 'scope.content.search-history.delete']) {
+    for (const name of ['team.document.search', 'scope.document.search', 'scope.content.search', 'scope.content.search-history', 'scope.content.search-history.delete']) {
       expect(TOOL_NAMES).not.toContain(name);
       expect(toolInputSchemas).not.toHaveProperty(name);
     }
@@ -108,6 +113,11 @@ describe('unified tool registry', () => {
     expect(TOOL_NAMES).toContain('inbox.sync');
     expect(MODEL_TOOL_NAMES).not.toContain('inbox.sync');
     expect(TOOL_DEFINITIONS.some(({ name }) => name === 'inbox.sync')).toBe(false);
+    expect(TOOL_NAMES).toContain('account.delete');
+    expect(MODEL_TOOL_NAMES).not.toContain('account.delete');
+    expect(TOOL_DEFINITIONS.some(({ name }) => name === 'account.delete')).toBe(false);
+    expect(toolInputSchemas['account.delete'].parse({ confirmation: 'DELETE MY ACCOUNT' })).toEqual({ confirmation: 'DELETE MY ACCOUNT' });
+    expect(() => toolInputSchemas['account.delete'].parse({ confirmation: 'DELETE MY ACCOUNT', userKey: newId() })).toThrow('Unrecognized key');
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['inbox.search', 'email.tone.search']));
     expect(toolInputSchemas['inbox.search'].parse({ query: 'leadership' })).toEqual({ query: 'leadership', minimumScore: 0.55, limit: 50, recordHistory: true });
     expect(toolInputSchemas['email.tone.search'].parse({ query: 'measured', recordHistory: false })).toMatchObject({ query: 'measured', recordHistory: false });
@@ -130,8 +140,8 @@ describe('unified tool registry', () => {
     expect(toolInputSchemas['inbox.sync'].parse({ connectorKey: inboxSortConnectorKey })).toEqual({ connectorKey: inboxSortConnectorKey });
     expect(toolInputSchemas['inbox.subscribe'].parse({ connectorKey: inboxSortConnectorKey, notificationHistoryId: '123' })).toEqual({ connectorKey: inboxSortConnectorKey, notificationHistoryId: '123' });
     expect(toolInputSchemas['email.draft.create-if-needed'].parse({ connectorKey: inboxSortConnectorKey, threadKey: newId(), messageKey: newId() })).toHaveProperty('connectorKey', inboxSortConnectorKey);
-    for (const tool of ['inbox.sync', 'inbox.subscribe']) for (const field of ['organizationKey', 'scopeKey', 'userKey', 'accessToken']) expect(() => toolInputSchemas[tool].parse({ connectorKey: inboxSortConnectorKey, [field]: newId() })).toThrow('Unrecognized key');
-    for (const tool of ['inbox.refresh', 'inbox.sort']) for (const field of ['organizationKey', 'scopeKey', 'userKey']) expect(() => toolInputSchemas[tool].parse({ connectorKey: inboxSortConnectorKey, [field]: newId() })).toThrow('Unrecognized key');
+    for (const tool of ['inbox.sync', 'inbox.subscribe']) for (const field of ['teamKey', 'scopeKey', 'userKey', 'accessToken']) expect(() => toolInputSchemas[tool].parse({ connectorKey: inboxSortConnectorKey, [field]: newId() })).toThrow('Unrecognized key');
+    for (const tool of ['inbox.refresh', 'inbox.sort']) for (const field of ['teamKey', 'scopeKey', 'userKey']) expect(() => toolInputSchemas[tool].parse({ connectorKey: inboxSortConnectorKey, [field]: newId() })).toThrow('Unrecognized key');
     expect(() => toolInputSchemas['email.draft.assign'].parse({ draftKey: newId(), connectorKey: newId(), scopeKey: newId() })).toThrow('Unrecognized key');
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['content.hidden.list', 'book.topic.suggest', 'book.goal.suggest', 'book.create', 'book.favorite', 'email.thread.read', 'email.thread.read-state', 'email.trash.clear']));
     expect(toolInputSchemas['book.favorite'].parse({ bookKey: newId(), isFavorite: true })).toMatchObject({ isFavorite: true });
@@ -149,9 +159,18 @@ describe('unified tool registry', () => {
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'collection.hide', 'collection.reveal', 'image.hide', 'image.reveal']));
     expect(TOOL_NAMES).not.toContain('user.settings.read');
     expect(TOOL_NAMES).not.toContain('user.settings.update');
-    for (const name of ['access.agent.evaluate', 'agent.member.list', 'artifact.create', 'project.create', 'milestone.create', 'task.create', 'organization.member.list', 'scope.list']) expect(TOOL_NAMES).not.toContain(name);
+    for (const name of ['access.agent.evaluate', 'agent.member.list', 'artifact.create', 'project.create', 'milestone.create', 'task.create', 'team.member.list']) expect(TOOL_NAMES).not.toContain(name);
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['scope.list', 'scope.create', 'scope.select']));
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['team.list', 'team.select']));
+    expect(toolInputSchemas['team.list'].parse({})).toEqual({});
+    expect(() => toolInputSchemas['team.list'].parse({ userKey: newId() })).toThrow('Unrecognized key');
+    expect(() => toolInputSchemas['team.select'].parse({ targetTeamKey: newId(), teamMembershipKey: newId() })).toThrow('Unrecognized key');
+    expect(toolInputSchemas['scope.list'].parse({})).toEqual({});
+    expect(toolInputSchemas['scope.create'].parse({ name: 'Plans' })).toEqual({ name: 'Plans' });
+    expect(toolInputSchemas['scope.select'].parse({ targetScopeKey: newId() })).toHaveProperty('targetScopeKey');
+    for (const name of ['scope.list', 'scope.create', 'scope.select']) for (const field of ['teamKey', 'scopeKey', 'userKey', 'teamMembershipKey', 'idempotencyKey']) expect(() => toolInputSchemas[name].parse({ ...(name === 'scope.create' ? { name: 'Plans' } : name === 'scope.select' ? { targetScopeKey: newId() } : {}), [field]: newId() })).toThrow('Unrecognized key');
     expect(TOOL_NAMES.every((name) => !name.includes('_'))).toBe(true);
-    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['conversation.create', 'conversation.list', 'conversation.search', 'conversation.rename', 'conversation.favorite', 'conversation.delete', 'conversation.message.list', 'conversation.message.delete', 'conversation.message.send', 'conversation.image.enqueue', 'agent.query', 'agents.core']));
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['conversation.create', 'conversation.list', 'conversation.search', 'conversation.rename', 'conversation.favorite', 'conversation.delete', 'conversation.message.list', 'conversation.message.delete', 'conversation.message.send', 'conversation.image.enqueue', 'agent.guide', 'agent.query', 'agents.core']));
     expect(TOOL_NAMES.filter((name) => name === 'agents.core')).toHaveLength(1);
     expect(TOOL_NAMES).not.toContain('assistant.query');
     expect(toolInputSchemas['agent.query'].parse({ query: 'history' })).toEqual({ query: 'history', limit: 20 });
@@ -159,15 +178,23 @@ describe('unified tool registry', () => {
     expect(() => toolInputSchemas['agent.query'].parse({ query: 'history', limit: 21 })).toThrow();
     expect(() => toolInputSchemas['agent.query'].parse({ query: 'history', conversationKey: newId() })).toThrow('Unrecognized key');
     const agentQueryDefinition = TOOL_DEFINITIONS.find(({ name }) => name === 'agent.query')!;
-    expect(agentQueryDefinition.description).toContain('completed private messages across the authenticated user\'s conversations in the current organization and scope');
+    expect(agentQueryDefinition.description).toContain('completed private messages across the authenticated user\'s conversations in the current team and scope');
     expect(agentQueryDefinition.description).toContain('only when context beyond the supplied recent messages is needed');
     expect(agentQueryDefinition.inputSchema).toMatchObject({ type: 'object', additionalProperties: false, required: ['query'], properties: { limit: { default: 20, maximum: 20 } } });
+    expect(toolInputSchemas['agent.guide'].parse({ mode: 'recommend' })).toEqual({ mode: 'recommend' });
+    expect(toolInputSchemas['agent.guide'].parse({ mode: 'explain' })).toEqual({ mode: 'explain' });
+    expect(() => toolInputSchemas['agent.guide'].parse({ mode: 'onboard' })).toThrow();
+    expect(() => toolInputSchemas['agent.guide'].parse({ mode: 'recommend', scopeKey: newId() })).toThrow('Unrecognized key');
+    const agentGuideDefinition = TOOL_DEFINITIONS.find(({ name }) => name === 'agent.guide')!;
+    expect(agentGuideDefinition.description).toContain('Use mode recommend');
+    expect(agentGuideDefinition.description).toContain('Use mode explain');
+    expect(agentGuideDefinition.inputSchema).toMatchObject({ type: 'object', additionalProperties: false, required: ['mode'], properties: { mode: { enum: ['recommend', 'explain'] } } });
     expect(() => toolInputSchemas['conversation.message.send'].parse({ conversationKey: newId(), message: 'hello', requestKey: 'forged' })).toThrow('Unrecognized key');
     expect(toolInputSchemas['conversation.image.enqueue'].parse({ prompt: 'hello' })).toEqual({ prompt: 'hello', referenceImageKeys: [], size: '1024x1024', quality: 'medium', mode: 'default' });
     expect(() => toolInputSchemas['conversation.image.enqueue'].parse({ conversationKey: newId(), prompt: 'hello' })).toThrow('Unrecognized key');
     expect(() => toolInputSchemas['conversation.message.delete'].parse({ conversationKey: newId(), messageKey: newId(), userKey: newId() })).toThrow('Unrecognized key');
     expect(toolInputSchemas['agents.core'].parse({ message: 'hello' })).toEqual({ message: 'hello', generateName: false });
-    for (const field of ['systemPrompt', 'currentDate', 'requestKey', 'organizationKey', 'scopeKey', 'userKey', 'membership']) expect(() => toolInputSchemas['agents.core'].parse({ message: 'hello', [field]: 'forged' })).toThrow('Unrecognized key');
+    for (const field of ['systemPrompt', 'currentDate', 'requestKey', 'teamKey', 'scopeKey', 'userKey', 'membership']) expect(() => toolInputSchemas['agents.core'].parse({ message: 'hello', [field]: 'forged' })).toThrow('Unrecognized key');
     expect(toolInputSchemas['conversation.list'].parse({})).toMatchObject({ favoriteOnly: false, limit: 25 });
     expect(toolInputSchemas['conversation.search'].parse({ query: 'saved', favoriteOnly: true })).toMatchObject({ favoriteOnly: true, recordHistory: true });
     expect(() => toolInputSchemas['app.search'].parse({ query: 'chat', collectionSlugs: ['conversations'] })).toThrow();
@@ -180,13 +207,17 @@ describe('unified tool registry', () => {
 
   test('classifies model-visible execution effects from the canonical registry', () => {
     expect(isToolReadOnly('app.search', { query: 'roadmap', collectionSlugs: ['documents'], limit: 1 })).toBe(true);
+    expect(isToolReadOnly('agent.guide', { mode: 'recommend' })).toBe(true);
     expect(isToolReadOnly('web.search', { query: 'current guidance' })).toBe(true);
     expect(isToolReadOnly('feedback.list', {})).toBe(true);
     expect(isToolReadOnly('tag.list', {})).toBe(true);
+    expect(isToolReadOnly('scope.list', {})).toBe(true);
     expect(isToolReadOnly('conversation.list', {})).toBe(true);
     expect(isToolReadOnly('app.enhance', { text: 'Draft' })).toBe(true);
 
     expect(isToolReadOnly('profile.update', { name: 'Ada' })).toBe(false);
+    expect(isToolReadOnly('scope.create', { name: 'Plans' })).toBe(false);
+    expect(isToolReadOnly('scope.select', { targetScopeKey: newId() })).toBe(false);
     expect(isToolReadOnly('feedback.vote', { ticketKey: newId(), vote: 'up' })).toBe(false);
     expect(isToolReadOnly('tag.create', { name: 'Plan' })).toBe(false);
     expect(isToolReadOnly('tag.assignment.set', { changes: [{ tagKey: newId(), target: { type: 'document', key: newId() }, assigned: true }] })).toBe(false);
@@ -194,16 +225,41 @@ describe('unified tool registry', () => {
     expect(isToolReadOnly('app.enhance', { documentKey: newId(), save: true })).toBe(false);
   });
 
+  test('dispatches scope tools to the canonical service with trusted context', async () => {
+    const teamKey = newId(), scopeKey = newId(), userKey = newId();
+    const contentContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const calls: unknown[] = [];
+    const scopeService = {
+      list: async (...args: unknown[]) => { calls.push(['list', ...args]); return { scopes: [] }; },
+      create: async (...args: unknown[]) => { calls.push(['create', ...args]); return { key: scopeKey }; },
+      select: async (...args: unknown[]) => { calls.push(['select', ...args]); return { key: scopeKey }; },
+    } as any;
+    await runTool('scope.list', '', {}, { contentContext, scopeService });
+    await runTool('scope.create', '', { name: 'Plans' }, { contentContext, scopeService, requestKey: 'tool-request' });
+    await runTool('scope.select', '', { targetScopeKey: scopeKey }, { contentContext, scopeService });
+    expect(calls).toEqual([
+      ['list', {}, contentContext],
+      ['create', { name: 'Plans' }, contentContext, 'tool-request'],
+      ['select', { targetScopeKey: scopeKey }, contentContext],
+    ]);
+    for (const surface of ['knowledge-workspace', 'media-workspace', 'book-workspace', 'travel-workspace', 'signal-workspace'] as const) {
+      const names = defaultAssistantCapabilityRegistry.resolve(surface).map(({ definition }) => definition.name);
+      expect(names).toContain('scope.list');
+      expect(names).not.toContain('scope.create');
+      expect(names).not.toContain('scope.select');
+    }
+  });
+
   test('returns raw app.search results to unified observers while keeping model projection in the agent', async () => {
-    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
-    const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const teamKey = newId(), scopeKey = newId(), userKey = newId();
+    const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const raw = { query: 'roadmap', groups: [{ collectionSlug: 'documents', results: [{ key: newId(), name: 'Roadmap', scopeKey, isFavorite: false, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }] }] };
     await expect(runTool('app.search', 'agents.core', { query: 'roadmap', collectionSlugs: ['documents'], limit: 1 }, { contentContext: context, appSearchService: { search: async () => raw } as never })).resolves.toEqual(raw);
   });
 
   test('executes profile and ticket tools through canonical services with trusted identity and context', async () => {
-    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
-    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const teamKey = newId(), scopeKey = newId(), userKey = newId();
+    const contentContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const calls: unknown[] = [];
     const accountProfileService = { updateName: async (...args: unknown[]) => { calls.push(['profile', ...args]); return { profile: { key: userKey, name: 'Ada Lovelace', profileStorageKey: null, updatedAt: '2026-09-03T10:00:00.000Z' } }; } } as any;
     const ticketService = { submit: async (...args: unknown[]) => { calls.push(['ticket', ...args]); return { key: newId(), message: 'Please help', createdAt: '2026-09-03T10:00:00.000Z' }; } } as any;
@@ -221,8 +277,8 @@ describe('unified tool registry', () => {
   });
 
   test('injects trusted request context and keeps agent recall scope-wide', async () => {
-    const organizationKey = newId(), scopeKey = newId(), userKey = newId(), conversationKey = newId(), referenceImageKey = newId(); const calls: unknown[] = [];
-    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const teamKey = newId(), scopeKey = newId(), userKey = newId(), conversationKey = newId(), referenceImageKey = newId(); const calls: unknown[] = [];
+    const contentContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const conversations = { turn: async (input: unknown, _context: ToolContext, emit: (event: unknown) => void) => { calls.push(input); emit({ type: 'done' }); }, enqueueImageTurn: async (input: unknown) => { calls.push(input); return {}; }, deleteMessage: async (input: unknown) => { calls.push(input); return { deletedKeys: [] }; }, query: async (_context: ToolContext, input: unknown) => { calls.push(input); return { messages: [] }; } } as any;
     await runTool('conversation.message.send', '', { conversationKey, message: 'hello' }, { contentContext, conversationService: conversations, requestKey: 'trusted-request' });
     await runTool('conversation.image.enqueue', '', { prompt: 'draw this', referenceImageKeys: [newId()] }, { contentContext, conversationService: conversations, currentConversationKey: conversationKey, currentReferenceImageKeys: [referenceImageKey], requestKey: 'trusted-image-request' });
@@ -232,30 +288,30 @@ describe('unified tool registry', () => {
   });
 
   test('dispatches web search through the canonical action with trusted routing context', async () => {
-    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
-    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const teamKey = newId(), scopeKey = newId(), userKey = newId();
+    const contentContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const calls: unknown[] = [];
     const result = await runTool('web.search', '', { query: 'current information' }, {
       ...billingFixture,
       requestKey: 'web-request',
       contentContext,
-      executeSearch: async (trustedOrganization, input, options) => {
-        calls.push({ trustedOrganization, input, providers: options.providers });
+      executeSearch: async (trustedTeam, input, options) => {
+        calls.push({ trustedTeam, input, providers: options.providers });
         return { output: { text: 'Grounded answer', citations: [{ title: 'Source', url: 'https://example.com/source' }], sources: ['https://example.com/source'] }, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' };
       },
     });
-    expect(calls).toEqual([{ trustedOrganization: organizationKey, input: { prompt: 'current information' }, providers: ['web.primary'] }]);
+    expect(calls).toEqual([{ trustedTeam: teamKey, input: { prompt: 'current information' }, providers: ['web.primary'] }]);
     expect(result).toMatchObject({ text: 'Grounded answer', citations: [{ url: 'https://example.com/source' }] });
   });
 
   test('dispatches the unique agents.core tool through the canonical lazy agent adapter', async () => {
-    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
-    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const teamKey = newId(), scopeKey = newId(), userKey = newId();
+    const contentContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const inputs: unknown[] = [];
     const result = await runTool('agents.core', '', { message: 'hello' }, {
       contentContext, requestKey: 'trusted-agent-request',
       conversationService: {} as any,
-      agentDependencies: { stream: async function* (_organization, input) { inputs.push(input); yield { type: 'text-delta', text: '{"tools":[],"message":"Hello."}' }; yield { type: 'done' }; } },
+      agentDependencies: { stream: async function* (_team, input) { inputs.push(input); yield { type: 'text-delta', text: '{"tools":[],"message":"Hello."}' }; yield { type: 'done' }; } },
     });
     expect(result).toEqual({ message: 'Hello.', tools: [] });
     expect(inputs).toHaveLength(1);
@@ -263,7 +319,7 @@ describe('unified tool registry', () => {
   });
 
   test('executes inbox ingestion tools only through trusted system context', async () => {
-    const organizationKey = newId(), scopeKey = newId(), connectorKey = newId(), userKey = newId();
+    const teamKey = newId(), scopeKey = newId(), connectorKey = newId(), userKey = newId();
     const calls: unknown[][] = [];
     const emailService = {
       initialSync: async (...args: unknown[]) => { calls.push(['sync', ...args]); return { synced: 4, initialSyncCompleted: true }; },
@@ -271,8 +327,8 @@ describe('unified tool registry', () => {
       continueSubscription: async (...args: unknown[]) => { calls.push(['continue', ...args]); return { synced: 1 }; },
       createDraftIfNeeded: async (...args: unknown[]) => { calls.push(['draft-if-needed', ...args]); return { decision: 'skip' }; },
     } as any;
-    const systemContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'system' } } as ToolContext;
-    const memberContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const systemContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'system' } } as ToolContext;
+    const memberContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
 
     await runTrustedTool('inbox.sync', { connectorKey }, { context: systemContext, email: emailService });
     await runTrustedTool('inbox.subscribe', { connectorKey, notificationHistoryId: '456' }, { context: systemContext, email: emailService });
@@ -282,26 +338,39 @@ describe('unified tool registry', () => {
     await expect(runTrustedTool('inbox.sync', { connectorKey }, { context: memberContext, email: emailService })).rejects.toThrow('system-only');
     await expect(runTool('inbox.sync', '', { connectorKey }, { contentContext: systemContext, emailService })).rejects.toThrow();
     expect(calls).toEqual([
-      ['sync', { userKey: 'system', organizationKey, scopeKey }, connectorKey],
-      ['subscribe', { userKey: 'system', organizationKey, scopeKey }, connectorKey, '456'],
-      ['continue', { userKey: 'system', organizationKey, scopeKey }, connectorKey],
-      ['draft-if-needed', { userKey: 'system', organizationKey, scopeKey }, draftInput],
+      ['sync', { userKey: 'system', teamKey, scopeKey }, connectorKey],
+      ['subscribe', { userKey: 'system', teamKey, scopeKey }, connectorKey, '456'],
+      ['continue', { userKey: 'system', teamKey, scopeKey }, connectorKey],
+      ['draft-if-needed', { userKey: 'system', teamKey, scopeKey }, draftInput],
     ]);
+  });
+
+  test('executes account deletion only through trusted authenticated context', async () => {
+    const teamKey = newId(), scopeKey = newId(), userKey = newId();
+    const memberContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const systemContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'system' } } as ToolContext;
+    const calls: unknown[] = [];
+    const accountDeletion = { delete: async (...args: unknown[]) => { calls.push(args); return { deleted: true as const }; } } as any;
+    await expect(runTrustedTool('account.delete', { confirmation: 'DELETE MY ACCOUNT' }, { context: memberContext, accountDeletion })).resolves.toEqual({ deleted: true });
+    await expect(runTrustedTool('account.delete', { confirmation: 'DELETE MY ACCOUNT', userKey }, { context: memberContext, accountDeletion })).rejects.toThrow('Unrecognized key');
+    await expect(runTrustedTool('account.delete', { confirmation: 'DELETE MY ACCOUNT' }, { context: systemContext, accountDeletion })).rejects.toThrow('Authenticated user context');
+    await expect(runTool('account.delete', '', { confirmation: 'DELETE MY ACCOUNT' }, { contentContext: memberContext })).rejects.toThrow();
+    expect(calls).toEqual([[{ confirmation: 'DELETE MY ACCOUNT' }, userKey]]);
   });
 
   test('does not expose any removed outside-domain tool', () => {
     const removed = [
       'chat', 'transcribe', 'email.read',
-      'access.agent.evaluate', 'access.agent.explain', 'access.organization.evaluate', 'access.organization.explain', 'access.scope.evaluate', 'access.scope.explain',
+      'access.agent.evaluate', 'access.agent.explain', 'access.team.evaluate', 'access.team.explain', 'access.scope.evaluate', 'access.scope.explain',
       'agent.member.grant', 'agent.member.list', 'agent.member.read', 'agent.member.revoke', 'agent.member.sync',
       'artifact.create',
       'project.archive', 'project.create', 'project.delete', 'project.find', 'project.list', 'project.move', 'project.rename', 'project.restore', 'project.update',
       'milestone.archive', 'milestone.change-status', 'milestone.complete', 'milestone.create', 'milestone.delete', 'milestone.find', 'milestone.list', 'milestone.move', 'milestone.rename', 'milestone.reopen', 'milestone.restore', 'milestone.schedule', 'milestone.update',
       'task.archive', 'task.change-status', 'task.complete', 'task.create', 'task.delete', 'task.find', 'task.list', 'task.move', 'task.reopen', 'task.reorder', 'task.rename', 'task.restore', 'task.rewrite', 'task.summarize', 'task.translate', 'task.update',
-      'organization.archive', 'organization.member.activate', 'organization.member.add', 'organization.member.list', 'organization.member.read', 'organization.member.remove', 'organization.member.role.update', 'organization.member.suspend', 'organization.project.search', 'organization.provider.disable', 'organization.provider.enable', 'organization.provider.list', 'organization.provider.read', 'organization.provider.test', 'organization.read', 'organization.restore', 'organization.update',
-      'scope.agent.access-threshold.update', 'scope.agent.add', 'scope.agent.archive', 'scope.agent.list', 'scope.agent.move', 'scope.agent.read', 'scope.agent.remove', 'scope.agent.restore', 'scope.archive', 'scope.create', 'scope.list', 'scope.member.activate', 'scope.member.add', 'scope.member.list', 'scope.member.read', 'scope.member.remove', 'scope.member.role.update', 'scope.member.suspend', 'scope.move', 'scope.project.search', 'scope.read', 'scope.remove', 'scope.restore', 'scope.update',
+      'team.archive', 'team.member.activate', 'team.member.add', 'team.member.list', 'team.member.read', 'team.member.remove', 'team.member.role.update', 'team.member.suspend', 'team.project.search', 'team.provider.disable', 'team.provider.enable', 'team.provider.list', 'team.provider.read', 'team.provider.test', 'team.read', 'team.restore', 'team.update',
+      'scope.agent.access-threshold.update', 'scope.agent.add', 'scope.agent.archive', 'scope.agent.list', 'scope.agent.move', 'scope.agent.read', 'scope.agent.remove', 'scope.agent.restore', 'scope.archive', 'scope.member.activate', 'scope.member.add', 'scope.member.list', 'scope.member.read', 'scope.member.remove', 'scope.member.role.update', 'scope.member.suspend', 'scope.move', 'scope.project.search', 'scope.read', 'scope.remove', 'scope.restore', 'scope.update',
     ];
-    expect(removed).toHaveLength(94);
+    expect(removed).toHaveLength(92);
     for (const name of removed) {
       expect(TOOL_NAMES).not.toContain(name);
       expect(toolInputSchemas).not.toHaveProperty(name);
@@ -309,9 +378,9 @@ describe('unified tool registry', () => {
   });
 
   test('executes workspace tools with strict input and trusted context', async () => {
-    const organizationKey = newId(), scopeKey = newId(), userKey = newId(), collectionKey = newId();
-    const membership = { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' };
-    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: membership } } as unknown as ToolContext;
+    const teamKey = newId(), scopeKey = newId(), userKey = newId(), collectionKey = newId();
+    const membership = { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' };
+    const contentContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: membership } } as unknown as ToolContext;
     const calls: unknown[][] = [];
     const travelService = {
       overview: async (...args: unknown[]) => { calls.push(['overview', ...args]); return { places: [] }; },
@@ -362,43 +431,43 @@ describe('unified tool registry', () => {
     await expect(runTool('place.open', '', { ...openInput, openedAt: new Date().toISOString() }, { contentContext, travelService })).rejects.toThrow('Unrecognized key');
     await runTool('place.open', '', openInput, { contentContext, travelService });
     expect(calls).toEqual([
-      ['overview', { organizationKey, scopeKey }, userKey],
-      ['searchPlaces', { organizationKey, scopeKey, query: 'warm coast', recordHistory: true }, userKey, { signal: undefined, timeoutMs: undefined }],
-      ['findPlaces', { organizationKey, scopeKey, query: 'Reykjavik' }, userKey, { signal: undefined, timeoutMs: undefined }],
-      ['listTrips', { organizationKey, scopeKey }, userKey],
-      ['searchTrips', { organizationKey, scopeKey, query: 'Iceland route', recordHistory: true }, userKey, { signal: undefined, timeoutMs: undefined }],
-      ['createTrip', { organizationKey, scopeKey, name: 'Route', placeKeys: [scopeKey], idempotencyKey: 'request-1:trip.create' }, userKey],
-      ['updateTrip', { organizationKey, scopeKey, tripKey: scopeKey, isFavorite: true }, userKey],
-      ['deleteTrip', { organizationKey, scopeKey, tripKey: scopeKey }, userKey],
-      ['setTripAttachments', { organizationKey, scopeKey, tripKey: scopeKey, attachments: [{ type: 'collection', key: scopeKey }] }, userKey],
-      ['findPlaceGuide', { organizationKey, scopeKey, query: 'Reykjavik' }, userKey, { signal: undefined, timeoutMs: undefined }],
-      ['findCity', { organizationKey, scopeKey, ...cityInput }, userKey, { signal: undefined, timeoutMs: undefined }],
-      ['findChildren', { organizationKey, scopeKey, childrenRequestToken: 'token' }, userKey, { signal: undefined, timeoutMs: undefined }],
-      ['createPlace', { organizationKey, scopeKey, ...createInput }, userKey, { signal: undefined, timeoutMs: undefined }],
-      ['updatePlace', { organizationKey, scopeKey, placeKey: scopeKey, status: 'visited' }, userKey],
-      ['deletePlace', { organizationKey, scopeKey, placeKey: scopeKey }, userKey],
-      ['openPlace', { organizationKey, scopeKey, ...openInput }, userKey],
+      ['overview', { teamKey, scopeKey }, userKey],
+      ['searchPlaces', { teamKey, scopeKey, query: 'warm coast', recordHistory: true }, userKey, { signal: undefined, timeoutMs: undefined }],
+      ['findPlaces', { teamKey, scopeKey, query: 'Reykjavik' }, userKey, { signal: undefined, timeoutMs: undefined }],
+      ['listTrips', { teamKey, scopeKey }, userKey],
+      ['searchTrips', { teamKey, scopeKey, query: 'Iceland route', recordHistory: true }, userKey, { signal: undefined, timeoutMs: undefined }],
+      ['createTrip', { teamKey, scopeKey, name: 'Route', placeKeys: [scopeKey], idempotencyKey: 'request-1:trip.create' }, userKey],
+      ['updateTrip', { teamKey, scopeKey, tripKey: scopeKey, isFavorite: true }, userKey],
+      ['deleteTrip', { teamKey, scopeKey, tripKey: scopeKey }, userKey],
+      ['setTripAttachments', { teamKey, scopeKey, tripKey: scopeKey, attachments: [{ type: 'collection', key: scopeKey }] }, userKey],
+      ['findPlaceGuide', { teamKey, scopeKey, query: 'Reykjavik' }, userKey, { signal: undefined, timeoutMs: undefined }],
+      ['findCity', { teamKey, scopeKey, ...cityInput }, userKey, { signal: undefined, timeoutMs: undefined }],
+      ['findChildren', { teamKey, scopeKey, childrenRequestToken: 'token' }, userKey, { signal: undefined, timeoutMs: undefined }],
+      ['createPlace', { teamKey, scopeKey, ...createInput }, userKey, { signal: undefined, timeoutMs: undefined }],
+      ['updatePlace', { teamKey, scopeKey, placeKey: scopeKey, status: 'visited' }, userKey],
+      ['deletePlace', { teamKey, scopeKey, placeKey: scopeKey }, userKey],
+      ['openPlace', { teamKey, scopeKey, ...openInput }, userKey],
     ]);
-    expect(() => toolInputSchemas['collection.create'].parse({ name: 'Favorites', organizationKey })).toThrow('Unrecognized key');
+    expect(() => toolInputSchemas['collection.create'].parse({ name: 'Favorites', teamKey })).toThrow('Unrecognized key');
   });
 
   test('executes country.search through the canonical read-only service with trusted identity', async () => {
-    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
-    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const teamKey = newId(), scopeKey = newId(), userKey = newId();
+    const contentContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const calls: unknown[][] = [];
     await runTool('country.search', '', { query: 'Portugal' }, { contentContext, countrySearchService: { search: async (...args: unknown[]) => { calls.push(args); return { country: null }; } } as any });
-    expect(calls).toEqual([[{ organizationKey, query: 'Portugal' }, userKey, { signal: undefined, timeoutMs: undefined }]]);
-    await expect(runTool('country.search', '', { query: 'Portugal', organizationKey }, { contentContext })).rejects.toThrow('Unrecognized key');
+    expect(calls).toEqual([[{ teamKey, query: 'Portugal' }, userKey, { signal: undefined, timeoutMs: undefined }]]);
+    await expect(runTool('country.search', '', { query: 'Portugal', teamKey }, { contentContext })).rejects.toThrow('Unrecognized key');
   });
 
-  test('injects trusted Content scope and organization into public tools', async () => {
-    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
-    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+  test('injects trusted Content scope and team into public tools', async () => {
+    const teamKey = newId(), scopeKey = newId(), userKey = newId();
+    const contentContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const calls: unknown[][] = [];
     const executeWorkspaceContent = async (...args: unknown[]) => { calls.push(args); return {}; };
 
     await expect(runTool('folder.list', '', { scopeKey: newId() }, { contentContext, executeWorkspaceContent: executeWorkspaceContent as any })).rejects.toThrow('Unrecognized key');
-    await expect(runTool('document.search-all', '', { organizationKey: newId(), query: 'roadmap' }, { contentContext, executeWorkspaceContent: executeWorkspaceContent as any })).rejects.toThrow('Unrecognized key');
+    await expect(runTool('document.search-all', '', { teamKey: newId(), query: 'roadmap' }, { contentContext, executeWorkspaceContent: executeWorkspaceContent as any })).rejects.toThrow('Unrecognized key');
     await runTool('folder.list', '', {}, { contentContext, executeWorkspaceContent: executeWorkspaceContent as any });
     await runTool('folder.list', '', {}, { contentContext, requestKey: 'read-request-key', executeWorkspaceContent: executeWorkspaceContent as any });
     await runTool('folder.create', '', { folders: [{ name: 'Plans' }] }, { contentContext, executeWorkspaceContent: executeWorkspaceContent as any });
@@ -409,15 +478,15 @@ describe('unified tool registry', () => {
       ['folder.list', { scopeKey }, contentContext, expect.any(Object)],
       ['folder.list', { scopeKey }, contentContext, expect.any(Object)],
       ['folder.create', { folders: [{ scopeKey, name: 'Plans' }] }, contentContext, expect.any(Object)],
-      ['document.search-all', { organizationKey, query: 'roadmap' }, contentContext, expect.any(Object)],
+      ['document.search-all', { teamKey, query: 'roadmap' }, contentContext, expect.any(Object)],
       ['folder.create', { folders: [{ scopeKey, name: 'Idempotent' }], idempotencyKey: 'agent-request-key' }, contentContext, expect.any(Object)],
     ]);
   });
 
   test('executes non-text image.search through the canonical Gallery operation', async () => {
-    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
-    const membership = { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' };
-    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: membership } } as unknown as ToolContext;
+    const teamKey = newId(), scopeKey = newId(), userKey = newId();
+    const membership = { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' };
+    const contentContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: membership } } as unknown as ToolContext;
     const calls: unknown[][] = [];
     const imageKey = newId();
     const images = [{ key: newId(), url: 'https://images.example/safe.jpg' }];
@@ -429,16 +498,16 @@ describe('unified tool registry', () => {
 
     expect(calls).toEqual([[
       { imageKey, limit: 50 },
-      { organizationKey, scopeKey, membership, modelVisible: true },
+      { teamKey, scopeKey, membership, modelVisible: true },
     ]]);
     expect(result).toEqual({ images });
     await expect(runTool('image.search', '', { query: 'red dog' }, { contentContext, gallery: {} })).rejects.toThrow();
-    await expect(runTool('image.search', '', { imageKey, organizationKey }, { contentContext, gallery: {} })).rejects.toThrow('Unrecognized key');
+    await expect(runTool('image.search', '', { imageKey, teamKey }, { contentContext, gallery: {} })).rejects.toThrow('Unrecognized key');
   });
 
   test('executes canonical image tools with trusted context and request idempotency', async () => {
-    const organizationKey = newId(), scopeKey = newId(), userKey = newId(), collectionKey = newId();
-    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const teamKey = newId(), scopeKey = newId(), userKey = newId(), collectionKey = newId();
+    const contentContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const calls: unknown[][] = [];
     const images = {
       createIdeas: async (...args: unknown[]) => { calls.push(['ideas', ...args]); return { concepts: [] }; },
@@ -459,8 +528,8 @@ describe('unified tool registry', () => {
   });
 
   test('executes hidden-content tools through the injected canonical service', async () => {
-    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
-    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), userId: userKey, organizationId: organizationKey, status: 'active' } } } as unknown as ToolContext;
+    const teamKey = newId(), scopeKey = newId(), userKey = newId();
+    const contentContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), userId: userKey, teamKey: teamKey, status: 'active' } } } as unknown as ToolContext;
     const calls: unknown[] = [];
     const sourceKey = newId();
     const hiddenKey = newId();
@@ -471,15 +540,15 @@ describe('unified tool registry', () => {
     await runTool('document.hide', '', { sourceKey }, { contentContext, userHiddenService });
     await expect(runTool('content.hidden.list', '', { userKey }, { contentContext, userHiddenService })).rejects.toThrow('Unrecognized key');
     const listed = await runTool('content.hidden.list', '', {}, { contentContext, userHiddenService });
-    const actor = { userKey, organizationKey, membershipKey: (contentContext.principal as any).userOrganization.key, service: userHiddenService };
+    const actor = { userKey, teamKey, teamMembershipKey: (contentContext.principal as any).userTeam.key, service: userHiddenService };
     expect(calls).toEqual([[actor, { source: 'document', sourceKey }], [actor]]);
     expect(listed).toEqual({ items: [{ key: hiddenKey, source: 'document', sourceKey, createdAt: '2026-08-19T00:00:00.000Z' }] });
     expect(JSON.stringify(listed)).not.toContain(userKey);
   });
 
   test('executes book creation, favorite, and Signal read-state tools through injected services', async () => {
-    const organizationKey = newId(), scopeKey = newId(), userKey = newId(), threadKey = newId();
-    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const teamKey = newId(), scopeKey = newId(), userKey = newId(), threadKey = newId();
+    const contentContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const calls: unknown[][] = [];
     const emailService = {
       threadForTool: async (...args: unknown[]) => { calls.push(['threadForTool', ...args]); return {}; },
@@ -495,17 +564,17 @@ describe('unified tool registry', () => {
     await runTool('book.goal.suggest', '', { topic: 'Decision making', excludeGoals: ['Old goal'] }, { contentContext, bookService });
     await runTool('book.create', '', brief, { ...billingFixture, contentContext, bookService, requestKey: 'request-1' });
     const bookKey = newId();
-    await expect(runTool('book.favorite', '', { bookKey, isFavorite: true, organizationKey }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
+    await expect(runTool('book.favorite', '', { bookKey, isFavorite: true, teamKey }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
     await runTool('book.favorite', '', { bookKey, isFavorite: true }, { contentContext, bookService });
     await runTool('email.thread.read', '', { threadKey }, { contentContext, emailService });
     await runTool('email.thread.read-state', '', { threadKey, isRead: true }, { contentContext, emailService });
     await runTool('email.similar.find', '', { messageKey: threadKey }, { contentContext, emailService });
-    const actor = { userKey, organizationKey, scopeKey };
+    const actor = { userKey, teamKey, scopeKey };
     expect(calls).toEqual([
-      ['suggestTopics', { organizationKey, scopeKey, excludeTopics: ['Old idea'] }, userKey, { signal: undefined, timeoutMs: undefined }],
-      ['suggestGoals', { organizationKey, scopeKey, topic: 'Decision making', excludeGoals: ['Old goal'] }, userKey, { signal: undefined, timeoutMs: undefined }],
-      ['create', { organizationKey, scopeKey, generationRequestKey: 'request-1', ...brief }, userKey],
-      ['setFavorite', bookKey, { organizationKey, scopeKey, isFavorite: true }, userKey],
+      ['suggestTopics', { teamKey, scopeKey, excludeTopics: ['Old idea'] }, userKey, { signal: undefined, timeoutMs: undefined }],
+      ['suggestGoals', { teamKey, scopeKey, topic: 'Decision making', excludeGoals: ['Old goal'] }, userKey, { signal: undefined, timeoutMs: undefined }],
+      ['create', { teamKey, scopeKey, generationRequestKey: 'request-1', ...brief }, userKey],
+      ['setFavorite', bookKey, { teamKey, scopeKey, isFavorite: true }, userKey],
       ['threadForTool', actor, threadKey, undefined],
       ['setReadState', actor, { threadKey, isRead: true }, false, undefined],
       ['findSimilar', actor, { messageKey: threadKey, limit: 10 }],
@@ -513,8 +582,8 @@ describe('unified tool registry', () => {
   });
 
   test('dispatches all 31 Signal-specific tools through runTool with strict trusted contracts', async () => {
-    const organizationKey = newId(), scopeKey = newId(), userKey = newId(), key = newId();
-    const contentContext = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const teamKey = newId(), scopeKey = newId(), userKey = newId(), key = newId();
+    const contentContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const cases = [
       ['email.overview', 'overview', {}],
       ['inbox.refresh', 'sync', { connectorKey: key }],
@@ -566,7 +635,7 @@ describe('unified tool registry', () => {
       if (['draft', 'draftNew', 'updateDraft', 'assignDraft'].includes(method)) return draftOutput;
       return { key, safe: true };
     } }) as any;
-    const actor = { userKey, organizationKey, scopeKey };
+    const actor = { userKey, teamKey, scopeKey };
     const mutationNames = new Set([
       'inbox.refresh', 'inbox.sort', 'inbox.update', 'email.thread.read-state', 'email.thread.favorite', 'email.thread.trash', 'email.trash.clear',
       'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.delete', 'email.draft.create', 'email.draft.compose', 'email.draft.update', 'email.draft.assign',

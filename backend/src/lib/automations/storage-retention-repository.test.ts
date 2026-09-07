@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { STORAGE_RETENTION_SCAN_BATCH_SIZE, STORAGE_WIPE_BATCH_SIZE, STORAGE_WIPE_COLLECTIONS, createStorageRetentionRepository, storageRetentionStateSchema } from './storage-retention-repository';
+import { STORAGE_RETENTION_SCAN_BATCH_SIZE, STORAGE_WIPE_BATCH_SIZE, STORAGE_WIPE_COLLECTIONS, createStorageRetentionRepository, storageMonthlyCostSparks, storageRetentionStateSchema } from './storage-retention-repository';
 
 describe('storage retention repository', () => {
   test('models an explicit durable lifecycle and declares the complete wipe transaction', () => {
@@ -27,6 +27,15 @@ describe('storage retention repository', () => {
     await repository.listUnfunded({ afterKey: 'state-100', limit: STORAGE_RETENTION_SCAN_BATCH_SIZE + 1 });
     expect(query).toContain('state._key > @afterKey SORT state._key ASC LIMIT @limit');
     expect(bind).toMatchObject({ afterKey: 'state-100', limit: STORAGE_RETENTION_SCAN_BATCH_SIZE });
+    expect(query).toContain('object.deletedAt == null');
+  });
+
+  test('projects exact stored bytes and monthly Sparks at the canonical decimal GB rate', async () => {
+    expect(storageMonthlyCostSparks('6000000000')).toBe('180');
+    expect(storageMonthlyCostSparks('1')).toBe('0.000001');
+    const database = { async query() { return { async next() { return undefined; }, async all() { return [{ state: { _key: 'state', userKey: 'user', paymentPastDueAt: '2026-01-01T00:00:00.000Z', wipeDueAt: '2026-04-01T00:00:00.000Z', minimumBalanceMicroSparks: 10 }, balanceMicroSparks: 0, storedByteSizes: ['9007199254740993', '7'] }]; } }; } };
+    const [state] = await createStorageRetentionRepository(database, async (operation) => operation(database)).listUnfunded();
+    expect(state).toMatchObject({ storedBytes: '9007199254741000', monthlyCostSparks: '270215977.64223' });
   });
 
   test('detaches the complete owned reference set and completes the fenced wipe', async () => {
@@ -46,7 +55,7 @@ describe('storage retention repository', () => {
     const source = queries.join('\n');
     for (const reference of ['profileStorageKey', 'coverStorageKey', 'audioStorageKey', 'emailAttachments', 'placeHeroMedia', 'sourceStorageKeys', 'speechStorageKeys', 'documentVersions', 'documentAudioVersions', 'documentSummaryAudio', 'galleryUploads']) expect(source).toContain(reference);
     for (const graph of ['collectionImages', 'placeImages', 'imageIdentities', 'visualIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'imageCaptions']) expect(source).toContain(graph);
-    for (const dependent of ['tagAssignments', 'shares', 'userHiddens', 'conversationMessages', 'emailMessages', 'emailDrafts']) expect(source).toContain(dependent);
+    for (const dependent of ['tagAssignments', 'userHiddens', 'conversationMessages', 'emailMessages', 'emailDrafts']) expect(source).toContain(dependent);
     expect(source).toContain('REMOVE_VALUES(document.sourceStorageKeys, @storageKeys)');
     expect(source).toContain('UPSERT { storageKey }');
     expect(source).toContain('object.userKey == @userKey && object.deletedAt == null');

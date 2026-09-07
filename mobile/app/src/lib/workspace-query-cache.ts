@@ -3,15 +3,14 @@ import type { AssistantChange } from "./assistant-changes";
 import type { Book, BookChapter, BookDetail } from "./books-client";
 import { contentQueryKeys } from "./content-query-cache";
 import { normalizeEmailOverviewQuery, type EmailConnector, type EmailDraft, type EmailFacet, type EmailFilter, type EmailOverview, type EmailOverviewQuery, type EmailReplyContext, type EmailSummary, type EmailThread, type EmailToneRecord, type EmailTranslationVersion } from "./email-client";
-import { normalizeCollection } from "./collection-access";
-import type { GalleryCollection, GalleryCollectionInvite, GalleryCollectionMember, GalleryCollectionShareLink, GalleryImage, GalleryImageOrigin, GalleryOverview } from "./gallery-client";
+import type { GalleryCollection, GalleryImage, GalleryImageOrigin, GalleryOverview } from "./gallery-client";
 import type { Place, RecentPlace, Trip } from "./travel-client";
 import type { UserHiddenRecord } from "./user-hidden-client";
 import { compassQueryKeys, type WorkspaceContext } from "./compass-query-keys";
 export { compassQueryKeys } from "./compass-query-keys";
 export type { WorkspaceContext } from "./compass-query-keys";
 
-const contextKey = (context: WorkspaceContext) => [context.organizationKey, context.scopeKey] as const;
+const contextKey = (context: WorkspaceContext) => [context.teamKey, context.scopeKey] as const;
 const signalTombstones = new Map<string, Set<string>>();
 const signalTombstoneKey = (context: WorkspaceContext, connectorKey: string) => JSON.stringify([...contextKey(context), connectorKey]);
 
@@ -54,10 +53,6 @@ export const galleryQueryKeys = {
     ? [...galleryQueryKeys.overviews(context), collectionKey ?? null, origin] as const
     : [...galleryQueryKeys.overviews(context), collectionKey ?? null] as const,
   image: (context: WorkspaceContext, collectionKey: string | undefined, imageKey: string) => [...galleryQueryKeys.all(context), "image", collectionKey ?? null, imageKey] as const,
-  members: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "sharing", collectionKey, "members"] as const,
-  invites: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "sharing", collectionKey, "invites"] as const,
-  incomingInvites: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "sharing", "incoming-invites"] as const,
-  shareLinks: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "sharing", collectionKey, "share-links"] as const,
   subjects: (context: WorkspaceContext) => [...galleryQueryKeys.all(context), "subjects"] as const,
   search: (context: WorkspaceContext, mode: "text" | "similar" | "identity", collectionKey: string | undefined, value: string) => [...galleryQueryKeys.all(context), "search", mode, collectionKey ?? null, value] as const,
   duplicates: (context: WorkspaceContext, collectionKey: string) => [...galleryQueryKeys.all(context), "duplicates", collectionKey] as const,
@@ -77,27 +72,14 @@ export function patchGalleryUserHiddens(queryClient: QueryClient, context: Works
   return previous;
 }
 
-export function setCachedGalleryMembers(queryClient: QueryClient, context: WorkspaceContext, collectionKey: string, members: GalleryCollectionMember[]) {
-  queryClient.setQueryData(galleryQueryKeys.members(context, collectionKey), members);
-}
-
-export function setCachedGalleryInvites(queryClient: QueryClient, context: WorkspaceContext, collectionKey: string, invites: GalleryCollectionInvite[]) {
-  queryClient.setQueryData(galleryQueryKeys.invites(context, collectionKey), invites);
-}
-
-export function setCachedGalleryShareLinks(queryClient: QueryClient, context: WorkspaceContext, collectionKey: string, links: GalleryCollectionShareLink[]) {
-  queryClient.setQueryData(galleryQueryKeys.shareLinks(context, collectionKey), links);
-}
-
 export async function getGalleryCollections(queryClient: QueryClient, context: WorkspaceContext, queryFn: () => Promise<GalleryCollection[]>) {
   const collections = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.collections(context), queryFn, staleTime: Infinity });
-  const normalized = collections.map(normalizeCollection);
-  queryClient.setQueryData(galleryQueryKeys.collections(context), normalized);
-  return normalized;
+  queryClient.setQueryData(galleryQueryKeys.collections(context), collections);
+  return collections;
 }
 
 export function setCachedGalleryCollections(queryClient: QueryClient, context: WorkspaceContext, collections: GalleryCollection[]) {
-  queryClient.setQueryData(galleryQueryKeys.collections(context), collections.map(normalizeCollection));
+  queryClient.setQueryData(galleryQueryKeys.collections(context), collections);
 }
 
 export type CompassOverview = { places: Place[]; recentPlaces: RecentPlace[] };
@@ -210,7 +192,7 @@ export function parseSignalOverviewQuery(queryKey: QueryKey): ParsedSignalOvervi
   if (mode === "root") return { kind: "root" };
   if (mode === "legacy" && typeof queryKey[6] === "string") return { kind: "legacy", filter: queryKey[6] as EmailFilter, search: typeof queryKey[7] === "string" ? queryKey[7] : null };
   if (mode !== "inbox" || (queryKey[6] !== "read" && queryKey[6] !== "unread") || typeof queryKey[7] !== "string") return undefined;
-  const facets = queryKey[7] ? queryKey[7].split(",").filter((facet): facet is EmailFacet => ["urgent", "important", "filtered", "favorite"].includes(facet)) : [];
+  const facets = queryKey[7] ? queryKey[7].split(",").filter((facet): facet is EmailFacet => ["urgent", "important", "purchases", "filtered", "favorite"].includes(facet)) : [];
   const tagKeys = queryKey[9] === "tags" && typeof queryKey[10] === "string" ? queryKey[10].split(",").filter(Boolean) : undefined;
   return { kind: "inbox", query: normalizeEmailOverviewQuery({ readState: queryKey[6], facets, search: typeof queryKey[8] === "string" ? queryKey[8] : undefined }), ...(tagKeys?.length ? { tagKeys } : {}) };
 }
@@ -410,6 +392,7 @@ function signalThreadBelongs(thread: EmailThread, filter: EmailFilter) {
   if (filter === "all") return true;
   if (filter === "important") return thread.inboxCategory === "Important";
   if (filter === "urgent") return thread.inboxCategory === "Urgent";
+  if (filter === "purchases") return thread.inboxCategory === "Purchases";
   if (filter === "filtered") return thread.inboxCategory === "Filtered";
   if (filter === "needs_action") return thread.state === "needs_action";
   if (filter === "unread") return !thread.isRead;
@@ -427,6 +410,7 @@ function signalCountContribution(thread: EmailThread) {
     all: trash ? 0 : 1,
     important: !trash && thread.inboxCategory === "Important" ? 1 : 0,
     urgent: !trash && thread.inboxCategory === "Urgent" ? 1 : 0,
+    purchases: !trash && thread.inboxCategory === "Purchases" ? 1 : 0,
     needsAction: !trash && thread.state === "needs_action" ? 1 : 0,
     filtered: !trash && thread.inboxCategory === "Filtered" ? 1 : 0,
     unread: !trash && !thread.isRead ? 1 : 0,
@@ -515,7 +499,7 @@ export function removeSignalOverviewThreadKeys(overview: EmailOverview, threadKe
     const counts = signalCountContribution(thread);
     for (const key of Object.keys(total) as (keyof typeof total)[]) total[key] += counts[key];
     return total;
-  }, { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 0 });
+  }, { all: 0, important: 0, urgent: 0, purchases: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 0 });
   return {
     ...overview,
     threads: overview.threads.filter(({ key }) => !removed.has(key)),

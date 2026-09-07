@@ -13,8 +13,6 @@ export type CapabilitySlug = z.infer<typeof capabilitySlugSchema>;
 const capabilitySchema = z.strictObject({
   slug: capabilitySlugSchema,
   name: z.string().min(1),
-  /** Two-to-three-line onboarding card copy, verbatim from the approved mockup. */
-  onboardingDescription: z.string().min(1),
   /** Tagline under the hero icon on the capability screen. */
   tagline: z.string().min(1),
   searchPlaceholder: z.string().min(1),
@@ -26,13 +24,10 @@ export type Capability = z.infer<typeof capabilitySchema>;
 
 const registrySchema = z.array(capabilitySchema).length(5);
 
-/** Onboarding order is fixed: Archive, Gallery, Signal, Compass, Ascend. */
 export const CAPABILITIES: readonly Capability[] = registrySchema.parse([
   {
     slug: "archive",
     name: "Archive",
-    onboardingDescription:
-      "Store, organize and retrieve everything that matters.",
     tagline: "Your intelligent archive\nthat remembers everything.",
     searchPlaceholder: "Search archive...",
     sectionLabel: "Recent items",
@@ -40,16 +35,12 @@ export const CAPABILITIES: readonly Capability[] = registrySchema.parse([
   {
     slug: "gallery",
     name: "Gallery",
-    onboardingDescription:
-      "Generate, collect and curate images and visual inspiration.",
     tagline: "Create, collect and curate\nimages that inspire you.",
     searchPlaceholder: "Search gallery...",
   },
   {
     slug: "signal",
     name: "Signal",
-    onboardingDescription:
-      "Stay updated with real-time insights and important signals.",
     tagline: "Only what matters\nreaches you.",
     searchPlaceholder: "Search signal...",
     sectionLabel: "Priority",
@@ -57,8 +48,6 @@ export const CAPABILITIES: readonly Capability[] = registrySchema.parse([
   {
     slug: "compass",
     name: "Compass",
-    onboardingDescription:
-      "See your cities clearly on an interactive map.",
     tagline: "Your saved cities,\nmapped with clarity.",
     searchPlaceholder: "Search countries...",
     sectionLabel: "Saved cities",
@@ -66,8 +55,6 @@ export const CAPABILITIES: readonly Capability[] = registrySchema.parse([
   {
     slug: "ascend",
     name: "Ascend",
-    onboardingDescription:
-      "Evolve continuously and unlock your highest potential.",
     tagline: "Build the person\nyou are becoming.",
     searchPlaceholder: "Search ascend...",
     sectionLabel: "Active goals",

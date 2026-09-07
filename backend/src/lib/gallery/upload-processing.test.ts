@@ -23,7 +23,7 @@ const processGalleryUploadBatch = (uploadKeys: readonly string[], dependencies: 
 
 function upload(index: number): GalleryUpload {
   return galleryUploadSchema.parse({
-    key: keys[index], organizationKey: 'organization', scopeKey: 'cmrnlzf640001qc7kazsr96k5', actorKey: 'cmrnlzf640001qc7kazsr96k6', imageKey: `cmrnlzf650002qc7k4p5zema${index}`,
+    key: keys[index], teamKey: 'team', scopeKey: 'cmrnlzf640001qc7kazsr96k5', actorKey: 'cmrnlzf640001qc7kazsr96k6', imageKey: `cmrnlzf650002qc7k4p5zema${index}`,
     collectionKey: 'cmrnlzf650002qc7k4p5zemb0', filename: `image-${index}.jpg`, mimeType: 'image/jpeg', sizeBytes: 4, storageKey: `pending/${index}.jpg`, processingMode: 'library', status: 'queued', errorCode: null,
     createdAt: now, updatedAt: now, expiresAt: '2026-08-17T12:15:00.000Z',
   });
@@ -43,7 +43,7 @@ function fixture() {
     async addImageToCollection(relation: { imageKey: string }) { relations.push(relation.imageKey); return relation; },
     async listIdentityMatches() { return []; },
     async persistIdentityMatches() { return false; },
-    async getUserKeyByMemberKey() { return 'user-1'; },
+    async getUserKeyByMembershipKey() { return 'user-1'; },
     async listScopeManagerUserKeys() { return ['manager-1']; },
     async canFinalizeUpload() { return true; },
     async finalizeUpload(value: GalleryUpload, relation: { imageKey: string } | null, leaseId: string, updatedAt: string) { if (uploads.get(value.key)?.processingLeaseId !== leaseId) return { status: 'unchanged' as const }; if (relation) relations.push(relation.imageKey); await repository.updateUpload(value.key, { status: 'completed', processingLeaseId: null, errorCode: null, updatedAt }); return { status: 'completed' as const }; },
@@ -71,7 +71,7 @@ describe('Gallery upload batch processing', () => {
       resolveImageReference: async (bytes) => imageDataUrl(bytes, 'image/png'),
       sanitizeImage: async (bytes) => ({ bytes: new Uint8Array(bytes), coordinates: sanitized++ === 0 ? { latitude: 59.3293, longitude: 18.0686 } : undefined }),
       reverseGeocode: async (coordinates) => { expect(coordinates).toEqual({ latitude: 59.3293, longitude: 18.0686 }); return { city: 'Stockholm', country: 'Sweden', countryCode: 'SE' }; },
-      captionBatch: async (_organizationKey, urls) => { captionRequests.push(urls); return urls.map((_, index) => ({ caption: `Caption ${index + 1}`, score: 90 - index })); },
+      captionBatch: async (_teamKey, urls) => { captionRequests.push(urls); return urls.map((_, index) => ({ caption: `Caption ${index + 1}`, score: 90 - index })); },
       processBatch: async (inputs, dependencies) => {
         expect(inputs.every(({ origin }) => origin === 'uploaded')).toBe(true);
         expect(inputs[0]?.location).toEqual({ city: 'Stockholm', country: 'Sweden', countryCode: 'SE' });
@@ -278,7 +278,7 @@ describe('Gallery upload batch processing', () => {
       async renewUploadLease(uploadKeys: string[], leaseId: string, updatedAt: string) { const owned = uploadKeys.filter((key) => uploads.get(key)?.status === 'processing' && uploads.get(key)?.processingLeaseId === leaseId); for (const key of owned) await repository.updateUpload(key, { updatedAt }); return owned.length; },
       async addImageToCollection(relation: unknown) { return relation; },
       async listIdentityMatches() { return []; }, async persistIdentityMatches() { return false; },
-      async getUserKeyByMemberKey() { return 'user-1'; }, async listScopeManagerUserKeys() { return []; }, async canFinalizeUpload() { return true; },
+      async getUserKeyByMembershipKey() { return 'user-1'; }, async listScopeManagerUserKeys() { return []; }, async canFinalizeUpload() { return true; },
       async finalizeUpload(value: GalleryUpload, _relation: unknown, _leaseId: string, updatedAt: string) { const updated = galleryUploadSchema.parse({ ...uploads.get(value.key)!, status: 'completed', processingLeaseId: null, errorCode: null, updatedAt }); uploads.set(value.key, updated); return { status: 'completed' as const }; },
       async compensateUpload() { return null; },
     } as unknown as GalleryRepository;
@@ -291,7 +291,7 @@ describe('Gallery upload batch processing', () => {
     let requestedCaptions = 0, resolvedCaptions = 0;
     await processGalleryUploadBatch(keys, {
       repository, storage, resolveImageReference: async () => { resolvedCaptions += 1; return 'https://images.example/image.jpg'; },
-      captionBatch: async (_organization, urls) => { requestedCaptions += urls.length; return urls.map((_, index) => ({ caption: `Canonical ${index + 1}`, score: index === 0 ? 96 : 81 })); },
+      captionBatch: async (_team, urls) => { requestedCaptions += urls.length; return urls.map((_, index) => ({ caption: `Canonical ${index + 1}`, score: index === 0 ? 96 : 81 })); },
       processBatch: (inputs, dependencies) => processImages(inputs, {
         ...dependencies,
         findCaption: async (_scope, hash) => captions.find((caption) => perceptualHashDistance(caption.perceptualHash, hash) <= PERCEPTUAL_HASH_DUPLICATE_DISTANCE) ?? null,

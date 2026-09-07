@@ -4,7 +4,7 @@ import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { SCOPE_TAG_TARGET_ADAPTERS, SCOPE_TAG_TARGETS, createScopeTagRepository, type ScopeTagDatabase } from './repository';
 
 const now = '2026-09-04T12:00:00.000Z';
-const owner = { organizationKey: newId(), scopeKey: newId(), userKey: newId(), membershipKey: newId() };
+const owner = { teamKey: newId(), scopeKey: newId(), userKey: newId(), teamMembershipKey: newId() };
 const tag = { key: newId(), scopeKey: owner.scopeKey, userKey: owner.userKey, name: 'Work', normalizedName: 'work', embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: now, updatedAt: now };
 
 describe('scope tag repository', () => {
@@ -37,8 +37,9 @@ describe('scope tag repository', () => {
     expect(query).toContain('tag.userKey == @userKey'); expect(query).toContain('assignment.sourceType == @sourceType'); expect(query).toContain('tag.normalizedName > @cursor.normalizedName');
     expect(query).toContain('scopeRole IN ["owner", "admin", "moderator", "viewer"]');
     expect(query).toContain('privateTarget ? target.userKey == @userKey && (scoped || elevated)');
-    expect(query).toContain('collectionTarget ? elevated || collectionMember != null || (managedCollection && scoped)');
-    expect(query).toContain('imageTarget ? elevated || imageMemberAccess || (managedImageAccess && scoped)');
+    expect(query).toContain('collectionTarget ? elevated || ownsCollection || (managedCollection && scoped)');
+    expect(query).toContain('imageTarget ? elevated || imageOwnerAccess || (managedImageAccess && scoped)');
+    expect(query).not.toContain('collectionMembers');
     expect(bindVars).toMatchObject({ userKey: owner.userKey, sourceType: 'document', limit: 51 }); expect(result[0]).not.toHaveProperty('_key');
   });
 
@@ -209,7 +210,7 @@ describe('scope tag repository', () => {
     await repository.listTargetTags(owner, [{ type: 'document', key: newId() }]);
     await repository.listTargetAssignmentState(owner, [{ type: 'document', key: newId() }], [tag.key]);
 
-    const authorizationQueries = queries.filter((query) => query.includes('DOCUMENT(userOrganizations, @membershipKey)'));
+    const authorizationQueries = queries.filter((query) => query.includes('DOCUMENT(userTeams, @teamMembershipKey)'));
     expect(authorizationQueries).toHaveLength(14);
     for (const query of authorizationQueries) {
       expect(query).toContain('membership != null');

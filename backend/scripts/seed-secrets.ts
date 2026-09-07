@@ -2,17 +2,18 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { closeDb, db } from '@/lib/db/client';
 import { NODE_REGISTRY, NODE_NAMES } from '@/lib/db/registry';
 import { newId } from '@/lib/ids';
-import { getRootOrganizationId } from '@/lib/db/organizations.node';
+import { getRootTeamKey } from '@/lib/db/teams.node';
 import { normalizeEmail } from '@/api/users';
 import { sha256 } from '@/lib/crypto';
 import { getUserByEmailHash } from '@/lib/db/users.node';
 import { provisionPersonalAuthContext } from '@/lib/db/personal-auth-context.node';
 import { isProviderError } from '@/lib/ai/providers/errors';
 import {
-  getUserOrganizationByOrganizationAndUser,
-  upsertUserOrganizationByKey,
-  type UserOrganization,
-} from '@/lib/db/user-organization.node';
+  getUserTeamByTeamAndUser,
+  upsertUserTeamByKey,
+  type UserTeam,
+} from '@/lib/db/user-team.node';
+import { enforceRootTeamMfa, ensureSeededActiveRootMembersVerified } from './seed-verification';
 
 const ENVIRONMENTS_JSON_PATH = '../.github/environments.json';
 
@@ -34,8 +35,8 @@ function resolveSeedsFile(): string {
 
 const SEEDS_FILE = resolveSeedsFile();
 
-// These are the only node schemas with a required (non-nullable) organizationId.
-const NODES_WITH_ORGANIZATION_ID = new Set(['users']);
+// These are the only node schemas with a required (non-nullable) teamKey.
+const NODES_WITH_TEAM_KEY = new Set(['users']);
 
 /** Same derivation the app uses at signup (see hashUserEmail in api/users.ts) — kept local so seed docs only need a plaintext "email". */
 function generateEmailHash(email: string): Promise<string> {
@@ -66,34 +67,35 @@ function resolveRefs(value: unknown, idMap: Map<string, string>): unknown {
   return value;
 }
 
-function seededMembershipRole(role: unknown): UserOrganization['orgRole'] | null {
+function seededMembershipRole(role: unknown): UserTeam['teamRole'] | null {
   if (role === 'owner' || role === 'admin' || role === 'moderator' || role === 'member' || role === 'viewer') return role;
   return null;
 }
 
-async function syncSeededOrganizationMembership(input: {
+async function syncSeededTeamMembership(input: {
   userId: string;
-  organizationId: unknown;
-  organizationRole: unknown;
-  organizationTitle: unknown;
+  teamKey: unknown;
+  teamRole: unknown;
+  teamTitle: unknown;
   now: string;
 }) {
-  const role = seededMembershipRole(input.organizationRole);
-  if (!role || typeof input.organizationId !== 'string' || !input.organizationId) return null;
+  const role = seededMembershipRole(input.teamRole);
+  if (!role || typeof input.teamKey !== 'string' || !input.teamKey) return null;
 
-  const existing = await getUserOrganizationByOrganizationAndUser(
-    input.organizationId,
+  const existing = await getUserTeamByTeamAndUser(
+    input.teamKey,
     input.userId,
   );
   const key = existing?.key ?? generateCuidKey();
-  return upsertUserOrganizationByKey({
+  return upsertUserTeamByKey({
     ...(existing ?? {}),
     key,
-    organizationId: input.organizationId,
+    teamKey: input.teamKey,
     userId: input.userId,
-    orgRole: role,
-    orgTitle: typeof input.organizationTitle === 'string' ? input.organizationTitle : existing?.orgTitle ?? null,
+    teamRole: role,
+    teamTitle: typeof input.teamTitle === 'string' ? input.teamTitle : existing?.teamTitle ?? null,
     status: 'active',
+    environmentSeeded: true,
     joinedAt: existing?.joinedAt ?? input.now,
     isMfaEnabled: existing?.isMfaEnabled ?? false,
     totpSecret: existing?.totpSecret ?? null,
@@ -111,8 +113,9 @@ async function main() {
   }
 
   const idMap = new Map<string, string>();
-  let rootOrganizationId: string | null = null;
+  let rootTeamKey: string | null = null;
   const results: { node: string; key: string }[] = [];
+  const seededUserKeys = new Set<string>();
   const authoritativeMemberships = new Map<string, Set<string>>();
 
   for (const [nodeName, docs] of Object.entries(seeds as Record<string, unknown>)) {
@@ -150,57 +153,77 @@ async function main() {
       }
       if (!doc.createdAt) doc.createdAt = now;
       if (!doc.updatedAt) doc.updatedAt = now;
-      if (NODES_WITH_ORGANIZATION_ID.has(nodeName) && !doc.organizationId) {
-        rootOrganizationId ??= await getRootOrganizationId();
-        doc.organizationId = rootOrganizationId;
+      if (NODES_WITH_TEAM_KEY.has(nodeName) && !doc.teamKey) {
+        rootTeamKey ??= await getRootTeamKey();
+        doc.teamKey = rootTeamKey;
       }
       if (nodeName === 'users' && !doc.currentScopeKey) doc.currentScopeKey = newId();
 
-      const resolved = resolveRefs(doc, idMap) as Record<string, unknown>;
+      let resolved = resolveRefs(doc, idMap) as Record<string, unknown>;
+      if (nodeName === 'teams') resolved = enforceRootTeamMfa(resolved);
       const saved = (await accessor.upsertByKey(resolved as never)) as { key: string };
       results.push({ node: nodeName, key: saved.key });
 
       if (nodeName === 'users') {
+        seededUserKeys.add(saved.key);
         await provisionPersonalAuthContext({
           key: saved.key,
           name: typeof resolved.name === 'string' ? resolved.name : null,
           email: String(resolved.email),
           currentScopeKey: String(resolved.currentScopeKey),
         }, { mainScopeKey: String(resolved.currentScopeKey) });
-        const membership = await syncSeededOrganizationMembership({
+        const membership = await syncSeededTeamMembership({
           userId: saved.key,
-          organizationId: resolved.organizationId,
-          organizationRole: resolved.organization_role,
-          organizationTitle: resolved.organization_title,
+          teamKey: resolved.teamKey,
+          teamRole: resolved.team_role,
+          teamTitle: resolved.team_title,
           now,
         });
         if (membership) {
-          results.push({ node: 'userOrganizations', key: membership.key });
-          if (process.env.SYNC_SEEDED_ORGANIZATION_ROSTER === 'true') {
-            const userKeys = authoritativeMemberships.get(membership.organizationId) ?? new Set<string>();
+          results.push({ node: 'userTeams', key: membership.key });
+          if (process.env.SYNC_SEEDED_TEAM_ROSTER === 'true') {
+            const userKeys = authoritativeMemberships.get(membership.teamKey) ?? new Set<string>();
             userKeys.add(membership.userId);
-            authoritativeMemberships.set(membership.organizationId, userKeys);
+            authoritativeMemberships.set(membership.teamKey, userKeys);
           }
         }
       }
 
       if (localId) idMap.set(localId, saved.key);
-      if (nodeName === 'organizations' && resolved.is_root === true) rootOrganizationId = saved.key;
+      if (nodeName === 'teams' && resolved.is_root === true) rootTeamKey = saved.key;
     }
   }
 
-  for (const [organizationId, userKeys] of authoritativeMemberships) {
+  const verifiedRootMemberKeys = await ensureSeededActiveRootMembersVerified(
+    [...seededUserKeys],
+    new Date().toISOString(),
+  );
+  for (const key of verifiedRootMemberKeys) results.push({ node: 'users', key });
+
+  if (process.env.SYNC_SEEDED_TEAM_ROSTER === 'true') {
+    const cursor = await db.query<string>(`
+      FOR membership IN userTeams
+        FILTER membership.environmentSeeded == true
+        COLLECT teamKey = membership.teamKey
+        RETURN teamKey
+    `);
+    for (const teamKey of await cursor.all()) {
+      if (!authoritativeMemberships.has(teamKey)) authoritativeMemberships.set(teamKey, new Set());
+    }
+  }
+
+  for (const [teamKey, userKeys] of authoritativeMemberships) {
     const cursor = await db.query<number>(`
       LET changed = LENGTH(
-        FOR membership IN userOrganizations
-          FILTER membership.organizationId == @organizationId
-          FILTER membership.status == "active" && membership.userId NOT IN @userKeys
-          UPDATE membership WITH { status: "inactive", updatedAt: @now } IN userOrganizations
+        FOR membership IN userTeams
+          FILTER membership.teamKey == @teamKey
+          FILTER membership.environmentSeeded == true && membership.userId NOT IN @userKeys
+          UPDATE membership WITH { status: "inactive", environmentSeeded: false, updatedAt: @now } IN userTeams
           RETURN 1
       )
       RETURN changed
-    `, { organizationId, userKeys: [...userKeys], now: new Date().toISOString() });
-    console.log(`Deactivated ${await cursor.next() ?? 0} non-seeded organization membership(s).`);
+    `, { teamKey, userKeys: [...userKeys], now: new Date().toISOString() });
+    console.log(`Deactivated ${await cursor.next() ?? 0} non-seeded team membership(s).`);
   }
 
   console.table(results);

@@ -2,7 +2,7 @@ import { beforeEach, expect, mock, test } from "bun:test";
 
 const calls: { method: string; path: string; body: unknown; config?: unknown }[] = [];
 let deleteData: unknown;
-const authState = { organization: { key: "org-key" }, scope: { key: "scope-key" } };
+const authState = { team: { key: "team-key" }, scope: { key: "scope-key" } };
 const timestamp = "2026-08-11T10:00:00.000Z";
 const place = { key: "place-key", kind: "place" as const, name: "Reykjavik", summary: "A compact North Atlantic capital.", countryCode: "IS", latitude: 64.15, longitude: -21.94, status: "wishlist" as const, isFavorite: false, createdAt: timestamp, coverUrl: "https://signed.test/media/reykjavik.png" };
 const recentPlace = { key: "country-key", kind: "country" as const, name: "Iceland", summary: place.summary, countryCode: "IS", latitude: 64.96, longitude: -19.02, openedAt: timestamp, coverUrl: "https://signed.test/media/iceland.png" };
@@ -86,7 +86,7 @@ test("sends and strictly validates the saved-city overview", async () => {
   expect(client.placeSchema.safeParse({ ...place, status: "planned" }).success).toBe(false);
   expect(client.placeSchema.safeParse({ ...place, kind: "city" }).success).toBe(false);
   expect(client.placeSchema.parse({ ...place, summary: "" }).summary).toBe("");
-  expect(calls[0]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key" });
+  expect(calls[0]?.body).toEqual({ teamKey: "team-key", scopeKey: "scope-key" });
 });
 
 test("strictly validates focused web-grounded travel recommendations", () => {
@@ -107,7 +107,7 @@ test("strictly scopes city guides to their supplied country", async () => {
   expect(() => client.cityDetailSchema.parse({ ...cityDetail, popularCities })).toThrow();
   const controller = new AbortController();
   await client.findCity("Reykjavik", { name: "Iceland", code: "IS", continent: "Europe", lat: 64.96, lon: -19.02 }, controller.signal);
-  expect(calls[0]).toEqual({ method: "POST", path: "/travel/cities/find", body: { organizationKey: "org-key", scopeKey: "scope-key", city: "Reykjavik", country: { name: "Iceland", code: "IS", continent: "Europe", lat: 64.96, lon: -19.02 } }, config: { timeout: 30_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/travel/cities/find", body: { teamKey: "team-key", scopeKey: "scope-key", city: "Reykjavik", country: { name: "Iceland", code: "IS", continent: "Europe", lat: 64.96, lon: -19.02 } }, config: { timeout: 30_000, signal: controller.signal } });
 });
 
 test("strictly parses one transient hero and sends only the opaque token", async () => {
@@ -120,7 +120,7 @@ test("strictly parses one transient hero and sends only the opaque token", async
   expect(() => client.placeImageResponseSchema.parse({ ...readyImage, image: { ...readyImage.image, url: oversizedUrl } })).toThrow();
   const controller = new AbortController();
   expect(await client.generatePlaceHeroImage({ imageRequestToken: "opaque-image-token" }, controller.signal)).toEqual(readyImage);
-  expect(calls[0]).toEqual({ method: "POST", path: "/travel/places/image", body: { organizationKey: "org-key", scopeKey: "scope-key", imageRequestToken: "opaque-image-token" }, config: { timeout: 15_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/travel/places/image", body: { teamKey: "team-key", scopeKey: "scope-key", imageRequestToken: "opaque-image-token" }, config: { timeout: 15_000, signal: controller.signal } });
 });
 
 test("finds exactly ten ordered city details with trusted local context and cancellation", async () => {
@@ -129,7 +129,7 @@ test("finds exactly ten ordered city details with trusted local context and canc
   expect(calls[0]).toEqual({
     method: "POST",
     path: "/travel/places/children/find",
-    body: { organizationKey: "org-key", scopeKey: "scope-key", childrenRequestToken: "opaque-children-token" },
+    body: { teamKey: "team-key", scopeKey: "scope-key", childrenRequestToken: "opaque-children-token" },
     config: { timeout: 30_000, signal: controller.signal },
   });
   expect(() => client.cityDetailSchema.parse({ ...cityDetail, popularCities })).toThrow();
@@ -139,7 +139,7 @@ test("passes cancellation and authoritative country context", async () => {
   const controller = new AbortController();
   await client.findPlace("Iceland", { name: "Iceland", code: "IS", continent: "Europe", lat: 64.96, lon: -19.02 }, controller.signal);
   expect(calls[0]?.path).toBe("/travel/places/guide");
-  expect(calls[0]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", query: "Iceland", country: { name: "Iceland", code: "IS", continent: "Europe", lat: 64.96, lon: -19.02 } });
+  expect(calls[0]?.body).toEqual({ teamKey: "team-key", scopeKey: "scope-key", query: "Iceland", country: { name: "Iceland", code: "IS", continent: "Europe", lat: 64.96, lon: -19.02 } });
   expect(calls[0]?.config).toEqual({ timeout: 30_000, signal: controller.signal });
   expect(() => client.findPlace("Iceland", { name: "Iceland", code: "Iceland", continent: "Europe", lat: 64.96, lon: -19.02 })).toThrow();
   expect(() => client.generatePlaceHeroImage({ imageRequestToken: "opaque-image-token", prompt: "untrusted" } as never)).toThrow();
@@ -148,7 +148,7 @@ test("passes cancellation and authoritative country context", async () => {
 test("strictly searches for one country without leaking the workspace scope", async () => {
   const controller = new AbortController();
   expect(await client.searchCountries(" volcanic island ", controller.signal)).toEqual({ name: "Iceland", countryCode: "IS", latitude: 64.96, longitude: -19.02 });
-  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", query: "volcanic island", collectionSlugs: ["countries"], recordHistory: true, limit: 1 }, config: { timeout: 15_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { teamKey: "team-key", scopeKey: "scope-key", query: "volcanic island", collectionSlugs: ["countries"], recordHistory: true, limit: 1 }, config: { timeout: 15_000, signal: controller.signal } });
   expect(client.countrySearchResultSchema.safeParse({ country: { name: "Iceland", countryCode: "IS", latitude: 64.96, longitude: -19.02, continent: "Europe" } }).success).toBe(false);
   expect(client.countrySearchResultSchema.parse({ country: null })).toEqual({ country: null });
 });
@@ -158,14 +158,14 @@ test("strictly parses recent places and records each place open", async () => {
   expect(client.travelOverviewSchema.safeParse({ places: [place], recentPlaces: Array.from({ length: 26 }, (_, index) => ({ ...recentPlace, key: `place-${index}` })) }).success).toBe(false);
   const controller = new AbortController();
   expect(await client.openPlace(recentPlace.name, recentPlace.countryCode, controller.signal)).toEqual(recentPlace);
-  expect(calls[0]).toEqual({ method: "POST", path: "/travel/places/open", body: { organizationKey: "org-key", scopeKey: "scope-key", name: recentPlace.name, countryCode: recentPlace.countryCode }, config: { timeout: 30_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/travel/places/open", body: { teamKey: "team-key", scopeKey: "scope-key", name: recentPlace.name, countryCode: recentPlace.countryCode }, config: { timeout: 30_000, signal: controller.signal } });
 });
 
 test("saves a generated place through the canonical travel route", async () => {
   const controller = new AbortController();
   const input = { name: place.name, summary: place.summary, countryCode: place.countryCode, latitude: place.latitude, longitude: place.longitude, imageRequestToken: detail.imageRequestToken };
   expect(await client.createPlace(input, controller.signal)).toEqual(place);
-  expect(calls[0]).toEqual({ method: "POST", path: "/travel/places", body: { organizationKey: "org-key", scopeKey: "scope-key", ...input }, config: { timeout: 30_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/travel/places", body: { teamKey: "team-key", scopeKey: "scope-key", ...input }, config: { timeout: 30_000, signal: controller.signal } });
   expect(() => client.createPlace({ ...input, summary: "" })).toThrow();
   expect(() => client.createPlace({ ...input, imageRequestToken: "" })).toThrow();
 });
@@ -173,7 +173,7 @@ test("saves a generated place through the canonical travel route", async () => {
 test("updates strict place status and favorite fields", async () => {
   const controller = new AbortController();
   expect(await client.updatePlace({ placeKey: place.key, status: "visited", isFavorite: true }, controller.signal)).toEqual(place);
-  expect(calls[0]).toEqual({ method: "POST", path: "/travel/places/update", body: { organizationKey: "org-key", scopeKey: "scope-key", placeKey: place.key, status: "visited", isFavorite: true }, config: { timeout: 30_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/travel/places/update", body: { teamKey: "team-key", scopeKey: "scope-key", placeKey: place.key, status: "visited", isFavorite: true }, config: { timeout: 30_000, signal: controller.signal } });
   await expect(client.updatePlace({ placeKey: place.key })).rejects.toThrow();
   await expect(client.updatePlace({ placeKey: place.key, status: "completed" } as never)).rejects.toThrow();
   await expect(client.updatePlace({ placeKey: place.key, isFavorite: true, unknown: true } as never)).rejects.toThrow();
@@ -183,7 +183,7 @@ test("deletes a place through a strict context-scoped request", async () => {
   deleteData = { placeKey: place.key };
   const controller = new AbortController();
   expect(await client.deletePlace(place.key, controller.signal)).toEqual({ placeKey: place.key });
-  expect(calls[0]).toEqual({ method: "POST", path: "/travel/places/delete", body: { organizationKey: "org-key", scopeKey: "scope-key", placeKey: place.key }, config: { timeout: 30_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/travel/places/delete", body: { teamKey: "team-key", scopeKey: "scope-key", placeKey: place.key }, config: { timeout: 30_000, signal: controller.signal } });
   await expect(client.deletePlace("")).rejects.toThrow();
   deleteData = { placeKey: place.key, unknown: true };
   await expect(client.deletePlace(place.key)).rejects.toThrow();
@@ -192,7 +192,7 @@ test("deletes a place through a strict context-scoped request", async () => {
 test("finds one to five strict direct country and city results", async () => {
   const controller = new AbortController();
   expect(await client.findPlaces(" Iceland ", controller.signal)).toEqual(placeSearchResults);
-  expect(calls[0]).toEqual({ method: "POST", path: "/travel/places/find", body: { organizationKey: "org-key", scopeKey: "scope-key", query: "Iceland" }, config: { timeout: 30_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/travel/places/find", body: { teamKey: "team-key", scopeKey: "scope-key", query: "Iceland" }, config: { timeout: 30_000, signal: controller.signal } });
   expect(client.placeSearchResultSchema.safeParse({ ...placeSearchResults[0], extra: true }).success).toBe(false);
   await expect(client.findPlaces(" ")).rejects.toThrow();
   await expect(client.findPlaces("x")).rejects.toThrow();
@@ -202,7 +202,7 @@ test("finds one to five strict direct country and city results", async () => {
 test("semantically searches strict saved place DTOs", async () => {
   const controller = new AbortController();
   expect(await client.searchPlaces(" volcanic capital ", controller.signal)).toEqual([place]);
-  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", query: "volcanic capital", collectionSlugs: ["places"], recordHistory: true, limit: 50 }, config: { timeout: 15_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { teamKey: "team-key", scopeKey: "scope-key", query: "volcanic capital", collectionSlugs: ["places"], recordHistory: true, limit: 50 }, config: { timeout: 15_000, signal: controller.signal } });
   await client.searchPlaces(" volcanic capital ", controller.signal, false);
   expect(calls[1]?.body).toMatchObject({ query: "volcanic capital", recordHistory: false });
 });
@@ -210,7 +210,7 @@ test("semantically searches strict saved place DTOs", async () => {
 test("lists and searches saved places with sorted all-tag filters", async () => {
   const controller = new AbortController();
   expect(await client.searchPlaces("", controller.signal, false, ["summer", "adventure"])).toEqual([place]);
-  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", operation: "list", collectionSlugs: ["places"], recordHistory: false, limit: 50, filters: { tagKeys: ["adventure", "summer"], tagMatch: "all" } }, config: { timeout: 15_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { teamKey: "team-key", scopeKey: "scope-key", operation: "list", collectionSlugs: ["places"], recordHistory: false, limit: 50, filters: { tagKeys: ["adventure", "summer"], tagMatch: "all" } }, config: { timeout: 15_000, signal: controller.signal } });
   await client.searchPlaces(" volcanic capital ", controller.signal, false, ["summer", "adventure"]);
   expect(calls[1]?.body).toMatchObject({ query: "volcanic capital", filters: { tagKeys: ["adventure", "summer"], tagMatch: "all" } });
 });
@@ -218,7 +218,7 @@ test("lists and searches saved places with sorted all-tag filters", async () => 
 test("lists trips separately from the travel overview with strict DTOs", async () => {
   const controller = new AbortController();
   expect(await client.listTrips(controller.signal)).toEqual([trip]);
-  expect(calls[0]).toEqual({ method: "POST", path: "/travel/trips/list", body: { organizationKey: "org-key", scopeKey: "scope-key" }, config: { timeout: 30_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/travel/trips/list", body: { teamKey: "team-key", scopeKey: "scope-key" }, config: { timeout: 30_000, signal: controller.signal } });
   expect(client.tripSchema.safeParse({ ...trip, places: [{ ...tripPlace, coverUrl: undefined }] }).success).toBe(true);
   expect(client.tripSchema.safeParse({ ...trip, updatedAt: undefined }).success).toBe(false);
   expect(client.tripSchema.safeParse({ ...trip, isFavorite: undefined }).success).toBe(false);
@@ -234,7 +234,7 @@ test("lists trips separately from the travel overview with strict DTOs", async (
 test("semantically searches strict trip DTOs", async () => {
   const controller = new AbortController();
   expect(await client.searchTrips(" northern lights ", controller.signal)).toEqual([trip]);
-  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", query: "northern lights", collectionSlugs: ["trips"], recordHistory: true, limit: 50 }, config: { timeout: 15_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { teamKey: "team-key", scopeKey: "scope-key", query: "northern lights", collectionSlugs: ["trips"], recordHistory: true, limit: 50 }, config: { timeout: 15_000, signal: controller.signal } });
   await client.searchTrips(" northern lights ", controller.signal, false);
   expect(calls[1]?.body).toMatchObject({ query: "northern lights", recordHistory: false });
 });
@@ -242,15 +242,15 @@ test("semantically searches strict trip DTOs", async () => {
 test("lists saved trips with sorted all-tag filters", async () => {
   const controller = new AbortController();
   expect(await client.searchTrips("", controller.signal, false, ["winter", "aurora"])).toEqual([trip]);
-  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { organizationKey: "org-key", scopeKey: "scope-key", operation: "list", collectionSlugs: ["trips"], recordHistory: false, limit: 50, filters: { tagKeys: ["aurora", "winter"], tagMatch: "all" } }, config: { timeout: 15_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/app/search", body: { teamKey: "team-key", scopeKey: "scope-key", operation: "list", collectionSlugs: ["trips"], recordHistory: false, limit: 50, filters: { tagKeys: ["aurora", "winter"], tagMatch: "all" } }, config: { timeout: 15_000, signal: controller.signal } });
 });
 
 test("lists and generates strict persisted trip guides with trusted workspace context", async () => {
   const controller = new AbortController();
   expect(await client.listTripGuides(trip.key, controller.signal)).toEqual([guide]);
-  expect(calls[0]).toEqual({ method: "POST", path: "/travel/trips/guides/list", body: { organizationKey: "org-key", scopeKey: "scope-key", tripKey: trip.key }, config: { timeout: 30_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/travel/trips/guides/list", body: { teamKey: "team-key", scopeKey: "scope-key", tripKey: trip.key }, config: { timeout: 30_000, signal: controller.signal } });
   expect(await client.generateTripGuide(trip.key, " guide-request ", controller.signal)).toEqual(guide);
-  expect(calls[1]).toEqual({ method: "POST", path: "/travel/trips/guides/generate", body: { organizationKey: "org-key", scopeKey: "scope-key", tripKey: trip.key, idempotencyKey: "guide-request" }, config: { timeout: 60_000, signal: controller.signal } });
+  expect(calls[1]).toEqual({ method: "POST", path: "/travel/trips/guides/generate", body: { teamKey: "team-key", scopeKey: "scope-key", tripKey: trip.key, idempotencyKey: "guide-request" }, config: { timeout: 60_000, signal: controller.signal } });
   expect(client.tripGuideSchema.safeParse({ ...guide, extra: true }).success).toBe(false);
   expect(client.tripGuideSchema.safeParse({ ...guide, content: "" }).success).toBe(false);
   expect(client.tripGuideSchema.safeParse({ ...guide, updatedAt: undefined }).success).toBe(false);
@@ -261,9 +261,9 @@ test("lists and generates strict persisted trip guides with trusted workspace co
 test("lists and generates strict kind-scoped Archive place references", async () => {
   const controller = new AbortController();
   expect(await client.listPlaceReferences(place.key, "brief", controller.signal)).toEqual([reference]);
-  expect(calls[0]).toEqual({ method: "POST", path: "/travel/places/references/list", body: { organizationKey: "org-key", scopeKey: "scope-key", placeKey: place.key, kind: "brief" }, config: { timeout: 30_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/travel/places/references/list", body: { teamKey: "team-key", scopeKey: "scope-key", placeKey: place.key, kind: "brief" }, config: { timeout: 30_000, signal: controller.signal } });
   expect(await client.generatePlaceReference(place.key, "brief", " reference-request ", controller.signal)).toEqual(reference);
-  expect(calls[1]).toEqual({ method: "POST", path: "/travel/places/references/generate", body: { organizationKey: "org-key", scopeKey: "scope-key", placeKey: place.key, kind: "brief", idempotencyKey: "reference-request" }, config: { timeout: 60_000, signal: controller.signal } });
+  expect(calls[1]).toEqual({ method: "POST", path: "/travel/places/references/generate", body: { teamKey: "team-key", scopeKey: "scope-key", placeKey: place.key, kind: "brief", idempotencyKey: "reference-request" }, config: { timeout: 60_000, signal: controller.signal } });
   expect(client.placeReferenceSchema.safeParse({ ...reference, extra: true }).success).toBe(false);
   expect(client.placeReferenceSchema.safeParse({ ...reference, content: "" }).success).toBe(false);
   expect(client.placeReferenceSchema.safeParse({ ...reference, updatedAt: undefined }).success).toBe(false);
@@ -276,7 +276,7 @@ test("creates a strict trip and rejects blank or duplicate input", async () => {
   const controller = new AbortController();
   const input = { name: " Iceland winter ", description: " Northern lights ", placeKeys: [place.key], idempotencyKey: "request-1" };
   expect(await client.createTrip(input, controller.signal)).toEqual(trip);
-  expect(calls[0]).toEqual({ method: "POST", path: "/travel/trips", body: { organizationKey: "org-key", scopeKey: "scope-key", name: "Iceland winter", description: "Northern lights", placeKeys: [place.key], idempotencyKey: "request-1" }, config: { timeout: 30_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/travel/trips", body: { teamKey: "team-key", scopeKey: "scope-key", name: "Iceland winter", description: "Northern lights", placeKeys: [place.key], idempotencyKey: "request-1" }, config: { timeout: 30_000, signal: controller.signal } });
   await expect(client.createTrip({ name: " ", placeKeys: [place.key], idempotencyKey: "request-2" })).rejects.toThrow();
   await expect(client.createTrip({ name: "Trip", description: " ", placeKeys: [place.key], idempotencyKey: "request-3" })).rejects.toThrow();
   await expect(client.createTrip({ name: "Trip", placeKeys: [place.key, place.key], idempotencyKey: "request-4" })).rejects.toThrow();
@@ -290,12 +290,12 @@ test("updates trip fields without collapsing null into omission and preserves pl
   expect(calls[0]).toEqual({
     method: "POST",
     path: "/travel/trips/update",
-    body: { organizationKey: "org-key", scopeKey: "scope-key", tripKey: trip.key, name: "Iceland spring", description: null, coverImageKey: null, isFavorite: true, status: "completed", placeKeys: ["place-two", place.key] },
+    body: { teamKey: "team-key", scopeKey: "scope-key", tripKey: trip.key, name: "Iceland spring", description: null, coverImageKey: null, isFavorite: true, status: "completed", placeKeys: ["place-two", place.key] },
     config: { timeout: 30_000, signal: controller.signal },
   });
 
   await client.updateTrip({ tripKey: trip.key, isFavorite: false });
-  expect(calls[1]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", tripKey: trip.key, isFavorite: false });
+  expect(calls[1]?.body).toEqual({ teamKey: "team-key", scopeKey: "scope-key", tripKey: trip.key, isFavorite: false });
   await expect(client.updateTrip({ tripKey: trip.key })).rejects.toThrow();
   await expect(client.updateTrip({ tripKey: trip.key, description: undefined })).rejects.toThrow();
   await expect(client.updateTrip({ tripKey: trip.key, description: " " })).rejects.toThrow();
@@ -311,7 +311,7 @@ test("replaces strict ordered trip attachments", async () => {
   expect(calls[0]).toEqual({
     method: "POST",
     path: "/travel/trips/attachments/set",
-    body: { organizationKey: "org-key", scopeKey: "scope-key", tripKey: trip.key, attachments },
+    body: { teamKey: "team-key", scopeKey: "scope-key", tripKey: trip.key, attachments },
     config: { timeout: 30_000, signal: controller.signal },
   });
   await expect(client.setTripAttachments({ tripKey: trip.key, attachments: [{ type: "image", key: "image-key" }] } as never)).rejects.toThrow();
@@ -323,7 +323,7 @@ test("replaces strict ordered trip attachments", async () => {
 test("deletes a trip through the strict canonical response", async () => {
   const controller = new AbortController();
   expect(await client.deleteTrip(trip.key, controller.signal)).toEqual({ tripKey: trip.key });
-  expect(calls[0]).toEqual({ method: "POST", path: "/travel/trips/delete", body: { organizationKey: "org-key", scopeKey: "scope-key", tripKey: trip.key }, config: { timeout: 30_000, signal: controller.signal } });
+  expect(calls[0]).toEqual({ method: "POST", path: "/travel/trips/delete", body: { teamKey: "team-key", scopeKey: "scope-key", tripKey: trip.key }, config: { timeout: 30_000, signal: controller.signal } });
   await expect(client.deleteTrip("")).rejects.toThrow();
   deleteData = { tripKey: trip.key, unknown: true };
   await expect(client.deleteTrip(trip.key)).rejects.toThrow();

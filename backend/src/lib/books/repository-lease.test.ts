@@ -4,7 +4,7 @@ import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { BookRepositoryError, createBookRepository, type BookAccessContext, type BookDatabase } from './repository';
 
 const scopeKey = newId(); const bookKey = newId(); const chapterKey = newId();
-const baseContext = { organizationKey: 'organization', scopeKey, userKey: newId() };
+const baseContext = { teamKey: 'team', scopeKey, userKey: newId() };
 
 function leaseDatabase(initialToken = 'owner') {
   let token: string | null = initialToken; let chapterRemovals = 0; const mutationFences: boolean[] = []; const patches: unknown[] = [];

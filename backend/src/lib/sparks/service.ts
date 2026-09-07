@@ -41,7 +41,7 @@ export function createSparkService({ repository, createKey = newId, now = () => 
   });
 
   return Object.freeze({
-    charge(trustedUserKey: string, input: ChargeInput & Readonly<{ kind: 'tool' | 'action' | 'storage' | 'recurring-service'; toolSlug?: string; actionSlug?: string }>) {
+    charge(trustedUserKey: string, input: ChargeInput & Readonly<{ kind: 'tool' | 'action' | 'storage'; toolSlug?: string; actionSlug?: string }>) {
       return apply(trustedUserKey, input.kind, -positiveSafeInteger(input.microSparks), input);
     },
     chargeExecution(trustedUserKey: string, input: ChargeInput & Readonly<{ kind: 'tool' | 'action'; toolSlug?: string; actionSlug?: string; executionIdentity: string }>) {
@@ -92,17 +92,21 @@ export function createSparkService({ repository, createKey = newId, now = () => 
     getBalance(trustedUserKey: string) {
       return repository.getBalance(trustedUserKey);
     },
+    getDebt(trustedUserKey: string) {
+      return repository.getDebt?.(trustedUserKey) ?? Promise.resolve(0);
+    },
     listHistory(trustedUserKey: string, input?: SparkHistoryInput): Promise<SparkTransaction[]> {
       return repository.listHistory(trustedUserKey, sparkHistoryInputSchema.parse(input ?? {}));
     },
     async getSummary(trustedUserKey: string, input?: SparkHistoryInput) {
       const valid = sparkHistoryInputSchema.parse(input ?? {});
-      const [microSparkBalance, transactions] = await Promise.all([
+      const [microSparkBalance, microSparkDebt, transactions] = await Promise.all([
         repository.getBalance(trustedUserKey),
+        repository.getDebt?.(trustedUserKey) ?? Promise.resolve(0),
         repository.listHistory(trustedUserKey, valid),
       ]);
       if (microSparkBalance === null) throw new SparkRepositoryError('USER_NOT_FOUND', 'Spark account user was not found.');
-      return { microSparkBalance, transactions };
+      return { microSparkBalance, microSparkDebt: microSparkDebt ?? 0, spendingBlocked: (microSparkDebt ?? 0) > 0, transactions };
     },
   });
 }

@@ -10,14 +10,14 @@ import {
 
 describe("book playback identity", () => {
   test("scopes playback and progress to the authenticated user", () => {
-    const first = getBookPlaybackIdentity("user-1", "org", "scope")!;
-    const second = getBookPlaybackIdentity("user-2", "org", "scope")!;
+    const first = getBookPlaybackIdentity("user-1", "team", "scope")!;
+    const second = getBookPlaybackIdentity("user-2", "team", "scope")!;
     expect(first).not.toBe(second);
     expect(getBookProgressKey(first, "book", "chapter")).not.toBe(getBookProgressKey(second, "book", "chapter"));
   });
 
   test("has no playback identity while signed out", () => {
-    expect(getBookPlaybackIdentity(undefined, "org", "scope")).toBeUndefined();
+    expect(getBookPlaybackIdentity(undefined, "team", "scope")).toBeUndefined();
   });
 });
 

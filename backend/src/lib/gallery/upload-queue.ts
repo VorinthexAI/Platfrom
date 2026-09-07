@@ -70,7 +70,7 @@ export async function recoverGalleryUploadQueue() {
   const uploads = recovered.uploads.filter(({ key }) => !alreadyQueued.has(key));
   const groups = new Map<string, string[]>();
   for (const upload of uploads) {
-    const key = `${upload.organizationKey}:${upload.scopeKey}:${upload.actorKey}`;
+    const key = `${upload.teamKey}:${upload.scopeKey}:${upload.actorKey}`;
     const keys = groups.get(key) ?? [];
     keys.push(upload.key);
     groups.set(key, keys);

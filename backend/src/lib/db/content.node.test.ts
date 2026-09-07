@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { buildEmbeddingText } from './base';
 import { documentExtensionSchema, documentSchema, documentsEmbeddingFields } from './documents.node';
-import { documentShareSchema, documentSharesEmbeddingFields } from './document-shares.node';
 import { folderSchema, foldersEmbeddingFields } from './folders.node';
 import { documentVersionSchema, documentVersionsEmbeddingFields } from './document-versions.node';
 import { documentAudioVersionSchema } from './document-audio-versions.node';
@@ -21,13 +20,11 @@ describe('Content node contracts', () => {
     expect(foldersEmbeddingFields).toEqual(['name', 'description']);
     expect(documentsEmbeddingFields).toEqual(['name', 'content']);
     expect(documentVersionsEmbeddingFields).toEqual(['label', 'content']);
-    expect(documentSharesEmbeddingFields).toEqual([]);
     expect(buildEmbeddingText(documentsEmbeddingFields, { name: 'Roadmap', content: 'Ship Content V1' })).toBe('Roadmap\n\nShip Content V1');
-    expect(buildEmbeddingText(documentSharesEmbeddingFields, { token: 'not-embedded' })).toBeNull();
   });
 
   test('omits soft-delete state from every Content resource schema', () => {
-    for (const schema of [folderSchema, documentSchema, documentVersionSchema, documentShareSchema]) {
+    for (const schema of [folderSchema, documentSchema, documentVersionSchema]) {
     }
     expect(folderSchema.shape.isFavorite.parse(undefined)).toBe(false);
     expect(documentSchema.shape.isFavorite.parse(undefined)).toBe(false);
@@ -83,21 +80,6 @@ describe('Content node contracts', () => {
     expect(snapshot.content).toBe(content);
   });
 
-  test('shares persist hashes and strip plaintext tokens', () => {
-    const share = documentShareSchema.parse({
-      key: 'cm00000000000000000000001', scopeKey: 'cm00000000000000000000002', documentKey: 'cm00000000000000000000003',
-      permission: 'read', tokenHash: 'a'.repeat(64), token: 'plaintext-secret', embedding: [],
-      createdAt: '2026-07-22T10:00:00.000Z', updatedAt: '2026-07-22T10:00:00.000Z',
-    });
-    expect(share.tokenHash).toBe('a'.repeat(64));
-    expect(share).not.toHaveProperty('token');
-    expect(share).not.toHaveProperty('embedding');
-    expect(documentShareSchema.parse({ ...share, permission: 'comment' }).permission).toBe('comment');
-    expect(() => documentShareSchema.parse({ ...share, permission: 'view' })).toThrow();
-    expect(() => documentShareSchema.parse({ ...share, permission: 'edit' })).toThrow();
-    expect(documentShareSchema.parse({ ...share, embedding: [1] })).not.toHaveProperty('embedding');
-  });
-
   test('requires nonempty finite embeddings for persisted document snapshots', () => {
     const snapshot = {
       key: 'cm00000000000000000000001', scopeKey: 'cm00000000000000000000002', documentKey: 'cm00000000000000000000003',
@@ -107,10 +89,9 @@ describe('Content node contracts', () => {
     expect(() => documentVersionSchema.parse({ ...snapshot, embedding: [Number.NaN] })).toThrow();
   });
 
-  test('search and active-share queries allow roots and guard folder ownership', async () => {
+  test('search queries allow roots and guard folder ownership', async () => {
     const searchSource = await Bun.file(new URL('./documents.node.ts', import.meta.url)).text();
     const folderSource = await Bun.file(new URL('./folders.node.ts', import.meta.url)).text();
-    const shareSource = await Bun.file(new URL('./document-shares.node.ts', import.meta.url)).text();
     expect(searchSource).toContain("const folderKeys = input.folderKeys?.length ? input.folderKeys : null");
     expect(searchSource.match(/folder == null \|\| folder.scopeKey == document.scopeKey/g)).toHaveLength(2);
     expect(searchSource).toContain('document.chunkEmbeddings');
@@ -120,7 +101,5 @@ describe('Content node contracts', () => {
     expect(searchSource).not.toContain('version.updatedAt');
     expect(folderSource).toContain('folder.createdAt >= ${input.createdFrom ?? null}');
     expect(folderSource).toContain('folder.createdAt <= ${input.createdTo ?? null}');
-    expect(shareSource).toContain('document != null && document.scopeKey == share.scopeKey');
-    expect(shareSource).toContain('folder == null || folder.scopeKey == share.scopeKey');
   });
 });

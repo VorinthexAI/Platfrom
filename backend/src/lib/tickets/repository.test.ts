@@ -4,7 +4,7 @@ import { newId } from '@/lib/ids';
 import { createTicketRepository, type Ticket, type TicketDatabase } from './repository';
 
 const ticket = (): Ticket => ({
-  key: newId(), organizationKey: newId(), scopeKey: newId(), userKey: newId(), message: 'Need help',
+  key: newId(), teamKey: newId(), scopeKey: newId(), userKey: newId(), message: 'Need help',
   embedding: Array(EMBEDDING_DIMENSIONS).fill(0), idempotencyKey: 'request-1', requestHash: 'a'.repeat(64), type: 'issue', createdAt: '2026-09-03T10:00:00.000Z',
 });
 
@@ -24,7 +24,7 @@ describe('ticket repository', () => {
       } });
     });
     await expect(repository.createOrReplay(value, newId())).resolves.toEqual({ state: 'created', ticket: value });
-    expect(declaration).toEqual({ read: ['users', 'userOrganizations', 'scopes', 'scopeMembers'], write: ['tickets'] });
+    expect(declaration).toEqual({ read: ['users', 'userTeams', 'scopes', 'scopeMembers'], write: ['tickets'] });
     expect(query).toContain('LET user = DOCUMENT(users, @userKey)');
     expect(query).toContain('FILTER user != null');
     expect(query).toContain('membership.status == "active"');
@@ -65,8 +65,8 @@ describe('ticket repository', () => {
       declaration = collections;
       return operation({ query: async (text, vars) => { query = text; bindVars = vars ?? {}; return { next: async () => ({ authorized: true, rows: [{ ticket: { ...value, key: undefined, _key: value.key }, viewerVote: 'up' }] }) }; } });
     });
-    await expect(repository.listFeedback({ organizationKey: value.organizationKey, scopeKey: value.scopeKey, userKey: value.userKey, membershipKey: newId(), limit: 20 })).resolves.toEqual({ state: 'ok', tickets: [{ ticket: value, viewerVote: 'up' }], nextCursor: null });
-    expect(declaration).toEqual({ read: ['users', 'userOrganizations', 'scopes', 'scopeMembers', 'tickets', 'ticketVotes'], write: [] });
+    await expect(repository.listFeedback({ teamKey: value.teamKey, scopeKey: value.scopeKey, userKey: value.userKey, teamMembershipKey: newId(), limit: 20 })).resolves.toEqual({ state: 'ok', tickets: [{ ticket: value, viewerVote: 'up' }], nextCursor: null });
+    expect(declaration).toEqual({ read: ['users', 'userTeams', 'scopes', 'scopeMembers', 'tickets', 'ticketVotes'], write: [] });
     expect(query).toContain('ticket.type == "feedback"');
     expect(query).toContain('item.userKey == @userKey');
     expect(bindVars.pageSize).toBe(21);
@@ -86,8 +86,8 @@ describe('ticket repository', () => {
         return { next: async () => undefined };
       } });
     });
-    await expect(repository.setFeedbackVote({ organizationKey: value.organizationKey, scopeKey: value.scopeKey, userKey: value.userKey, membershipKey: newId(), ticketKey: value.key, vote: 'up', voteKey: newId(), now: value.createdAt })).resolves.toMatchObject({ state: 'ok', viewerVote: 'up' });
-    expect(declaration).toEqual({ read: ['users', 'userOrganizations', 'scopes', 'scopeMembers'], write: ['tickets', 'ticketVotes'] });
+    await expect(repository.setFeedbackVote({ teamKey: value.teamKey, scopeKey: value.scopeKey, userKey: value.userKey, teamMembershipKey: newId(), ticketKey: value.key, vote: 'up', voteKey: newId(), now: value.createdAt })).resolves.toMatchObject({ state: 'ok', viewerVote: 'up' });
+    expect(declaration).toEqual({ read: ['users', 'userTeams', 'scopes', 'scopeMembers'], write: ['tickets', 'ticketVotes'] });
     expect(queries).toHaveLength(4);
     expect(queries[0]).toContain('RETURN { authorized, selected: selected != null }');
     expect(queries[1]).toContain('UPSERT { ticketKey: @ticketKey, userKey: @userKey }');

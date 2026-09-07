@@ -1,0 +1,16 @@
+.page { position: relative; display: grid; min-height: 100dvh; overflow: hidden; padding: 24px; background: radial-gradient(circle at 50% 34%, rgba(104,137,143,.16), transparent 28rem), #020304; color: #eff0ed; place-items: center; }
+.page::before { position: absolute; inset: 0; background: linear-gradient(115deg, transparent 20%, rgba(255,255,255,.025) 50%, transparent 80%); content: ""; }
+.mark { position: absolute; width: min(72vw, 680px); height: auto; opacity: .035; filter: grayscale(1); transform: rotate(-8deg); }
+.card { position: relative; z-index: 1; display: grid; width: min(600px, 100%); padding: clamp(34px, 7vw, 66px); justify-items: center; border: 1px solid rgba(210,223,221,.16); border-radius: 28px; background: linear-gradient(145deg, rgba(15,22,24,.94), rgba(4,7,8,.97)); box-shadow: 0 34px 100px rgba(0,0,0,.58), inset 0 1px rgba(255,255,255,.06); text-align: center; }
+.brandMark { margin-bottom: 30px; opacity: .85; filter: grayscale(1); }
+.eyebrow { margin: 0 0 18px; color: #7d898c; font-family: var(--font-mono); font-size: 9px; letter-spacing: .24em; text-transform: uppercase; }
+.card h1 { max-width: 480px; margin: 0; font-family: var(--font-display); font-size: clamp(33px, 7vw, 50px); font-weight: 400; letter-spacing: .04em; line-height: 1.08; }
+.copy { max-width: 480px; margin: 22px 0 0; color: #969f9f; font-size: 14px; line-height: 1.75; }
+.actions { display: flex; margin-top: 32px; flex-wrap: wrap; justify-content: center; gap: 12px; }
+.actions :global(.vui-button) { gap: 9px; }
+.note { margin: 18px 0 0; color: #687173; font-family: var(--font-mono); font-size: 9px; letter-spacing: .08em; line-height: 1.6; }
+.rewards { display: grid; width: 100%; margin: 30px 0 0; padding: 0; grid-template-columns: 1fr 1fr; gap: 10px; list-style: none; }
+.rewards li { display: grid; padding: 20px 14px; gap: 7px; border: 1px solid rgba(205,218,216,.12); border-radius: 16px; background: rgba(151,177,178,.04); }
+.rewards strong { font-family: var(--font-display); font-size: 19px; font-weight: 400; }
+.rewards span { color: #858f90; font-size: 11px; line-height: 1.5; }
+@media (max-width: 520px) { .page { padding: 12px; } .card { padding: 38px 22px; border-radius: 22px; } .rewards { grid-template-columns: 1fr; } }

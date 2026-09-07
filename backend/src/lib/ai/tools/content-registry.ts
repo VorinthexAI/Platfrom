@@ -41,7 +41,7 @@ function modelInputSchema(name: ContentToolName): z.ZodTypeAny {
     const folder = canonical.shape.folders.element.omit({ scopeKey: true });
     return canonical.extend({ folders: z.array(folder).min(1).max(100) });
   }
-  if (name === 'document.search-all') return contentToolContracts[name].input.omit({ organizationKey: true });
+  if (name === 'document.search-all') return contentToolContracts[name].input.omit({ teamKey: true });
   if (hasPrimaryModelScope(name)) {
     const canonical: z.ZodTypeAny = contentToolContracts[name].input;
     const object = canonical instanceof z.ZodEffects ? canonical.innerType() : canonical;
@@ -68,12 +68,6 @@ function providerInputSchema(name: ContentToolName) {
     };
     if (name === 'document.parse') properties.file = fileHandle;
     else properties.pages = { type: 'array', minItems: 1, maxItems: 12, items: fileHandle };
-  }
-  if (name === 'document.unshare') {
-    schema.oneOf = [
-      { required: ['shareKeys'], not: { required: ['documentKeys'] } },
-      { required: ['documentKeys'], not: { required: ['shareKeys'] } },
-    ];
   }
   if (name === 'document.update') {
     const properties = schema.properties as Record<string, any>;

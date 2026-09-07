@@ -2,12 +2,14 @@ import { CONTENT_TOOL_DEFINITIONS, contentToolModelInputSchemas, hasContentIdemp
 import { isContentMutation, runContentTool, type ContentToolDependencies } from './content-runtime';
 import type { ContentToolName } from './content-schemas';
 import type { ToolContext } from './tool-context';
+import type { TeamService } from '@/lib/teams';
 
 export interface PublicToolDependencies {
   context: ToolContext;
   content?: ContentToolDependencies;
   executeContent?: typeof runContentTool;
   requestKey?: string;
+  teamService?: TeamService;
 }
 
 const contentDefinitions = new Map(CONTENT_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
@@ -27,7 +29,7 @@ export function createPublicToolDefinition<Name extends ContentToolName>(name: N
       const canonicalInput = name === 'folder.create'
         ? { ...input, folders: (input.folders as Record<string, unknown>[]).map((folder) => ({ scopeKey: dependencies.context.runtimeScopeKey, ...folder })) }
         : name === 'document.search-all'
-          ? { organizationKey: dependencies.context.organizationKey, ...input }
+          ? { teamKey: dependencies.context.teamKey, ...input }
           : hasPrimaryModelScope(name)
             ? { scopeKey: dependencies.context.runtimeScopeKey, ...input }
             : input;

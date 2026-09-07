@@ -12,7 +12,7 @@ import { fetchBookDetail, getBooksContext, updateBookChapterProgress, type BookC
 import { ascendQueryKeys, mergeBookDetailProgress, patchCachedBookDetail, patchCachedBookProgress } from "./workspace-query-cache";
 import { useAuthStore } from "@/state/auth";
 
-type ProgressJob = { bookKey: string; chapterKey: string; context: { organizationKey: string; scopeKey: string }; identity: string; intent: BookProgressIntent };
+type ProgressJob = { bookKey: string; chapterKey: string; context: { teamKey: string; scopeKey: string }; identity: string; intent: BookProgressIntent };
 
 type BookPlaybackValue = {
   audio: ReturnType<typeof useAudioPlayerStatus>;
@@ -51,10 +51,10 @@ function message(error: unknown) {
 export function BookPlaybackProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const userKey = useAuthStore((state) => typeof state.user?.key === "string" ? state.user.key : undefined);
-  const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "");
+  const teamKey = useAuthStore((state) => typeof state.team?.key === "string" ? state.team.key : "");
   const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
-  const identity = getBookPlaybackIdentity(userKey, organizationKey, scopeKey);
-  const context = useMemo(() => ({ organizationKey, scopeKey }), [organizationKey, scopeKey]);
+  const identity = getBookPlaybackIdentity(userKey, teamKey, scopeKey);
+  const context = useMemo(() => ({ teamKey, scopeKey }), [teamKey, scopeKey]);
   const [playbackBookKey, setPlaybackBookKey] = useState<string>();
   const [playbackChapterKey, setPlaybackChapterKey] = useState<string>();
   const [speed, setSpeedState] = useState(1);

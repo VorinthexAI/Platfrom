@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { apiClient } from "@/lib/api-client";
 
-const contextSchema = z.strictObject({ organizationKey: z.string().trim().min(1), scopeKey: z.string().trim().min(1) });
+const contextSchema = z.strictObject({ teamKey: z.string().trim().min(1), scopeKey: z.string().trim().min(1) });
 const outputSchema = z.strictObject({ text: z.string().trim().min(1) });
 const responseSchema = z.discriminatedUnion("success", [
   z.strictObject({ success: z.literal(true), data: outputSchema }),

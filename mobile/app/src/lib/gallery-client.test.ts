@@ -18,7 +18,7 @@ mock.module("expo-file-system", () => ({
 }));
 
 mock.module("@/state/auth", () => ({
-  useAuthStore: { getState: () => ({ user: { email: "recipient@example.com" }, organization: { key: "organization", membership_key: "membership" }, scope: { key: "scope" } }) },
+  useAuthStore: { getState: () => ({ user: { email: "recipient@example.com" }, team: { key: "team", membership_key: "membership" }, scope: { key: "scope" } }) },
 }));
 mock.module("./api-client", () => ({
   apiClient: { get: async (path: string, options?: { params?: Record<string, unknown>; timeout?: number }) => {
@@ -40,16 +40,7 @@ mock.module("./api-client", () => ({
     if (path === "/app/search") return { data: { success: true, data: { query: body.query, groups: [{ collectionSlug: (body.collectionSlugs as string[])[0], results: [] }] } } };
     if (path === "/gallery/uploads/presign") return { data: { success: true, data: { uploads: [{ clientKey: "local-image", uploadKey: "upload", imageKey: "image", url: "https://uploads.example/image", headers: { "Content-Type": "image/png" } }] } } };
     if (path === "/gallery/uploads/complete") return { data: { success: true, data: { jobs: [{ key: "upload", imageKey: "image", status: "queued" }] } } };
-    if (path === "/gallery/collections/members") return { data: { success: true, data: { owners: [], collaborators: [], viewers: [] } } };
-    if (path === "/gallery/invites/pending") return { data: { success: true, data: { invites: [
-      { key: "incoming", inviteeKey: "membership", role: "viewer", createdAt: "2026-08-18T00:00:00.000Z", collection: { key: "shared", name: "Shared" }, inviterDisplayName: "Ada" },
-      { key: "sent", email: "someone@example.com", role: "viewer", createdAt: "2026-08-18T00:00:00.000Z", collection: { key: "owned", name: "Owned" }, inviterDisplayName: "You" },
-    ] } } };
-    if (path === "/gallery/collections/shares/list") return { data: { success: true, data: { shares: [{ key: "listed", url: "https://vorinthex.com/share/secure-listed-token", role: "viewer", active: true, createdAt: "2026-08-18T00:00:00.000Z" }] } } };
-    if (path === "/gallery/collections/shares") return { data: { success: true, data: { share: { key: "link", url: "https://vorinthex.com/share/secure-created-token", role: "viewer", active: true, createdAt: "2026-08-18T00:00:00.000Z" }, token: "secure-created-token" } } };
-    if (path === "/gallery/collections/shares/update") return { data: { success: true, data: { share: { key: "link", url: "https://vorinthex.com/share/secure-created-token", role: "viewer", active: false, createdAt: "2026-08-18T00:00:00.000Z" } } } };
-    if (path === "/gallery/shares/activate") return { data: { success: true, data: { scopeKey: "scope", collectionKey: "shared", role: "viewer" } } };
-    const collection = { key: "collection", name: "Collection", description: null, purpose: null, mutationPolicy: "user", isFavorite: false, count: 0, coverUrl: null, memberKey: "membership", role: "owner", access: { canRead: true, canContribute: true, canManage: true }, createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z" };
+    const collection = { key: "collection", name: "Collection", description: null, purpose: null, mutationPolicy: "user", isFavorite: false, count: 0, coverUrl: null, actorKey: "membership", role: "owner", access: { canRead: true, canContribute: true, canManage: true }, createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z" };
     const persistedImage = { key: "image", filename: "image.jpg", caption: "Image", imageCaptionKey: null, mimeType: "image/jpeg", sizeBytes: 100, width: 10, height: 10, city: null, country: null, countryCode: null, latitude: null, longitude: null, locationSource: null, origin: "uploaded", mutationPolicy: "user", isFavorite: false, createdByKey: "membership", createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z", url: "https://images.example/image" };
     if (path === "/gallery/overview") return { data: { success: true, data: { collections: [], images: [], nextCursor: null, canCreateCollections: true } } };
     if (path === "/gallery/collections") return { data: { success: true, data: collection } };
@@ -59,7 +50,7 @@ mock.module("./api-client", () => ({
   } },
 }));
 
-const { activateGalleryShare, createGalleryCollection, createGalleryCollectionHighlight, createGalleryCollectionMemory, createGalleryCollectionShareLink, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryCollectionHighlight, deleteGalleryCollectionMemory, deleteGalleryGenerationHistory, deleteGalleryImages, deleteGallerySubject, fetchGalleryCollectionHighlight, fetchGalleryCollectionMemory, fetchGalleryOverview, filterGalleryShareLinks, findGalleryCollectionDuplicates, galleryCollectionSchema, galleryImageSchema, generateGalleryImages, groupGalleryImagesByCreatedDate, isGalleryClientErrorCode, isGalleryCollectionOwned, isGalleryMemoryExhaustion, isManagedGalleryCollection, isManagedGalleryImage, leaveGalleryCollection, listGalleryCollectionHighlights, listGalleryCollectionInvites, listGalleryCollectionMemories, listGalleryCollectionMembers, listGalleryCollectionShareLinks, listGalleryGenerationHistory, mergeMediaItems, partitionFavoriteGalleryImages, reconcileGalleryDuplicateDeletion, reconcileGalleryImageDeletion, removeGalleryCollectionMember, resolveGalleryHighlightSlides, respondToGalleryCollectionInvite, searchGalleryCollections, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMember, updateGalleryCollectionShareLink, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
+const { createGalleryCollection, createGalleryCollectionHighlight, createGalleryCollectionMemory, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryCollectionHighlight, deleteGalleryCollectionMemory, deleteGalleryGenerationHistory, deleteGalleryImages, deleteGallerySubject, fetchGalleryCollectionHighlight, fetchGalleryCollectionMemory, fetchGalleryOverview, findGalleryCollectionDuplicates, galleryCollectionSchema, galleryImageSchema, generateGalleryImages, groupGalleryImagesByCreatedDate, isGalleryClientErrorCode, isGalleryMemoryExhaustion, isManagedGalleryCollection, isManagedGalleryImage, listGalleryCollectionHighlights, listGalleryCollectionMemories, listGalleryGenerationHistory, mergeMediaItems, partitionFavoriteGalleryImages, reconcileGalleryDuplicateDeletion, reconcileGalleryImageDeletion, resolveGalleryHighlightSlides, searchGalleryCollections, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryImage, uploadGalleryImages } = await import("./gallery-client");
 
 beforeEach(() => { calls.splice(0); responses.clear(); failures.clear(); malformed.clear(); localFiles.clear(); });
 
@@ -72,18 +63,11 @@ const collection = (name: string, key: string) => ({
   isFavorite: false,
   count: 0,
   coverUrl: null,
-  memberKey: "membership",
+  actorKey: "membership",
   role: "owner" as const,
   access: { canRead: true, canContribute: true, canManage: true },
   createdAt: "2026-08-14T00:00:00.000Z",
   updatedAt: "2026-08-14T00:00:00.000Z",
-});
-
-test("uses authoritative ownership with a legacy role fallback", () => {
-  expect(isGalleryCollectionOwned({ isOwned: false, role: "owner" })).toBe(false);
-  expect(isGalleryCollectionOwned({ isOwned: true, role: "collaborator" })).toBe(true);
-  expect(isGalleryCollectionOwned({ role: "owner" })).toBe(true);
-  expect(isGalleryCollectionOwned({ role: "viewer" })).toBe(false);
 });
 
 test("identifies backend-managed place media without inferring it from names", () => {
@@ -95,7 +79,7 @@ test("identifies backend-managed place media without inferring it from names", (
 });
 
 test("accepts neutral app presentation metadata on collection projections", () => {
-  const base = { key: "collection", name: "Collection", description: null, purpose: null, mutationPolicy: "system-only", isFavorite: false, count: 0, coverUrl: null, memberKey: "membership", role: "owner", access: { canRead: true, canContribute: false, canManage: false }, createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z" };
+  const base = { key: "collection", name: "Collection", description: null, purpose: null, mutationPolicy: "system-only", isFavorite: false, count: 0, coverUrl: null, actorKey: "membership", role: "owner", access: { canRead: true, canContribute: false, canManage: false }, createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z" };
   for (const presentation of ["travel", "communication", "learning"] as const) expect(galleryCollectionSchema.parse({ ...base, presentation }).presentation).toBe(presentation);
   expect(galleryCollectionSchema.safeParse({ ...base, presentation: "unknown" }).success).toBe(false);
 });
@@ -162,7 +146,7 @@ test("strictly validates generation history and deletes by prompt with content s
   expect(await listGalleryGenerationHistory()).toEqual([{ type: "image", prompt: "A moonlit lake", normalizedPrompt: "a moonlit lake", usageCount: 2, generatedAt: "2026-08-31T10:00:00.000Z" }]);
   responses.set("DELETE /images/generation-history", { normalizedPrompt: "a moonlit lake", deleted: true });
   expect(await deleteGalleryGenerationHistory("A moonlit lake")).toEqual({ normalizedPrompt: "a moonlit lake", deleted: true });
-  expect(calls[1]).toMatchObject({ method: "DELETE", path: "/images/generation-history", body: { organizationKey: "organization", scopeKey: "scope", prompt: "A moonlit lake" } });
+  expect(calls[1]).toMatchObject({ method: "DELETE", path: "/images/generation-history", body: { teamKey: "team", scopeKey: "scope", prompt: "A moonlit lake" } });
   responses.set("GET /images/generation-history", { generations: [{ type: "image", prompt: "Lake", normalizedPrompt: "lake", usageCount: 1, generatedAt: "2026-08-31T10:00:00.000Z", extra: true }] });
   expect(listGalleryGenerationHistory()).rejects.toThrow();
 });
@@ -171,7 +155,7 @@ test("strictly validates generation requests and sends a stable idempotency key"
   responses.set("/images/generate", { images: [{ key: "generated", filename: "generated.png", caption: "A moonlit lake", mimeType: "image/png", sizeBytes: 100, width: 1024, height: 1024, origin: "generated", createdByKey: "membership", url: "https://images.example/generated", createdAt: "2026-08-31T10:00:00.000Z" }], provider: { durationMs: 123, costUsd: null } });
   const generated = await generateGalleryImages({ collectionKey: "collection", prompt: "A moonlit lake", count: 1, referenceImageKeys: ["reference"] }, "stable-request");
   expect(generated[0]).toMatchObject({ key: "generated", filename: "generated.png", origin: "generated", mutationPolicy: "user", imageCaptionKey: null });
-  expect(calls[0]).toMatchObject({ path: "/images/generate", headers: { "Idempotency-Key": "stable-request" }, body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", prompt: "A moonlit lake", count: 1, referenceImageKeys: ["reference"] } });
+  expect(calls[0]).toMatchObject({ path: "/images/generate", headers: { "Idempotency-Key": "stable-request" }, body: { teamKey: "team", scopeKey: "scope", collectionKey: "collection", prompt: "A moonlit lake", count: 1, referenceImageKeys: ["reference"] } });
   expect(generateGalleryImages({ collectionKey: "collection", prompt: "Lake", count: 3, referenceImageKeys: Array.from({ length: 9 }, (_, index) => `reference-${index}`) }, "request")).rejects.toThrow();
   responses.set("/images/generate", { images: [], provider: { durationMs: 1, costUsd: null } });
   expect(generateGalleryImages({ collectionKey: "collection", prompt: "Lake", count: 1, referenceImageKeys: [] }, "unsafe")).rejects.toThrow();
@@ -182,7 +166,7 @@ test("sends collection-scoped semantic searches through the canonical endpoint",
 
   expect(calls).toEqual([{
     path: "/app/search",
-    body: { organizationKey: "organization", scopeKey: "scope", query: "rain", collectionSlugs: ["images"], recordHistory: false, limit: 50, filters: { collectionKey: "collection" } },
+    body: { teamKey: "team", scopeKey: "scope", query: "rain", collectionSlugs: ["images"], recordHistory: false, limit: 50, filters: { collectionKey: "collection" } },
     timeout: 15_000,
   }]);
 });
@@ -199,9 +183,9 @@ test("lists and searches tag-filtered Gallery collections and images through app
   await searchGalleryImages({ query: "rain", collectionKey: "collection", recordHistory: false, limit: 50, tagKeys: ["summer", "family"] });
 
   expect(calls.map(({ path, body }) => ({ path, body }))).toEqual([
-    { path: "/app/search", body: { organizationKey: "organization", scopeKey: "scope", operation: "list", collectionSlugs: ["collections"], recordHistory: false, limit: 50, filters: { tagKeys: ["summer", "family"], tagMatch: "all" } } },
-    { path: "/app/search", body: { organizationKey: "organization", scopeKey: "scope", operation: "list", collectionSlugs: ["images"], recordHistory: false, limit: 50, filters: { collectionKey: "collection", tagKeys: ["summer", "family"], tagMatch: "all" } } },
-    { path: "/app/search", body: { organizationKey: "organization", scopeKey: "scope", query: "rain", collectionSlugs: ["images"], recordHistory: false, limit: 50, filters: { collectionKey: "collection", tagKeys: ["summer", "family"], tagMatch: "all" } } },
+    { path: "/app/search", body: { teamKey: "team", scopeKey: "scope", operation: "list", collectionSlugs: ["collections"], recordHistory: false, limit: 50, filters: { tagKeys: ["summer", "family"], tagMatch: "all" } } },
+    { path: "/app/search", body: { teamKey: "team", scopeKey: "scope", operation: "list", collectionSlugs: ["images"], recordHistory: false, limit: 50, filters: { collectionKey: "collection", tagKeys: ["summer", "family"], tagMatch: "all" } } },
+    { path: "/app/search", body: { teamKey: "team", scopeKey: "scope", query: "rain", collectionSlugs: ["images"], recordHistory: false, limit: 50, filters: { collectionKey: "collection", tagKeys: ["summer", "family"], tagMatch: "all" } } },
   ]);
 });
 
@@ -229,8 +213,8 @@ test("validates and sends ordered custom highlight and memory image payloads", a
   await createGalleryCollectionMemory("collection", "first");
 
   expect(calls.slice(-2).map(({ path, body }) => ({ path, body }))).toEqual([
-    { path: "/gallery/highlights", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", imageKeys: ["first", "second"] } },
-    { path: "/gallery/memories", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", imageKey: "first" } },
+    { path: "/gallery/highlights", body: { teamKey: "team", scopeKey: "scope", collectionKey: "collection", imageKeys: ["first", "second"] } },
+    { path: "/gallery/memories", body: { teamKey: "team", scopeKey: "scope", collectionKey: "collection", imageKey: "first" } },
   ]);
   expect(() => createGalleryCollectionHighlight("collection", ["only-one"])).toThrow();
   expect(() => createGalleryCollectionHighlight("collection", Array.from({ length: 11 }, (_, index) => `image-${index}`))).toThrow();
@@ -245,7 +229,7 @@ test("passes image search cancellation to the transport", async () => {
 
 test("requests cursor pages of one hundred collection images", async () => {
   await fetchGalleryOverview("collection", "next-page");
-  expect(calls[0]).toMatchObject({ path: "/gallery/overview", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", cursor: "next-page", limit: 100 } });
+  expect(calls[0]).toMatchObject({ path: "/gallery/overview", body: { teamKey: "team", scopeKey: "scope", collectionKey: "collection", cursor: "next-page", limit: 100 } });
   expect(calls[0]?.body).not.toHaveProperty("maxCaptionScore");
 });
 
@@ -261,30 +245,29 @@ test("sends an inclusive caption score threshold on initial and cursor overview 
   await fetchGalleryOverview("collection", "next-page", 100, 50);
 
   expect(calls.map(({ body }) => body)).toEqual([
-    { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", limit: 100, maxCaptionScore: 50 },
-    { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", cursor: "next-page", limit: 100, maxCaptionScore: 50 },
+    { teamKey: "team", scopeKey: "scope", collectionKey: "collection", limit: 100, maxCaptionScore: 50 },
+    { teamKey: "team", scopeKey: "scope", collectionKey: "collection", cursor: "next-page", limit: 100, maxCaptionScore: 50 },
   ]);
 });
 
-test("strictly parses authoritative overview collection roles and capabilities", async () => {
+test("keeps owned and managed collections while removing authorization transport metadata", async () => {
   const base = collection("Legacy", "legacy");
-  responses.set("/gallery/overview", { collections: [base, { ...base, key: "viewer", role: "viewer", access: { canRead: true, canContribute: false, canManage: false } }, { ...base, key: "collaborator", role: "collaborator", access: { canRead: true, canContribute: true, canManage: false } }], images: [], nextCursor: null, canCreateCollections: true });
+  const external = { ...base, key: "external", role: "viewer" as const, isOwned: false, access: { canRead: true, canContribute: false, canManage: false } };
+  const managed = { ...external, key: "managed", purpose: "generated-media" as const, mutationPolicy: "system-only" as const };
+  responses.set("/gallery/overview", { collections: [base, external, managed], images: [], nextCursor: null, canCreateCollections: true });
 
   const overview = await fetchGalleryOverview();
 
-  expect(overview.collections.map(({ role, access }) => ({ role, access }))).toEqual([
-    { role: "owner", access: { canRead: true, canContribute: true, canManage: true } },
-    { role: "viewer", access: { canRead: true, canContribute: false, canManage: false } },
-    { role: "collaborator", access: { canRead: true, canContribute: true, canManage: false } },
-  ]);
+  expect(overview.collections.map(({ key }) => key)).toEqual(["legacy", "managed"]);
+  expect(overview.collections.every((collection) => !("role" in collection) && !("isOwned" in collection))).toBe(true);
 });
 
-test("normalizes create and update responses while preserving authoritative false capabilities", async () => {
+test("parses create and update responses while preserving authoritative false capabilities", async () => {
   const base = collection("Collection", "collection");
   responses.set("/gallery/collections", base);
   responses.set("/gallery/collections/update", { collection: { ...base, role: "owner", access: { canRead: true, canContribute: false, canManage: false } } });
 
-  expect(await createGalleryCollection("Collection", false)).toMatchObject({ role: "owner", access: { canRead: true, canContribute: true, canManage: true } });
+  expect(await createGalleryCollection("Collection", false)).toMatchObject({ access: { canRead: true, canContribute: true, canManage: true } });
   expect((await updateGalleryCollection("collection", "Collection", false)).collection.access).toEqual({ canRead: true, canContribute: false, canManage: false });
 });
 
@@ -293,14 +276,14 @@ test("sends similarity and duplicate discovery through image search", async () =
   await findGalleryCollectionDuplicates("collection");
 
   expect(calls.map(({ path, body }) => ({ path, body }))).toEqual([
-    { path: "/gallery/images/search", body: { organizationKey: "organization", scopeKey: "scope", imageKey: "source-image", limit: 15 } },
-    { path: "/gallery/images/search", body: { organizationKey: "organization", scopeKey: "scope", duplicates: true, collectionKey: "collection" } },
+    { path: "/gallery/images/search", body: { teamKey: "team", scopeKey: "scope", imageKey: "source-image", limit: 15 } },
+    { path: "/gallery/images/search", body: { teamKey: "team", scopeKey: "scope", duplicates: true, collectionKey: "collection" } },
   ]);
 });
 
 test("sends visual identity search without a threshold or caller limit", async () => {
   await searchGalleryImages({ identityKey: "identity", collectionKey: "collection" });
-  expect(calls[0]).toMatchObject({ path: "/gallery/images/search", body: { organizationKey: "organization", scopeKey: "scope", identityKey: "identity", collectionKey: "collection" } });
+  expect(calls[0]).toMatchObject({ path: "/gallery/images/search", body: { teamKey: "team", scopeKey: "scope", identityKey: "identity", collectionKey: "collection" } });
   expect(calls[0]?.body).not.toHaveProperty("threshold");
   expect(calls[0]?.body).not.toHaveProperty("limit");
 });
@@ -311,9 +294,9 @@ test("sends favorite, delete, and many-to-many transfer through canonical mutati
   await transferGalleryCollectionImages({ sourceCollectionKey: "source", destinationCollectionKeys: ["one"], imageKeys: ["image-a", "image-b"], mode: "copy" });
 
   expect(calls.map(({ path, body }) => ({ path, body }))).toEqual([
-    { path: "/gallery/images/favorite", body: { organizationKey: "organization", scopeKey: "scope", imageKey: "image", isFavorite: true } },
-    { path: "/gallery/images/delete", body: { organizationKey: "organization", scopeKey: "scope", imageKeys: ["image-a", "image-b"] } },
-    { path: "/gallery/collections/images/transfer", body: { organizationKey: "organization", scopeKey: "scope", sourceCollectionKey: "source", destinationCollectionKeys: ["one"], imageKeys: ["image-a", "image-b"], mode: "copy" } },
+    { path: "/gallery/images/favorite", body: { teamKey: "team", scopeKey: "scope", imageKey: "image", isFavorite: true } },
+    { path: "/gallery/images/delete", body: { teamKey: "team", scopeKey: "scope", imageKeys: ["image-a", "image-b"] } },
+    { path: "/gallery/collections/images/transfer", body: { teamKey: "team", scopeKey: "scope", sourceCollectionKey: "source", destinationCollectionKeys: ["one"], imageKeys: ["image-a", "image-b"], mode: "copy" } },
   ]);
 });
 
@@ -377,9 +360,9 @@ test("sends image and collection edits and collection deletion through canonical
   await updateGalleryCollection("collection", "Portraits", true);
   await deleteGalleryCollection("collection");
   expect(calls.map(({ path, body }) => ({ path, body }))).toEqual([
-    { path: "/gallery/images/update", body: { organizationKey: "organization", scopeKey: "scope", imageKey: "image", name: "portrait.jpg", isFavorite: true } },
-    { path: "/gallery/collections/update", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", name: "Portraits", isFavorite: true } },
-    { path: "/gallery/collections/delete", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" } },
+    { path: "/gallery/images/update", body: { teamKey: "team", scopeKey: "scope", imageKey: "image", name: "portrait.jpg", isFavorite: true } },
+    { path: "/gallery/collections/update", body: { teamKey: "team", scopeKey: "scope", collectionKey: "collection", name: "Portraits", isFavorite: true } },
+    { path: "/gallery/collections/delete", body: { teamKey: "team", scopeKey: "scope", collectionKey: "collection" } },
   ]);
 });
 
@@ -388,64 +371,21 @@ test("distinguishes selected, cleared, and omitted collection covers", async () 
   await updateGalleryCollection("collection", "Cleared", false, null);
   await updateGalleryCollection("collection", "Untouched", false);
   expect(calls.map(({ body }) => body)).toEqual([
-    { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", name: "Selected", isFavorite: false, coverImageKey: "image-key" },
-    { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", name: "Cleared", isFavorite: false, coverImageKey: null },
-    { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection", name: "Untouched", isFavorite: false },
+    { teamKey: "team", scopeKey: "scope", collectionKey: "collection", name: "Selected", isFavorite: false, coverImageKey: "image-key" },
+    { teamKey: "team", scopeKey: "scope", collectionKey: "collection", name: "Cleared", isFavorite: false, coverImageKey: null },
+    { teamKey: "team", scopeKey: "scope", collectionKey: "collection", name: "Untouched", isFavorite: false },
   ]);
-});
-
-test("filters share links into active and inactive tabs", () => {
-  const links = [
-    { key: "active", url: "https://vorinthex.com/share/active", role: "viewer" as const, active: true, createdAt: "2026-01-01T00:00:00.000Z" },
-    { key: "inactive", url: "https://vorinthex.com/share/inactive", role: "collaborator" as const, active: false, createdAt: "2026-01-02T00:00:00.000Z" },
-  ];
-  expect(filterGalleryShareLinks(links, true).map(({ key }) => key)).toEqual(["active"]);
-  expect(filterGalleryShareLinks(links, false).map(({ key }) => key)).toEqual(["inactive"]);
 });
 
 test("creates collections with only a name and favorite state", async () => {
   await createGalleryCollection("Portraits", true);
-  expect(calls[0]).toMatchObject({ path: "/gallery/collections", body: { organizationKey: "organization", scopeKey: "scope", name: "Portraits", isFavorite: true } });
+  expect(calls[0]).toMatchObject({ path: "/gallery/collections", body: { teamKey: "team", scopeKey: "scope", name: "Portraits", isFavorite: true } });
   expect(calls[0]?.body).not.toHaveProperty("description");
-});
-
-test("uses explicit strict POST contracts for collection sharing", async () => {
-  await listGalleryCollectionMembers("collection");
-  await updateGalleryCollectionMember("collection", "member", "collaborator");
-  await removeGalleryCollectionMember("collection", "member");
-  const pending = await listGalleryCollectionInvites();
-  await respondToGalleryCollectionInvite("invite", "accept");
-  await respondToGalleryCollectionInvite("invite", "reject");
-  const listed = await listGalleryCollectionShareLinks("collection");
-  const created = await createGalleryCollectionShareLink("collection", "viewer", true);
-  expect(created.token).toBe("secure-created-token");
-  const updated = await updateGalleryCollectionShareLink("collection", "link", false);
-  await leaveGalleryCollection("collection");
-  expect(calls.map(({ path }) => path)).toEqual([
-    "/gallery/collections/members", "/gallery/collections/members/role", "/gallery/collections/members/remove",
-    "/gallery/invites/pending", "/gallery/invites/accept", "/gallery/invites/reject",
-    "/gallery/collections/shares/list", "/gallery/collections/shares", "/gallery/collections/shares/update", "/gallery/collections/leave",
-  ]);
-  expect(calls.every(({ body }) => body.organizationKey === "organization" && body.scopeKey === "scope")).toBe(true);
-  expect(calls[3]?.body).toEqual({ organizationKey: "organization", scopeKey: "scope" });
-  expect(calls[4]?.body).not.toHaveProperty("collectionKey");
-  expect(pending.invites.map(({ key }) => key)).toEqual(["incoming"]);
-  expect(listed.links[0]?.url).toBe("https://vorinthex.com/share/secure-listed-token");
-  expect(created.link.url).toBe("https://vorinthex.com/share/secure-created-token");
-  expect(updated.link.url).toBe("https://vorinthex.com/share/secure-created-token");
-  expect(calls[8]?.body).toMatchObject({ shareKey: "link", active: false });
-  expect(calls[8]?.body).not.toHaveProperty("role");
-  expect(calls[7]?.body).toMatchObject({ role: "viewer", active: true });
-});
-
-test("activates a secure collection share token with returned scope context", async () => {
-  expect(await activateGalleryShare("secure-token")).toEqual({ scopeKey: "scope", collectionKey: "shared", role: "viewer" });
-  expect(calls).toEqual([{ path: "/gallery/shares/activate", body: { organizationKey: "organization", scopeKey: "scope", token: "secure-token" }, timeout: 60_000 }]);
 });
 
 test("deletes visual identities through the canonical Gallery mutation", async () => {
   await deleteGallerySubject("identity");
-  expect(calls[0]).toMatchObject({ path: "/gallery/subjects/delete", body: { organizationKey: "organization", scopeKey: "scope", identityKey: "identity" } });
+  expect(calls[0]).toMatchObject({ path: "/gallery/subjects/delete", body: { teamKey: "team", scopeKey: "scope", identityKey: "identity" } });
 });
 
 test("creates, lists, and reads collection highlights through canonical operation routes", async () => {
@@ -460,10 +400,10 @@ test("creates, lists, and reads collection highlights through canonical operatio
   expect((await fetchGalleryCollectionHighlight("highlight")).highlight.key).toBe("highlight");
   expect(await deleteGalleryCollectionHighlight("highlight")).toEqual({ highlightKey: "highlight" });
   expect(calls.map(({ path, body, timeout, method }) => ({ path, body, timeout, method }))).toEqual([
-    { path: "/gallery/highlights", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" }, timeout: 60_000, method: undefined },
-    { path: "/gallery/highlights", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" }, timeout: 60_000, method: "GET" },
-    { path: "/gallery/highlights/read", body: { organizationKey: "organization", scopeKey: "scope", highlightKey: "highlight" }, timeout: 60_000, method: undefined },
-    { path: "/gallery/highlights/delete", body: { organizationKey: "organization", scopeKey: "scope", highlightKey: "highlight" }, timeout: 60_000, method: undefined },
+    { path: "/gallery/highlights", body: { teamKey: "team", scopeKey: "scope", collectionKey: "collection" }, timeout: 60_000, method: undefined },
+    { path: "/gallery/highlights", body: { teamKey: "team", scopeKey: "scope", collectionKey: "collection" }, timeout: 60_000, method: "GET" },
+    { path: "/gallery/highlights/read", body: { teamKey: "team", scopeKey: "scope", highlightKey: "highlight" }, timeout: 60_000, method: undefined },
+    { path: "/gallery/highlights/delete", body: { teamKey: "team", scopeKey: "scope", highlightKey: "highlight" }, timeout: 60_000, method: undefined },
   ]);
 });
 
@@ -484,10 +424,10 @@ test("creates, lists, reads, and deletes collection memories through canonical r
   expect((await fetchGalleryCollectionMemory("memory")).memory).toEqual(memory);
   expect(await deleteGalleryCollectionMemory("memory", "collection")).toEqual({ memoryKey: "memory" });
   expect(calls.map(({ path, body, method }) => ({ path, body, method }))).toEqual([
-    { path: "/gallery/memories", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" }, method: undefined },
-    { path: "/gallery/memories", body: { organizationKey: "organization", scopeKey: "scope", collectionKey: "collection" }, method: "GET" },
-    { path: "/gallery/memories/read", body: { organizationKey: "organization", scopeKey: "scope", memoryKey: "memory" }, method: undefined },
-    { path: "/gallery/memories/delete", body: { organizationKey: "organization", scopeKey: "scope", memoryKey: "memory", collectionKey: "collection" }, method: undefined },
+    { path: "/gallery/memories", body: { teamKey: "team", scopeKey: "scope", collectionKey: "collection" }, method: undefined },
+    { path: "/gallery/memories", body: { teamKey: "team", scopeKey: "scope", collectionKey: "collection" }, method: "GET" },
+    { path: "/gallery/memories/read", body: { teamKey: "team", scopeKey: "scope", memoryKey: "memory" }, method: undefined },
+    { path: "/gallery/memories/delete", body: { teamKey: "team", scopeKey: "scope", memoryKey: "memory", collectionKey: "collection" }, method: undefined },
   ]);
 });
 

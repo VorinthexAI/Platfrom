@@ -27,11 +27,8 @@ export function createCachedUrlSigner(sign: (key: string) => Promise<string>, op
 }
 
 const signBookUrl = createCachedUrlSigner((key) => signObject(publicS3, new GetObjectCommand({ Bucket: S3_BUCKET, Key: key }), { expiresIn: 15 * 60 }));
-const signPublicBookUrl = (key: string) => signObject(publicS3, new GetObjectCommand({ Bucket: S3_BUCKET, Key: key }), { expiresIn: 5 * 60 });
-
 export const defaultBookService = createBookService({
   repository,
   generator: createBookRuntime({ repository }),
   signUrl: signBookUrl,
-  publicSignUrl: signPublicBookUrl,
 });

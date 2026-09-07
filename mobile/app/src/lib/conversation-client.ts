@@ -17,13 +17,13 @@ export const CONVERSATION_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 
 export const conversationContextSchema = z.strictObject({
   userKey: z.string().min(1),
-  organizationKey: z.string().min(1),
+  teamKey: z.string().min(1),
   scopeKey: z.string().min(1),
 });
 export type ConversationContext = z.infer<typeof conversationContextSchema>;
 
 export function conversationContextIdentity(context: ConversationContext) {
-  return `${context.userKey}:${context.organizationKey}:${context.scopeKey}`;
+  return `${context.userKey}:${context.teamKey}:${context.scopeKey}`;
 }
 
 export function isConversationContextCurrent(capturedIdentity: string, currentIdentity: { current: string }) {
@@ -36,14 +36,14 @@ export function isConversationNotFoundError(error: unknown) {
 
 export const conversationSchema = z.strictObject({
   key: z.string().min(1),
-  organizationKey: z.string().min(1),
+  teamKey: z.string().min(1),
   scopeKey: z.string().min(1),
   userKey: z.string().min(1),
   name: z.string().min(1).max(CONVERSATION_NAME_MAX_LENGTH),
   isFavorite: z.boolean(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
-}).transform(({ organizationKey: _organizationKey, scopeKey: _scopeKey, userKey: _userKey, ...conversation }) => conversation);
+}).transform(({ teamKey: _teamKey, scopeKey: _scopeKey, userKey: _userKey, ...conversation }) => conversation);
 export type Conversation = z.infer<typeof conversationSchema>;
 
 export const conversationRetrievalCollectionSlugSchema = z.enum(["folders", "documents", "files", "collections", "images", "inboxes", "email-tones", "email-messages", "email-drafts", "places", "trips", "countries", "books"]);
@@ -53,7 +53,7 @@ export const conversationRetrievalFiltersSchema = z.strictObject({
   collectionKey: z.string().cuid().optional(),
   connectorKey: z.string().cuid().optional(),
   readState: z.enum(["read", "unread"]).optional(),
-  emailFacets: z.array(z.enum(["urgent", "important", "filtered", "favorite"])).max(4).optional(),
+  emailFacets: z.array(z.enum(["urgent", "important", "purchases", "filtered", "favorite"])).max(5).optional(),
   createdFrom: z.string().datetime().optional(),
   createdTo: z.string().datetime().optional(),
 });
@@ -107,7 +107,7 @@ export type ConversationMessagePage = z.infer<typeof conversationMessagePageSche
 
 const conversationEnvelope = <T extends z.ZodTypeAny>(schema: T) => z.union([schema, z.strictObject({ success: z.literal(true), data: schema })]);
 function unwrap<T>(value: T | { success: true; data: T }): T { return typeof value === "object" && value !== null && "success" in value ? value.data : value; }
-function selectors(context: ConversationContext) { const { organizationKey, scopeKey } = conversationContextSchema.parse(context); return { organizationKey, scopeKey }; }
+function selectors(context: ConversationContext) { const { teamKey, scopeKey } = conversationContextSchema.parse(context); return { teamKey, scopeKey }; }
 
 const attachmentFileSchema = z.strictObject({
   clientKey: z.string().trim().min(1).max(120),
@@ -171,13 +171,13 @@ export async function listConversationMessages(context: ConversationContext, con
 }
 
 export async function createConversation(context: ConversationContext, name = "New chat", signal?: AbortSignal) {
-  const body = z.strictObject({ organizationKey: z.string().min(1), scopeKey: z.string().min(1), name: z.string().trim().min(1).max(CONVERSATION_NAME_MAX_LENGTH).optional() }).parse({ ...selectors(context), name });
+  const body = z.strictObject({ teamKey: z.string().min(1), scopeKey: z.string().min(1), name: z.string().trim().min(1).max(CONVERSATION_NAME_MAX_LENGTH).optional() }).parse({ ...selectors(context), name });
   return unwrap(conversationEnvelope(conversationSchema).parse((await apiClient.post("/conversations", body, { signal })).data));
 }
 
 export async function updateConversation(context: ConversationContext, conversationKey: string, patch: { name?: string; isFavorite?: boolean }, signal?: AbortSignal) {
   const key = z.string().min(1).parse(conversationKey);
-  const body = z.strictObject({ organizationKey: z.string().min(1), scopeKey: z.string().min(1), name: z.string().trim().min(1).max(CONVERSATION_NAME_MAX_LENGTH).optional(), isFavorite: z.boolean().optional() })
+  const body = z.strictObject({ teamKey: z.string().min(1), scopeKey: z.string().min(1), name: z.string().trim().min(1).max(CONVERSATION_NAME_MAX_LENGTH).optional(), isFavorite: z.boolean().optional() })
     .refine(({ name, isFavorite }) => name !== undefined || isFavorite !== undefined, "A conversation change is required.").parse({ ...selectors(context), ...patch });
   const response = patch.name !== undefined ? await apiClient.patch(`/conversations/${encodeURIComponent(key)}`, body, { signal }) : await apiClient.post(`/conversations/${encodeURIComponent(key)}/favorite`, body, { signal });
   return unwrap(conversationEnvelope(conversationSchema).parse(response.data));
@@ -232,7 +232,7 @@ export function parseConversationTurnEvent(event: ServerSentEvent) {
 export type ConversationEventTransport = (path: string, body: unknown, onEvent: (event: ServerSentEvent) => void, signal?: AbortSignal) => Promise<void>;
 
 export async function streamConversationTurnWithTransport(transport: ConversationEventTransport, context: ConversationContext, input: { conversationKey: string; message: string; requestKey: string; attachmentKeys?: string[]; referenceImageKeys?: string[] }, onEvent: (event: ConversationTurnEvent) => void, signal?: AbortSignal) {
-  const body = z.strictObject({ organizationKey: z.string().min(1), scopeKey: z.string().min(1), conversationKey: z.string().min(1), message: z.string().trim().min(1).max(CONVERSATION_MESSAGE_MAX_LENGTH), requestKey: z.string().min(1).max(180), attachmentKeys: z.array(z.string().min(1)).max(CONVERSATION_ATTACHMENT_MAX_FILES).default([]), referenceImageKeys: z.array(z.string().min(1)).max(1).default([]) }).parse({ ...selectors(context), ...input });
+  const body = z.strictObject({ teamKey: z.string().min(1), scopeKey: z.string().min(1), conversationKey: z.string().min(1), message: z.string().trim().min(1).max(CONVERSATION_MESSAGE_MAX_LENGTH), requestKey: z.string().min(1).max(180), attachmentKeys: z.array(z.string().min(1)).max(CONVERSATION_ATTACHMENT_MAX_FILES).default([]), referenceImageKeys: z.array(z.string().min(1)).max(1).default([]) }).parse({ ...selectors(context), ...input });
   const { conversationKey, ...request } = body;
   let started: Extract<ConversationTurnEvent, { type: "start" }> | undefined;
   let terminal: Extract<ConversationTurnEvent, { type: "done" | "error" }> | undefined;

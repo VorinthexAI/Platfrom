@@ -38,7 +38,7 @@ describe('user helpers', () => {
   test('defaults new users to subscribed to updates', () => {
     const user = userSchema.parse({
       key: 'usr_test',
-      organizationId: 'org_root',
+      teamKey: 'team_root',
       currentScopeKey: 'cm1234567890123456789012345',
       email: 'person@example.com',
       emailHash: 'hash',

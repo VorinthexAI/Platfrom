@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
 import { NODE_NAMES, NODE_REGISTRY, registerNode } from './registry';
-import { organizationSchema } from './organizations.node';
-import { userOrganizationSchema } from './user-organization.node';
+import { teamSchema } from './teams.node';
+import { userTeamSchema } from './user-team.node';
 import { userSchema } from './users.node';
 import { channelSchema } from './channels.node';
 import { channelParticipantSchema } from './channel-participants.node';
@@ -16,14 +16,12 @@ import { pollVoteSchema } from './poll-votes.node';
 import { folderSchema } from './folders.node';
 import { documentSchema } from './documents.node';
 import { documentVersionSchema } from './document-versions.node';
-import { documentShareSchema } from './document-shares.node';
 import { imageSchema } from './images.node';
 import { collectionSchema } from './collections.node';
-import { shareSchema } from './shares.node';
 import { placeSchema } from './places.node';
 
 describe('node registry schema contracts', () => {
-  test('registry serves organizations and user links, never the retired team/platform nodes', () => {
+  test('registry serves teams and user links, never the retired team/platform nodes', () => {
     expect(NODE_NAMES).not.toContain('actions');
     expect(NODE_NAMES).not.toContain('providers');
     expect(NODE_NAMES).not.toContain('models');
@@ -50,7 +48,6 @@ describe('node registry schema contracts', () => {
       'images',
       'collections',
       'collectionImages',
-      'collectionMembers',
       'tags',
       'tagAssignments',
       'places',
@@ -59,12 +56,10 @@ describe('node registry schema contracts', () => {
     expect(NODE_NAMES).not.toContain('tools');
     expect(NODE_NAMES).not.toContain('toolActions');
     expect(NODE_NAMES).toContain('users');
-    expect(NODE_NAMES).toContain('organizations');
-    expect(NODE_NAMES).toContain('userOrganizations');
-    expect(NODE_NAMES).not.toContain('organizationMembers');
-    expect(NODE_NAMES).not.toContain('platforms');
-    expect(NODE_NAMES).not.toContain('teams');
+    expect(NODE_NAMES).toContain('teams');
+    expect(NODE_NAMES).toContain('userTeams');
     expect(NODE_NAMES).not.toContain('teamMembers');
+    expect(NODE_NAMES).not.toContain('platforms');
     expect(NODE_NAMES).not.toContain('teamMemberInvites');
     expect(NODE_NAMES).not.toContain('members');
     expect(NODE_NAMES).not.toContain('superAdmins');
@@ -73,8 +68,8 @@ describe('node registry schema contracts', () => {
 
   test('new and changed node schemas carry embedding fields', () => {
     expect(userSchema.shape).toHaveProperty('embedding');
-    expect(organizationSchema.shape).toHaveProperty('embedding');
-    expect(userOrganizationSchema.shape).toHaveProperty('embedding');
+    expect(teamSchema.shape).toHaveProperty('embedding');
+    expect(userTeamSchema.shape).toHaveProperty('embedding');
     for (const schema of [
       channelSchema,
       channelParticipantSchema,
@@ -122,12 +117,7 @@ describe('node registry schema contracts', () => {
     expect(NODE_NAMES).not.toContain('shares');
     expect(NODE_NAMES).not.toContain('collectionInvites');
     expect(NODE_NAMES).not.toContain('documentShares');
-    expect(documentShareSchema.shape).toHaveProperty('key');
-    expect(documentShareSchema.shape).not.toHaveProperty('embedding');
-    expect(shareSchema.shape).toHaveProperty('sourceType');
-    expect(shareSchema.shape).toHaveProperty('sourceKey');
-    expect(shareSchema.shape).not.toHaveProperty('embedding');
-    for (const schema of [imageSchema, collectionSchema, folderSchema, documentSchema, documentVersionSchema, documentShareSchema, shareSchema]) expect(schema.safeParse({}).success).toBe(false);
+    for (const schema of [imageSchema, collectionSchema, folderSchema, documentSchema, documentVersionSchema]) expect(schema.safeParse({}).success).toBe(false);
   });
 
   test('requires exactly one channel participant identity', () => {
@@ -136,8 +126,8 @@ describe('node registry schema contracts', () => {
       joinedAt: '2026-07-22T00:00:00.000Z', createdAt: '2026-07-22T00:00:00.000Z', updatedAt: '2026-07-22T00:00:00.000Z',
     };
     expect(() => channelParticipantSchema.parse(participant)).toThrow();
-    expect(() => channelParticipantSchema.parse({ ...participant, userOrganizationKey: 'cmrnlzf640003qc7k4p5zem5w', orchestratorKey: 'cmrnlzf640004qc7k4p5zem5w' })).toThrow();
-    expect(channelParticipantSchema.parse({ ...participant, userOrganizationKey: 'cmrnlzf640003qc7k4p5zem5w' }).userOrganizationKey).toBeDefined();
+    expect(() => channelParticipantSchema.parse({ ...participant, userTeamKey: 'cmrnlzf640003qc7k4p5zem5w', orchestratorKey: 'cmrnlzf640004qc7k4p5zem5w' })).toThrow();
+    expect(channelParticipantSchema.parse({ ...participant, userTeamKey: 'cmrnlzf640003qc7k4p5zem5w' }).userTeamKey).toBeDefined();
   });
 
   test('registers new nodes for generic consumers', () => {

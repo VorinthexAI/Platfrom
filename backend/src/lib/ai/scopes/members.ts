@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { isArangoNotFoundError, isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib/db/base';
-import { userOrganizationSchema } from '@/lib/db/user-organization.node';
+import { userTeamSchema } from '@/lib/db/user-team.node';
 import { userSchema } from '@/lib/db/users.node';
 import { newId } from '@/lib/ids';
 import { AiError } from '@/lib/ai/shared/result';
@@ -26,46 +26,46 @@ export type ScopeMemberView = {
 };
 
 export interface ScopeMemberRepository {
-  addMember(scopeKey: string, userOrganizationKey: string, role: ScopeMemberRole): Promise<ScopeMember>;
-  removeMember(scopeKey: string, userOrganizationKey: string): Promise<void>;
+  addMember(scopeKey: string, userTeamKey: string, role: ScopeMemberRole): Promise<ScopeMember>;
+  removeMember(scopeKey: string, userTeamKey: string): Promise<void>;
   listMembers(scopeKey: string): Promise<readonly ScopeMember[]>;
   listMemberViews(scopeKey: string): Promise<readonly ScopeMemberView[]>;
 }
 
 export class ScopeMembershipNotFoundError extends AiError {
-  constructor(userOrganizationKey: string) {
-    super('scope_membership_not_found', `User organization membership not found: ${userOrganizationKey}`);
+  constructor(userTeamKey: string) {
+    super('scope_membership_not_found', `User team membership not found: ${userTeamKey}`);
   }
 }
 
-export class ScopeMemberOrganizationMismatchError extends AiError {
-  constructor(scopeKey: string, userOrganizationKey: string) {
+export class ScopeMemberTeamMismatchError extends AiError {
+  constructor(scopeKey: string, userTeamKey: string) {
     super(
-      'scope_member_organization_mismatch',
-      `Membership ${userOrganizationKey} does not belong to the organization owning scope ${scopeKey}`,
+      'scope_member_team_mismatch',
+      `Membership ${userTeamKey} does not belong to the team owning scope ${scopeKey}`,
     );
   }
 }
 
 export class DuplicateScopeMemberError extends AiError {
-  constructor(scopeKey: string, userOrganizationKey: string) {
-    super('duplicate_scope_member', `Membership ${userOrganizationKey} is already in scope ${scopeKey}`);
+  constructor(scopeKey: string, userTeamKey: string) {
+    super('duplicate_scope_member', `Membership ${userTeamKey} is already in scope ${scopeKey}`);
   }
 }
 
 export class ScopeMemberNotFoundError extends AiError {
-  constructor(scopeKey: string, userOrganizationKey: string) {
-    super('scope_member_not_found', `Membership ${userOrganizationKey} is not in scope ${scopeKey}`);
+  constructor(scopeKey: string, userTeamKey: string) {
+    super('scope_member_not_found', `Membership ${userTeamKey} is not in scope ${scopeKey}`);
   }
 }
 
 export function createScopeMemberRepository(database: ScopesDatabase = db): ScopeMemberRepository {
   return {
-    async addMember(scopeKey, userOrganizationKey, role) {
+    async addMember(scopeKey, userTeamKey, role) {
       const member = scopeMemberSchema.parse({
         key: newId(),
         scopeKey,
-        userOrganizationKey,
+        userTeamKey,
         role: scopeMemberRoleSchema.parse(role),
         source: 'explicit',
       });
@@ -81,15 +81,15 @@ export function createScopeMemberRepository(database: ScopesDatabase = db): Scop
 
       let membership;
       try {
-        const membershipDoc = await database.collection('userOrganizations').document(userOrganizationKey);
-        membership = userOrganizationSchema.parse(withArangoKey(membershipDoc as Record<string, unknown>));
+        const membershipDoc = await database.collection('userTeams').document(userTeamKey);
+        membership = userTeamSchema.parse(withArangoKey(membershipDoc as Record<string, unknown>));
       } catch (error) {
-        if (isArangoNotFoundError(error)) throw new ScopeMembershipNotFoundError(userOrganizationKey);
+        if (isArangoNotFoundError(error)) throw new ScopeMembershipNotFoundError(userTeamKey);
         throw error;
       }
 
-      if (scope.organizationKey !== membership.organizationId) {
-        throw new ScopeMemberOrganizationMismatchError(scopeKey, userOrganizationKey);
+      if (scope.teamKey !== membership.teamKey) {
+        throw new ScopeMemberTeamMismatchError(scopeKey, userTeamKey);
       }
 
       try {
@@ -97,24 +97,24 @@ export function createScopeMemberRepository(database: ScopesDatabase = db): Scop
         const saved = (result as { new?: Record<string, unknown> }).new;
         return saved ? scopeMemberSchema.parse(withArangoKey(saved)) : member;
       } catch (error) {
-        if (isArangoUniqueConstraintError(error)) throw new DuplicateScopeMemberError(scopeKey, userOrganizationKey);
+        if (isArangoUniqueConstraintError(error)) throw new DuplicateScopeMemberError(scopeKey, userTeamKey);
         throw error;
       }
     },
 
-    async removeMember(scopeKey, userOrganizationKey) {
+    async removeMember(scopeKey, userTeamKey) {
       const cursor = await database.query(
         `
           FOR member IN scopeMembers
             FILTER member.scopeKey == @scopeKey
-              && member.userOrganizationKey == @userOrganizationKey
+              && member.userTeamKey == @userTeamKey
             LIMIT 1
             RETURN member
         `,
-        { scopeKey, userOrganizationKey },
+        { scopeKey, userTeamKey },
       );
       const raw = await cursor.next();
-      if (!raw) throw new ScopeMemberNotFoundError(scopeKey, userOrganizationKey);
+      if (!raw) throw new ScopeMemberNotFoundError(scopeKey, userTeamKey);
       const member = scopeMemberSchema.parse(withArangoKey(raw as Record<string, unknown>));
       await database.collection(SCOPE_MEMBERS_COLLECTION).remove(member.key);
     },
@@ -140,8 +140,8 @@ export function createScopeMemberRepository(database: ScopesDatabase = db): Scop
         `
           FOR member IN scopeMembers
             FILTER member.scopeKey == @scopeKey
-            FOR membership IN userOrganizations
-              FILTER membership._key == member.userOrganizationKey
+            FOR membership IN userTeams
+              FILTER membership._key == member.userTeamKey
               FOR user IN users
                 FILTER user._key == membership.userId
                 SORT user.name ASC, user._key ASC

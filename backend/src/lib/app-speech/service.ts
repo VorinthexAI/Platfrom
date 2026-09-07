@@ -23,7 +23,7 @@ export const appSpeechInputSchema = z.object({
 }).strict();
 
 const trustedTargetInputSchema = z.object({
-  organizationKey: z.string().trim().min(1),
+  teamKey: z.string().trim().min(1),
   storageKey: z.string().trim().min(1),
   text: z.string().trim().min(1).max(50_000),
   language: z.string().trim().min(2).max(100).default('English'),
@@ -50,7 +50,7 @@ interface AppSpeechDependencies {
   content?: ContentToolDependencies;
   executeContent?: typeof runContentTool;
   storage?: DocumentStorage;
-  speech?: (input: SpeechInput, organizationKey: string, options?: ExecuteActionOptions) => Promise<{ bytes: Uint8Array; mimeType: 'audio/mpeg'; durationSeconds?: number }>;
+  speech?: (input: SpeechInput, teamKey: string, options?: ExecuteActionOptions) => Promise<{ bytes: Uint8Array; mimeType: 'audio/mpeg'; durationSeconds?: number }>;
   signAudioUrl?: (storageKey: string) => Promise<string>;
   id?: () => string;
   now?: () => string;
@@ -65,8 +65,8 @@ const fallbackDurationSeconds = (text: string, pace: number) => Math.max(1, Math
 function member(context: ToolContext) {
   if (context.principal.kind !== 'member') throw new ContentError('CONTENT_UNAUTHORIZED', 'A resolved human principal is required.', 'app.speech', { action: 'authorization' });
   const principal = context.principal;
-  if (principal.userOrganization.organizationId !== context.organizationKey || principal.userOrganization.userId !== principal.user.key || principal.userOrganization.status !== 'active') {
-    throw new ContentError('CONTENT_FORBIDDEN', 'Active matching organization membership is required.', 'app.speech', { action: 'authorization' });
+  if (principal.userTeam.teamKey !== context.teamKey || principal.userTeam.userId !== principal.user.key || principal.userTeam.status !== 'active') {
+    throw new ContentError('CONTENT_FORBIDDEN', 'Active matching team membership is required.', 'app.speech', { action: 'authorization' });
   }
   return principal;
 }
@@ -83,14 +83,14 @@ async function productionRepository(): Promise<Pick<ContentRepository, 'getDocum
 
 export function createAppSpeechService(dependencies: AppSpeechDependencies = {}): AppSpeechService {
   const storage = dependencies.storage ?? documentStorage;
-  const speech = dependencies.speech ?? (async (input, organizationKey, options) => {
-    const output = speechOutputSchema.parse((await executeAction({ mode: 'auto', organizationKey, actionSlug: 'speech' }, input, { providers: ['speech.primary'], ...options })).output);
+  const speech = dependencies.speech ?? (async (input, teamKey, options) => {
+    const output = speechOutputSchema.parse((await executeAction({ mode: 'auto', teamKey, actionSlug: 'speech' }, input, { providers: ['speech.primary'], ...options })).output);
     return { bytes: Buffer.from(output.base64, 'base64'), mimeType: output.mimeType, durationSeconds: output.durationSeconds };
   });
   const generateForTarget: AppSpeechService['generateForTarget'] = async (rawInput, options) => {
     const input = trustedTargetInputSchema.parse(rawInput);
     const { afterSpeech, persist, compensate, ...actionOptions } = options;
-    const generated = await speech({ text: input.text, language: input.language, voice: voiceMap[input.voice], pace: input.pace, format: 'mp3' }, input.organizationKey, actionOptions);
+    const generated = await speech({ text: input.text, language: input.language, voice: voiceMap[input.voice], pace: input.pace, format: 'mp3' }, input.teamKey, actionOptions);
     await afterSpeech?.();
     const durationSeconds = generated.durationSeconds ?? fallbackDurationSeconds(input.text, input.pace);
     const stored = await storage.upload({ key: input.storageKey, bytes: generated.bytes, mimeType: generated.mimeType });
@@ -123,7 +123,7 @@ export function createAppSpeechService(dependencies: AppSpeechDependencies = {})
       if (!text) throw new ContentError('CONTENT_INVALID_INPUT', 'Document narration is empty.', 'app.speech', { action: 'speech', resourceKey: input.documentKey });
       const timestamp = dependencies.now?.() ?? new Date().toISOString();
       const audioKey = dependencies.id?.() ?? newId();
-      const generated = await generateForTarget({ organizationKey: context.organizationKey, storageKey: `document-audio/${document.scopeKey}/${document.key}/${audioKey}.mp3`, text, voice: input.voice, pace: input.pace }, {
+      const generated = await generateForTarget({ teamKey: context.teamKey, storageKey: `document-audio/${document.scopeKey}/${document.key}/${audioKey}.mp3`, text, voice: input.voice, pace: input.pace }, {
         ...options,
         persist: (audio) => repository.createAudioVersion!({
           key: audioKey, scopeKey: document.scopeKey, documentKey: document.key, sourceContentHash: documentSemanticHash(document.content), sourceTitle: document.name,

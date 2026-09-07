@@ -5,7 +5,7 @@ import type { CityDetail } from "./travel-client";
 import { hydratePlaceChildren, PLACE_GUIDE_CACHE_MS } from "./travel-prefetch";
 import { compassQueryKeys } from "./compass-query-keys";
 
-const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+const context = { teamKey: "team-key", scopeKey: "scope-key" };
 const names = ["Reykjavik", "Akureyri", "Husavik", "Vik", "Selfoss", "Hofn", "Isafjordur", "Stykkisholmur", "Seydisfjordur", "Borgarnes"];
 const cities = names.map((name, index): CityDetail => ({
   location: { kind: "place", name, countryCode: "IS", country: "Iceland", continent: "Europe", region: null, city: name, latitude: 64 + index / 10, longitude: -22 + index / 10 },

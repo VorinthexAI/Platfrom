@@ -37,7 +37,7 @@ if (!execute || initial === 0) process.exit(0);
 let updated = 0;
 let after = '';
 while (true) {
-  const cursor = await db.query<{ key: string; revision: string; scopeKey: string; organizationKey: string; filename: string; storageKey: string }>(`
+  const cursor = await db.query<{ key: string; revision: string; scopeKey: string; teamKey: string; filename: string; storageKey: string }>(`
     FOR caption IN imageCaptions
       FILTER caption._key > @after
       FILTER @scopeKey == null || caption.scopeKey == @scopeKey
@@ -54,7 +54,7 @@ while (true) {
       FILTER scope != null
       SORT caption._key ASC
       LIMIT @limit
-      RETURN { key: caption._key, revision: caption._rev, scopeKey: caption.scopeKey, organizationKey: scope.organizationKey, filename: image.filename, storageKey: image.storageKey }
+      RETURN { key: caption._key, revision: caption._rev, scopeKey: caption.scopeKey, teamKey: scope.teamKey, filename: image.filename, storageKey: image.storageKey }
   `, { after, limit: BATCH_SIZE, scopeKey: scopeKey ?? null });
   const rows = await cursor.all();
   if (rows.length === 0) break;
@@ -66,10 +66,10 @@ while (true) {
   const urls = await Promise.all(objects.map(({ bytes }) => imageAnalysisDataUrl(bytes, 768)));
   const captionStartedAt = performance.now();
   const generated: Array<{ caption: string; score: number }> = Array(rows.length);
-  const organizations = new Map<string, number[]>();
-  rows.forEach((row, index) => organizations.set(row.organizationKey, [...organizations.get(row.organizationKey) ?? [], index]));
-  await Promise.all([...organizations].map(async ([organizationKey, indices]) => {
-    const results = (await imageCaptionTool.execute({ imageUrls: indices.map((index) => urls[index]!) }, { organizationKey })).results;
+  const teams = new Map<string, number[]>();
+  rows.forEach((row, index) => teams.set(row.teamKey, [...teams.get(row.teamKey) ?? [], index]));
+  await Promise.all([...teams].map(async ([teamKey, indices]) => {
+    const results = (await imageCaptionTool.execute({ imageUrls: indices.map((index) => urls[index]!) }, { teamKey })).results;
     indices.forEach((index, position) => { generated[index] = results[position]!; });
   }));
   const captionDurationMs = performance.now() - captionStartedAt;

@@ -42,13 +42,13 @@ async function main() {
     const { hashUserEmail } = await import('@/api/users');
     const { getUserByEmailHash, insertUser, updateUser } = await import('@/lib/db/users.node');
     const {
-      getUserOrganizationByOrganizationAndUser,
-      upsertUserOrganizationByKey,
-      updateUserOrganization,
-    } = await import('@/lib/db/user-organization.node');
+      getUserTeamByTeamAndUser,
+      upsertUserTeamByKey,
+      updateUserTeam,
+    } = await import('@/lib/db/user-team.node');
     const { encryptSecret } = await import('@/lib/crypto');
     const { newId } = await import('@/lib/ids');
-    const { getRootOrganizationId } = await import('@/lib/db/organizations.node');
+    const { getRootTeamKey } = await import('@/lib/db/teams.node');
     const { provisionPersonalAuthContext } = await import('@/lib/db/personal-auth-context.node');
     const { verifySuccessiveTotpCodes } = await import('@/api/auth');
 
@@ -58,11 +58,10 @@ async function main() {
     const emailHash = await hashUserEmail(email);
     const existingSuperAdmin = await getUserByEmailHash(emailHash);
     const now = new Date().toISOString();
-    const rootOrganizationId = await getRootOrganizationId();
+    const rootTeamKey = await getRootTeamKey();
     const currentScopeKey = newId();
     const superAdmin = existingSuperAdmin ?? await insertUser({
       key: newId(),
-      organizationId: rootOrganizationId,
       currentScopeKey,
       email,
       emailHash,
@@ -74,7 +73,6 @@ async function main() {
       is_subscribed_to_updates: true,
       is_subscribed_to_updates_unsubscribe_token_hash: null,
       is_subscribed_to_updates_unsubscribe_requested_at: null,
-      refreshTokenHash: null,
       lastLoginAt: null,
       createdAt: now,
       updatedAt: now,
@@ -84,13 +82,13 @@ async function main() {
       await updateUser(existingSuperAdmin.key, { isVerified: true, updatedAt: now });
     }
     await provisionPersonalAuthContext(superAdmin, existingSuperAdmin ? {} : { mainScopeKey: currentScopeKey });
-    const existingLink = await getUserOrganizationByOrganizationAndUser(rootOrganizationId, superAdminKey);
-    const superAdminLink = await upsertUserOrganizationByKey({
+    const existingLink = await getUserTeamByTeamAndUser(rootTeamKey, superAdminKey);
+    const superAdminLink = await upsertUserTeamByKey({
       key: existingLink?.key ?? `root-owner-${superAdminKey}`,
-      organizationId: rootOrganizationId,
+      teamKey: rootTeamKey,
       userId: superAdminKey,
-      orgRole: 'owner',
-      orgTitle: 'Owner',
+      teamRole: 'owner',
+      teamTitle: 'Owner',
       status: 'active',
       joinedAt: existingLink?.joinedAt ?? now,
       isMfaEnabled: existingLink?.isMfaEnabled ?? false,
@@ -112,7 +110,7 @@ async function main() {
 
     const lastTotpTimeStep = await verifyTwoCodes(secret, verifySuccessiveTotpCodes);
 
-    await updateUserOrganization(superAdminLink.key, {
+    await updateUserTeam(superAdminLink.key, {
       totpSecret: await encryptSecret(secret),
       isMfaEnabled: true,
       lastTotpTimeStep,

@@ -55,11 +55,11 @@ export class ConversationError extends Error {
   constructor(readonly code: 'FORBIDDEN' | 'NOT_FOUND' | 'CONFLICT' | 'FAILED', message: string) { super(message); }
 }
 
-type Owner = { organizationKey: string; scopeKey: string; userKey: string };
+type Owner = { teamKey: string; scopeKey: string; userKey: string };
 function owner(context: ToolContext): Owner {
-  if (context.principal.kind !== 'member' || context.principal.userOrganization.status !== 'active') throw new ConversationError('FORBIDDEN', 'An active user organization membership is required.');
-  if (context.principal.userOrganization.organizationId !== context.organizationKey || context.principal.userOrganization.userId !== context.principal.user.key) throw new ConversationError('FORBIDDEN', 'Membership does not belong to the selected user and organization.');
-  return { organizationKey: context.organizationKey, scopeKey: context.runtimeScopeKey, userKey: context.principal.user.key };
+  if (context.principal.kind !== 'member' || context.principal.userTeam.status !== 'active') throw new ConversationError('FORBIDDEN', 'An active user team membership is required.');
+  if (context.principal.userTeam.teamKey !== context.teamKey || context.principal.userTeam.userId !== context.principal.user.key) throw new ConversationError('FORBIDDEN', 'Membership does not belong to the selected user and team.');
+  return { teamKey: context.teamKey, scopeKey: context.runtimeScopeKey, userKey: context.principal.user.key };
 }
 
 /** Deterministic upper-bound estimate: one estimated token per UTF-8 byte. */
@@ -268,7 +268,7 @@ export function createConversationService(dependencies: ConversationServiceDepen
       if (started.state === 'idempotency-conflict') throw new ConversationError('CONFLICT', 'The request key was already used for a different message.');
       if (started.assistant.status === 'PENDING') {
         const enqueue = dependencies.enqueueImageJob ?? ((job: unknown) => import('./image-turn-queue').then(({ enqueueConversationImageTurn }) => enqueueConversationImageTurn(job)));
-        await enqueue({ schemaVersion: 1, assistantMessageKey: started.assistant.key, conversationKey: input.conversationKey, ...ownership, actorKey: context.principal.kind === 'member' ? context.principal.userOrganization.key : '', requestKey: started.assistant.key, input: imageInput }).catch((error) => console.error('conversation image enqueue failed; startup recovery will retry', { assistantMessageKey: started.assistant.key, error }));
+        await enqueue({ schemaVersion: 1, assistantMessageKey: started.assistant.key, conversationKey: input.conversationKey, ...ownership, actorKey: context.principal.kind === 'member' ? context.principal.userTeam.key : '', requestKey: started.assistant.key, input: imageInput }).catch((error) => console.error('conversation image enqueue failed; startup recovery will retry', { assistantMessageKey: started.assistant.key, error }));
       }
       return conversationImageTurnResultSchema.parse({ user: projectConversationMessage(started.user), assistant: projectConversationMessage(started.assistant), replayed: started.state === 'replay' });
     },

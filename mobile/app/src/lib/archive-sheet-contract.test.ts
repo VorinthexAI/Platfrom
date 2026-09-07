@@ -49,7 +49,8 @@ test("keeps empty Archive views scrollable for pull-to-refresh", () => {
 
 test("fences pull-to-refresh results to the initiating Archive view", () => {
   const refresh = source.slice(source.indexOf("const refreshArchive = async"), source.indexOf("useEffect(() => { if (userHiddensQuery.data)", source.indexOf("const refreshArchive = async")));
-  expect(source).toContain("refreshViewKey.current = JSON.stringify([contentContextKey, workspaceMode, currentFolder?.key, folderContentTab, query.trim(), rootSearchQuery.trim(), selectedTagKeys, documentKeyRef.current])");
+  expect(source).toContain("const currentRefreshViewKey = JSON.stringify([contentContextKey, workspaceMode, currentFolder?.key, folderContentTab, query.trim(), rootSearchQuery.trim(), selectedTagKeys, editorDocumentKey])");
+  expect(source).toContain("refreshViewKey.current = currentRefreshViewKey");
   expect(refresh).toContain("const navigationRequest = navigationGeneration.current");
   expect(refresh).toContain("refreshViewKey.current === viewKey && navigationGeneration.current === navigationRequest");
   expect(refresh).toContain("if (!isCurrent()) return;");
@@ -179,7 +180,7 @@ test("keeps transformation sheets dismissible and background errors out of the e
   expect(source).toContain('if (propagateError) throw cause');
   expect(source).toContain('if (activeSheetRef.current === "versions") setSheetError(message);\n      else notify(message);');
   const versionFooter = source.slice(source.indexOf('if (activeSheet === "versions")'), source.indexOf('if (activeSheet === "documentVersions")'));
-  expect(versionFooter).toContain('{close(false)}');
+  expect(versionFooter).toContain('{closeFooter(false)}');
   expect(versionFooter).not.toContain('close(Boolean(documentActionLoading))');
 });
 

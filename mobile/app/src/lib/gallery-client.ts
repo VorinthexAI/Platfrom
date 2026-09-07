@@ -4,7 +4,6 @@ import { File } from "expo-file-system";
 import { apiClient } from "@/lib/api-client";
 import { appSearchResults, searchApp } from "@/lib/app-search-client";
 import type { AssistantChange } from "@/lib/assistant-changes";
-import { normalizeCollection, type CollectionRole } from "@/lib/collection-access";
 import { useAuthStore } from "@/state/auth";
 import type { ContentPresentation } from "@/data/capability-icons";
 
@@ -18,48 +17,12 @@ export type GalleryCollection = {
   count: number;
   coverUrl: string | null;
   presentation?: ContentPresentation;
-  memberKey: string;
-  isOwned?: boolean;
-  role: GalleryCollectionRole;
+  actorKey: string;
   access: { canRead: boolean; canContribute: boolean; canManage: boolean };
   createdAt: string;
   updatedAt: string;
   score?: number;
 };
-
-export type GalleryCollectionRole = CollectionRole;
-
-export type GalleryCollectionMember = {
-  key: string;
-  memberKey: string;
-  name: string;
-  email: string | null;
-  role: GalleryCollectionRole;
-  joinedAt: string;
-};
-
-export type GalleryCollectionInvite = {
-  key: string;
-  recipient: string;
-  role: Exclude<GalleryCollectionRole, "owner">;
-  createdAt: string;
-  collection: { key: string; name: string };
-  inviterDisplayName: string;
-  email?: string;
-  inviteeKey?: string;
-};
-
-export type GalleryCollectionShareLink = {
-  key: string;
-  url: string;
-  role: Exclude<GalleryCollectionRole, "owner">;
-  active: boolean;
-  createdAt: string;
-};
-
-export function filterGalleryShareLinks(links: GalleryCollectionShareLink[], active: boolean) {
-  return links.filter((link) => link.active === active);
-}
 
 export type GalleryImage = {
   key: string;
@@ -111,13 +74,15 @@ export type GalleryOverview = {
   canCreateCollections: boolean;
 };
 
-const galleryCollectionRoleSchema = z.enum(["owner", "collaborator", "viewer"]);
 const galleryCollectionAccessSchema = z.strictObject({ canRead: z.boolean(), canContribute: z.boolean(), canManage: z.boolean() });
-export const galleryCollectionSchema = z.strictObject({
+const galleryCollectionTransportSchema = z.strictObject({
   key: z.string().min(1), name: z.string().min(1), description: z.string().nullable(), purpose: z.enum(["place-media", "email-media", "generated-media"]).nullable(), mutationPolicy: z.enum(["user", "system-only"]),
-  isFavorite: z.boolean(), count: z.number().int().nonnegative(), coverUrl: z.string().min(1).nullable(), presentation: z.enum(["travel", "communication", "learning"]).optional(), memberKey: z.string().min(1), isOwned: z.boolean().optional(),
-  role: galleryCollectionRoleSchema, access: galleryCollectionAccessSchema, createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(), score: z.number().optional(),
+  isFavorite: z.boolean(), count: z.number().int().nonnegative(), coverUrl: z.string().min(1).nullable(), presentation: z.enum(["travel", "communication", "learning"]).optional(), actorKey: z.string().min(1), isOwned: z.boolean().optional(),
+  role: z.enum(["owner", "viewer"]), access: galleryCollectionAccessSchema, createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(), score: z.number().optional(),
 });
+const isVisibleCollection = (collection: z.infer<typeof galleryCollectionTransportSchema>) => collection.mutationPolicy === "system-only" || (collection.isOwned ?? collection.role === "owner");
+const ownerCollection = ({ isOwned: _isOwned, role: _role, ...collection }: z.infer<typeof galleryCollectionTransportSchema>): GalleryCollection => collection;
+export const galleryCollectionSchema = galleryCollectionTransportSchema.transform(ownerCollection);
 export const galleryImageSchema = z.strictObject({
   key: z.string().min(1), filename: z.string().min(1), caption: z.string().min(1), imageCaptionKey: z.string().min(1).nullable(), mimeType: z.string().min(1),
   sizeBytes: z.number().int().positive(), width: z.number().int().positive(), height: z.number().int().positive(), city: z.string().min(1).nullable(), country: z.string().min(1).nullable(),
@@ -126,7 +91,8 @@ export const galleryImageSchema = z.strictObject({
   createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(), url: z.string().min(1), score: z.number().optional(), createdByKey: z.string().min(1).nullable(),
   collections: z.array(z.strictObject({ key: z.string().min(1), name: z.string().min(1) })).optional(),
 });
-const galleryOverviewSchema = z.strictObject({ collections: z.array(galleryCollectionSchema), images: z.array(galleryImageSchema), nextCursor: z.string().nullable(), canCreateCollections: z.boolean() });
+const galleryOverviewSchema = z.strictObject({ collections: z.array(galleryCollectionTransportSchema), images: z.array(galleryImageSchema), nextCursor: z.string().nullable(), canCreateCollections: z.boolean() })
+  .transform(({ collections, ...overview }) => ({ ...overview, collections: collections.filter(isVisibleCollection).map(ownerCollection) }));
 const galleryGenerationHistoryItemSchema = z.strictObject({ type: z.literal("image"), prompt: z.string().trim().min(1).max(8_000), normalizedPrompt: z.string().trim().min(1).max(8_000), usageCount: z.number().int().positive(), generatedAt: z.iso.datetime() });
 const galleryGenerationHistorySchema = z.strictObject({ generations: z.array(galleryGenerationHistoryItemSchema) });
 const galleryGenerationHistoryDeleteSchema = z.strictObject({ normalizedPrompt: z.string().trim().min(1).max(8_000), deleted: z.boolean() });
@@ -184,10 +150,6 @@ export function resolveGalleryHighlightSlides(highlight: GalleryHighlightDetail)
     const image = images.get(imageKey);
     return image ? [{ key: `${highlight.key}:${index}`, imageKey, url: image.url }] : [];
   });
-}
-
-export function isGalleryCollectionOwned(collection: Pick<GalleryCollection, "isOwned" | "role">) {
-  return collection.isOwned ?? (collection.role === "owner");
 }
 
 export function isManagedGalleryCollection(collection: Pick<GalleryCollection, "purpose" | "mutationPolicy"> | undefined) {
@@ -258,7 +220,7 @@ export function isGalleryMemoryExhaustion(error: unknown) {
   return error instanceof GalleryClientError && (error.status === 409 || error.code?.includes("EXHAUST") === true);
 }
 
-type GalleryContext = { organizationKey: string; scopeKey: string };
+type GalleryContext = { teamKey: string; scopeKey: string };
 
 function recordKey(value: Record<string, unknown> | null) {
   return typeof value?.key === "string" ? value.key : "";
@@ -267,17 +229,11 @@ function recordKey(value: Record<string, unknown> | null) {
 export function getGalleryContext(): GalleryContext {
   const state = useAuthStore.getState();
   const context = {
-    organizationKey: recordKey(state.organization),
+    teamKey: recordKey(state.team),
     scopeKey: recordKey(state.scope),
   };
-  if (!context.organizationKey || !context.scopeKey) throw new Error("Gallery is unavailable for this session.");
+  if (!context.teamKey || !context.scopeKey) throw new Error("Gallery is unavailable for this session.");
   return context;
-}
-
-export function getGalleryMemberKey() {
-  const organization = useAuthStore.getState().organization;
-  const value = organization?.membership_key ?? organization?.membershipKey;
-  return typeof value === "string" ? value : "";
 }
 
 async function postGallery<T>(path: string, input: Record<string, unknown>, timeout = 60_000, signal?: AbortSignal) {
@@ -293,20 +249,6 @@ async function postGallery<T>(path: string, input: Record<string, unknown>, time
     throw error;
   }
 }
-
-export const GALLERY_COLLECTION_SHARING_ENDPOINTS = {
-  members: "/gallery/collections/members",
-  updateMember: "/gallery/collections/members/role",
-  removeMember: "/gallery/collections/members/remove",
-  invites: "/gallery/invites/pending",
-  acceptInvite: "/gallery/invites/accept",
-  rejectInvite: "/gallery/invites/reject",
-  shareLinks: "/gallery/collections/shares/list",
-  createShareLink: "/gallery/collections/shares",
-  updateShareLink: "/gallery/collections/shares/update",
-  leave: "/gallery/collections/leave",
-  activateShare: "/gallery/shares/activate",
-} as const;
 
 export const GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS = {
   create: "/gallery/highlights",
@@ -372,52 +314,6 @@ export function deleteGalleryCollectionMemory(memoryKey: string, collectionKey: 
   return postGallery<{ memoryKey: string }>(GALLERY_COLLECTION_MEMORY_ENDPOINTS.delete, { memoryKey, collectionKey });
 }
 
-export function listGalleryCollectionMembers(collectionKey: string) {
-  type ProjectedMember = Omit<GalleryCollectionMember, "name" | "email"> & { displayName: string };
-  return postGallery<{ owners: ProjectedMember[]; collaborators: ProjectedMember[]; viewers: ProjectedMember[] }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.members, { collectionKey }).then(({ owners, collaborators, viewers }) => ({ members: [...owners, ...collaborators, ...viewers].map(({ displayName, ...member }) => ({ ...member, name: displayName, email: null })) }));
-}
-
-export function updateGalleryCollectionMember(collectionKey: string, memberKey: string, role: Exclude<GalleryCollectionRole, "owner">) {
-  return postGallery<{ memberKey: string; role: Exclude<GalleryCollectionRole, "owner">; joinedAt: string }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.updateMember, { collectionKey, memberKey, role });
-}
-
-export function removeGalleryCollectionMember(collectionKey: string, memberKey: string) {
-  return postGallery<{ memberKey: string }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.removeMember, { collectionKey, memberKey });
-}
-
-export function listGalleryCollectionInvites(memberKeys: string[] = []) {
-  type PendingInvite = Omit<GalleryCollectionInvite, "recipient"> & { email?: string; inviteeKey?: string };
-  const email = useAuthStore.getState().user?.email?.trim().toLocaleLowerCase();
-  const memberships = new Set([getGalleryMemberKey(), ...memberKeys].filter(Boolean));
-  return postGallery<{ invites: PendingInvite[] }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.invites, {}).then(({ invites }) => ({ invites: invites
-    .filter((invite) => Boolean(email && invite.email?.toLocaleLowerCase() === email) || Boolean(invite.inviteeKey && memberships.has(invite.inviteeKey)))
-    .map((invite) => ({ ...invite, recipient: invite.email ?? invite.inviteeKey ?? "Pending recipient" })) }));
-}
-
-export function respondToGalleryCollectionInvite(inviteKey: string, response: "accept" | "reject") {
-  return postGallery<{ inviteKey: string }>(response === "accept" ? GALLERY_COLLECTION_SHARING_ENDPOINTS.acceptInvite : GALLERY_COLLECTION_SHARING_ENDPOINTS.rejectInvite, { inviteKey });
-}
-
-export function listGalleryCollectionShareLinks(collectionKey: string) {
-  return postGallery<{ shares: GalleryCollectionShareLink[] }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.shareLinks, { collectionKey }).then(({ shares }) => ({ links: shares }));
-}
-
-export function createGalleryCollectionShareLink(collectionKey: string, role: Exclude<GalleryCollectionRole, "owner">, active: boolean) {
-  return postGallery<{ share: GalleryCollectionShareLink; token?: string }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.createShareLink, { collectionKey, role, active }).then(({ share, token }) => ({ link: share, token }));
-}
-
-export function updateGalleryCollectionShareLink(collectionKey: string, shareKey: string, active: boolean) {
-  return postGallery<{ share: GalleryCollectionShareLink }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.updateShareLink, { collectionKey, shareKey, active }).then(({ share }) => ({ link: share }));
-}
-
-export function leaveGalleryCollection(collectionKey: string) {
-  return postGallery<{ collectionKey: string }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.leave, { collectionKey });
-}
-
-export function activateGalleryShare(token: string) {
-  return postGallery<{ scopeKey: string; collectionKey: string; role: GalleryCollectionRole }>(GALLERY_COLLECTION_SHARING_ENDPOINTS.activateShare, { token });
-}
-
 async function fetchWithTimeout(input: string, init: RequestInit | undefined, timeout: number) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
@@ -431,7 +327,7 @@ async function fetchWithTimeout(input: string, init: RequestInit | undefined, ti
 export function fetchGalleryOverview(collectionKey?: string, cursor?: string, limit = 100, maxCaptionScore?: number, signal?: AbortSignal, origin?: GalleryImageOrigin) {
   return postGallery<unknown>("/gallery/overview", { ...(collectionKey ? { collectionKey } : {}), ...(cursor ? { cursor } : {}), limit, ...(maxCaptionScore !== undefined ? { maxCaptionScore } : {}), ...(origin ? { origin } : {}) }, 60_000, signal)
     .then((overview) => galleryOverviewSchema.parse(overview))
-    .then((overview) => ({ ...overview, collections: overview.collections.map(normalizeCollection) }));
+    .then((overview) => overview);
 }
 
 export async function listGalleryGenerationHistory(limit = 20) {
@@ -470,13 +366,13 @@ export async function generateGalleryImages(rawInput: GalleryGenerationInput, re
 }
 
 export function createGalleryCollection(name: string, isFavorite: boolean) {
-  return postGallery<unknown>("/gallery/collections", { name, isFavorite }).then((collection) => normalizeCollection(galleryCollectionSchema.parse(collection)));
+  return postGallery<unknown>("/gallery/collections", { name, isFavorite }).then((collection) => galleryCollectionSchema.parse(collection));
 }
 
 export function updateGalleryCollection(collectionKey: string, name: string, isFavorite: boolean, coverImageKey?: string | null) {
   return postGallery<unknown>("/gallery/collections/update", { collectionKey, name, isFavorite, ...(coverImageKey !== undefined ? { coverImageKey } : {}) })
     .then((value) => z.strictObject({ collection: galleryCollectionSchema }).parse(value))
-    .then(({ collection }) => ({ collection: normalizeCollection(collection) }));
+    .then(({ collection }) => ({ collection }));
 }
 
 export function deleteGalleryCollection(collectionKey: string) {
@@ -546,7 +442,7 @@ export function searchGalleryImages(input: { query?: string; imageKey?: string; 
 
 export function searchGalleryCollections(query: string, recordHistory = true, signal?: AbortSignal, tagKeys: string[] = []) {
   return searchApp({ ...(query ? { query } : { operation: "list" as const }), collectionSlugs: ["collections"], recordHistory, limit: 50, ...(tagKeys.length ? { filters: { tagKeys, tagMatch: "all" as const } } : {}) }, signal)
-    .then((output) => ({ collections: appSearchResults(output, "collections", galleryCollectionSchema) }));
+    .then((output) => ({ collections: appSearchResults(output, "collections", galleryCollectionTransportSchema).filter(isVisibleCollection).map(ownerCollection) }));
 }
 
 export function setGalleryImageFavorite(imageKey: string, isFavorite: boolean) {
@@ -622,10 +518,10 @@ export function deleteGallerySubject(identityKey: string) {
 }
 
 export async function askGalleryAssistant(message: string) {
-  const { organizationKey, scopeKey } = getGalleryContext();
+  const { teamKey, scopeKey } = getGalleryContext();
   const response = await apiClient.post<ApiResponse<{ type: "answer" | "note" | "unsupported"; message: string; changes?: AssistantChange[] }>>(
     "/assistant/respond",
-    { organizationKey, scopeKey, input: { surface: "media-workspace", message, currentNote: { title: "", content: "" } } },
+    { teamKey, scopeKey, input: { surface: "media-workspace", message, currentNote: { title: "", content: "" } } },
     { timeout: 4 * 60_000 },
   );
   if (!response.data.success) throw new Error(response.data.error.message);

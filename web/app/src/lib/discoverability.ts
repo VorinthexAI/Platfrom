@@ -1,6 +1,9 @@
 export const CANONICAL_ORIGIN = "https://vorinthex.com" as const;
-export const CONTENT_LAST_REVIEWED = "2026-09-04" as const;
+export const CONTENT_LAST_REVIEWED = "2026-09-06" as const;
 export const CONTACT_EMAIL = "contact@vorinthex.com" as const;
+export const PRICING_HERO_HEADING = "One balance for everything you create and use" as const;
+export const PRICING_HERO_BODY =
+  "Sparks give you a simple way to use AI capabilities, store your work, and keep services connected across Vorinthex." as const;
 
 export type PublicRoutePath =
   | "/"
@@ -47,18 +50,18 @@ export const CORE_CAPABILITIES = [
     id: "gallery",
     name: "Gallery",
     icon: "/logos/entities/capability-gallery.png",
-    description: "Organize, understand, search, and share your visual library.",
+    description: "Organize, understand, and search your visual library.",
     promise: "An intelligent home for your images and memories.",
     details: [
       "Bring photos and images together in beautiful collections, mark favorites, and find what you need without remembering filenames or manually sorting everything.",
-      "Gallery understands what your images contain and makes them naturally searchable. Share individual images or build collections where friends, family, and collaborators can contribute.",
+      "Gallery understands what your images contain and makes them naturally searchable, so you can rediscover visual moments without manually sorting everything.",
     ],
     connection:
       "Gallery links visual moments to Archive knowledge, Compass places and people connected through Signal.",
     features: [
       "Albums and visual clusters",
       "Search by people, places, dates, and events",
-      "Private sharing links and album invites",
+      "Favorites and curated collections",
     ],
   },
   {
@@ -125,13 +128,14 @@ export const PRODUCT_FACTS = {
   privacy:
     "Privacy and user control are central product principles for Core.",
   sparks:
-    "Sparks are the usage unit for Vorinthex services. Prepaid Sparks remain available after subscription cancellation, balances never go below zero, and storage is charged hourly from prepaid Sparks. Unfunded storage incurs no debt or backcharges; growth is blocked, existing data remains available for export, deletion, and recovery, and adding enough Sparks before deletion begins restores prospective charging. Once deletion begins, it cannot be reversed. Stored S3-backed data is hard-deleted after 90 consecutive unfunded days. Pricing is shown in USD, and local taxes may be added where required.",
+    `${PRICING_HERO_HEADING}. ${PRICING_HERO_BODY} The current launch subscriptions are $19.99 monthly for 1,000 Sparks (discounted from the $24.99 regular monthly price) and $7.99 weekly for 200 Sparks. A one-time 200-Spark top-up is $9.99. Purchases are not yet available on the public website. Prepaid Sparks remain available after subscription cancellation, balances never go below zero, and storage is charged hourly from prepaid Sparks. Unfunded storage incurs no debt or backcharges; growth is blocked, existing data remains available for export, deletion, and recovery, and adding enough Sparks before deletion begins restores prospective charging. Once deletion begins, it cannot be reversed. Stored S3-backed data is hard-deleted after 90 consecutive unfunded days. Pricing is shown in USD and excludes VAT and other local taxes; Polar calculates and adds applicable tax at checkout.`,
   pricing: {
     currency: SPARK_PRICING_CURRENCY,
     newcomerAllocation: NEWCOMER_FREE_SPARKS,
-    monthlyPlans: SPARK_MONTHLY_PLANS,
-    topUps: SPARK_TOP_UPS,
-    onDemand: SPARK_ON_DEMAND,
+    subscriptions: SPARK_SUBSCRIPTIONS,
+    topUp: SPARK_TOP_UP,
+    referrals: REFERRAL_REWARDS,
+    webPurchasesAvailable: false,
   },
   capabilities: CORE_CAPABILITIES,
 } as const;
@@ -154,10 +158,8 @@ export const PUBLIC_DISCOVERABILITY_REGISTRY = {
   "/pricing": {
     path: "/pricing",
     title: "Sparks Pricing | Vorinthex AI",
-    description:
-      "Explore Vorinthex Sparks pricing, prepaid balances, hourly storage charging, and unfunded-storage handling in USD.",
-    summary:
-      "Vorinthex Sparks pricing covers monthly balances, one-time top-ups, hourly prepaid storage charges, and unfunded-storage handling.",
+    description: PRICING_HERO_BODY,
+    summary: `${PRICING_HERO_HEADING}. ${PRICING_HERO_BODY}`,
     schemaPageType: "WebPage",
     status: "current",
     lastModified: CONTENT_LAST_REVIEWED,
@@ -218,8 +220,8 @@ export function canonicalUrl(path: PublicRoutePath | string): string {
 }
 import {
   NEWCOMER_FREE_SPARKS,
-  SPARK_MONTHLY_PLANS,
-  SPARK_ON_DEMAND,
   SPARK_PRICING_CURRENCY,
-  SPARK_TOP_UPS,
+  SPARK_SUBSCRIPTIONS,
+  SPARK_TOP_UP,
+  REFERRAL_REWARDS,
 } from "@/lib/spark-pricing";

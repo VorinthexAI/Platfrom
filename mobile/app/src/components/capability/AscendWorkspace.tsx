@@ -53,7 +53,6 @@ import { ResourceTagsSheet } from "@/components/ResourceTagsSheet";
 import { SearchHistorySheet } from "@/components/SearchHistorySheet";
 import { TagFilterLane } from "@/components/TagFilterLane";
 import { TagFilterSheet } from "@/components/TagFilterSheet";
-import { BookSharing } from "@/components/capability/BookSharing";
 import { EmailAttachmentPicker, type EmailAttachmentLabels } from "@/components/capability/EmailAttachmentPicker";
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import { assistantIconSource } from "@/data/capability-icons";
@@ -103,7 +102,7 @@ import {
 } from "@/lib/user-search-history-cache";
 import { useAuthStore } from "@/state/auth";
 import { EMPTY_SELECTED_TAGS, useUiStore } from "@/state/ui";
-import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
+import { fonts, palette, radii, spacing } from "@/theme/tokens";
 
 const COLUMNS = 3;
 const GRID_GAP = 8;
@@ -263,7 +262,6 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
   const [readingChapterKey, setReadingChapterKey] = useState<string>();
   const [playbackScrubValue, setPlaybackScrubValue] = useState<number>();
   const [playbackIslandDismissed, setPlaybackIslandDismissed] = useState(false);
-  const [sharingBook, setSharingBook] = useState<Book>();
   const [selectedBookKeys, setSelectedBookKeys] = useState<string[]>([]);
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bookPageOpen, setBookPageOpen] = useState(Boolean(initialBookKey));
@@ -367,8 +365,7 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
   }, []);
   useEffect(() => {
     const next = query.trim();
-    if (!next) { setSearchTerm(""); return; }
-    const timer = setTimeout(() => setSearchTerm(next), BOOK_SEARCH_DEBOUNCE_MS);
+    const timer = setTimeout(() => setSearchTerm(next), next ? BOOK_SEARCH_DEBOUNCE_MS : 0);
     return () => clearTimeout(timer);
   }, [query]);
   useEffect(() => {
@@ -657,7 +654,7 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
     try {
       const result = action === "enhance" ? await enhanceAppTextForContext(capturedContext, text) : await translateAppTextForContext(capturedContext, text, language);
       const currentContext = getBooksContext();
-      if (generation === briefTransformationGeneration.current && currentContext.organizationKey === capturedContext.organizationKey && currentContext.scopeKey === capturedContext.scopeKey) applyBriefEditorText(target, result.text);
+      if (generation === briefTransformationGeneration.current && currentContext.teamKey === capturedContext.teamKey && currentContext.scopeKey === capturedContext.scopeKey) applyBriefEditorText(target, result.text);
     } catch (error) {
       if (generation === briefTransformationGeneration.current) showToast({ title: errorMessage(error), duration: 2_000 });
     } finally {
@@ -1079,7 +1076,7 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
         ) : <View accessibilityRole="alert" style={styles.state}><Text style={styles.stateTitle}>Audio book details could not be loaded.</Text><Button onPress={() => void detailQuery.refetch()} size="sm" variant="secondary">Retry</Button></View>
       ) : <>
         <View style={styles.searchRow}>
-          <View style={styles.rootSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search audio books" editable={rootSearchFocusable} focusable={rootSearchFocusable} onChangeText={setQuery} placeholder="Search..." ref={rootSearchInputRef} style={styles.rootSearchInput} value={query} />{query ? <Button accessibilityLabel="Clear audio book search" contentMode="raw" iconOnly onPress={() => setQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}</View>
+          <View style={styles.rootSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search audio books" editable={rootSearchFocusable} focusable={rootSearchFocusable} onChangeText={(value) => { setQuery(value); if (!value.trim()) setSearchTerm(""); }} placeholder="Search..." ref={rootSearchInputRef} style={styles.rootSearchInput} value={query} />{query ? <Button accessibilityLabel="Clear audio book search" contentMode="raw" iconOnly onPress={() => { setQuery(""); setSearchTerm(""); }} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}</View>
           <Button accessibilityLabel="Filter audio books" contentMode="raw" onPress={() => open("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={showOnlyFavorites || selectedTags.length ? "accent" : "default"} /></Button>
         </View>
         <TagFilterLane context={contentContext} />
@@ -1193,7 +1190,6 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
               </Text>
             ) : null}
             <BottomSheetItem disabled={bulkLoading || selectedBook.key.startsWith("pending-")} onPress={() => void updateBooksFavorite([selectedBook], !selectedBook.isFavorite, false)} style={styles.sheetAction} variant="secondary">{selectedBook.isFavorite ? "Unfavorite" : "Favorite"}</BottomSheetItem>
-            <BottomSheetItem disabled={selectedBook.key.startsWith("pending-")} onPress={() => { setSheetOpen(false); setSheet(undefined); setSharingBook(selectedBook); }} style={styles.sheetAction} variant="secondary">Share</BottomSheetItem>
             {selectedBook.status === "ready" ? <BottomSheetItem disabled={extensionMutation.isPending} onPress={openExtension} style={styles.sheetAction} variant="secondary">Extend</BottomSheetItem> : null}
             <BottomSheetItem
               disabled={
@@ -1342,9 +1338,7 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
         </ScrollView>
       </BottomSheet>
 
-      {contextPickerOpen && createDetailsOpen ? <EmailAttachmentPicker archiveOnly context={contentContext} contextKey={`${context.organizationKey}:${context.scopeKey}:audio-book-context`} labels={contextLabels} maxSelection={MAX_CONTEXT_DOCUMENTS} onClose={() => setContextPickerOpen(false)} onDone={finishContextSelection} onSelectionLimitReached={(limit) => showToast({ title: `You can select up to ${limit} items.`, duration: 2_500 })} open selection={contextSelection} title="Context" /> : null}
-
-      {sharingBook ? <BookSharing book={sharingBook} onClose={() => setSharingBook(undefined)} open={Boolean(sharingBook)} /> : null}
+      {contextPickerOpen && createDetailsOpen ? <EmailAttachmentPicker archiveOnly context={contentContext} contextKey={`${context.teamKey}:${context.scopeKey}:audio-book-context`} labels={contextLabels} maxSelection={MAX_CONTEXT_DOCUMENTS} onClose={() => setContextPickerOpen(false)} onDone={finishContextSelection} onSelectionLimitReached={(limit) => showToast({ title: `You can select up to ${limit} items.`, duration: 2_500 })} open selection={contextSelection} title="Context" /> : null}
 
       <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setBriefActionTarget(undefined); }} open={Boolean(briefActionTarget)} title="AI actions">
         <BottomSheetMenu>

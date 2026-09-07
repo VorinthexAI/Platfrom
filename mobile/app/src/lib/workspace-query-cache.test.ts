@@ -17,7 +17,7 @@ mock.module("./books-client", () => ({}));
 mock.module("./email-client", () => ({
   normalizeEmailOverviewQuery: (input: { readState?: "read" | "unread"; facets?: string[]; search?: string } = {}) => ({
     readState: input.readState ?? "unread",
-    facets: ["urgent", "important", "filtered", "favorite"].filter((facet) => (input.facets ?? ["urgent", "important"]).includes(facet)),
+    facets: ["urgent", "important", "purchases", "filtered", "favorite"].filter((facet) => (input.facets ?? ["urgent", "important", "purchases"]).includes(facet)),
     search: input.search?.trim() ?? "",
   }),
 }));
@@ -59,9 +59,6 @@ const {
   signalQueryKeys,
   signalThreadBelongsToOverview,
   setCachedGalleryCollections,
-  setCachedGalleryInvites,
-  setCachedGalleryMembers,
-  setCachedGalleryShareLinks,
   transferCachedGalleryImages,
   upsertCachedCompassTrip,
   upsertCompassTrip,
@@ -178,7 +175,7 @@ test("Signal deletion rollback restores only a still-removed entity", () => {
   expect(restoreSignalToneIfStillRemoved([newerTone], tone)).toEqual([newerTone]);
   expect(restoreSignalToneIfStillRemoved([{ ...tone, key: "concurrent" }], tone)?.map(({ key }) => key)).toEqual(["concurrent", "tone"]);
   const draft = { key: "draft", variant: "new" as const, connectorKey: "connector", to: ["one@example.com"], subject: "Draft", generatedContent: "Body", status: "generated" as const, createdAt: at, updatedAt: at };
-  const overview = { accounts: [], selectedAccount: null, threads: [], drafts: [], unassignedDrafts: [], counts: { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 0 }, nextCursor: null };
+  const overview = { accounts: [], selectedAccount: null, threads: [], drafts: [], unassignedDrafts: [], counts: { all: 0, important: 0, urgent: 0, purchases: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 0 }, nextCursor: null };
   expect(restoreSignalDraftIfStillRemoved(overview, draft, { drafts: true, unassignedDrafts: false })?.drafts).toEqual([draft]);
   const newerDraft = { ...draft, subject: "Newer", updatedAt: newerTone.updatedAt };
   expect(restoreSignalDraftIfStillRemoved({ ...overview, drafts: [newerDraft] }, draft, { drafts: true, unassignedDrafts: false })?.drafts).toEqual([newerDraft]);
@@ -186,26 +183,26 @@ test("Signal deletion rollback restores only a still-removed entity", () => {
   expect(restoreSignalDraftIfStillRemoved({ ...overview, drafts: [concurrentDraft] }, draft, { drafts: true, unassignedDrafts: false })?.drafts).toEqual([concurrentDraft, draft]);
 });
 
-const context: ContentContext = { organizationKey: "org-a", scopeKey: "scope-a" };
-const otherContext: ContentContext = { organizationKey: "org-b", scopeKey: "scope-b" };
+const context: ContentContext = { teamKey: "team-a", scopeKey: "scope-a" };
+const otherContext: ContentContext = { teamKey: "team-b", scopeKey: "scope-b" };
 
 test("isolates every routed workspace key by context and resource", () => {
   expect(galleryQueryKeys.overview(context, "collection")).not.toEqual(galleryQueryKeys.overview(otherContext, "collection"));
   expect(galleryQueryKeys.cleanup(context, "collection", 25)).not.toEqual(galleryQueryKeys.cleanup(context, "collection", 50));
   expect(galleryQueryKeys.cleanup(context, "collection", 25)).not.toEqual(galleryQueryKeys.cleanup(context, "other", 25));
   expect(galleryQueryKeys.highlight(context, "collection", "one")).not.toEqual(galleryQueryKeys.highlight(context, "collection", "two"));
-  expect(galleryQueryKeys.memories(context, "collection")).toEqual(["gallery", "org-a", "scope-a", "memories", "collection"]);
-  expect(galleryQueryKeys.memory(context, "collection", "one")).toEqual(["gallery", "org-a", "scope-a", "memories", "collection", "one"]);
+  expect(galleryQueryKeys.memories(context, "collection")).toEqual(["gallery", "team-a", "scope-a", "memories", "collection"]);
+  expect(galleryQueryKeys.memory(context, "collection", "one")).toEqual(["gallery", "team-a", "scope-a", "memories", "collection", "one"]);
   expect(galleryQueryKeys.memory(context, "collection", "one")).not.toEqual(galleryQueryKeys.memory(context, "collection", "two"));
   expect(galleryQueryKeys.userHiddens(context)).not.toEqual(galleryQueryKeys.userHiddens(otherContext));
   expect(compassQueryKeys.overview(context)).not.toEqual(compassQueryKeys.overview(otherContext));
-  expect(compassQueryKeys.trips(context)).toEqual(["compass", "org-a", "scope-a", "trips"]);
-  expect(compassQueryKeys.placeReferences(context, "place-a", "brief")).toEqual(["compass", "org-a", "scope-a", "places", "place-a", "references", "brief"]);
+  expect(compassQueryKeys.trips(context)).toEqual(["compass", "team-a", "scope-a", "trips"]);
+  expect(compassQueryKeys.placeReferences(context, "place-a", "brief")).toEqual(["compass", "team-a", "scope-a", "places", "place-a", "references", "brief"]);
   expect(compassQueryKeys.placeReferences(context, "place-a", "brief")).not.toEqual(compassQueryKeys.placeReferences(context, "place-a", "activities"));
-  expect(compassQueryKeys.tripGuides(context, "trip-a")).toEqual(["compass", "org-a", "scope-a", "trips", "trip-a", "guides"]);
+  expect(compassQueryKeys.tripGuides(context, "trip-a")).toEqual(["compass", "team-a", "scope-a", "trips", "trip-a", "guides"]);
   expect(compassQueryKeys.tripGuides(context, "trip-a")).not.toEqual(compassQueryKeys.tripGuides(context, "trip-b"));
   expect(compassQueryKeys.tripGuides(context, "trip-a")).not.toEqual(compassQueryKeys.tripGuides(otherContext, "trip-a"));
-  expect(compassQueryKeys.countryDetail(context, "IS")).toEqual(["compass", "org-a", "scope-a", "country-details", "IS"]);
+  expect(compassQueryKeys.countryDetail(context, "IS")).toEqual(["compass", "team-a", "scope-a", "country-details", "IS"]);
   expect(compassQueryKeys.countryDetail(context, "IS")).not.toEqual(compassQueryKeys.countryDetail(otherContext, "IS"));
   expect(compassQueryKeys.countryImage(context, "token-a")).not.toEqual(compassQueryKeys.countryImage(context, "token-b"));
   expect(compassQueryKeys.cityDetail(context, "ES", "Valencia")).not.toEqual(compassQueryKeys.cityDetail(context, "VE", "Valencia"));
@@ -216,15 +213,15 @@ test("isolates every routed workspace key by context and resource", () => {
   expect(signalQueryKeys.overviewPage(context, "connector-a", composite, "cursor-a")).not.toEqual(signalQueryKeys.overviewPage(context, "connector-a", composite, "cursor-b"));
   expect(signalQueryKeys.detail(context, "connector-a", "thread-a")).not.toEqual(signalQueryKeys.detail(context, "connector-b", "thread-a"));
   expect(signalQueryKeys.overview(context)).not.toEqual(signalQueryKeys.overview(otherContext));
-  expect(signalQueryKeys.replyContexts(context)).toEqual(["signal", "org-a", "scope-a", "reply-contexts"]);
+  expect(signalQueryKeys.replyContexts(context)).toEqual(["signal", "team-a", "scope-a", "reply-contexts"]);
   expect(signalQueryKeys.replyContexts(context)).not.toEqual(signalQueryKeys.replyContexts(otherContext));
   expect(ascendQueryKeys.detail(context, "book-a")).not.toEqual(ascendQueryKeys.detail(otherContext, "book-a"));
 });
 
 test("Signal composite keys normalize and parse every facet combination", () => {
-  const all = signalQueryKeys.overview(context, "connector", { readState: "read", facets: ["favorite", "filtered", "important", "urgent"], search: "  client  " });
-  expect(all).toEqual([...signalQueryKeys.accountOverviews(context, "connector"), "inbox", "read", "urgent,important,filtered,favorite", "client"]);
-  expect(parseSignalOverviewQuery(all)).toEqual({ kind: "inbox", query: { readState: "read", facets: ["urgent", "important", "filtered", "favorite"], search: "client" } });
+  const all = signalQueryKeys.overview(context, "connector", { readState: "read", facets: ["favorite", "filtered", "purchases", "important", "urgent"], search: "  client  " });
+  expect(all).toEqual([...signalQueryKeys.accountOverviews(context, "connector"), "inbox", "read", "urgent,important,purchases,filtered,favorite", "client"]);
+  expect(parseSignalOverviewQuery(all)).toEqual({ kind: "inbox", query: { readState: "read", facets: ["urgent", "important", "purchases", "filtered", "favorite"], search: "client" } });
   const emptyQuery = { readState: "unread" as const, facets: [] as const, search: "" };
   const empty = signalQueryKeys.overview(context, "connector", emptyQuery);
   expect(parseSignalOverviewQuery(empty)).toEqual({ kind: "inbox", query: { readState: "unread", facets: [], search: "" } });
@@ -240,6 +237,7 @@ test("Signal favorite membership is optional when off and required when on", () 
   const base = { key: "thread", subject: "Subject", summary: "Summary", intent: "Review", priority: "normal" as const, state: "needs_action" as const, inboxCategory: "Important" as const, lastMessageAt: at, isFavorite: false, isRead: false, unread: true, createdAt: at, updatedAt: at };
   expect(signalThreadBelongsToOverview(base, { readState: "unread", facets: ["urgent", "important"], search: "" })).toBe(true);
   expect(signalThreadBelongsToOverview({ ...base, inboxCategory: "Urgent" }, { readState: "unread", facets: ["urgent", "favorite"], search: "" })).toBe(false);
+  expect(signalThreadBelongsToOverview({ ...base, inboxCategory: "Purchases" }, { readState: "unread", facets: ["purchases"], search: "" })).toBe(true);
   expect(signalThreadBelongsToOverview({ ...base, isFavorite: true }, { readState: "unread", facets: ["important", "favorite"], search: "" })).toBe(true);
   expect(signalThreadBelongsToOverview({ ...base, inboxCategory: "Filtered", isFavorite: true }, { readState: "unread", facets: ["favorite"], search: "" })).toBe(true);
   expect(signalThreadBelongsToOverview({ ...base, isRead: true, unread: false }, { readState: "unread", facets: ["important"], search: "" })).toBe(false);
@@ -249,10 +247,10 @@ test("Signal favorite membership is optional when off and required when on", () 
 test("Signal reconciliation honors default, all-active, and zero-facet cache membership", () => {
   const at = "2026-08-23T10:00:00.000Z";
   const thread = { key: "thread", subject: "Subject", summary: "Summary", intent: "Review", priority: "normal" as const, state: "needs_action" as const, inboxCategory: "Important" as const, lastMessageAt: at, isFavorite: false, isRead: false, unread: true, createdAt: at, updatedAt: at };
-  const overview = { accounts: [], selectedAccount: null, threads: [thread], drafts: [], unassignedDrafts: [], counts: { all: 1, important: 1, urgent: 0, needsAction: 1, filtered: 0, unread: 1, favorite: 0, trash: 0 }, nextCursor: null };
+  const overview = { accounts: [], selectedAccount: null, threads: [thread], drafts: [], unassignedDrafts: [], counts: { all: 1, important: 1, urgent: 0, purchases: 0, needsAction: 1, filtered: 0, unread: 1, favorite: 0, trash: 0 }, nextCursor: null };
   const filtered = { ...thread, inboxCategory: "Filtered" as const, updatedAt: "2026-08-23T10:01:00.000Z" };
   expect(reconcileSignalOverviewThreads(overview, [filtered], { readState: "unread", facets: ["urgent", "important"], search: "" }).threads).toEqual([]);
-  expect(reconcileSignalOverviewThreads(overview, [{ ...filtered, isFavorite: true }], { readState: "unread", facets: ["urgent", "important", "filtered", "favorite"], search: "" }).threads).toEqual([{ ...filtered, isFavorite: true }]);
+  expect(reconcileSignalOverviewThreads(overview, [{ ...filtered, isFavorite: true }], { readState: "unread", facets: ["urgent", "important", "purchases", "filtered", "favorite"], search: "" }).threads).toEqual([{ ...filtered, isFavorite: true }]);
   expect(reconcileSignalOverviewThreads(overview, [filtered], { readState: "unread", facets: [], search: "" }).threads).toEqual([]);
   expect(reconcileSignalOverviewThreads(overview, [{ ...filtered, isRead: true, unread: false }], { readState: "unread", facets: ["filtered"], search: "" }).threads).toEqual([]);
 });
@@ -401,7 +399,7 @@ test("invalidates every cached cleanup threshold for one collection", async () =
 
 test("loads Gallery collections once per context and permits explicit singleton updates", async () => {
   const client = new QueryClient();
-  const collections: GalleryCollection[] = [{ key: "collection", name: "Collection", description: null, isFavorite: false, count: 1, coverUrl: null, memberKey: "membership", role: "owner", access: { canRead: true, canContribute: true, canManage: true } }];
+  const collections: GalleryCollection[] = [{ key: "collection", name: "Collection", description: null, purpose: null, mutationPolicy: "user", isFavorite: false, count: 1, coverUrl: null, actorKey: "membership", access: { canRead: true, canContribute: true, canManage: true }, createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z" }];
   let loads = 0;
   const load = () => { loads += 1; return Promise.resolve(collections); };
 
@@ -412,17 +410,6 @@ test("loads Gallery collections once per context and permits explicit singleton 
   const updated = [{ ...collections[0]!, count: 2 }];
   setCachedGalleryCollections(client, context, updated);
   expect(client.getQueryData(galleryQueryKeys.collections(context))).toEqual(updated);
-});
-
-test("repairs legacy Gallery collections already retained in the singleton cache", async () => {
-  const client = new QueryClient();
-  const legacy = { key: "legacy", name: "Legacy", description: null, isFavorite: false, count: 0, coverUrl: null, memberKey: "membership", role: "viewer" };
-  client.setQueryData(galleryQueryKeys.collections(context), [legacy]);
-
-  const collections = await getGalleryCollections(client, context, async () => { throw new Error("stale cache should be used"); });
-
-  expect(collections[0]).toMatchObject({ role: "viewer", access: { canRead: true, canContribute: false, canManage: false } });
-  expect(client.getQueryData(galleryQueryKeys.collections(context))).toEqual(collections);
 });
 
 test("assistant changes invalidate exact workspace prefixes without crossing contexts", async () => {
@@ -508,7 +495,7 @@ test("functionally merges concurrent Signal translation and summary versions", (
 
 test("generated record deletion and conditional restoration preserve additions, order, idempotency, and context isolation", () => {
   const client = new QueryClient();
-  const otherContext = { organizationKey: "other-org", scopeKey: "other-scope" };
+  const otherContext = { teamKey: "other-team", scopeKey: "other-scope" };
   const translation = (key: string, version: number) => ({ key, version, content: key }) as Parameters<typeof upsertSignalTranslationVersion>[3];
   const summary = (key: string, version: number) => ({ key, version, summary: key }) as Parameters<typeof upsertSignalSummary>[3];
   const translations = { messageKey: "message", versions: [translation("three", 3), translation("two", 2), translation("one", 1)] };
@@ -535,7 +522,7 @@ test("repeated Trash reconciliation is idempotent", () => {
   const client = new QueryClient();
   const at = "2026-08-23T10:00:00.000Z";
   const thread = { key: "thread", scopeKey: context.scopeKey, accountKey: "account", providerThreadId: "provider", subject: "Subject", summary: "Summary", intent: "Review", priority: "low" as const, state: "filtered" as const, inboxCategory: "Filtered" as const, labels: ["TRASH"], inInbox: false, lastMessageAt: at, isFavorite: false, isRead: true, createdAt: at, updatedAt: at };
-  const overview = { accounts: [], selectedAccount: null, threads: [thread], drafts: [], unassignedDrafts: [], counts: { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 1 }, nextCursor: null };
+  const overview = { accounts: [], selectedAccount: null, threads: [thread], drafts: [], unassignedDrafts: [], counts: { all: 0, important: 0, urgent: 0, purchases: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 1 }, nextCursor: null };
   client.setQueryData(signalQueryKeys.overview(context, "connector", "trash"), overview);
   reconcileSignalTrashedThread(client, context, "connector", thread);
   reconcileSignalTrashedThread(client, context, "connector", thread);
@@ -671,7 +658,7 @@ test("provider deletion wins over an optimistic Clear Trash rollback", () => {
   const at = "2026-08-23T10:00:00.000Z";
   const deleted = { key: "deleted", subject: "Gone", summary: "Summary", intent: "Review", priority: "normal" as const, state: "filtered" as const, inboxCategory: "Filtered" as const, labels: ["TRASH"], lastMessageAt: at, isFavorite: false, isRead: true, createdAt: at, updatedAt: at };
   const key = signalQueryKeys.overview(context, "connector", "trash");
-  client.setQueryData(key, { accounts: [], selectedAccount: null, threads: [deleted], drafts: [], unassignedDrafts: [], counts: { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 1 }, nextCursor: null });
+  client.setQueryData(key, { accounts: [], selectedAccount: null, threads: [deleted], drafts: [], unassignedDrafts: [], counts: { all: 0, important: 0, urgent: 0, purchases: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 1 }, nextCursor: null });
   const removal = clearSignalTrashCaches(client, context, "connector");
   tombstoneSignalThreadKeys(context, "connector", [deleted.key]);
   expect(restoreSignalTrashCaches(client, removal)).toBe(true);
@@ -683,7 +670,7 @@ test("optimistically clears Trash overviews without crossing connectors", () => 
   const client = new QueryClient();
   const at = "2026-08-23T10:00:00.000Z";
   const thread = { key: "thread", scopeKey: context.scopeKey, accountKey: "account", providerThreadId: "provider", subject: "Subject", summary: "Summary", intent: "Review", priority: "normal" as const, state: "filtered" as const, inboxCategory: "Filtered" as const, labels: ["TRASH"], lastMessageAt: at, isFavorite: false, isRead: true, createdAt: at, updatedAt: at };
-  const overview = { accounts: [], selectedAccount: null, threads: [thread], drafts: [], unassignedDrafts: [], counts: { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 1 }, nextCursor: null };
+  const overview = { accounts: [], selectedAccount: null, threads: [thread], drafts: [], unassignedDrafts: [], counts: { all: 0, important: 0, urgent: 0, purchases: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 1 }, nextCursor: null };
   client.setQueryData(signalQueryKeys.overview(context, "connector", "trash"), overview);
   client.setQueryData(signalQueryKeys.detail(context, "connector", thread.key), { thread, messages: [] });
   client.setQueryData(signalQueryKeys.overview(context, "other", "trash"), overview);
@@ -745,7 +732,7 @@ test("successful Clear Trash tombstones loaded group threads absent from caches"
   const uncached = { key: "uncached-trash", subject: "Uncached", summary: "Summary", intent: "Review", priority: "normal" as const, state: "filtered" as const, inboxCategory: "Filtered" as const, labels: ["TRASH"], lastMessageAt: at, isFavorite: false, isRead: true, unread: false, createdAt: at, updatedAt: at };
   const removal = clearSignalTrashCaches(client, context, "connector");
   commitSignalTrashCaches(client, removal, [uncached.key]);
-  const stale = { accounts: [], selectedAccount: null, threads: [uncached], drafts: [], unassignedDrafts: [], counts: { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 1 }, nextCursor: null };
+  const stale = { accounts: [], selectedAccount: null, threads: [uncached], drafts: [], unassignedDrafts: [], counts: { all: 0, important: 0, urgent: 0, purchases: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 1 }, nextCursor: null };
   expect(filterSignalTombstonedOverview(context, "connector", stale)).toMatchObject({ threads: [], counts: { trash: 0 } });
   clearSignalThreadTombstones(context, "connector");
 });
@@ -755,7 +742,7 @@ test("patches folder-like Signal inboxes and tones without crossing contexts", (
   const inbox = { key: "inbox", connectorKey: "connector", email: "team@example.com", name: "Team", isFavorite: false, status: "active" as const, syncEnabled: true, initialSyncCompleted: true, syncStatus: "idle" as const };
   const updatedInbox = { ...inbox, name: "Priority team", isFavorite: true };
   const first = { key: "tone", name: "Warm", instruction: "Write warmly.", isFavorite: false };
-  const overview = { accounts: [inbox], tones: [first], selectedAccount: inbox, threads: [], drafts: [], unassignedDrafts: [], counts: { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0 }, nextCursor: null };
+  const overview = { accounts: [inbox], tones: [first], selectedAccount: inbox, threads: [], drafts: [], unassignedDrafts: [], counts: { all: 0, important: 0, urgent: 0, purchases: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0 }, nextCursor: null };
   client.setQueryData(signalQueryKeys.overview(context), overview);
   client.setQueryData(signalQueryKeys.overview(context, inbox.connectorKey), overview);
   client.setQueryData(signalQueryKeys.overview(otherContext), overview);
@@ -785,20 +772,6 @@ test("atomically upserts and removes Signal reply context in one exact workspace
   expect(client.getQueryData(signalQueryKeys.replyContexts(otherContext))).toEqual([first]);
 });
 
-test("isolates and updates collection sharing caches", () => {
-  const client = new QueryClient();
-  const members = [{ key: "membership", memberKey: "user", name: "Ada", email: null, role: "viewer" as const, joinedAt: "2026-08-18T00:00:00.000Z" }];
-  const invites = [{ key: "invite", recipient: "ada@example.com", role: "collaborator" as const, createdAt: "2026-08-18T00:00:00.000Z", collection: { key: "collection", name: "Collection" }, inviterDisplayName: "Owner" }];
-  const links = [{ key: "link", url: "https://vorinthex.com/share/link", role: "viewer" as const, active: true, createdAt: "2026-08-18T00:00:00.000Z" }];
-  setCachedGalleryMembers(client, context, "collection", members);
-  setCachedGalleryInvites(client, context, "collection", invites);
-  setCachedGalleryShareLinks(client, context, "collection", links);
-  expect(client.getQueryData(galleryQueryKeys.members(context, "collection"))).toEqual(members);
-  expect(client.getQueryData(galleryQueryKeys.invites(context, "collection"))).toEqual(invites);
-  expect(client.getQueryData(galleryQueryKeys.shareLinks(context, "collection"))).toEqual(links);
-  expect(galleryQueryKeys.members(context, "collection")).not.toEqual(galleryQueryKeys.members(context, "other"));
-});
-
 const image = (key: string, isFavorite = false, origin: GalleryImage["origin"] = "uploaded"): GalleryImage => ({ key, filename: `${key}.jpg`, caption: key, imageCaptionKey: null, mimeType: "image/jpeg", sizeBytes: 100, width: 10, height: 10, city: null, country: null, countryCode: null, latitude: null, longitude: null, locationSource: null, origin, mutationPolicy: "user", isFavorite, createdAt: "2026-08-14T00:00:00.000Z", updatedAt: "2026-08-14T00:00:00.000Z", url: `https://images.example/${key}` });
 
 test("optimistically patches favorites across every Gallery overview", () => {
@@ -818,9 +791,9 @@ test("optimistically copies and moves many images to many collection caches", ()
   const client = new QueryClient();
   const first = image("first"), second = image("second");
   const collections = [
-    { key: "source", name: "Source", description: null, isFavorite: false, count: 2, coverUrl: first.url, memberKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
-    { key: "one", name: "One", description: null, isFavorite: false, count: 0, coverUrl: null, memberKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
-    { key: "two", name: "Two", description: null, isFavorite: false, count: 0, coverUrl: null, memberKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
+    { key: "source", name: "Source", description: null, isFavorite: false, count: 2, coverUrl: first.url, actorKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
+    { key: "one", name: "One", description: null, isFavorite: false, count: 0, coverUrl: null, actorKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
+    { key: "two", name: "Two", description: null, isFavorite: false, count: 0, coverUrl: null, actorKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
   ];
   client.setQueryData(galleryQueryKeys.overview(context), { collections, images: [first, second], nextCursor: null, canCreateCollections: true });
   client.setQueryData(galleryQueryKeys.overview(context, "source"), { collections, images: [first, second], nextCursor: null, canCreateCollections: true });
@@ -838,8 +811,8 @@ test("moves uploaded and generated images across origin-specific Gallery caches"
   const client = new QueryClient();
   const uploaded = image("uploaded"), generated = image("generated", false, "generated"), retained = image("retained");
   const collections = [
-    { key: "source", name: "Source", description: null, isFavorite: false, count: 3, coverUrl: uploaded.url, memberKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
-    { key: "destination", name: "Destination", description: null, isFavorite: false, count: 0, coverUrl: null, memberKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
+    { key: "source", name: "Source", description: null, isFavorite: false, count: 3, coverUrl: uploaded.url, actorKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
+    { key: "destination", name: "Destination", description: null, isFavorite: false, count: 0, coverUrl: null, actorKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
   ];
   const overview = (images: GalleryImage[]): GalleryOverview => ({ collections, images, nextCursor: null, canCreateCollections: true });
   client.setQueryData(galleryQueryKeys.overview(context), overview([uploaded, generated, retained]));
@@ -862,8 +835,8 @@ test("copies only missing memberships across origin-specific Gallery caches", ()
   const client = new QueryClient();
   const uploaded = image("uploaded"), generated = image("generated", false, "generated");
   const collections = [
-    { key: "source", name: "Source", description: null, isFavorite: false, count: 2, coverUrl: uploaded.url, memberKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
-    { key: "destination", name: "Destination", description: null, isFavorite: false, count: 1, coverUrl: uploaded.url, memberKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
+    { key: "source", name: "Source", description: null, isFavorite: false, count: 2, coverUrl: uploaded.url, actorKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
+    { key: "destination", name: "Destination", description: null, isFavorite: false, count: 1, coverUrl: uploaded.url, actorKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } },
   ];
   const overview = (images: GalleryImage[]): GalleryOverview => ({ collections, images, nextCursor: null, canCreateCollections: true });
   client.setQueryData(galleryQueryKeys.overview(context), overview([uploaded, generated]));
@@ -881,7 +854,7 @@ test("removes deleted images everywhere and restores exact optimistic snapshots"
   const client = new QueryClient();
   const deleted = image("deleted"), retained = image("retained");
   const key = galleryQueryKeys.overview(context, "collection");
-  client.setQueryData(key, { collections: [{ key: "collection", name: "Collection", description: null, isFavorite: false, count: 2, coverUrl: deleted.url, memberKey: "membership", role: "owner", access: { canRead: true, canContribute: true, canManage: true } }], images: [deleted, retained], nextCursor: null, canCreateCollections: true });
+  client.setQueryData(key, { collections: [{ key: "collection", name: "Collection", description: null, isFavorite: false, count: 2, coverUrl: deleted.url, actorKey: "membership", role: "owner", access: { canRead: true, canContribute: true, canManage: true } }], images: [deleted, retained], nextCursor: null, canCreateCollections: true });
   const snapshot = snapshotGalleryOverviews(client, context);
 
   removeCachedGalleryImages(client, context, [deleted]);
@@ -893,7 +866,7 @@ test("removes deleted images everywhere and restores exact optimistic snapshots"
 test("removes images and reconciles membership once across origin-specific Gallery caches", () => {
   const client = new QueryClient();
   const uploaded = image("uploaded"), generated = image("generated", false, "generated"), retained = image("retained");
-  const collection = { key: "collection", name: "Collection", description: null, isFavorite: false, count: 3, coverUrl: uploaded.url, memberKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } };
+  const collection = { key: "collection", name: "Collection", description: null, isFavorite: false, count: 3, coverUrl: uploaded.url, actorKey: "membership", role: "owner" as const, access: { canRead: true, canContribute: true, canManage: true } };
   const overview = (images: GalleryImage[]): GalleryOverview => ({ collections: [collection], images, nextCursor: null, canCreateCollections: true });
   client.setQueryData(galleryQueryKeys.overview(context), overview([uploaded, generated, retained]));
   client.setQueryData(galleryQueryKeys.overview(context, "collection", "uploaded"), overview([uploaded, retained]));

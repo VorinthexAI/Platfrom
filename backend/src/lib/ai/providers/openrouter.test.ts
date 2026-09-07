@@ -4,7 +4,7 @@ import { createOpenRouterProvider, openRouterProviderConfigSchema, splitOpenRout
 import type { ProviderExecuteRequest } from './types';
 
 function request(actionId: ProviderExecuteRequest['actionId'], input: unknown, externalModelId = 'vendor/model'): ProviderExecuteRequest {
-  return { actionId, modelId: `openrouter.${externalModelId}`, externalModelId, input, organizationKey: 'org' };
+  return { actionId, modelId: `openrouter.${externalModelId}`, externalModelId, input, teamKey: 'team' };
 }
 const chatInput = { messages: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }] };
 function mp3Frame() { const frame = new Uint8Array(417); frame.set([0xff, 0xfb, 0x90, 0x64]); return frame; }

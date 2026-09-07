@@ -179,10 +179,10 @@ describe('document-extract action', () => {
   test('routes text-based and scanned PDFs through the file action', async () => {
     for (const text of ['Selectable PDF', 'Scanned OCR']) {
       const calls: unknown[] = [];
-      const result = await documentExtract({ ...normalized('pdf'), storageKey: 'pdf' }, { logger: quiet, fileAction: { execute: async (input, organizationKey) => { calls.push({ input, organizationKey }); return { text, metadata: { provider: 'aws-textract' } }; } } });
+      const result = await documentExtract({ ...normalized('pdf'), storageKey: 'pdf' }, { logger: quiet, fileAction: { execute: async (input, teamKey) => { calls.push({ input, teamKey }); return { text, metadata: { provider: 'aws-textract' } }; } } });
       expect(result.extractedText).toBe(text);
       expect(result.metadata).toEqual({ provider: 'aws-textract' });
-      expect(calls).toEqual([{ input: { operation: 'document', storageKey: 'pdf', filename: 'Report.pdf', mimeType: 'application/pdf', bytes: normalized('pdf').fileInput }, organizationKey: scopeKey }]);
+      expect(calls).toEqual([{ input: { operation: 'document', storageKey: 'pdf', filename: 'Report.pdf', mimeType: 'application/pdf', bytes: normalized('pdf').fileInput }, teamKey: scopeKey }]);
     }
   });
 

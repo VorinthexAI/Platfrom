@@ -44,6 +44,6 @@ Every execution is constrained by direct action authorization, original-human ac
 
 Authentication sessions use backend-issued cookie policy metadata. Ordinary
 users and members receive a seven-day access token and one-year absolute
-refresh session. Root-organization owners (`superAdmin`, the Nexus founder
+refresh session. Root-team owners (`superAdmin`, a Founders team owner
 flow) receive a 15-minute access token and one-day absolute refresh session.
 Refresh rotation preserves the original absolute expiry.

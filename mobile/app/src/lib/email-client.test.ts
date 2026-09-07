@@ -1,7 +1,7 @@
 import { beforeEach, expect, mock, test } from "bun:test";
 
 const calls: { method: string; path: string; body: unknown; config?: unknown }[] = [];
-const authState = { organization: { key: "org-key", role: "member" }, scope: { key: "scope-key", role: "moderator" } };
+const authState = { team: { key: "team-key", role: "member" }, scope: { key: "scope-key", role: "moderator" } };
 const now = "2026-08-11T10:00:00.000Z";
 const connector = { key: "inbox-a", connectorKey: "connector-a", provider: "gmail" as const, email: "a@example.com", name: "Client inbox", description: "Priority client mail", isFavorite: true, status: "active" as const, syncEnabled: true, initialSyncCompleted: true, syncStatus: "idle" as const, createdAt: now, updatedAt: now };
 
@@ -32,7 +32,7 @@ mock.module("./api-client", () => ({ apiClient: {
     calls.push({ method: "POST", path, body, config });
     const data = path === "/assistant/respond" ? { type: "answer", message: "You have one urgent unread email.", sources: [], changes: [{ workspace: "signal" }] }
       : path === "/app/search" ? { query: (body as { query: string }).query, groups: (body as { collectionSlugs: string[] }).collectionSlugs.map((collectionSlug) => ({ collectionSlug, results: collectionSlug === "inboxes" ? [{ ...connector, score: 0.91 }] : collectionSlug === "email-tones" ? [{ ...tones[0], score: 0.87 }] : collectionSlug === "email-messages" ? [{ ...thread, score: 0.84 }] : collectionSlug === "email-drafts" ? [{ ...draft, score: 0.89 }] : [] })) }
-      : path === "/email/overview" ? { accounts: [connector, connectorB], selectedAccount: (body as { connectorKey?: string }).connectorKey ? connector : null, threads: (body as { connectorKey?: string }).connectorKey ? [thread] : [], drafts: [], tones: (body as { connectorKey?: string }).connectorKey ? [] : tones, ...(includeUnassignedDrafts ? { unassignedDrafts: [unassignedDraft] } : {}), counts: { all: 1, important: 0, urgent: 0, needsAction: 1, filtered: 0, unread: 1, favorite: 0, trash: 0 }, nextCursor: null }
+      : path === "/email/overview" ? { accounts: [connector, connectorB], selectedAccount: (body as { connectorKey?: string }).connectorKey ? connector : null, threads: (body as { connectorKey?: string }).connectorKey ? [thread] : [], drafts: [], tones: (body as { connectorKey?: string }).connectorKey ? [] : tones, ...(includeUnassignedDrafts ? { unassignedDrafts: [unassignedDraft] } : {}), counts: { all: 1, important: 0, urgent: 0, purchases: 1, needsAction: 1, filtered: 0, unread: 1, favorite: 0, trash: 0 }, nextCursor: null }
       : path === "/email/drafts" || path === "/email/drafts/compose" ? draft
         : path.endsWith("/assign") ? { ...unassignedDraft, connectorKey: connector.connectorKey }
           : (path.startsWith("/email/drafts/") || path.startsWith("/email/tones/")) && path.endsWith("/delete") ? { deletedKey: path.includes("/tones/") ? "tone-direct" : "draft-key" }
@@ -86,7 +86,7 @@ beforeEach(() => {
   includeUnassignedDrafts = true;
   replyContextDeleteResult = undefined;
   bulkReportOverride = undefined;
-  authState.organization.key = "org-key";
+  authState.team.key = "team-key";
   authState.scope.key = "scope-key";
 });
 
@@ -99,14 +99,14 @@ test("sends scoped overview, draft, edit, and send requests", async () => {
   expect(calls.map(({ method, path }) => `${method} ${path}`)).toEqual([
     "POST /email/overview", "POST /email/threads/thread-key/favorite", "POST /email/drafts", "PATCH /email/drafts/draft-key", "POST /email/drafts/draft-key/send",
   ]);
-  expect(calls[0]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", connectorKey: connector.connectorKey, readState: "unread", facets: ["urgent", "important"] });
+  expect(calls[0]?.body).toEqual({ teamKey: "team-key", scopeKey: "scope-key", connectorKey: connector.connectorKey, readState: "unread", facets: ["urgent", "important"] });
   expect(calls[0]?.config).toEqual({ headers: { "X-Vorinthex-Email-Transport": "2" } });
-  expect(calls[1]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", isFavorite: true });
-  expect(calls[2]?.body).toEqual({ organizationKey: "org-key", scopeKey: "scope-key", threadKey: "thread-key", replyMode: "reply", tone: "warm" });
+  expect(calls[1]?.body).toEqual({ teamKey: "team-key", scopeKey: "scope-key", isFavorite: true });
+  expect(calls[2]?.body).toEqual({ teamKey: "team-key", scopeKey: "scope-key", threadKey: "thread-key", replyMode: "reply", tone: "warm" });
 });
 
 test("asks Core through the scoped Signal assistant surface", async () => {
-  const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+  const context = { teamKey: "team-key", scopeKey: "scope-key" };
   expect(await client.askEmailAssistantForContext(context, "Show urgent email", "assistant-request")).toEqual({ type: "answer", message: "You have one urgent unread email.", sources: [], changes: [{ workspace: "signal" }] });
   expect(calls[0]).toEqual({
     method: "POST",
@@ -117,7 +117,7 @@ test("asks Core through the scoped Signal assistant surface", async () => {
 });
 
 test("semantically searches inboxes, tones, messages, and drafts through app search", async () => {
-  const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+  const context = { teamKey: "team-key", scopeKey: "scope-key" };
   const controller = new AbortController();
   expect((await client.searchEmailInboxesForContext(context, "leadership", false, controller.signal)).inboxes[0]).toMatchObject({ key: connector.key, score: 0.91 });
   expect((await client.searchEmailTonesForContext(context, "measured", true, controller.signal)).tones[0]).toMatchObject({ key: tones[0]!.key, score: 0.87 });
@@ -132,7 +132,7 @@ test("semantically searches inboxes, tones, messages, and drafts through app sea
 });
 
 test("filters Signal text searches and empty-query lists without dropping inbox selectors", async () => {
-  const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+  const context = { teamKey: "team-key", scopeKey: "scope-key" };
   const tags = ["tag-b", "tag-a"];
   await client.searchEmailInboxesForContext(context, "", true, undefined, tags);
   await client.searchEmailTonesForContext(context, "measured", false, undefined, tags);
@@ -158,12 +158,12 @@ test("sends strict new compose and reply attachment requests", async () => {
   const attachments = [{ type: "document" as const, key: "document-key" }, { type: "image" as const, key: "image-key" }];
   await client.composeEmailDraft({ connectorKey: connector.connectorKey, to: ["one@example.com"], cc: ["two@example.com"], subject: "Project update", tone: "direct", instruction: "Use the reviewed body", attachments });
   await client.createEmailDraft({ threadKey: "thread-key", replyMode: "reply_all", tone: "warm", instruction: "Confirm receipt", attachments });
-  expect(calls[0]).toMatchObject({ method: "POST", path: "/email/drafts/compose", body: { organizationKey: "org-key", scopeKey: "scope-key", connectorKey: connector.connectorKey, to: ["one@example.com"], cc: ["two@example.com"], subject: "Project update", tone: "direct", instruction: "Use the reviewed body", attachments } });
-  expect(calls[1]).toMatchObject({ method: "POST", path: "/email/drafts", body: { organizationKey: "org-key", scopeKey: "scope-key", threadKey: "thread-key", replyMode: "reply_all", tone: "warm", instruction: "Confirm receipt", attachments } });
+  expect(calls[0]).toMatchObject({ method: "POST", path: "/email/drafts/compose", body: { teamKey: "team-key", scopeKey: "scope-key", connectorKey: connector.connectorKey, to: ["one@example.com"], cc: ["two@example.com"], subject: "Project update", tone: "direct", instruction: "Use the reviewed body", attachments } });
+  expect(calls[1]).toMatchObject({ method: "POST", path: "/email/drafts", body: { teamKey: "team-key", scopeKey: "scope-key", threadKey: "thread-key", replyMode: "reply_all", tone: "warm", instruction: "Confirm receipt", attachments } });
 });
 
 test("sends strict independent body and attachment draft updates", async () => {
-  const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+  const context = { teamKey: "team-key", scopeKey: "scope-key" };
   const attachments = [{ type: "document" as const, key: "document-key" }, { type: "image" as const, key: "image-key" }];
   await client.updateEmailDraftForContext(context, "draft-key", { attachments }, "attachments-update");
   await client.updateEmailDraft("draft-key", "Body only");
@@ -198,7 +198,7 @@ test("matches generate and preserve compose modes with exact blank content", asy
 
 test("forwards an optional abort signal when composing", async () => {
   const controller = new AbortController();
-  await client.composeEmailDraftForContext({ organizationKey: "org-key", scopeKey: "scope-key" }, { to: ["one@example.com"], generationMode: "generate", subject: "", authoredBody: "", tone: "direct" }, "compose-signal", controller.signal);
+  await client.composeEmailDraftForContext({ teamKey: "team-key", scopeKey: "scope-key" }, { to: ["one@example.com"], generationMode: "generate", subject: "", authoredBody: "", tone: "direct" }, "compose-signal", controller.signal);
   expect(calls[0]?.config).toEqual({ headers: { "Idempotency-Key": "compose-signal" }, signal: controller.signal });
 });
 
@@ -223,7 +223,7 @@ test("parses the safe tone DTO from list responses while retaining built-in draf
 });
 
 test("sends and strictly parses reader and generated-version requests", async () => {
-  const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+  const context = { teamKey: "team-key", scopeKey: "scope-key" };
   await client.trashEmailThreadForContext(context, thread.key);
   const similar = await client.findSimilarEmailMessagesForContext(context, "message-key", { limit: 10 });
   expect(similar.items[0]?.inboxCategory).toBe("Urgent");
@@ -243,11 +243,12 @@ test("sends and strictly parses reader and generated-version requests", async ()
   expect(() => client.emailTranslationVersionSchema.parse({ ...translation.version, scopeKey: "scope-key", embedding: [] })).toThrow();
   expect(() => client.emailSummarySchema.parse({ ...summaryVersion, sourceContentHash: "a".repeat(64), createdByKey: "member-key" })).toThrow();
   expect(() => client.emailInboxCategorySchema.parse("Primary")).toThrow();
+  expect(client.emailInboxCategorySchema.parse("Purchases")).toBe("Purchases");
 });
 
 test("sends the normalized inbox cursor query without changing the product-neutral overview route", async () => {
-  await client.fetchEmailOverview({ connectorKey: connector.connectorKey, readState: "read", facets: ["favorite", "urgent", "filtered", "important"], cursor: "cursor-1", limit: 50 });
-  expect(calls[0]).toMatchObject({ path: "/email/overview", body: { organizationKey: "org-key", scopeKey: "scope-key", connectorKey: connector.connectorKey, readState: "read", facets: ["urgent", "important", "filtered", "favorite"], cursor: "cursor-1", limit: 50 } });
+  await client.fetchEmailOverview({ connectorKey: connector.connectorKey, readState: "read", facets: ["favorite", "urgent", "filtered", "purchases", "important"], cursor: "cursor-1", limit: 50 });
+  expect(calls[0]).toMatchObject({ path: "/email/overview", body: { teamKey: "team-key", scopeKey: "scope-key", connectorKey: connector.connectorKey, readState: "read", facets: ["urgent", "important", "purchases", "filtered", "favorite"], cursor: "cursor-1", limit: 50 } });
   expect(client.emailOverviewInputSchema.parse({ connectorKey: connector.connectorKey, search: " client " })).toMatchObject({ search: "client" });
 });
 
@@ -270,8 +271,8 @@ test("retains request identity for the same payload and replaces it when payload
 });
 
 test("normalizes default, all-facet, and intentional empty inbox queries immutably", () => {
-  expect(client.normalizeEmailOverviewQuery()).toEqual({ readState: "unread", facets: ["urgent", "important"], search: "" });
-  expect(client.normalizeEmailOverviewQuery({ facets: ["favorite", "filtered", "important", "urgent"] }).facets).toEqual(["urgent", "important", "filtered", "favorite"]);
+  expect(client.normalizeEmailOverviewQuery()).toEqual({ readState: "unread", facets: ["urgent", "important", "purchases"], search: "" });
+  expect(client.normalizeEmailOverviewQuery({ facets: ["favorite", "filtered", "purchases", "important", "urgent"] }).facets).toEqual(["urgent", "important", "purchases", "filtered", "favorite"]);
   const empty = client.normalizeEmailOverviewQuery({ facets: [] });
   expect(empty.facets).toEqual([]);
   expect(Object.isFrozen(empty)).toBe(true);
@@ -292,17 +293,17 @@ test("constrains attachment references on message and draft output fields", () =
 test("rapid facet requests compose from the latest requested query", () => {
   const first = client.toggleEmailOverviewFacet(client.normalizeEmailOverviewQuery(), "urgent");
   const second = client.toggleEmailOverviewFacet(first, "important");
-  expect(second).toEqual({ readState: "unread", facets: [], search: "" });
+  expect(second).toEqual({ readState: "unread", facets: ["purchases"], search: "" });
 });
 
 test("rapid read and facet requests preserve both requested changes", () => {
   const read = client.setEmailOverviewReadState(client.normalizeEmailOverviewQuery({ search: "client" }), "read");
   const combined = client.toggleEmailOverviewFacet(read, "favorite");
-  expect(combined).toEqual({ readState: "read", facets: ["urgent", "important", "favorite"], search: "client" });
+  expect(combined).toEqual({ readState: "read", facets: ["urgent", "important", "purchases", "favorite"], search: "client" });
 });
 
 test("hydrates a thread without changing provider read state", async () => {
-  const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+  const context = { teamKey: "team-key", scopeKey: "scope-key" };
   expect((await client.fetchEmailThreadForContext(context, thread.key)).thread).toEqual(thread);
   expect(calls[0]).toMatchObject({ path: `/email/threads/${thread.key}`, body: context });
 });
@@ -324,9 +325,9 @@ test("sends strict inbox and tone metadata payloads", async () => {
   expect(() => client.emailToneUpdateInputSchema.parse({ toneKey: "tone-warm", coverImageKey: "image-key" })).toThrow();
   await client.updateEmailInbox({ connectorKey: connector.connectorKey, name: "Client inbox", description: null, coverImageKey: null, isFavorite: false });
   expect(calls.map(({ path, body }) => ({ path, body }))).toEqual([
-    { path: "/email/tones", body: { organizationKey: "org-key", scopeKey: "scope-key", name: "Warm", instruction: "Write with empathy." } },
-    { path: "/email/tones/tone-warm", body: { organizationKey: "org-key", scopeKey: "scope-key", name: "Warm", instruction: "Write naturally.", isFavorite: true } },
-    { path: "/email/inboxes", body: { organizationKey: "org-key", scopeKey: "scope-key", connectorKey: connector.connectorKey, name: "Client inbox", description: null, coverImageKey: null, isFavorite: false } },
+    { path: "/email/tones", body: { teamKey: "team-key", scopeKey: "scope-key", name: "Warm", instruction: "Write with empathy." } },
+    { path: "/email/tones/tone-warm", body: { teamKey: "team-key", scopeKey: "scope-key", name: "Warm", instruction: "Write naturally.", isFavorite: true } },
+    { path: "/email/inboxes", body: { teamKey: "team-key", scopeKey: "scope-key", connectorKey: connector.connectorKey, name: "Client inbox", description: null, coverImageKey: null, isFavorite: false } },
   ]);
   expect(calls.map(({ method }) => method)).toEqual(["POST", "PATCH", "PATCH"]);
   expect(() => client.emailToneCreateInputSchema.parse({ name: "Warm", instruction: "Write naturally.", hidden: true })).toThrow();
@@ -337,7 +338,7 @@ test("sends strict inbox and tone metadata payloads", async () => {
 });
 
 test("arbitrary email text enhancement and translation use unified app actions with AI timeouts", async () => {
-  const context = { organizationKey: "org-captured", scopeKey: "scope-captured" };
+  const context = { teamKey: "team-captured", scopeKey: "scope-captured" };
   await expect(transformations.enhanceAppTextForContext(context, "bad words here")).resolves.toEqual({ text: "Enhanced text." });
   await expect(transformations.translateAppTextForContext(context, "Clear sentence.", "French")).resolves.toEqual({ text: "Texte traduit." });
   expect(calls).toEqual([
@@ -347,8 +348,8 @@ test("arbitrary email text enhancement and translation use unified app actions w
 });
 
 test("explicit-context draft and metadata operations ignore later auth scope changes", async () => {
-  const context = { organizationKey: "org-captured", scopeKey: "scope-captured" };
-  authState.organization.key = "org-current";
+  const context = { teamKey: "team-captured", scopeKey: "scope-captured" };
+  authState.team.key = "team-current";
   authState.scope.key = "scope-current";
 
   await client.fetchEmailOverviewForContext(context);
@@ -363,24 +364,24 @@ test("explicit-context draft and metadata operations ignore later auth scope cha
 
   expect(calls).toHaveLength(9);
   expect(calls.every(({ body }) => {
-    const value = body as { organizationKey?: string; scopeKey?: string };
-    return value.organizationKey === context.organizationKey && value.scopeKey === context.scopeKey;
+    const value = body as { teamKey?: string; scopeKey?: string };
+    return value.teamKey === context.teamKey && value.scopeKey === context.scopeKey;
   })).toBe(true);
   expect(calls[5]?.config).toEqual({ timeout: 4 * 60_000 });
   expect(calls[8]?.body).toMatchObject({ replyMode: "reply_all" });
 });
 
 test("favorite keeps the existing route while using captured context", async () => {
-  const context = { organizationKey: "org-captured", scopeKey: "scope-captured" };
-  authState.organization.key = "org-current";
+  const context = { teamKey: "team-captured", scopeKey: "scope-captured" };
+  authState.team.key = "team-current";
   authState.scope.key = "scope-current";
   await client.setEmailThreadFavoriteForContext(context, "thread-key", true);
   expect(calls[0]).toMatchObject({ method: "POST", path: "/email/threads/thread-key/favorite", body: { ...context, isFavorite: true } });
 });
 
 test("reply context uses strict DTOs, payloads, and explicit captured context", async () => {
-  const context = { organizationKey: "org-captured", scopeKey: "scope-captured" };
-  authState.organization.key = "org-current";
+  const context = { teamKey: "team-captured", scopeKey: "scope-captured" };
+  authState.team.key = "team-current";
   authState.scope.key = "scope-current";
   expect(await client.fetchEmailReplyContextsForContext(context)).toEqual(replyContexts);
   expect(await client.createEmailReplyContextForContext(context, { name: "Client background", text: "Use the account history." })).toEqual(replyContexts[0]);
@@ -389,7 +390,7 @@ test("reply context uses strict DTOs, payloads, and explicit captured context", 
   expect(calls.map(({ method, path }) => `${method} ${path}`)).toEqual([
     "POST /email/reply-context/list", "POST /email/reply-context", "PATCH /email/reply-context/context-client", "POST /email/reply-context/delete",
   ]);
-  expect(calls.every(({ body }) => (body as { organizationKey: string }).organizationKey === context.organizationKey && (body as { scopeKey: string }).scopeKey === context.scopeKey)).toBe(true);
+  expect(calls.every(({ body }) => (body as { teamKey: string }).teamKey === context.teamKey && (body as { scopeKey: string }).scopeKey === context.scopeKey)).toBe(true);
   expect(calls[3]?.body).toEqual({ ...context, noteKeys: ["context-client", "context-policy"] });
   expect(() => client.emailReplyContextSchema.parse({ ...replyContexts[0], scopeKey: "private" })).toThrow();
   expect(() => client.emailReplyContextCreateInputSchema.parse({ name: "Note", text: "Text", hidden: true })).toThrow();
@@ -399,7 +400,7 @@ test("reply context uses strict DTOs, payloads, and explicit captured context", 
 });
 
 test("reply context bulk delete accepts only the exact backend result", async () => {
-  const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+  const context = { teamKey: "team-key", scopeKey: "scope-key" };
   replyContextDeleteResult = { deletedKeys: ["context-client"], deleted: 1 };
   await expect(client.deleteEmailReplyContextsForContext(context, ["context-client"])).rejects.toThrow();
   replyContextDeleteResult = { deletedNoteKeys: ["context-client"] };
@@ -408,7 +409,7 @@ test("reply context bulk delete accepts only the exact backend result", async ()
 
 test("Gmail OAuth start carries strict inbox metadata and a fixed provider", async () => {
   expect(await client.launchEmailConnection({ name: "Client inbox", description: "Priority mail" })).toBeNull();
-  expect(calls[0]).toEqual({ method: "POST", path: "/email/connect", body: { organizationKey: "org-key", scopeKey: "scope-key", provider: "gmail", returnUri: "https://vorinthex.com/capability/signal", name: "Client inbox", description: "Priority mail" }, config: {} });
+  expect(calls[0]).toEqual({ method: "POST", path: "/email/connect", body: { teamKey: "team-key", scopeKey: "scope-key", provider: "gmail", returnUri: "https://vorinthex.com/capability/signal", name: "Client inbox", description: "Priority mail" }, config: {} });
   expect(() => client.emailConnectionMetadataSchema.parse({ name: "", description: "Invalid" })).toThrow();
   expect(() => client.emailConnectionMetadataSchema.parse({ provider: "other", name: "Inbox" })).toThrow();
   expect(() => client.emailConnectionMetadataSchema.parse({ name: "Inbox", email: "other@example.com", appPassword: "password" })).toThrow();
@@ -424,7 +425,7 @@ test("parses unassigned drafts and defaults the legacy field to an empty list", 
 
 test("sends a strict draft assignment request without sending the draft", async () => {
   expect(await client.assignEmailDraft(unassignedDraft.key, connector.connectorKey)).toMatchObject({ key: unassignedDraft.key, connectorKey: connector.connectorKey });
-  expect(calls[0]).toMatchObject({ method: "POST", path: `/email/drafts/${unassignedDraft.key}/assign`, body: { organizationKey: "org-key", scopeKey: "scope-key", connectorKey: connector.connectorKey } });
+  expect(calls[0]).toMatchObject({ method: "POST", path: `/email/drafts/${unassignedDraft.key}/assign`, body: { teamKey: "team-key", scopeKey: "scope-key", connectorKey: connector.connectorKey } });
   expect(() => client.emailAssignDraftInputSchema.parse({ draftKey: unassignedDraft.key, connectorKey: connector.connectorKey, send: true })).toThrow();
 });
 
@@ -435,7 +436,7 @@ test("propagates connector selectors to compose and disconnect", async () => {
 });
 
 test("explicit-context provider clients never reread ambient scope", async () => {
-  const context = { organizationKey: "captured-org", scopeKey: "captured-scope" };
+  const context = { teamKey: "captured-team", scopeKey: "captured-scope" };
   await client.assignEmailDraftForContext(context, unassignedDraft.key, connector.connectorKey);
   await client.disconnectEmailForContext(context, connector.connectorKey);
   expect(calls.map(({ body }) => body)).toEqual([
@@ -445,7 +446,7 @@ test("explicit-context provider clients never reread ambient scope", async () =>
 });
 
 test("sends strict bulk thread mutations and parses ordered itemized reports", async () => {
-  const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+  const context = { teamKey: "team-key", scopeKey: "scope-key" };
   expect((await client.setEmailThreadsFavoriteForContext(context, [thread.key], true)).items[0]).toMatchObject({ threadKey: thread.key, status: "succeeded", thread: { isFavorite: true } });
   expect((await client.setEmailThreadsReadStateForContext(context, [thread.key], true)).items[0]).toMatchObject({ status: "succeeded", thread: { isRead: true, unread: false } });
   expect((await client.trashEmailThreadsForContext(context, [thread.key])).items[0]).toMatchObject({ status: "succeeded", thread: { labels: ["TRASH"], inInbox: false } });
@@ -459,7 +460,7 @@ test("sends strict bulk thread mutations and parses ordered itemized reports", a
 });
 
 test("accepts the exact repairPending bulk item and preserves partial success order", async () => {
-  const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+  const context = { teamKey: "team-key", scopeKey: "scope-key" };
   bulkReportOverride = { requested: 2, succeeded: 1, failed: 0, repairPending: 1, items: [{ threadKey: thread.key, status: "succeeded", thread: { ...thread, isFavorite: true } }, { threadKey: "thread-two", status: "repairPending", error: "database unavailable" }] };
   const report = await client.setEmailThreadsFavoriteForContext(context, [thread.key, "thread-two"], true);
   expect(report.items).toEqual([expect.objectContaining({ threadKey: thread.key, status: "succeeded" }), { threadKey: "thread-two", status: "repairPending", error: "database unavailable" }]);
@@ -485,13 +486,13 @@ test("accepts strict mixed succeeded, provider-deleted, failed, and repair-pendi
 });
 
 test("clears one connector Trash with strict deletion counts", async () => {
-  const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+  const context = { teamKey: "team-key", scopeKey: "scope-key" };
   expect(await client.clearEmailTrashForContext(context, connector.connectorKey)).toEqual({ connectorKey: connector.connectorKey, providerMessagesDeleted: 2, threadsDeleted: 1, documentsDeleted: 3 });
   expect(calls[0]).toMatchObject({ path: "/email/trash/clear", body: { ...context, connectorKey: connector.connectorKey } });
 });
 
 test("bulk deletes generated email records through exact strict routes", async () => {
-  const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+  const context = { teamKey: "team-key", scopeKey: "scope-key" };
   expect(await client.deleteEmailMessageTranslationsForContext(context, { messageKey: message.key, translationKeys: [translationVersion.key] }, "translation-delete")).toEqual({ messageKey: message.key, deletedKeys: [translationVersion.key] });
   expect(await client.deleteEmailMessageSummariesForContext(context, { messageKey: message.key, summaryKeys: [summaryVersion.key] }, "summary-delete")).toEqual({ messageKey: message.key, deletedKeys: [summaryVersion.key] });
   expect(calls).toEqual([
@@ -504,7 +505,7 @@ test("bulk deletes generated email records through exact strict routes", async (
 });
 
 test("sends idempotency keys only as mutation headers", async () => {
-  const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+  const context = { teamKey: "team-key", scopeKey: "scope-key" };
   await client.setEmailThreadsFavoriteForContext(context, [thread.key], true, "favorite-action");
   await client.setEmailThreadsReadStateForContext(context, [thread.key], true, "read-action");
   await client.trashEmailThreadForContext(context, thread.key, "trash-action");
@@ -519,7 +520,7 @@ test("sends idempotency keys only as mutation headers", async () => {
 });
 
 test("uses canonical hard-delete routes for persisted drafts and custom tones", async () => {
-  const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+  const context = { teamKey: "team-key", scopeKey: "scope-key" };
   expect(await client.deleteEmailDraftForContext(context, "draft-key", "draft-delete")).toEqual({ deletedKey: "draft-key" });
   expect(await client.deleteEmailToneForContext(context, "tone-direct", "tone-delete")).toEqual({ deletedKey: "tone-direct" });
   expect(calls).toEqual([
@@ -529,7 +530,7 @@ test("uses canonical hard-delete routes for persisted drafts and custom tones", 
 });
 
 test("forwards one supplied idempotency key for every supported mutation and never for reads", async () => {
-  const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+  const context = { teamKey: "team-key", scopeKey: "scope-key" };
   const mutate = async (key: string, operation: () => Promise<unknown>) => {
     const start = calls.length;
     await operation();
@@ -559,7 +560,7 @@ test("forwards one supplied idempotency key for every supported mutation and nev
 });
 
 test("parses exact backend-shaped public projections and rejects private identities", async () => {
-  const context = { organizationKey: "org-key", scopeKey: "scope-key" };
+  const context = { teamKey: "team-key", scopeKey: "scope-key" };
   expect((await client.fetchEmailOverviewForContext(context, { connectorKey: connector.connectorKey })).threads).toEqual([thread]);
   const detail = await client.fetchEmailThreadForContext(context, thread.key);
   expect(detail).toMatchObject({ thread, messages: [{ ...message, bodyTruncated: false }], nextCursor: null, truncated: false });
@@ -571,6 +572,6 @@ test("parses exact backend-shaped public projections and rejects private identit
 });
 
 test("thread detail continuations send the bounded cursor in the request body", async () => {
-  await client.fetchEmailThreadForContext({ organizationKey: "org-key", scopeKey: "scope-key" }, thread.key, "next-page");
-  expect(calls.at(-1)).toMatchObject({ method: "POST", path: `/email/threads/${thread.key}`, body: { organizationKey: "org-key", scopeKey: "scope-key", cursor: "next-page" } });
+  await client.fetchEmailThreadForContext({ teamKey: "team-key", scopeKey: "scope-key" }, thread.key, "next-page");
+  expect(calls.at(-1)).toMatchObject({ method: "POST", path: `/email/threads/${thread.key}`, body: { teamKey: "team-key", scopeKey: "scope-key", cursor: "next-page" } });
 });

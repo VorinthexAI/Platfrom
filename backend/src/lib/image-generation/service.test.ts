@@ -4,11 +4,11 @@ import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import type { ProcessImageInput } from '@/lib/ai/image-processing';
 import { createImageGenerationService as createProductionImageGenerationService, imageGenerateModelInputSchema, imageIdeasInputSchema, parseImageIdeas } from './service';
 
-const organizationKey = newId(), scopeKey = newId(), membershipKey = newId(), collectionKey = newId();
+const teamKey = newId(), scopeKey = newId(), teamMembershipKey = newId(), collectionKey = newId();
 const context = {
-  organizationKey,
+  teamKey,
   runtimeScopeKey: scopeKey,
-  principal: { kind: 'member', user: { key: newId() }, userOrganization: { key: membershipKey } },
+  principal: { kind: 'member', user: { key: newId() }, userTeam: { key: teamMembershipKey } },
 } as unknown as ToolContext;
 
 const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString('base64');
@@ -16,12 +16,12 @@ const authorizedGallery = { getCollectionRole: async () => 'owner' as const, get
 const safeAsk = (async () => ({ output: { text: '{"safe":true}', toolCalls: [], stopReason: 'completed' }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' })) as any;
 const history = { record: async () => ({}), list: async () => [], remove: async () => ({ normalizedPrompt: '', deleted: false }) } as any;
 const claimedLedger = () => ({ claim: async () => ({ status: 'claimed' as const }), start: async () => true, renew: async () => true, complete: async () => {}, fail: async () => {}, release: async () => {} });
-const persistedImage = (key = newId()) => ({ key, scopeKey, filename: 'generated.png', caption: 'Earth', imageCaptionKey: newId(), createdByKey: membershipKey, storageKey: `durable/${key}.png`, mimeType: 'image/png', sizeBytes: 8, width: 1024, height: 1024, embedding: [], origin: 'generated', isFavorite: false, createdAt: '2026-08-19T00:00:00.000Z', updatedAt: '2026-08-19T00:00:00.000Z' }) as any;
+const persistedImage = (key = newId()) => ({ key, scopeKey, filename: 'generated.png', caption: 'Earth', imageCaptionKey: newId(), createdByKey: teamMembershipKey, storageKey: `durable/${key}.png`, mimeType: 'image/png', sizeBytes: 8, width: 1024, height: 1024, embedding: [], origin: 'generated', isFavorite: false, createdAt: '2026-08-19T00:00:00.000Z', updatedAt: '2026-08-19T00:00:00.000Z' }) as any;
 const createImageGenerationService = (dependencies: Parameters<typeof createProductionImageGenerationService>[0] = {}) => createProductionImageGenerationService({ publishGeneratedImages: async () => {}, publishManagedGeneratedImage: async () => {}, ...dependencies });
 
 describe('image generation service', () => {
   test('uses strict bounded contracts and an exact distinct fallback', () => {
-    expect(() => imageIdeasInputSchema.parse({ prompt: 'A globe', requestedCount: 2, organizationKey })).toThrow('Unrecognized key');
+    expect(() => imageIdeasInputSchema.parse({ prompt: 'A globe', requestedCount: 2, teamKey })).toThrow('Unrecognized key');
     expect(() => imageIdeasInputSchema.parse({ prompt: 'A globe', requestedCount: 9 })).toThrow();
     expect(() => imageGenerateModelInputSchema.parse({ prompt: 'A globe', count: 1, size: '512x512', quality: 'high' })).toThrow();
     expect(imageGenerateModelInputSchema.parse({ prompt: 'A globe', collectionKey }).mode).toBe('default');
@@ -54,15 +54,15 @@ describe('image generation service', () => {
       executeAsk: (async (...args: unknown[]) => { calls.push(args); return { output: { text: '{"concepts":[{"title":"Orbit","prompt":"A complete orbital image"}]}', toolCalls: [], stopReason: 'completed' }, usage: {}, providerId: 'openrouter', modelId: 'google.gemini-3.1-flash-lite', externalModelId: 'google/gemini-3.1-flash-lite' }; }) as any,
       now: (() => { let value = 10; return () => value += 25; })(),
     });
-    await service.createRawIdeas({ prompt: 'Earth', requestedCount: 1 }, organizationKey);
-    const generated = await service.generateRaw({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high' }, organizationKey);
-    expect(calls[0]?.[0]).toBe(organizationKey);
+    await service.createRawIdeas({ prompt: 'Earth', requestedCount: 1 }, teamKey);
+    const generated = await service.generateRaw({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'high' }, teamKey);
+    expect(calls[0]?.[0]).toBe(teamKey);
     expect(calls[0]?.[1]).not.toHaveProperty('mode');
-    expect(calls[1]?.[0]).toEqual({ mode: 'auto', organizationKey, actionSlug: 'image' });
+    expect(calls[1]?.[0]).toEqual({ mode: 'auto', teamKey, actionSlug: 'image' });
     expect(generated).toMatchObject({ durationMs: 25, costUsd: 0.12 });
 
-    await service.generateRaw({ prompt: 'Earth', count: 1, size: '1536x1024', quality: 'low', mode: 'fast' }, organizationKey);
-    expect(calls[2]?.[0]).toEqual({ mode: 'auto', organizationKey, actionSlug: 'image' });
+    await service.generateRaw({ prompt: 'Earth', count: 1, size: '1536x1024', quality: 'low', mode: 'fast' }, teamKey);
+    expect(calls[2]?.[0]).toEqual({ mode: 'auto', teamKey, actionSlug: 'image' });
     expect(calls[2]?.[1]).toEqual({ operation: 'generate', prompt: 'Earth', count: 1, aspectRatio: '3:2', outputFormat: 'png' });
   });
 
@@ -86,7 +86,7 @@ describe('image generation service', () => {
     expect(first).toEqual(second);
     expect(providerCalls).toBe(1);
     expect(processCalls).toHaveLength(1);
-    expect(processCalls[0]?.[0]).toMatchObject({ scopeKey, ownerKey: membershipKey, idempotencyKey: expect.stringMatching(/^image-generation:[a-f0-9]{64}$/), file: { filename: 'generated-1.png', mimeType: 'image/png', sizeBytes: 8 } });
+    expect(processCalls[0]?.[0]).toMatchObject({ scopeKey, ownerKey: teamMembershipKey, idempotencyKey: expect.stringMatching(/^image-generation:[a-f0-9]{64}$/), file: { filename: 'generated-1.png', mimeType: 'image/png', sizeBytes: 8 } });
     expect(first.provider).toEqual({ durationMs: 0, costUsd: 0.2 });
     expect(first.images[0]).toMatchObject({ caption: 'Generated globe', url: 'https://images.example/signed.png' });
     expect(JSON.stringify(first)).not.toContain('base64');
@@ -105,7 +105,7 @@ describe('image generation service', () => {
   test('authorizes Gallery persistence before claiming or invoking the provider', async () => {
     let claimed = 0, provider = 0;
     const service = createImageGenerationService({ executeAsk: safeAsk, history, gallery: { ...authorizedGallery, getCollectionRole: async () => 'viewer' }, idempotency: { ...claimedLedger(), claim: async () => { claimed += 1; return { status: 'claimed' }; } }, execute: (async () => { provider += 1; return {}; }) as any });
-    await expect(service.generate({ collectionKey, prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, context, 'denied')).rejects.toThrow('contribution access');
+    await expect(service.generate({ collectionKey, prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, context, 'denied')).rejects.toThrow('ownership');
     expect({ claimed, provider }).toEqual({ claimed: 0, provider: 0 });
   });
 
@@ -132,7 +132,7 @@ describe('image generation service', () => {
     expect(result.images).toHaveLength(1); expect(providerCalls).toBe(1);
     expect(processed[0]).toHaveLength(1); expect(processed[0]![0]).not.toHaveProperty('mutationPolicy');
     expect(attached[0]?.slice(0, 2)).toEqual([scopeKey, collectionKey]);
-    expect(attached[0]?.[2]).toEqual([result.images[0]!.key]); expect(attached[0]?.[3]).toBe(membershipKey);
+    expect(attached[0]?.[2]).toEqual([result.images[0]!.key]); expect(attached[0]?.[3]).toBe(teamMembershipKey);
   });
 
   test('routes direct multi-image generation into managed Core through one atomic dedicated attachment', async () => {
@@ -167,7 +167,7 @@ describe('image generation service', () => {
     });
     await expect(service.generate({ collectionKey, prompt: 'request', count: 1 }, context, 'direct-image-action')).resolves.toMatchObject({ images: [{ origin: 'generated' }] });
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.[0]).toEqual({ mode: 'auto', organizationKey, actionSlug: 'image' });
+    expect(calls[0]?.[0]).toEqual({ mode: 'auto', teamKey, actionSlug: 'image' });
     expect(calls[0]?.[1]).toMatchObject({ operation: 'generate', prompt: 'request', count: 1 });
   });
 
@@ -227,9 +227,9 @@ describe('image generation service', () => {
     expect(providerCalls).toBe(0);
   });
 
-  test('separates deterministic generated-image keys for collaborators sharing an idempotency key', async () => {
-    const secondMembershipKey = newId();
-    const secondContext = { ...context, principal: { kind: 'member', user: { key: newId() }, userOrganization: { key: secondMembershipKey } } } as unknown as ToolContext;
+  test('separates deterministic generated-image keys for different owners sharing an idempotency key', async () => {
+    const secondTeamMembershipKey = newId();
+    const secondContext = { ...context, principal: { kind: 'member', user: { key: newId() }, userTeam: { key: secondTeamMembershipKey } } } as unknown as ToolContext;
     const lookupKeys: string[] = [];
     const processInputs: ProcessImageInput[] = [];
     const service = createImageGenerationService({
@@ -243,7 +243,7 @@ describe('image generation service', () => {
     await service.generate(input, context, 'same-key');
     await service.generate(input, secondContext, 'same-key');
     expect(new Set(lookupKeys).size).toBe(2);
-    expect(processInputs.map(({ ownerKey }) => ownerKey)).toEqual([membershipKey, secondMembershipKey]);
+    expect(processInputs.map(({ ownerKey }) => ownerKey)).toEqual([teamMembershipKey, secondTeamMembershipKey]);
     expect(processInputs.map(({ imageKey }) => imageKey)).toEqual(lookupKeys);
     expect(new Set(processInputs.map(({ idempotencyKey }) => idempotencyKey)).size).toBe(2);
   });
@@ -305,7 +305,7 @@ describe('image generation service', () => {
     const dependencies = { executeAsk: safeAsk, history,
       gallery: authorizedGallery, idempotency: ledger, getImage: async () => null,
       execute: (async () => { providerCalls += 1; return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' }; }) as any,
-      process: async () => [{ key: newId(), scopeKey, filename: 'generated.png', caption: 'Earth', imageCaptionKey: newId(), createdByKey: membershipKey, storageKey: 'durable/key.png', mimeType: 'image/png', sizeBytes: 8, width: 1024, height: 1024, embedding: [], isFavorite: false, createdAt: '2026-08-19T00:00:00.000Z', updatedAt: '2026-08-19T00:00:00.000Z' }] as any,
+      process: async () => [{ key: newId(), scopeKey, filename: 'generated.png', caption: 'Earth', imageCaptionKey: newId(), createdByKey: teamMembershipKey, storageKey: 'durable/key.png', mimeType: 'image/png', sizeBytes: 8, width: 1024, height: 1024, embedding: [], isFavorite: false, createdAt: '2026-08-19T00:00:00.000Z', updatedAt: '2026-08-19T00:00:00.000Z' }] as any,
       signUrl: async () => `https://images.example/fresh-${++signCount}`,
     };
     const input = { collectionKey, prompt: 'Earth', count: 1, size: '1024x1024' as const, quality: 'medium' as const };

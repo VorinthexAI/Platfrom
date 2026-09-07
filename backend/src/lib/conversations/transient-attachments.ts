@@ -52,11 +52,11 @@ const imageResultSchema = z.object({ kind: z.literal('image'), filename: filenam
 const documentResultSchema = z.object({ kind: z.literal('document'), filename: filenameSchema, mimeType: documentMimeTypeSchema, sizeBytes: z.number().int().positive().max(TRANSIENT_ATTACHMENT_MAX_BYTES), content: z.string().trim().min(1).refine((value) => Buffer.byteLength(value, 'utf8') <= TRANSIENT_DOCUMENT_MAX_TEXT_BYTES, `Extracted text must not exceed ${TRANSIENT_DOCUMENT_MAX_TEXT_BYTES} bytes.`), metadata: z.record(z.unknown()).optional() }).strict();
 export const transientAttachmentResultSchema = z.discriminatedUnion('kind', [imageResultSchema, documentResultSchema]);
 export const transientAttachmentRecordSchema = z.object({
-  key: z.string().cuid(), binding: z.string().length(64), organizationKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(), userKey: z.string().cuid(), conversationKey: z.string().cuid(), requestKey: z.string().trim().min(1).max(200),
+  key: z.string().cuid(), binding: z.string().length(64), teamKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(), userKey: z.string().cuid(), conversationKey: z.string().cuid(), requestKey: z.string().trim().min(1).max(200),
   filename: filenameSchema, mimeType: mimeTypeSchema, sizeBytes: z.number().int().positive().max(TRANSIENT_ATTACHMENT_MAX_BYTES), storageKey: z.string().min(1), status: z.enum(['reserved', 'processing', 'sealed', 'claimed']), result: transientAttachmentResultSchema.optional(), createdAt: z.string().datetime(), expiresAt: z.string().datetime(),
 }).strict();
 export type TransientAttachmentRecord = z.infer<typeof transientAttachmentRecordSchema>;
-export type TransientAttachmentOwner = { organizationKey: string; scopeKey: string; userKey: string };
+export type TransientAttachmentOwner = { teamKey: string; scopeKey: string; userKey: string };
 
 type RedisLike = Pick<typeof redisConnection, 'get' | 'set' | 'del' | 'eval'>;
 type Transition = (record: TransientAttachmentRecord, next: TransientAttachmentRecord, ttlSeconds: number) => Promise<boolean>;
@@ -64,7 +64,7 @@ type SignUpload = (record: TransientAttachmentRecord) => Promise<string>;
 const publicS3 = createPublicS3Client();
 const signUrl = getSignedUrl as unknown as (client: S3Client, command: PutObjectCommand, options: { expiresIn: number }) => Promise<string>;
 const keyFor = (key: string) => `conversation-attachment:${key}`;
-const bindingFor = (owner: TransientAttachmentOwner, conversationKey: string, requestKey: string) => createHash('sha256').update(`${owner.userKey}\0${owner.organizationKey}\0${owner.scopeKey}\0${conversationKey}\0${requestKey}`).digest('hex');
+const bindingFor = (owner: TransientAttachmentOwner, conversationKey: string, requestKey: string) => createHash('sha256').update(`${owner.userKey}\0${owner.teamKey}\0${owner.scopeKey}\0${conversationKey}\0${requestKey}`).digest('hex');
 
 const TRANSITION_SCRIPT = `
 local raw = redis.call('get', KEYS[1])
@@ -102,7 +102,7 @@ export function normalizeTransientAttachmentError(error: unknown) {
 }
 
 function assertOwner(owner: TransientAttachmentOwner) {
-  z.object({ organizationKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(), userKey: z.string().cuid() }).strict().parse(owner);
+  z.object({ teamKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(), userKey: z.string().cuid() }).strict().parse(owner);
 }
 
 async function requireConversation(owner: TransientAttachmentOwner, conversationKey: string, dependencies: TransientAttachmentDependencies) {
@@ -110,7 +110,7 @@ async function requireConversation(owner: TransientAttachmentOwner, conversation
 }
 
 function bound(record: TransientAttachmentRecord, owner: TransientAttachmentOwner, conversationKey: string, requestKey: string) {
-  return record.organizationKey === owner.organizationKey && record.scopeKey === owner.scopeKey && record.userKey === owner.userKey && record.conversationKey === conversationKey && record.requestKey === requestKey && record.binding === bindingFor(owner, conversationKey, requestKey);
+  return record.teamKey === owner.teamKey && record.scopeKey === owner.scopeKey && record.userKey === owner.userKey && record.conversationKey === conversationKey && record.requestKey === requestKey && record.binding === bindingFor(owner, conversationKey, requestKey);
 }
 
 async function readRecord(key: string, dependencies: TransientAttachmentDependencies) {

@@ -42,12 +42,17 @@
             {
               "scheme": "https",
               "host": "vorinthex.com",
+              "path": "/auth/mfa"
+            },
+            {
+              "scheme": "https",
+              "host": "vorinthex.com",
               "path": "/capability/signal"
             },
             {
               "scheme": "https",
               "host": "vorinthex.com",
-              "pathPrefix": "/share/"
+              "pathPrefix": "/referral/"
             }
           ],
           "category": [
@@ -71,11 +76,19 @@
       ],
       "expo-secure-store",
       "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/brand/notification-icon.png",
+          "color": "#FFFFFF",
+          "defaultChannel": "default"
+        }
+      ],
       "expo-apple-authentication",
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Vorinthex to add the photos you choose to Gallery.",
+          "photosPermission": "Allow Vorinthex to read your photo library for Gallery.",
           "cameraPermission": "Allow Vorinthex to scan documents and take photos for Gallery."
         }
       ],

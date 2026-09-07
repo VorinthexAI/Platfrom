@@ -5,6 +5,7 @@ import { createRedisConnection } from '@/lib/redis';
 import { toolEventService } from '@/lib/ai/events/service';
 import type { ToolEventRecorder } from '@/lib/ai/events/service';
 import { APP_KEYS } from '@/lib/apps/registry';
+import { appsService } from '@/lib/apps/service';
 import { sha256 } from '@/lib/crypto';
 import { getUserById } from '@/lib/db/users.node';
 import { newId } from '@/lib/ids';
@@ -49,6 +50,7 @@ export function createStorageChargeService(dependencies: {
   charge?: typeof sparkService.charge;
   getUser?: typeof getUserById;
   record?: ToolEventRecorder;
+  appScopeKey?: string;
   hash?: typeof sha256;
   id?: () => string;
 } = {}): StorageChargeService {
@@ -73,7 +75,7 @@ export function createStorageChargeService(dependencies: {
         userId: user.key,
         scopeKey: user.currentScopeKey,
         slug: 'storage.hourly',
-        appKey: APP_KEYS.CORE,
+        appScopeKey: dependencies.appScopeKey ?? (await appsService.resolveAlias(APP_KEYS.CORE)).scopeKey,
         status: 'completed',
         microSparks,
         sparkTransactionKey: charged.transaction.key,

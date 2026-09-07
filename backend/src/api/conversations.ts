@@ -10,8 +10,9 @@ import { publishUserEvent } from './events';
 import { projectSparkError, sparkErrorResponse } from './errors';
 import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
 import type { ToolEventRecorder } from '@/lib/ai/events/service';
+import { authenticatedTeamContext } from './auth';
 
-const selector = { organizationKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid() };
+const selector = { teamKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid() };
 const selected = <T extends z.ZodRawShape>(shape: T) => z.object({ ...selector, ...shape }).strict();
 export const conversationStartEventSchema = z.object({ type: z.literal('start'), correlationKey: z.string().min(1), conversationKey: z.string().cuid(), userMessageKey: z.string().cuid(), assistantMessageKey: z.string().cuid() }).strict();
 export const conversationDeltaEventSchema = z.object({ type: z.literal('delta'), correlationKey: z.string().min(1), assistantMessageKey: z.string().cuid(), text: z.string().min(1) }).strict();
@@ -28,7 +29,7 @@ export function bindConversationStreamAbort(stream: { onAbort(callback: () => vo
 
 export interface ConversationHandlerDependencies {
   getIdentity?: typeof getAuthIdentity;
-  authorize?: (input: { organizationKey: string; scopeKey: string }, options: { authenticatedUserKey: string }) => Promise<{ context: ToolContext }>;
+  authorize?: (input: { teamKey: string; scopeKey: string }, options: { authenticatedUserKey: string; teamAssurance?: ToolContext['teamAssurance'] }) => Promise<{ context: ToolContext }>;
   service?: ConversationService;
   createTurnService?: (signal: AbortSignal) => ConversationService;
   publishChanged?: typeof publishUserEvent;
@@ -36,12 +37,11 @@ export interface ConversationHandlerDependencies {
   billing?: ToolBillingDependencies;
 }
 
-async function authenticated(c: Context, organizationKey: string, scopeKey: string, dependencies: ConversationHandlerDependencies): Promise<ToolContext | Response> {
+async function authenticated(c: Context, teamKey: string, scopeKey: string, dependencies: ConversationHandlerDependencies): Promise<ToolContext | Response> {
   const identity = await (dependencies.getIdentity ?? getAuthIdentity)(c);
   if (!identity) return c.json({ success: false, error: 'authentication required' }, 401);
-  if (identity.identityType !== 'user') return c.json({ success: false, error: 'user session required' }, 403);
   const authorize = dependencies.authorize ?? authorizeContentExecution;
-  return (await authorize({ organizationKey, scopeKey }, { authenticatedUserKey: identity.key })).context;
+  return (await authorize({ teamKey, scopeKey }, authenticatedTeamContext(identity))).context;
 }
 function failure(c: Context, error: unknown) {
   const billing = sparkErrorResponse(c, error); if (billing) return billing;
@@ -52,8 +52,8 @@ function failure(c: Context, error: unknown) {
 }
 async function invoke(c: Context, schema: z.ZodTypeAny, run: (service: ConversationService, input: any, context: ToolContext) => Promise<unknown>, changed: boolean, dependencies: ConversationHandlerDependencies) {
   try {
-    const body = await parseJson(c, schema); const { organizationKey, scopeKey, ...input } = body;
-    const context = await authenticated(c, organizationKey, scopeKey, dependencies); if (context instanceof Response) return context;
+    const body = await parseJson(c, schema); const { teamKey, scopeKey, ...input } = body;
+    const context = await authenticated(c, teamKey, scopeKey, dependencies); if (context instanceof Response) return context;
     const data = await run(dependencies.service ?? getDefaultConversationService(), input, context);
     if (changed && context.principal.kind === 'member') await (dependencies.publishChanged ?? publishUserEvent)(context.principal.user.key, 'conversation.changed');
     return c.json({ success: true, data });
@@ -72,8 +72,8 @@ export function createConversationHandlers(dependencies: ConversationHandlerDepe
   async imageTurn(c: Context) {
     try {
       const body = await parseJson(c, selected({ prompt: conversationImageTurnShape.prompt, requestKey: conversationImageTurnRequestKeySchema, referenceImageKeys: conversationImageTurnShape.referenceImageKeys, size: conversationImageTurnShape.size, quality: conversationImageTurnShape.quality, mode: conversationImageTurnShape.mode }));
-      const context = await authenticated(c, body.organizationKey, body.scopeKey, dependencies); if (context instanceof Response) return context;
-      const { organizationKey: _organizationKey, scopeKey: _scopeKey, ...input } = body;
+      const context = await authenticated(c, body.teamKey, body.scopeKey, dependencies); if (context instanceof Response) return context;
+      const { teamKey: _teamKey, scopeKey: _scopeKey, ...input } = body;
       const data = await (dependencies.service ?? getDefaultConversationService()).enqueueImageTurn({ ...input, conversationKey: z.string().cuid().parse(c.req.param('conversationKey')) }, context);
       if (context.principal.kind === 'member') await (dependencies.publishChanged ?? publishUserEvent)(context.principal.user.key, 'conversation.changed');
       return c.json({ success: true, data }, 202);
@@ -82,7 +82,7 @@ export function createConversationHandlers(dependencies: ConversationHandlerDepe
   async turn(c: Context) {
     try {
       const body = await parseJson(c, selected({ message: z.string().trim().min(1).max(20_000), requestKey: z.string().trim().min(1).max(180), attachmentKeys: z.array(z.string().cuid()).max(10).default([]), referenceImageKeys: z.array(z.string().cuid()).max(1).default([]) }));
-      const context = await authenticated(c, body.organizationKey, body.scopeKey, dependencies); if (context instanceof Response) return context;
+      const context = await authenticated(c, body.teamKey, body.scopeKey, dependencies); if (context instanceof Response) return context;
       const input = conversationSendInputSchema.parse({ conversationKey: c.req.param('conversationKey'), message: body.message, requestKey: body.requestKey, attachmentKeys: body.attachmentKeys, referenceImageKeys: body.referenceImageKeys });
       return streamSSE(c, async (stream) => {
         const abort = bindConversationStreamAbort(stream, c.req.raw.signal);

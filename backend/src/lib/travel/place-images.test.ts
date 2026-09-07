@@ -3,13 +3,13 @@ import { newId } from '@/lib/ids';
 import { TravelRepositoryError } from './repository';
 import { createPlaceImageGenerator, PLACE_IMAGE_PNG_MAX_BYTES, PLACE_IMAGE_TOKEN_MAX_LENGTH, PLACE_IMAGE_TOKEN_VALIDITY_MS, placeImageReplayStateForTests, resetPlaceImageReplayStateForTests, travelPlaceImageInputSchema } from './place-images';
 
-const organizationKey = 'organization';
+const teamKey = 'team';
 const scopeKey = newId();
 const userKey = newId();
-const input = { organizationKey, scopeKey, imageRequestToken: 'opaque-token' };
+const input = { teamKey, scopeKey, imageRequestToken: 'opaque-token' };
 const issuedAt = Date.now();
 const hero = { title: 'Japan travel interpretation', prompt: 'Authoritative destination: Japan. Create an original landscape editorial interpretation of a volcanic island country with cedar forests, dense cities, timber architecture, and soft morning light. No text or identifiable people.' };
-const tokenPayload = { version: 5, issuedAt, nonce: 'A'.repeat(43), organizationKey, scopeKey, country: { name: 'Japan', countryCode: 'JP', continent: 'Asia', latitude: 36.2, longitude: 138.2 }, place: { kind: 'country', name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2 }, hero } as const;
+const tokenPayload = { version: 5, issuedAt, nonce: 'A'.repeat(43), teamKey, scopeKey, country: { name: 'Japan', countryCode: 'JP', continent: 'Asia', latitude: 36.2, longitude: 138.2 }, place: { kind: 'country', name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2 }, hero } as const;
 const staged = new Map<string, Uint8Array>();
 const storage = { upload: async ({ key, bytes }: { key: string; bytes: Uint8Array }) => { staged.set(key, bytes); return { storageKey: key }; }, download: async (key: string) => { const bytes = staged.get(key); if (!bytes) throw new Error('missing'); return { bytes }; }, delete: async (key: string) => { staged.delete(key); } } as any;
 const token = { storage, decryptImageRequest: (value: string) => { if (!value.startsWith(input.imageRequestToken)) throw new Error('tampered token'); return tokenPayload; } };
@@ -52,7 +52,7 @@ describe('transient place hero generation', () => {
       onMetrics: (value) => metrics.push(value), log: () => {},
     })(input, userKey, { signal: controller.signal, timeoutMs: 12_345 });
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.[0]).toEqual({ mode: 'auto', organizationKey, actionSlug: 'image' });
+    expect(calls[0]?.[0]).toEqual({ mode: 'auto', teamKey, actionSlug: 'image' });
     expect(calls[0]?.[1]).toEqual({ operation: 'generate', prompt: hero.prompt, count: 1, size: '1536x1024', aspectRatio: '3:2', quality: 'low', outputFormat: 'png' });
     expect(calls[0]?.[2]).toEqual({ providers: ['image.primary'], signal: controller.signal, timeoutMs: 12_345 });
     expect(result).toEqual({ status: 'ready', image: { status: 'ready', title: hero.title, url: `data:image/png;base64,${Buffer.from(png()).toString('base64')}`, width: 1536, height: 1024, mimeType: 'image/png' }, durationMs: expect.any(Number), costUsd: 0.04 });

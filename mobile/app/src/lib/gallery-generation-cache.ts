@@ -16,7 +16,7 @@ export function createGalleryGenerationRequestKey(now = Date.now()) {
   return `gallery-image-${now.toString(36)}-${generationSequence.toString(36)}`;
 }
 
-export const galleryGenerationHistoryQueryKey = (context: WorkspaceContext) => ["gallery", context.organizationKey, context.scopeKey, "generation-history"] as const;
+export const galleryGenerationHistoryQueryKey = (context: WorkspaceContext) => ["gallery", context.teamKey, context.scopeKey, "generation-history"] as const;
 
 export function addGalleryGenerationPlaceholder(current: GalleryGenerationPlaceholder[], placeholder: GalleryGenerationPlaceholder) {
   return [placeholder, ...current.filter(({ requestKey }) => requestKey !== placeholder.requestKey)];

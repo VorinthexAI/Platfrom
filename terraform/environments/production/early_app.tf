@@ -141,6 +141,11 @@ resource "aws_iam_role_policy" "early_app_archive_processing" {
       },
       {
         Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = ["${module.storage.s3_bucket_arn}/apps/logos/v1/*"]
+      },
+      {
+        Effect   = "Allow"
         Action   = ["polly:SynthesizeSpeech"]
         Resource = ["*"]
       },

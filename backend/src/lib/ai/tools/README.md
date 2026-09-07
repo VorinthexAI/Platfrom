@@ -11,11 +11,14 @@ expresses domain intent such as `folder.create`, `email.draft.send`, or
 - `content-schemas.ts`, `content-registry.ts`, and `content-runtime.ts` own
   Archive contracts and execution.
 - `workspace-tool-definitions.ts` adapts Core capabilities into the public
-  registry while injecting trusted `ToolContext` identity, organization, and
+  registry while injecting trusted `ToolContext` identity, team, and
   scope.
 - `email-ingestion-tool-definitions.ts` owns system-only inbox ingestion tools.
   They are registered canonical tools but excluded from model/provider
   definitions and every Core surface.
+- `account-tool-definitions.ts` owns authenticated permanent account deletion.
+  It is registered for transport parity but intentionally excluded from every
+  model/provider definition and Core surface.
 
 ## Required Layering
 
@@ -56,6 +59,11 @@ Specialized tools remain separate for similarity and duplicate detection,
 signed downloads, persisted generated artifacts, conversation history, and
 other semantics that are not ordinary resource queries.
 
+`agent.guide` reads the canonical apps catalog for product explanation and
+goal-based app recommendations. It does not search user-owned workspace data;
+Core may combine it with `app.search` when guidance needs current workspace
+evidence.
+
 Generated travel references use the same canonical travel service from HTTP
 and Core. `trip.guide.generate/list` and the parameterized
 `place.reference.generate/list` persist private `tripGuides` or
@@ -67,7 +75,7 @@ do not control Compass lifecycle.
 
 1. Search the existing registry for matching semantics.
 2. Add one strict Zod input schema and product-neutral definition.
-3. Inject identity, organization, scope, and idempotency from `ToolContext`.
+3. Inject identity, team, scope, and idempotency from `ToolContext`.
 4. Call the canonical service, operation, Content runtime, or action directly.
 5. Register the capability in the applicable Core surface and mutation metadata.
 6. Add strict-input, authorization, registry uniqueness, and HTTP/Core parity
@@ -81,7 +89,7 @@ strict model-visible input schema.
 
 ```ts
 await executeAction(
-  { mode: 'auto', organizationKey: context.organizationKey, actionSlug: 'image' },
+  { mode: 'auto', teamKey: context.teamKey, actionSlug: 'image' },
   actionInput,
   {
     providers: ['image.primary'],

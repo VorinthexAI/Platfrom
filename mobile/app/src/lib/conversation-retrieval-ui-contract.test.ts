@@ -78,13 +78,13 @@ test("reuses the retrieval query as the destination workspace search and opens m
   expect(composer).toContain("const searchParams = retrieval.query ? { initialQuery: retrieval.query } : {};");
   expect(composer).toContain('params: { slug: "gallery", assetKey: key, ...searchParams }');
   expect(route).toContain("initialSearchQuery={params.initialQuery}");
-  expect(route).toContain('key={`${params.assetKey ?? "root"}:${params.imageKey ?? ""}:${params.initialQuery ?? ""}`}');
-  expect(route).toContain('key={`${params.assetKey ?? "root"}:${params.documentKey ?? ""}:${params.collectionKind ?? ""}:${params.initialQuery ?? ""}`}');
+  expect(route).toContain('key={`${scopeKey}:${params.assetKey ?? "root"}:${params.imageKey ?? ""}:${params.initialQuery ?? ""}`}');
+  expect(route).toContain('key={`${scopeKey}:${params.assetKey ?? "root"}:${params.documentKey ?? ""}:${params.collectionKind ?? ""}:${params.initialQuery ?? ""}`}');
   expect(composer).toContain('collectionKind: destinationCollectionSlug');
   expect(archive).toContain('initialFolderKey ? initialSearchQuery?.slice(0, 500) ?? "" : ""');
   for (const kind of ['collectionKind: "places"', 'collectionKind: "trips"', 'collectionKind: "countries"', 'collectionKind: "email-tones"']) expect(composer).toContain(kind);
   expect(composer).toContain('collectionKind: destinationCollectionSlug, ...searchParams');
-  expect(route).toContain('key={`${params.placeKey ?? ""}:${params.tripKey ?? ""}:${params.countryCode ?? ""}:${params.collectionKind ?? ""}:${params.initialQuery ?? ""}:${params.openTripAssets ?? ""}`}');
-  expect(route).toContain('key={`${params.bookKey ?? "root"}:${params.initialQuery ?? ""}`}');
+  expect(route).toContain('key={`${scopeKey}:${params.placeKey ?? ""}:${params.tripKey ?? ""}:${params.countryCode ?? ""}:${params.collectionKind ?? ""}:${params.initialQuery ?? ""}:${params.openTripAssets ?? ""}`}');
+  expect(route).toContain('key={`${scopeKey}:${params.bookKey ?? "root"}:${params.initialQuery ?? ""}`}');
   expect(signal).toContain('search: initialConnectorKey && initialSearchQuery ? initialSearchQuery.slice(0, 500) : ""');
 });

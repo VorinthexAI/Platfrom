@@ -1,9 +1,6 @@
 export const APP_EVENT_SLUGS = [
   'collection.index.changed',
   'collection.content.changed',
-  'collection.access.changed',
-  'collection.invites.changed',
-  'collection.shares.changed',
   'image.changed',
   'upload.changed',
   'subject.changed',
@@ -16,6 +13,7 @@ export const APP_EVENT_SLUGS = [
   'inbox.changed',
   'book.changed',
   'conversation.changed',
+  'referral.reward.created',
 ] as const;
 export type AppEventSlug = (typeof APP_EVENT_SLUGS)[number];
 export type EventEnvelope =

@@ -20,7 +20,7 @@ async function verify(capability: string, run: () => Promise<string>) {
   }
 }
 
-const executeText = (input: unknown) => provider.execute({ actionId: 'text', ...textModel, organizationKey: 'live-smoke', input, timeoutMs: 120_000 });
+const executeText = (input: unknown) => provider.execute({ actionId: 'text', ...textModel, teamKey: 'live-smoke', input, timeoutMs: 120_000 });
 
 await verify('Text generation', async () => {
   const response = await executeText({ messages: [{ role: 'user', content: [{ type: 'text', text: 'Reply with exactly: openrouter-ok' }] }], options: { temperature: 0, maxTokens: 64 } });
@@ -72,7 +72,7 @@ await verify('Text streaming', async () => {
   if (!provider.stream) throw new Error('OpenRouter streaming is unavailable.');
   let text = '';
   let completed = false;
-  for await (const chunk of provider.stream({ actionId: 'text', ...textModel, organizationKey: 'live-smoke', input: { messages: [{ role: 'user', content: [{ type: 'text', text: 'Reply with exactly: stream-ok' }] }], options: { temperature: 0, maxTokens: 64 } }, timeoutMs: 120_000 })) {
+  for await (const chunk of provider.stream({ actionId: 'text', ...textModel, teamKey: 'live-smoke', input: { messages: [{ role: 'user', content: [{ type: 'text', text: 'Reply with exactly: stream-ok' }] }], options: { temperature: 0, maxTokens: 64 } }, timeoutMs: 120_000 })) {
     if (chunk.type === 'text-delta') text += chunk.text;
     if (chunk.type === 'done') completed = true;
   }
@@ -81,7 +81,7 @@ await verify('Text streaming', async () => {
 });
 
 await verify('Grounded web search', async () => {
-  const response = await provider.execute({ actionId: 'web', ...textModel, organizationKey: 'live-smoke', input: { prompt: 'What is the official capital of Sweden? Answer briefly and cite a source.' }, timeoutMs: 120_000 });
+  const response = await provider.execute({ actionId: 'web', ...textModel, teamKey: 'live-smoke', input: { prompt: 'What is the official capital of Sweden? Answer briefly and cite a source.' }, timeoutMs: 120_000 });
   const output = response.output as { text: string; citations: unknown[] };
   if (!output.text.toLowerCase().includes('stockholm') || output.citations.length === 0) throw new Error('Grounded search returned no supported answer.');
   return `${output.citations.length} citation(s)`;
@@ -91,28 +91,28 @@ const sourceImage = await sharp({ create: { width: 64, height: 64, channels: 3, 
 const imageUrl = `data:image/png;base64,${sourceImage.toString('base64')}`;
 
 await verify('Image caption', async () => {
-  const response = await provider.execute({ actionId: 'image', ...imageModel, organizationKey: 'live-smoke', input: { operation: 'caption', imageUrls: [imageUrl], purpose: 'caption' }, timeoutMs: 120_000 });
+  const response = await provider.execute({ actionId: 'image', ...imageModel, teamKey: 'live-smoke', input: { operation: 'caption', imageUrls: [imageUrl], purpose: 'caption' }, timeoutMs: 120_000 });
   const output = response.output as { results: Array<{ caption: string }> };
   if (output.results.length !== 1 || !output.results[0]?.caption) throw new Error('Image caption returned no result.');
   return 'caption valid';
 });
 
 await verify('Visual identity', async () => {
-  const response = await provider.execute({ actionId: 'image', ...imageModel, organizationKey: 'live-smoke', input: { operation: 'describe-visual-identity', imageUrls: [imageUrl] }, timeoutMs: 120_000 });
+  const response = await provider.execute({ actionId: 'image', ...imageModel, teamKey: 'live-smoke', input: { operation: 'describe-visual-identity', imageUrls: [imageUrl] }, timeoutMs: 120_000 });
   const output = response.output as { description: string };
   if (!output.description) throw new Error('Visual identity returned no description.');
   return 'description valid';
 });
 
 await verify('Image generation', async () => {
-  const response = await provider.execute({ actionId: 'image', ...imageModel, organizationKey: 'live-smoke', input: { operation: 'generate', prompt: 'A minimal red compass icon centered on a plain white background.', count: 1, aspectRatio: '1:1', outputFormat: 'png' }, timeoutMs: 180_000 });
+  const response = await provider.execute({ actionId: 'image', ...imageModel, teamKey: 'live-smoke', input: { operation: 'generate', prompt: 'A minimal red compass icon centered on a plain white background.', count: 1, aspectRatio: '1:1', outputFormat: 'png' }, timeoutMs: 180_000 });
   const output = response.output as { images: Array<{ base64: string; mimeType: string }> };
   if (output.images.length !== 1 || !output.images[0]?.base64) throw new Error('Image generation returned no image.');
   return `${Buffer.from(output.images[0].base64, 'base64').length} bytes`;
 });
 
 await verify('Speech generation', async () => {
-  const response = await provider.execute({ actionId: 'speech', modelId: 'xai.grok-voice-tts-1.0', externalModelId: 'x-ai/grok-voice-tts-1.0', organizationKey: 'live-smoke', input: { text: 'Vorinthex speech capability is operational.', language: 'English', voice: 'coral', pace: 1, format: 'mp3' }, timeoutMs: 180_000 });
+  const response = await provider.execute({ actionId: 'speech', modelId: 'xai.grok-voice-tts-1.0', externalModelId: 'x-ai/grok-voice-tts-1.0', teamKey: 'live-smoke', input: { text: 'Vorinthex speech capability is operational.', language: 'English', voice: 'coral', pace: 1, format: 'mp3' }, timeoutMs: 180_000 });
   const output = response.output as { base64: string; durationSeconds: number };
   const mp3 = Buffer.from(output.base64, 'base64');
   if (!mp3.length || !output.durationSeconds || mp3[0] !== 0xff) throw new Error('Speech generation returned no valid MP3 audio.');

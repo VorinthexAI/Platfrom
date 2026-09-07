@@ -5,9 +5,9 @@ import type { ConversationMessage } from './schemas';
 import type { ConversationRepository } from './repository';
 import { recordActionCost, recordActionUsage } from '@/lib/ai/events/runtime';
 
-const organizationKey = 'organization', scopeKey = newId(), userKey = newId(), actorKey = newId(), conversationKey = newId(), assistantMessageKey = newId();
+const teamKey = 'team', scopeKey = newId(), userKey = newId(), actorKey = newId(), conversationKey = newId(), assistantMessageKey = newId();
 const input = { prompt: 'A quiet observatory', referenceImageKeys: [], size: '1024x1024' as const, quality: 'medium' as const, mode: 'default' as const };
-const job = () => conversationImageTurnJobSchema.parse({ schemaVersion: 1, assistantMessageKey, conversationKey, organizationKey, scopeKey, userKey, actorKey, requestKey: 'image-turn', input });
+const job = () => conversationImageTurnJobSchema.parse({ schemaVersion: 1, assistantMessageKey, conversationKey, teamKey, scopeKey, userKey, actorKey, requestKey: 'image-turn', input });
 
 describe('conversation image turn queue', () => {
   test('uses the assistant message as the deterministic job id and validates strict payloads', async () => {
@@ -23,7 +23,7 @@ describe('conversation image turn queue', () => {
     const repository = { completeImageTurn: async (...args: unknown[]) => { completed.push(args); return {} as never; }, failTurn: async () => { throw new Error('unexpected failure'); } } as unknown as ConversationRepository;
     const result = await processConversationImageTurn(job(), { repository, images: { generateManaged: async () => ({ images: [{ key: 'c123456789' }] }) } as never, publishChanged: async (...args: unknown[]) => { events.push(args); }, now: () => '2026-09-03T00:00:00.000Z' });
     expect(result).toEqual({ imageKey: 'c123456789' });
-    expect(completed[0]).toEqual([{ organizationKey, scopeKey, userKey }, conversationKey, assistantMessageKey, 'c123456789', '2026-09-03T00:00:00.000Z']);
+    expect(completed[0]).toEqual([{ teamKey, scopeKey, userKey }, conversationKey, assistantMessageKey, 'c123456789', '2026-09-03T00:00:00.000Z']);
     expect(events).toEqual([[userKey, 'conversation.changed']]);
   });
 
@@ -33,7 +33,7 @@ describe('conversation image turn queue', () => {
     await processConversationImageTurn(job(), {
       repository,
       images: { generateManaged: async () => { await recordActionCost('image', { operation: 'generate', count: 1 }); await recordActionUsage('image', { operation: 'generate', count: 1 }, { inputTokens: 0, outputTokens: 0, totalTokens: 0 }); return { images: [{ key: 'c123456789' }] }; } } as never,
-      publishChanged: async () => {}, recordEvent: async () => {},
+      publishChanged: async () => {}, recordEvent: async () => {}, appScopeKey: newId(),
       billing: { getBalance: async () => 100_000_000, charge: async (_key, input) => { charges.push(input); return { status: 'applied', transaction: { key: newId() } } as never; } },
     });
     expect(charges).toHaveLength(1);
@@ -49,7 +49,7 @@ describe('conversation image turn queue', () => {
     await expect(processConversationImageTurn(job(), { repository, images, terminalFailure: true, publishChanged: async () => {} })).rejects.toThrow('provider failed');
     expect(failures).toBe(1);
 
-    const pending = { key: assistantMessageKey, conversationKey, organizationKey, scopeKey, userKey, turnKey: 'image-turn', requestHash: 'a'.repeat(64), type: 'IMAGE', role: 'ASSISTANT', status: 'PENDING', content: JSON.stringify(input), retrievals: [], createdAt: '2026-09-03T00:00:00.000Z' } satisfies ConversationMessage;
+    const pending = { key: assistantMessageKey, conversationKey, teamKey, scopeKey, userKey, turnKey: 'image-turn', requestHash: 'a'.repeat(64), type: 'IMAGE', role: 'ASSISTANT', status: 'PENDING', content: JSON.stringify(input), retrievals: [], createdAt: '2026-09-03T00:00:00.000Z' } satisfies ConversationMessage;
     const added: unknown[] = [];
     const queue = { getJobs: async () => [], getJob: async () => undefined, add: async (...args: unknown[]) => { added.push(args); return { id: assistantMessageKey }; } };
     const recoveryRepository = { listPendingImageTurns: async () => [{ message: pending, actorKey }] } as unknown as ConversationRepository;

@@ -190,6 +190,7 @@ type BusyAction =
 const INBOX_FACETS: readonly { facet: EmailFacet; label: string }[] = [
   { facet: "urgent", label: "Urgent" },
   { facet: "important", label: "Important" },
+  { facet: "purchases", label: "Purchases" },
   { facet: "filtered", label: "Filtered" },
   { facet: "favorite", label: "Favorite" },
 ];
@@ -247,11 +248,11 @@ function formatEmailTimestamp(value: string) {
   }).format(new Date(value)).replace(",", "");
 }
 export function EmailWorkspace({ initialCollectionKind, initialConnectorKey, initialDraftKey, initialMessageKey, initialSearchQuery, initialThreadKey, initialToneKey, navigatedFromRoot = false, openAttachments = false }: { initialCollectionKind?: string; initialConnectorKey?: string; initialDraftKey?: string; initialMessageKey?: string; initialSearchQuery?: string; initialThreadKey?: string; initialToneKey?: string; navigatedFromRoot?: boolean; openAttachments?: boolean }) {
-  const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "");
+  const teamKey = useAuthStore((state) => typeof state.team?.key === "string" ? state.team.key : "");
   const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
-  if (!organizationKey || !scopeKey) return null;
-  const emailContext = { organizationKey, scopeKey };
-  const sessionKey = `${emailContext.organizationKey}:${emailContext.scopeKey}:${initialConnectorKey ?? "root"}:${initialThreadKey ?? "inbox"}:${initialMessageKey ?? "latest"}:${initialDraftKey ?? ""}:${initialToneKey ?? ""}:${initialCollectionKind ?? ""}:${initialSearchQuery ?? ""}:${openAttachments ? "attachments" : "reader"}`;
+  if (!teamKey || !scopeKey) return null;
+  const emailContext = { teamKey, scopeKey };
+  const sessionKey = `${emailContext.teamKey}:${emailContext.scopeKey}:${initialConnectorKey ?? "root"}:${initialThreadKey ?? "inbox"}:${initialMessageKey ?? "latest"}:${initialDraftKey ?? ""}:${initialToneKey ?? ""}:${initialCollectionKind ?? ""}:${initialSearchQuery ?? ""}:${openAttachments ? "attachments" : "reader"}`;
   return <EmailWorkspaceSession emailContext={emailContext} initialCollectionKind={initialCollectionKind} initialConnectorKey={initialConnectorKey} initialDraftKey={initialDraftKey} initialMessageKey={initialMessageKey} initialSearchQuery={initialSearchQuery} initialThreadKey={initialThreadKey} initialToneKey={initialToneKey} key={sessionKey} navigatedFromRoot={navigatedFromRoot} openAttachments={openAttachments} />;
 }
 
@@ -264,7 +265,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const { showToast } = useToast();
   const countryCode = useAuthStore((state) => state.user?.countryCode);
   const userKey = useAuthStore((state) => state.user?.key ?? "");
-  const historyContext = useMemo(() => ({ ...emailContext, userKey }), [emailContext.organizationKey, emailContext.scopeKey, userKey]);
+  const historyContext = { ...emailContext, userKey };
   const tagContextKey = tagFilterContextKey(historyContext);
   const selectedTags = useUiStore((state) => state.selectedTagsByContext[tagContextKey] ?? EMPTY_SELECTED_TAGS);
   const selectedTagKeys = useMemo(() => selectedTags.map(({ key }) => key).sort(), [selectedTags]);
@@ -483,7 +484,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     queryFn: () => fetchEmailOverviewForContext(emailContext),
   });
   const metadataOverview = metadataQuery.data;
-  const metadataAccounts = metadataOverview?.accounts ?? overview?.accounts ?? [];
+  const metadataAccounts = useMemo(() => metadataOverview?.accounts ?? overview?.accounts ?? [], [metadataOverview?.accounts, overview?.accounts]);
   const selectedAccount = initialConnectorKey ? metadataAccounts.find(({ connectorKey }) => connectorKey === initialConnectorKey) ?? overview?.selectedAccount ?? undefined : undefined;
   const toneRecords = metadataOverview?.tones ?? [];
   const tonesLoading = metadataQuery.isPending;
@@ -529,8 +530,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const searchedAccounts = rootFilterActive && rootSearchResults?.tab === "inboxes" && rootSearchResults.filterKey === rootFilterKey ? rootSearchResults.inboxes ?? [] : rootFilterActive ? [] : metadataAccounts;
   const searchedTones = rootFilterActive && rootSearchResults?.tab === "tones" && rootSearchResults.filterKey === rootFilterKey ? rootSearchResults.tones ?? [] : rootFilterActive ? [] : toneRecords;
   const visibleAccounts = searchedAccounts.filter(({ isFavorite }) => !rootFavoritesOnly || isFavorite);
-  // Keep the removed projection bound while Metro retires pre-change render closures.
-  const visibleUnassignedDrafts: EmailDraft[] = [];
   const visibleTones = searchedTones.filter(({ isFavorite }) => !rootFavoritesOnly || isFavorite);
   const selectedMessage = selected?.messages.find(({ key }) => key === selectedMessageKey)
     ?? [...(selected?.messages ?? [])].sort((left, right) => right.sentAt.localeCompare(left.sentAt) || right.key.localeCompare(left.key))[0];
@@ -571,11 +570,11 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   selectedInboxesRef.current = selectedInboxes;
   useEffect(() => {
     setSelectedInboxes((current) => reconcileSelectedInboxSnapshots(current, metadataAccounts));
-  }, [metadataOverview?.accounts, overview?.accounts]);
+  }, [metadataAccounts]);
   useEffect(() => {
     const timer = setTimeout(resetGeneratedBoundary, 0);
     return () => clearTimeout(timer);
-  }, [emailContext.organizationKey, emailContext.scopeKey, selected?.thread.key, selectedMessage?.key]);
+  }, [emailContext.teamKey, emailContext.scopeKey, selected?.thread.key, selectedMessage?.key]);
   useEffect(() => {
     if (permissions.canMutate) return;
     const timer = setTimeout(clearGeneratedViewerSelection, 0);
@@ -589,7 +588,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   function contextIsCurrent(context: typeof emailContext) {
     try {
       const current = getEmailContext();
-      return current.organizationKey === context.organizationKey && current.scopeKey === context.scopeKey;
+      return current.teamKey === context.teamKey && current.scopeKey === context.scopeKey;
     } catch {
       return false;
     }
@@ -620,7 +619,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     return generation === readerGeneration.current && contextIsCurrent(context) && selectedThreadKeyRef.current === threadKey && selectedMessageKeyRef.current === messageKey;
   }
   function discardDrafts(drafts: readonly EmailDraft[], preserveDraftKey?: string) {
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     for (const draftKey of new Set(drafts.map(({ key }) => key))) {
       if (draftKey === preserveDraftKey || draftCleanupInFlight.current.has(draftKey)) continue;
       draftCleanupInFlight.current.add(draftKey);
@@ -656,26 +655,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     setReplyModeOpen(false);
     setEmptyReply(false);
     setReplySending(false);
-  }
-  async function loadOverviewForContext(context: typeof emailContext, connectorKey: string, nextQuery: EmailOverviewQuery) {
-    const queryKey = signalQueryKeys.overview(context, connectorKey, nextQuery, undefined, selectedTagKeys);
-    const value = await queryClient.fetchQuery({
-      queryKey,
-      queryFn: async () => {
-        if (!nextQuery.search && !selectedTagKeys.length) return filterSignalTombstonedOverview(context, connectorKey, await fetchEmailOverviewForContext(context, { connectorKey, readState: nextQuery.readState, facets: [...nextQuery.facets], limit: 50 }));
-        const [base, threads] = await Promise.all([
-          fetchEmailOverviewForContext(context, { connectorKey, readState: nextQuery.readState, facets: [...nextQuery.facets], limit: 50 }),
-          searchEmailMessagesForContext(context, connectorKey, nextQuery, false, undefined, selectedTagKeys),
-        ]);
-        return filterSignalTombstonedOverview(context, connectorKey, { ...base, threads, nextCursor: null });
-      },
-      staleTime: 0,
-    });
-    if (!contextIsCurrent(context)) return value;
-    settleRepairPendingThreads(value.threads);
-    const visibleValue = { ...value, threads: overlayPendingSignalThreads(value.threads, pendingThreadFields.current) };
-    queryClient.setQueryData(queryKey, visibleValue);
-    return visibleValue;
   }
   function closeReaderFlowPreservingDraft(preserveDraftKey?: string) {
     if (trashBusy || replySending) return;
@@ -793,7 +772,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     if (generation !== operationGeneration.current) return false;
     try {
       const current = getEmailContext();
-      return current.organizationKey === context.organizationKey && current.scopeKey === context.scopeKey;
+      return current.teamKey === context.teamKey && current.scopeKey === context.scopeKey;
     } catch {
       return false;
     }
@@ -811,11 +790,12 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     setNewEmailReviewOpen(false);
     setNewEmailError(undefined);
   }
+  const invalidateNewEmailAlternativesFromEffect = useEffectEvent(invalidateNewEmailAlternatives);
   function invalidateSignalMetadata(context: typeof emailContext) {
     return queryClient.invalidateQueries({ queryKey: signalQueryKeys.overviews(context), refetchType: "none" });
   }
   function completeConnection(connector: EmailConnector) {
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const generation = ++operationGeneration.current;
     clearSignalThreadTombstones(context, connector.connectorKey);
     const rootRefresh = queryClient.fetchQuery({
@@ -866,7 +846,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     }
     const refreshThreadKeys = [...new Set([...selectedThreads.map(({ key }) => key), ...repairPendingThreadFields.current.keys()])];
     if (initialConnectorKey && refreshThreadKeys.length) {
-      const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+      const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
       const connectorKey = initialConnectorKey;
       const generation = ++selectionGeneration.current;
       void Promise.allSettled(refreshThreadKeys.map((key) => fetchEmailThreadForContext(context, key))).then((results) => {
@@ -907,14 +887,14 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       setTrashRootError(undefined);
       void loadLatest(initialCollectionKind === "email-drafts" || initialDraftKey ? { ...committedInboxQuery.current, search: "" } : committedInboxQuery.current);
     });
-  }, [emailContext.organizationKey, emailContext.scopeKey, initialCollectionKind, initialConnectorKey, initialDraftKey, initialSearchQuery, initialThreadKey]);
+  }, [emailContext.teamKey, emailContext.scopeKey, initialCollectionKind, initialConnectorKey, initialDraftKey, initialSearchQuery, initialThreadKey]);
   useEffect(() => {
     const generation = ++operationGeneration.current;
     const activeReadOperations = readInFlight.current;
     const toneRequests = newEmailToneRequests.current;
     const toneRequestKeys = newEmailToneRequestKeys.current;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
-    invalidateNewEmailAlternatives();
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
+    invalidateNewEmailAlternativesFromEffect();
     sendGeneration.current = undefined;
     newEmailSendInFlight.current = false;
     const requests = metadataRequests.current;
@@ -977,14 +957,14 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       ]);
       clearSignalThreadTombstones(context);
     };
-  }, [emailContext.organizationKey, emailContext.scopeKey, queryClient]);
+  }, [emailContext.teamKey, emailContext.scopeKey, queryClient]);
   useEffect(() => () => {
     if (rootSearchFocusTimer.current) clearTimeout(rootSearchFocusTimer.current);
     rootSearchRequest.current?.abort();
   }, []);
   useEffect(() => {
     const query = rootQuery.trim();
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     rootSearchRequest.current?.abort();
     if (!query && !selectedTagKeys.length) {
       setRootSearchResults(undefined);
@@ -1018,12 +998,12 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       void request.catch(() => undefined);
     }, 800) : undefined;
     return () => { clearTimeout(timeout); if (historyTimeout) clearTimeout(historyTimeout); controller.abort(); };
-  }, [emailContext.organizationKey, emailContext.scopeKey, queryClient, rootQuery, rootTab, selectedTagKeys]);
+  }, [emailContext.teamKey, emailContext.scopeKey, queryClient, rootQuery, rootTab, selectedTagKeys]);
   useEffect(() => {
     if (!initialConnectorKey) return;
     const next = query.trim();
     if (!next) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const controller = new AbortController();
     const historyTimeout = setTimeout(() => {
       if (inboxTab === "drafts") void searchEmailDraftsForContext(context, initialConnectorKey, next, true, controller.signal, selectedTagKeys).catch(() => undefined);
@@ -1033,15 +1013,15 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       }
     }, 800);
     return () => { clearTimeout(historyTimeout); controller.abort(); };
-  }, [emailContext.organizationKey, emailContext.scopeKey, initialConnectorKey, inboxTab, query, selectedTagKeys]);
+  }, [emailContext.teamKey, emailContext.scopeKey, initialConnectorKey, inboxTab, query, selectedTagKeys]);
   useEffect(() => {
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     return navigation.addListener("focus", () => {
       void queryClient.cancelQueries({ queryKey: signalQueryKeys.overview(context), exact: true }).then(() => {
         void queryClient.invalidateQueries({ queryKey: signalQueryKeys.overview(context), exact: true, refetchType: "active" });
       });
     });
-  }, [emailContext.organizationKey, emailContext.scopeKey, navigation, queryClient]);
+  }, [emailContext.teamKey, emailContext.scopeKey, navigation, queryClient]);
   useEffect(() => subscribeAppEvent((event) => {
     if (event.type === "inbox.changed" || event.type === "event-stream.connected") refreshFromInboxEvent();
   }), []);
@@ -1121,7 +1101,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     void transitionToForm("toneCreate", () => {
       setToneName("");
       setToneInstruction("");
-      metadataFormContext.current = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+      metadataFormContext.current = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     });
   }
   function openConnectForm() {
@@ -1206,7 +1186,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       setMetadataInstruction("");
       setMetadataFavorite(inbox.isFavorite);
       setMetadataCoverAsset(undefined);
-      metadataFormContext.current = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+      metadataFormContext.current = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     });
   }
   function openToneEdit(record: EmailToneRecord) {
@@ -1215,7 +1195,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     setMetadataInstruction(record.instruction);
     setMetadataFavorite(record.isFavorite);
     setMetadataCoverAsset(undefined);
-    metadataFormContext.current = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    metadataFormContext.current = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     setSheetError(undefined);
     setSheet("toneEdit");
     setSheetOpen(true);
@@ -1298,7 +1278,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const instruction = toneInstruction.trim();
     if (!name || !instruction) return;
     const context = metadataFormContext.current;
-    if (!context || context.organizationKey !== emailContext.organizationKey || context.scopeKey !== emailContext.scopeKey) return;
+    if (!context || context.teamKey !== emailContext.teamKey || context.scopeKey !== emailContext.scopeKey) return;
     const generation = operationGeneration.current;
     const requestKey = randomUUID();
     toneCreateInFlight.current = true;
@@ -1345,13 +1325,13 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const writingInstruction = metadataInstruction.trim();
     if (!name || toneRecord && !writingInstruction || !toneRecord && !inbox) return;
     const context = metadataFormContext.current;
-    if (!context || context.organizationKey !== emailContext.organizationKey || context.scopeKey !== emailContext.scopeKey) return;
+    if (!context || context.teamKey !== emailContext.teamKey || context.scopeKey !== emailContext.scopeKey) return;
     const generation = operationGeneration.current;
     const requestKey = randomUUID();
     metadataInFlight.current = true;
     setBusy("metadata");
     setSheetError(undefined);
-    const targetKey = `${context.organizationKey}:${context.scopeKey}:${toneRecord ? `tone:${toneRecord.key}` : `inbox:${inbox!.connectorKey}`}`;
+    const targetKey = `${context.teamKey}:${context.scopeKey}:${toneRecord ? `tone:${toneRecord.key}` : `inbox:${inbox!.connectorKey}`}`;
     const request = (metadataRequests.current.get(targetKey) ?? 0) + 1;
     metadataRequests.current.set(targetKey, request);
     const coverChange = inbox ? metadataCoverAsset : undefined;
@@ -1427,7 +1407,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   async function deleteTone() {
     const record = editingTone;
     if (!record || record.slug || deleteToneInFlight.current) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const generation = operationGeneration.current;
     const requestKey = randomUUID();
     deleteToneInFlight.current = true;
@@ -1471,7 +1451,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const connectorKey = initialConnectorKey;
     const finalContent = draftBody.trim();
     if (!saved || !connectorKey || draftSending || !finalContent) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     setDraftSending(true);
     try {
       if (finalContent !== (saved.finalContent ?? saved.generatedContent).trim()) {
@@ -1549,7 +1529,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const controller = new AbortController();
     const timeout = setTimeout(() => { void searchLatest(next, false, controller.signal); }, next ? 300 : 0);
     return () => { clearTimeout(timeout); controller.abort(); };
-  }, [emailContext.organizationKey, emailContext.scopeKey, initialConnectorKey, inboxTab, query, selectedTagKeys]);
+  }, [emailContext.teamKey, emailContext.scopeKey, initialConnectorKey, inboxTab, query, selectedTagKey, selectedTagKeys]);
   async function loadMore() {
     const cursor = overview?.nextCursor;
     if (!cursor || loadingMore.current || loadingOverview.current || loading || loadError) return;
@@ -1563,7 +1543,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     }
   }
   async function openThread(thread: EmailThread) {
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const connectorKey = initialConnectorKey;
     if (!connectorKey) return;
     const generation = ++detailGeneration.current;
@@ -1595,7 +1575,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const cursor = selected?.nextCursor;
     const threadKey = selected?.thread.key;
     if (!cursor || !threadKey || loadingMoreThread.current) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const generation = detailGeneration.current;
     loadingMoreThread.current = true;
     setThreadPageLoading(true);
@@ -1626,7 +1606,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   async function restoreSignalReader() {
     if (!initialConnectorKey || !initialThreadKey || restoredSignalReader.current) return;
     restoredSignalReader.current = true;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const generation = ++detailGeneration.current;
     const detailKey = signalQueryKeys.detail(context, initialConnectorKey, initialThreadKey);
     setOpeningThreadKey(initialThreadKey);
@@ -1668,7 +1648,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     if (!openAttachments || !selectedMessage || restoredSignalAttachments.current) return;
     restoredSignalAttachments.current = true;
     void openLatestReceivedAttachments();
-  }, [openAttachments, selectedMessage?.key]);
+  }, [openAttachments, selectedMessage]);
 
   async function resolveGalleryAttachment(ref: EmailAttachmentRef & { type: "image" }) {
     const galleryContext = getGalleryContext();
@@ -1745,7 +1725,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   }
   async function openRootBulkActions() {
     if (!selectedInboxesRef.current.length || rootBulkBusy) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const generation = ++rootSelectionGeneration.current;
     try {
       const authoritative = await queryClient.fetchQuery({ queryKey: signalQueryKeys.overview(context), queryFn: () => fetchEmailOverviewForContext(context), staleTime: 0 });
@@ -1762,9 +1742,9 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const snapshot = reconcileSelectedInboxSnapshots(selectedInboxes, metadataAccounts);
     if (!snapshot.length) { setSelectedInboxes([]); return; }
     const isFavorite = !snapshot.every((account) => account.isFavorite);
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const requests = new Map(snapshot.map((account) => {
-      const targetKey = `${context.organizationKey}:${context.scopeKey}:inbox:${account.connectorKey}`;
+      const targetKey = `${context.teamKey}:${context.scopeKey}:inbox:${account.connectorKey}`;
       const request = (metadataRequests.current.get(targetKey) ?? 0) + 1;
       metadataRequests.current.set(targetKey, request);
       return [account.connectorKey, { targetKey, request }] as const;
@@ -1796,7 +1776,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     if (!selectedInboxes.length || rootBulkBusy || !permissions.canManageConnector) return;
     const snapshot = reconcileSelectedInboxSnapshots(selectedInboxes, metadataAccounts);
     if (!snapshot.length) { setSelectedInboxes([]); return; }
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     setRootDisconnectOpen(false);
     setRootBulkBusy(true);
     snapshot.forEach(({ connectorKey }) => removeRootInboxFromCaches(context, connectorKey));
@@ -1889,7 +1869,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   }
   async function openBulkActions() {
     if (!initialConnectorKey || !selectedThreads.length || bulkBusy || bulkInFlight.current) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const connectorKey = initialConnectorKey;
     const generation = ++selectionGeneration.current;
     const snapshot = [...selectedThreads];
@@ -1914,7 +1894,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const thread = selected?.thread;
     const messageKey = selectedMessageKeyRef.current;
     if (!thread || !messageKey || readBusy || trashBusy || readInFlight.current.has(thread.key)) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const connectorKey = initialConnectorKey;
     if (!connectorKey) return;
     const requestKey = randomUUID();
@@ -1960,7 +1940,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     if (!initialConnectorKey || !selectedThreads.length || bulkBusy || bulkInFlight.current) return;
     const snapshot = [...selectedThreads];
     const threadKeys = snapshot.map(({ key }) => key);
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const connectorKey = initialConnectorKey;
     const generation = ++bulkGeneration.current;
     const requestKey = randomUUID();
@@ -2017,7 +1997,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     if (!selected || !initialConnectorKey || trashBusy || favoriteInFlight.current) return;
     const generation = ++favoriteGeneration.current;
     favoriteInFlight.current = true;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const connectorKey = initialConnectorKey;
     const threadKey = selected.thread.key;
     const requestKey = randomUUID();
@@ -2144,7 +2124,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const language = editorTargetLanguage.trim();
     if (!text) { notify("Enter text before using an AI action."); return; }
     if (action === "translate" && language.length < 2) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const generation = ++editorTransformationGeneration.current;
     setEditorActionTarget(undefined);
     setEditorTranslateTarget(undefined);
@@ -2164,7 +2144,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     return generation === newEmailGeneration.current && owner === newEmailGenerationOwner.current && contextIsCurrent(context);
   }
   function generateNewEmailAlternatives(options: NewEmailToneOption[]) {
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const generation = ++newEmailGeneration.current;
     const owner = randomUUID();
     newEmailGenerationOwner.current = owner;
@@ -2204,7 +2184,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     void Promise.allSettled(operations);
   }
   function retryNewEmailAlternative(option: NewEmailToneOption) {
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const generation = newEmailGeneration.current;
     const owner = newEmailGenerationOwner.current;
     if (!owner || newEmailToneRequests.current.has(option.value)) return;
@@ -2256,7 +2236,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   async function refreshNewEmailImageUrls() {
     const refs = newEmailAttachments.filter((ref): ref is EmailAttachmentRef & { type: "image" } => ref.type === "image");
     if (!refs.length) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const results = await Promise.allSettled(refs.map((ref) => searchGalleryImages({ imageKey: ref.key }).then(({ images }) => [ref.key, images.find(({ key }) => key === ref.key)?.url] as const)));
     if (!contextIsCurrent(context)) return;
     setNewEmailAttachmentImageUrls((current) => Object.fromEntries([
@@ -2328,7 +2308,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         }
         if (newEmailContentOpen) {
           event.preventDefault();
-          invalidateNewEmailAlternatives();
+          invalidateNewEmailAlternativesFromEffect();
           setNewEmailContentOpen(false);
           setNewEmailRecipientsOpen(true);
           return;
@@ -2355,7 +2335,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     if (newEmailSendInFlight.current || newEmailSending) return;
     const selectedDraft = newEmailSelectedDraft;
     if (!newEmailSkipped && !selectedDraft) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const generation = ++newEmailGeneration.current;
     sendGeneration.current = generation;
     newEmailSendInFlight.current = true;
@@ -2462,7 +2442,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const keys = selectedKeys.filter((key) => records.some((record) => record.key === key)).slice(0, 50);
     if (!threadKey || !messageKey || !keys.length) return;
     const generation = ++generatedDeleteGeneration.current;
-    setGeneratedDeleteConfirmation(Object.freeze({ kind, context: { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey }, threadKey, messageKey, keys: Object.freeze([...keys]), generation }));
+    setGeneratedDeleteConfirmation(Object.freeze({ kind, context: { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey }, threadKey, messageKey, keys: Object.freeze([...keys]), generation }));
   }
   async function deleteGeneratedRecords() {
     const operation = generatedDeleteConfirmation;
@@ -2531,7 +2511,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const message = selectedMessage;
     const threadKey = selected?.thread.key;
     if (!message || !threadKey) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const messageKey = message.key;
     const generation = ++readerGeneration.current;
     readerTargetKey.current = messageKey;
@@ -2570,7 +2550,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const threadKey = selected?.thread.key;
     const messageKey = selectedMessage?.key;
     if (!threadKey || !messageKey) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const generation = ++readerGeneration.current;
     readerTargetKey.current = messageKey;
     setReaderError(undefined);
@@ -2673,7 +2653,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const messageKey = selectedMessageKeyRef.current;
     const generation = readerGeneration.current;
     if (!draftKey || !threadKey || !messageKey) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const request = searchGalleryImages({ imageKey: ref.key }).then(({ images }) => {
       const url = images.find(({ key }) => key === ref.key)?.url;
       if (!url || !readerOperationIsCurrent(generation, context, threadKey, messageKey) || selectedReplyKeyRef.current !== draftKey) return;
@@ -2696,7 +2676,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     let current = selectedReply;
     const threadKey = selected?.thread.key;
     if ((!current && !emptyReply) || !threadKey || replySending || !replyBody.trim()) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const generation = readerGeneration.current;
     setReplyModeOpen(false);
     setReplySending(true);
@@ -2750,7 +2730,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const messageKey = readerTargetKey.current;
     const threadKey = selectedThreadKeyRef.current;
     if (!messageKey || !threadKey || !targetLanguage.trim()) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const generation = ++readerGeneration.current;
     const requestKey = randomUUID();
     setReaderSheet("translate");
@@ -2774,7 +2754,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const messageKey = readerTargetKey.current;
     const threadKey = selectedThreadKeyRef.current;
     if (!messageKey || !threadKey) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const generation = ++readerGeneration.current;
     const requestKey = randomUUID();
     setReaderGenerating("summary");
@@ -2794,7 +2774,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const messageKey = captured?.messageKey ?? readerTargetKey.current;
     const threadKey = captured?.threadKey ?? selectedThreadKeyRef.current;
     if (!messageKey || !threadKey) return;
-    const context = captured?.context ?? { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = captured?.context ?? { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const generation = captured?.generation ?? ++readerGeneration.current;
     setSimilarResults([]);
     setReaderLoading(true);
@@ -2809,7 +2789,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     }
   }
   async function openSimilarResult(result: EmailSimilarResult) {
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const connectorKey = initialConnectorKey;
     const sourceThreadKey = selectedThreadKeyRef.current;
     const sourceMessageKey = readerTargetKey.current;
@@ -2833,7 +2813,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   async function trashThread() {
     const previousThread = selected?.thread;
     if (!previousThread || !selectedMessageKeyRef.current || !initialConnectorKey || trashInFlight.current) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const connectorKey = initialConnectorKey;
     const threadKey = previousThread.key;
     const generation = ++trashGeneration.current;
@@ -2879,7 +2859,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   async function openTrashRoot() {
     if (!initialConnectorKey) return;
     const accounts = metadataAccounts.filter(({ connectorKey }) => connectorKey === initialConnectorKey);
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const generation = ++trashRootGeneration.current;
     setSheetOpen(false);
     await wait(180);
@@ -2906,7 +2886,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   async function clearTrash() {
     const clearable = clearableEmailTrashGroups(trashGroups);
     if (trashClearBusy || trashClearInFlight.current || !clearable.length) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const generation = ++trashRootGeneration.current;
     const groups = [...clearable];
     const requestKeys = new Map(groups.map(({ connector }) => [connector.connectorKey, randomUUID()]));
@@ -2968,7 +2948,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   }
   async function disconnect() {
     if (!initialConnectorKey) return;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const connectorKey = initialConnectorKey;
     const generation = ++operationGeneration.current;
     setBusy("disconnect");
@@ -2997,7 +2977,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const message = assistantInput.trim();
     if (!message || assistantBusy) return;
     const generation = ++assistantGeneration.current;
-    const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey };
+    const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     setAssistantBusy(true);
     setAssistantError(undefined);
     setAssistantResponse(undefined);
@@ -3246,7 +3226,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
                 {!loadError && !visibleAccounts.length && !rootFilterActive ? (
                   <View style={styles.rootEmptyState}>
                     <Text style={styles.rootEmpty}>{rootFavoritesOnly ? "No favorite inboxes." : "No connected inbox yet."}</Text>
-                    {permissions.canManageConnector ? <Button accessibilityLabel="Connect Gmail" contentMode="raw" onPress={openConnectForm} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : <Text style={styles.rootEmptyHelp}>Ask an organization administrator to connect an inbox.</Text>}
+                    {permissions.canManageConnector ? <Button accessibilityLabel="Connect Gmail" contentMode="raw" onPress={openConnectForm} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : <Text style={styles.rootEmptyHelp}>Ask an team administrator to connect an inbox.</Text>}
                   </View>
                 ) : null}
               </>
@@ -3700,7 +3680,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
           {newEmailAttachments.length ? <View accessibilityLabel={`${newEmailAttachments.length} email attachments`} onLayout={({ nativeEvent }) => setReviewAttachmentGridWidth(nativeEvent.layout.width)} style={styles.reviewAttachmentGrid}>{newEmailAttachments.map((ref) => { const identity = attachmentIdentity(ref); const label = newEmailAttachmentLabels[identity] ?? (ref.type === "document" ? "Archive document" : "Gallery image"); const imageUrl = ref.type === "image" ? newEmailAttachmentImageUrls[identity] : undefined; return <Button accessibilityLabel={`Edit attachment ${label}`} contentMode="raw" disabled={newEmailSending || Boolean(newEmailReviewTransformation)} key={identity} onPress={openNewEmailAttachments} shape="rounded" size="md" style={[styles.reviewAttachmentCard, { width: reviewAttachmentCardSize, height: reviewAttachmentCardSize }]} variant="ghost">{imageUrl ? <Image contentFit="cover" onError={() => void refreshNewEmailImageUrls()} source={imageUrl} style={styles.reviewAttachmentImage} transition={150} /> : <><FileIcon size="lg" /><Text ellipsizeMode="tail" numberOfLines={1} style={styles.reviewAttachmentLabel}>{label}</Text></>}</Button>; })}</View> : null}
         </ScrollView>
       </BottomSheet>
-      {newEmailAttachmentsOpen ? <EmailAttachmentPicker context={historyContext} contextKey={`${emailContext.organizationKey}:${emailContext.scopeKey}:new-email`} imageUrls={newEmailAttachmentImageUrls} labels={newEmailAttachmentLabels} onClose={() => setNewEmailAttachmentsOpen(false)} onDone={finishNewEmailAttachments} open selection={newEmailAttachments} /> : null}
+      {newEmailAttachmentsOpen ? <EmailAttachmentPicker context={historyContext} contextKey={`${emailContext.teamKey}:${emailContext.scopeKey}:new-email`} imageUrls={newEmailAttachmentImageUrls} labels={newEmailAttachmentLabels} onClose={() => setNewEmailAttachmentsOpen(false)} onDone={finishNewEmailAttachments} open selection={newEmailAttachments} /> : null}
       <BottomSheet
         description={readerSheet === "translate" || readerSheet === "translationReader" ? "View saved translations or create a new one." : readerSheet === "translationForm" ? "Choose the language for this email translation." : readerSheet === "summaryVersions" || readerSheet === "summaryReader" ? "View saved summaries or create a new one." : readerSheet === "replies" ? "Choose a generated response to review." : undefined}
         dismissible={!trashBusy && !generatedDeleteBusy && !replySending && !replyAttachmentsOpen && !replyEditorOpen}
@@ -3754,7 +3734,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
           </ScrollView>
         </BottomSheet>
         <BottomSheet dismissible={!replySending} hideHeading onOpenChange={(open) => { if (!open && !replySending) setReplyModeOpen(false); }} open={readerSheetOpen && replyModeOpen} title="Choose reply recipients"><BottomSheetMenu><BottomSheetItem disabled={replySending} onPress={() => void sendSuggestedReply("reply")} style={styles.sheetAction} variant="secondary">Reply</BottomSheetItem><BottomSheetItem disabled={replySending} onPress={() => void sendSuggestedReply("reply_all")} style={styles.sheetAction} variant="secondary">Reply all</BottomSheetItem></BottomSheetMenu></BottomSheet>
-        {replyAttachmentsOpen && replyEditorOpen ? <EmailAttachmentPicker context={historyContext} contextKey={`${emailContext.organizationKey}:${emailContext.scopeKey}:reply:${selectedReply?.key ?? selected?.thread.key ?? "empty"}`} imageUrls={replyAttachmentImageUrls} labels={replyAttachmentLabels} onClose={() => setReplyAttachmentsOpen(false)} onDone={finishReplyAttachments} open selection={replyAttachments} /> : null}
+        {replyAttachmentsOpen && replyEditorOpen ? <EmailAttachmentPicker context={historyContext} contextKey={`${emailContext.teamKey}:${emailContext.scopeKey}:reply:${selectedReply?.key ?? selected?.thread.key ?? "empty"}`} imageUrls={replyAttachmentImageUrls} labels={replyAttachmentLabels} onClose={() => setReplyAttachmentsOpen(false)} onDone={finishReplyAttachments} open selection={replyAttachments} /> : null}
       </BottomSheet>
       <BottomSheet dismissible={!trashBusy} footer={<><Button disabled={trashBusy} onPress={() => void trashThread()} size="md" variant="primary">Move to trash</Button><Button disabled={trashBusy} onPress={closeReaderFlow} size="md" variant="secondary">Cancel</Button></>} onOpenChange={(open) => { if (!open) closeReaderFlow(); }} open={readerSheetOpen && readerSheet === "delete"} title="Move to Trash?" />
       <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setEditorActionTarget(undefined); }} open={Boolean(editorActionTarget)} title="AI actions">
@@ -3796,7 +3776,7 @@ function ReplyContextSheets({ canMutate, context, onClose, open }: { canMutate: 
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const capturedContext = { organizationKey: context.organizationKey, scopeKey: context.scopeKey };
+  const capturedContext = { teamKey: context.teamKey, scopeKey: context.scopeKey };
   const queryKey = signalQueryKeys.replyContexts(capturedContext);
   const notesQuery = useQuery({
     enabled: open,
@@ -3819,7 +3799,7 @@ function ReplyContextSheets({ canMutate, context, onClose, open }: { canMutate: 
       setSaving(false);
       setDeleting(false);
     });
-  }, [context.organizationKey, context.scopeKey]);
+  }, [context.teamKey, context.scopeKey]);
   useEffect(() => {
     if (!open) {
       void Promise.resolve().then(() => {
@@ -3834,7 +3814,7 @@ function ReplyContextSheets({ canMutate, context, onClose, open }: { canMutate: 
     if (generation !== contextGeneration.current) return false;
     try {
       const current = getEmailContext();
-      return current.organizationKey === operationContext.organizationKey && current.scopeKey === operationContext.scopeKey;
+      return current.teamKey === operationContext.teamKey && current.scopeKey === operationContext.scopeKey;
     } catch {
       return false;
     }

@@ -52,7 +52,7 @@ export const nonTextImageSearchProviderInputSchema = { type: 'object', oneOf: im
 
 export interface ImageSearchToolDependencies extends ExecuteActionOptions {
   context: ToolContext;
-  executeEmbedding?: (organizationKey: string, input: EmbeddingInput) => Promise<ProviderExecuteResponse<EmbeddingOutput>>;
+  executeEmbedding?: (teamKey: string, input: EmbeddingInput) => Promise<ProviderExecuteResponse<EmbeddingOutput>>;
   /** Trusted query embedding supplied by a canonical parent operation. */
   queryEmbedding?: number[];
   searchImages?: (input: AccessibleImageSearchInput) => Promise<AccessibleImageSearchResult[]>;
@@ -88,7 +88,7 @@ export const imageSearchTool = {
     };
     const actorKey = imageSearchActor(dependencies.context);
     const scopeKey = dependencies.context.runtimeScopeKey;
-    const organizationKey = dependencies.context.organizationKey;
+    const teamKey = dependencies.context.teamKey;
     if ('collectionKey' in input && input.collectionKey) {
       if (!await (dependencies.canAccessCollection ?? repository.canAccessCollection)(scopeKey, input.collectionKey, actorKey)) throw new Error('Image collection not found.');
       const collection = await (dependencies.getCollection ?? repository.getCollection)(scopeKey, input.collectionKey);
@@ -110,7 +110,7 @@ export const imageSearchTool = {
       const source = await (dependencies.getImage ?? repository.getImage)(input.imageKey);
       if (!source || source.scopeKey !== scopeKey || !await (dependencies.canAccessImage ?? repository.canAccessImage)(scopeKey, source.key, actorKey)) throw new Error('Source image not found.');
       const results = await (dependencies.searchImages ?? repository.searchAccessibleImages)({
-        organizationKey,
+        teamKey,
         scopeKey,
         actorKey,
         embedding: source.embedding,
@@ -124,10 +124,10 @@ export const imageSearchTool = {
     const embeddingPromise = dependencies.queryEmbedding
       ? Promise.resolve({ output: { embedding: dependencies.queryEmbedding } })
       : dependencies.executeEmbedding
-      ? dependencies.executeEmbedding(organizationKey, embeddingInput)
+      ? dependencies.executeEmbedding(teamKey, embeddingInput)
       : executeAction<EmbeddingInput, EmbeddingOutput>({
           mode: 'auto',
-          organizationKey,
+          teamKey,
           actionSlug: 'embed',
         }, embeddingInput, dependencies);
     const [response, identities] = await Promise.all([
@@ -141,7 +141,7 @@ export const imageSearchTool = {
     const searchDateRange = { ...(input.createdFrom ? { createdFrom: input.createdFrom } : {}), ...(input.createdTo ? { createdTo: input.createdTo } : {}) };
     const [semanticResults, ...identityResults] = await Promise.all([
       search({
-        organizationKey,
+        teamKey,
         scopeKey,
         actorKey,
         embedding,
@@ -151,7 +151,7 @@ export const imageSearchTool = {
         ...searchDateRange,
       }),
       ...identities.map((identity) => search({
-        organizationKey,
+        teamKey,
         scopeKey,
         actorKey,
         embedding: identity.embedding,

@@ -4,7 +4,9 @@ import { createNodeHelpers, withArangoKey } from './base';
 import { db } from './client';
 
 export const COLLECTION_IMAGES_COLLECTION = 'collectionImages';
-export const collectionImageSchema = z.object({ key: z.string().cuid(), scopeKey: z.string().cuid(), collectionKey: z.string().cuid(), imageKey: z.string().cuid(), addedByKey: z.string().cuid(), createdAt: z.string().datetime() });
+export const collectionImageSchema = z.object({ key: z.string().cuid(), scopeKey: z.string().cuid(), collectionKey: z.string().cuid(), imageKey: z.string().cuid(), addedByKey: z.string().cuid().optional(), managedPurpose: z.literal('scope-directory').optional(), createdAt: z.string().datetime() }).superRefine((value, context) => {
+  if (!value.addedByKey && value.managedPurpose !== 'scope-directory') context.addIssue({ code: z.ZodIssueCode.custom, path: ['addedByKey'], message: 'User-managed collection relations require an actor.' });
+});
 export type CollectionImage = z.infer<typeof collectionImageSchema>;
 export const collectionImagesEmbeddingFields = [] as const;
 const helpers = createNodeHelpers(COLLECTION_IMAGES_COLLECTION, collectionImageSchema, collectionImagesEmbeddingFields, { requireEmbedding: false });

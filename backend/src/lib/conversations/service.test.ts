@@ -8,12 +8,12 @@ import {
   conversationMessageSchema, conversationSendInputSchema, encodeCursor, projectConversationMessage, type ConversationMessage,
 } from './schemas';
 
-const organizationKey = newId(), scopeKey = newId(), userKey = newId(), conversationKey = newId();
+const teamKey = newId(), scopeKey = newId(), userKey = newId(), conversationKey = newId();
 const at = '2026-09-01T10:00:00.000Z';
-const owner = { organizationKey, scopeKey, userKey };
-const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+const owner = { teamKey, scopeKey, userKey };
+const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
 const message = (overrides: Partial<ConversationMessage> = {}): ConversationMessage => ({
-  key: newId(), conversationKey, organizationKey, scopeKey, userKey, turnKey: 'request-1', requestHash: 'a'.repeat(64), type: 'TEXT',
+  key: newId(), conversationKey, teamKey, scopeKey, userKey, turnKey: 'request-1', requestHash: 'a'.repeat(64), type: 'TEXT',
   role: 'ASSISTANT', status: 'COMPLETED', content: 'answer', retrievals: [], createdAt: at, completedAt: at, ...overrides,
 });
 
@@ -33,7 +33,7 @@ describe('private conversations', () => {
   test('keeps agent.query strict and rejects forged trusted selectors before embedding', async () => {
     expect(agentQueryInputSchema.parse({ query: 'history' })).toEqual({ query: 'history', limit: 20 });
     expect(() => agentQueryInputSchema.parse({ query: 'x', limit: 21 })).toThrow();
-    for (const forged of ['conversationKey', 'organizationKey', 'scopeKey', 'userKey']) expect(() => agentQueryInputSchema.parse({ query: 'x', [forged]: newId() })).toThrow('Unrecognized key');
+    for (const forged of ['conversationKey', 'teamKey', 'scopeKey', 'userKey']) expect(() => agentQueryInputSchema.parse({ query: 'x', [forged]: newId() })).toThrow('Unrecognized key');
     expect(() => conversationSendInputSchema.parse({ conversationKey, message: 'x', requestKey: 'r', extra: true })).toThrow('Unrecognized key');
     expect(() => conversationModelSendInputSchema.parse({ conversationKey, message: 'x', requestKey: 'forged' })).toThrow('Unrecognized key');
     expect(() => conversationMessageDeleteInputSchema.parse({ conversationKey, messageKey: newId(), userKey })).toThrow('Unrecognized key');
@@ -46,7 +46,7 @@ describe('private conversations', () => {
     expect(() => conversationMessageSchema.parse({ ...message(), type: 'IMAGE' })).toThrow('require an image reference');
     expect(conversationMessageSchema.parse({ ...message(), type: 'IMAGE', imageKey: newId(), embedding: undefined }).type).toBe('IMAGE');
     let embeds = 0;
-    await expect(createConversationService({ repository: {} as ConversationRepository, embed: async () => { embeds += 1; return [1]; } }).query({ ...context, organizationKey: newId() }, { query: 'secret' })).rejects.toThrow('Membership does not belong');
+    await expect(createConversationService({ repository: {} as ConversationRepository, embed: async () => { embeds += 1; return [1]; } }).query({ ...context, teamKey: newId() }, { query: 'secret' })).rejects.toThrow('Membership does not belong');
     expect(embeds).toBe(0);
   });
 

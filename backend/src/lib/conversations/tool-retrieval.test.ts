@@ -49,9 +49,6 @@ describe('conversation tool result retrieval capture', () => {
   test('captures nothing for deletions, non-resource tools, unknown slugs, and empty results', () => {
     expect(projectToolResultRetrieval('folder.delete', { deletedKey: newId() })).toBeNull();
     expect(projectToolResultRetrieval('image.remove', { key: newId() })).toBeNull();
-    expect(projectToolResultRetrieval('collection.member.list', { members: [{ key: newId(), name: 'Someone' }] })).toBeNull();
-    expect(projectToolResultRetrieval('collection.invite.create', { key: newId(), name: 'Invite' })).toBeNull();
-    expect(projectToolResultRetrieval('collection.share.update', { key: newId(), name: 'Share' })).toBeNull();
     expect(projectToolResultRetrieval('image.memory.read', { key: newId(), name: 'Memory' })).toBeNull();
     expect(projectToolResultRetrieval('web.search', { results: [{ key: newId(), name: 'Page' }] })).toBeNull();
     expect(projectToolResultRetrieval('agent.query', { answer: 'no resources' })).toBeNull();
@@ -100,4 +97,3 @@ describe('conversation tool result retrieval capture', () => {
     expect(projectToolResultRetrieval('collection.list', deep)).toBeNull();
   });
 });
-

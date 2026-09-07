@@ -32,7 +32,7 @@ const guestResponse = await fetch(`${apiBase}/api/v1/auth/guest`, {
 });
 if (!guestResponse.ok) throw new Error(`Guest bootstrap failed with ${guestResponse.status}: ${await guestResponse.text()}`);
 const guest = object(await guestResponse.json(), 'guest response');
-const organizationKey = string(object(guest.organization, 'guest organization').key, 'organization key');
+const teamKey = string(object(guest.team, 'guest team').key, 'team key');
 const scopeKey = string(object(guest.main_scope, 'guest main scope').key, 'scope key');
 let accessToken = string(guestResponse.headers.get('x-access-token'), 'access token');
 let refreshToken = string(guestResponse.headers.get('x-refresh-token'), 'refresh token');
@@ -58,7 +58,7 @@ async function api(path: string, body: Record<string, unknown>, method = 'POST')
 
 const generationStartedAt = performance.now();
 const created = await api('/books', {
-  organizationKey,
+  teamKey,
   scopeKey,
   generationRequestKey: `ascend-book-e2e-${suffix}`,
   topic: 'Maintaining a reliable everyday bicycle at home',
@@ -80,7 +80,7 @@ const deadline = Date.now() + timeoutMs;
 let lastProgress = '';
 let detail: Record<string, unknown> | undefined;
 while (Date.now() < deadline) {
-  detail = await api(`/books/${bookKey}/detail`, { organizationKey, scopeKey });
+  detail = await api(`/books/${bookKey}/detail`, { teamKey, scopeKey });
   const book = object(detail.book, 'book');
   const status = string(book.status, 'book status');
   const progress = `${status}:${String(book.generationProgressPercent ?? 100)}`;

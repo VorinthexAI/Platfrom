@@ -14,17 +14,17 @@ const evidenceLinks = PUBLIC_ROUTES.map(
 ).join("\n");
 
 function buildPricingText(): string {
-  const { newcomerAllocation, monthlyPlans, onDemand, topUps } =
+  const { newcomerAllocation, referrals, subscriptions, topUp, webPurchasesAvailable } =
     PRODUCT_FACTS.pricing;
 
-  return `Prices are shown in USD. Local taxes may be added where required.
+  return `Prices are shown in USD and exclude VAT and other local taxes. Polar calculates and adds applicable tax at checkout.
 
 - Newcomer allocation: ${formatSparkCount(newcomerAllocation)} Sparks.
-- Monthly options:
-${monthlyPlans.map((plan) => `  - ${plan.name}: ${formatUsd(plan.price)} per month for ${formatSparkCount(plan.sparks)} Sparks.`).join("\n")}
-- One-time top-ups:
-${topUps.map((topUp) => `  - ${formatSparkCount(topUp.sparks)} Sparks for ${formatUsd(topUp.price)}.`).join("\n")}
-- ${onDemand.name}: ${onDemand.description}; requires ${onDemand.requiresPlan}.`;
+- Active subscription options:
+${subscriptions.map((plan) => `  - ${plan.name}: ${formatUsd(plan.price)} per ${plan.cadence} for ${formatSparkCount(plan.sparks)} Sparks per billing ${plan.cadence}${"referencePrice" in plan ? `; currently discounted from the regular ${formatUsd(plan.referencePrice)} monthly price` : ""}.`).join("\n")}
+- One-time top-up: ${formatSparkCount(topUp.sparks)} Sparks for ${formatUsd(topUp.price)}.
+- Referral rewards for the referrer: ${formatSparkCount(referrals.signup)} Sparks when a new user signs up with the referrer's code, then ${formatSparkCount(referrals.firstSubscriptionPurchase)} Sparks when that referred user first purchases a subscription. Each stage is awarded once per referred user.
+- Public website purchases available: ${webPurchasesAvailable ? "yes" : "no; coming soon"}.`;
 }
 
 export function buildLlmsText(): string {

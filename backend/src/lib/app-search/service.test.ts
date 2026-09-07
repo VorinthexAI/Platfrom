@@ -4,11 +4,11 @@ import { newId } from '@/lib/ids';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { APP_SEARCH_COLLECTION_ADAPTERS, MAX_APP_SEARCH_RETRIEVAL_RESULTS, appSearchInputSchema, appSearchModelInputSchema, appSearchRetrievalSchema, appSearchSumOutputSchema, createAppSearchService, describeAppSearchCollections, projectAppSearchModelResult, projectAppSearchRetrieval } from './service';
 
-const organizationKey = newId();
+const teamKey = newId();
 const scopeKey = newId();
 const userKey = newId();
-const membership = { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' };
-const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: membership } } as unknown as ToolContext;
+const membership = { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' };
+const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: membership } } as unknown as ToolContext;
 const embedding = Array(EMBEDDING_DIMENSIONS).fill(0.1);
 
 describe('app search service', () => {
@@ -20,7 +20,7 @@ describe('app search service', () => {
       { query: 'roadmap', collectionSlugs: [] },
       { query: 'roadmap', collectionSlugs: ['folders', 'folders'] },
       { query: 'roadmap', collectionSlugs: ['unknown'] },
-      { query: 'roadmap', collectionSlugs: ['folders'], organizationKey },
+      { query: 'roadmap', collectionSlugs: ['folders'], teamKey },
       { query: 'roadmap', collectionSlugs: ['folders'], queryEmbedding: embedding },
       { query: 'roadmap', collectionSlugs: ['folders'], minimumScore: 0.55 },
     ]) expect(() => appSearchInputSchema.parse(invalid)).toThrow();
@@ -111,6 +111,7 @@ describe('app search service', () => {
     expect(appSearchInputSchema.parse({ operation: 'count', collectionSlugs: ['documents', 'files'], filters: { tagKeys: [firstTag, secondTag] } }).filters).toMatchObject({ tagKeys: [firstTag, secondTag], tagMatch: 'any' });
     expect(appSearchModelInputSchema.parse({ operation: 'count', collectionSlugs: ['documents'], limit: 10, filters: { tagNames: ['  Ｗork  ', 'Priority'] } }).filters).toEqual({ tagNames: ['Work', 'Priority'], tagMatch: 'any' });
     expect(appSearchModelInputSchema.parse({ operation: 'list', collectionSlugs: ['documents', 'places'], limit: 10, filters: { tagKeys: [firstTag, secondTag], tagMatch: 'all' } }).filters).toEqual({ tagKeys: [firstTag, secondTag], tagMatch: 'all' });
+    expect(appSearchModelInputSchema.parse({ operation: 'list', collectionSlugs: ['email-messages'], limit: 10, filters: { connectorKey: newId(), readState: 'unread', emailFacets: ['urgent', 'important', 'purchases', 'filtered', 'favorite'] } }).filters?.emailFacets).toEqual(['urgent', 'important', 'purchases', 'filtered', 'favorite']);
     for (const invalid of [
       { operation: 'count', collectionSlugs: ['books'], filters: { tagMatch: 'all' } },
       { operation: 'count', collectionSlugs: ['books'], filters: { tagKeys: [firstTag, firstTag] } },
@@ -297,7 +298,7 @@ describe('app search service', () => {
     const connectorKey = newId(); const calls: any[] = [];
     const service = createAppSearchService({ email: { overview: async (_actor: unknown, input: any) => {
       calls.push(input);
-      return { threads: input.cursor ? [{ key: newId() }] : [{ key: newId() }, { key: newId() }], drafts: [], counts: { all: 12, important: 4, urgent: 1, needsAction: 2, filtered: 3, unread: 5, favorite: 6, trash: 0 }, nextCursor: input.cursor ? null : 'next' };
+      return { threads: input.cursor ? [{ key: newId() }] : [{ key: newId() }, { key: newId() }], drafts: [], counts: { all: 12, important: 4, urgent: 1, purchases: 2, needsAction: 2, filtered: 3, unread: 5, favorite: 6, trash: 0 }, nextCursor: input.cursor ? null : 'next' };
     } } as never });
     await expect(service.search({ operation: 'count', collectionSlugs: ['email-messages'], filters: { connectorKey, readState: 'unread' } }, context)).resolves.toEqual({ operation: 'count', groups: [{ collectionSlug: 'email-messages', count: 5 }] });
     await expect(service.search({ operation: 'count', collectionSlugs: ['email-messages'], filters: { connectorKey, readState: 'read', emailFacets: ['important'] } }, context)).resolves.toEqual({ operation: 'count', groups: [{ collectionSlug: 'email-messages', count: 3 }] });
@@ -423,7 +424,7 @@ describe('app search service', () => {
     const folder = keyed('Folder');
     const document = keyed('Document');
     const file = { ...keyed('File'), extension: 'pdf' };
-    const collection = { key: newId(), name: 'Collection', description: null, purpose: null, mutationPolicy: 'user', isFavorite: false, count: 1, coverUrl: null, memberKey: newId(), isOwned: true, role: 'owner', access: { canRead: true, canContribute: true, canManage: true }, createdAt: date, updatedAt: date, score: 0.8 };
+    const collection = { key: newId(), name: 'Collection', description: null, purpose: null, mutationPolicy: 'user', isFavorite: false, count: 1, coverUrl: null, actorKey: newId(), isOwned: true, role: 'owner', access: { canRead: true, canContribute: true, canManage: true }, createdAt: date, updatedAt: date, score: 0.8 };
     const image = { key: newId(), filename: 'fallback.jpg', caption: '  ', imageCaptionKey: null, mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, city: null, country: null, countryCode: null, latitude: null, longitude: null, locationSource: null, origin: 'uploaded', mutationPolicy: 'user', isFavorite: false, createdAt: date, updatedAt: date, url: 'https://example.test/image.jpg', score: 0.8 };
     const inbox = { key: newId(), connectorKey: newId(), provider: 'gmail', email: 'person@example.com', name: '', isFavorite: false, status: 'active', syncEnabled: true, syncStatus: 'idle', createdAt: date, updatedAt: date, score: 0.8 };
     const tone = { key: newId(), name: 'Warm', instruction: 'Be warm', isFavorite: false, createdAt: date, updatedAt: date, score: 0.8 };
@@ -721,7 +722,7 @@ describe('app search service', () => {
     expect(seenEmbeddings[0]).toEqual(embedding);
     expect(events.slice(0, 3).sort()).toEqual(['content:start', 'email:start', 'gallery:start']);
     expect(events.at(-1)).toBe('history');
-    expect(JSON.stringify(result)).not.toMatch(/embedding|organizationKey|initialSyncCompleted/);
+    expect(JSON.stringify(result)).not.toMatch(/embedding|teamKey|initialSyncCompleted/);
     expect(result.groups[2]).toEqual({ collectionSlug: 'inboxes', results: [{ key: expect.any(String), connectorKey: expect.any(String), provider: 'gmail', email: 'work@example.com', name: 'Work', isFavorite: false, status: 'active', syncEnabled: true, syncStatus: 'idle', createdAt: '2026-08-24T00:00:00.000Z', updatedAt: '2026-08-24T00:00:00.000Z', score: 0.75, tags: [] }] });
     expect(result.groups[1]).toMatchObject({ collectionSlug: 'images', results: [{ origin: 'generated' }] });
   });
@@ -837,7 +838,7 @@ describe('app search service', () => {
       } } as never,
     });
     const result = await service.search({ query: 'decisions', collectionSlugs: ['books'], recordHistory: false }, context);
-    expect(received).toEqual({ input: { organizationKey, scopeKey, query: 'decisions', minimumScore: -1, limit: 10 }, actorKey: userKey, options: { queryEmbedding: embedding } });
+    expect(received).toEqual({ input: { teamKey, scopeKey, query: 'decisions', minimumScore: -1, limit: 10 }, actorKey: userKey, options: { queryEmbedding: embedding } });
     expect(result.groups).toEqual([{ collectionSlug: 'books', results: [{ key: bookKey, title: 'Clear decisions', subtitle: 'A practical guide', description: 'Make better decisions.', status: 'ready', isFavorite: false, isExtending: false, estimatedMinutes: 30, chapterCount: 4, progressPercent: 25, createdAt: date, updatedAt: date, score: 0.88, tags: [] }] }]);
   });
 
@@ -848,18 +849,18 @@ describe('app search service', () => {
       executeEmbedding: async () => ({ embedding }),
       galleryCollectionSearch: async (input: unknown, galleryContext: any) => {
         received = { input, galleryContext };
-        return { collections: [{ key: collectionKey, name: 'Road trips', description: null, purpose: null, mutationPolicy: 'user', isFavorite: false, count: 4, coverUrl: null, memberKey: membership.key, isOwned: false, role: 'viewer', access: { canRead: true, canContribute: false, canManage: false }, createdAt: '2026-08-24T00:00:00.000Z', updatedAt: '2026-08-24T00:00:00.000Z', score: 0.84 }] };
+        return { collections: [{ key: collectionKey, name: 'Road trips', description: null, purpose: 'generated-media', mutationPolicy: 'system-only', isFavorite: false, count: 4, coverUrl: null, actorKey: membership.key, isOwned: false, role: 'viewer', access: { canRead: true, canContribute: false, canManage: false }, createdAt: '2026-08-24T00:00:00.000Z', updatedAt: '2026-08-24T00:00:00.000Z', score: 0.84 }] };
       },
     });
     const result = await service.search({ query: 'road', collectionSlugs: ['collections'], recordHistory: false }, context);
     expect(received.input).toEqual({ query: 'road', minimumScore: -1, limit: 10 });
-    expect(received.galleryContext).toMatchObject({ organizationKey, scopeKey, membership, queryEmbedding: embedding });
+    expect(received.galleryContext).toMatchObject({ teamKey, scopeKey, membership, queryEmbedding: embedding });
     expect(result.groups).toEqual([{ collectionSlug: 'collections', results: [expect.objectContaining({ key: collectionKey, isOwned: false, role: 'viewer', score: 0.84 })] }]);
   });
 
   test('rejects a mismatched trusted member context before embedding', async () => {
     let embedded = false;
-    const invalid = { ...context, organizationKey: newId() };
+    const invalid = { ...context, teamKey: newId() };
     await expect(createAppSearchService({ executeEmbedding: async () => { embedded = true; return { embedding }; } }).search({ query: 'roadmap', collectionSlugs: ['folders'] }, invalid)).rejects.toThrow('membership');
     expect(embedded).toBe(false);
   });

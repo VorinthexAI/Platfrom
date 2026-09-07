@@ -49,7 +49,7 @@ const directMarker = `DIRECT_${shortSuffix.toUpperCase()}`;
 
 let accessToken = '';
 let refreshToken = '';
-let organizationKey = '';
+let teamKey = '';
 let scopeKey = '';
 let conversationKey: string | undefined;
 let folderKey: string | undefined;
@@ -86,7 +86,7 @@ async function api(path: string, body: Record<string, unknown>, method = 'POST')
 }
 
 async function tool(name: string, input: Record<string, unknown>) {
-  return api(`/content/tools/${name}`, { organizationKey, scopeKey, input });
+  return api(`/content/tools/${name}`, { teamKey, scopeKey, input });
 }
 
 function parseSseFrames(source: string): Array<{ event: string; id: string; data: Record<string, unknown> }> {
@@ -119,7 +119,7 @@ async function turn(label: string, message: string): Promise<TurnResult> {
     const response = await fetch(`${apiBase}/api/v1/conversations/${conversationKey}/turn/stream`, {
       method: 'POST',
       headers: { ...authHeaders(), accept: 'text/event-stream' },
-      body: JSON.stringify({ organizationKey, scopeKey, message, requestKey }),
+      body: JSON.stringify({ teamKey, scopeKey, message, requestKey }),
       signal: controller.signal,
     });
     captureRotatedTokens(response);
@@ -194,12 +194,12 @@ try {
   });
   if (!guestResponse.ok) throw new Error(`Guest bootstrap failed with ${guestResponse.status}: ${await guestResponse.text()}`);
   const guest = object(await guestResponse.json(), 'guest response');
-  organizationKey = string(object(guest.organization, 'guest organization').key, 'organization key');
+  teamKey = string(object(guest.team, 'guest team').key, 'team key');
   scopeKey = string(object(guest.main_scope, 'guest main scope').key, 'scope key');
   accessToken = string(guestResponse.headers.get('x-access-token'), 'access token');
   refreshToken = string(guestResponse.headers.get('x-refresh-token'), 'refresh token');
 
-  const conversation = await api('/conversations', { organizationKey, scopeKey, name: `Core agent live E2E ${shortSuffix}` });
+  const conversation = await api('/conversations', { teamKey, scopeKey, name: `Core agent live E2E ${shortSuffix}` });
   conversationKey = string(conversation.key, 'conversation key');
 
   const createdFolder = await tool('folder.create', { folders: [{ scopeKey, name: originalFolderName, description: originalDescription }], idempotencyKey: `core-agent-e2e-folder-${suffix}` });
@@ -207,9 +207,9 @@ try {
   if (createdFolderResult.success !== true) throw new Error(`Folder creation failed: ${JSON.stringify(createdFolderResult)}`);
   folderKey = string(object(object(createdFolderResult.data, 'folder.create data').folder, 'created folder').key, 'created folder key');
 
-  const createdTag = await api('/tags', { organizationKey, scopeKey, name: tagName, description: `Temporary exact-search tag ${shortSuffix}` });
+  const createdTag = await api('/tags', { teamKey, scopeKey, name: tagName, description: `Temporary exact-search tag ${shortSuffix}` });
   tagKey = string(createdTag.key, 'created tag key');
-  await api('/tags/assignments?action=tag', { organizationKey, scopeKey, targets: [{ type: 'folder', key: folderKey }], tagKeys: [tagKey] });
+  await api('/tags/assignments?action=tag', { teamKey, scopeKey, targets: [{ type: 'folder', key: folderKey }], tagKeys: [tagKey] });
 
   const direct = await turn('direct', `Do not use any tools. Reply with exactly this text and nothing else: ${directMarker}`);
   if (direct.content.trim() !== directMarker) throw new Error(`Direct response was not exact: ${JSON.stringify(direct.content)}`);
@@ -256,7 +256,7 @@ try {
   if (assigned.content.includes(folderKey) || assigned.content.includes(tagKey)) throw new Error('Tag assignment answer exposed an internal key.');
   if (assigned.retrievals.length !== 0) throw new Error(`Tag-assignment list unexpectedly produced search retrievals: ${JSON.stringify(assigned.retrievals)}`);
 
-  const messages = await api(`/conversations/${conversationKey}/messages/list`, { organizationKey, scopeKey, limit: 20 });
+  const messages = await api(`/conversations/${conversationKey}/messages/list`, { teamKey, scopeKey, limit: 20 });
   const persisted = array(messages.items, 'persisted messages');
   if (persisted.length !== 20) throw new Error(`Expected 20 persisted messages for ten turns, received ${persisted.length}.`);
   if (persisted.some((value) => object(value, 'persisted message').status !== 'COMPLETED')) throw new Error('At least one persisted message was not completed.');
@@ -264,7 +264,7 @@ try {
   console.log('Core agent live E2E passed: direct answer, live singular-limit inference, exact private-tag search and assignment listing through app.search, app search/list/count, SSE protocol, canonical persistence checks, and conversation history.');
 } finally {
   if (tagKey && accessToken) {
-    try { await api(`/tags/${tagKey}`, { organizationKey, scopeKey }, 'DELETE'); }
+    try { await api(`/tags/${tagKey}`, { teamKey, scopeKey }, 'DELETE'); }
     catch (error) { console.error('Core agent E2E tag cleanup failed.', error); }
   }
   if (folderKey && accessToken) {
@@ -272,7 +272,7 @@ try {
     catch (error) { console.error('Core agent E2E folder cleanup failed.', error); }
   }
   if (conversationKey && accessToken) {
-    try { await api(`/conversations/${conversationKey}`, { organizationKey, scopeKey }, 'DELETE'); }
+    try { await api(`/conversations/${conversationKey}`, { teamKey, scopeKey }, 'DELETE'); }
     catch (error) { console.error('Core agent E2E conversation cleanup failed.', error); }
   }
 }

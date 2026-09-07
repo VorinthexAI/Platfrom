@@ -1,4 +1,4 @@
-﻿import Svg, { Path } from "react-native-svg";
+﻿import Svg, { Circle, Path } from "react-native-svg";
 export type HelpIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
 export type HelpIconSize = "sm" | "md" | "lg";
 export type HelpIconProps = {
@@ -19,8 +19,9 @@ export function HelpIcon({ variant = "default", size = "md", strokeWidth = 1.4 }
   const color = colors[variant];
   return (
     <Svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none">
-      <Path d="M5 12h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-      <Path d="M12 5v14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Circle cx="12" cy="12" r="9" stroke={color} strokeWidth={strokeWidth} />
+      <Path d="M9.75 9a2.4 2.4 0 1 1 3.4 2.18c-.72.36-1.15.88-1.15 1.82" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M12 16.5h.01" stroke={color} strokeWidth={strokeWidth + 0.6} strokeLinecap="round" />
     </Svg>
   );
 }

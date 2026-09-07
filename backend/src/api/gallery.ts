@@ -16,42 +16,44 @@ import type { ToolBillingDependencies } from '@/lib/ai/events/runtime';
 import type { ToolEventRecorder } from '@/lib/ai/events/service';
 import type { RunAuthenticatedContentToolOptions } from '@/lib/ai/tools';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
+import { authenticatedTeamContext } from './auth';
 
-const trustedContextSchema = z.object({ organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid() }).passthrough();
+const trustedContextSchema = z.object({ teamKey: z.string().trim().min(1), scopeKey: z.string().cuid() }).passthrough();
 const idempotencyKeySchema = z.string().trim().min(1).max(200);
-export const galleryHighlightListQuerySchema = z.object({ organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid(), collectionKey: z.string().cuid() }).strict();
+export const galleryHighlightListQuerySchema = z.object({ teamKey: z.string().trim().min(1), scopeKey: z.string().cuid(), collectionKey: z.string().cuid() }).strict();
 export const galleryMemoryListQuerySchema = galleryHighlightListQuerySchema;
 
 interface GalleryHandlerDependencies {
   getIdentity?: typeof getAuthIdentity;
-  authorize?: (input: { organizationKey: string; scopeKey: string }, options: Omit<RunAuthenticatedContentToolOptions, 'execute'>) => Promise<{ context: ToolContext }>;
+  authorize?: (input: { teamKey: string; scopeKey: string }, options: Omit<RunAuthenticatedContentToolOptions, 'execute'>) => Promise<{ context: ToolContext }>;
   operations?: Partial<Record<GalleryOperationName, (input: unknown, context: GalleryOperationContext) => Promise<unknown>>>;
   recordEvent?: ToolEventRecorder;
+  appScopeKey?: string;
   billing?: ToolBillingDependencies;
 }
 
-async function context(c: Context, organizationKey: string, scopeKey: string, dependencies: GalleryHandlerDependencies = {}) {
+async function context(c: Context, teamKey: string, scopeKey: string, dependencies: GalleryHandlerDependencies = {}) {
   const identity = await (dependencies.getIdentity ?? getAuthIdentity)(c);
   if (!identity) throw new GalleryOperationError(401, 'GALLERY_UNAUTHORIZED', 'Authentication required.');
   if (identity.identityType !== 'user') throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'A user session is required.');
-  const { context: toolContext } = await (dependencies.authorize ?? authorizeContentExecution)({ organizationKey, scopeKey }, { authenticatedUserKey: identity.key });
+  const { context: toolContext } = await (dependencies.authorize ?? authorizeContentExecution)({ teamKey, scopeKey }, authenticatedTeamContext(identity));
   if (toolContext.principal.kind !== 'member') throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'Gallery scope access denied.');
   const rawIdempotencyKey = c.req.header('idempotency-key')?.trim();
   const idempotencyKey = rawIdempotencyKey ? idempotencyKeySchema.parse(rawIdempotencyKey) : undefined;
-  const galleryContext: GalleryOperationContext = { organizationKey, scopeKey, membership: toolContext.principal.userOrganization, ...(idempotencyKey ? { idempotencyKey } : {}), signal: c.req.raw.signal };
+  const galleryContext: GalleryOperationContext = { teamKey, scopeKey, membership: toolContext.principal.userTeam, ...(idempotencyKey ? { idempotencyKey } : {}), signal: c.req.raw.signal };
   return { galleryContext, toolContext, idempotencyKey };
 }
 
 export function createGalleryOperationHandler(name: GalleryOperationName, successStatus = 200, transformInput: (input: Record<string, unknown>) => unknown = (input) => input, billedSlug?: 'subject.create' | 'highlight.create' | 'image.create-memory', dependencies: GalleryHandlerDependencies = {}) {
   return async (c: Context) => {
     try {
-      const { organizationKey, scopeKey, ...input } = trustedContextSchema.parse(await c.req.json());
+      const { teamKey, scopeKey, ...input } = trustedContextSchema.parse(await c.req.json());
       const operation = (dependencies.operations?.[name] ?? galleryOperations[name]) as (input: unknown, context: GalleryOperationContext) => Promise<unknown>;
       const transformed = transformInput(input);
-      const authorized = await context(c, organizationKey, scopeKey, dependencies);
+      const authorized = await context(c, teamKey, scopeKey, dependencies);
       const execute = () => operation(transformed, authorized.galleryContext);
       const data = billedSlug
-        ? await observeToolExecution(billedSlug, authorized.toolContext, execute, { recorder: dependencies.recordEvent ?? toolEventService.record, idempotencyKey: z.string().trim().min(1).max(200).parse(authorized.idempotencyKey), input: transformed, ...dependencies.billing })
+        ? await observeToolExecution(billedSlug, authorized.toolContext, execute, { recorder: dependencies.recordEvent ?? toolEventService.record, appScopeKey: dependencies.appScopeKey, idempotencyKey: z.string().trim().min(1).max(200).parse(authorized.idempotencyKey), input: transformed, ...dependencies.billing })
         : await execute();
       return c.json({ success: true, data }, successStatus as 200);
     } catch (error) {
@@ -72,20 +74,6 @@ export const galleryOverview = handler('overview');
 export const createGalleryCollection = handler('createCollection', 201);
 export const updateGalleryCollection = handler('updateCollection');
 export const deleteGalleryCollection = handler('deleteCollection');
-export const listGalleryCollectionMembers = handler('listMembers');
-export const listGalleryPendingInvites = handler('listPendingInvites');
-export const createGalleryCollectionInvite = handler('createInvite', 201);
-export const acceptGalleryCollectionInvite = handler('acceptInvite');
-export const rejectGalleryCollectionInvite = handler('rejectInvite');
-export const revokeGalleryCollectionInvite = handler('revokeInvite');
-export const updateGalleryCollectionMemberRole = handler('updateMemberRole');
-export const removeGalleryCollectionMember = handler('removeMember');
-export const leaveGalleryCollection = handler('leaveCollection');
-export const listGalleryCollectionShares = handler('listShares');
-export const createGalleryCollectionShare = handler('createShare', 201);
-export const updateGalleryCollectionShare = handler('updateShare');
-export const revokeGalleryCollectionShare = handler('revokeShare');
-export const activateGalleryCollectionShare = handler('activateShare');
 export const presignGalleryUploads = handler('reserveUploads', 201);
 export const completeGalleryUploads = handler('completeUploads', 202);
 export const galleryUploadStatus = handler('uploadStatus');
@@ -103,8 +91,8 @@ export const deleteGallerySubject = handler('deleteSubject');
 export const createGalleryHighlight = handler('createHighlight', 201, (input) => input, 'highlight.create');
 export const listGalleryHighlights = async (c: Context) => {
   try {
-    const { organizationKey, scopeKey, ...input } = galleryHighlightListQuerySchema.parse(c.req.query());
-    const data = await galleryOperations.listHighlights(input, (await context(c, organizationKey, scopeKey)).galleryContext);
+    const { teamKey, scopeKey, ...input } = galleryHighlightListQuerySchema.parse(c.req.query());
+    const data = await galleryOperations.listHighlights(input, (await context(c, teamKey, scopeKey)).galleryContext);
     return c.json({ success: true, data }, 200);
   } catch (error) {
     const normalized = normalizeGalleryOperationError(error);
@@ -116,8 +104,8 @@ export const deleteGalleryHighlight = handler('deleteHighlight');
 export const createGalleryMemory = handler('createMemory', 201, (input) => input, 'image.create-memory');
 export const listGalleryMemories = async (c: Context) => {
   try {
-    const { organizationKey, scopeKey, ...input } = galleryMemoryListQuerySchema.parse(c.req.query());
-    const data = await galleryOperations.listMemories(input, (await context(c, organizationKey, scopeKey)).galleryContext);
+    const { teamKey, scopeKey, ...input } = galleryMemoryListQuerySchema.parse(c.req.query());
+    const data = await galleryOperations.listMemories(input, (await context(c, teamKey, scopeKey)).galleryContext);
     return c.json({ success: true, data }, 200);
   } catch (error) {
     const normalized = normalizeGalleryOperationError(error);

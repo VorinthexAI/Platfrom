@@ -20,8 +20,8 @@ const pollKey = newId();
 
 describe('Communication communication keys', () => {
   test('accepts persisted opaque channel keys across every related document', () => {
-    expect(channelSchema.parse({ key: channelKey, organizationKey: 'organization_root', scopeKey, name: 'general', position: 0, createdAt: now, updatedAt: now }).key).toBe(channelKey);
-    expect(channelParticipantSchema.parse({ key: participantKey, scopeKey, channelKey, userOrganizationKey: 'membership_root', joinedAt: now, createdAt: now, updatedAt: now }).channelKey).toBe(channelKey);
+    expect(channelSchema.parse({ key: channelKey, teamKey: 'team_root', scopeKey, name: 'general', position: 0, createdAt: now, updatedAt: now }).key).toBe(channelKey);
+    expect(channelParticipantSchema.parse({ key: participantKey, scopeKey, channelKey, userTeamKey: 'membership_root', joinedAt: now, createdAt: now, updatedAt: now }).channelKey).toBe(channelKey);
     expect(messageSchema.parse({ key: messageKey, scopeKey, channelKey, authorParticipantKey: participantKey, content: 'Hello', createdAt: now, updatedAt: now }).channelKey).toBe(channelKey);
     expect(messageMentionSchema.parse({ key: newId(), scopeKey, channelKey, messageKey, participantKey, createdAt: now, updatedAt: now }).channelKey).toBe(channelKey);
     expect(messageReactionSchema.parse({ key: newId(), scopeKey, channelKey, messageKey, participantKey, reaction: 'ack', createdAt: now, updatedAt: now }).channelKey).toBe(channelKey);

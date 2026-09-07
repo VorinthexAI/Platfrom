@@ -6,7 +6,7 @@ const TYPING_CHANNEL = 'communication:typing:v1';
 const TYPING_EVENT = 'typing';
 
 export const communicationTypingEventSchema = z.object({
-  organizationKey: z.string().min(1),
+  teamKey: z.string().min(1),
   channelKey: z.string().min(1),
   participantKey: z.string().min(1),
   type: z.enum(['user', 'orchestrator']),

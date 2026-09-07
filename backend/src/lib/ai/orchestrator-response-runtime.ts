@@ -12,12 +12,12 @@ export const orchestratorResponseInputSchema = z.object({
 }).strict();
 
 export interface OrchestratorResponseDependencies extends RouterDependencies, RetrievalDependencies {
-  execute?: (organizationKey: string, input: CoreChatInput) => Promise<ProviderExecuteResponse<ChatOutput>>;
-  stream?: (organizationKey: string, input: CoreChatInput) => AsyncIterable<ProviderStreamChunk>;
+  execute?: (teamKey: string, input: CoreChatInput) => Promise<ProviderExecuteResponse<ChatOutput>>;
+  stream?: (teamKey: string, input: CoreChatInput) => AsyncIterable<ProviderStreamChunk>;
   selectRoute?: typeof selectRoute;
   streamRoute?: typeof streamRoute;
   signal?: AbortSignal;
-  organizationKey?: string;
+  teamKey?: string;
   retrievalContext?: RetrievalContext;
   embedRetrievalQuery?: (text: string, signal?: AbortSignal) => Promise<number[]>;
   retrievalTimeoutMs?: number;
@@ -33,7 +33,7 @@ export const orchestratorResponseRuntime = {
   async execute(skill: string, rawInput: unknown, dependencies: OrchestratorResponseDependencies = {}): Promise<string> {
     if (dependencies.execute) {
       const chatInput = await prepareChatInput(skill, rawInput, dependencies);
-      const response = await dependencies.execute(dependencies.organizationKey ?? 'nexus', chatInput);
+      const response = await dependencies.execute(dependencies.teamKey ?? 'nexus', chatInput);
       return chatOutputSchema.parse(response.output).text;
     }
     let text = '';
@@ -44,9 +44,9 @@ export const orchestratorResponseRuntime = {
   },
   async *stream(skill: string, rawInput: unknown, dependencies: OrchestratorResponseDependencies = {}): AsyncIterable<ProviderStreamChunk> {
     const chatInput = await prepareChatInput(skill, rawInput, dependencies);
-    const organizationKey = dependencies.organizationKey ?? 'nexus';
+    const teamKey = dependencies.teamKey ?? 'nexus';
     if (dependencies.stream) {
-      yield* validateStream(dependencies.stream(organizationKey, chatInput), 'google.gemini-3.1-flash-lite', 'openrouter');
+      yield* validateStream(dependencies.stream(teamKey, chatInput), 'google.gemini-3.1-flash-lite', 'openrouter');
       return;
     }
     const select = dependencies.selectRoute ?? selectRoute;
@@ -57,7 +57,7 @@ export const orchestratorResponseRuntime = {
       if (dependencies.signal?.aborted) throw dependencies.signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
       let emittedText = false;
       try {
-        const decision = await select({ mode: 'fixed', organizationKey, actionSlug: 'text', modelSlug, providerSlug }, dependencies);
+        const decision = await select({ mode: 'fixed', teamKey, actionSlug: 'text', modelSlug, providerSlug }, dependencies);
         const chunks = validateStream(stream({
           decision,
           input: chatInput,
@@ -123,11 +123,11 @@ async function retrieveChatContext(message: string, dependencies: OrchestratorRe
   try {
     const results = await withTimeout((async () => {
       const embedding = await (dependencies.embedRetrievalQuery ?? ((text, signal) => embedText({ text, purpose: 'query', signal })))(message, controller.signal);
-      return retrievalTool.execute({ nodes: [{ node: 'messages', ...(embedding.length ? { embedding } : {}), filters: { organizationKey: dependencies.retrievalContext!.organizationKey } }], limit: 50 }, dependencies.retrievalContext!, dependencies);
+      return retrievalTool.execute({ nodes: [{ node: 'messages', ...(embedding.length ? { embedding } : {}), filters: { teamKey: dependencies.retrievalContext!.teamKey } }], limit: 50 }, dependencies.retrievalContext!, dependencies);
     })(), dependencies.retrievalTimeoutMs ?? 8_000, () => controller.abort(new Error('retrieval timed out')));
     return formatRetrievalContext(results);
   } catch (error) {
-    console.error('orchestrator retrieval failed; continuing without context', { organizationKey: dependencies.retrievalContext!.organizationKey, error });
+    console.error('orchestrator retrieval failed; continuing without context', { teamKey: dependencies.retrievalContext!.teamKey, error });
     return '';
   } finally {
     dependencies.signal?.removeEventListener('abort', abort);

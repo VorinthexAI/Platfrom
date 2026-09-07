@@ -2,11 +2,16 @@ import { describe, expect, test } from 'bun:test';
 import { createAutomationLifecycle } from './index';
 
 describe('automation lifecycle', () => {
-  test('includes connected inbox charging in the unified startup and shutdown lifecycle', async () => {
+  test('includes storage and commerce automations without retired connected-inbox charging', async () => {
     const source = await Bun.file(new URL('./index.ts', import.meta.url)).text();
-    expect(source).toContain('startInboxCharger(dependencies.inbox)');
-    expect(source).toContain('closeInboxChargerQueue()');
-    expect(source).toContain("export * from './inbox-charger-queue'");
+    expect(source).not.toContain('InboxCharger');
+    expect(source).not.toContain('inbox-charger');
+    expect(source).toContain('startCommerceReconciliation(dependencies.commerce)');
+    expect(source).toContain('closeCommerceReconciliationQueue()');
+    expect(source).toContain("export * from './commerce-reconciliation-queue'");
+    expect(source).toContain('startPolarWebhookWorker(dependencies.polarWebhook)');
+    expect(source).toContain('closePolarWebhookQueue()');
+    expect(source).toContain("export * from './polar-webhook-queue'");
   });
 
   test('starts once, closes worker and queue, and can restart', async () => {

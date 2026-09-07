@@ -12,6 +12,9 @@ import type { BookService } from '@/lib/books/service';
 import type { UserHiddenService } from '@/lib/user-hiddens/service';
 import type { AccountProfileService } from '@/lib/account-profile/service';
 import type { TicketService } from '@/lib/tickets/service';
+import type { ReferralService } from '@/lib/referrals/service';
+import type { CommerceService } from '@/lib/commerce/service';
+import type { CostService } from '@/lib/costs/service';
 import { describeAppSearchCollections, type AppSearchService } from '@/lib/app-search/service';
 import { executeAsk, type ExecuteActionOptions } from '@/lib/ai/router';
 import { assistantSourceSchema, assistantSurfaceSchema, defaultAssistantCapabilityRegistry, type AssistantCapability, type AssistantCapabilityContext, type AssistantCapabilityRegistry } from './capabilities';
@@ -49,7 +52,7 @@ const chatOutputSchema = z.object({
 
 export interface PersonalAssistantDependencies {
   registry?: AssistantCapabilityRegistry;
-  execute?: (organizationKey: string, input: z.input<typeof coreChatInputSchema>, options?: ExecuteActionOptions) => Promise<{ output: unknown }>;
+  execute?: (teamKey: string, input: z.input<typeof coreChatInputSchema>, options?: ExecuteActionOptions) => Promise<{ output: unknown }>;
   executeContent?: typeof runContentTool;
   router?: ExecuteActionOptions;
   content?: ContentToolDependencies;
@@ -62,8 +65,13 @@ export interface PersonalAssistantDependencies {
   appSearch?: AppSearchService;
   accountProfile?: AccountProfileService;
   tickets?: TicketService;
+  referrals?: Pick<ReferralService, 'readSummary'>;
+  commerce?: CommerceService;
+  costs?: CostService;
   scopeTags?: AssistantCapabilityContext['scopeTags'];
+  appNotifications?: AssistantCapabilityContext['appNotifications'];
   recordEvent?: ToolEventRecorder;
+  appScopeKey?: string;
   billing?: ToolBillingDependencies;
 }
 
@@ -170,7 +178,7 @@ export async function runPersonalAssistant(
   const input = personalAssistantInputSchema.parse(rawInput);
   if (requestsPlatformInternals(input.message)) return personalAssistantOutputSchema.parse({ type: 'unsupported', message: UNSUPPORTED_MESSAGES[input.surface], sources: [] });
   const requestKey = createHash('sha256').update(canonicalJson({
-    organizationKey: domain.organizationKey,
+    teamKey: domain.teamKey,
     scopeKey: domain.runtimeScopeKey,
     actorKey: domain.principal.kind === 'member' ? domain.principal.user.key : null,
     surface: input.surface,
@@ -196,7 +204,7 @@ export async function runPersonalAssistant(
       tools: [...capabilities.map(({ definition }) => definition), unsupportedRequestDefinition],
       options: { temperature: 0.2, maxTokens: 4_096 },
     });
-    const response = await (dependencies.execute ?? executeAsk)(domain.organizationKey, chatInput, { ...dependencies.router, timeoutMs: dependencies.router?.timeoutMs ?? 45_000 });
+    const response = await (dependencies.execute ?? executeAsk)(domain.teamKey, chatInput, { ...dependencies.router, timeoutMs: dependencies.router?.timeoutMs ?? 45_000 });
     const output = chatOutputSchema.parse(response.output);
     if (output.toolCalls.length === 0) {
       if (!domainToolExecuted) return personalAssistantOutputSchema.parse({ type: 'unsupported', message: UNSUPPORTED_MESSAGES[input.surface], sources: [] });
@@ -231,10 +239,14 @@ export async function runPersonalAssistant(
       appSearch: dependencies.appSearch,
       accountProfile: dependencies.accountProfile,
       tickets: dependencies.tickets,
+      referrals: dependencies.referrals,
+      commerce: dependencies.commerce,
+      costs: dependencies.costs,
       scopeTags: dependencies.scopeTags,
+      appNotifications: dependencies.appNotifications,
       signal: dependencies.router?.signal,
       timeoutMs: dependencies.router?.timeoutMs,
-    }), { recorder: dependencies.recordEvent, idempotencyKey: createHash('sha256').update(JSON.stringify({ requestKey, iteration, toolCallId: toolCall.id, tool: toolCall.name })).digest('hex'), input: toolCall.arguments, ...dependencies.billing });
+    }), { recorder: dependencies.recordEvent, appScopeKey: dependencies.appScopeKey, idempotencyKey: createHash('sha256').update(JSON.stringify({ requestKey, iteration, toolCallId: toolCall.id, tool: toolCall.name })).digest('hex'), input: toolCall.arguments, ...dependencies.billing });
     domainToolExecuted = true;
     const mutationWorkspace = typeof capability.mutationWorkspace === 'function' ? capability.mutationWorkspace(toolCall.arguments) : capability.mutationWorkspace;
     if (mutationWorkspace) for (const workspace of Array.isArray(mutationWorkspace) ? mutationWorkspace : [mutationWorkspace]) changedWorkspaces.add(workspace);

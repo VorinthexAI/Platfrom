@@ -1,8 +1,8 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { getUserById } from '@/lib/db/users.node';
-import { listActiveUserOrganizationsByUser } from '@/lib/db/user-organization.node';
-import { getOrganizationById } from '@/lib/db/organizations.node';
+import { listActiveUserTeamsByUser } from '@/lib/db/user-team.node';
+import { getTeamById } from '@/lib/db/teams.node';
 import {
   getOrchestratorById,
   insertOrchestrator,
@@ -49,18 +49,20 @@ async function requireSuperAdmin(c: Context) {
     return { error: c.json({ error: 'authentication required' }, 401) };
   }
   const user = await getUserById(auth.key);
-  const memberships = user ? await listActiveUserOrganizationsByUser(user.key) : [];
-  const rootMembership = memberships.find((membership) => membership.key === auth.founderMembershipKey);
-  const rootOrganization = rootMembership ? await getOrganizationById(rootMembership.organizationId) : null;
+  const memberships = user ? await listActiveUserTeamsByUser(user.key) : [];
+  const rootTeamMembershipKey = auth.teamMembershipKey;
+  const rootMfaVersion = auth.teamMfaVersion ?? auth.teamMfaVersion;
+  const rootMembership = memberships.find((membership) => membership.key === rootTeamMembershipKey);
+  const rootTeam = rootMembership ? await getTeamById(rootMembership.teamKey) : null;
   if (
     auth.identityType !== 'superAdmin'
     || auth.founderAssured !== true
     || !rootMembership
-    || !rootOrganization?.is_root
-    || !rootOrganization.isActive
-    || rootMembership.orgRole !== 'owner'
+    || !rootTeam?.is_root
+    || !rootTeam.isActive
+    || rootMembership.teamRole !== 'owner'
     || !rootMembership.isMfaEnabled
-    || rootMembership.mfaVersion !== auth.founderMfaVersion
+    || rootMembership.teamMfaVersion !== rootMfaVersion
   ) {
     return { error: c.json({ error: 'super admin required' }, 403) };
   }

@@ -18,7 +18,7 @@ export interface TrustedEmailToolDependencies {
 
 function systemActor(context: ToolContext) {
   if (context.principal.kind !== 'system') throw new ToolExecutionError('TOOL_FORBIDDEN', 'Inbox ingestion tools are system-only.');
-  return { userKey: 'system', organizationKey: context.organizationKey, scopeKey: context.runtimeScopeKey };
+  return { userKey: 'system', teamKey: context.teamKey, scopeKey: context.runtimeScopeKey };
 }
 
 export const TRUSTED_EMAIL_TOOL_DEFINITIONS = Object.freeze([

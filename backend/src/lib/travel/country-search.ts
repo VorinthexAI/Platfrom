@@ -7,9 +7,9 @@ import { embedText } from '@/lib/embeddings';
 import { getDefaultUserSearchService, type UserSearchService } from '@/lib/user-searches/service';
 
 export const countrySearchInputSchema = strictObject({
-  organizationKey: z.string().trim().min(1), query: z.string().trim().min(1).max(200),
+  teamKey: z.string().trim().min(1), query: z.string().trim().min(1).max(200),
 });
-export type CountrySearchContext = { organizationKey: string; userKey: string };
+export type CountrySearchContext = { teamKey: string; userKey: string };
 export const COUNTRY_SEMANTIC_THRESHOLD = 0.72;
 export interface CountrySearchRepository {
   authorize(context: CountrySearchContext): Promise<void>;
@@ -20,8 +20,8 @@ export class CountrySearchAccessError extends Error {}
 export function createCountrySearchRepository(database = db): CountrySearchRepository {
   return {
     async authorize(context) {
-      const cursor = await database.query('FOR membership IN userOrganizations FILTER membership.organizationId == @organizationKey && membership.userId == @userKey && membership.status == "active" LIMIT 1 RETURN true', context);
-      if (!await cursor.next()) throw new CountrySearchAccessError('Country search organization access denied.');
+      const cursor = await database.query('FOR membership IN userTeams FILTER membership.teamKey == @teamKey && membership.userId == @userKey && membership.status == "active" LIMIT 1 RETURN true', context);
+      if (!await cursor.next()) throw new CountrySearchAccessError('Country search team access denied.');
     },
     async findExact(query) {
       const normalized = query.trim().toLocaleLowerCase();
@@ -31,7 +31,7 @@ export function createCountrySearchRepository(database = db): CountrySearchRepos
     },
     async search(context, embedding) {
     const cursor = await database.query(`
-      LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
+      LET membership = FIRST(FOR candidate IN userTeams FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
       FILTER membership != null
       FOR country IN countries FILTER IS_ARRAY(country.embedding) && LENGTH(country.embedding) == @dimensions
         LET score = COSINE_SIMILARITY(country.embedding, @embedding)
@@ -47,7 +47,7 @@ export function createCountrySearchService(options: { repository?: CountrySearch
   const userSearches = options.userSearches ?? getDefaultUserSearchService();
   return { async search(raw: unknown, userKey: string, execution: { signal?: AbortSignal; timeoutMs?: number; queryEmbedding?: number[]; recordHistory?: boolean; minimumScore?: number } = {}) {
     const input = countrySearchInputSchema.parse(raw);
-    const context = { organizationKey: input.organizationKey, userKey };
+    const context = { teamKey: input.teamKey, userKey };
     await repository.authorize(context);
     if (execution.recordHistory !== false) await userSearches.record(userKey, input.query);
     let country = await repository.findExact(input.query);

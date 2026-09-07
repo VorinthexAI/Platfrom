@@ -33,11 +33,14 @@ describe("mobile auth helpers", () => {
   test("normalizes the me boundary and derives a greeting name", () => {
     const context = normalizeAuthContext({
       user: { display_name: "Ada Lovelace", country_code: "SE" },
-      org: { key: "org" },
-      main_scope: { key: "scope" },
+      team: { key: "team" },
+      teamMembership: { key: "membership", role: "owner" },
+      teamSelectionEnabled: true,
+      scope: { key: "scope" },
     });
-    expect(context.organization).toEqual({ key: "org" });
+    expect(context.team).toEqual({ key: "team" });
     expect(context.scope).toEqual({ key: "scope" });
+    expect(context.teamSelectionEnabled).toBe(true);
     expect(context.user?.countryCode).toBe("SE");
     expect(hasCompleteAuthContext(context)).toBe(true);
     expect(hasCompleteAuthContext({ ...context, scope: null })).toBe(false);

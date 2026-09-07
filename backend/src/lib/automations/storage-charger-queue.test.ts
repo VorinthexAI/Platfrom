@@ -78,6 +78,7 @@ describe('storage charger queue', () => {
     const charges: any[] = [], events: any[] = [];
     const service = createStorageChargeService({
       hash: async () => 'a'.repeat(64), id: () => 'event-1',
+      appScopeKey: 'cmrnlzf640001qc7kazsr96k5',
       charge: async (userKey, input) => { charges.push({ userKey, input }); return { status: 'applied', transaction: { key: 'transaction-1', eventKey: input.eventKey } } as never; },
       getUser: async () => ({ key: 'user-1', currentScopeKey: 'scope-1' }) as never,
       record: async (input, options) => { events.push({ input, options }); },

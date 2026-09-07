@@ -6,8 +6,8 @@ import { tagSchema, type Tag } from '@/lib/db/tags.node';
 import { createScopeTagService, normalizeScopeTagName, scopeTagServiceSchemas } from './service';
 import { ScopeTagRepositoryError, type ScopeTagRepository } from './repository';
 
-const organizationKey = newId(), scopeKey = newId(), userKey = newId(), membershipKey = newId(), timestamp = '2026-09-04T12:00:00.000Z';
-const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: membershipKey, userId: userKey, organizationId: organizationKey, status: 'active' }, scopeMember: { role: 'viewer', status: 'active' } } } as unknown as ToolContext;
+const teamKey = newId(), scopeKey = newId(), userKey = newId(), teamMembershipKey = newId(), timestamp = '2026-09-04T12:00:00.000Z';
+const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: teamMembershipKey, userId: userKey, teamKey: teamKey, status: 'active' }, scopeMember: { role: 'viewer', status: 'active' } } } as unknown as ToolContext;
 const embedding = Array(EMBEDDING_DIMENSIONS).fill(0);
 
 function memoryRepository() {
@@ -149,7 +149,7 @@ describe('scope tag service', () => {
     const memory = memoryRepository(); let accessed = false;
     memory.repository.list = async () => { accessed = true; return []; };
     const service = createScopeTagService({ repository: memory.repository, embed: async () => embedding });
-    const unauthenticated = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'system' } } as ToolContext;
+    const unauthenticated = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'system' } } as ToolContext;
     await expect(service.list({}, unauthenticated)).rejects.toMatchObject({ code: 'FORBIDDEN' });
     expect(accessed).toBe(false);
   });

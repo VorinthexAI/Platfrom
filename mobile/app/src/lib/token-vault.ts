@@ -2,7 +2,7 @@ import * as SecureStore from "expo-secure-store";
 
 import type { SessionTokens } from "./auth-helpers";
 
-const SESSION_KEY = "vorinthex.auth.session.v1";
+const SESSION_KEY = "vorinthex.auth.session.v2";
 let operation = Promise.resolve<unknown>(undefined);
 let generation = 0;
 

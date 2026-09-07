@@ -37,7 +37,6 @@ test("places hide and reveal immediately before destructive Gallery actions", ()
   const collectionMenuStart = normalizedGallery.lastIndexOf(normalize('{activeSheet === "collectionMenu"'));
   const collectionMenu = normalizedGallery.slice(collectionMenuStart, normalizedGallery.indexOf(normalize('{activeSheet === "cleanupMenu"'), collectionMenuStart));
   expect(collectionMenu.indexOf(normalize('? "Reveal" : "Hide"'))).toBeLessThan(collectionMenu.indexOf(normalize('>Delete collection</BottomSheetItem>')));
-  expect(collectionMenu.indexOf(normalize('? "Reveal" : "Hide"'))).toBeLessThan(collectionMenu.indexOf(normalize('>Leave</BottomSheetItem>')));
   const imageMenuStart = normalizedGallery.lastIndexOf(normalize('{activeSheet === "imageActions" && selectedImage'));
   const imageMenu = normalizedGallery.slice(imageMenuStart, normalizedGallery.indexOf(normalize('{activeSheet === "imageEdit"'), imageMenuStart));
   expect(imageMenu.indexOf(normalize('? "Reveal" : "Hide"'))).toBeLessThan(imageMenu.indexOf(normalize('>Delete image</BottomSheetItem>')));

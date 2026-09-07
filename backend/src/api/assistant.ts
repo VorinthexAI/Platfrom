@@ -3,13 +3,14 @@ import { z, ZodError } from 'zod';
 import { authorizeContentExecution, ContentError } from '@/lib/ai/tools';
 import { personalAssistantInputSchema, runPersonalAssistant } from '@/lib/ai/personal-assistant/runtime';
 import { getAuthIdentity } from './security';
+import { authenticatedTeamContext } from './auth';
 import { parseJson } from './validation';
 import { sparkErrorResponse } from './errors';
 import { toolEventService } from '@/lib/ai/events/service';
 import { observeToolExecution } from '@/lib/ai/events/runtime';
 import { createHash } from 'node:crypto';
 
-const assistantRespondSchema = z.object({ organizationKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(), input: personalAssistantInputSchema }).strict();
+const assistantRespondSchema = z.object({ teamKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(), input: personalAssistantInputSchema }).strict();
 
 export async function respondToAssistant(c: Context) {
   const identity = await getAuthIdentity(c);
@@ -17,7 +18,7 @@ export async function respondToAssistant(c: Context) {
   if (identity.identityType !== 'user') return c.json({ success: false, error: { code: 'ASSISTANT_FORBIDDEN', message: 'A user session is required.' } }, 403);
   try {
     const body = await parseJson(c, assistantRespondSchema);
-    const { context } = await authorizeContentExecution({ organizationKey: body.organizationKey, scopeKey: body.scopeKey }, { authenticatedUserKey: identity.key });
+    const { context } = await authorizeContentExecution({ teamKey: body.teamKey, scopeKey: body.scopeKey }, authenticatedTeamContext(identity));
     const requestKey = body.input.requestKey ?? createHash('sha256').update(JSON.stringify(body)).digest('hex');
     const input = { ...body.input, requestKey };
     return c.json({ success: true, data: await observeToolExecution(

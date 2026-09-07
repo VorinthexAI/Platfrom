@@ -5,8 +5,8 @@ import { sanitizedAgentMessageSchema } from '@/lib/ai/tools';
 import { orchestratorResponseRuntime, type OrchestratorResponseDependencies } from '@/lib/ai/orchestrator-response-runtime';
 import { dedupeMentionCandidates } from '@/lib/communication/mention-candidates';
 import { getDefaultScopeRepository } from '@/lib/ai/scopes';
-import { listAccessibleScopes, requireOrganizationAccess, FoundersAccessError } from '@/lib/founders/access';
-import { getUserOrganizationById } from '@/lib/db/user-organization.node';
+import { listAccessibleScopes, requireTeamAccess, FoundersAccessError } from '@/lib/founders/access';
+import { getUserTeamById } from '@/lib/db/user-team.node';
 import { CommunicationError, CommunicationService, type CommunicationActor } from '@/lib/communication';
 import { requireFounder } from './founders';
 import { parseJson, parseQuery, strictObject } from './validation';
@@ -15,10 +15,10 @@ import type { MentionCandidate } from '@/lib/communication/repository';
 import { publishCommunicationTyping, subscribeCommunicationTyping, type CommunicationTypingEvent } from '@/lib/communication/typing';
 import { randomUUID } from 'node:crypto';
 
-// Communication identifiers are public application keys. Legacy organization records
+// Communication identifiers are public application keys. Legacy team records
 // may use stable opaque keys rather than generated CUIDs.
 const key = z.string().trim().min(1).max(160);
-const organizationKey = z.string().trim().min(1).max(160);
+const teamKey = z.string().trim().min(1).max(160);
 const messageBody = strictObject({ content: sanitizedAgentMessageSchema, threadKey: key.optional(), replyToMessageKey: key.optional() });
 const editMessageBody = strictObject({ content: sanitizedAgentMessageSchema });
 const reactionBody = strictObject({ reaction: z.string().trim().min(1).max(64), operation: z.enum(['add', 'remove', 'toggle']).default('toggle') });
@@ -37,7 +37,7 @@ export const communicationMessageListQuerySchema = strictObject({ limit: z.coerc
 
 export interface CommunicationApiDependencies {
   service: CommunicationService;
-  resolveActor(c: Context, requestedOrganizationKey: string): Promise<CommunicationActor | Response>;
+  resolveActor(c: Context, requestedTeamKey: string): Promise<CommunicationActor | Response>;
   stream(skill: string, input: { message: string }, dependencies: OrchestratorResponseDependencies): AsyncIterable<{ type: string; text?: string }>;
   listScopes(actor: CommunicationActor): Promise<readonly { name: string; description: string | null }[]>;
   publishTyping?(event: CommunicationTypingEvent): Promise<void>;
@@ -75,23 +75,23 @@ function boundedWorkers<T>(items: readonly T[], limit: number, operation: (item:
 
 const defaultDependencies: CommunicationApiDependencies = {
   service: new CommunicationService(),
-  async resolveActor(c, requestedOrganizationKey) {
+  async resolveActor(c, requestedTeamKey) {
     const auth = await requireFounder(c);
     if ('error' in auth) return auth.error;
     try {
-      const { membership } = await requireOrganizationAccess(auth.founder.user.key, requestedOrganizationKey);
-      return { organizationKey: requestedOrganizationKey, membershipKey: membership.key, name: auth.founder.user.name ?? auth.founder.user.alias ?? auth.founder.user.email.split('@')[0] ?? 'Member' };
+      const { membership } = await requireTeamAccess(auth.founder.user.key, requestedTeamKey);
+      return { teamKey: requestedTeamKey, teamMembershipKey: membership.key, name: auth.founder.user.name ?? auth.founder.user.alias ?? auth.founder.user.email.split('@')[0] ?? 'Member' };
     } catch (error) {
-      if (error instanceof FoundersAccessError) return c.json({ error: 'organization access denied' }, 403);
+      if (error instanceof FoundersAccessError) return c.json({ error: 'team access denied' }, 403);
       throw error;
     }
   },
   stream: (skill, input, dependencies) => orchestratorResponseRuntime.stream(skill, input, dependencies),
   async listScopes(actor) {
-    const membership = await getUserOrganizationById(actor.membershipKey);
-    if (!membership || membership.organizationId !== actor.organizationKey || membership.status !== 'active') return [];
+    const membership = await getUserTeamById(actor.teamMembershipKey);
+    if (!membership || membership.teamKey !== actor.teamKey || membership.status !== 'active') return [];
     const accessibleKeys = new Set((await listAccessibleScopes(membership)).map(({ key: scopeKey }) => scopeKey));
-    return (await getDefaultScopeRepository().listScopes(actor.organizationKey)).filter((scope) => accessibleKeys.has(scope.key));
+    return (await getDefaultScopeRepository().listScopes(actor.teamKey)).filter((scope) => accessibleKeys.has(scope.key));
   },
   publishTyping: publishCommunicationTyping,
   subscribeTyping: subscribeCommunicationTyping,
@@ -101,8 +101,8 @@ function statusFor(error: CommunicationError): 403 | 404 | 409 {
   return error.code === 'forbidden' ? 403 : error.code === 'not_found' ? 404 : 409;
 }
 
-function channelSummary(channel: { key: string; organizationKey: string; scopeKey: string; kind: string; name: string; description?: string; position: number; createdAt: string; updatedAt: string; archivedAt?: string }) {
-  return { key: channel.key, organizationKey: channel.organizationKey, scopeKey: channel.scopeKey, kind: channel.kind, name: channel.name, description: channel.description, position: channel.position, archivedAt: channel.archivedAt, createdAt: channel.createdAt, updatedAt: channel.updatedAt };
+function channelSummary(channel: { key: string; teamKey: string; scopeKey: string; kind: string; name: string; description?: string; position: number; createdAt: string; updatedAt: string; archivedAt?: string }) {
+  return { key: channel.key, teamKey: channel.teamKey, scopeKey: channel.scopeKey, kind: channel.kind, name: channel.name, description: channel.description, position: channel.position, archivedAt: channel.archivedAt, createdAt: channel.createdAt, updatedAt: channel.updatedAt };
 }
 
 function storedMessage(message: { key: string; channelKey: string; threadKey?: string; replyToMessageKey?: string; content: string; editedAt?: string; createdAt: string; updatedAt: string }) {
@@ -126,7 +126,7 @@ function scopeContext(scopes: readonly { name: string; description: string | nul
   const descriptions = scopes
     .filter((scope) => scope.description?.trim())
     .map((scope) => `${scope.name}: ${scope.description!.trim()}`);
-  return descriptions.length ? `## Organization scopes\n${descriptions.join('\n')}` : '';
+  return descriptions.length ? `## Team scopes\n${descriptions.join('\n')}` : '';
 }
 
 function responseIdentity(name: string, role?: string): string {
@@ -160,7 +160,7 @@ export function buildMentionRoster(candidates: readonly MentionCandidate[]) {
 export function createCommunicationHandlers(dependencies: CommunicationApiDependencies = defaultDependencies) {
   const activeChannels = new Set<string>();
   const actor = async (c: Context): Promise<CommunicationActor | Response> => {
-    const requested = organizationKey.parse(c.req.param('organizationKey'));
+    const requested = teamKey.parse(c.req.param('teamKey'));
     return dependencies.resolveActor(c, requested);
   };
   const run = async (c: Context, action: (resolved: CommunicationActor) => Promise<unknown>, created = false) => {
@@ -187,7 +187,7 @@ export function createCommunicationHandlers(dependencies: CommunicationApiDepend
       const channelKey = key.parse(c.req.param('channelKey'));
       const body = await parseJson(c, typingBody);
       const access = await dependencies.service.requireChannel(resolved, channelKey);
-      await dependencies.publishTyping?.({ organizationKey: resolved.organizationKey, channelKey, participantKey: access.humanParticipant.key, type: 'user', name: resolved.name?.trim() || 'Member', active: body.active, expiresAt: body.active ? Date.now() + 5_000 : Date.now() });
+      await dependencies.publishTyping?.({ teamKey: resolved.teamKey, channelKey, participantKey: access.humanParticipant.key, type: 'user', name: resolved.name?.trim() || 'Member', active: body.active, expiresAt: body.active ? Date.now() + 5_000 : Date.now() });
       return { ok: true };
     }),
     typingStream: async (c: Context) => {
@@ -200,7 +200,7 @@ export function createCommunicationHandlers(dependencies: CommunicationApiDepend
       return streamSSE(c, async (stream) => {
         let eventId = 0;
         const unsubscribe = dependencies.subscribeTyping?.((event) => {
-          if (event.organizationKey !== resolved.organizationKey || event.channelKey !== channelKey || event.participantKey === access.humanParticipant.key) return;
+          if (event.teamKey !== resolved.teamKey || event.channelKey !== channelKey || event.participantKey === access.humanParticipant.key) return;
           eventId += 1;
           void stream.writeSSE({ event: 'typing', data: JSON.stringify(event), id: String(eventId) }).catch(() => {});
         }) ?? (() => {});
@@ -225,11 +225,11 @@ export function createCommunicationHandlers(dependencies: CommunicationApiDepend
       try { preview = [...new Map((await dependencies.service.resolveOrchestrators(resolved, channelKey, body.content)).map((item) => [item.key, item])).values()]; }
       catch (error) { if (error instanceof CommunicationError) return c.json({ error: error.message }, statusFor(error)); throw error; }
       if (preview.length > MAX_ORCHESTRATOR_RECIPIENTS) return c.json({ error: `at most ${MAX_ORCHESTRATOR_RECIPIENTS} orchestrators may be selected` }, 400);
-      const localChannelKey = `${resolved.organizationKey}:${channelKey}`;
+      const localChannelKey = `${resolved.teamKey}:${channelKey}`;
       if (activeChannels.has(localChannelKey)) return c.json({ error: 'a message is already being processed for this channel' }, 409);
       activeChannels.add(localChannelKey);
       const lease = dependencies.channelLease ?? defaultChannelLease;
-      const leaseKey = `communication:channel-lease:${resolved.organizationKey}:${channelKey}`;
+      const leaseKey = `communication:channel-lease:${resolved.teamKey}:${channelKey}`;
       const leaseOwner = randomUUID();
       let leaseAcquired = false;
       let streamStarted = false;
@@ -245,7 +245,7 @@ export function createCommunicationHandlers(dependencies: CommunicationApiDepend
         try {
           context = scopeContext(await dependencies.listScopes(resolved));
         } catch {
-          console.error('communication scope context unavailable', { organizationKey: resolved.organizationKey, channelKey });
+          console.error('communication scope context unavailable', { teamKey: resolved.teamKey, channelKey });
         }
         const response = streamSSE(c, async (sse) => {
           streamStarted = true;
@@ -269,7 +269,7 @@ export function createCommunicationHandlers(dependencies: CommunicationApiDepend
             } catch (error) {
               leaseLost = true;
               abortTurn();
-              console.error('communication channel lease refresh failed', { organizationKey: resolved.organizationKey, channelKey, error });
+              console.error('communication channel lease refresh failed', { teamKey: resolved.teamKey, channelKey, error });
               return false;
             }
           };
@@ -287,7 +287,7 @@ export function createCommunicationHandlers(dependencies: CommunicationApiDepend
               return;
             }
             for (const orchestrator of orchestrators) {
-              const typingEvent: CommunicationTypingEvent = { organizationKey: resolved.organizationKey, channelKey, participantKey: orchestrator.participantKey, type: 'orchestrator', name: orchestrator.name, active: true, expiresAt: Date.now() + 120_000 };
+              const typingEvent: CommunicationTypingEvent = { teamKey: resolved.teamKey, channelKey, participantKey: orchestrator.participantKey, type: 'orchestrator', name: orchestrator.name, active: true, expiresAt: Date.now() + 120_000 };
               activeTyping.set(orchestrator.key, typingEvent);
               await dependencies.publishTyping?.(typingEvent);
               await write('assistant-start', { orchestrator: { participantKey: orchestrator.participantKey, key: orchestrator.key, name: orchestrator.name } });
@@ -296,8 +296,8 @@ export function createCommunicationHandlers(dependencies: CommunicationApiDepend
               let storedContent = '';
               try {
                 const provider = dependencies.stream([orchestrator.skill, responseIdentity(orchestrator.name, orchestrator.role), context, COMMUNICATION_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: promptMessage }, {
-                  organizationKey: resolved.organizationKey,
-                    retrievalContext: { organizationKey: resolved.organizationKey, membershipKey: resolved.membershipKey, exclude: { messages: [message.key] } },
+                  teamKey: resolved.teamKey,
+                    retrievalContext: { teamKey: resolved.teamKey, teamMembershipKey: resolved.teamMembershipKey, exclude: { messages: [message.key] } },
                   signal: turnController.signal,
                 });
                 for await (const chunk of provider) {

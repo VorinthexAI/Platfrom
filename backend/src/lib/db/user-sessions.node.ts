@@ -1,14 +1,14 @@
 import { z } from 'zod';
 import { aql } from 'arangojs';
-import { db } from './client';
-import { createNodeHelpers, withArangoKey } from './base';
+import { db, withTransaction } from './client';
+import { createNodeHelpers, toArangoDoc, withArangoKey } from './base';
 import { presenceSourceSchema } from './visitor-sessions.node';
 
 export const USER_SESSIONS_COLLECTION = 'userSessions';
 
 /**
  * One node per authenticated presence session — the authed twin of a
- * `visitorSessions` node, owned by the root organization. Created when a
+ * `visitorSessions` node, owned by the root team. Created when a
  * signed-in user joins the live galaxy over the presence pub/sub, closed
  * (disconnectedAt stamped) when they leave or their Redis session key
  * expires. A new entry is written per session, exactly like visitorSessions;
@@ -16,7 +16,7 @@ export const USER_SESSIONS_COLLECTION = 'userSessions';
  */
 export const userSessionSchema = z.object({
   key: z.string(),
-  organizationId: z.string(),
+  teamKey: z.string(),
   /** The signed-in user this session belongs to. */
   userId: z.string(),
   alias: z.string(),
@@ -42,6 +42,23 @@ export const deleteUserSession = helpers.deleteById;
 export const upsertUserSessionByKey = helpers.upsertByKey;
 export const getAllUserSessionsChunked = helpers.getAllChunked;
 export const listUserSessionsPage = helpers.listPage;
+
+/** Serializes with the account deletion fence and never inserts for a fenced user. */
+export async function insertUserSessionUnlessDeleting(
+  input: z.input<typeof userSessionSchema>,
+  transact: typeof withTransaction = withTransaction,
+): Promise<boolean> {
+  const session = userSessionSchema.parse(input);
+  return transact(['users', USER_SESSIONS_COLLECTION], async (transaction) => {
+    const cursor = await transaction.query(`
+      LET user = DOCUMENT(users, @userKey)
+      FILTER user != null && user.deletionRequestedAt == null
+      INSERT @session INTO userSessions
+      RETURN true
+    `, { userKey: session.userId, session: toArangoDoc(session) });
+    return await cursor.next() === true;
+  });
+}
 
 /** How many authenticated presence sessions are currently open. */
 export async function countOpenUserSessions(): Promise<number> {

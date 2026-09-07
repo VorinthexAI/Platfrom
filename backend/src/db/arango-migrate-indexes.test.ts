@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { isLegacyIndex, LEGACY_REMOVAL_MARKER, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
-import { stageLegacyDocumentShares } from './content-migration';
-import { collections, migrateContainerPresentations, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateManagedGeneratedMedia, migrateMinimalPlacesAndRetireTrips, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTicketTypes, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireMomentumScope, retireUserSettings } from './arango-migrate';
+import { isLegacyIndex, LEGACY_REMOVAL_MARKER } from './arango-migrate-indexes';
+import { collections, migrateCollectionOwnership, migrateContainerPresentations, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateManagedGeneratedMedia, migrateMinimalPlacesAndRetireTrips, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTicketTypes, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireMomentumScope, retireUserSettings } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, LEGACY_EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 import { emailArchiveRootFolderKey, emailMediaCollectionKey } from '../lib/email-inbox/export-container-keys';
@@ -30,6 +29,17 @@ function migrationDatabase(collection: 'documents' | 'documentVersions', row: Re
 }
 
 describe('Arango migration indexes', () => {
+  test('creates private push notification collections with uniqueness and recovery indexes', async () => {
+    const byName = new Map(collections.map((collection) => [collection.name, collection]));
+    expect(byName.get('pushSubscriptions')?.indexes).toContainEqual({ fields: ['userKey', 'installationKey'], unique: true });
+    expect(byName.get('pushSubscriptions')?.indexes).toContainEqual({ fields: ['tokenHash'], unique: true });
+    expect(byName.get('appNotifications')).toMatchObject({ embedKeys: ['title', 'message'] });
+    expect(byName.get('appNotifications')?.indexes).toContainEqual({ fields: ['teamKey', 'actorUserKey', 'idempotencyKey'], unique: true });
+    expect(await Bun.file(new URL('../../scripts/backfill-semantic-embeddings.ts', import.meta.url)).text()).toContain("'appNotifications'");
+    expect(byName.get('appNotificationRecipients')?.indexes).toContainEqual({ fields: ['notificationKey', 'userKey'], unique: true });
+    expect(byName.get('appNotificationRecipients')?.indexes).toContainEqual({ fields: ['userKey', 'teamKey', 'readAt', 'createdAt'] });
+    expect(byName.get('pushDeliveries')?.indexes).toContainEqual({ fields: ['status', 'receiptDueAt'], sparse: true });
+  });
   test('backfills app-logo presentation metadata for legacy managed containers', async () => {
     const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
     const connectorKey = 'cmrnlzf650002qc7k4p5zem5w';
@@ -95,8 +105,8 @@ describe('Arango migration indexes', () => {
     expect(source).toContain('encryptedCredentials: null');
     expect(source).toContain('await migrateEmailAttachmentAvailability(targetDb)');
   });
-  test('hard-drops retired persistence without recreating it and retains collaboration collections', async () => {
-    const retired = ['orgCredentials', 'organizationProviders', 'organization_providers', 'modelProviders', 'models', 'providers', 'agents', 'skills', 'agentSkills', 'scopeAgents', 'agentMembers', 'agentRuns', 'agentRunSteps', 'agentRunCalls', 'agentRunSources', 'agentArtifacts', 'agentArtifactChecks', 'agentMemories', 'runtimeVariables', 'capabilities', 'mindCapabilities', 'minds', 'actions', 'modelActions', 'agentArtifactsLegacy', 'agentRunsLegacy', 'agent_runs', 'agentTools', 'toolActions', 'tools', 'templates'];
+  test('hard-drops retired persistence without recreating it and retains active scope collections', async () => {
+    const retired = ['modelProviders', 'models', 'providers', 'agents', 'skills', 'agentSkills', 'scopeAgents', 'agentMembers', 'agentRuns', 'agentRunSteps', 'agentRunCalls', 'agentRunSources', 'agentArtifacts', 'agentArtifactChecks', 'agentMemories', 'runtimeVariables', 'capabilities', 'mindCapabilities', 'minds', 'actions', 'modelActions', 'agentArtifactsLegacy', 'agentRunsLegacy', 'agent_runs', 'agentTools', 'toolActions', 'tools', 'templates'];
     expect(collections.filter(({ name }) => retired.includes(name))).toEqual([]);
     for (const retained of ['scopes', 'channels', 'channelParticipants', 'orchestrators']) expect(collections.some(({ name }) => name === retained)).toBe(true);
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
@@ -109,6 +119,64 @@ describe('Arango migration indexes', () => {
     expect(source).not.toMatch(/ensure(?:Agent|RuntimeVariable|Skill|Action|Capability|Mind)/);
     expect(source).not.toContain('migrateModelActionSlugs');
     expect(source).not.toContain('IN modelActions');
+  });
+  test('derives exactly one legacy owner before retiring sharing persistence', async () => {
+    const queries: string[] = [];
+    const database = {
+      collection(name: string) { return { async exists() { return name === 'collections' || name === 'collectionMembers'; } }; },
+      async query(query: string) {
+        queries.push(query);
+        return { async all() { return []; } };
+      },
+    };
+
+    await migrateCollectionOwnership(database as never);
+
+    expect(queries).toHaveLength(3);
+    expect(queries[0]).toContain('LET owners = UNIQUE');
+    expect(queries[0]).toContain('FILTER LENGTH(owners) != 1');
+    expect(queries[1]).toContain('UPDATE collection WITH { ownerKey } IN collections');
+    expect(queries[2]).toContain('membership.teamKey != scope.teamKey');
+
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    const ownership = source.indexOf('await migrateCollectionOwnership(targetDb)');
+    const retirement = source.indexOf("'collectionMembers',", ownership);
+    expect(ownership).toBeGreaterThan(-1);
+    expect(retirement).toBeGreaterThan(ownership);
+    for (const name of ['collectionMembers', 'collectionInvites', 'documentShares', 'shares']) {
+      expect(collections.some((spec) => spec.name === name)).toBe(false);
+      expect(source.indexOf(`'${name}',`, ownership)).toBeGreaterThan(ownership);
+    }
+  });
+
+  test('aborts collection ownership migration when legacy ownership is ambiguous', async () => {
+    const queries: string[] = [];
+    const database = {
+      collection(name: string) { return { async exists() { return name === 'collections' || name === 'collectionMembers'; } }; },
+      async query(query: string) {
+        queries.push(query);
+        return { async all() { return ['ambiguous-collection']; } };
+      },
+    };
+
+    await expect(migrateCollectionOwnership(database as never)).rejects.toThrow('Cannot migrate collection ownership for: ambiguous-collection');
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).not.toContain('UPDATE collection');
+  });
+
+  test('rejects a derived owner outside the collection team scope', async () => {
+    const queries: string[] = [];
+    const database = {
+      collection(name: string) { return { async exists() { return name === 'collections' || name === 'collectionMembers'; } }; },
+      async query(query: string) {
+        queries.push(query);
+        return { async all() { return query.includes('LET membership = DOCUMENT') ? ['cross-team-collection'] : []; } };
+      },
+    };
+
+    await expect(migrateCollectionOwnership(database as never)).rejects.toThrow('Collection ownership verification failed for: cross-team-collection');
+    expect(queries).toHaveLength(3);
+    expect(queries[2]).toContain('membership.teamKey != scope.teamKey');
   });
   test('removes retired actions from semantic backfill and global retrieval policy', async () => {
     const backfill = await Bun.file(new URL('../../scripts/backfill-semantic-embeddings.ts', import.meta.url)).text();
@@ -176,9 +244,10 @@ describe('Arango migration indexes', () => {
     expect(collections.find(({ name }) => name === 'storageRetentionStates')).toEqual({ name: 'storageRetentionStates', skipEmbedding: true, indexes: [{ fields: ['userKey'], unique: true }, { fields: ['wipeDueAt'] }, { fields: ['fundedAt', 'wipedAt'] }] });
   });
   test('declares private per-connector inbox period, hour, and remainder indexes', () => {
-    expect(collections.find(({ name }) => name === 'inboxBillingPeriods')?.indexes).toEqual(expect.arrayContaining([{ fields: ['connectorKey', 'startedAt'], unique: true }, { fields: ['userKey'] }]));
-    expect(collections.find(({ name }) => name === 'inboxChargingHours')?.indexes).toContainEqual({ fields: ['connectorKey', 'hourStart'], unique: true, sparse: true });
-    expect(collections.find(({ name }) => name === 'inboxChargingMeters')?.indexes).toContainEqual({ fields: ['connectorKey'], unique: true });
+    expect(collections.some(({ name }) => ['inboxBillingPeriods', 'inboxChargingHours', 'inboxChargingMeters'].includes(name))).toBe(false);
+  });
+  test('declares durable commerce reconciliation run uniqueness and recovery indexes', () => {
+    expect(collections.find(({ name }) => name === 'commerceReconciliationRuns')).toEqual({ name: 'commerceReconciliationRuns', skipEmbedding: true, indexes: [{ fields: ['windowStart'], unique: true }, { fields: ['status', 'windowStart'] }] });
   });
   test('backfills legacy ticket types and declares private feedback vote indexes', async () => {
     const calls: string[] = [];
@@ -186,7 +255,7 @@ describe('Arango migration indexes', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toContain('type: HAS(ticket, "type") ? ticket.type : "issue"');
     expect(calls[0]).toContain('ticket.type == "feedback"');
-    expect(collections.find(({ name }) => name === 'tickets')?.indexes).toContainEqual({ fields: ['organizationKey', 'scopeKey', 'type', 'createdAt'] });
+    expect(collections.find(({ name }) => name === 'tickets')?.indexes).toContainEqual({ fields: ['teamKey', 'scopeKey', 'type', 'createdAt'] });
     expect(collections.find(({ name }) => name === 'ticketVotes')).toEqual({ name: 'ticketVotes', skipEmbedding: true, indexes: [{ fields: ['ticketKey', 'userKey'], unique: true }, { fields: ['scopeKey', 'ticketKey'] }, { fields: ['userKey'] }] });
   });
   test('physically retires the legacy settings blob when users already exist', async () => {
@@ -225,23 +294,16 @@ describe('Arango migration indexes', () => {
   test('removes the retired execution-workspace scope and access relations', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const database = { async query(query: string, bindVars?: Record<string, unknown>) { calls.push({ query, bindVars }); return { async all() { return query.includes('RETURN scope._key') ? ['scope-key'] : []; }, async next() { return undefined; } }; } };
-    await retireMomentumScope(database as never, 'organization-key', 'archive-scope-key');
-    expect(calls).toHaveLength(13);
-    const contentMoves = calls.slice(1, 10);
-    expect(contentMoves.map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['folders', 'tags', 'tagAssignments', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'shares']);
+    await retireMomentumScope(database as never, 'team-key', 'archive-scope-key');
+    expect(calls).toHaveLength(12);
+    const contentMoves = calls.slice(1, 9);
+    expect(contentMoves.map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['folders', 'tags', 'tagAssignments', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio']);
     expect(contentMoves.every(({ query, bindVars }) => query.includes('UPDATE resource WITH { scopeKey: @archiveScopeKey }') && bindVars?.archiveScopeKey === 'archive-scope-key')).toBe(true);
     expect(calls.map(({ query }) => query).join('\n')).toContain('REMOVE relation IN scopeScopes');
     expect(calls.map(({ query }) => query).join('\n')).toContain('REMOVE relation IN scopeMembers');
     expect(calls.at(-1)?.query).toContain('REMOVE scope IN scopes');
   });
 
-  test('normalizes legacy share permissions without granting additional access', () => {
-    expect(normalizeLegacyDocumentSharePermission('read')).toBe('read');
-    expect(normalizeLegacyDocumentSharePermission('view')).toBe('read');
-    expect(normalizeLegacyDocumentSharePermission('comment')).toBe('comment');
-    expect(normalizeLegacyDocumentSharePermission('edit')).toBe('comment');
-    expect(normalizeLegacyDocumentSharePermission(undefined)).toBe('read');
-  });
   test('drops obsolete search uniqueness and expiry indexes', () => {
     expect(isLegacyIndex('contentSearchQueries', ['actorKey', 'scopeKey', 'normalizedQuery'])).toBe(true);
     expect(isLegacyIndex('contentSearchQueries', ['expiresAt'])).toBe(true);
@@ -253,9 +315,8 @@ describe('Arango migration indexes', () => {
     expect(isLegacyIndex('documentVersions', ['storageKey'], [['documentKey', 'version']])).toBe(true);
   });
   test('retires single Gmail binding uniqueness but preserves account uniqueness', () => {
-    const desired = [['organizationKey', 'scopeKey', 'provider', 'providerAccountId']];
-    expect(isLegacyIndex('organizationConnectors', ['organizationKey', 'scopeKey', 'provider'], desired)).toBe(true);
-    expect(isLegacyIndex('organizationConnectors', desired[0]!, desired)).toBe(false);
+    const desired = [['teamKey', 'scopeKey', 'provider', 'providerAccountId']];
+    expect(isLegacyIndex('teamConnectors', desired[0]!, desired)).toBe(false);
   });
   test('declares the exact email attachment binding ownership and recovery indexes', () => {
     expect(collections.find(({ name }) => name === 'emailAttachmentBindings')).toEqual({
@@ -276,7 +337,7 @@ describe('Arango migration indexes', () => {
   });
   test('hard-removes legacy tombstones and reconciles their indexes for every affected collection', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-    for (const name of ['scopes', 'scopeScopes', 'folders', 'images', 'visualIdentities', 'collections', 'imageCollecitionHightlights', 'documents', 'documentVersions', 'shares', 'places', 'trips', 'books', 'messages']) {
+    for (const name of ['scopes', 'scopeScopes', 'folders', 'images', 'visualIdentities', 'collections', 'imageCollecitionHightlights', 'documents', 'documentVersions', 'places', 'trips', 'books', 'messages']) {
       expect(source).toContain(`'${name}'`);
     }
     expect(source).toContain('resource[@marker] != null');
@@ -286,7 +347,6 @@ describe('Arango migration indexes', () => {
     expect(source.indexOf('FOR trip IN trips FILTER trip.coverImageKey IN @keys')).toBeLessThan(source.indexOf("await removeKeys('images', imageKeys)"));
     for (const [owner, collection] of [['collection', 'collections'], ['folder', 'folders'], ['document', 'documents'], ['trip', 'trips']]) expect(source).toContain(`FOR ${owner} IN ${collection} FILTER ${owner}.coverImageKey IN @keys UPDATE ${owner} WITH { coverImageKey: null, updatedAt: @now }`);
     expect(source.indexOf("await removeBy('tripAttachments', 'tripKey', tripKeys)")).toBeLessThan(source.indexOf("await removeKeys('trips', tripKeys)"));
-    expect(source.indexOf("await removeTyped('shares', 'sourceType', 'book', bookKeys, 'books')")).toBeLessThan(source.indexOf("await removeKeys('books', bookKeys)"));
     expect(source).toContain('fields.includes(LEGACY_REMOVAL_MARKER)');
     expect(source).toContain('OPTIONS { keepNull: false }');
   });
@@ -311,7 +371,7 @@ describe('Arango migration indexes', () => {
   });
   test('declares sparse direct-channel identity uniqueness and poll vote uniqueness', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-    expect(source).toContain("{ fields: ['organizationKey', 'kind', 'name'], unique: true, sparse: true }");
+    expect(source).toContain("{ fields: ['teamKey', 'kind', 'name'], unique: true, sparse: true }");
     expect(source).toContain("{ fields: ['pollKey', 'optionKey', 'participantKey'], unique: true }");
     expect(source).toContain("fields[0] === 'scopeKey' && fields[1] === 'name'");
     expect(source).toContain('Dropped obsolete unique channel-name index');
@@ -329,16 +389,18 @@ describe('Arango migration indexes', () => {
     expect(source).toContain('Dropped obsolete unique folder-name index');
   });
   test('declares exact managed audiobook folder ownership uniqueness', () => {
-    expect(collections.find(({ name }) => name === 'folders')?.indexes).toContainEqual({ fields: ['scopeKey', 'managedPurpose', 'managedOwnerKey'], unique: true, sparse: true });
+    expect(collections.find(({ name }) => name === 'folders')?.indexes).toContainEqual({ fields: ['scopeKey', 'managedPurpose', 'managedOwnerKey', 'name'], unique: true, sparse: true });
+    expect(isLegacyIndex('folders', ['scopeKey', 'managedPurpose', 'managedOwnerKey'], collections.find(({ name }) => name === 'folders')?.indexes?.map(({ fields }) => fields))).toBe(true);
+    expect(isLegacyIndex('documents', ['scopeKey', 'managedPurpose', 'managedOwnerKey'], collections.find(({ name }) => name === 'documents')?.indexes?.map(({ fields }) => fields))).toBe(true);
   });
   test('declares private ticket idempotency and canonical profile storage indexes', () => {
     expect(collections.find(({ name }) => name === 'tickets')).toEqual({
       name: 'tickets',
       embedKeys: ['message'],
       indexes: [
-        { fields: ['organizationKey', 'scopeKey', 'type', 'createdAt'] },
-        { fields: ['organizationKey', 'scopeKey', 'userKey', 'createdAt'] },
-        { fields: ['organizationKey', 'userKey', 'idempotencyKey'], unique: true },
+        { fields: ['teamKey', 'scopeKey', 'type', 'createdAt'] },
+        { fields: ['teamKey', 'scopeKey', 'userKey', 'createdAt'] },
+        { fields: ['teamKey', 'userKey', 'idempotencyKey'], unique: true },
       ],
     });
     expect(collections.find(({ name }) => name === 'users')?.indexes).toContainEqual({ fields: ['profileStorageKey'], unique: true, sparse: true });
@@ -377,7 +439,7 @@ describe('Arango migration indexes', () => {
     expect(collections.find(({ name }) => name === 'bookChapters')?.indexes).toContainEqual({ fields: ['scopeKey', 'bookKey', 'position'], unique: true });
     expect(collections.find(({ name }) => name === 'bookExtensions')?.indexes).toContainEqual({ fields: ['scopeKey', 'bookKey', 'requestKey'], unique: true });
     expect(collections.find(({ name }) => name === 'bookRefundIntents')).toEqual({ name: 'bookRefundIntents', skipEmbedding: true, indexes: [{ fields: ['chargeTransactionKey'], unique: true }, { fields: ['status', 'createdAt'] }, { fields: ['leaseExpiresAt'], sparse: true }] });
-    expect(collections.find(({ name }) => name === 'folders')?.indexes).toContainEqual({ fields: ['scopeKey', 'managedPurpose', 'managedOwnerKey'], unique: true, sparse: true });
+    expect(collections.find(({ name }) => name === 'folders')?.indexes).toContainEqual({ fields: ['scopeKey', 'managedPurpose', 'managedOwnerKey', 'name'], unique: true, sparse: true });
     const emailNames = ['emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'emailAttachments'];
     expect(collections.filter(({ name }) => emailNames.includes(name)).map(({ name }) => name)).toEqual(emailNames);
     expect(collections.filter(({ name }) => ['tripGuides', 'placeReferences', 'placeHeroMedia'].includes(name)).map(({ name }) => name)).toEqual(['tripGuides', 'placeReferences', 'placeHeroMedia']);
@@ -429,7 +491,7 @@ describe('Arango migration indexes', () => {
     expect(migration).toContain('purpose: null');
     expect(migration).not.toContain('ensureMailFolders');
   });
-  test('assigns provider-independent active drafts only when one active organization connector exists', async () => {
+  test('assigns provider-independent active drafts only when one active team connector exists', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const patches = [{ key: 'draft-key', revision: 'draft-revision', content: '{"version":1}', updatedAt: '2026-08-23T00:00:00.000Z' }];
     const database = {
@@ -440,7 +502,7 @@ describe('Arango migration indexes', () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]?.query).toContain('payload.data.accountKey == document.scopeKey');
     expect(calls[0]?.query).toContain('payload.data.status IN ["generated", "edited"]');
-    expect(calls[0]?.query).toContain('connector.organizationKey == scope.organizationKey');
+    expect(calls[0]?.query).toContain('connector.teamKey == scope.teamKey');
     expect(calls[0]?.query).toContain('LIMIT 2');
     expect(calls[0]?.query).toContain('FILTER LENGTH(connectors) == 1');
     expect(calls[0]?.query).toContain('accountKey: connectors[0]._key');
@@ -456,7 +518,7 @@ describe('Arango migration indexes', () => {
     expect(calls[1]?.bindVars).toEqual({ patches });
     expect(calls[0]?.bindVars).toEqual(expect.objectContaining({ after: '', batchSize: 100 }));
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-    expect(source.indexOf('await ensureOrganizationConnectorsCollection(targetDb)')).toBeLessThan(source.indexOf('await migrateProviderIndependentEmailDrafts(targetDb)'));
+    expect(source.indexOf('await ensureTeamConnectorsCollection(targetDb)')).toBeLessThan(source.indexOf('await migrateProviderIndependentEmailDrafts(targetDb)'));
   });
   test('pages provider-independent drafts deterministically across bounded batches', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
@@ -827,13 +889,10 @@ describe('Arango migration indexes', () => {
     expect(source).toContain('document.audioChapter.readerProgress');
     expect(source).toContain("'bookProgress',");
   });
-  test('migration never hashes missing data or borrows current documents for version history', async () => {
+  test('migration never borrows current documents for version history', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-    const helperSource = await Bun.file(new URL('./content-migration.ts', import.meta.url)).text();
-    expect(source).toContain('stageLegacyDocumentShares([share])');
     expect(source).toContain('nonEmptyString(snapshot.html)');
     expect(source).not.toContain('DOCUMENT(documents, snapshot.documentKey)');
-    expect(helperSource).toContain('has neither a valid tokenHash nor a plaintext token');
     expect(source).toContain('beginTransaction');
     expect(source).toContain('migration verification failed');
   });
@@ -850,7 +909,6 @@ describe('Arango migration indexes', () => {
     for (const collection of ['tasks', 'milestones', 'projects', 'artifactDependencies', 'artifactSnapshots', 'artifacts']) {
       expect(source).toContain(`'${collection}',`);
     }
-    expect(source).toContain("_key: 'content-document-shares-cutover'");
     expect(source.indexOf('await migrateGenericContentContracts(targetDb)')).toBeLessThan(source.indexOf('for (const spec of collections)'));
   });
   test('repairs recoverable document and version representations without borrowing data', async () => {
@@ -948,71 +1006,29 @@ describe('Arango migration indexes', () => {
       expect(calls.every(({ bindVars }) => bindVars?.['@collection'] === collection)).toBe(true);
     }
   });
-  test('uses a durable two-phase cutover and verifies before dropping legacy shares', async () => {
-    const staged = stageLegacyDocumentShares([
-      { _key: 'first', token: 'one', permission: 'read' },
-      { _key: 'second', token: 'two', permission: 'edit' },
-    ]);
-    expect(staged).toHaveLength(2);
-    expect(new Set(staged.map((share) => share.tokenHash)).size).toBe(2);
-    expect(staged.map((share) => share.permission)).toEqual(['read', 'comment']);
-
+  test('reconciles scope memberships from canonical userTeams', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-    const ensureIndexes = source.indexOf('await target.ensureIndex');
-    const dualMarker = source.indexOf("state: 'dual'");
-    const copy = source.indexOf('const copyAndVerify');
-    const globalMarker = source.indexOf("state: 'global'");
-    const dropLegacy = source.indexOf('await legacy.drop()');
-    expect(ensureIndexes).toBeGreaterThan(-1);
-    expect(ensureIndexes).toBeLessThan(dualMarker);
-    expect(dualMarker).toBeLessThan(copy);
-    expect(copy).toBeLessThan(globalMarker);
-    expect(globalMarker).toBeLessThan(dropLegacy);
-    expect(source).toContain('LIMIT 100');
-    expect(source).toContain('share._key > @after');
-    expect(source).toContain('if (!marker) return');
-    expect(source).toContain('if (!equal(copied, prepared))');
+    const canonicalCollection = source.indexOf("name: 'userTeams'");
+    const scopeReconciliation = source.indexOf('reconcileTeamScopeMemberships(team.key');
+    expect(canonicalCollection).toBeGreaterThan(-1);
+    expect(scopeReconciliation).toBeGreaterThan(canonicalCollection);
+    expect(source).not.toContain('reconcileTeamInheritedAgentMemberships');
   });
 
-  test('stages more than one migration chunk without retaining prior rows or changing order', () => {
-    const shares = Array.from({ length: 205 }, (_, index) => ({
-      _key: String(index).padStart(4, '0'),
-      token: `legacy-${index}`,
-      permission: index % 2 ? 'edit' : 'read',
-    }));
-    const staged = [];
-    for (let offset = 0; offset < shares.length; offset += 100) staged.push(...stageLegacyDocumentShares(shares.slice(offset, offset + 100)));
-    expect(staged.map((share) => share._key)).toEqual(shares.map((share) => share._key));
-    expect(new Set(staged.map((share) => share.tokenHash))).toHaveLength(205);
-  });
-
-  test('reconciles scope memberships after canonical userOrganizations migration', async () => {
-    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-    const canonicalCopy = source.indexOf('Copied user_organization -> userOrganizations');
-    const scopeReconciliation = source.indexOf('reconcileOrganizationScopeMemberships(organization.key');
-    expect(canonicalCopy).toBeGreaterThan(-1);
-    expect(scopeReconciliation).toBeGreaterThan(canonicalCopy);
-    expect(source).not.toContain('reconcileOrganizationInheritedAgentMemberships');
-  });
-
-  test('marks legacy scope memberships explicit before organization reconciliation', async () => {
+  test('initializes scope membership sources before team reconciliation', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     const sourceMigration = source.indexOf('source: "explicit"');
-    const reconciliation = source.indexOf('reconcileOrganizationScopeMemberships(organization.key');
+    const reconciliation = source.indexOf('reconcileTeamScopeMemberships(team.key');
     expect(sourceMigration).toBeGreaterThan(-1);
     expect(reconciliation).toBeGreaterThan(sourceMigration);
   });
 
-  test('purges retired Hunt, waitlist, Polar, and legacy user-event data idempotently', async () => {
+  test('purges retired Hunt, waitlist, and legacy user-event data without retiring commerce or Polar claims', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     const retiredCollections = [
       'userEvents',
       'intelligenceFragments',
       'userWaitlistLeaderboardChanges',
-      'products',
-      'paymentCheckouts',
-      'paymentOrders',
-      'subscriptions',
       'userEntitlements',
     ];
     const retiredCollectionLoop = source.indexOf('for (const retiredCollectionName of [');
@@ -1020,20 +1036,30 @@ describe('Arango migration indexes', () => {
     for (const collection of retiredCollections) {
       expect(source.indexOf(`'${collection}'`, retiredCollectionLoop)).toBeGreaterThan(retiredCollectionLoop);
     }
-    expect(source).toContain('FILTER event.provider == "polar"');
-    expect(source).toContain('REMOVE event IN processedWebhookEvents');
+    for (const collection of ['products', 'checkoutHandoffs', 'paymentCheckouts', 'paymentOrders', 'subscriptions']) {
+      expect(collections.find(({ name }) => name === collection)?.skipEmbedding).toBe(true);
+      expect(source.indexOf(`'${collection}'`, retiredCollectionLoop)).toBe(-1);
+    }
+    expect(source).not.toContain('FILTER event.provider == "polar"');
+    expect(collections.find(({ name }) => name === 'products')?.indexes).toEqual([
+      { fields: ['productId'], unique: true },
+      { fields: ['providerProductId'], unique: true, sparse: true },
+      { fields: ['active', 'productId'] },
+    ]);
+    expect(collections.find(({ name }) => name === 'paymentOrders')?.indexes).toContainEqual({ fields: ['providerOrderId'], unique: true });
+    const registry = await Bun.file(new URL('../lib/db/registry.ts', import.meta.url)).text();
+    for (const collection of ['products', 'checkoutHandoffs', 'paymentCheckouts', 'paymentOrders', 'subscriptions', 'processedWebhookEvents']) expect(registry).not.toContain(`${collection}:`);
     expect(source).toContain('HAS(u, "waitlistNumber")');
     expect(source).toContain('waitlistNumber: null');
     expect(source).toContain('isOnWaitlist: null');
     expect(source).toContain('isWaitlistApproved: null');
     expect(source).toContain('IN users OPTIONS { keepNull: false }');
     expect(source).toContain("name: 'events'");
-    expect(source).toContain("{ fields: ['appKey', 'createdAt'] }");
+    expect(source).toContain("{ fields: ['appScopeKey', 'createdAt'] }");
     expect(source).toContain("{ fields: ['scopeKey', 'createdAt'] }");
-    expect(isLegacyIndex('events', ['distinctId', 'createdAt'], [['appKey', 'createdAt']])).toBe(true);
-    expect(isLegacyIndex('events', ['domain', 'createdAt'], [['appKey', 'createdAt']])).toBe(true);
-    expect(source).toContain('OR HAS(event, "distinctId")');
-    expect(source).toContain('OR HAS(event, "embedding")');
+    expect(source).toContain("{ fields: ['eventIdentifier', 'createdAt'] }");
+    expect(isLegacyIndex('events', ['distinctId', 'createdAt'], [['appScopeKey', 'createdAt']])).toBe(true);
+    expect(isLegacyIndex('events', ['domain', 'createdAt'], [['appScopeKey', 'createdAt']])).toBe(true);
   });
 
   test('retires inbox rows only after canonical Signal backfill', async () => {
@@ -1049,7 +1075,7 @@ describe('Arango migration indexes', () => {
   test('protects tone semantics from generic document chunking and embeds only the name', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     const toneMigration = source.slice(source.indexOf('export async function migrateEmailToneEmbeddings'), source.indexOf('export async function migrateContentVersions'));
-    const documentMigration = source.slice(source.indexOf('export async function migrateContentDocuments'), source.indexOf('export async function migrateContentShares'));
+    const documentMigration = source.slice(source.indexOf('export async function migrateContentDocuments'), source.indexOf('export async function migrateCollectionOwnership'));
     expect(toneMigration).toContain('folder.purpose == "communication-mail-tones"');
     expect(toneMigration).toContain('isCanonicalEmailToneDocument(document)');
     expect(toneMigration).toContain('decodeEmailToneContent');
@@ -1096,7 +1122,7 @@ describe('Arango migration indexes', () => {
     expect(deferredCall).toBeGreaterThan(loopStart);
     expect(deferredCall).toBeLessThan(afterCollectionLoop);
     expect(loopClose).toBeGreaterThan(loopStart);
-    expect(source.slice(loopClose, deferredCall)).toBe('\n  }\n\n  ');
+    expect(source.slice(loopClose, deferredCall)).toBe('\n  }\n\n  await migrateReferralCodes(targetDb);\n\n  ');
     for (const collection of ['documents', 'folders', 'documentVersions', 'documentSummaries', 'documentAudioVersions', 'documentSummaryAudio']) expect(collections.some(({ name }) => name === collection)).toBe(true);
   });
 });
@@ -1114,9 +1140,9 @@ liveArangoSuite('Email migration live Arango', () => {
     await root.createDatabase(temporaryName);
     const temporary = root.database(temporaryName);
     try {
-      for (const name of ['documents', 'organizationConnectors', 'scopes', 'folders', 'documentVersions', 'documentSummaries', 'documentAudioVersions', 'documentSummaryAudio']) await temporary.createCollection(name);
-      await temporary.collection('scopes').save({ _key: 'scope-live', organizationKey: 'organization-live' });
-      await temporary.collection('organizationConnectors').save({ _key: 'connector-live', organizationKey: 'organization-live', scopeKey: 'scope-live', provider: 'gmail', status: 'active', syncEnabled: true });
+      for (const name of ['documents', 'teamConnectors', 'scopes', 'folders', 'documentVersions', 'documentSummaries', 'documentAudioVersions', 'documentSummaryAudio']) await temporary.createCollection(name);
+      await temporary.collection('scopes').save({ _key: 'scope-live', teamKey: 'team-live' });
+      await temporary.collection('teamConnectors').save({ _key: 'connector-live', teamKey: 'team-live', scopeKey: 'scope-live', provider: 'gmail', status: 'active', syncEnabled: true });
       const documents = Array.from({ length: 105 }, (_, index) => ({
         _key: `draft-${String(index).padStart(3, '0')}`,
         scopeKey: 'scope-live',

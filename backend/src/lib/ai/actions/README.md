@@ -39,7 +39,7 @@ Pass the trusted options object as the third argument to `executeAction`:
 
 ```ts
 const response = await executeAction(
-  { mode: 'auto', organizationKey, actionSlug: 'text' },
+  { mode: 'auto', teamKey, actionSlug: 'text' },
   input,
   {
     providers: ['text.primary'],

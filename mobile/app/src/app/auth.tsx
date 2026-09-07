@@ -4,25 +4,24 @@ import { Spinner } from "@vorinthex/shared/ui/spinner";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { isAxiosError } from "axios";
 import * as Linking from "expo-linking";
-import { useLocalSearchParams } from "expo-router";
+import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { AccessibilityInfo, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { vorinthexMarkSource } from "@/data/capability-icons";
 import { ChromeIcon } from "@/components/ChromeIcon";
-import { ChromePanel } from "@/components/ChromePanel";
 import { NeuralBackdrop } from "@/components/NeuralBackdrop";
 import { getJson, postJson } from "@/lib/api-client";
 import { launchOAuthProvider, type OAuthProvider } from "@/lib/oauth";
 import { useAuthStore } from "@/state/auth";
 import { fonts, palette, spacing, tracking } from "@/theme/tokens";
-import { savePendingReturnRoute } from "@/lib/pending-return-route";
+import { clearPendingReferralCode, readPendingReferralCode } from "@/lib/pending-referral-vault";
+import { setPendingTeamMfaChallenge } from "@/lib/team-client";
 
 type LoginResponse = {
   handoff_token_hash?: string;
   handoff_expires_at?: string;
-  organization_mfa_required?: boolean;
 };
 
 const FRONTEND_URL = (process.env.EXPO_PUBLIC_FRONTEND_URL ?? "https://vorinthex.com").replace(/\/$/, "");
@@ -35,7 +34,7 @@ function messageFor(error: unknown) {
 }
 
 export default function AuthRoute() {
-  const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { height, width } = useWindowDimensions();
   const hydrate = useAuthStore((state) => state.hydrate);
@@ -48,10 +47,6 @@ export default function AuthRoute() {
   const [error, setError] = useState<string | null>(null);
   const busy = loading !== null;
   const emailInvalid = error === "Enter a valid email address.";
-
-  useEffect(() => {
-    if (returnTo) void savePendingReturnRoute(returnTo).catch(() => undefined);
-  }, [returnTo]);
 
   useEffect(() => {
     if (!handoff) return;
@@ -73,7 +68,7 @@ export default function AuthRoute() {
         if (!active || status.status !== "approved" || claiming) return;
         claiming = true;
         setClaimingHandoff(true);
-        const claim = await postJson<{ handoff_token_hash: string }, { status: string }>(
+        const claim = await postJson<{ handoff_token_hash: string }, { status: string; totp_challenge_token_hash?: string }>(
           "/auth/handoff/claim",
           { handoff_token_hash: handoff.token },
         );
@@ -86,7 +81,10 @@ export default function AuthRoute() {
         } else {
           claiming = false;
           setClaimingHandoff(false);
-          setError("This account requires an additional verification step on the web.");
+          if ((claim.status === "totp_setup_required" || claim.status === "totp_required") && claim.totp_challenge_token_hash) {
+            setPendingTeamMfaChallenge(claim.status === "totp_required" ? "totp_required" : "setup_required", claim.totp_challenge_token_hash);
+            router.replace("/auth/mfa");
+          } else setError("This account requires an additional verification step.");
         }
       } catch (pollError) {
         claiming = false;
@@ -101,7 +99,7 @@ export default function AuthRoute() {
       active = false;
       clearInterval(interval);
     };
-  }, [handoff, hydrate]);
+  }, [handoff, hydrate, router]);
 
   useEffect(() => {
     if (error && Platform.OS === "ios") AccessibilityInfo.announceForAccessibility(error);
@@ -130,11 +128,9 @@ export default function AuthRoute() {
     setError(null);
     setLoading("email");
     try {
-      const response = await postJson<{ email: string }, LoginResponse>("/auth/login", { email: normalized });
-      if (response.organization_mfa_required) {
-        setError("This organization requires an additional verification step on the web.");
-        return;
-      }
+      const referralCode = await readPendingReferralCode();
+      const response = await postJson<{ email: string; referral_code?: string }, LoginResponse>("/auth/login", { email: normalized, ...(referralCode ? { referral_code: referralCode } : {}) });
+      if (referralCode) await clearPendingReferralCode().catch(() => undefined);
       const parsedExpiry = response.handoff_expires_at ? Date.parse(response.handoff_expires_at) : Number.NaN;
       setCheckInbox(true);
       setHandoff(response.handoff_token_hash ? {
@@ -170,7 +166,7 @@ export default function AuthRoute() {
             </Text>
           </View>
 
-          <ChromePanel accessibilityViewIsModal={false} radius={28} style={styles.panel}>
+          <View style={styles.panel}>
             {checkInbox ? (
               <>
                 <View accessibilityLiveRegion="polite" accessibilityState={{ busy: Boolean(handoff) }} style={styles.waiting}>
@@ -183,7 +179,6 @@ export default function AuthRoute() {
               <>
                 {emailVisible ? (
                   <View style={styles.emailForm}>
-                    <Text style={styles.inputLabel}>Email address</Text>
                     <TextInput
                       accessibilityLabel="Email address"
                       accessibilityHint={emailInvalid ? error ?? undefined : "Enter the email address for your account"}
@@ -206,15 +201,15 @@ export default function AuthRoute() {
                   </View>
                 ) : (
                   <>
-                    <Button disabled={busy} icon={<GoogleIcon />} loading={loading === "google"} onPress={() => void oauth("google")} size="lg" variant="secondary">Continue with Google</Button>
-                    <Button disabled={busy} icon={<AppleIcon />} loading={loading === "apple"} onPress={() => void oauth("apple")} size="lg" variant="secondary">Continue with Apple</Button>
+                    <Button disabled={busy} icon={<GoogleIcon />} loading={loading === "google"} onPress={() => void oauth("google")} size="lg" trailingIcon={loading === "google" ? <Spinner size="small" /> : undefined} variant="secondary">Continue with Google</Button>
+                    <Button disabled={busy} icon={<AppleIcon />} loading={loading === "apple"} onPress={() => void oauth("apple")} size="lg" trailingIcon={loading === "apple" ? <Spinner size="small" /> : undefined} variant="secondary">Continue with Apple</Button>
                     <Button disabled={busy} icon={<MailIcon />} loading={loading === "email"} onPress={() => { setError(null); setEmailVisible(true); }} size="lg" variant="secondary">Continue with email</Button>
                   </>
                 )}
               </>
             )}
             {error && <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text>}
-          </ChromePanel>
+          </View>
           {!checkInbox && (
             <Text style={styles.legalNote}>
               By continuing, you agree to our{" "}
@@ -223,6 +218,10 @@ export default function AuthRoute() {
               <Text accessibilityRole="link" onPress={() => void Linking.openURL(`${FRONTEND_URL}/privacy`)} style={styles.legalLink}>Privacy Policy</Text>.
             </Text>
           )}
+          <View style={styles.disclosure}>
+            <Text style={styles.disclosureTitle}>AI-powered features</Text>
+            <Text style={styles.disclosureCopy}>Vorinthex AI uses artificial intelligence to generate and process text, images, audio and video.</Text>
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -239,9 +238,8 @@ const styles = StyleSheet.create({
   eyebrow: { marginTop: spacing.lg, color: palette.silver500, fontFamily: fonts.medium, fontSize: 10, letterSpacing: tracking.label },
   title: { marginTop: spacing.sm, color: palette.silver50, fontFamily: fonts.light, fontSize: 34, lineHeight: 40, letterSpacing: -1.2, textAlign: "center" },
   subtitle: { maxWidth: 340, marginTop: spacing.sm, color: palette.silver300, fontFamily: fonts.regular, fontSize: 14, lineHeight: 21, textAlign: "center" },
-  panel: { gap: 12, padding: spacing.md },
+  panel: { gap: 12 },
   emailForm: { gap: 12 },
-  inputLabel: { marginLeft: 2, color: palette.silver300, fontFamily: fonts.medium, fontSize: 12, letterSpacing: 0.4 },
   input: { minHeight: 50, backgroundColor: palette.obsidian850 },
   inputError: { borderColor: "#D98B8B" },
   waiting: { minHeight: 76, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, borderRadius: 22, borderWidth: 1, borderColor: palette.hairline },
@@ -249,4 +247,7 @@ const styles = StyleSheet.create({
   error: { paddingHorizontal: spacing.sm, color: "#D98B8B", fontFamily: fonts.regular, fontSize: 13, lineHeight: 18, textAlign: "center" },
   legalNote: { alignSelf: "center", maxWidth: 330, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16, textAlign: "center" },
   legalLink: { color: palette.silver300, textDecorationLine: "underline" },
+  disclosure: { alignSelf: "center", borderTopColor: palette.hairline, borderTopWidth: 1, gap: spacing.xs, maxWidth: 360, paddingTop: spacing.md, width: "100%" },
+  disclosureTitle: { color: palette.silver300, fontFamily: fonts.medium, fontSize: 12, textAlign: "center" },
+  disclosureCopy: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 11, lineHeight: 17, textAlign: "center" },
 });

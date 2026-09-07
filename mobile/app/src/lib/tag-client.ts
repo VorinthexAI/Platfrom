@@ -25,7 +25,7 @@ const envelopeSchema = z.discriminatedUnion("success", [
   z.strictObject({ success: z.literal(true), data: listOutputSchema }),
   z.object({ success: z.literal(false), error: z.unknown() }),
 ]);
-const createRequestSchema = z.strictObject({ organizationKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(), key: z.string().cuid(), name: z.string().trim().min(1).max(120) });
+const createRequestSchema = z.strictObject({ teamKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(), key: z.string().cuid(), name: z.string().trim().min(1).max(120) });
 const failureSchema = z.strictObject({ success: z.literal(false), error: z.strictObject({ code: z.string().min(1), message: z.string().min(1) }) });
 const createEnvelopeSchema = z.discriminatedUnion("success", [z.strictObject({ success: z.literal(true), data: scopeTagSchema }), failureSchema]);
 
@@ -43,7 +43,7 @@ export function createResourceTagKey() {
 }
 
 export async function createScopeTag(context: ContentContext, input: { key: string; name: string }) {
-  const payload = createRequestSchema.parse({ organizationKey: context.organizationKey, scopeKey: context.scopeKey, ...input });
+  const payload = createRequestSchema.parse({ teamKey: context.teamKey, scopeKey: context.scopeKey, ...input });
   const send = async () => {
     const response = await apiClient.post("/tags", payload, { timeout: 15_000 });
     const envelope = createEnvelopeSchema.parse(response.data);
@@ -65,7 +65,7 @@ export async function listScopeTags(context: ContentContext, signal?: AbortSigna
     const items: ScopeTag[] = [];
     let cursor: string | undefined;
     do {
-      const response = await apiClient.post("/tags/list", { organizationKey: context.organizationKey, scopeKey: context.scopeKey, limit: 100, ...(cursor ? { cursor } : {}) }, { signal, timeout: 15_000 });
+      const response = await apiClient.post("/tags/list", { teamKey: context.teamKey, scopeKey: context.scopeKey, limit: 100, ...(cursor ? { cursor } : {}) }, { signal, timeout: 15_000 });
       const envelope = envelopeSchema.parse(response.data);
       if (!envelope.success) throw new Error("Tags could not be loaded.");
       items.push(...envelope.data.items);
@@ -109,7 +109,7 @@ export async function listResourceTagAssignments(context: ContentContext, target
     const assignments = Object.fromEntries(normalizedTargets.map((target) => [resourceTagTargetIdentity(target), new Set<string>()]));
     let cursor: string | undefined;
     do {
-      const response = await apiClient.post("/tags/list", { organizationKey: context.organizationKey, scopeKey: context.scopeKey, targets: normalizedTargets, limit: 100, ...(cursor ? { cursor } : {}) }, { signal, timeout: 15_000 });
+      const response = await apiClient.post("/tags/list", { teamKey: context.teamKey, scopeKey: context.scopeKey, targets: normalizedTargets, limit: 100, ...(cursor ? { cursor } : {}) }, { signal, timeout: 15_000 });
       const envelope = envelopeSchema.parse(response.data);
       if (!envelope.success) throw new Error("Tags could not be loaded.");
       if (!envelope.data.targetAssignments) throw new Error("Tag assignments could not be loaded.");
@@ -158,7 +158,7 @@ export function groupResourceTagAssignmentRequests(targets: readonly ResourceTag
 
 export async function persistResourceTagAssignments(context: ContentContext, requests: readonly ResourceTagAssignmentRequest[]) {
   try {
-    const results = await Promise.allSettled(requests.map(({ action, targets, tagKeys }) => apiClient.post(`/tags/assignments?action=${action}`, { organizationKey: context.organizationKey, scopeKey: context.scopeKey, targets, tagKeys }, { timeout: 15_000 })));
+    const results = await Promise.allSettled(requests.map(({ action, targets, tagKeys }) => apiClient.post(`/tags/assignments?action=${action}`, { teamKey: context.teamKey, scopeKey: context.scopeKey, targets, tagKeys }, { timeout: 15_000 })));
     const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (failure) throw failure.reason;
   } catch (error) {
@@ -166,6 +166,6 @@ export async function persistResourceTagAssignments(context: ContentContext, req
   }
 }
 
-export function tagFilterContextKey(context: Pick<ContentContext, "userKey" | "organizationKey" | "scopeKey">) {
-  return `${context.userKey}:${context.organizationKey}:${context.scopeKey}`;
+export function tagFilterContextKey(context: Pick<ContentContext, "userKey" | "teamKey" | "scopeKey">) {
+  return `${context.userKey}:${context.teamKey}:${context.scopeKey}`;
 }

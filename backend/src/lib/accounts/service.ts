@@ -6,11 +6,12 @@ import { isArangoUniqueConstraintError } from '@/lib/db/base';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '@/lib/alias';
 import { sha256 } from '@/lib/crypto';
 import { newId } from '@/lib/ids';
-import { getRootOrganizationId } from '@/lib/db/organizations.node';
 import { APP_KEYS } from '@/lib/apps/registry';
+import { appsService } from '@/lib/apps/service';
 import { toolEventService } from '@/lib/ai/events/service';
 import { sparkService } from '@/lib/sparks/service';
 import { ACCOUNT_GRANT_MICRO_SPARKS } from '@/lib/costs';
+import { referralService } from '@/lib/referrals/service';
 
 export function newcomerGrantInput(eventKey: string) {
   return {
@@ -26,17 +27,19 @@ async function initializeNewAccount(user: User): Promise<User> {
   const grant = await sparkService.adjust(user.key, newcomerGrantInput(newId()));
   if (grant.status === 'conflict') throw new Error(`Spark account initialization conflicted for user ${user.key}.`);
   await recordAccountCreatedEvent(user, grant.transaction);
+  await referralService.ensurePersonalCode(user.key);
   return await getUserById(user.key) ?? user;
 }
 
 async function recordAccountCreatedEvent(user: User, transaction: { key: string; eventKey?: string; deltaMicroSparks: number }) {
   const eventKey = transaction.eventKey;
   if (!eventKey) throw new Error(`Spark account initialization did not retain an event key for user ${user.key}.`);
+  const { scopeKey: appScopeKey } = await appsService.resolveAlias(APP_KEYS.CORE);
   await toolEventService.record({
     userId: user.key,
     scopeKey: user.currentScopeKey,
     slug: 'account.created',
-    appKey: APP_KEYS.CORE,
+    appScopeKey,
     status: 'completed',
     microSparks: transaction.deltaMicroSparks,
     sparkTransactionKey: transaction.key,
@@ -90,13 +93,12 @@ export async function upsertUserByEmail(
   const normalized = normalizeEmail(email);
   const emailHash = await hashUserEmail(normalized);
   const now = new Date().toISOString();
-  const organizationId = values.organizationId ?? await getRootOrganizationId();
   // The alias travels: whoever explored the galaxy as this anonymous visitor
   // keeps the same "<Prefix> <Role>" identity when they become a user.
   const visitor = await findVisitorForConversion(options.distinctId ?? null);
 
   async function reconcileWithExisting(existing: User): Promise<User> {
-    const patch: Partial<User> = { ...values, organizationId, email: normalized, emailHash, updatedAt: now };
+    const patch: Partial<User> = { ...values, email: normalized, emailHash, updatedAt: now };
     const initialName = options.initializeNameOnly && typeof patch.name === 'string' ? patch.name : null;
     if (options.initializeNameOnly) delete patch.name;
     // Country is captured at account creation, not rewritten by later sign-ins.
@@ -117,6 +119,7 @@ export async function upsertUserByEmail(
     const named = initialName ? await initializeUserNameIfMissing(updated.key, initialName, now) ?? updated : updated;
     await provisionPersonalAuthContext(named);
     const reconciled = await getUserById(named.key) ?? named;
+    await referralService.ensurePersonalCode(reconciled.key);
     await recoverNewcomerGrantEvent(reconciled);
     return reconciled;
   }
@@ -132,7 +135,6 @@ export async function upsertUserByEmail(
       key,
       currentScopeKey,
       ...values,
-      organizationId,
       email: normalized,
       emailHash,
       name: values.name ?? defaultNameFromEmail(normalized),

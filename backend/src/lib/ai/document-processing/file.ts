@@ -2,7 +2,7 @@ import { fileInputSchema, fileOutputSchema, type FileInput, type FileOutput } fr
 import { awsTextractDocumentOcr, awsTextractImageOcr, type DocumentImageOcr, type DocumentOcr } from './textract';
 
 export interface FileActionClient {
-  execute(input: FileInput, organizationKey: string): Promise<FileOutput>;
+  execute(input: FileInput, teamKey: string): Promise<FileOutput>;
 }
 
 export function createAwsFileAction(documentOcr: DocumentOcr = awsTextractDocumentOcr, imageOcr: DocumentImageOcr = awsTextractImageOcr): FileActionClient {

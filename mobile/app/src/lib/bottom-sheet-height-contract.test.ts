@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 const read = (path: string) => Bun.file(new URL(path, import.meta.url)).text();
-const [mobileSheet, webSheet, mobileButton, webButton, mobileToast, agents, theme, core, switcher, travel, email, ascend, gallery, sharing, archive] = await Promise.all([
+const [mobileSheet, webSheet, mobileButton, webButton, mobileToast, agents, theme, core, switcher, travel, email, ascend, gallery, archive] = await Promise.all([
   read("../../../../shared/packages/ui/components/bottom-sheet/bottom-sheet.mobile.tsx"),
   read("../../../../shared/packages/ui/components/bottom-sheet/bottom-sheet.web.tsx"),
   read("../../../../shared/packages/ui/components/button/button.mobile.tsx"),
@@ -15,7 +15,6 @@ const [mobileSheet, webSheet, mobileButton, webButton, mobileToast, agents, them
   read("../components/capability/EmailWorkspace.tsx"),
   read("../components/capability/AscendWorkspace.tsx"),
   read("../components/capability/GalleryWorkspace.tsx"),
-  read("../components/capability/GalleryCollectionSharing.tsx"),
   read("../components/capability/KnowledgeWorkspace.tsx"),
 ]);
 
@@ -55,7 +54,7 @@ test("exposes only intrinsic and full BottomSheet heights", () => {
 });
 
 test("uses no legacy BottomSheet sizing props", () => {
-  for (const consumer of [core, switcher, travel, email, ascend, gallery, sharing, archive]) {
+  for (const consumer of [core, switcher, travel, email, ascend, gallery, archive]) {
     expect(consumer).not.toMatch(/<BottomSheet[\s\S]*?\b(?:mutation|tall)=/);
   }
 });
@@ -132,6 +131,5 @@ test("classifies every full-height sheet workflow explicitly", () => {
   expect(ascend).toContain('height={sheet === "reader" || sheet === "chapterRead" || sheet === "bookSummary" ? "full" : undefined}');
   expect(gallery).toContain('height="full"');
   expect(gallery).toContain('height={activeSheet === "destination" || activeSheet === "imageEdit"');
-  expect(sharing).toContain('height={fullHeight ? "full" : undefined}');
   expect(archive).toContain('height={activeSheet === "documents"');
 });

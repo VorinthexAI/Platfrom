@@ -11,7 +11,7 @@ describe('country HTTP adapter', () => {
     const service = { search: async (...args: unknown[]) => { calls.push(args); return { country: { name: 'Portugal', countryCode: 'PT', latitude: 39.61, longitude: -8.27 } }; } } as any;
     const app = new Hono();
     app.post('/travel/countries/search', createCountryHandlers({ service, getIdentity: async () => ({ key: 'trusted-user', identityType: 'user' }) }).search);
-    const input = { organizationKey: 'organization', query: 'Portugal' };
+    const input = { teamKey: 'team', query: 'Portugal' };
     const response = await app.request('/travel/countries/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
     expect(response.status).toBe(200);
     expect(calls).toEqual([[input, 'trusted-user', { signal: expect.any(AbortSignal), timeoutMs: 10_000 }]]);
@@ -19,17 +19,17 @@ describe('country HTTP adapter', () => {
   });
 
   test('keeps HTTP and Core country.search on the same trusted-user canonical service', async () => {
-    const organizationKey = newId(), scopeKey = newId(), userKey = newId();
+    const teamKey = newId(), scopeKey = newId(), userKey = newId();
     const calls: unknown[][] = [];
     const service = { search: async (...args: unknown[]) => { calls.push(args); return { country: null }; } } as any;
     const app = new Hono();
     app.post('/travel/countries/search', createCountryHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }).search);
-    await app.request('/travel/countries/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, query: 'Japan' }) });
-    const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    await app.request('/travel/countries/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, query: 'Japan' }) });
+    const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     await runTool('country.search', '', { query: 'Japan' }, { contentContext: context, countrySearchService: service });
     expect(calls.map((call) => call.slice(0, 2))).toEqual([
-      [{ organizationKey, query: 'Japan' }, userKey],
-      [{ organizationKey, query: 'Japan' }, userKey],
+      [{ teamKey, query: 'Japan' }, userKey],
+      [{ teamKey, query: 'Japan' }, userKey],
     ]);
   });
 });

@@ -13,15 +13,15 @@ const now = '2026-07-29T12:00:00.000Z';
 
 describe('Communication orchestrator chat flow', () => {
   test('detects a mention, retrieves authorized filtered context, chats with Nova, streams, and persists the response', async () => {
-    const organizationKey = 'root-org';
-    const membershipKey = newId();
+    const teamKey = 'root-team';
+    const teamMembershipKey = newId();
     const scopeKey = newId();
-    const channel = channelSchema.parse({ key: newId(), organizationKey, scopeKey, name: 'general', description: 'Organization-wide conversation', position: 0, createdAt: now, updatedAt: now });
-    const human = channelParticipantSchema.parse({ key: newId(), scopeKey, channelKey: channel.key, userOrganizationKey: membershipKey, joinedAt: now, createdAt: now, updatedAt: now });
+    const channel = channelSchema.parse({ key: newId(), teamKey, scopeKey, name: 'general', description: 'Team-wide conversation', position: 0, createdAt: now, updatedAt: now });
+    const human = channelParticipantSchema.parse({ key: newId(), scopeKey, channelKey: channel.key, userTeamKey: teamMembershipKey, joinedAt: now, createdAt: now, updatedAt: now });
     const atlasParticipant = channelParticipantSchema.parse({ key: newId(), scopeKey, channelKey: channel.key, orchestratorKey: newId(), joinedAt: now, createdAt: now, updatedAt: now });
     const access: GeneralChannelAccess = { channel, humanParticipant: human, viewerUserKey: newId(), mentions: [
       { participantKey: 'everyone', type: 'everyone', key: 'everyone', name: 'everyone', mentionCount: 0 },
-      { participantKey: atlasParticipant.key, type: 'orchestrator', key: atlasParticipant.orchestratorKey!, name: 'Atlas', role: 'CEO', skill: 'Lead the organization.', mentionCount: 0 },
+      { participantKey: atlasParticipant.key, type: 'orchestrator', key: atlasParticipant.orchestratorKey!, name: 'Atlas', role: 'CEO', skill: 'Lead the team.', mentionCount: 0 },
     ] };
     const messages: Message[] = [];
     const persistedMentions: unknown[] = [];
@@ -54,7 +54,7 @@ describe('Communication orchestrator chat flow', () => {
     const service = new CommunicationService(repository, () => now);
     const handlers = createCommunicationHandlers({
       service,
-      resolveActor: async () => ({ organizationKey, membershipKey }),
+      resolveActor: async () => ({ teamKey, teamMembershipKey }),
       stream: (skill, input, dependencies) => orchestratorResponseRuntime.stream(skill, input, {
         ...dependencies,
         embedRetrievalQuery: async () => [1, 0],
@@ -64,16 +64,16 @@ describe('Communication orchestrator chat flow', () => {
         },
         stream: async function* (_key, chatInput) { novaInputs.push(chatInput); yield { type: 'text-delta', text: 'Atlas response' }; yield { type: 'done' }; },
       }),
-      listScopes: async (actor) => { expect(actor).toEqual({ organizationKey, membershipKey }); return []; },
+      listScopes: async (actor) => { expect(actor).toEqual({ teamKey, teamMembershipKey }); return []; },
       channelLease: {
         acquire: async () => true,
         refresh: async () => true,
         release: async () => {},
       },
     });
-    const app = new Hono().post('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages', handlers.postMessage);
+    const app = new Hono().post('/founders/teams/:teamKey/communication/channels/:channelKey/messages', handlers.postMessage);
 
-    const response = await app.request(`/founders/organizations/${organizationKey}/communication/channels/${channel.key}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas explain the launch' }) });
+    const response = await app.request(`/founders/teams/${teamKey}/communication/channels/${channel.key}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas explain the launch' }) });
     const body = await response.text();
 
     expect(response.status).toBe(200);
@@ -83,14 +83,14 @@ describe('Communication orchestrator chat flow', () => {
     expect(persistedMentions).toHaveLength(1);
     expect(messages.map(({ content }) => content)).toEqual(['@Atlas explain the launch', 'Atlas response']);
     expect(retrievalQueries).toHaveLength(1);
-    expect(retrievalQueries[0]?.bindVars).toMatchObject({ organizationKey, membershipKey, filterOrganizationKey: organizationKey, filterKeys: [], limit: 50 });
+    expect(retrievalQueries[0]?.bindVars).toMatchObject({ teamKey, teamMembershipKey, filterTeamKey: teamKey, filterKeys: [], limit: 50 });
     expect(retrievalQueries[0]?.bindVars.access).toBe('channel');
     expect(retrievalQueries[0]?.bindVars.excludeKeys).toEqual([messages[0]!.key]);
     expect(retrievalQueries[0]?.bindVars).not.toHaveProperty('collectionName');
-    expect(retrievalQueries[0]?.query).toContain('membership.organizationId == @organizationKey');
+    expect(retrievalQueries[0]?.query).toContain('membership.teamKey == @teamKey');
     expect(retrievalQueries[0]?.query).toContain('document.channelKey IN authorizedChannelKeys');
     expect(novaInputs[0]).toMatchObject({ systemPrompt: expect.stringContaining('Authorized launch decision.'), messages: [{ role: 'user', content: [{ type: 'text', text: '@Atlas explain the launch' }] }] });
-    const canonical = await service.listMessages({ organizationKey, membershipKey }, channel.key, 100);
+    const canonical = await service.listMessages({ teamKey, teamMembershipKey }, channel.key, 100);
     expect(canonical.map(({ content }) => content)).toEqual(['@Atlas explain the launch', 'Atlas response']);
     expect(canonical[1]).toMatchObject({ author: { type: 'orchestrator', name: 'Atlas' }, reactions: [] });
     expect(canonical[1]?.replyToMessageKey).toBeUndefined();

@@ -22,7 +22,7 @@ Actions with `none` policy or no declared bindings are not routable. A
 bindings; there is no persisted action-to-model routing collection.
 
 Product capabilities use the unified tool registry and invoke canonical domain
-services directly. Tools receive trusted organization, scope, membership, and
+services directly. Tools receive trusted team, scope, membership, and
 request context from their authorized caller rather than model-visible input.
 
 ## Provider configuration

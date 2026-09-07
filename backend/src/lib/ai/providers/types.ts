@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { actionIdSchema, type ActionId } from '@/lib/ai/actions/types';
 import { coreChatInputSchema, coreChatMessageSchema, coreChatToolDefinitionSchema, type CoreChatInput, type CoreChatMessage, type CoreChatToolDefinition } from '@/lib/ai/actions/core-chat';
-import { organizationKeySchema } from '@/lib/ai/shared/ids';
+import { teamKeySchema } from '@/lib/ai/shared/ids';
 import type { TokenUsage } from '@/lib/ai/shared/usage';
 import { MAX_IMAGE_CAPTION_URLS } from '@/lib/image-caption-constants';
 
@@ -36,7 +36,7 @@ export interface ProviderExecuteRequest<TInput = unknown> {
   modelId: string;
   externalModelId: string;
   input: TInput;
-  organizationKey: string;
+  teamKey: string;
   timeoutMs?: number;
   signal?: AbortSignal;
 }
@@ -46,7 +46,7 @@ export const providerExecuteRequestSchema = z.object({
   modelId: z.string().min(1),
   externalModelId: z.string().min(1),
   input: z.unknown(),
-  organizationKey: organizationKeySchema,
+  teamKey: teamKeySchema,
   timeoutMs: z.number().int().positive().optional(),
   signal: z.instanceof(AbortSignal).optional(),
 });

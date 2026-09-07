@@ -6,10 +6,10 @@ import { formatGuideContent } from "./travel-guide-format";
 
 const workspace = readFileSync(new URL("../components/capability/TravelWorkspace.tsx", import.meta.url), "utf8");
 const events = readFileSync(new URL("event-bridge.tsx", import.meta.url), "utf8");
-const context = { organizationKey: "org", scopeKey: "scope" };
+const context = { teamKey: "team", scopeKey: "scope" };
 
 test("scopes place reference caches by workspace, place, and kind", () => {
-  expect(compassQueryKeys.placeReferences(context, "place-key", "brief")).toEqual(["compass", "org", "scope", "places", "place-key", "references", "brief"]);
+  expect(compassQueryKeys.placeReferences(context, "place-key", "brief")).toEqual(["compass", "team", "scope", "places", "place-key", "references", "brief"]);
   expect(compassQueryKeys.placeReferences(context, "place-key", "brief")).not.toEqual(compassQueryKeys.placeReferences(context, "place-key", "restaurants"));
   expect(events).toContain('if (event.event === "place.reference.changed") invalidateCompassPlaceReferences()');
   expect(events).toContain('if (event.event === "content.changed")');

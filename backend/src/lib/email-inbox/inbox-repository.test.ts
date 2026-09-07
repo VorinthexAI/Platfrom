@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
-import { organizationConnectorSchema } from './connector-schema';
+import { teamConnectorSchema } from './connector-schema';
 import { createInboxRepository } from './inbox-repository';
 
 const now = '2026-08-25T12:00:00.000Z';
 const embedding = Array(EMBEDDING_DIMENSIONS).fill(0);
 
 function connector() {
-  return organizationConnectorSchema.parse({ key: newId(), organizationKey: 'organization', scopeKey: newId(), provider: 'gmail', providerAccountId: 'provider', email: 'person@example.com', encryptedCredentials: 'cipher', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: newId(), status: 'active', createdAt: now, updatedAt: now });
+  return teamConnectorSchema.parse({ key: newId(), teamKey: 'team', scopeKey: newId(), provider: 'gmail', providerAccountId: 'provider', email: 'person@example.com', encryptedCredentials: 'cipher', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByTeamMembershipKey: newId(), status: 'active', createdAt: now, updatedAt: now });
 }
 
 describe('dedicated inbox repository', () => {
@@ -30,7 +30,7 @@ describe('dedicated inbox repository', () => {
   test('authorizes cover images and optimistic updates without managed folder markers', async () => {
     let call: { query: string; bindVars: Record<string, unknown> } | undefined;
     const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return { next: async () => null }; } };
-    await createInboxRepository(database as never).update('organization', newId(), newId(), now, { coverImageKey: newId() });
+    await createInboxRepository(database as never).update('team', newId(), newId(), now, { coverImageKey: newId() });
     expect(call?.query).toContain('cover.scopeKey == @scopeKey');
     expect(call?.query).toContain('inbox.updatedAt == @expectedUpdatedAt');
     expect(call?.query).toContain('UPDATE inbox WITH patch IN @@inboxes');
@@ -47,13 +47,13 @@ describe('dedicated inbox repository', () => {
     expect(call?.bindVars).toMatchObject({ '@inboxes': 'emailInboxes', expectedRevision: 'inbox-before-oauth' });
   });
 
-  test('semantic search enforces organization, scope, connector, and active Gmail boundaries', async () => {
+  test('semantic search enforces team, scope, connector, and active Gmail boundaries', async () => {
     const scopeKey = newId();
     const connectorKey = newId();
     let call: { query: string; bindVars: Record<string, unknown> } | undefined;
     const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return { all: async () => [] }; } };
-    expect(await createInboxRepository(database as never).search('organization', scopeKey, [connectorKey], embedding, '  Leadership  ', 0.55, 10, { createdFrom: now, createdTo: now })).toEqual([]);
-    expect(call?.query).toContain('inbox.organizationKey == @organizationKey && inbox.scopeKey == @scopeKey');
+    expect(await createInboxRepository(database as never).search('team', scopeKey, [connectorKey], embedding, '  Leadership  ', 0.55, 10, { createdFrom: now, createdTo: now })).toEqual([]);
+    expect(call?.query).toContain('inbox.teamKey == @teamKey && inbox.scopeKey == @scopeKey');
     expect(call?.query).toContain('connector.provider == "gmail" && connector.status != "revoked"');
     expect(call?.query).toContain('FOR inbox IN @@inboxes');
     expect(call?.bindVars).toMatchObject({ '@inboxes': 'emailInboxes', connectorKeys: [connectorKey], query: 'leadership', createdFrom: now, createdTo: now });
