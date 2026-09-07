@@ -31,7 +31,7 @@ export async function seedAppLogoAssets({
     const checksum = createHash('sha256').update(body).digest('hex');
     let unchanged = false;
     try {
-      const head = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: asset.storageKey, ChecksumMode: 'ENABLED' }));
+      const head = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: asset.storageKey }));
       unchanged = head.Metadata?.sha256 === checksum
         && head.ContentType === 'image/png'
         && head.CacheControl === APP_LOGO_CACHE_CONTROL;
