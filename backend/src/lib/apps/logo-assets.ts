@@ -17,10 +17,12 @@ export async function seedAppLogoAssets({
   client,
   bucket,
   repositoryRoot,
+  forceUpload = false,
 }: {
   client: LogoAssetClient;
   bucket: string;
   repositoryRoot: string;
+  forceUpload?: boolean;
 }) {
   if (!bucket.trim()) throw new Error('App logo asset seeding requires a non-empty S3 bucket.');
   const results: Array<{ slug: string; storageKey: string; status: 'uploaded' | 'unchanged'; checksum: string }> = [];
@@ -30,13 +32,15 @@ export async function seedAppLogoAssets({
     if (body.byteLength === 0) throw new Error(`App logo source is empty: ${asset.sourcePath}`);
     const checksum = createHash('sha256').update(body).digest('hex');
     let unchanged = false;
-    try {
-      const head = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: asset.storageKey }));
-      unchanged = head.Metadata?.sha256 === checksum
-        && head.ContentType === 'image/png'
-        && head.CacheControl === APP_LOGO_CACHE_CONTROL;
-    } catch (error) {
-      if (!isMissingObject(error)) throw error;
+    if (!forceUpload) {
+      try {
+        const head = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: asset.storageKey }));
+        unchanged = head.Metadata?.sha256 === checksum
+          && head.ContentType === 'image/png'
+          && head.CacheControl === APP_LOGO_CACHE_CONTROL;
+      } catch (error) {
+        if (!isMissingObject(error)) throw error;
+      }
     }
 
     if (!unchanged) {

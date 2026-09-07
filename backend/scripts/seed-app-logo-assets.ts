@@ -22,6 +22,11 @@ export function assertAppLogoSeedEnvironment(mode: string | undefined, env: Node
 
 if (import.meta.main) {
   assertAppLogoSeedEnvironment(process.argv[2]);
-  const results = await seedAppLogoAssets({ client: s3, bucket: S3_BUCKET, repositoryRoot: resolve(import.meta.dir, '../..') });
+  const results = await seedAppLogoAssets({
+    client: s3,
+    bucket: S3_BUCKET,
+    repositoryRoot: resolve(import.meta.dir, '../..'),
+    forceUpload: process.argv[2] === '--production-ci',
+  });
   console.table(results);
 }
