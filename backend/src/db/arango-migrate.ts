@@ -305,6 +305,29 @@ export async function deduplicateScopeSlugs(targetDb: Database): Promise<void> {
   }
 }
 
+export async function deduplicateScopeMembers(targetDb: Database): Promise<void> {
+  const cursor = await targetDb.query<Array<{ _key: string; role?: string; source?: string; status?: string }>>(`
+    FOR member IN scopeMembers
+      COLLECT scopeKey = member.scopeKey, userTeamKey = member.userTeamKey INTO grouped = member
+      FILTER LENGTH(grouped) > 1
+      RETURN grouped
+  `);
+  const roleRank = new Map([['viewer', 0], ['moderator', 1], ['admin', 2], ['owner', 3]]);
+  const collection = targetDb.collection('scopeMembers');
+  for (const grouped of await cursor.all()) {
+    const ordered = grouped.slice().sort((left, right) => left._key.localeCompare(right._key));
+    const keeper = ordered[0]!;
+    const role = ordered.reduce((strongest, member) => (roleRank.get(member.role ?? '') ?? -1) > (roleRank.get(strongest) ?? -1) ? member.role! : strongest, 'viewer');
+    await collection.update(keeper._key, {
+      role,
+      status: ordered.some(({ status }) => status !== 'suspended') ? 'active' : 'suspended',
+      source: ordered.some(({ source }) => source !== 'team') ? 'explicit' : 'team',
+    });
+    for (const duplicate of ordered.slice(1)) await collection.remove(duplicate._key);
+    console.log(`Collapsed ${ordered.length} duplicate scope memberships into ${keeper._key}`);
+  }
+}
+
 function buildNodeEmbedText(_collectionName: string, _key: string, embedKeys: readonly string[], doc: Record<string, unknown>): string | null {
   return buildEmbeddingText(embedKeys, doc);
 }
@@ -2077,6 +2100,9 @@ async function main() {
       REMOVE relation IN scopeScopes
   `);
   await ensureScopeScopesCollection(targetDb);
+  const scopeMembersCollection = targetDb.collection('scopeMembers');
+  if (!(await scopeMembersCollection.exists())) await scopeMembersCollection.create();
+  await deduplicateScopeMembers(targetDb);
   await ensureScopeMembersCollection(targetDb);
   await targetDb.query(`FOR member IN scopeMembers FILTER !HAS(member, "status") UPDATE member WITH { status: "active" } IN scopeMembers`);
   await targetDb.query(`FOR member IN scopeMembers FILTER !HAS(member, "source") UPDATE member WITH { source: "explicit" } IN scopeMembers`);

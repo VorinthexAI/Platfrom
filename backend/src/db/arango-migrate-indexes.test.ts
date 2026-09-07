@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER } from './arango-migrate-indexes';
-import { collections, deduplicateScopeSlugs, migrateCollectionOwnership, migrateContainerPresentations, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateManagedGeneratedMedia, migrateMinimalPlacesAndRetireTrips, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTicketTypes, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireMomentumScope, retireUserSettings } from './arango-migrate';
+import { collections, deduplicateScopeMembers, deduplicateScopeSlugs, migrateCollectionOwnership, migrateContainerPresentations, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateManagedGeneratedMedia, migrateMinimalPlacesAndRetireTrips, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTicketTypes, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireMomentumScope, retireUserSettings } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, LEGACY_EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 import { emailArchiveRootFolderKey, emailMediaCollectionKey } from '../lib/email-inbox/export-container-keys';
@@ -786,6 +786,28 @@ describe('Arango migration indexes', () => {
     };
     await deduplicateScopeSlugs(database as never);
     expect(updates).toEqual([{ key: 'cmrnlzf650002qc7k4p5zem5w', slug: 'cmrnlzf650002qc7k4p5zem5w' }]);
+  });
+  test('collapses duplicate scope memberships with the strongest access', async () => {
+    const updates: Array<{ key: string; patch: Record<string, string> }> = [];
+    const removed: string[] = [];
+    const database = {
+      async query() {
+        return { async all() { return [[
+          { _key: 'membership-b', role: 'viewer', status: 'suspended', source: 'team' },
+          { _key: 'membership-a', role: 'admin', status: 'active', source: 'explicit' },
+        ]]; } };
+      },
+      collection(name: string) {
+        expect(name).toBe('scopeMembers');
+        return {
+          async update(key: string, patch: Record<string, string>) { updates.push({ key, patch }); },
+          async remove(key: string) { removed.push(key); },
+        };
+      },
+    };
+    await deduplicateScopeMembers(database as never);
+    expect(updates).toEqual([{ key: 'membership-a', patch: { role: 'admin', status: 'active', source: 'explicit' } }]);
+    expect(removed).toEqual(['membership-b']);
   });
   test('force-projects legacy places once while preserving keys and regenerating name-only embeddings', async () => {
     const previous = process.env.CONTENT_E2E;
