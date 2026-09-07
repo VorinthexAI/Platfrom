@@ -76,60 +76,60 @@ async function main() {
   const user = users[0]!;
 
   const memberships = await (await db.query(aql`
-    FOR membership IN userOrganizations
+    FOR membership IN userTeams
       FILTER membership.userId == ${user.key}
-      LET organization = DOCUMENT("organizations", membership.organizationId)
+      LET team = DOCUMENT("teams", membership.teamKey)
       LET otherMembers = LENGTH(
-        FOR candidate IN userOrganizations
-          FILTER candidate.organizationId == membership.organizationId
+        FOR candidate IN userTeams
+          FILTER candidate.teamKey == membership.teamKey
             && candidate.userId != ${user.key}
             && candidate.status == "active"
           RETURN 1
       )
       RETURN {
         key: membership._key,
-        organizationKey: membership.organizationId,
-        organizationName: organization.name,
-        personalOwnerUserId: organization.personalOwnerUserId,
+        teamKey: membership.teamKey,
+        teamName: team.name,
+        personalOwnerUserId: team.personalOwnerUserId,
         otherMembers
       }
-  `)).all() as { key: string; organizationKey: string; organizationName: string; personalOwnerUserId?: string; otherMembers: number }[];
+  `)).all() as { key: string; teamKey: string; teamName: string; personalOwnerUserId?: string; otherMembers: number }[];
   const unsafeMemberships = memberships.filter(({ personalOwnerUserId, otherMembers }) => personalOwnerUserId !== user.key || otherMembers > 0);
   if (unsafeMemberships.length) {
     console.log(JSON.stringify({ userKey: user.key, blockedMemberships: unsafeMemberships }, null, 2));
-    throw new Error('Account belongs to a shared or non-exclusive organization; automatic deletion is blocked.');
+    throw new Error('Account belongs to a shared or non-exclusive team; automatic deletion is blocked.');
   }
 
-  const personalOrganizations = await (await db.query(aql`
-    FOR organization IN organizations
-      FILTER organization.personalOwnerUserId == ${user.key}
+  const personalTeams = await (await db.query(aql`
+    FOR team IN teams
+      FILTER team.personalOwnerUserId == ${user.key}
       LET otherMembers = LENGTH(
-        FOR membership IN userOrganizations
-          FILTER membership.organizationId == organization._key
+        FOR membership IN userTeams
+          FILTER membership.teamKey == team._key
             && membership.userId != ${user.key}
             && membership.status == "active"
           RETURN 1
       )
-      RETURN { key: organization._key, otherMembers }
+      RETURN { key: team._key, otherMembers }
   `)).all() as { key: string; otherMembers: number }[];
-  if (personalOrganizations.some(({ otherMembers }) => otherMembers > 0)) {
-    throw new Error('A personal organization contains another active member; automatic deletion is blocked.');
+  if (personalTeams.some(({ otherMembers }) => otherMembers > 0)) {
+    throw new Error('A personal team contains another active member; automatic deletion is blocked.');
   }
-  const organizationKeys = [...new Set([
-    ...memberships.map(({ organizationKey }) => organizationKey),
-    ...personalOrganizations.map(({ key }) => key),
+  const teamKeys = [...new Set([
+    ...memberships.map(({ teamKey }) => teamKey),
+    ...personalTeams.map(({ key }) => key),
   ])];
-  const membershipKeys = memberships.map(({ key }) => key);
-  const scopeKeys = organizationKeys.length ? await (await db.query(aql`
+  const teamMembershipKeys = memberships.map(({ key }) => key);
+  const scopeKeys = teamKeys.length ? await (await db.query(aql`
     FOR scope IN scopes
-      FILTER scope.organizationKey IN ${organizationKeys}
+      FILTER scope.teamKey IN ${teamKeys}
       RETURN scope._key
   `)).all() as string[] : [];
   const collections = (await db.listCollections())
     .map(({ name }) => name)
     .filter((name) => !name.startsWith('_'))
     .sort();
-  const targetKeys = new Set([user.key, emailHash, ...organizationKeys, ...membershipKeys, ...scopeKeys]);
+  const targetKeys = new Set([user.key, emailHash, ...teamKeys, ...teamMembershipKeys, ...scopeKeys]);
   const matched = new Map<string, Map<string, MatchedDocument>>();
 
   let discovered = true;
@@ -166,7 +166,7 @@ async function main() {
     emailHash,
     storedEmailHashMatches: user.emailHashMatches,
     userKey: user.key,
-    memberships: memberships.map(({ key, organizationKey, organizationName, otherMembers }) => ({ key, organizationKey, organizationName, otherMembers })),
+    memberships: memberships.map(({ key, teamKey, teamName, otherMembers }) => ({ key, teamKey, teamName, otherMembers })),
     scopeKeys: [...scopeKeys].sort(),
     affectedCollections,
     storageKeys,

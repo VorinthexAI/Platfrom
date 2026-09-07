@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View, type TextInput as NativeTextInput } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
@@ -38,14 +38,7 @@ export function ResourceTagsSheet({ context, targets, open, onClose }: ResourceT
   const createSubmissionRef = useRef<string | undefined>(undefined);
   const pendingCreationsRef = useRef(new Map<string, Promise<boolean>>());
 
-  useEffect(() => {
-    const session = ++sessionRef.current;
-    if (!open) {
-      setCreateOpen(false);
-      setTagName("");
-      return;
-    }
-    const request = ++requestRef.current;
+  const loadAssignments = useEffectEvent((request: number) => {
     const normalizedTargets = normalizeResourceTagTargets(targets);
     setDraft({});
     setState(undefined);
@@ -58,8 +51,21 @@ export function ResourceTagsSheet({ context, targets, open, onClose }: ResourceT
     }).finally(() => {
       if (request === requestRef.current) setLoading(false);
     });
-    return () => { requestRef.current += 1; if (sessionRef.current === session) sessionRef.current += 1; };
-  }, [batchIdentity, context.organizationKey, context.scopeKey, context.userKey, open, queryClient]);
+  });
+
+  useEffect(() => {
+    const session = ++sessionRef.current;
+    if (!open) {
+      const timeout = setTimeout(() => {
+        setCreateOpen(false);
+        setTagName("");
+      }, 0);
+      return () => clearTimeout(timeout);
+    }
+    const request = ++requestRef.current;
+    const timeout = setTimeout(() => loadAssignments(request), 0);
+    return () => { clearTimeout(timeout); requestRef.current += 1; if (sessionRef.current === session) sessionRef.current += 1; };
+  }, [batchIdentity, context.teamKey, context.scopeKey, context.userKey, open, queryClient]);
 
   useEffect(() => {
     if (!createOpen) return;

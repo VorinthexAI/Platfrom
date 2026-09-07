@@ -7,6 +7,7 @@ import { publishAppEvent } from "./app-events";
 import { appSearchQueryRoot } from "./app-search-client";
 import { publishBookChanged } from "./book-events";
 import { createCoalescedRefresh } from "./async-refresh";
+import { billingSummaryQueryKey } from "./billing-client";
 import { compassQueryKeys } from "./compass-query-keys";
 import { conversationQueryKeys } from "./conversation-cache";
 import { contentQueryKeys } from "./content-query-cache";
@@ -20,23 +21,28 @@ export function AuthenticatedEventBridge() {
   const queryClient = useQueryClient();
   const status = useAuthStore((state) => state.status);
   const userKey = useAuthStore((state) => state.user?.key);
-  const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "");
+  const teamKey = useAuthStore((state) => typeof state.team?.key === "string" ? state.team.key : "");
   const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
-  const previousIdentity = useRef<string | null | undefined>(undefined);
+  const previousIdentity = useRef<{ teamKey: string; scopeKey: string; userKey: string } | null | undefined>(undefined);
   const streamGeneration = useRef(0);
 
   useEffect(() => {
-    const identity = status === "authenticated" && userKey ? `${userKey}:${organizationKey}:${scopeKey}` : null;
-    if (previousIdentity.current !== undefined && previousIdentity.current !== identity) queryClient.clear();
+    const identity = status === "authenticated" && userKey ? { userKey, teamKey, scopeKey } : null;
+    const previous = previousIdentity.current;
+    const changed = previous !== undefined && (previous?.userKey !== identity?.userKey || previous?.teamKey !== identity?.teamKey || previous?.scopeKey !== identity?.scopeKey);
+    if (changed && previous && identity && previous.userKey === identity.userKey && previous.teamKey === identity.teamKey) {
+      void queryClient.cancelQueries({ predicate: ({ queryKey }) => queryKey[0] !== "scope-list" });
+      queryClient.removeQueries({ predicate: ({ queryKey }) => queryKey[0] !== "scope-list" });
+    } else if (changed) queryClient.clear();
     previousIdentity.current = identity;
-  }, [organizationKey, queryClient, scopeKey, status, userKey]);
+  }, [teamKey, queryClient, scopeKey, status, userKey]);
 
   useEffect(() => subscribeUserSearchHistoryAppends((appendedUserKey) => {
     if (appendedUserKey === userKey) void queryClient.invalidateQueries({ queryKey: userSearchHistoryQueryKey(userKey), exact: true, refetchType: "none" });
   }), [queryClient, userKey]);
 
   useEffect(() => {
-    if (status !== "authenticated" || !userKey || !organizationKey || !scopeKey) return;
+    if (status !== "authenticated" || !userKey || !teamKey || !scopeKey) return;
     const generation = ++streamGeneration.current;
     const isCurrent = () => isCurrentContextGeneration(generation, streamGeneration.current);
     let active = AppState.currentState === "active";
@@ -44,10 +50,11 @@ export function AuthenticatedEventBridge() {
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let controller: AbortController | undefined;
 
-    const root = ["gallery", organizationKey, scopeKey] as const;
-    const compassContext = { organizationKey, scopeKey };
-    const contentContext = { userKey, organizationKey, scopeKey };
-    const conversationContext = { userKey, organizationKey, scopeKey };
+    const root = ["gallery", teamKey, scopeKey] as const;
+    const compassContext = { teamKey, scopeKey };
+    const contentContext = { userKey, teamKey, scopeKey };
+    const conversationContext = { userKey, teamKey, scopeKey };
+    const invalidateBilling = () => void queryClient.invalidateQueries({ queryKey: billingSummaryQueryKey(userKey), exact: true, refetchType: "active" });
     const invalidateCompassTrips = () => void queryClient.invalidateQueries({ queryKey: compassQueryKeys.trips(compassContext) });
     const invalidateAppSearch = () => void queryClient.invalidateQueries({ queryKey: appSearchQueryRoot, refetchType: "active" });
     const invalidateCompassPlaceReferences = () => void queryClient.invalidateQueries({ queryKey: compassQueryKeys.places(compassContext) });
@@ -61,16 +68,9 @@ export function AuthenticatedEventBridge() {
       () => queryClient.invalidateQueries({ queryKey: ascendQueryKeys.all(compassContext), refetchType: "active" }),
       isCurrent,
     );
-    const inCurrentGallery = (queryKey: readonly unknown[]) => root.every((value, index) => queryKey[index] === value);
-    const invalidateSharingSuffix = (suffixes: readonly string[]) => {
-      void queryClient.invalidateQueries({ predicate: ({ queryKey }) => inCurrentGallery(queryKey) && queryKey[3] === "sharing" && suffixes.includes(String(queryKey.at(-1))), refetchType: "none" });
-    };
     const invalidateGallery = (families: ReadonlySet<GalleryRefreshFamily>) => {
-      if (families.has("root") || families.has("current") || families.has("access")) void queryClient.invalidateQueries({ queryKey: [...root, "overviews"], refetchType: "none" });
-      if (families.has("root") || families.has("access")) void queryClient.invalidateQueries({ queryKey: [...root, "collections"], refetchType: "none" });
-      if (families.has("members")) invalidateSharingSuffix(["members"]);
-      if (families.has("collectionInvites") || families.has("incomingInvites")) invalidateSharingSuffix(["invites", "incoming-invites"]);
-      if (families.has("shares")) invalidateSharingSuffix(["share-links"]);
+      if (families.has("root") || families.has("current")) void queryClient.invalidateQueries({ queryKey: [...root, "overviews"], refetchType: "none" });
+      if (families.has("root")) void queryClient.invalidateQueries({ queryKey: [...root, "collections"], refetchType: "none" });
       if (families.has("subjects")) void queryClient.invalidateQueries({ queryKey: [...root, "subjects"], refetchType: "none" });
       if (families.has("search")) void queryClient.invalidateQueries({ queryKey: [...root, "search"], refetchType: "none" });
       if (families.has("duplicates")) void queryClient.invalidateQueries({ queryKey: [...root, "duplicates"], refetchType: "none" });
@@ -89,6 +89,7 @@ export function AuthenticatedEventBridge() {
         if (!isCurrent()) return;
         invalidateAppSearch();
         invalidateUserHiddens();
+        if (event.event === "referral.reward.created") invalidateBilling();
         if (event.event === "trip.changed") invalidateCompassTrips();
         if (event.event === "place.reference.changed") invalidateCompassPlaceReferences();
         if (event.event === "inbox.changed") {
@@ -128,6 +129,7 @@ export function AuthenticatedEventBridge() {
         invalidateCompassPlaceReferences();
         invalidateSignal();
         invalidateBooks();
+        invalidateBilling();
         void queryClient.invalidateQueries({ queryKey: conversationQueryKeys.all(conversationContext), refetchType: "active" });
         publishAppEvent({ type: "event-stream.connected" });
       }).catch((error: unknown) => {
@@ -159,6 +161,7 @@ export function AuthenticatedEventBridge() {
         invalidateCompassPlaceReferences();
         invalidateSignal();
         invalidateBooks();
+        invalidateBilling();
         connect();
       }
     });
@@ -173,7 +176,7 @@ export function AuthenticatedEventBridge() {
       currentController?.abort();
       subscription.remove();
     };
-  }, [organizationKey, queryClient, scopeKey, status, userKey]);
+  }, [teamKey, queryClient, scopeKey, status, userKey]);
 
   return null;
 }

@@ -31,6 +31,7 @@ export type ButtonProps = PressableProps & {
   children?: ReactNode;
   contentMode?: "label" | "raw";
   icon?: ReactNode;
+  trailingIcon?: ReactNode;
   iconOnly?: boolean;
   loading?: boolean;
   pressFeedback?: "opacity" | "none";
@@ -114,6 +115,7 @@ export function Button({
   contentMode = "label",
   disabled,
   icon,
+  trailingIcon,
   iconOnly = false,
   loading = false,
   pressFeedback = "opacity",
@@ -186,6 +188,7 @@ export function Button({
                 {children}
               </Text>
             )}
+            {trailingIcon}
           </>
         );
       }}

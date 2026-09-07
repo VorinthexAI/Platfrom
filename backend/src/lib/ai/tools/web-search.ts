@@ -9,8 +9,8 @@ export const webSearchInputSchema = z.object({
 export type WebSearchInput = z.infer<typeof webSearchInputSchema>;
 
 export interface WebSearchToolDependencies extends ExecuteActionOptions {
-  organizationKey?: string;
-  executeSearch?: (organizationKey: string, input: { prompt: string }, options: ExecuteActionOptions) => Promise<ProviderExecuteResponse<WebOutput>>;
+  teamKey?: string;
+  executeSearch?: (teamKey: string, input: { prompt: string }, options: ExecuteActionOptions) => Promise<ProviderExecuteResponse<WebOutput>>;
 }
 
 export const webSearchTool = {
@@ -29,7 +29,7 @@ export const webSearchTool = {
   },
   async execute(rawInput: unknown, dependencies: WebSearchToolDependencies = {}): Promise<WebOutput> {
     const input = webSearchInputSchema.parse(rawInput);
-    if (!dependencies.organizationKey) throw new Error('web.search requires an authorized organization.');
+    if (!dependencies.teamKey) throw new Error('web.search requires an authorized team.');
     const options: ExecuteActionOptions = {
       adapters: dependencies.adapters,
       env: dependencies.env,
@@ -38,8 +38,8 @@ export const webSearchTool = {
       providers: ['web.primary'],
     };
     const response = dependencies.executeSearch
-      ? await dependencies.executeSearch(dependencies.organizationKey, { prompt: input.query }, options)
-      : await executeWebSearch<WebOutput>(dependencies.organizationKey, { prompt: input.query }, options);
+      ? await dependencies.executeSearch(dependencies.teamKey, { prompt: input.query }, options)
+      : await executeWebSearch<WebOutput>(dependencies.teamKey, { prompt: input.query }, options);
     return webOutputSchema.parse(response.output);
   },
 } as const;

@@ -5,7 +5,7 @@ export const GALLERY_UPLOADS_COLLECTION = 'galleryUploads';
 export const galleryUploadStatusSchema = z.enum(['reserved', 'queued', 'processing', 'completed', 'failed']);
 export const galleryUploadSchema = z.object({
   key: z.string().cuid(),
-  organizationKey: z.string().min(1),
+  teamKey: z.string().min(1),
   scopeKey: z.string().cuid(),
   actorKey: z.string().cuid(),
   imageKey: z.string().cuid(),

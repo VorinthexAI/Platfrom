@@ -1,6 +1,6 @@
-export type WorkspaceContext = { organizationKey: string; scopeKey: string };
+export type WorkspaceContext = { teamKey: string; scopeKey: string };
 
-const contextKey = (context: WorkspaceContext) => [context.organizationKey, context.scopeKey] as const;
+const contextKey = (context: WorkspaceContext) => [context.teamKey, context.scopeKey] as const;
 const sortedTagKeys = (tagKeys: readonly string[]) => [...tagKeys].sort();
 
 export const compassQueryKeys = {

@@ -51,7 +51,7 @@ try {
       return key;
     }));
     const urls = await Promise.all(storageKeys.map(signedImageUrl));
-    const response = await router.executeAction<{ operation: 'caption'; imageUrls: string[]; purpose: 'document-transcription' }, { results: { caption: string; score: number }[] }>({ mode: 'auto', actionSlug: 'image', organizationKey: 'nexus' }, { operation: 'caption', imageUrls: urls, purpose: 'document-transcription' }, { providers: ['image.primary'] });
+    const response = await router.executeAction<{ operation: 'caption'; imageUrls: string[]; purpose: 'document-transcription' }, { results: { caption: string; score: number }[] }>({ mode: 'auto', actionSlug: 'image', teamKey: 'nexus' }, { operation: 'caption', imageUrls: urls, purpose: 'document-transcription' }, { providers: ['image.primary'] });
     response.output.results.forEach(({ caption }, index) => console.log(`\n===== PAGE ${index + 1}: VISUAL AI =====\n${caption}`));
     console.log(`\nVerified visual transcription for ${response.output.results.length} real image page(s).`);
   } else {

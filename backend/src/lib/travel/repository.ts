@@ -16,27 +16,27 @@ import { currentEmbeddingSchema } from '@/lib/embeddings';
 import { ensureGeneratedDocumentFolders } from '@/lib/generated-documents/folders';
 import { z } from 'zod';
 
-export interface TravelAccessContext { organizationKey: string; scopeKey: string; userKey: string }
+export interface TravelAccessContext { teamKey: string; scopeKey: string; userKey: string }
 export interface TravelCreationDateRange { createdFrom?: string; createdTo?: string }
 export interface PlacePresentationRecord { place: Place; heroStorageKey?: string; trips?: Array<{ key: string; name: string }> }
 export interface TripPresentationRecord { trip: Trip; places: Place[]; placeHeroStorageKeys: Array<string | null>; attachments: TripAttachment[]; accessibleCoverImageKey?: string; coverStorageKey?: string }
 export interface TripGuideSource { trip: Trip; places: Place[] }
 export interface GeneratedDocumentRecord { document: Document; binding: GeneratedDocumentBinding }
 export type TravelGeneratedRecord = TripGuide | PlaceReference;
-export interface GalleryExportCollection { key: string; scopeKey: string; ownerKey: string; memberKey: string; name: string; embedding: number[]; createdAt: string; updatedAt: string }
+export interface GalleryExportCollection { key: string; scopeKey: string; ownerKey: string; name: string; embedding: number[]; createdAt: string; updatedAt: string }
 export interface TravelDatabase { query(query: string, bindVars?: Record<string, unknown>): Promise<{ all(): Promise<unknown[]> }> }
 type TravelTransactionRunner = <T>(collections: { read: string[]; write: string[] }, operation: (transaction: TravelDatabase) => Promise<T>) => Promise<T>;
 const runTravelTransaction: TravelTransactionRunner = (collections, operation) => withTransaction(collections, (transaction) => operation(transaction));
 const readAuthorizationQuery = `
-  LET membership = FIRST(FOR candidate IN userOrganizations
-    FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active"
+  LET membership = FIRST(FOR candidate IN userTeams
+    FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active"
     LIMIT 1 RETURN candidate)
   LET scope = DOCUMENT(scopes, @scopeKey)
   LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers
-    FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active"
+    FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active"
     LIMIT 1 RETURN member.role)
-  FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-  FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member", "viewer"]
+  FILTER membership != null && scope != null && scope.teamKey == @teamKey
+  FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member", "viewer"]
   RETURN membership._key
 `;
 const writeAuthorizationQuery = readAuthorizationQuery.replace('["owner", "admin", "moderator", "member", "viewer"]', '["owner", "admin", "moderator", "member"]');
@@ -118,15 +118,15 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
     },
     async open(context, countryCode, name, openedAt) {
       const cursor = await database.query(`
-        LET membership = FIRST(FOR candidate IN userOrganizations
-          FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active"
+        LET membership = FIRST(FOR candidate IN userTeams
+          FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active"
           LIMIT 1 RETURN candidate)
         LET scope = DOCUMENT(scopes, @scopeKey)
         LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers
-          FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active"
+          FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active"
           LIMIT 1 RETURN member.role)
-        FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-        FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member", "viewer"]
+        FILTER membership != null && scope != null && scope.teamKey == @teamKey
+        FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member", "viewer"]
         FOR place IN places
           FILTER place.scopeKey == @scopeKey && place.userKey == @userKey && place.countryCode == @countryCode && LOWER(place.name) == LOWER(@name) && place.generatedDetail != null
           LIMIT 1 UPDATE place WITH { openedAt: @openedAt } IN places RETURN NEW
@@ -147,15 +147,15 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
     async upsertGenerated(context, place) {
       const valid = placeSchema.parse(place);
       const cursor = await database.query(`
-        LET membership = FIRST(FOR candidate IN userOrganizations
-          FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active"
+        LET membership = FIRST(FOR candidate IN userTeams
+          FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active"
           LIMIT 1 RETURN candidate)
         LET scope = DOCUMENT(scopes, @scopeKey)
         LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers
-          FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active"
+          FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active"
           LIMIT 1 RETURN member.role)
-        FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-        FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
+        FILTER membership != null && scope != null && scope.teamKey == @teamKey
+        FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
         UPSERT { scopeKey: @scopeKey, userKey: @userKey, countryCode: @countryCode, name: @name }
           INSERT @place
           UPDATE {
@@ -171,15 +171,15 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
     async create(context, place) {
       const valid = placeSchema.parse(place);
       const cursor = await database.query(`
-        LET membership = FIRST(FOR candidate IN userOrganizations
-          FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active"
+        LET membership = FIRST(FOR candidate IN userTeams
+          FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active"
           LIMIT 1 RETURN candidate)
         LET scope = DOCUMENT(scopes, @scopeKey)
         LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers
-          FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active"
+          FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active"
           LIMIT 1 RETURN member.role)
-        FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-        FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
+        FILTER membership != null && scope != null && scope.teamKey == @teamKey
+        FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
         UPSERT { scopeKey: @scopeKey, userKey: @userKey, countryCode: @countryCode, name: @name }
           INSERT @place UPDATE {} IN places RETURN NEW
       `, { ...context, countryCode: valid.countryCode, name: valid.name, place: toArangoDoc(valid) });
@@ -189,19 +189,19 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
     },
     async updatePlace(context, placeKey, patch) {
       const result = await transaction({
-        read: ['userOrganizations', 'scopes', 'scopeMembers', 'placeHeroMedia'],
+        read: ['userTeams', 'scopes', 'scopeMembers', 'placeHeroMedia'],
         write: ['places'],
       }, async (executor) => {
         const cursor = await executor.query(`
-          LET membership = FIRST(FOR candidate IN userOrganizations
-            FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active"
+          LET membership = FIRST(FOR candidate IN userTeams
+            FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active"
             LIMIT 1 RETURN candidate)
           LET scope = DOCUMENT(scopes, @scopeKey)
           LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers
-            FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active"
+            FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active"
             LIMIT 1 RETURN member.role)
-          FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-          FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
+          FILTER membership != null && scope != null && scope.teamKey == @teamKey
+          FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
           LET place = DOCUMENT(places, @placeKey)
           FILTER place != null && place.scopeKey == @scopeKey && place.userKey == @userKey && place.saved == true
           LET changed = (@setStatus && (place.status IN ["wishlist", "visited"] ? place.status : "wishlist") != @status)
@@ -229,15 +229,15 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
     async deletePlace(context, placeKey, updatedAt) {
       z.string().datetime().parse(updatedAt);
       const result = await transaction({
-        read: ['userOrganizations', 'scopes', 'scopeMembers', 'places'],
+        read: ['userTeams', 'scopes', 'scopeMembers', 'places'],
         write: ['places', 'placeHeroMedia', 'placeReferences', 'tripPlaces', 'trips', 'storageDeletionJobs', 'tagAssignments'],
       }, async (executor) => {
         const cursor = await executor.query(`
-          LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
+          LET membership = FIRST(FOR candidate IN userTeams FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
           LET scope = DOCUMENT(scopes, @scopeKey)
-          LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
-          FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-          FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
+          LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
+          FILTER membership != null && scope != null && scope.teamKey == @teamKey
+          FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
           LET place = DOCUMENT(places, @placeKey)
           FILTER place == null || (place.scopeKey == @scopeKey && place.userKey == @userKey && place.saved == true)
           RETURN place == null ? "deleted" : "deletable"
@@ -263,11 +263,11 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
     },
     async searchPlaces(context, embedding, dateRange = {}) {
       const cursor = await database.query(`
-        LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
+        LET membership = FIRST(FOR candidate IN userTeams FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
         LET scope = DOCUMENT(scopes, @scopeKey)
-        LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
-        FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-        FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member", "viewer"]
+        LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
+        FILTER membership != null && scope != null && scope.teamKey == @teamKey
+        FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member", "viewer"]
         FOR place IN places
           FILTER place.scopeKey == @scopeKey && place.userKey == @userKey && place.saved == true
           FILTER @createdFrom == null || place.createdAt >= @createdFrom
@@ -300,25 +300,25 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
         throw new TravelRepositoryError('forbidden');
       }
       const result = await transaction({
-        read: ['userOrganizations', 'scopes', 'scopeMembers', 'places', 'images', 'placeHeroMedia', 'tripAttachments', 'folders', 'collections', 'collectionMembers', 'collectionImages'],
+        read: ['userTeams', 'scopes', 'scopeMembers', 'places', 'images', 'placeHeroMedia', 'tripAttachments', 'folders', 'collections', 'collectionImages'],
         write: ['tripCreationReceipts', 'trips', 'tripPlaces'],
       }, async (executor) => {
         const cursor = await executor.query(`
-          LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
+          LET membership = FIRST(FOR candidate IN userTeams FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
           LET scope = DOCUMENT(scopes, @scopeKey)
-          LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
-          FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-          FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
-          LET elevated = membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"]
+          LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
+          FILTER membership != null && scope != null && scope.teamKey == @teamKey
+          FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
+          LET elevated = membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"]
           LET receipt = DOCUMENT(tripCreationReceipts, @tripKey)
           LET trip = DOCUMENT(trips, @tripKey)
           LET requestedPlaces = receipt == null ? (FOR placeKey IN @placeKeys LET place = DOCUMENT(places, placeKey) FILTER place != null && place.scopeKey == @scopeKey && place.userKey == @userKey && place.saved == true LET hero = FIRST(FOR media IN placeHeroMedia FILTER media.scopeKey == @scopeKey && media.userKey == @userKey && media.placeKey == place._key LIMIT 1 RETURN media.storageKey) RETURN { place, heroStorageKey: hero }) : []
           LET persistedPlaces = receipt != null && trip != null ? (FOR relation IN tripPlaces FILTER relation.scopeKey == @scopeKey && relation.tripKey == trip._key SORT relation.position ASC, relation._key ASC LET place = DOCUMENT(places, relation.placeKey) FILTER place != null && place.scopeKey == @scopeKey && place.userKey == @userKey && place.saved == true LET hero = FIRST(FOR media IN placeHeroMedia FILTER media.scopeKey == @scopeKey && media.userKey == @userKey && media.placeKey == place._key LIMIT 1 RETURN media.storageKey) RETURN { place, heroStorageKey: hero }) : []
           LET places = receipt == null ? requestedPlaces : persistedPlaces
-          LET attachments = receipt != null && trip != null ? (FOR attachment IN tripAttachments FILTER attachment.scopeKey == @scopeKey && attachment.tripKey == trip._key SORT attachment.position ASC, attachment._key ASC LET folder = attachment.targetType == "folder" ? DOCUMENT(folders, attachment.targetKey) : null LET collection = attachment.targetType == "collection" ? DOCUMENT(collections, attachment.targetKey) : null LET collectionAccess = collection == null ? false : elevated || LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collection._key && member.memberKey == membership._key LIMIT 1 RETURN 1) > 0 FILTER (attachment.targetType == "folder" && folder != null && folder.scopeKey == @scopeKey && (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null)) || (attachment.targetType == "collection" && collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only" && collection.purpose == null && collectionAccess) RETURN attachment) : []
+          LET attachments = receipt != null && trip != null ? (FOR attachment IN tripAttachments FILTER attachment.scopeKey == @scopeKey && attachment.tripKey == trip._key SORT attachment.position ASC, attachment._key ASC LET folder = attachment.targetType == "folder" ? DOCUMENT(folders, attachment.targetKey) : null LET collection = attachment.targetType == "collection" ? DOCUMENT(collections, attachment.targetKey) : null LET collectionAccess = collection != null && (elevated || collection.ownerKey == membership._key) FILTER (attachment.targetType == "folder" && folder != null && folder.scopeKey == @scopeKey && (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null)) || (attachment.targetType == "collection" && collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only" && collection.purpose == null && collectionAccess) RETURN attachment) : []
           LET customCover = trip == null || trip.coverImageKey == null ? null : DOCUMENT(images, trip.coverImageKey)
           LET coverCollections = customCover == null ? [] : (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == customCover._key LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null && collection.scopeKey == @scopeKey RETURN collection._key)
-          LET coverAccessible = customCover != null && customCover.scopeKey == @scopeKey && (elevated || LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey IN coverCollections && member.memberKey == membership._key LIMIT 1 RETURN 1) > 0 || (LENGTH(coverCollections) == 0 && customCover.createdByKey == membership._key))
+          LET coverAccessible = customCover != null && customCover.scopeKey == @scopeKey && (elevated || LENGTH(FOR collectionKey IN coverCollections LET collection = DOCUMENT(collections, collectionKey) FILTER collection != null && collection.ownerKey == membership._key LIMIT 1 RETURN 1) > 0 || (LENGTH(coverCollections) == 0 && customCover.createdByKey == membership._key))
           LET firstHeroStorageKey = FIRST(places).heroStorageKey
           RETURN { receipt, trip, places, attachments, accessibleCoverImageKey: coverAccessible ? customCover._key : null, coverStorageKey: coverAccessible ? customCover.storageKey : firstHeroStorageKey }
         `, { ...context, tripKey: validTrip.key, placeKeys: validRelations.map(({ placeKey }) => placeKey) });
@@ -343,12 +343,12 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
     },
     async tripSemanticSourceForUpdate(context, tripKey) {
       const cursor = await database.query(`
-        LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
+        LET membership = FIRST(FOR candidate IN userTeams FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
         LET scope = DOCUMENT(scopes, @scopeKey)
-        LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
-        FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-        FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
-        LET elevated = membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"]
+        LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
+        FILTER membership != null && scope != null && scope.teamKey == @teamKey
+        FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
+        LET elevated = membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"]
         LET trip = DOCUMENT(trips, @tripKey)
         FILTER trip != null && trip.scopeKey == @scopeKey && trip.userKey == @userKey
         RETURN { name: trip.name, description: trip.description }
@@ -363,15 +363,15 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
       const validRelations = relations?.map((relation) => tripPlaceSchema.parse(relation));
       if (validRelations?.some((relation, position) => relation.scopeKey !== context.scopeKey || relation.tripKey !== tripKey || relation.position !== position)) throw new TravelRepositoryError('forbidden');
       const updated = await transaction({
-        read: ['userOrganizations', 'scopes', 'scopeMembers', 'trips', 'images', 'collectionImages', 'collections', 'collectionMembers', 'tripAttachments', 'folders', 'placeHeroMedia'],
+        read: ['userTeams', 'scopes', 'scopeMembers', 'trips', 'images', 'collectionImages', 'collections', 'tripAttachments', 'folders', 'placeHeroMedia'],
         write: ['trips', 'tripPlaces', 'places'],
       }, async (executor) => {
         const mutation = await executor.query(`
-          LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
+          LET membership = FIRST(FOR candidate IN userTeams FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
           LET scope = DOCUMENT(scopes, @scopeKey)
-          LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
-          FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-          FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
+          LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
+          FILTER membership != null && scope != null && scope.teamKey == @teamKey
+          FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
           LET trip = DOCUMENT(trips, @tripKey)
           FILTER trip != null && trip.scopeKey == @scopeKey && trip.userKey == @userKey
           LET currentPlaceKeys = (FOR relation IN tripPlaces FILTER relation.scopeKey == @scopeKey && relation.tripKey == @tripKey SORT relation.position ASC, relation._key ASC RETURN relation.placeKey)
@@ -379,7 +379,7 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
           FILTER !@replacePlaces || (LENGTH(UNIQUE(@placeKeys)) == LENGTH(@placeKeys) && LENGTH(selectedPlaces) == LENGTH(@placeKeys))
           LET cover = !@setCover || @coverImageKey == null ? null : DOCUMENT(images, @coverImageKey)
           LET coverCollections = cover == null ? [] : (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == cover._key LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null && collection.scopeKey == @scopeKey RETURN collection._key)
-          LET coverAccessible = cover != null && cover.scopeKey == @scopeKey && (membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey IN coverCollections && member.memberKey == membership._key LIMIT 1 RETURN 1) > 0 || (LENGTH(coverCollections) == 0 && cover.createdByKey == membership._key))
+          LET coverAccessible = cover != null && cover.scopeKey == @scopeKey && (membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || LENGTH(FOR collectionKey IN coverCollections LET collection = DOCUMENT(collections, collectionKey) FILTER collection != null && collection.ownerKey == membership._key LIMIT 1 RETURN 1) > 0 || (LENGTH(coverCollections) == 0 && cover.createdByKey == membership._key))
           FILTER !@setCover || @coverImageKey == null || coverAccessible
           LET changedPlaces = @replacePlaces && currentPlaceKeys != @placeKeys
           LET changed = changedPlaces || (@setName && trip.name != @name) || (@setDescription && (HAS(trip, "description") ? trip.description : null) != @description) || (@setCover && (HAS(trip, "coverImageKey") ? trip.coverImageKey : null) != @coverImageKey) || (@setFavorite && (trip.isFavorite == true) != @isFavorite) || (@setStatus && (trip.status IN ["planned", "completed"] ? trip.status : "planned") != @status)
@@ -403,16 +403,16 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
           `, { scopeKey: context.scopeKey, userKey: context.userKey, tripKey });
         }
         const cursor = await executor.query(`
-          LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
-          LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
-          LET elevated = membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"]
+          LET membership = FIRST(FOR candidate IN userTeams FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
+          LET scopeRole = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
+          LET elevated = membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"]
           LET trip = DOCUMENT(trips, @tripKey)
           LET places = (FOR relation IN tripPlaces FILTER relation.scopeKey == @scopeKey && relation.tripKey == @tripKey SORT relation.position ASC, relation._key ASC LET place = DOCUMENT(places, relation.placeKey) FILTER place != null && place.scopeKey == @scopeKey && place.userKey == @userKey && place.saved == true LET heroStorageKey = FIRST(FOR media IN placeHeroMedia FILTER media.scopeKey == @scopeKey && media.userKey == @userKey && media.placeKey == place._key LIMIT 1 RETURN media.storageKey) RETURN { place, heroStorageKey })
-          LET attachments = (FOR attachment IN tripAttachments FILTER attachment.scopeKey == @scopeKey && attachment.tripKey == @tripKey SORT attachment.position ASC, attachment._key ASC LET folder = attachment.targetType == "folder" ? DOCUMENT(folders, attachment.targetKey) : null LET collection = attachment.targetType == "collection" ? DOCUMENT(collections, attachment.targetKey) : null LET collectionAccess = collection == null ? false : elevated || LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collection._key && member.memberKey == membership._key LIMIT 1 RETURN 1) > 0 FILTER (attachment.targetType == "folder" && folder != null && folder.scopeKey == @scopeKey && (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null)) || (attachment.targetType == "collection" && collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only" && collection.purpose == null && collectionAccess) RETURN attachment)
+          LET attachments = (FOR attachment IN tripAttachments FILTER attachment.scopeKey == @scopeKey && attachment.tripKey == @tripKey SORT attachment.position ASC, attachment._key ASC LET folder = attachment.targetType == "folder" ? DOCUMENT(folders, attachment.targetKey) : null LET collection = attachment.targetType == "collection" ? DOCUMENT(collections, attachment.targetKey) : null LET collectionAccess = collection != null && (elevated || collection.ownerKey == membership._key) FILTER (attachment.targetType == "folder" && folder != null && folder.scopeKey == @scopeKey && (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null)) || (attachment.targetType == "collection" && collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only" && collection.purpose == null && collectionAccess) RETURN attachment)
           LET heroStorageKey = FIRST(places).heroStorageKey
           LET customCover = trip.coverImageKey == null ? null : DOCUMENT(images, trip.coverImageKey)
           LET coverCollections = customCover == null ? [] : (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == customCover._key LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null && collection.scopeKey == @scopeKey RETURN collection._key)
-          LET coverAccessible = customCover != null && customCover.scopeKey == @scopeKey && (elevated || LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey IN coverCollections && member.memberKey == membership._key LIMIT 1 RETURN 1) > 0 || (LENGTH(coverCollections) == 0 && customCover.createdByKey == membership._key))
+          LET coverAccessible = customCover != null && customCover.scopeKey == @scopeKey && (elevated || LENGTH(FOR collectionKey IN coverCollections LET collection = DOCUMENT(collections, collectionKey) FILTER collection != null && collection.ownerKey == membership._key LIMIT 1 RETURN 1) > 0 || (LENGTH(coverCollections) == 0 && customCover.createdByKey == membership._key))
           RETURN { trip, places, attachments, accessibleCoverImageKey: coverAccessible ? customCover._key : null, coverStorageKey: coverAccessible ? customCover.storageKey : heroStorageKey }
         `, { ...context, tripKey });
         return (await cursor.all())[0];
@@ -421,13 +421,13 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
       return parseTripPresentation(updated);
     },
     async deleteTrip(context, tripKey) {
-      const result = await transaction({ read: ['userOrganizations', 'scopes', 'scopeMembers', 'tripCreationReceipts'], write: ['trips', 'tripPlaces', 'tripAttachments', 'tripGuides', 'tagAssignments'] }, async (executor) => {
+      const result = await transaction({ read: ['userTeams', 'scopes', 'scopeMembers', 'tripCreationReceipts'], write: ['trips', 'tripPlaces', 'tripAttachments', 'tripGuides', 'tagAssignments'] }, async (executor) => {
         const cursor = await executor.query(`
-          LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
+          LET membership = FIRST(FOR candidate IN userTeams FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
           LET scope = DOCUMENT(scopes, @scopeKey)
-          LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
-          FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-          FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
+          LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
+          FILTER membership != null && scope != null && scope.teamKey == @teamKey
+          FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
           LET trip = DOCUMENT(trips, @tripKey)
           LET receipt = DOCUMENT(tripCreationReceipts, @tripKey)
           FILTER (trip != null && trip.scopeKey == @scopeKey && trip.userKey == @userKey) || (trip == null && receipt != null && receipt.scopeKey == @scopeKey && receipt.userKey == @userKey)
@@ -455,27 +455,27 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
       const references = validAttachments.map(({ targetType, targetKey }) => `${targetType}\0${targetKey}`);
       if (new Set(references).size !== references.length) throw new TravelRepositoryError('forbidden');
       const updated = await transaction({
-        read: ['userOrganizations', 'scopes', 'scopeMembers', 'trips', 'folders', 'collections', 'images', 'collectionImages', 'collectionMembers', 'tripPlaces', 'places', 'placeHeroMedia'],
+        read: ['userTeams', 'scopes', 'scopeMembers', 'trips', 'folders', 'collections', 'images', 'collectionImages', 'tripPlaces', 'places', 'placeHeroMedia'],
         write: ['tripAttachments', 'trips'],
       }, async (executor) => {
         const cursor = await executor.query(`
-        LET membership = FIRST(FOR candidate IN userOrganizations
-          FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active"
+        LET membership = FIRST(FOR candidate IN userTeams
+          FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active"
           LIMIT 1 RETURN candidate)
         LET scope = DOCUMENT(scopes, @scopeKey)
         LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers
-          FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active"
+          FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active"
           LIMIT 1 RETURN member.role)
-        FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-        FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
-        LET elevated = membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"]
+        FILTER membership != null && scope != null && scope.teamKey == @teamKey
+        FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
+        LET elevated = membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"]
         LET trip = DOCUMENT(trips, @tripKey)
         FILTER trip != null && trip.scopeKey == @scopeKey && trip.userKey == @userKey
         LET existingAttachments = (FOR attachment IN tripAttachments FILTER attachment.scopeKey == @scopeKey && attachment.tripKey == @tripKey SORT attachment.position ASC, attachment._key ASC RETURN attachment)
         LET validatedTargets = (FOR attachment IN @attachments
           LET folder = attachment.targetType == "folder" ? DOCUMENT(folders, attachment.targetKey) : null
           LET collection = attachment.targetType == "collection" ? DOCUMENT(collections, attachment.targetKey) : null
-          LET collectionAccess = collection == null ? false : elevated || LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collection._key && member.memberKey == membership._key LIMIT 1 RETURN 1) > 0
+          LET collectionAccess = collection != null && (elevated || collection.ownerKey == membership._key)
           FILTER (attachment.targetType == "folder" && folder != null && folder.scopeKey == @scopeKey && (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null))
             || (attachment.targetType == "collection" && collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only" && collection.purpose == null && collectionAccess)
           RETURN attachment)
@@ -490,7 +490,7 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
           RETURN { place, heroStorageKey })
         LET customCover = trip.coverImageKey == null ? null : DOCUMENT(images, trip.coverImageKey)
         LET customCoverCollections = customCover == null ? [] : (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == customCover._key LET containing = DOCUMENT(collections, relation.collectionKey) FILTER containing != null && containing.scopeKey == @scopeKey RETURN containing._key)
-        LET customCoverAccessible = customCover != null && customCover.scopeKey == @scopeKey && (membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey IN customCoverCollections && member.memberKey == membership._key LIMIT 1 RETURN 1) > 0 || (LENGTH(customCoverCollections) == 0 && customCover.createdByKey == membership._key))
+        LET customCoverAccessible = customCover != null && customCover.scopeKey == @scopeKey && (membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"] || LENGTH(FOR collectionKey IN customCoverCollections LET collection = DOCUMENT(collections, collectionKey) FILTER collection != null && collection.ownerKey == membership._key LIMIT 1 RETURN 1) > 0 || (LENGTH(customCoverCollections) == 0 && customCover.createdByKey == membership._key))
         RETURN { trip, places, attachments: unchanged ? existingAttachments : @attachments, unchanged, accessibleCoverImageKey: customCoverAccessible ? customCover._key : null, coverStorageKey: customCoverAccessible ? customCover.storageKey : FIRST(places).heroStorageKey }
         `, { ...context, tripKey, attachments: validAttachments.map((attachment) => toArangoDoc(attachment)) });
         const presentation = (await cursor.all())[0];
@@ -507,16 +507,16 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
     },
     async listTrips(context) {
       const cursor = await database.query(`
-        LET membership = FIRST(FOR candidate IN userOrganizations
-          FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active"
+        LET membership = FIRST(FOR candidate IN userTeams
+          FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active"
           LIMIT 1 RETURN candidate)
         LET scope = DOCUMENT(scopes, @scopeKey)
         LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers
-          FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active"
+          FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active"
           LIMIT 1 RETURN member.role)
-        FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-        FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member", "viewer"]
-        LET elevated = membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"]
+        FILTER membership != null && scope != null && scope.teamKey == @teamKey
+        FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member", "viewer"]
+        LET elevated = membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"]
         FOR trip IN trips
           FILTER trip.scopeKey == @scopeKey && trip.userKey == @userKey
           SORT trip.createdAt ASC, trip._key ASC
@@ -529,13 +529,13 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
             RETURN { place, heroStorageKey })
           LET customCover = trip.coverImageKey == null ? null : DOCUMENT(images, trip.coverImageKey)
           LET customCoverCollections = customCover == null ? [] : (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == customCover._key LET containing = DOCUMENT(collections, relation.collectionKey) FILTER containing != null && containing.scopeKey == @scopeKey RETURN containing._key)
-          LET customCoverAccessible = customCover != null && customCover.scopeKey == @scopeKey && (elevated || LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey IN customCoverCollections && member.memberKey == membership._key LIMIT 1 RETURN 1) > 0 || (LENGTH(customCoverCollections) == 0 && customCover.createdByKey == membership._key))
+          LET customCoverAccessible = customCover != null && customCover.scopeKey == @scopeKey && (elevated || LENGTH(FOR collectionKey IN customCoverCollections LET collection = DOCUMENT(collections, collectionKey) FILTER collection != null && collection.ownerKey == membership._key LIMIT 1 RETURN 1) > 0 || (LENGTH(customCoverCollections) == 0 && customCover.createdByKey == membership._key))
           LET attachments = (FOR attachment IN tripAttachments
             FILTER attachment.scopeKey == @scopeKey && attachment.tripKey == trip._key
             SORT attachment.position ASC, attachment._key ASC
             LET folder = attachment.targetType == "folder" ? DOCUMENT(folders, attachment.targetKey) : null
             LET collection = attachment.targetType == "collection" ? DOCUMENT(collections, attachment.targetKey) : null
-            LET collectionAccess = collection == null ? false : elevated || LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == collection._key && member.memberKey == membership._key LIMIT 1 RETURN 1) > 0
+            LET collectionAccess = collection != null && (elevated || collection.ownerKey == membership._key)
             FILTER (attachment.targetType == "folder" && folder != null && folder.scopeKey == @scopeKey && (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null))
               || (attachment.targetType == "collection" && collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only" && collection.purpose == null && collectionAccess)
             RETURN attachment)
@@ -545,11 +545,11 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
     },
     async searchTrips(context, embedding, dateRange = {}) {
       const cursor = await database.query(`
-        LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
+        LET membership = FIRST(FOR candidate IN userTeams FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
         LET scope = DOCUMENT(scopes, @scopeKey)
-        LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
-        FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-        FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member", "viewer"]
+        LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
+        FILTER membership != null && scope != null && scope.teamKey == @teamKey
+        FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member", "viewer"]
         FOR trip IN trips
           FILTER trip.scopeKey == @scopeKey && trip.userKey == @userKey
           FILTER @createdFrom == null || trip.createdAt >= @createdFrom
@@ -566,11 +566,11 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
     },
     async prepareTripGuide(context, guideKey, tripKey, requestHash) {
       const cursor = await database.query(`
-        LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
+        LET membership = FIRST(FOR candidate IN userTeams FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
         LET scope = DOCUMENT(scopes, @scopeKey)
-        LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
-        FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-        FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
+        LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
+        FILTER membership != null && scope != null && scope.teamKey == @teamKey
+        FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
         LET existing = DOCUMENT(tripGuides, @guideKey)
         LET trip = DOCUMENT(trips, @tripKey)
         FILTER existing != null || (trip != null && trip.scopeKey == @scopeKey && trip.userKey == @userKey)
@@ -594,11 +594,11 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
     },
     async preparePlaceReference(context, referenceKey, placeKey, kind, requestHash) {
       const cursor = await database.query(`
-        LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
+        LET membership = FIRST(FOR candidate IN userTeams FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
         LET scope = DOCUMENT(scopes, @scopeKey)
-        LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
-        FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-        FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
+        LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
+        FILTER membership != null && scope != null && scope.teamKey == @teamKey
+        FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
         LET place = DOCUMENT(places, @placeKey)
         FILTER place != null && place.scopeKey == @scopeKey && place.userKey == @userKey && place.saved == true
         LET existing = DOCUMENT(placeReferences, @referenceKey)
@@ -617,13 +617,13 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
       const valid = 'tripKey' in record ? tripGuideSchema.parse(record) : placeReferenceSchema.parse(record);
       if (valid.scopeKey !== context.scopeKey || valid.userKey !== context.userKey) throw new TravelRepositoryError('forbidden');
       const isGuide = 'tripKey' in valid;
-      const result = await transaction({ read: ['userOrganizations', 'scopes', 'scopeMembers', 'trips', 'places'], write: [isGuide ? 'tripGuides' : 'placeReferences'] }, async (executor) => {
+      const result = await transaction({ read: ['userTeams', 'scopes', 'scopeMembers', 'trips', 'places'], write: [isGuide ? 'tripGuides' : 'placeReferences'] }, async (executor) => {
         const cursor = await executor.query(`
-          LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
+          LET membership = FIRST(FOR candidate IN userTeams FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
           LET scope = DOCUMENT(scopes, @scopeKey)
-          LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
-          FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-          FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
+          LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
+          FILTER membership != null && scope != null && scope.teamKey == @teamKey
+          FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
           LET subject = @isGuide ? DOCUMENT(trips, @subjectKey) : DOCUMENT(places, @subjectKey)
           FILTER subject != null && subject.scopeKey == @scopeKey && subject.userKey == @userKey
           FILTER @isGuide || subject.saved == true
@@ -639,11 +639,11 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
     },
     async listTripGuides(context, tripKey) {
       const cursor = await database.query(`
-        LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
+        LET membership = FIRST(FOR candidate IN userTeams FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
         LET scope = DOCUMENT(scopes, @scopeKey)
-        LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
-        FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-        FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member", "viewer"]
+        LET scopeRole = membership == null ? null : FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userTeamKey == membership._key && member.status == "active" LIMIT 1 RETURN member.role)
+        FILTER membership != null && scope != null && scope.teamKey == @teamKey
+        FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member", "viewer"]
         LET trip = DOCUMENT(trips, @tripKey)
         FILTER trip != null && trip.scopeKey == @scopeKey && trip.userKey == @userKey
         FOR guide IN tripGuides
@@ -675,23 +675,22 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
       });
     },
     async ensureGalleryExportCollection(context, collection) {
-      const valid = z.object({ key: z.string().cuid(), scopeKey: z.string().cuid(), ownerKey: z.string().cuid(), memberKey: z.string().cuid(), name: z.string().trim().min(1), embedding: currentEmbeddingSchema, createdAt: z.string().datetime(), updatedAt: z.string().datetime() }).strict().parse(collection);
+      const valid = z.object({ key: z.string().cuid(), scopeKey: z.string().cuid(), ownerKey: z.string().cuid(), name: z.string().trim().min(1), embedding: currentEmbeddingSchema, createdAt: z.string().datetime(), updatedAt: z.string().datetime() }).strict().parse(collection);
       if (valid.scopeKey !== context.scopeKey) throw new TravelRepositoryError('forbidden');
-      await transaction({ read: ['userOrganizations', 'scopes', 'scopeMembers'], write: ['collections', 'collectionMembers'] }, async (executor) => {
+      await transaction({ read: ['userTeams', 'scopes', 'scopeMembers'], write: ['collections'] }, async (executor) => {
         const cursor = await executor.query(`${writeAuthorizationFilter}
           UPSERT { _key: @collectionKey }
-            INSERT { _key: @collectionKey, scopeKey: @scopeKey, name: @name, presentation: "travel", embedding: @embedding, isFavorite: false, createdAt: @createdAt, updatedAt: @updatedAt }
-            UPDATE { presentation: "travel" } IN collections
+            INSERT { _key: @collectionKey, scopeKey: @scopeKey, ownerKey: @ownerKey, name: @name, presentation: "travel", mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @createdAt, updatedAt: @updatedAt }
+            UPDATE { ownerKey: @ownerKey, presentation: "travel" } IN collections
           RETURN membership._key
-        `, { ...context, collectionKey: valid.key, name: valid.name, embedding: valid.embedding, createdAt: valid.createdAt, updatedAt: valid.updatedAt });
+        `, { ...context, collectionKey: valid.key, ownerKey: valid.ownerKey, name: valid.name, embedding: valid.embedding, createdAt: valid.createdAt, updatedAt: valid.updatedAt });
         if ((await cursor.all())[0] !== valid.ownerKey) throw new TravelRepositoryError('forbidden');
-        await executor.query('UPSERT { _key: @memberKey } INSERT { _key: @memberKey, scopeKey: @scopeKey, collectionKey: @collectionKey, memberKey: @ownerKey, role: "owner", createdAt: @createdAt } UPDATE {} IN collectionMembers', { memberKey: valid.memberKey, scopeKey: context.scopeKey, collectionKey: valid.key, ownerKey: valid.ownerKey, createdAt: valid.createdAt });
       });
     },
     async linkGalleryExport(context, relation) {
       const valid = collectionImageSchema.parse(relation);
       if (valid.scopeKey !== context.scopeKey) throw new TravelRepositoryError('forbidden');
-      await transaction({ read: ['userOrganizations', 'scopes', 'scopeMembers', 'collections', 'images'], write: ['collectionImages'] }, async (executor) => {
+      await transaction({ read: ['userTeams', 'scopes', 'scopeMembers', 'collections', 'images'], write: ['collectionImages'] }, async (executor) => {
         const cursor = await executor.query(`${writeAuthorizationFilter}
           LET collection = DOCUMENT(collections, @collectionKey)
           LET image = DOCUMENT(images, @imageKey)
@@ -709,15 +708,15 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
       const { context } = input;
       if (place.scopeKey !== context.scopeKey || place.userKey !== context.userKey || hero.scopeKey !== context.scopeKey || hero.userKey !== context.userKey || hero.placeKey !== place.key) throw new TravelRepositoryError('forbidden');
       const saved = await transaction({
-        read: ['userOrganizations', 'scopes', 'scopeMembers'],
+        read: ['userTeams', 'scopes', 'scopeMembers'],
         write: ['places', 'placeHeroMedia'],
       }, async (executor) => {
         const authorization = await executor.query(`
-          LET membership = FIRST(FOR candidate IN userOrganizations FILTER candidate.organizationId == @organizationKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
+          LET membership = FIRST(FOR candidate IN userTeams FILTER candidate.teamKey == @teamKey && candidate.userId == @userKey && candidate.status == "active" LIMIT 1 RETURN candidate)
           LET scope = DOCUMENT(scopes, @scopeKey)
-          LET scopeRole = membership == null ? null : FIRST(FOR candidate IN scopeMembers FILTER candidate.scopeKey == @scopeKey && candidate.userOrganizationKey == membership._key && candidate.status == "active" LIMIT 1 RETURN candidate.role)
-          FILTER membership != null && scope != null && scope.organizationKey == @organizationKey
-          FILTER membership.orgRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
+          LET scopeRole = membership == null ? null : FIRST(FOR candidate IN scopeMembers FILTER candidate.scopeKey == @scopeKey && candidate.userTeamKey == membership._key && candidate.status == "active" LIMIT 1 RETURN candidate.role)
+          FILTER membership != null && scope != null && scope.teamKey == @teamKey
+          FILTER membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator", "member"]
           RETURN true
         `, { ...context });
         if ((await authorization.all())[0] !== true) return null;

@@ -7,7 +7,7 @@ import { createTravelService, travelChildrenFindInputSchema, travelCityFindInput
 import { createCountrySearchService } from '@/lib/travel/country-search';
 import { createEmailService, emailDraftComposeInputSchema, emailDraftCreateInputSchema, emailDraftDeleteInputSchema, emailMessageGeneratedListInputSchema, emailMessageSummarizeInputSchema, emailMessageSummaryDeleteInputSchema, emailMessageTranslateInputSchema, emailMessageTranslationDeleteInputSchema, emailOverviewInputSchema, emailReplyContextCreateInputSchema, emailReplyContextDeleteInputSchema, emailReplyContextUpdateInputSchema, emailSemanticSearchInputSchema, emailSimilarFindInputSchema, emailThreadFavoriteInputSchema, emailThreadReadStateInputSchema, emailThreadTrashInputSchema, emailToneCreateInputSchema, emailToneDeleteInputSchema, emailToneUpdateInputSchema, emailTrashClearInputSchema, inboxSortInputSchema, inboxUpdateInputSchema, publicEmailCoreDraftSchema, publicEmailGeneratedDeleteResultSchema, publicEmailSummaryListResultSchema, publicEmailSummaryResultSchema, publicEmailTranslationListResultSchema, publicEmailTranslationResultSchema } from '@/lib/email-inbox/service';
 import { defaultBookService } from '@/lib/books/default-service';
-import { bookExtendToolInputSchema, bookFavoriteToolInputSchema, bookGoalSuggestToolInputSchema, bookShareDetailToolInputSchema, bookShareUpdateToolInputSchema, bookTopicSuggestToolInputSchema } from '@/lib/books/service';
+import { bookExtendToolInputSchema, bookFavoriteToolInputSchema, bookGoalSuggestToolInputSchema, bookTopicSuggestToolInputSchema } from '@/lib/books/service';
 import { emailDraftUpdateInputSchema } from '@/lib/email-inbox/service';
 import type { EmailActor } from '@/lib/email-inbox/service';
 import { newId } from '@/lib/ids';
@@ -20,6 +20,15 @@ import { appSpeechInputSchema, createAppSpeechService } from '@/lib/app-speech/s
 import { accountProfileService, profileNameUpdateInputSchema, safeProfileUpdateResultSchema } from '@/lib/account-profile/service';
 import { feedbackListInputSchema, feedbackVoteInputSchema, getDefaultTicketService, ticketSubmitInputSchema } from '@/lib/tickets/service';
 import { scopeTagCreateInputSchema, scopeTagDeleteInputSchema, scopeTagListInputSchema, scopeTagService, scopeTagSetAssignmentsInputSchema, scopeTagUpdateInputSchema } from '@/lib/scope-tags/service';
+import { referralSummaryReadInputSchema, referralSummarySchema } from '@/lib/referrals/contracts';
+import { referralService } from '@/lib/referrals/service';
+import { checkoutCreateInputSchema, subscriptionMutationInputSchema } from '@/lib/commerce/contracts';
+import { commerceService } from '@/lib/commerce/service';
+import { scopeCreateInputSchema, scopeListInputSchema, scopeSelectInputSchema, scopeService } from '@/lib/ai/scopes';
+import { appNotifyInputSchema, notificationListInputSchema } from '@/lib/app-notifications/contracts';
+import { appNotificationService } from '@/lib/app-notifications/service';
+import { teamListInputSchema, teamSelectInputSchema, teamService } from '@/lib/teams';
+import { costService } from '@/lib/costs/service';
 
 const key = z.string().cuid();
 const name = z.string().trim().min(1).max(255);
@@ -42,8 +51,8 @@ const appTranslateInputSchema = z.object({
 function identity(context: AssistantCapabilityContext) {
   const { domain } = context;
   if (domain.principal.kind !== 'member') throw new Error('A member principal is required for personal assistant capabilities.');
-  if (domain.principal.userOrganization.organizationId !== domain.organizationKey || domain.principal.userOrganization.userId !== domain.principal.user.key || domain.principal.userOrganization.status !== 'active') throw new Error('Active matching organization membership is required.');
-  const serviceContext = { organizationKey: domain.organizationKey, scopeKey: domain.runtimeScopeKey };
+  if (domain.principal.userTeam.teamKey !== domain.teamKey || domain.principal.userTeam.userId !== domain.principal.user.key || domain.principal.userTeam.status !== 'active') throw new Error('Active matching team membership is required.');
+  const serviceContext = { teamKey: domain.teamKey, scopeKey: domain.runtimeScopeKey };
   return {
     userKey: domain.principal.user.key,
     serviceContext,
@@ -81,7 +90,7 @@ function archive<Schema extends z.ZodTypeAny>(name: string, description: string,
   return capability(name, description, schema, async (input, context) => {
     const canonicalInput = transform(input, context);
     if (mutation) {
-      const requestKey = context.requestKey ?? createHash('sha256').update(JSON.stringify({ organizationKey: context.domain.organizationKey, scopeKey: context.domain.runtimeScopeKey, name, input: canonicalInput })).digest('hex');
+      const requestKey = context.requestKey ?? createHash('sha256').update(JSON.stringify({ teamKey: context.domain.teamKey, scopeKey: context.domain.runtimeScopeKey, name, input: canonicalInput })).digest('hex');
       canonicalInput.idempotencyKey = `${requestKey}:${name}`;
     }
     return (context.executeContent ?? runContentTool)(tool as never, canonicalInput, context.domain, context.contentDependencies);
@@ -97,10 +106,10 @@ function currentDocumentKey(documentKey: string | undefined, context: AssistantC
 function hiddenContext(context: AssistantCapabilityContext) {
   const principal = context.domain.principal;
   if (principal.kind !== 'member') throw new Error('A member principal is required.');
-  if (principal.userOrganization.status !== 'active' || principal.userOrganization.organizationId !== context.domain.organizationKey || principal.userOrganization.userId !== principal.user.key) {
-    throw new Error('An active matching organization membership is required.');
+  if (principal.userTeam.status !== 'active' || principal.userTeam.teamKey !== context.domain.teamKey || principal.userTeam.userId !== principal.user.key) {
+    throw new Error('An active matching team membership is required.');
   }
-  return { userKey: principal.user.key, organizationKey: context.domain.organizationKey, membershipKey: principal.userOrganization.key, service: context.userHiddens };
+  return { userKey: principal.user.key, teamKey: context.domain.teamKey, teamMembershipKey: principal.userTeam.key, service: context.userHiddens };
 }
 
 function hiddenCapability(source: 'folder' | 'document', operation: 'hide' | 'reveal') {
@@ -139,7 +148,7 @@ appSearchCapability.definition.description = appSearchCapability.definition.desc
 );
 
 export const appEnhanceCapability = capability('app.enhance', 'Improve spelling, grammar, punctuation, and wording while preserving the source meaning.', appEnhanceInputSchema, async ({ text, documentKey, instruction, save }, context) => {
-  if (text) return (context.appTransformation ?? createAppTransformationService()).enhance({ text, instruction }, context.domain.organizationKey, { signal: context.signal, timeoutMs: context.timeoutMs });
+  if (text) return (context.appTransformation ?? createAppTransformationService()).enhance({ text, instruction }, context.domain.teamKey, { signal: context.signal, timeoutMs: context.timeoutMs });
   const canonicalInput = { documentKeys: [currentDocumentKey(documentKey, context)], instruction, mode: save ? 'replace' as const : 'preview' as const, ...(save ? { idempotencyKey: `${context.requestKey ?? newId()}:app.enhance` } : {}) };
   return (context.executeContent ?? runContentTool)('document.enhance', canonicalInput, context.domain, context.contentDependencies);
 }, (rawInput) => {
@@ -148,7 +157,7 @@ export const appEnhanceCapability = capability('app.enhance', 'Improve spelling,
 });
 
 export const appTranslateCapability = capability('app.translate', 'Translate text, an Archive document, or a Signal message into a requested language while preserving meaning and structure.', appTranslateInputSchema, async ({ text, documentKey, messageKey, save, ...input }, context) => {
-  if (text) return (context.appTransformation ?? createAppTransformationService()).translate({ text, ...input }, context.domain.organizationKey, { signal: context.signal, timeoutMs: context.timeoutMs });
+  if (text) return (context.appTransformation ?? createAppTransformationService()).translate({ text, ...input }, context.domain.teamKey, { signal: context.signal, timeoutMs: context.timeoutMs });
   if (messageKey) {
     const actor = identity(context);
     return publicEmailTranslationResultSchema.parse(await (context.email ?? createEmailService()).translateMessage(actor.emailActor, { messageKey, targetLanguage: input.targetLanguage, sourceLanguage: input.sourceLanguage }, context.requestKey));
@@ -170,27 +179,67 @@ export const hiddenListCapability = capability('content.hidden.list', 'List cont
 });
 
 export const platformCapabilities = [
+  capability('team.list', 'List teams and scopes available to the authenticated account when team selection is enabled.', teamListInputSchema, async (input, context) => teamService.list(input, context.domain), undefined, 'read'),
+  capability('app.notify', 'Send a notification with a dynamic title and message to specific eligible users by user key, or to every eligible user in the current team. Set notifyAll true only when every team user should be notified.', appNotifyInputSchema, async (input, context) => (context.appNotifications ?? appNotificationService).notify(input, context.domain, `${context.requestKey ?? newId()}:app.notify`), undefined, 'write'),
+  capability('notification.list', "List the authenticated user's notifications in the current team and optionally mark them read.", notificationListInputSchema, async (input, context) => (context.appNotifications ?? appNotificationService).list(input, context.domain), undefined, 'write'),
+  capability('scope.list', 'List the active scopes the authenticated user can access in the current team.', scopeListInputSchema, async (input, context) => (context.scopes ?? scopeService).list(input, context.domain), undefined, 'read'),
+  capability('pricing.read', 'Read the current Spark charges without purchase grants or free capabilities.', z.object({}).strict(), async (_input, context) => {
+    identity(context);
+    return (context.costs ?? costService).listCharges();
+  }, undefined, 'read'),
+  capability('catalog.list', 'List active purchasable plans and Spark top-ups in deterministic order.', z.object({}).strict(), async (_input, context) => {
+    identity(context);
+    return (context.commerce ?? commerceService).listProducts();
+  }, undefined, 'read'),
+  capability('payment.checkout.create', 'Create a hosted checkout for one active catalog product.', checkoutCreateInputSchema, async (input, context) => {
+    const { userKey } = identity(context);
+    return (context.commerce ?? commerceService).createCheckout(input, userKey, `${context.requestKey ?? newId()}:payment.checkout.create`);
+  }, undefined, 'write'),
+  capability('subscription.current.read', 'Read the authenticated user\'s current subscription.', z.object({}).strict(), async (_input, context) => {
+    const { userKey } = identity(context);
+    return (context.commerce ?? commerceService).getCurrentSubscription(userKey);
+  }, undefined, 'read'),
+  capability('subscription.current.cancel', 'Schedule the authenticated user\'s current subscription to cancel at period end.', subscriptionMutationInputSchema, async (_input, context) => {
+    const { userKey } = identity(context);
+    return (context.commerce ?? commerceService).setCancellation(userKey, true);
+  }, undefined, 'write'),
+  capability('subscription.current.restore', 'Restore a subscription that is scheduled to cancel at period end.', subscriptionMutationInputSchema, async (_input, context) => {
+    const { userKey } = identity(context);
+    return (context.commerce ?? commerceService).setCancellation(userKey, false);
+  }, undefined, 'write'),
+  capability('referral.summary.read', 'Read the authenticated user\'s referral code and current referral reward summary.', referralSummaryReadInputSchema, async (_input, context) => {
+    const { userKey } = identity(context);
+    return referralSummarySchema.parse(await (context.referrals ?? referralService).readSummary(userKey));
+  }, undefined, 'read'),
   capability('profile.update', 'Change the authenticated user\'s profile name.', profileNameUpdateInputSchema, async (input, context) => {
     const { userKey } = identity(context);
     const { profile } = await (context.accountProfile ?? accountProfileService).updateName(input, userKey);
     return safeProfileUpdateResultSchema.parse({ profile: { name: profile.name } });
   }, undefined, 'write'),
-  capability('ticket.create', 'Submit an issue ticket for the authenticated user in the current organization and scope.', ticketSubmitInputSchema, async (input, context) => {
+  capability('ticket.create', 'Submit an issue ticket for the authenticated user in the current team and scope.', ticketSubmitInputSchema, async (input, context) => {
     identity(context);
     return (context.tickets ?? getDefaultTicketService()).submit(input, context.domain, context.requestKey ?? newId());
   }, undefined, 'write'),
-  capability('feedback.create', 'Submit product feedback for the authenticated user in the current organization and scope.', ticketSubmitInputSchema, async (input, context) => {
+  capability('feedback.create', 'Submit product feedback for the authenticated user in the current team and scope.', ticketSubmitInputSchema, async (input, context) => {
     identity(context);
     return (context.tickets ?? getDefaultTicketService()).createFeedback(input, context.domain, context.requestKey ?? newId());
   }, undefined, 'write'),
-  capability('feedback.list', 'List recent product feedback and the authenticated user\'s vote in the current organization and scope.', feedbackListInputSchema, async (input, context) => {
+  capability('feedback.list', 'List recent product feedback and the authenticated user\'s vote in the current team and scope.', feedbackListInputSchema, async (input, context) => {
     identity(context);
     return (context.tickets ?? getDefaultTicketService()).listFeedback(input, context.domain);
   }),
-  capability('feedback.vote', 'Set, change, or clear the authenticated user\'s vote on product feedback in the current organization and scope.', feedbackVoteInputSchema, async (input, context) => {
+  capability('feedback.vote', 'Set, change, or clear the authenticated user\'s vote on product feedback in the current team and scope.', feedbackVoteInputSchema, async (input, context) => {
     identity(context);
     return (context.tickets ?? getDefaultTicketService()).setFeedbackVote(input, context.domain, context.requestKey ?? newId());
   }, undefined, 'write'),
+] as const;
+
+// Trusted adapters can dispatch these unified tools, but Core must not select a
+// new scope and then continue the same turn with its original ToolContext.
+export const scopeMutationCapabilities = [
+  capability('team.select', 'Select an authorized team and scope, requiring exact team MFA assurance when enabled.', teamSelectInputSchema, async (input, context) => teamService.select(input, context.domain), undefined, 'write'),
+  capability('scope.create', 'Create a scope in the current team. Only team owners and admins may create scopes.', scopeCreateInputSchema, async (input, context) => (context.scopes ?? scopeService).create(input, context.domain, context.requestKey ?? newId()), undefined, 'write'),
+  capability('scope.select', 'Select the authenticated user\'s current scope by its target scope key.', scopeSelectInputSchema, async (input, context) => (context.scopes ?? scopeService).select(input, context.domain), undefined, 'write'),
 ] as const;
 
 const allTagWorkspaces = ['archive', 'gallery', 'compass', 'signal', 'ascend'] as const;
@@ -244,27 +293,27 @@ export const archiveCapabilities = [
 ];
 
 export const compassCapabilities = [
-  capability('country.search', 'Find the country that best matches a country-name query.', z.object({ query: z.string().trim().min(1).max(200) }).strict(), async (input, context) => { const actor = identity(context); return (context.countries ?? createCountrySearchService()).search({ organizationKey: actor.serviceContext.organizationKey, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
-  capability('place.find', 'Find external country and city destination candidates without saving them.', travelPlaceFindInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findPlaces({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
-  capability('place.search', 'Semantically search the current user\'s saved places in this Compass workspace.', travelPlaceSearchInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).searchPlaces({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
+  capability('country.search', 'Find the country that best matches a country-name query.', z.object({ query: z.string().trim().min(1).max(200) }).strict(), async (input, context) => { const actor = identity(context); return (context.countries ?? createCountrySearchService()).search({ teamKey: actor.serviceContext.teamKey, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
+  capability('place.find', 'Find external country and city destination candidates without saving them.', travelPlaceFindInputSchema.omit({ teamKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findPlaces({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
+  capability('place.search', 'Semantically search the current user\'s saved places in this Compass workspace.', travelPlaceSearchInputSchema.omit({ teamKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).searchPlaces({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
   capability('place.list', 'List saved and recently opened places.', z.object({}).strict(), async (_input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).overview(actor.serviceContext, actor.userKey); }),
-  capability('place.reference.generate', 'Generate and persist one stable general-knowledge reference for a saved place.', travelPlaceReferenceGenerateInputSchema.omit({ organizationKey: true, scopeKey: true, idempotencyKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).generatePlaceReference({ ...actor.serviceContext, ...input, idempotencyKey: `${context.requestKey ?? newId()}:place.reference.generate` }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
-  capability('place.reference.list', 'List persisted references of one kind newest first for a saved place.', travelPlaceReferenceListInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).listPlaceReferences({ ...actor.serviceContext, ...input }, actor.userKey); }),
-  capability('trip.list', 'List trips and their ordered saved places.', travelTripListInputSchema.omit({ organizationKey: true, scopeKey: true }), async (_input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).listTrips(actor.serviceContext, actor.userKey); }),
-  capability('trip.search', 'Semantically search the current user\'s trips and return their complete aggregates.', travelTripSearchInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).searchTrips({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
-  capability('trip.guide.generate', 'Generate and persist a formatted guide for one trip and its ordered places.', travelTripGuideGenerateInputSchema.omit({ organizationKey: true, scopeKey: true, idempotencyKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).generateTripGuide({ ...actor.serviceContext, ...input, idempotencyKey: `${context.requestKey ?? newId()}:trip.guide.generate` }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
-  capability('trip.guide.list', 'List complete persisted trip guides newest first for one trip.', travelTripGuideListInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).listTripGuides({ ...actor.serviceContext, ...input }, actor.userKey); }),
-  capability('trip.create', 'Create a trip from ordered saved places in the current Compass workspace.', travelTripCreateInputSchema.omit({ organizationKey: true, scopeKey: true, idempotencyKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).createTrip({ ...actor.serviceContext, ...input, idempotencyKey: `${context.requestKey ?? newId()}:trip.create` }, actor.userKey); }, 'compass'),
+  capability('place.reference.generate', 'Generate and persist one stable general-knowledge reference for a saved place.', travelPlaceReferenceGenerateInputSchema.omit({ teamKey: true, scopeKey: true, idempotencyKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).generatePlaceReference({ ...actor.serviceContext, ...input, idempotencyKey: `${context.requestKey ?? newId()}:place.reference.generate` }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
+  capability('place.reference.list', 'List persisted references of one kind newest first for a saved place.', travelPlaceReferenceListInputSchema.omit({ teamKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).listPlaceReferences({ ...actor.serviceContext, ...input }, actor.userKey); }),
+  capability('trip.list', 'List trips and their ordered saved places.', travelTripListInputSchema.omit({ teamKey: true, scopeKey: true }), async (_input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).listTrips(actor.serviceContext, actor.userKey); }),
+  capability('trip.search', 'Semantically search the current user\'s trips and return their complete aggregates.', travelTripSearchInputSchema.omit({ teamKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).searchTrips({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
+  capability('trip.guide.generate', 'Generate and persist a formatted guide for one trip and its ordered places.', travelTripGuideGenerateInputSchema.omit({ teamKey: true, scopeKey: true, idempotencyKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).generateTripGuide({ ...actor.serviceContext, ...input, idempotencyKey: `${context.requestKey ?? newId()}:trip.guide.generate` }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
+  capability('trip.guide.list', 'List complete persisted trip guides newest first for one trip.', travelTripGuideListInputSchema.omit({ teamKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).listTripGuides({ ...actor.serviceContext, ...input }, actor.userKey); }),
+  capability('trip.create', 'Create a trip from ordered saved places in the current Compass workspace.', travelTripCreateInputSchema.omit({ teamKey: true, scopeKey: true, idempotencyKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).createTrip({ ...actor.serviceContext, ...input, idempotencyKey: `${context.requestKey ?? newId()}:trip.create` }, actor.userKey); }, 'compass'),
   capability('trip.update', 'Update trip details, status, favorite state, cover, or ordered saved places.', travelTripUpdateToolInputSchema, async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).updateTrip({ ...actor.serviceContext, ...input }, actor.userKey); }, 'compass'),
-  capability('trip.delete', 'Delete a non-favorite trip and its relations.', travelTripDeleteInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).deleteTrip({ ...actor.serviceContext, ...input }, actor.userKey); }, 'compass'),
-  capability('trip.attachment.set', 'Replace all ordered Archive and Gallery references attached to a trip.', travelTripAttachmentSetInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).setTripAttachments({ ...actor.serviceContext, ...input }, actor.userKey); }, 'compass'),
-  capability('place.guide.find', 'Find a destination and create its structured travel guide.', travelPlaceGuideFindInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findPlaceGuide({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
-  capability('place.find-city', 'Find a city in an authoritative country and create its structured travel guide.', travelCityFindInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findCity({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
-  capability('place.find-children', 'Find detailed guides for the ten cities sealed by a country place result.', travelChildrenFindInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findChildren({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
-  capability('place.create', 'Save a country or city to the current Compass workspace.', travelPlaceCreateInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).createPlace({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
+  capability('trip.delete', 'Delete a non-favorite trip and its relations.', travelTripDeleteInputSchema.omit({ teamKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).deleteTrip({ ...actor.serviceContext, ...input }, actor.userKey); }, 'compass'),
+  capability('trip.attachment.set', 'Replace all ordered Archive and Gallery references attached to a trip.', travelTripAttachmentSetInputSchema.omit({ teamKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).setTripAttachments({ ...actor.serviceContext, ...input }, actor.userKey); }, 'compass'),
+  capability('place.guide.find', 'Find a destination and create its structured travel guide.', travelPlaceGuideFindInputSchema.omit({ teamKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findPlaceGuide({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
+  capability('place.find-city', 'Find a city in an authoritative country and create its structured travel guide.', travelCityFindInputSchema.omit({ teamKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findCity({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
+  capability('place.find-children', 'Find detailed guides for the ten cities sealed by a country place result.', travelChildrenFindInputSchema.omit({ teamKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).findChildren({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
+  capability('place.create', 'Save a country or city to the current Compass workspace.', travelPlaceCreateInputSchema.omit({ teamKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).createPlace({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }, 'compass'),
   capability('place.update', 'Update the status or favorite state of a saved place.', travelPlaceUpdateToolInputSchema, async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).updatePlace({ ...actor.serviceContext, ...input }, actor.userKey); }, 'compass'),
   capability('place.delete', 'Delete one saved place and remove it from trips and reports.', travelPlaceDeleteToolInputSchema, async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).deletePlace({ ...actor.serviceContext, ...input }, actor.userKey); }, 'compass'),
-  capability('place.open', 'Record that the current user opened an existing country or place.', travelPlaceOpenInputSchema.omit({ organizationKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).openPlace({ ...actor.serviceContext, ...input }, actor.userKey); }, 'compass'),
+  capability('place.open', 'Record that the current user opened an existing country or place.', travelPlaceOpenInputSchema.omit({ teamKey: true, scopeKey: true }), async (input, context) => { const actor = identity(context); return (context.travel ?? createTravelService()).openPlace({ ...actor.serviceContext, ...input }, actor.userKey); }, 'compass'),
 ];
 
 export const signalCapabilities = [
@@ -272,7 +321,7 @@ export const signalCapabilities = [
   capability('inbox.refresh', 'Refresh one connected inbox from its email provider.', z.object({ connectorKey: key }).strict(), async ({ connectorKey }, context) => { const actor = identity(context); return (context.email ?? createEmailService()).sync(actor.emailActor, connectorKey); }, 'signal'),
   capability('inbox.search', 'Semantically search connected Signal inboxes by their names and descriptions.', emailSemanticSearchInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).searchInboxes(actor.emailActor, input, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
   capability('email.tone.search', 'Semantically search available Signal email tones by name.', emailSemanticSearchInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).searchTones(actor.emailActor, input, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
-  capability('inbox.sort', 'Sort every persisted email in one connected inbox into Urgent, Important, or Filtered and refresh its Archive representation.', inboxSortInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).sort(actor.emailActor, input); }, 'signal'),
+  capability('inbox.sort', 'Sort every persisted email in one connected inbox into Urgent, Important, Purchases, or Filtered and refresh its Archive representation.', inboxSortInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).sort(actor.emailActor, input); }, 'signal'),
   capability('inbox.update', 'Update one connected inbox name, description, cover, or favorite state.', inboxUpdateInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).updateInbox(actor.emailActor, input, context.requestKey); }, 'signal'),
   capability('email.thread.read', 'Read up to 50 Signal email messages without changing unread state. Message bodies are limited to 8,000 characters each and 64,000 characters total; truncation and a continuation cursor are returned explicitly.', z.object({ threadKey: key, cursor: z.string().min(1).max(2_000).optional() }).strict(), async ({ threadKey, cursor }, context) => { const actor = identity(context); return (context.email ?? createEmailService()).threadForTool(actor.emailActor, threadKey, cursor); }),
   capability('email.thread.read-state', 'Set read or unread state for one or up to 50 distinct Signal email threads.', emailThreadReadStateInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).setReadState(actor.emailActor, input, false, context.requestKey); }, 'signal'),
@@ -312,8 +361,6 @@ export const ascendCapabilities = [
     const requestKey = !rawRequestKey ? newId() : rawRequestKey.length <= 200 ? rawRequestKey : createHash('sha256').update(rawRequestKey).digest('hex');
     return (context.books ?? defaultBookService).extend(bookKey, { ...actor.serviceContext, ...input, ...(input.mode === 'generate' ? { requestKey } : {}) }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs });
   }, (input) => (input as { mode?: unknown }).mode === 'generate' ? 'ascend' : undefined),
-  capability('book.share.detail', 'Read whether an audiobook share link is active. The private URL is not exposed to the model.', bookShareDetailToolInputSchema, async ({ bookKey }, context) => { const actor = identity(context); const { url: _url, ...safe } = await (context.books ?? defaultBookService).shareDetail(bookKey, actor.serviceContext, actor.userKey); return safe; }),
-  capability('book.share.update', 'Activate or deactivate an audiobook share link. The private URL is not exposed to the model.', bookShareUpdateToolInputSchema, async ({ bookKey, active }, context) => { const actor = identity(context); const { url: _url, ...safe } = await (context.books ?? defaultBookService).setShareActive(bookKey, { ...actor.serviceContext, active }, actor.userKey); return safe; }, 'ascend'),
   capability('book.chapter.progress', 'Update progress for an Ascend chapter.', z.object({ bookKey: key, chapterKey: key, progressSeconds: z.number().int().nonnegative(), isCompleted: z.boolean() }).strict(), async ({ bookKey, chapterKey, ...input }, context) => { const actor = identity(context); return (context.books ?? defaultBookService).progress(bookKey, chapterKey, { ...actor.serviceContext, ...input }, actor.userKey); }, 'ascend'),
   capability('book.create', 'Accept a personalized ten-chapter audiobook for durable background generation.', z.object({ topic: z.string().trim().min(3).max(500), goal: z.string().trim().min(3).max(1_000), currentKnowledge: z.string().trim().max(2_000), writingTone: z.string().trim().min(2).max(200), language: z.string().trim().min(2).max(100), archiveDocumentKeys: z.array(key).max(50), narratorVoiceKey: z.enum(['calm', 'clear', 'warm']), narrationPace: z.number().min(0.75).max(2), additionalInstructions: z.string().trim().max(12_000).optional() }).strict(), async (input, context) => {
     const actor = identity(context);

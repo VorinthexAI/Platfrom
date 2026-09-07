@@ -17,7 +17,7 @@ export const resourceTagAssignmentsQueryRoot = ["resource-tag-assignments"] as c
 export const resourceTagAssignmentsQueryKey = (context: ContentContext, targets: readonly ResourceTagTarget[]) => [
   ...resourceTagAssignmentsQueryRoot,
   context.userKey,
-  context.organizationKey,
+  context.teamKey,
   context.scopeKey,
   normalizeResourceTagTargets(targets).map(resourceTagTargetIdentity),
 ] as const;
@@ -49,7 +49,10 @@ export function applyResourceTagDraft(state: ResourceTagAssignmentState, targets
   for (const target of normalizeResourceTagTargets(targets)) {
     const identity = resourceTagTargetIdentity(target);
     const keys = new Set(tagKeysByTarget[identity] ?? []);
-    for (const [tagKey, action] of Object.entries(draft)) action === "tag" ? keys.add(tagKey) : keys.delete(tagKey);
+    for (const [tagKey, action] of Object.entries(draft)) {
+      if (action === "tag") keys.add(tagKey);
+      else keys.delete(tagKey);
+    }
     tagKeysByTarget[identity] = [...keys].sort();
   }
   return { ...state, tagKeysByTarget };

@@ -11,7 +11,7 @@ export const avatarUploadSchema = z.strictObject({
   uri: z.string().min(1),
 });
 export const ticketSchema = z.strictObject({
-  organizationKey: z.string().trim().min(1),
+  teamKey: z.string().trim().min(1),
   scopeKey: z.string().trim().min(1),
   message: z.string().trim().min(1).max(8_000),
 });
@@ -25,12 +25,12 @@ export const feedbackItemSchema = z.strictObject({
   createdAt: z.string().datetime(),
 });
 export const feedbackListSchema = z.strictObject({
-  organizationKey: z.string().trim().min(1),
+  teamKey: z.string().trim().min(1),
   scopeKey: z.string().trim().min(1),
   limit: z.number().int().min(1).max(50).optional(),
 });
 export const feedbackVoteRequestSchema = z.strictObject({
-  organizationKey: z.string().trim().min(1),
+  teamKey: z.string().trim().min(1),
   scopeKey: z.string().trim().min(1),
   ticketKey: z.string().trim().min(1),
   vote: feedbackVoteSchema.nullable(),

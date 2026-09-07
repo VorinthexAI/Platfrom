@@ -4,7 +4,7 @@ import { createUserHiddenService, UserHiddenSourceNotFoundError } from './servic
 
 describe('user hidden service', () => {
   test('is idempotent through the canonical repository and scopes by user', async () => {
-    const actor = { userKey: newId(), organizationKey: newId(), membershipKey: newId() };
+    const actor = { userKey: newId(), teamKey: newId(), teamMembershipKey: newId() };
     const sourceKey = newId();
     const records = new Map<string, any>();
     const repository: any = {
@@ -26,11 +26,11 @@ describe('user hidden service', () => {
   test('requires read access, including for shared-source validation', async () => {
     const repository: any = { canAccess: async () => false, hide: async () => { throw new Error('not reached'); }, reveal: async () => null, list: async () => [] };
     const service = createUserHiddenService(repository);
-    await expect(service.hide({ userKey: newId(), organizationKey: newId(), membershipKey: newId() }, { source: 'image', sourceKey: newId() })).rejects.toBeInstanceOf(UserHiddenSourceNotFoundError);
+    await expect(service.hide({ userKey: newId(), teamKey: newId(), teamMembershipKey: newId() }, { source: 'image', sourceKey: newId() })).rejects.toBeInstanceOf(UserHiddenSourceNotFoundError);
   });
 
-  test('preserves organization and membership context when listing', async () => {
-    const actor = { userKey: newId(), organizationKey: newId(), membershipKey: newId() };
+  test('preserves team and membership context when listing', async () => {
+    const actor = { userKey: newId(), teamKey: newId(), teamMembershipKey: newId() };
     let received: unknown;
     const repository: any = { list: async (value: unknown) => { received = value; return []; } };
     await createUserHiddenService(repository).list(actor);

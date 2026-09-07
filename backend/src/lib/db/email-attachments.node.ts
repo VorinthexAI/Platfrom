@@ -4,7 +4,7 @@ export const EMAIL_ATTACHMENTS_COLLECTION = 'emailAttachments';
 
 export const emailAttachmentSchema = z.object({
   key: z.string().cuid(),
-  organizationKey: z.string().min(1),
+  teamKey: z.string().min(1),
   scopeKey: z.string().cuid(),
   connectorKey: z.string().cuid(),
   providerMessageId: z.string().trim().min(1),

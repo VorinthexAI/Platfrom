@@ -8,8 +8,8 @@ import {
  * resource tool result — list, search-adjacent, create, update — becomes a
  * query-free `results` retrieval attached to the assistant message, so the
  * client can render the touched resources as navigable results. Deletion
- * tools (the resource no longer exists) and non-resource tools (memberships,
- * invitations, share links, derived artifacts) capture nothing.
+ * tools (the resource no longer exists) and non-resource tools capture
+ * nothing.
  */
 
 const TOOL_RESOURCE_SLUGS: Record<string, AppSearchCollectionSlug> = {

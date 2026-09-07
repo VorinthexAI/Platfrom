@@ -20,7 +20,7 @@ function serialize<T>(work: () => Promise<T>): Promise<T> {
 }
 
 function selectionKey(context: ConversationContext) {
-  return `${SELECTION_KEY_PREFIX}.${context.userKey}.${context.organizationKey}.${context.scopeKey}`;
+  return `${SELECTION_KEY_PREFIX}.${context.userKey}.${context.teamKey}.${context.scopeKey}`;
 }
 
 export function readConversationSelection(context: ConversationContext): Promise<Conversation | undefined> {

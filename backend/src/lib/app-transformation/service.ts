@@ -17,28 +17,28 @@ export const appTextTranslateInputSchema = z.object({
 export const appTextTransformationOutputSchema = z.object({ text: z.string().trim().min(1) }).strict();
 
 export interface AppTransformationService {
-  enhance(input: z.input<typeof appTextEnhanceInputSchema>, organizationKey: string, options?: ExecuteActionOptions): Promise<{ text: string }>;
-  translate(input: z.input<typeof appTextTranslateInputSchema>, organizationKey: string, options?: ExecuteActionOptions): Promise<{ text: string }>;
+  enhance(input: z.input<typeof appTextEnhanceInputSchema>, teamKey: string, options?: ExecuteActionOptions): Promise<{ text: string }>;
+  translate(input: z.input<typeof appTextTranslateInputSchema>, teamKey: string, options?: ExecuteActionOptions): Promise<{ text: string }>;
 }
 
-export function createAppTransformationService(dependencies: { generate?: (organizationKey: string, request: Parameters<TextGeneration>[0], options?: ExecuteActionOptions) => Promise<string> } = {}): AppTransformationService {
-  const generate = dependencies.generate ?? (async (organizationKey, request, options) => {
+export function createAppTransformationService(dependencies: { generate?: (teamKey: string, request: Parameters<TextGeneration>[0], options?: ExecuteActionOptions) => Promise<string> } = {}): AppTransformationService {
+  const generate = dependencies.generate ?? (async (teamKey, request, options) => {
     const { mode: _mode, ...input } = coreChatInputSchema.parse({
       systemPrompt: request.systemPrompt,
       messages: [{ role: 'user', content: [{ type: 'text', text: request.text }] }],
       options: { temperature: request.temperature, maxTokens: request.maxTokens },
     });
-    const response = await executeAction<typeof input, ChatOutput>({ mode: 'auto', organizationKey, actionSlug: 'text' }, input, options);
+    const response = await executeAction<typeof input, ChatOutput>({ mode: 'auto', teamKey, actionSlug: 'text' }, input, options);
     return response.output.text;
   });
   return {
-    async enhance(rawInput, organizationKey, options) {
+    async enhance(rawInput, teamKey, options) {
       const input = appTextEnhanceInputSchema.parse(rawInput);
-      return appTextTransformationOutputSchema.parse({ text: await generateTextEnhancement({ content: input.text, instruction: input.instruction }, (request) => generate(organizationKey, request, options)) });
+      return appTextTransformationOutputSchema.parse({ text: await generateTextEnhancement({ content: input.text, instruction: input.instruction }, (request) => generate(teamKey, request, options)) });
     },
-    async translate(rawInput, organizationKey, options) {
+    async translate(rawInput, teamKey, options) {
       const input = appTextTranslateInputSchema.parse(rawInput);
-      return appTextTransformationOutputSchema.parse({ text: await generateDocumentTranslation({ content: input.text, targetLanguage: input.targetLanguage, sourceLanguage: input.sourceLanguage, instruction: input.instruction, preserveFormatting: true }, (request) => generate(organizationKey, request, options)) });
+      return appTextTransformationOutputSchema.parse({ text: await generateDocumentTranslation({ content: input.text, targetLanguage: input.targetLanguage, sourceLanguage: input.sourceLanguage, instruction: input.instruction, preserveFormatting: true }, (request) => generate(teamKey, request, options)) });
     },
   };
 }

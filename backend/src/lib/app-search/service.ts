@@ -36,7 +36,7 @@ export const APP_SEARCH_COLLECTION_ADAPTERS = Object.freeze({
   images: { description: 'Individual pictures and generated visuals; searched by filename, caption, depicted content, place, and visible text.', operations: ['search', 'list', 'count', 'sum'], filters: ['collectionKey', 'createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], fields: ['key', 'filename', 'caption', 'mimeType', 'sizeBytes', 'width', 'height', 'city', 'country', 'countryCode', 'origin', 'isFavorite', 'createdAt', 'updatedAt', 'collections', 'tags'], sumFields: { sizeBytes: { description: 'Bytes used by unique stored images.', unit: 'bytes' } } },
   inboxes: { description: 'Connected email accounts or mailboxes; searched by inbox name, address, and description, not message content.', operations: ['search', 'list', 'count', 'get'], filters: ['createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], fields: ['key', 'connectorKey', 'provider', 'email', 'name', 'description', 'isFavorite', 'status', 'syncEnabled', 'syncStatus', 'lastSyncedAt', 'createdAt', 'updatedAt', 'tags'], statuses: ['active', 'error', 'revoked'] },
   'email-tones': { description: 'Saved writing styles used when composing email; searched by tone name and instruction.', operations: ['search', 'list', 'count'], filters: ['createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], fields: ['key', 'slug', 'name', 'instruction', 'isFavorite', 'createdAt', 'updatedAt', 'tags'] },
-  'email-messages': { description: 'Received and sent email conversations; searched by sender, subject, summary, intent, and body.', operations: ['search', 'list', 'count', 'get'], filters: ['connectorKey', 'readState', 'emailFacets', 'createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], fields: ['key', 'subject', 'summary', 'content', 'intent', 'priority', 'state', 'lastMessageAt', 'unread', 'isRead', 'isFavorite', 'inboxCategory', 'createdAt', 'updatedAt', 'tags'] },
+  'email-messages': { description: 'Received and sent email conversations organized into Urgent, Important, Purchases, and Filtered categories; searched by sender, subject, summary, intent, and body.', operations: ['search', 'list', 'count', 'get'], filters: ['connectorKey', 'readState', 'emailFacets', 'createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], fields: ['key', 'subject', 'summary', 'content', 'intent', 'priority', 'state', 'lastMessageAt', 'unread', 'isRead', 'isFavorite', 'inboxCategory', 'createdAt', 'updatedAt', 'tags'] },
   'email-drafts': { description: 'Composed email drafts; searched by recipients, subject, instructions, and draft body.', operations: ['search', 'list', 'count'], filters: ['connectorKey', 'createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], fields: ['key', 'variant', 'connectorKey', 'threadKey', 'messageKey', 'subject', 'to', 'instruction', 'generatedContent', 'finalContent', 'status', 'createdAt', 'updatedAt', 'tags'], statuses: ['generated', 'edited', 'sending', 'sent', 'discarded'] },
   places: { description: 'Personally saved travel destinations with wishlist or visited state; searched by place name and summary.', operations: ['search', 'list', 'count', 'get'], filters: ['status', 'createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], fields: ['key', 'kind', 'name', 'summary', 'countryCode', 'latitude', 'longitude', 'status', 'isFavorite', 'createdAt', 'coverUrl', 'trips', 'tags'], statuses: ['wishlist', 'visited'] },
   trips: { description: 'User-created travel plans containing ordered saved places; searched by trip name and description.', operations: ['search', 'list', 'count', 'get'], filters: ['status', 'isFavorite', 'createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], fields: ['key', 'name', 'description', 'status', 'isFavorite', 'coverImageKey', 'createdAt', 'updatedAt', 'places', 'attachments', 'tags'], statuses: ['planned', 'completed'] },
@@ -63,7 +63,7 @@ const appSearchFiltersShape = {
   collectionKey: z.string().cuid().optional(),
   connectorKey: z.string().cuid().optional(),
   readState: z.enum(['read', 'unread']).optional(),
-  emailFacets: z.array(z.enum(['urgent', 'important', 'filtered', 'favorite'])).min(1).max(4).superRefine((facets, context) => {
+  emailFacets: z.array(z.enum(['urgent', 'important', 'purchases', 'filtered', 'favorite'])).min(1).max(5).superRefine((facets, context) => {
     if (new Set(facets).size !== facets.length) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Email facets must be distinct.' });
   }).optional(),
   status: z.enum(['active', 'error', 'revoked', 'generated', 'edited', 'sending', 'sent', 'discarded', 'wishlist', 'visited', 'planned', 'completed', 'queued', 'researching', 'planning', 'writing', 'narrating', 'finalizing', 'failed', 'ready', 'cancelled']).optional(),
@@ -140,8 +140,8 @@ const imageResultSchema = z.object({
   collections: z.array(z.object({ key: z.string(), name: z.string() }).strict()).max(3).optional(), tags: resultTagsSchema.default([]),
 }).strict();
 const collectionResultSchema = z.object({
-  key: z.string(), name: z.string(), description: z.string().nullable(), purpose: z.enum(['place-media', 'email-media', 'generated-media']).nullable(), mutationPolicy: z.enum(['user', 'system-only']), presentation: z.enum(['travel', 'communication', 'learning']).optional(),
-  isFavorite: z.boolean(), count: z.number().int().nonnegative(), coverUrl: z.string().url().nullable(), memberKey: z.string(), isOwned: z.boolean(), role: z.enum(['owner', 'collaborator', 'viewer']), access: z.object({ canRead: z.boolean(), canContribute: z.boolean(), canManage: z.boolean() }).strict(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(), score: z.number().optional(), tags: resultTagsSchema.default([]),
+  key: z.string(), name: z.string(), description: z.string().nullable(), purpose: z.enum(['place-media', 'email-media', 'generated-media', 'scope-directory']).nullable(), mutationPolicy: z.enum(['user', 'system-only']), presentation: z.enum(['travel', 'communication', 'learning']).optional(),
+  isFavorite: z.boolean(), count: z.number().int().nonnegative(), coverUrl: z.string().url().nullable(), actorKey: z.string(), isOwned: z.boolean(), role: z.enum(['owner', 'viewer']), access: z.object({ canRead: z.boolean(), canContribute: z.boolean(), canManage: z.boolean() }).strict(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(), score: z.number().optional(), tags: resultTagsSchema.default([]),
 }).strict();
 const inboxResultSchema = z.object({
   key: z.string(), connectorKey: z.string(), provider: z.literal('gmail'), email: z.string().email(), name: z.string(), description: z.string().optional(), coverUrl: z.string().url().optional(), isFavorite: z.boolean(),
@@ -150,7 +150,7 @@ const inboxResultSchema = z.object({
 const toneResultSchema = z.object({ key: z.string(), slug: z.enum(['casual', 'formal', 'concise', 'warm', 'direct']).optional(), name: z.string(), instruction: z.string(), isFavorite: z.boolean(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(), score: z.number().optional(), tags: resultTagsSchema.default([]) }).strict();
 const emailMessageResultSchema = z.object({
   key: z.string(), subject: z.string(), summary: z.string(), intent: z.string(), action: z.string().optional(), priority: z.enum(['low', 'normal', 'high', 'urgent']), state: z.enum(['needs_action', 'waiting', 'informational', 'filtered', 'done']), lastMessageAt: z.string().datetime(),
-  snippet: z.string().optional(), content: z.string().optional(), contentTruncated: z.boolean().optional(), category: z.enum(['primary', 'updates', 'promotions', 'social', 'forums', 'other']).optional(), unread: z.boolean(), isRead: z.boolean(), starred: z.boolean().optional(), labels: z.array(z.string()).optional(), latestFrom: z.string().email().optional(), inInbox: z.boolean().optional(), isFavorite: z.boolean(), inboxCategory: z.enum(['Urgent', 'Important', 'Filtered']), createdAt: z.string().datetime(), updatedAt: z.string().datetime(), score: z.number(), inbox: z.object({ key: z.string(), connectorKey: z.string(), name: z.string() }).strict().optional(), tags: resultTagsSchema.default([]),
+  snippet: z.string().optional(), content: z.string().optional(), contentTruncated: z.boolean().optional(), category: z.enum(['primary', 'updates', 'promotions', 'social', 'forums', 'other']).optional(), unread: z.boolean(), isRead: z.boolean(), starred: z.boolean().optional(), labels: z.array(z.string()).optional(), latestFrom: z.string().email().optional(), inInbox: z.boolean().optional(), isFavorite: z.boolean(), inboxCategory: z.enum(['Urgent', 'Important', 'Purchases', 'Filtered']), createdAt: z.string().datetime(), updatedAt: z.string().datetime(), score: z.number(), inbox: z.object({ key: z.string(), connectorKey: z.string(), name: z.string() }).strict().optional(), tags: resultTagsSchema.default([]),
 }).strict();
 const emailDraftBaseShape = {
   key: z.string(), tone: z.string().optional(), instruction: z.string().optional(), attachments: emailAttachmentRefsSchema.optional(), generatedContent: z.string(), finalContent: z.string().optional(), status: z.enum(['generated', 'edited', 'sending', 'sent', 'discarded']), createdAt: z.string().datetime(), updatedAt: z.string().datetime(), score: z.number().optional(), inbox: z.object({ key: z.string(), connectorKey: z.string(), name: z.string() }).strict().optional(), tags: resultTagsSchema.default([]),
@@ -439,7 +439,7 @@ export interface AppSearchDependencies extends Pick<ExecuteActionOptions, 'signa
   books?: BookService;
   userSearches?: UserSearchService;
   scopeTags?: ScopeTagRepository;
-  executeEmbedding?: (organizationKey: string, input: EmbeddingInput, options: Pick<ExecuteActionOptions, 'signal' | 'timeoutMs'>) => Promise<EmbeddingOutput>;
+  executeEmbedding?: (teamKey: string, input: EmbeddingInput, options: Pick<ExecuteActionOptions, 'signal' | 'timeoutMs'>) => Promise<EmbeddingOutput>;
 }
 
 const APP_SEARCH_TAG_TARGET = {
@@ -461,13 +461,13 @@ const emptyScopeTags = {
 } as Pick<ScopeTagRepository, 'list' | 'get' | 'resolveOwnedByNormalizedNames' | 'searchOwned' | 'resolveCandidateKeys' | 'resolveEmailThreadKeys' | 'rankCandidateKeys' | 'listTargetTags' | 'listAssignments' | 'countAssignments' | 'getAssignment'>;
 function actor(context: ToolContext) {
   const principal = context.principal;
-  if (principal.kind !== 'member' || principal.userOrganization.status !== 'active' || principal.userOrganization.organizationId !== context.organizationKey || principal.userOrganization.userId !== principal.user.key) {
-    throw new Error('Active matching organization membership is required.');
+  if (principal.kind !== 'member' || principal.userTeam.status !== 'active' || principal.userTeam.teamKey !== context.teamKey || principal.userTeam.userId !== principal.user.key) {
+    throw new Error('Active matching team membership is required.');
   }
   return {
     userKey: principal.user.key,
-    membership: principal.userOrganization,
-    serviceContext: { organizationKey: context.organizationKey, scopeKey: context.runtimeScopeKey },
+    membership: principal.userTeam,
+    serviceContext: { teamKey: context.teamKey, scopeKey: context.runtimeScopeKey },
   };
 }
 
@@ -573,7 +573,7 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
        const projectTags = Boolean(dependencies.scopeTags) || !Object.keys(defaults).length;
        const scopeTags = dependencies.scopeTags ?? (projectTags ? getDefaultScopeTagRepository() : emptyScopeTags);
        const scopeTagQueries = createScopeTagService({ repository: scopeTags as ScopeTagRepository });
-      const tagOwner = { organizationKey: context.organizationKey, scopeKey: context.runtimeScopeKey, userKey: trusted.userKey, membershipKey: trusted.membership.key };
+      const tagOwner = { teamKey: context.teamKey, scopeKey: context.runtimeScopeKey, userKey: trusted.userKey, teamMembershipKey: trusted.membership.key };
        const targetTypes = [...new Set(input.collectionSlugs.flatMap((slug) => slug === 'countries' || slug === 'tags' || slug === 'tag-assignments' ? [] : slug === 'email-messages' ? ['email-thread' as const, 'email-message' as const] : [APP_SEARCH_TAG_TARGET[slug]]))];
        let candidateKeys: Record<string, string[]> | undefined;
        if (targetTypes.length && (input.filters?.tagNames || input.filters?.tagKeys)) {
@@ -744,14 +744,14 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
 
       const query = input.query!;
       const embeddingInput = { text: prepareEmbeddingText(query, 'query') };
-      const embeddingCacheKey = `${context.organizationKey}\0${embeddingInput.text}`;
+      const embeddingCacheKey = `${context.teamKey}\0${embeddingInput.text}`;
       const cachedEmbedding = embeddingCache.get(embeddingCacheKey);
       let queryEmbedding = cachedEmbedding && cachedEmbedding.expiresAt > Date.now() ? cachedEmbedding.embedding : undefined;
       if (!queryEmbedding) {
         embeddingCache.delete(embeddingCacheKey);
         const embeddingOutput = dependencies.executeEmbedding
-          ? await dependencies.executeEmbedding(context.organizationKey, embeddingInput, dependencies)
-          : (await executeAction<EmbeddingInput, EmbeddingOutput>({ mode: 'auto', organizationKey: context.organizationKey, actionSlug: 'embed' }, embeddingInput, dependencies)).output;
+          ? await dependencies.executeEmbedding(context.teamKey, embeddingInput, dependencies)
+          : (await executeAction<EmbeddingInput, EmbeddingOutput>({ mode: 'auto', teamKey: context.teamKey, actionSlug: 'embed' }, embeddingInput, dependencies)).output;
         queryEmbedding = currentEmbeddingSchema.parse(embeddingOutput.embedding);
         if (embeddingCache.size >= EMBEDDING_CACHE_LIMIT) embeddingCache.delete(embeddingCache.keys().next().value!);
         embeddingCache.set(embeddingCacheKey, { embedding: queryEmbedding, expiresAt: Date.now() + EMBEDDING_CACHE_TTL_MS });
@@ -893,7 +893,7 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
           }));
           return { collectionSlug, results: enriched };
         }
-        const output = await countries.search({ organizationKey: context.organizationKey, query }, trusted.userKey, { signal: dependencies.signal, timeoutMs: dependencies.timeoutMs, queryEmbedding, recordHistory: false, minimumScore: -1 });
+        const output = await countries.search({ teamKey: context.teamKey, query }, trusted.userKey, { signal: dependencies.signal, timeoutMs: dependencies.timeoutMs, queryEmbedding, recordHistory: false, minimumScore: -1 });
         return { collectionSlug, results: output.country ? [output.country] : [] };
       });
 

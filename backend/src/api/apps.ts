@@ -1,13 +1,13 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { appSchema, appsRepository } from '@/lib/db/apps.node';
+import { appsService, publicAppSchema, type AppsService } from '@/lib/apps/service';
 
-export const appsResponseSchema = z.object({ apps: z.array(appSchema) }).strict();
+export const appsResponseSchema = z.object({ apps: z.array(publicAppSchema) }).strict();
 
-export function createListApps(list: typeof appsRepository.list = appsRepository.list) {
+export function createListApps(service: Pick<AppsService, 'listPublic'> = appsService) {
   return async (c: Context) => {
     c.header('Cache-Control', 'no-store');
-    const apps = [...await list()].sort((left, right) => left.slug.localeCompare(right.slug) || left.key.localeCompare(right.key));
+    const apps = await service.listPublic();
     return c.json(appsResponseSchema.parse({ apps }));
   };
 }

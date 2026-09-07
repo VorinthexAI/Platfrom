@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { calculateByteHours, formatMicroSparks, HOURS_PER_BILLING_MONTH, storageCostMicroSparks } from '@/lib/costs';
 import { db, withTransaction } from '@/lib/db/client';
 import { withArangoKey } from '@/lib/db/base';
 import { STORAGE_OBJECTS_COLLECTION, STORAGE_RETENTION_STATES_COLLECTION } from './storage-charger-repository';
@@ -13,6 +14,9 @@ export const storageRetentionStateSchema = z.object({
   wipeBatch: z.number().int().nonnegative().optional(),
   wipeStartedAt: z.string().datetime().optional(),
   wipedAt: z.string().datetime().optional(),
+  warningPaymentPastDueAt: z.string().datetime().optional(),
+  warningWipeDueAt: z.string().datetime().optional(),
+  warningSentAt: z.string().datetime().optional(),
 }).strict();
 export type StorageRetentionState = z.infer<typeof storageRetentionStateSchema>;
 
@@ -29,14 +33,19 @@ export const STORAGE_WIPE_COLLECTIONS = [
    'books', 'bookChapters', 'emailAttachments', 'emailAttachmentBindings', 'emailMessages', 'emailDrafts', 'placeHeroMedia', 'documents',
   'documentVersions', 'documentAudioVersions', 'documentSummaryAudio', 'images', 'imageCaptions',
   'collectionImages', 'placeImages', 'imageIdentities', 'visualIdentities', 'imageCollecitionHightlights',
-   'imageCollectionMemories', 'collections', 'folders', 'trips', 'galleryUploads', 'tagAssignments', 'shares',
+   'imageCollectionMemories', 'collections', 'folders', 'trips', 'galleryUploads', 'tagAssignments',
    'userHiddens', 'conversationMessages',
 ] as const;
 
 export interface StorageRetentionRepository {
-  listUnfunded(input?: { afterKey?: string; limit?: number }): Promise<Array<StorageRetentionState & { balanceMicroSparks: number }>>;
+  listUnfunded(input?: { afterKey?: string; limit?: number }): Promise<Array<StorageRetentionState & { balanceMicroSparks: number; storedBytes: string; monthlyCostSparks: string }>>;
   markFunded(userKey: string, fundedAt: string): Promise<boolean>;
   wipe(input: { userKey: string; expectedWipeDueAt: string; batch: number; now: string }): Promise<StorageWipeResult>;
+}
+
+export function storageMonthlyCostSparks(storedBytes: string): string {
+  const bytes = BigInt(z.string().regex(/^\d+$/).parse(storedBytes));
+  return formatMicroSparks(storageCostMicroSparks(calculateByteHours(bytes, HOURS_PER_BILLING_MONTH)));
 }
 
 export function createStorageRetentionRepository(
@@ -46,11 +55,12 @@ export function createStorageRetentionRepository(
   return {
     async listUnfunded(input = {}) {
       const limit = Math.min(Math.max(input.limit ?? STORAGE_RETENTION_SCAN_BATCH_SIZE, 1), STORAGE_RETENTION_SCAN_BATCH_SIZE);
-      const cursor = await database.query('FOR state IN @@retention FILTER state.fundedAt == null && state._key > @afterKey SORT state._key ASC LIMIT @limit LET user = DOCUMENT(users, state.userKey) LET balanceMicroSparks = user != null && IS_NUMBER(user.microSparkBalance) ? user.microSparkBalance : 0 RETURN { state, balanceMicroSparks }', { '@retention': STORAGE_RETENTION_STATES_COLLECTION, afterKey: input.afterKey ?? '', limit });
+      const cursor = await database.query('FOR state IN @@retention FILTER state.fundedAt == null && state._key > @afterKey SORT state._key ASC LIMIT @limit LET user = DOCUMENT(users, state.userKey) LET balanceMicroSparks = user != null && IS_NUMBER(user.microSparkBalance) ? user.microSparkBalance : 0 LET storedByteSizes = (FOR object IN @@objects FILTER object.userKey == state.userKey && object.deletedAt == null RETURN object.sizeBytes) RETURN { state, balanceMicroSparks, storedByteSizes }', { '@retention': STORAGE_RETENTION_STATES_COLLECTION, '@objects': STORAGE_OBJECTS_COLLECTION, afterKey: input.afterKey ?? '', limit });
       return (await cursor.all()).map((raw) => {
-        const value = raw as { state: Record<string, unknown>; balanceMicroSparks: unknown };
+        const value = raw as { state: Record<string, unknown>; balanceMicroSparks: unknown; storedByteSizes: unknown };
         const balanceMicroSparks = z.number().int().nonnegative().safe().parse(value.balanceMicroSparks);
-        return { ...storageRetentionStateSchema.parse(withArangoKey(value.state)), balanceMicroSparks };
+        const storedBytes = z.array(z.string().regex(/^\d+$/)).parse(value.storedByteSizes).reduce((total, size) => total + BigInt(size), 0n).toString();
+        return { ...storageRetentionStateSchema.parse(withArangoKey(value.state)), balanceMicroSparks, storedBytes, monthlyCostSparks: storageMonthlyCostSparks(storedBytes) };
       });
     },
 
@@ -97,7 +107,6 @@ export function createStorageRetentionRepository(
         const memoryKeys = z.array(z.string()).parse(await memoryRows.all());
         await transaction.query('FOR item IN imageCollectionMemories FILTER item._key IN @memoryKeys REMOVE item IN imageCollectionMemories', { memoryKeys });
         await transaction.query('FOR assignment IN tagAssignments FILTER (assignment.sourceType == "image" && assignment.sourceKey IN @imageKeys) || (assignment.sourceType == "image-memory" && assignment.sourceKey IN @memoryKeys) REMOVE assignment IN tagAssignments', { imageKeys, memoryKeys });
-        await transaction.query('FOR share IN shares FILTER share.sourceType == "image" && share.sourceKey IN @imageKeys REMOVE share IN shares', { imageKeys });
         await transaction.query('FOR hidden IN userHiddens FILTER hidden.source == "image" && hidden.sourceKey IN @imageKeys REMOVE hidden IN userHiddens', { imageKeys });
         await transaction.query('FOR message IN conversationMessages FILTER message.imageKey IN @imageKeys REMOVE message IN conversationMessages', { imageKeys });
         await transaction.query('FOR relation IN imageIdentities FILTER relation.imageKey IN @imageKeys REMOVE relation IN imageIdentities', imageBind);

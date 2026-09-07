@@ -9,8 +9,8 @@ import { registerRoutes } from './routes';
 import { recordActionCost, recordActionUsage } from '@/lib/ai/events/runtime';
 import { SparkRepositoryError } from '@/lib/sparks/repository';
 
-const organizationKey = newId(), scopeKey = newId(), userKey = newId(), collectionKey = newId();
-const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+const teamKey = newId(), scopeKey = newId(), userKey = newId(), collectionKey = newId();
+const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
 const identity = async () => ({ key: userKey, identityType: 'user' as const });
 const authorize = async () => ({ context });
 
@@ -18,7 +18,7 @@ describe('image generation HTTP API', () => {
   test('requires authentication, strict input, and Idempotency-Key', async () => {
     const app = new Hono();
     app.post('/images/generate', createImageGenerateHandler({ getIdentity: identity, authorize, service: { generate: async () => ({}) } as never }));
-    const body = { organizationKey, scopeKey, collectionKey, prompt: 'Earth' };
+    const body = { teamKey, scopeKey, collectionKey, prompt: 'Earth' };
     expect((await app.request('/images/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(400);
     expect((await app.request('/images/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'request-1' }, body: JSON.stringify({ ...body, provider: 'openrouter' }) })).status).toBe(400);
     const unauthenticated = new Hono();
@@ -31,8 +31,8 @@ describe('image generation HTTP API', () => {
     const service = { generate: async (...args: unknown[]) => { calls.push(args); return { images: [], provider: { durationMs: 0, costUsd: null } }; } } as never;
     await runTool('image.generate', '', { collectionKey, prompt: 'Earth', count: 2 }, { contentContext: context, requestKey: 'request-1', images: service });
     const app = new Hono();
-    app.post('/images/generate', createImageGenerateHandler({ getIdentity: identity, authorize, service }));
-    const response = await app.request('/images/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'request-1' }, body: JSON.stringify({ organizationKey, scopeKey, collectionKey, prompt: 'Earth', count: 2 }) });
+    app.post('/images/generate', createImageGenerateHandler({ getIdentity: identity, authorize, service, appScopeKey: newId() }));
+    const response = await app.request('/images/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'request-1' }, body: JSON.stringify({ teamKey, scopeKey, collectionKey, prompt: 'Earth', count: 2 }) });
     expect(response.status).toBe(201);
     expect(calls).toHaveLength(2);
     expect(calls[0]).toEqual(calls[1]);
@@ -43,14 +43,14 @@ describe('image generation HTTP API', () => {
     const charges: Record<string, unknown>[] = [];
     const service = { generate: async (input: { count?: number }) => { await recordActionCost('image'); await recordActionUsage('image', { operation: 'generate', count: input.count ?? 1 }, { inputTokens: 0, outputTokens: 0, totalTokens: 0 }); return { images: [], provider: { durationMs: 0, costUsd: null } }; } } as never;
     const billing = { charge: async (_key: string, input: Record<string, unknown>) => { charges.push(input); return { status: 'applied', transaction: { key: newId() } } as never; } };
-    await runTool('image.generate', '', { collectionKey, prompt: 'Earth', count: 2 }, { contentContext: context, requestKey: 'core-image', images: service, recordEvent: async () => {}, billing });
-    const app = new Hono().post('/images/generate', createImageGenerateHandler({ getIdentity: identity, authorize, service, recordEvent: async () => {}, billing }));
-    expect((await app.request('/images/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'http-image' }, body: JSON.stringify({ organizationKey, scopeKey, collectionKey, prompt: 'Earth', count: 2 }) })).status).toBe(201);
+    await runTool('image.generate', '', { collectionKey, prompt: 'Earth', count: 2 }, { contentContext: context, requestKey: 'core-image', images: service, recordEvent: async () => {}, appScopeKey: 'cmrnlzf640001qc7kazsr96k5', billing });
+    const app = new Hono().post('/images/generate', createImageGenerateHandler({ getIdentity: identity, authorize, service, recordEvent: async () => {}, appScopeKey: newId(), billing }));
+    expect((await app.request('/images/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'http-image' }, body: JSON.stringify({ teamKey, scopeKey, collectionKey, prompt: 'Earth', count: 2 }) })).status).toBe(201);
     expect(charges).toHaveLength(2);
     expect(charges.every((charge) => charge.actionSlug === 'image' && charge.microSparks === 60_000_000)).toBe(true);
 
-    const insufficient = new Hono().post('/images/generate', createImageGenerateHandler({ getIdentity: identity, authorize, service, recordEvent: async () => {}, billing: { charge: async () => { throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'private'); } } }));
-    expect((await insufficient.request('/images/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'insufficient-image' }, body: JSON.stringify({ organizationKey, scopeKey, collectionKey, prompt: 'Earth' }) })).status).toBe(402);
+    const insufficient = new Hono().post('/images/generate', createImageGenerateHandler({ getIdentity: identity, authorize, service, recordEvent: async () => {}, appScopeKey: newId(), billing: { charge: async () => { throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'private'); } } }));
+    expect((await insufficient.request('/images/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'insufficient-image' }, body: JSON.stringify({ teamKey, scopeKey, collectionKey, prompt: 'Earth' }) })).status).toBe(402);
   });
 
   test('maps image idempotency conflicts to HTTP 409', async () => {
@@ -58,9 +58,10 @@ describe('image generation HTTP API', () => {
     app.post('/images/generate', createImageGenerateHandler({
       getIdentity: identity,
       authorize,
+      appScopeKey: newId(),
       service: { generate: async () => { throw new ImageGenerationIdempotencyError('IMAGE_IDEMPOTENCY_CONFLICT', 'different request', false); } } as never,
     }));
-    const response = await app.request('/images/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'conflict' }, body: JSON.stringify({ organizationKey, scopeKey, collectionKey, prompt: 'Earth' }) });
+    const response = await app.request('/images/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'conflict' }, body: JSON.stringify({ teamKey, scopeKey, collectionKey, prompt: 'Earth' }) });
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ success: false, error: { code: 'IMAGE_IDEMPOTENCY_CONFLICT', message: 'different request', retryable: false } });
   });
@@ -72,13 +73,13 @@ describe('image generation HTTP API', () => {
     const app = new Hono();
     app.get('/images/generation-history', createImageGenerationHistoryListHandler({ getIdentity: identity, authorize, service }));
     app.delete('/images/generation-history', createImageGenerationHistoryDeleteHandler({ getIdentity: identity, authorize, service }));
-    const listResponse = await app.request(`/images/generation-history?organizationKey=${organizationKey}&scopeKey=${scopeKey}`);
+    const listResponse = await app.request(`/images/generation-history?teamKey=${teamKey}&scopeKey=${scopeKey}`);
     expect(listResponse.status).toBe(200);
     expect(await listResponse.json()).toEqual({ success: true, data: { generations: [generation] } });
-    const deleteResponse = await app.request('/images/generation-history', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, prompt: 'Earth' }) });
+    const deleteResponse = await app.request('/images/generation-history', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, prompt: 'Earth' }) });
     expect(deleteResponse.status).toBe(200);
     expect(await deleteResponse.json()).toEqual({ success: true, data: { normalizedPrompt: 'earth', deleted: true } });
-    expect((await app.request('/images/generation-history', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, prompt: 'Earth', userKey }) })).status).toBe(400);
+    expect((await app.request('/images/generation-history', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, prompt: 'Earth', userKey }) })).status).toBe(400);
     expect(calls[0]?.[2]).toBe(context);
     expect(calls[1]?.[2]).toBe(context);
   });
@@ -94,8 +95,8 @@ describe('image generation HTTP API', () => {
     const app = new Hono();
     app.get('/images/generation-history', createImageGenerationHistoryListHandler({ getIdentity: identity, authorize, service }));
     app.delete('/images/generation-history', createImageGenerationHistoryDeleteHandler({ getIdentity: identity, authorize, service }));
-    await app.request(`/images/generation-history?organizationKey=${organizationKey}&scopeKey=${scopeKey}&limit=5`);
-    await app.request('/images/generation-history', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, prompt: 'Earth' }) });
+    await app.request(`/images/generation-history?teamKey=${teamKey}&scopeKey=${scopeKey}&limit=5`);
+    await app.request('/images/generation-history', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, prompt: 'Earth' }) });
     expect(calls[0]!.slice(1)).toEqual(calls[2]!.slice(1));
     expect(calls[1]!.slice(1)).toEqual(calls[3]!.slice(1));
   });

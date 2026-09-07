@@ -6,20 +6,21 @@ import type { runContentTool } from '@/lib/ai/tools/content-runtime';
 import { AssistantCapabilityRegistry } from './capabilities';
 import { runPersonalAssistant } from './runtime';
 
-const organizationKey = newId();
+const teamKey = newId();
 const scopeKey = newId();
 const documentKey = newId();
 const userKey = newId();
 const domain = {
-  organizationKey,
+  teamKey,
   runtimeScopeKey: scopeKey,
-  principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } },
+  principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } },
 } as unknown as ToolContext;
 
 const input = { surface: 'knowledge-workspace' as const, message: 'Help me', currentNote: { title: 'Notes', content: 'Existing text' } };
 const response = (output: unknown) => ({ output });
 const billingFixture = {
   recordEvent: async () => {},
+  appScopeKey: 'cmrnlzf640001qc7kazsr96k5',
   billing: {
     charge: async (_userKey: string, billingInput: Record<string, unknown>) => ({ status: 'applied', transaction: { key: newId(), eventKey: billingInput.eventKey } }) as never,
     refund: async () => ({ status: 'applied', transaction: { key: newId() } }) as never,
@@ -38,12 +39,14 @@ describe('personal assistant runtime', () => {
       },
     });
 
-    expect(request).toBe(organizationKey);
+    expect(request).toBe(teamKey);
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
       'app.search',
       'app.enhance', 'app.translate', 'app.speech',
       'content.hidden.list',
-      'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote',
+      'team.list', 'app.notify', 'notification.list', 'scope.list', 'pricing.read',
+      'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore',
+      'referral.summary.read', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote',
       'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal',
       'folder.create', 'folder.update', 'folder.move', 'folder.copy',
       'document.create', 'document.update',
@@ -84,10 +87,10 @@ describe('personal assistant runtime', () => {
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
       'app.search',
       'content.hidden.list',
-      'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote',
+      'team.list', 'app.notify', 'notification.list', 'scope.list', 'pricing.read',
+      'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore',
+      'referral.summary.read', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote',
       'collection.create', 'collection.update', 'collection.delete',
-      'collection.member.list', 'collection.invite.pending.list', 'collection.invite.create', 'collection.invite.accept', 'collection.invite.reject', 'collection.invite.revoke',
-      'collection.member.role.update', 'collection.member.remove', 'collection.leave', 'collection.share.list', 'collection.share.create', 'collection.share.update', 'collection.share.revoke', 'collection.share.activate',
       'image.search', 'image.favorite', 'image.update', 'image.delete',
       'collection.duplicates.delete', 'collection.image.transfer', 'subject.list', 'subject.create',
       'subject.image.list', 'subject.delete', 'highlight.create', 'highlight.list',
@@ -132,7 +135,7 @@ describe('personal assistant runtime', () => {
       },
     });
 
-    expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual(['app.search', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote', 'place.reference.generate', 'place.reference.list', 'trip.guide.generate', 'trip.guide.list', 'trip.create', 'trip.update', 'trip.delete', 'trip.attachment.set', 'place.guide.find', 'place.find-city', 'place.find-children', 'place.create', 'place.update', 'place.delete', 'place.open', 'assistant.unsupported']);
+    expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual(['app.search', 'team.list', 'app.notify', 'notification.list', 'scope.list', 'pricing.read', 'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore', 'referral.summary.read', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote', 'place.reference.generate', 'place.reference.list', 'trip.guide.generate', 'trip.guide.list', 'trip.create', 'trip.update', 'trip.delete', 'trip.attachment.set', 'place.guide.find', 'place.find-city', 'place.find-children', 'place.create', 'place.update', 'place.delete', 'place.open', 'assistant.unsupported']);
     expect(chatInput.systemPrompt).toContain('operating inside Compass');
     expect(chatInput.messages[0].content[0].text).toContain('"workspace":"Compass"');
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Compass. Core can search your saved knowledge for travel context.', sources: [] });
@@ -257,7 +260,7 @@ describe('personal assistant runtime', () => {
       execute: async (_request, nextInput) => {
         modelCalls += 1;
         if (modelCalls === 1) {
-          expect(nextInput.tools?.map(({ name }) => name)).toEqual(['app.search', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote', 'book.topic.suggest', 'book.goal.suggest', 'book.extend', 'book.share.detail', 'book.share.update', 'book.chapter.progress', 'book.create', 'book.generation.retry', 'book.generation.cancel', 'book.favorite', 'book.delete', 'assistant.unsupported']);
+          expect(nextInput.tools?.map(({ name }) => name)).toEqual(['app.search', 'team.list', 'app.notify', 'notification.list', 'scope.list', 'pricing.read', 'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore', 'referral.summary.read', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote', 'book.topic.suggest', 'book.goal.suggest', 'book.extend', 'book.chapter.progress', 'book.create', 'book.generation.retry', 'book.generation.cancel', 'book.favorite', 'book.delete', 'assistant.unsupported']);
           expect(nextInput.systemPrompt).toContain('Call book.create exactly once');
           return response({ text: '', toolCalls: [{ id: 'book-create-1', name: 'book.create', arguments: brief }], stopReason: 'tool_use' });
         }
@@ -267,7 +270,7 @@ describe('personal assistant runtime', () => {
       books: { create: async (...args: unknown[]) => { serviceCalls.push(args); return { key: bookKey, status: 'ready' }; } } as any,
     });
 
-    expect(serviceCalls).toEqual([[{ organizationKey, scopeKey, generationRequestKey: 'book-request-1', ...brief }, (domain.principal as any).user.key]]);
+    expect(serviceCalls).toEqual([[{ teamKey, scopeKey, generationRequestKey: 'book-request-1', ...brief }, (domain.principal as any).user.key]]);
     expect(modelCalls).toBe(2);
     expect(result).toEqual({ type: 'answer', message: 'Your book is ready in Ascend.', sources: [], changes: [{ workspace: 'ascend' }] });
   });

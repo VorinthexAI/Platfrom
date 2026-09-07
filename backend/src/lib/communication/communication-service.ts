@@ -12,20 +12,20 @@ export class CommunicationError extends Error {
   constructor(readonly code: CommunicationErrorCode, message: string) { super(message); this.name = 'CommunicationError'; }
 }
 
-export interface CommunicationActor { organizationKey: string; membershipKey: string; name?: string }
+export interface CommunicationActor { teamKey: string; teamMembershipKey: string; name?: string }
 const isoNow = () => new Date().toISOString();
 
 export class CommunicationService {
   constructor(private readonly repository: CommunicationRepository = arangoCommunicationRepository, private readonly now = isoNow) {}
 
   async generalChannel(actor: CommunicationActor) {
-    const access = await this.repository.ensureGeneralChannel(actor.organizationKey, actor.membershipKey);
-    if (!access) throw new CommunicationError('forbidden', 'organization access denied');
-    return await this.repository.getGeneralChannelAccess(actor.organizationKey, actor.membershipKey, access.channel.key) ?? access;
+    const access = await this.repository.ensureGeneralChannel(actor.teamKey, actor.teamMembershipKey);
+    if (!access) throw new CommunicationError('forbidden', 'team access denied');
+    return await this.repository.getGeneralChannelAccess(actor.teamKey, actor.teamMembershipKey, access.channel.key) ?? access;
   }
 
   async requireChannel(actor: CommunicationActor, channelKey: string): Promise<GeneralChannelAccess> {
-    const access = await this.repository.getGeneralChannelAccess(actor.organizationKey, actor.membershipKey, channelKey);
+    const access = await this.repository.getGeneralChannelAccess(actor.teamKey, actor.teamMembershipKey, channelKey);
     if (!access) throw new CommunicationError('forbidden', 'channel access denied');
     return access;
   }
@@ -38,7 +38,7 @@ export class CommunicationService {
   async deleteMessage(actor: CommunicationActor, channelKey: string, messageKey: string) {
     await this.requireChannel(actor, channelKey);
     await this.requireMessage(channelKey, messageKey);
-    if (!await this.repository.deleteMessage(channelKey, messageKey, actor.membershipKey, this.now())) {
+    if (!await this.repository.deleteMessage(channelKey, messageKey, actor.teamMembershipKey, this.now())) {
       throw new CommunicationError('forbidden', 'message deletion denied');
     }
   }
@@ -46,7 +46,7 @@ export class CommunicationService {
   async editMessage(actor: CommunicationActor, channelKey: string, messageKey: string, content: string) {
     await this.requireChannel(actor, channelKey);
     await this.requireMessage(channelKey, messageKey);
-    const edited = await this.repository.editMessage(channelKey, messageKey, actor.membershipKey, content, this.now());
+    const edited = await this.repository.editMessage(channelKey, messageKey, actor.teamMembershipKey, content, this.now());
     if (!edited) throw new CommunicationError('forbidden', 'only the message author may edit this message');
     return edited;
   }

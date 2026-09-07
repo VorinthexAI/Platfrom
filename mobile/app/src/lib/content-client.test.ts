@@ -3,7 +3,7 @@ import { beforeEach, expect, mock, test } from "bun:test";
 const calls: { url: string; body: Record<string, any>; config: Record<string, any> }[] = [];
 const testRuntime = globalThis as typeof globalThis & { __archiveApiPost?: (...input: any[]) => unknown };
 let authState = {
-  organization: { key: "org-authenticated" },
+  team: { key: "team-authenticated" },
   scope: { key: "scope-authenticated" },
 };
 let responseForTool: ((tool: string) => unknown) | undefined;
@@ -91,7 +91,7 @@ beforeEach(() => {
   digestInputs.length = 0;
   responseForTool = undefined;
   authState = {
-    organization: { key: "org-authenticated" },
+    team: { key: "team-authenticated" },
     scope: { key: "scope-authenticated" },
   };
 });
@@ -129,7 +129,7 @@ test("generates persisted document audio through app.speech", async () => {
   await expect(generateContentDocumentAudio("document")).resolves.toEqual(audio);
   expect(calls[0]).toMatchObject({
     url: "/app/speech",
-    body: { organizationKey: "org-authenticated", scopeKey: "scope-authenticated", input: { documentKey: "document", voice: "clear", pace: 1, includeTitle: true, includeCode: false } },
+    body: { teamKey: "team-authenticated", scopeKey: "scope-authenticated", input: { documentKey: "document", voice: "clear", pace: 1, includeTitle: true, includeCode: false } },
     config: { timeout: 5 * 60_000 },
   });
 });
@@ -162,7 +162,7 @@ test("sends document and folder mutations with the authenticated Archive context
     "/api/v1/content/tools/document.update",
     "/api/v1/content/tools/folder.create",
   ]);
-  expect(calls.every(({ body }) => body.organizationKey === "org-authenticated" && body.scopeKey === "scope-authenticated")).toBe(true);
+  expect(calls.every(({ body }) => body.teamKey === "team-authenticated" && body.scopeKey === "scope-authenticated")).toBe(true);
   expect(calls[0]?.body.input).toEqual({
     scopeKey: "scope-authenticated",
     folderKey: "parent",
@@ -180,7 +180,7 @@ test("uploads documents through the authenticated Archive context", async () => 
   await uploadContentDocument({ name: "notes.txt", type: "text/plain", size: 3, base64: "YWJj" }, "folder", getContentContext(), "upload-attempt");
 
   expect(calls[0]?.body).toMatchObject({
-    organizationKey: "org-authenticated",
+    teamKey: "team-authenticated",
     scopeKey: "scope-authenticated",
     input: {
       scopeKey: "scope-authenticated",
@@ -403,7 +403,7 @@ test("sends Archive requests to the personal assistant surface", async () => {
   expect(await askPersonalAssistant("Write a launch plan", { documentKey: "document", title: "Untitled note", content: "Draft", selection: { start: 0, end: 5 } }, "folder")).toEqual({ type: "note", content: "Generated note", message: "Wrote the note.", sources: [] });
   expect(calls[0]?.url).toBe("/api/v1/assistant/respond");
   expect(calls[0]?.body).toEqual({
-    organizationKey: "org-authenticated",
+    teamKey: "team-authenticated",
     scopeKey: "scope-authenticated",
     input: { surface: "knowledge-workspace", message: "Write a launch plan", currentNote: { documentKey: "document", title: "Untitled note", content: "Draft", selection: { start: 0, end: 5 } }, requestKey: expect.any(String), folderKey: "folder" },
   });
@@ -436,7 +436,7 @@ test("searches a folder while listing global user history", async () => {
   expect((await listContentSearchHistory())[0]?.query).toBe("roadmap");
   expect(calls[0]?.url).toBe("/app/search");
   expect(calls[1]?.url).toContain("/content.search-history.list");
-  expect(calls[0]?.body).toEqual({ organizationKey: "org-authenticated", scopeKey: "scope-authenticated", query: "roadmap", collectionSlugs: ["folders", "documents", "files"], recordHistory: true, limit: 50, filters: { folderKey: "folder", includeDescendants: true } });
+  expect(calls[0]?.body).toEqual({ teamKey: "team-authenticated", scopeKey: "scope-authenticated", query: "roadmap", collectionSlugs: ["folders", "documents", "files"], recordHistory: true, limit: 50, filters: { folderKey: "folder", includeDescendants: true } });
   expect(calls[1]?.body.input).toEqual({ scopeKey: "scope-authenticated", allLocations: true, limit: 50 });
 });
 
@@ -498,7 +498,7 @@ test("lists all-tag Archive matches when the query is empty and projects stable 
     documents: [{ documentKey: "document", score: 0 }],
   });
   expect(calls[0]?.body).toEqual({
-    organizationKey: "org-authenticated",
+    teamKey: "team-authenticated",
     scopeKey: "scope-authenticated",
     operation: "list",
     collectionSlugs: ["folders", "documents", "files"],
@@ -549,7 +549,7 @@ test("scopes fast semantic search to a folder and its descendants", async () => 
   responseForTool = () => ({ data: { success: true, data: { query: "roadmap", groups: [{ collectionSlug: "folders", results: [] }, { collectionSlug: "documents", results: [] }, { collectionSlug: "files", results: [] }] } } });
   await searchContentMatches("roadmap", undefined, "folder");
   expect(calls[0]?.body).toEqual({
-    organizationKey: "org-authenticated",
+    teamKey: "team-authenticated",
     scopeKey: "scope-authenticated",
     query: "roadmap",
     collectionSlugs: ["folders", "documents", "files"],

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { contentZodToJsonSchema } from '@/lib/ai/tools/content-json-schema';
 import type { AssistantCapability, AssistantCapabilityContext } from './capabilities';
-import { GalleryOperationError, galleryOperationInputSchemas, galleryOperations, redactCollectionShareOutput, type GalleryOperationContext, type GalleryOperationName } from '@/lib/gallery/operations';
+import { GalleryOperationError, galleryOperationInputSchemas, galleryOperations, type GalleryOperationContext, type GalleryOperationName } from '@/lib/gallery/operations';
 import { nonTextImageSearchInputSchema, nonTextImageSearchProviderInputSchema } from '@/lib/ai/tools/image-search';
 import { userHiddenOperations } from '@/lib/user-hiddens/operations';
 import { createImageGenerationService, imageGenerateModelInputSchema, imageGenerationHistoryDeleteInputSchema, imageGenerationHistoryListInputSchema, imageIdeasInputSchema, type ImageGenerationService } from '@/lib/image-generation/service';
@@ -21,20 +21,6 @@ const definitions: Array<{
   { operation: 'createCollection', name: 'collection.create', description: 'Create a Gallery collection.', schema: galleryOperationInputSchemas.createCollection, mutation: true },
   { operation: 'updateCollection', name: 'collection.update', description: 'Update a Gallery collection name, favorite state, and optional custom cover.', schema: galleryOperationInputSchemas.updateCollection, mutation: true },
   { operation: 'deleteCollection', name: 'collection.delete', description: 'Delete a non-favorite Gallery collection without deleting images that remain in Gallery. Favorite collections must be unfavorited first.', schema: galleryOperationInputSchemas.deleteCollection, mutation: true },
-  { operation: 'listMembers', name: 'collection.member.list', description: 'List collection members grouped by owner, collaborator, and viewer role.', schema: galleryOperationInputSchemas.listMembers },
-  { operation: 'listPendingInvites', name: 'collection.invite.pending.list', description: 'List pending collection invitations relevant to the authenticated user.', schema: galleryOperationInputSchemas.listPendingInvites },
-  { operation: 'createInvite', name: 'collection.invite.create', description: 'Invite a collaborator or viewer to a collection.', schema: galleryOperationInputSchemas.createInvite, mutation: true },
-  { operation: 'acceptInvite', name: 'collection.invite.accept', description: 'Accept a collection invitation relevant to the authenticated user.', schema: galleryOperationInputSchemas.acceptInvite, mutation: true },
-  { operation: 'rejectInvite', name: 'collection.invite.reject', description: 'Reject a collection invitation relevant to the authenticated user.', schema: galleryOperationInputSchemas.rejectInvite, mutation: true },
-  { operation: 'revokeInvite', name: 'collection.invite.revoke', description: 'Revoke a pending collection invitation.', schema: galleryOperationInputSchemas.revokeInvite, mutation: true },
-  { operation: 'updateMemberRole', name: 'collection.member.role.update', description: 'Set a collection member role to collaborator or viewer.', schema: galleryOperationInputSchemas.updateMemberRole, mutation: true },
-  { operation: 'removeMember', name: 'collection.member.remove', description: 'Remove a non-owner member from a collection without deleting images.', schema: galleryOperationInputSchemas.removeMember, mutation: true },
-  { operation: 'leaveCollection', name: 'collection.leave', description: 'Leave a collection without deleting images.', schema: galleryOperationInputSchemas.leaveCollection, mutation: true },
-  { operation: 'listShares', name: 'collection.share.list', description: 'List global share links for a collection.', schema: galleryOperationInputSchemas.listShares },
-  { operation: 'createShare', name: 'collection.share.create', description: 'Create a viewer or collaborator global share link for a collection.', schema: galleryOperationInputSchemas.createShare, mutation: true },
-  { operation: 'updateShare', name: 'collection.share.update', description: 'Activate or deactivate a collection share link.', schema: galleryOperationInputSchemas.updateShare, mutation: true },
-  { operation: 'revokeShare', name: 'collection.share.revoke', description: 'Revoke a collection share link.', schema: galleryOperationInputSchemas.revokeShare, mutation: true },
-  { operation: 'activateShare', name: 'collection.share.activate', description: 'Activate a collection share token for the authenticated user.', schema: galleryOperationInputSchemas.activateShare, mutation: true },
   { operation: 'search', name: 'image.search', description: 'Find Gallery images from a source image or saved visual identity, or find duplicates in a collection. Use app.search for text queries.', schema: nonTextImageSearchInputSchema },
   { operation: 'setFavorite', name: 'image.favorite', description: 'Set or clear an image favorite.', schema: galleryOperationInputSchemas.setFavorite, mutation: true },
   { operation: 'updateImage', name: 'image.update', description: 'Update an image name and favorite state.', schema: galleryOperationInputSchemas.updateImage, mutation: true },
@@ -61,9 +47,9 @@ function trustedContext(context: AssistantCapabilityContext): GalleryOperationCo
   const principal = context.domain.principal;
   if (principal.kind !== 'member') throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'A user session is required.');
   return {
-    organizationKey: context.domain.organizationKey,
+    teamKey: context.domain.teamKey,
     scopeKey: context.domain.runtimeScopeKey,
-    membership: principal.userOrganization,
+    membership: principal.userTeam,
     modelVisible: true,
     ...(context.requestKey ? { idempotencyKey: context.requestKey } : {}),
   };
@@ -79,7 +65,7 @@ export function createGalleryAssistantCapabilities(operations: Partial<Record<Ga
       const execute = context.gallery?.[operation] ?? operations[operation];
       if (!execute) throw new Error(`Gallery operation is unavailable: ${operation}`);
       const result = await execute(schema.parse(input), trustedContext(context));
-      return { kind: 'continue' as const, result: ['listShares', 'createShare', 'updateShare', 'revokeShare'].includes(operation) ? redactCollectionShareOutput(result) : result };
+      return { kind: 'continue' as const, result };
     },
     });
   });
@@ -91,7 +77,7 @@ export function createGalleryAssistantCapabilities(operations: Partial<Record<Ga
       const parsed = z.object({ sourceKey: key }).strict().parse(input);
       const principal = context.domain.principal;
       if (principal.kind !== 'member') throw new GalleryOperationError(403, 'GALLERY_FORBIDDEN', 'A user session is required.');
-      const result = await userHiddenOperations[operation]({ source, sourceKey: parsed.sourceKey }, { userKey: principal.user.key, organizationKey: context.domain.organizationKey, membershipKey: principal.userOrganization.key, service: context.userHiddens });
+      const result = await userHiddenOperations[operation]({ source, sourceKey: parsed.sourceKey }, { userKey: principal.user.key, teamKey: context.domain.teamKey, teamMembershipKey: principal.userTeam.key, service: context.userHiddens });
       return { kind: 'continue', result };
     },
   })));

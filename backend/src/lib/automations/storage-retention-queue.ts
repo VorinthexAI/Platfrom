@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { Queue, Worker, type JobsOptions } from 'bullmq';
 import { z } from 'zod';
 import { createRedisConnection } from '@/lib/redis';
+import { appNotificationService, type AppNotificationService } from '@/lib/app-notifications/service';
 import { getDefaultStorageRetentionRepository, STORAGE_RETENTION_SCAN_BATCH_SIZE, type StorageRetentionRepository, type StorageRetentionState } from './storage-retention-repository';
 
 export const STORAGE_RETENTION_QUEUE_NAME = 'daily-storage-retention';
@@ -13,7 +14,7 @@ const wakeSchema = z.object({ schemaVersion: z.literal(1), kind: z.literal('wake
 const wipeSchema = z.object({ schemaVersion: z.literal(1), kind: z.literal('wipe-user'), userKey: z.string().min(1).max(160), expectedWipeDueAt: z.string().datetime(), batch: z.number().int().nonnegative() }).strict();
 export const storageRetentionJobSchema = z.discriminatedUnion('kind', [wakeSchema, wipeSchema]);
 export type StorageRetentionJob = z.infer<typeof storageRetentionJobSchema>;
-type Result = { scanned: number; funded: number; enqueued: number } | { status: 'stale' } | { status: 'continued'; nextBatch: number; processed: number } | { status: 'wiped'; processed: number };
+type Result = { scanned: number; funded: number; warned: number; enqueued: number } | { status: 'stale' } | { status: 'continued'; nextBatch: number; processed: number } | { status: 'wiped'; processed: number };
 type QueueAccess = Pick<Queue<StorageRetentionJob, Result>, 'add' | 'getJob' | 'upsertJobScheduler'>;
 type WorkerHandle = { on(event: 'error', listener: (error: Error) => void): unknown; close(): Promise<void> };
 export interface StorageRetentionDependencies {
@@ -21,6 +22,7 @@ export interface StorageRetentionDependencies {
   now?: () => Date;
   queue?: QueueAccess;
   workerFactory?: (processor: (data: unknown) => Promise<Result>) => WorkerHandle;
+  notifications?: Pick<AppNotificationService, 'notifyStorageRetentionWarning'>;
 }
 
 const connection = () => createRedisConnection(process.env.JOB_REDIS_URL ?? process.env.REDIS_URL);
@@ -34,13 +36,13 @@ const getQueue = () => {
 
 export const storageWipeJobId = (userKey: string, expectedWipeDueAt: string, batch: number) => createHash('sha256').update(`storage-wipe\0${userKey}\0${expectedWipeDueAt}\0${z.number().int().nonnegative().parse(batch)}`).digest('hex');
 
-export function storageRetentionAction(state: StorageRetentionState & { balanceMicroSparks: number }, now: Date): 'fund' | 'wipe' | 'wait' {
+export function storageRetentionAction(state: StorageRetentionState & { balanceMicroSparks: number }, now: Date): 'fund' | 'wipe' | 'warn' | 'wait' {
   if (!Number.isFinite(now.getTime())) throw new TypeError('A valid retention scan time is required.');
   if (state.wipeStartedAt && !state.wipedAt) return 'wipe';
   if (state.wipeStartedAt || state.wipedAt) return 'wait';
   if (state.balanceMicroSparks >= state.minimumBalanceMicroSparks) return 'fund';
   if (Date.parse(state.wipeDueAt) <= now.getTime()) return 'wipe';
-  return 'wait';
+  return 'warn';
 }
 
 export async function enqueueStorageWipe(userKey: string, expectedWipeDueAt: string, batch: number, targetQueue: QueueAccess = getQueue()) {
@@ -55,8 +57,9 @@ export async function enqueueStorageWipe(userKey: string, expectedWipeDueAt: str
 export async function scanStorageRetention(dependencies: StorageRetentionDependencies = {}) {
   const repository = dependencies.repository ?? getDefaultStorageRetentionRepository();
   const targetQueue = dependencies.queue ?? getQueue();
+  const notifications = dependencies.notifications ?? appNotificationService;
   const now = (dependencies.now ?? (() => new Date()))().toISOString();
-  let scanned = 0, funded = 0, enqueued = 0;
+  let scanned = 0, funded = 0, warned = 0, enqueued = 0;
   let afterKey: string | undefined;
   while (true) {
     const states = await repository.listUnfunded({ afterKey, limit: STORAGE_RETENTION_SCAN_BATCH_SIZE });
@@ -70,6 +73,9 @@ export async function scanStorageRetention(dependencies: StorageRetentionDepende
         } else if (action === 'wipe') {
           await enqueueStorageWipe(state.userKey, state.wipeDueAt, state.wipeBatch ?? 0, targetQueue);
           enqueued += 1;
+        } else if (action === 'warn') {
+          const result = await notifications.notifyStorageRetentionWarning({ userKey: state.userKey, paymentPastDueAt: state.paymentPastDueAt, wipeDueAt: state.wipeDueAt, monthlyCostSparks: state.monthlyCostSparks, now });
+          if (result) warned += 1;
         }
       } catch (error) { failure ??= error; }
     }
@@ -79,7 +85,7 @@ export async function scanStorageRetention(dependencies: StorageRetentionDepende
     if (nextAfterKey === afterKey) throw new Error('Storage retention scan did not advance.');
     afterKey = nextAfterKey;
   }
-  return { scanned, funded, enqueued };
+  return { scanned, funded, warned, enqueued };
 }
 
 export async function processStorageRetentionJob(raw: unknown, dependencies: StorageRetentionDependencies = {}): Promise<Result> {

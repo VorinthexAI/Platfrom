@@ -4,6 +4,9 @@ import manifest from "@/app/manifest";
 import sitemap from "@/app/sitemap";
 import {
   CANONICAL_ORIGIN,
+  PRICING_HERO_BODY,
+  PRICING_HERO_HEADING,
+  PRODUCT_FACTS,
   PUBLIC_ROUTES,
   canonicalUrl,
 } from "@/lib/discoverability";
@@ -12,8 +15,9 @@ import { PRIVACY_COPY, TERMS_COPY } from "@/lib/legal-copy";
 import { buildRobotsMetadata, buildRouteMetadata } from "@/lib/metadata";
 import {
   NEWCOMER_FREE_SPARKS,
-  SPARK_MONTHLY_PLANS,
-  SPARK_TOP_UPS,
+  REFERRAL_REWARDS,
+  SPARK_SUBSCRIPTIONS,
+  SPARK_TOP_UP,
   formatSparkCount,
   formatUsd,
 } from "@/lib/spark-pricing";
@@ -55,7 +59,7 @@ describe("public discoverability registry", () => {
     expect(sitemap().map(({ url }) => url).sort()).toEqual(
       PUBLIC_ROUTES.map(({ path }) => canonicalUrl(path)).sort(),
     );
-    expect(sitemap().every(({ lastModified }) => lastModified === "2026-09-04")).toBe(
+    expect(sitemap().every(({ lastModified }) => lastModified === "2026-09-06")).toBe(
       true,
     );
   });
@@ -124,28 +128,46 @@ describe("generated answer-engine content", () => {
     for (const output of outputs) {
       expect(output).toContain("# Vorinthex AI");
       expect(output).toContain("> ");
-      expect(output).toContain("Last reviewed: 2026-09-04");
+      expect(output).toContain("Last reviewed: 2026-09-06");
       expect(output).toContain("personal AI");
-      expect(output).toContain("Local taxes may be added where required");
+      expect(output).toContain(PRICING_HERO_HEADING);
+      expect(output).toContain(PRICING_HERO_BODY);
+      expect(output).not.toMatch(/usage-based|pay only for what you use/i);
+      expect(output).toContain("excludes VAT and other local taxes");
       expect(output).toContain("Prepaid Sparks remain available after subscription cancellation");
       expect(output).toContain("balances never go below zero");
       expect(output).toContain("hard-deleted after 90 consecutive unfunded days");
       expect(output).toContain(canonicalUrl("/terms"));
-      expect(output).not.toMatch(/unlimited|most popular|app store|google play/i);
+      expect(output).not.toMatch(/Moon|Comet|On-Demand|unlimited|most popular|app store|google play/i);
       expect(output).toContain(formatSparkCount(NEWCOMER_FREE_SPARKS));
 
-      for (const plan of SPARK_MONTHLY_PLANS) {
+      for (const plan of SPARK_SUBSCRIPTIONS) {
         expect(output).toContain(plan.name);
         expect(output).toContain(formatSparkCount(plan.sparks));
         expect(output).toContain(formatUsd(plan.price));
       }
 
-      for (const topUp of SPARK_TOP_UPS) {
-        expect(output).toContain(formatSparkCount(topUp.sparks));
-        expect(output).toContain(formatUsd(topUp.price));
-      }
+      expect(output).toContain(formatUsd(SPARK_SUBSCRIPTIONS[0].referencePrice));
+      expect(output).toContain(formatSparkCount(SPARK_TOP_UP.sparks));
+      expect(output).toContain(formatUsd(SPARK_TOP_UP.price));
+      expect(output).toContain(`${formatSparkCount(REFERRAL_REWARDS.signup)} Sparks when a new user signs up`);
+      expect(output).toContain(`${formatSparkCount(REFERRAL_REWARDS.firstSubscriptionPurchase)} Sparks when that referred user first purchases a subscription`);
+      expect(output).toContain("Each stage is awarded once per referred user");
+      expect(output).toContain("Public website purchases available: no; coming soon");
     }
+  });
 
+  test("publishes only active catalog choices and no sales schema", () => {
+    expect(PRODUCT_FACTS.pricing.subscriptions).toHaveLength(2);
+    expect(PRODUCT_FACTS.pricing.subscriptions.map(({ name }) => name)).toEqual(["Monthly", "Weekly"]);
+    expect(PRODUCT_FACTS.pricing.subscriptions[0]).toMatchObject({ price: 19.99, referencePrice: 24.99, sparks: 1_000 });
+    expect(PRODUCT_FACTS.pricing.subscriptions[1]).toMatchObject({ price: 7.99, sparks: 200 });
+    expect(PRODUCT_FACTS.pricing.topUp).toEqual({ price: 9.99, sparks: 200 });
+    expect(PRODUCT_FACTS.pricing.referrals).toEqual({ signup: 50, firstSubscriptionPurchase: 100, recipient: "referrer", frequency: "one-time per referred user at each stage" });
+    expect(PRODUCT_FACTS.pricing.webPurchasesAvailable).toBe(false);
+
+    const pricingSchema = JSON.stringify(buildPageGraph("/pricing"));
+    expect(pricingSchema).not.toMatch(/\"@type\":\"(?:Offer|Product)\"/);
   });
 });
 

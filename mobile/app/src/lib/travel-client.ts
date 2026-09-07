@@ -184,7 +184,7 @@ const assistantResponseSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("note"), content: z.string(), message: z.string().min(1), sources: z.array(z.object({ documentKey: keySchema, name: z.string().min(1) })), changes: assistantChangesSchema }),
   z.object({ type: z.literal("unsupported"), message: z.string().min(1), sources: z.tuple([]), changes: assistantChangesSchema }),
 ]);
-const contextSchema = z.strictObject({ organizationKey: keySchema, scopeKey: keySchema });
+const contextSchema = z.strictObject({ teamKey: keySchema, scopeKey: keySchema });
 const placeSearchInputSchema = z.strictObject({ query: z.string().trim().min(2).max(500), recordHistory: z.boolean().optional() });
 const createTripInputSchema = z.strictObject({
   name: z.string().trim().min(1).max(255),
@@ -237,7 +237,7 @@ const setTripAttachmentsInputSchema = z.strictObject({
   if (new Set(attachments.map(({ type, key }) => `${type}:${key}`)).size !== attachments.length) context.addIssue({ code: "custom", message: "Trip attachments must be distinct.", path: ["attachments"] });
 });
 export type SetTripAttachmentsInput = z.input<typeof setTripAttachmentsInputSchema>;
-const countrySearchInputSchema = z.strictObject({ organizationKey: keySchema, query: z.string().trim().min(1).max(200) });
+const countrySearchInputSchema = z.strictObject({ teamKey: keySchema, query: z.string().trim().min(1).max(200) });
 export const countrySearchResultSchema = z.strictObject({
   country: z.strictObject({
     name: z.string().trim().min(1).max(160),
@@ -257,7 +257,7 @@ function recordKey(value: Record<string, unknown> | null) {
 export function getTravelContext() {
   const state = useAuthStore.getState();
   const parsed = contextSchema.safeParse({
-    organizationKey: recordKey(state.organization),
+    teamKey: recordKey(state.team),
     scopeKey: recordKey(state.scope),
   });
   if (!parsed.success) throw new Error("Places are unavailable for this session.");
@@ -471,7 +471,7 @@ export function findPlaceChildren(childrenRequestToken: string, signal?: AbortSi
 }
 
 export async function searchCountries(query: string, signal?: AbortSignal) {
-  countrySearchInputSchema.parse({ organizationKey: getTravelContext().organizationKey, query });
+  countrySearchInputSchema.parse({ teamKey: getTravelContext().teamKey, query });
   const output = await searchApp({ query, collectionSlugs: ["countries"], limit: 1 }, signal);
   return appSearchResults(output, "countries", countrySearchResultSchema.shape.country.unwrap()).at(0) ?? null;
 }
@@ -501,10 +501,10 @@ export function generatePlaceHeroImage(input: z.input<typeof placeImagesInputSch
 }
 
 export async function askTravelAssistant(message: string, requestKey: string) {
-  const { organizationKey, scopeKey } = getTravelContext();
+  const { teamKey, scopeKey } = getTravelContext();
   try {
     const response = await apiClient.post("/assistant/respond", {
-      organizationKey,
+      teamKey,
       scopeKey,
       input: {
         surface: "travel-workspace",

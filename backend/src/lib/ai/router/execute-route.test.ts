@@ -4,10 +4,11 @@ import { ProviderError, type ProviderExecuteRequest } from '@/lib/ai/providers';
 import { tokenUsage } from '@/lib/ai/shared';
 import { executeAction, executeRoute, streamAsk, type RouteAttemptTelemetry } from './execute-route';
 import type { RouteDecision } from './types';
-import { observeToolExecution } from '@/lib/ai/events/runtime';
+import { observeToolExecution as observePersistedToolExecution } from '@/lib/ai/events/runtime';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 
-const decision: RouteDecision = { organizationKey: newId(), actionSlug: 'text', modelSlug: 'google.gemini-3.1-flash-lite', providerSlug: 'openrouter', providerModelId: 'google/gemini-3.1-flash-lite' };
+const decision: RouteDecision = { teamKey: newId(), actionSlug: 'text', modelSlug: 'google.gemini-3.1-flash-lite', providerSlug: 'openrouter', providerModelId: 'google/gemini-3.1-flash-lite' };
+const observeToolExecution: typeof observePersistedToolExecution = (slug, context, execute, options = {}) => observePersistedToolExecution(slug, context, execute, { appScopeKey: 'cmrnlzf640001qc7kazsr96k5', ...options });
 
 describe('route execution', () => {
   test('executes exactly one route and reports provider token usage', async () => {
@@ -28,7 +29,7 @@ describe('route execution', () => {
 
   test('accepts provider slots with retry interval and attempt options', async () => {
     let calls = 0;
-    const response = await executeAction({ mode: 'auto', organizationKey: newId(), actionSlug: 'text' }, { messages: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }] }, {
+    const response = await executeAction({ mode: 'auto', teamKey: newId(), actionSlug: 'text' }, { messages: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }] }, {
       providers: ['text.primary'], retry: { intervalMs: 1, attempts: 2 },
       adapters: { openrouter: { id: 'openrouter', name: 'OpenRouter', async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) { calls += 1; if (calls === 1) throw new ProviderError('openrouter', 'rate_limited', 'limited', { status: 429 }); return { output: { text: 'ok' } as TOutput, usage: tokenUsage(), providerId: 'openrouter', modelId: request.modelId, externalModelId: request.externalModelId }; } } },
     });
@@ -38,7 +39,7 @@ describe('route execution', () => {
 
   test('does not retry invalid input', async () => {
     let calls = 0;
-    await expect(executeAction({ mode: 'auto', organizationKey: newId(), actionSlug: 'text' }, { messages: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }] }, {
+    await expect(executeAction({ mode: 'auto', teamKey: newId(), actionSlug: 'text' }, { messages: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }] }, {
       providers: ['text.primary'], retry: { intervalMs: 1, attempts: 2 },
       adapters: { openrouter: { id: 'openrouter', name: 'OpenRouter', async execute() { calls += 1; throw new ProviderError('openrouter', 'invalid_input', 'invalid'); } } },
     })).rejects.toMatchObject({ code: 'provider_execution_failed' });
@@ -47,9 +48,9 @@ describe('route execution', () => {
 
   test('rejects a priced action without a stable execution key before selecting or calling a provider', async () => {
     let providerCalls = 0;
-    const organizationKey = newId(), userKey = newId();
-    const context = { organizationKey, runtimeScopeKey: newId(), principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
-    await expect(observeToolExecution('document.read', context, () => executeAction({ mode: 'auto', organizationKey, actionSlug: 'text' }, { messages: [] }, {
+    const teamKey = newId(), userKey = newId();
+    const context = { teamKey, runtimeScopeKey: newId(), principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    await expect(observeToolExecution('document.read', context, () => executeAction({ mode: 'auto', teamKey, actionSlug: 'text' }, { messages: [] }, {
       providers: ['text.primary'], adapters: { openrouter: { id: 'openrouter', name: 'OpenRouter', async execute() { providerCalls += 1; return {} as never; } } },
     }), {
       recorder: async () => {},
@@ -83,9 +84,9 @@ describe('route execution', () => {
   test('bills only successful per-action usage after retries', async () => {
     let calls = 0;
     let charge: Record<string, unknown> | undefined;
-    const organizationKey = newId(), userKey = newId();
-    const context = { organizationKey, runtimeScopeKey: newId(), principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
-    await observeToolExecution('app.translate', context, () => executeAction({ mode: 'auto', organizationKey, actionSlug: 'text' }, { messages: [] }, {
+    const teamKey = newId(), userKey = newId();
+    const context = { teamKey, runtimeScopeKey: newId(), principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    await observeToolExecution('app.translate', context, () => executeAction({ mode: 'auto', teamKey, actionSlug: 'text' }, { messages: [] }, {
       providers: ['text.primary'], retry: { intervalMs: 1, attempts: 2 },
       adapters: { openrouter: { id: 'openrouter', name: 'OpenRouter', async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) { calls += 1; if (calls === 1) throw new ProviderError('openrouter', 'rate_limited', 'limited'); return { output: {} as TOutput, usage: tokenUsage(1, 1), providerId: 'openrouter', modelId: request.modelId, externalModelId: request.externalModelId }; } } },
     }), {
@@ -98,9 +99,9 @@ describe('route execution', () => {
 
   test('bills generated images by returned successful fan-out calls', async () => {
     const charges: Record<string, unknown>[] = [];
-    const organizationKey = newId(), userKey = newId();
-    const context = { organizationKey, runtimeScopeKey: newId(), principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
-    await observeToolExecution('image.generate', context, () => executeAction({ mode: 'auto', organizationKey, actionSlug: 'image' }, { operation: 'generate', prompt: 'x', count: 2 }, {
+    const teamKey = newId(), userKey = newId();
+    const context = { teamKey, runtimeScopeKey: newId(), principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    await observeToolExecution('image.generate', context, () => executeAction({ mode: 'auto', teamKey, actionSlug: 'image' }, { operation: 'generate', prompt: 'x', count: 2 }, {
       providers: ['image.primary'],
       adapters: { openrouter: { id: 'openrouter', name: 'OpenRouter', async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) { return { output: { images: [{ base64: 'AAAA', mimeType: 'image/png' }] } as TOutput, usage: tokenUsage(), providerId: 'openrouter', modelId: request.modelId, externalModelId: request.externalModelId }; } } },
     }), {

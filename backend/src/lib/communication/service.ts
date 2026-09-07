@@ -6,7 +6,7 @@ export interface CommunicationLookup {
   getParticipant(participantKey: string): Promise<ChannelParticipant | null>;
   getMessage(messageKey: string): Promise<Message | null>;
   getThread(threadKey: string): Promise<Thread | null>;
-  hasActiveScopeMember(scopeKey: string, userOrganizationKey: string): Promise<boolean>;
+  hasActiveScopeMember(scopeKey: string, userTeamKey: string): Promise<boolean>;
   hasOrchestratorScopeAccess(scopeKey: string, orchestratorKey: string): Promise<boolean>;
 }
 
@@ -28,7 +28,7 @@ export async function validateChannel(input: Channel, lookup: CommunicationLooku
 export async function validateChannelParticipant(input: ChannelParticipant, lookup: CommunicationLookup) {
   const channel = await lookup.getChannel(input.channelKey);
   if (!channel || !matchesChannel(input, channel)) throw new CommunicationReferenceError('Participant channel and scope must match');
-  if (input.userOrganizationKey && !await lookup.hasActiveScopeMember(input.scopeKey, input.userOrganizationKey)) throw new CommunicationReferenceError('Human participant requires active scope membership');
+  if (input.userTeamKey && !await lookup.hasActiveScopeMember(input.scopeKey, input.userTeamKey)) throw new CommunicationReferenceError('Human participant requires active scope membership');
   if (input.orchestratorKey && !await lookup.hasOrchestratorScopeAccess(input.scopeKey, input.orchestratorKey)) throw new CommunicationReferenceError('Orchestrator does not have scope access');
 }
 

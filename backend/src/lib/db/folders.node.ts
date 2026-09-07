@@ -16,7 +16,7 @@ export const folderSchema = z.object({
   coverImageKey: z.string().cuid().optional(),
   presentation: contentPresentationSchema.optional(),
   purpose: z.enum(['generated-documents-root', 'generated-documents-guide', 'generated-documents-brief', 'generated-documents-accommodations', 'generated-documents-restaurants', 'generated-documents-activities', 'communication-mail-root', 'communication-mail-inboxes', 'communication-mail-threads', 'communication-mail-drafts', 'communication-mail-tones', 'communication-mail-reply-context', 'communication-mail-settings']).optional(),
-  managedPurpose: z.enum(['mail-attachment', 'mail-inbox', 'mail-inbox-files', 'mail-thread']).optional(), managedOwnerKey: z.string().cuid().optional(),
+  managedPurpose: z.enum(['mail-attachment', 'mail-inbox', 'mail-inbox-files', 'mail-thread', 'scope-directory']).optional(), managedOwnerKey: z.string().cuid().optional(),
   mutationPolicy: z.enum(['user', 'system-container']).optional(),
   archiveVisibility: z.enum(['visible', 'domain-only']).default('visible'),
   embedding: currentEmbeddingSchema,

@@ -143,7 +143,7 @@ async function main() {
 
   const longDocuments = [
     [KEYS.longPdfStrategy, 'Product strategy narrative', KEYS.references, 'pdf', 'How Archive supports durable personal knowledge and deliberate action.'],
-    [KEYS.longPdfResearch, 'Research synthesis report', KEYS.synthesis, 'pdf', 'A synthesis of interviews about retrieval, trust, organization, and collaboration.'],
+    [KEYS.longPdfResearch, 'Research synthesis report', KEYS.synthesis, 'pdf', 'A synthesis of interviews about retrieval, trust, team, and collaboration.'],
     [KEYS.longPdfOperations, 'Operating model reference', KEYS.projects, 'pdf', 'An operating model for weekly planning, decision review, and cross-functional execution.'],
     [KEYS.longDocNarrative, 'Company narrative - legacy Word', KEYS.projects, 'doc', 'A detailed narrative connecting customer problems, product principles, and market direction.'],
     [KEYS.longDocWorkshop, 'Discovery workshop transcript - legacy Word', KEYS.interviews, 'doc', 'Notes and conclusions from a long-form product discovery workshop.'],
@@ -203,7 +203,7 @@ async function main() {
     { key: KEYS.interviewThemes, name: 'Recurring interview themes', folderKey: KEYS.interviews, content: 'Customers describe fragmented notes, duplicated decisions, slow retrieval, uncertain ownership, and difficulty turning research into a concrete next action.' },
     { key: KEYS.synthesisQuestions, name: 'Synthesis open questions', folderKey: KEYS.synthesis, content: 'Determine which retrieval signals create trust, when the system should ask for clarification, and how evidence should remain connected to decisions.' },
     { key: KEYS.quarterlyGoals, name: 'Quarterly focus', folderKey: KEYS.goals, content: 'Protect focused writing time, complete the launch milestone, review progress every Friday, and keep decisions linked to their evidence.' },
-    { key: KEYS.readingQueue, name: 'Systems reading queue', folderKey: KEYS.reading, content: 'Read about calm technology, information retrieval, resilient organizations, decision records, and humane tools for focused knowledge work.' },
+    { key: KEYS.readingQueue, name: 'Systems reading queue', folderKey: KEYS.reading, content: 'Read about calm technology, information retrieval, resilient teams, decision records, and humane tools for focused knowledge work.' },
     { key: KEYS.pdf, name: 'Focused work reference', folderKey: KEYS.references, content: 'A short PDF reference about calm systems for focused work.', extension: 'pdf' as const, mimeType: 'application/pdf', storageKey: pdfStorageKey, sizeBytes: pdfBytes.byteLength },
     ...importedDocuments,
   ];

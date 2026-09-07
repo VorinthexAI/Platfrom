@@ -3,7 +3,7 @@ import type { ProviderAdapter, ProviderId } from '@/lib/ai/providers/types';
 import type { ActionId } from '@/lib/ai/actions';
 
 export interface RouteDecision {
-  organizationKey: string;
+  teamKey: string;
   actionSlug: ActionId;
   modelSlug: ModelId;
   providerSlug: ProviderId;

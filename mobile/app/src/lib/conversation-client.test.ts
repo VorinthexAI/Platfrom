@@ -3,7 +3,7 @@ import { subscribeUserSearchHistoryAppends } from "./user-search-history-events"
 
 const calls: { method: string; path: string; body?: unknown; config?: unknown }[] = [];
 const timestamp = "2026-09-01T10:00:00.000Z";
-const serverConversation = { key: "conversation-key", organizationKey: "org", scopeKey: "scope", userKey: "user", name: "Planning", isFavorite: false, createdAt: timestamp, updatedAt: timestamp };
+const serverConversation = { key: "conversation-key", teamKey: "team", scopeKey: "scope", userKey: "user", name: "Planning", isFavorite: false, createdAt: timestamp, updatedAt: timestamp };
 const retrieval = { query: "roadmap", limit: 10, minimumScore: 0.55, groups: [{ collectionSlug: "documents", results: [{ key: "document-key", label: "Roadmap" }] }] };
 const serverMessage = { key: "assistant-key", conversationKey: serverConversation.key, turnKey: "request", type: "TEXT", role: "ASSISTANT", status: "COMPLETED", content: "Answer", retrievals: [retrieval], createdAt: timestamp, completedAt: timestamp };
 let response: unknown;
@@ -18,7 +18,7 @@ mock.module("./api-client", () => ({
 }));
 mock.module("expo-file-system", () => ({ File: class { constructor(private uri: string) {} async arrayBuffer() { return new Uint8Array(Number(this.uri.split(":").at(-1))).buffer; } } }));
 const client = await import("./conversation-client");
-const context = { userKey: "user", organizationKey: "org", scopeKey: "scope" };
+const context = { userKey: "user", teamKey: "team", scopeKey: "scope" };
 const start = { event: "start", id: "correlation", data: JSON.stringify({ type: "start", correlationKey: "correlation", conversationKey: serverConversation.key, userMessageKey: "user-message", assistantMessageKey: "assistant-key" }) };
 const delta = { event: "delta", id: "correlation", data: JSON.stringify({ type: "delta", correlationKey: "correlation", assistantMessageKey: "assistant-key", text: "Ans" }) };
 const done = { event: "done", id: "correlation", data: JSON.stringify({ type: "done", correlationKey: "correlation", conversationKey: serverConversation.key, message: serverMessage, name: "Named", replayed: false }) };
@@ -64,8 +64,8 @@ test("sends favorite and history selectors only to corrected conversation endpoi
   await client.listConversations(context, { query: "plan", favoriteOnly: true, recordHistory: false });
   await client.listConversations(context, { query: "plan", favoriteOnly: true, recordHistory: true });
   expect(calls.map(({ path }) => path)).toEqual(["/conversations/list", "/conversations/search", "/conversations/search"]);
-  expect(calls[0]?.body).toEqual({ organizationKey: "org", scopeKey: "scope", cursor: "cursor", favoriteOnly: true, limit: 25 });
-  expect(calls[2]?.body).toEqual({ organizationKey: "org", scopeKey: "scope", query: "plan", favoriteOnly: true, recordHistory: true, limit: 25 });
+  expect(calls[0]?.body).toEqual({ teamKey: "team", scopeKey: "scope", cursor: "cursor", favoriteOnly: true, limit: 25 });
+  expect(calls[2]?.body).toEqual({ teamKey: "team", scopeKey: "scope", query: "plan", favoriteOnly: true, recordHistory: true, limit: 25 });
 });
 
 test("publishes canonical history only after a successful recordHistory search", async () => {
@@ -92,7 +92,7 @@ test("passes abort signals through create, update, favorite, and delete mutation
   await expect(client.deleteConversationMessage(context, serverConversation.key, serverMessage.key, controller.signal)).resolves.toEqual({ deletedKeys: [serverMessage.key, "user-message"] });
   expect(calls.map(({ method, path }) => `${method} ${path}`)).toEqual(["POST /conversations", `PATCH /conversations/${serverConversation.key}`, `POST /conversations/${serverConversation.key}/favorite`, `DELETE /conversations/${serverConversation.key}`, `DELETE /conversations/${serverConversation.key}/messages/${serverMessage.key}`]);
   for (const call of calls) expect(call.config).toMatchObject({ signal: controller.signal });
-  expect(calls.at(-1)?.config).toMatchObject({ data: { organizationKey: "org", scopeKey: "scope" } });
+  expect(calls.at(-1)?.config).toMatchObject({ data: { teamKey: "team", scopeKey: "scope" } });
 });
 
 test("queues strict image turns and retains IMAGE lifecycle fields", async () => {
@@ -100,14 +100,14 @@ test("queues strict image turns and retains IMAGE lifecycle fields", async () =>
   const assistant = { ...serverMessage, key: "image-assistant", type: "IMAGE", content: JSON.stringify({ prompt: user.content }), imageKey: "cm123456789", retrievals: [] };
   response = { success: true, data: { user, assistant, replayed: false } };
   await expect(client.enqueueConversationImageTurn(context, { conversationKey: serverConversation.key, prompt: user.content, requestKey: "image-request" })).resolves.toMatchObject({ assistant: { kind: "image", imageKey: "cm123456789" } });
-  expect(calls[0]).toMatchObject({ method: "POST", path: `/conversations/${serverConversation.key}/image-turns`, body: { organizationKey: "org", scopeKey: "scope", prompt: user.content, requestKey: "image-request", referenceImageKeys: [], size: "1024x1024", quality: "medium", mode: "default" } });
+  expect(calls[0]).toMatchObject({ method: "POST", path: `/conversations/${serverConversation.key}/image-turns`, body: { teamKey: "team", scopeKey: "scope", prompt: user.content, requestKey: "image-request", referenceImageKeys: [], size: "1024x1024", quality: "medium", mode: "default" } });
   expect(() => client.conversationMessageSchema.parse({ ...assistant, type: "TEXT" })).toThrow();
 });
 
 test("uses exact backend bounds for names, turns, and message pages", async () => {
   response = { success: true, data: { items: [serverMessage], nextCursor: null } };
   await client.listConversationMessages(context, serverConversation.key, "older");
-  expect(calls[0]?.body).toEqual({ organizationKey: "org", scopeKey: "scope", cursor: "older", limit: 10 });
+  expect(calls[0]?.body).toEqual({ teamKey: "team", scopeKey: "scope", cursor: "older", limit: 10 });
   expect(client.CONVERSATION_MESSAGE_PAGE_SIZE).toBe(10);
   expect(client.CONVERSATION_NAME_MAX_LENGTH).toBe(200);
   expect(client.CONVERSATION_MESSAGE_MAX_LENGTH).toBe(20_000);
@@ -131,7 +131,7 @@ describe("strict conversation turn protocol", () => {
 
   test("sends bounded attachment keys with the conversation turn", async () => {
     await client.streamConversationTurnWithTransport(transport([start, done]), context, { conversationKey: serverConversation.key, message: "Use these", requestKey: "request", attachmentKeys: ["attachment-1", "attachment-2"] }, () => undefined);
-    expect(calls[0]?.body).toEqual({ organizationKey: "org", scopeKey: "scope", message: "Use these", requestKey: "request", attachmentKeys: ["attachment-1", "attachment-2"], referenceImageKeys: [] });
+    expect(calls[0]?.body).toEqual({ teamKey: "team", scopeKey: "scope", message: "Use these", requestKey: "request", attachmentKeys: ["attachment-1", "attachment-2"], referenceImageKeys: [] });
     await expect(client.streamConversationTurnWithTransport(transport([]), context, { conversationKey: serverConversation.key, message: "Too many", requestKey: "request", attachmentKeys: Array.from({ length: 11 }, (_, index) => `attachment-${index}`) }, () => undefined)).rejects.toThrow();
   });
 
@@ -188,8 +188,8 @@ test("reserves, directly uploads, and completes transient attachments", async ()
     await expect(client.uploadConversationAttachments(context, serverConversation.key, "request", [{ clientKey: "local-1", kind: "image", filename: "photo.png", mimeType: "image/png", sizeBytes: 4, uri: "bytes:4" }])).resolves.toMatchObject({ attachmentKeys: ["attachment-1"] });
   } finally { globalThis.fetch = originalFetch; }
   expect(calls.map(({ path }) => path)).toEqual([presignPath, completePath]);
-  expect(calls[0]?.body).toEqual({ organizationKey: "org", scopeKey: "scope", requestKey: "request", files: [{ clientKey: "local-1", filename: "photo.png", mimeType: "image/png", sizeBytes: 4 }] });
-  expect(calls[1]?.body).toEqual({ organizationKey: "org", scopeKey: "scope", requestKey: "request", attachmentKeys: ["attachment-1"] });
+  expect(calls[0]?.body).toEqual({ teamKey: "team", scopeKey: "scope", requestKey: "request", files: [{ clientKey: "local-1", filename: "photo.png", mimeType: "image/png", sizeBytes: 4 }] });
+  expect(calls[1]?.body).toEqual({ teamKey: "team", scopeKey: "scope", requestKey: "request", attachmentKeys: ["attachment-1"] });
   expect(uploads).toHaveLength(1);
   expect(uploads[0]).toMatchObject({ url: "https://uploads.example/attachment", init: { method: "PUT", headers: { "Content-Type": "image/png" } } });
 });

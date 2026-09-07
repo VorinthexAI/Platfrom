@@ -5,28 +5,18 @@ export const LEGACY_INDEX_FIELDS: Readonly<Record<string, readonly (readonly str
   // Visitors are anonymous now; identity and retired platform indexes go
   // with the fields scrubbed by the migration.
   visitors: [['emailHash'], ['userId'], ['platformId']],
-  users: [['platformId'], ['platform_role'], ['organization_role']],
+  users: [['platformId'], ['platform_role']],
   visitorSessions: [['platformId', 'connectedAt']],
   userSessions: [['platformId', 'connectedAt']],
-  scopes: [['organizationId', 'name'], ['organizationId']],
-  organizations: [['ownerId']],
-  folders: [['parentFolderKey']],
-  documents: [['folderKey']],
+  folders: [['parentFolderKey'], ['scopeKey', 'managedPurpose', 'managedOwnerKey']],
+  documents: [['folderKey'], ['scopeKey', 'managedPurpose', 'managedOwnerKey']],
   documentVersions: [['scopeKey'], ['documentKey'], ['storageKey']],
-  documentShares: [['scopeKey'], ['token']],
   contentSearchQueries: [['actorKey', 'scopeKey', 'normalizedQuery'], ['actorKey', 'scopeKey', 'contextDomain', 'normalizedQuery', 'folderKey', 'includeDescendants'], ['actorKey', 'scopeKey', 'contextDomain', 'searchedAt'], ['expiresAt']],
   events: [['distinctId', 'createdAt'], ['domain', 'createdAt']],
   places: [['scopeKey', 'isWishlist'], ['scopeKey', 'isFavorite'], ['scopeKey', 'countryCode', 'name']],
-  organizationConnectors: [['organizationKey', 'scopeKey', 'provider']],
 };
 
 export const LEGACY_REMOVAL_MARKER = ['deleted', 'At'].join('');
-
-export const DOCUMENT_SHARE_COMMENT_LEGACY_PERMISSIONS = ['comment', 'edit'] as const;
-
-export function normalizeLegacyDocumentSharePermission(permission: unknown): 'read' | 'comment' {
-  return DOCUMENT_SHARE_COMMENT_LEGACY_PERMISSIONS.includes(permission as 'comment' | 'edit') ? 'comment' : 'read';
-}
 
 export function isLegacyIndex(collectionName: string, fields: readonly string[], desiredIndexes: readonly (readonly string[])[] = []): boolean {
   if (desiredIndexes.some((desired) => desired.length === fields.length && desired.every((field, index) => fields[index] === field))) return false;

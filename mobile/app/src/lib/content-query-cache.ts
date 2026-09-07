@@ -27,7 +27,7 @@ export function populatedContentTab(location: ContentLocation, selected: FolderC
   return (["folders", "documents", "files"] as const).find((tab) => populated[tab]) ?? selected;
 }
 
-const contextKey = (context: ContentContext) => [context.userKey ?? "", context.organizationKey, context.scopeKey] as const;
+const contextKey = (context: ContentContext) => [context.userKey ?? "", context.teamKey, context.scopeKey] as const;
 
 export const contentQueryKeys = {
   all: (context: ContentContext) => ["archive", ...contextKey(context)] as const,

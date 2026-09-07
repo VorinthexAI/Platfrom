@@ -1,13 +1,22 @@
 import { SiteFooter, SiteHeader } from "@/components/site/SiteChrome";
 import { SiteNeuralBackdrop } from "@/components/site/SiteNeuralBackdrop";
+import { Button } from "@vorinthex/shared/ui/components";
+import {
+  CalendarIcon,
+  CheckIcon,
+  ClockIcon,
+  PlusIcon,
+  UsersIcon,
+} from "@vorinthex/shared/ui/icons";
 import {
   NEWCOMER_FREE_SPARKS,
-  SPARK_MONTHLY_PLANS,
-  SPARK_ON_DEMAND,
-  SPARK_TOP_UPS,
+  REFERRAL_REWARDS,
+  SPARK_SUBSCRIPTIONS,
+  SPARK_TOP_UP,
   formatSparkCount,
   formatUsd,
 } from "@/lib/spark-pricing";
+import { PRICING_HERO_BODY, PRICING_HERO_HEADING } from "@/lib/discoverability";
 import styles from "./PricingPage.module.css";
 
 export function PricingPage() {
@@ -18,10 +27,8 @@ export function PricingPage() {
       <main id="main-content" tabIndex={-1}>
         <section className={styles.hero}>
           <p className={styles.eyebrow}>Sparks pricing</p>
-          <h1>Usage-based pricing.</h1>
-          <p className={styles.intro}>
-            Choose a monthly Spark balance and add more whenever you need it.
-          </p>
+          <h1>{PRICING_HERO_HEADING}</h1>
+          <p className={styles.intro}>{PRICING_HERO_BODY}</p>
           <div className={styles.freeNotice}>
             <span>Newcomer allocation</span>
             <strong>{formatSparkCount(NEWCOMER_FREE_SPARKS)} Sparks</strong>
@@ -29,63 +36,77 @@ export function PricingPage() {
           </div>
         </section>
 
-        <section className={styles.plans} aria-labelledby="monthly-plans">
+        <section className={styles.plans} aria-labelledby="subscription-plans">
           <div className={styles.sectionHeading}>
-            <p className={styles.eyebrow}>Monthly options</p>
-            <h2 id="monthly-plans">Monthly Sparks.</h2>
-            <p>Your Spark balance refreshes each month.</p>
+            <p className={styles.eyebrow}>Launch subscriptions</p>
+            <h2 id="subscription-plans">Choose your cadence.</h2>
+            <p>Included Sparks refresh at the start of each billing period.</p>
           </div>
           <div className={styles.planGrid}>
-            {SPARK_MONTHLY_PLANS.map((plan, index) => (
+            {SPARK_SUBSCRIPTIONS.map((plan, index) => (
               <article
-                className={`${styles.planCard} ${index === 1 ? styles.featured : ""}`}
+                className={`${styles.planCard} ${index === 0 ? styles.featured : ""}`}
                 key={plan.name}
               >
-                {index === 1 && <span className={styles.planTag}>Most popular</span>}
-                <p className={styles.planIndex}>0{index + 1}</p>
+                {"badge" in plan && <span className={styles.planTag}>{plan.badge}</span>}
+                <div className={styles.planIcon} aria-hidden>
+                  {plan.cadence === "month" ? <CalendarIcon size="md" /> : <ClockIcon size="md" />}
+                </div>
                 <h3>{plan.name}</h3>
+                {"referencePrice" in plan && (
+                  <p className={styles.referencePrice}>
+                    Currently discounted from regular <s>{formatUsd(plan.referencePrice)}</s>
+                  </p>
+                )}
                 <p className={styles.planPrice}>
                   <strong>{formatUsd(plan.price)}</strong>
-                  <span>/ month</span>
+                  <span>/ {plan.cadence}</span>
                 </p>
                 <div className={styles.sparkAmount}>
                   <strong>{formatSparkCount(plan.sparks)}</strong>
-                  <span>monthly Sparks</span>
+                  <span>Sparks per billing {plan.cadence}</span>
                 </div>
+                <Button disabled size="lg" variant="primary">
+                  Subscriptions coming soon
+                </Button>
               </article>
             ))}
           </div>
         </section>
 
         <section className={styles.topUps} aria-labelledby="top-ups">
-          <div className={styles.sectionHeading}>
-            <p className={styles.eyebrow}>More when you need it</p>
-            <h2 id="top-ups">Top up your Sparks.</h2>
-            <p>One-time Spark packs for a bigger idea or a busier month.</p>
+          <div className={styles.topUpCopy}>
+            <div className={styles.roundIcon}><PlusIcon aria-hidden size="lg" /></div>
+            <p className={styles.eyebrow}>No subscription change</p>
+            <h2 id="top-ups">Add a little more.</h2>
+            <p>A one-time top-up for the week that grows beyond the plan.</p>
           </div>
-          <div className={styles.topUpGrid}>
-            {SPARK_TOP_UPS.map((topUp) => (
-              <article className={styles.topUpCard} key={topUp.sparks}>
-                <div>
-                  <strong>{formatSparkCount(topUp.sparks)}</strong>
-                  <span>Sparks</span>
-                </div>
-                <p>{formatUsd(topUp.price)}</p>
-              </article>
-            ))}
+          <div className={styles.topUpCard}>
+            <span>One-time top-up</span>
+            <strong>{formatSparkCount(SPARK_TOP_UP.sparks)} Sparks</strong>
+            <p>{formatUsd(SPARK_TOP_UP.price)}</p>
+            <Button disabled size="lg" variant="primary">Top-ups coming soon</Button>
           </div>
         </section>
 
-        <section className={styles.onDemand} aria-labelledby="on-demand">
-          <div className={styles.onDemandMark}>∞</div>
-          <div className={styles.onDemandCopy}>
-            <p className={styles.eyebrow}>For uninterrupted momentum</p>
-            <h2 id="on-demand">{SPARK_ON_DEMAND.name}</h2>
-            <p>
-              {SPARK_ON_DEMAND.description}. Requires the{" "}
-              {SPARK_ON_DEMAND.requiresPlan} plan.
-            </p>
+        <section className={styles.referrals} aria-labelledby="referrals">
+          <div className={styles.referralIntro}>
+            <div className={styles.roundIcon}><UsersIcon aria-hidden size="lg" /></div>
+            <p className={styles.eyebrow}>Share the signal</p>
+            <h2 id="referrals">Invite someone in. Earn Sparks twice.</h2>
+            <p>Share your referral code with someone new to Vorinthex.</p>
           </div>
+          <ol className={styles.rewardSteps}>
+            <li>
+              <span><CheckIcon aria-hidden size="sm" /></span>
+              <div><strong>+{formatSparkCount(REFERRAL_REWARDS.signup)} Sparks</strong><p>When a new user signs up with your code.</p></div>
+            </li>
+            <li>
+              <span><CheckIcon aria-hidden size="sm" /></span>
+              <div><strong>+{formatSparkCount(REFERRAL_REWARDS.firstSubscriptionPurchase)} Sparks</strong><p>When that referred user first purchases a subscription.</p></div>
+            </li>
+          </ol>
+          <p className={styles.referralTerms}>The referrer earns each reward stage one time per referred user.</p>
         </section>
         <p className={styles.taxDisclaimer}>
           Prepaid Sparks remain available after subscription cancellation, and balances
@@ -94,7 +115,8 @@ export function PricingPage() {
           growth is blocked while existing data remains available for export, deletion,
           and recovery. Adding Sparks restores prospective charging. Stored S3-backed
           data is hard-deleted after 90 consecutive unfunded days. Prices are shown in
-          USD. Local taxes may be added where required.
+          USD and exclude VAT and other local taxes. Polar calculates and adds
+          applicable tax at checkout.
         </p>
       </main>
 

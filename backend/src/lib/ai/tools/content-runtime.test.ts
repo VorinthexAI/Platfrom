@@ -14,11 +14,11 @@ const mailEnvelopeKinds = ['mail-thread', 'mail-message', 'mail-reply-draft', 'm
 const mailContent = (kind: string) => JSON.stringify({ version: 1, kind, data: {} });
 
 function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
-  const organizationKey = newId(), scopeKey = newId(), membershipKey = newId(), userKey = newId();
-  const folders = new Map<string, any>(), documents = new Map<string, any>(), shares = new Map<string, any>(), versions = new Map<string, any>(), audioVersions = new Map<string, any>(), summaries = new Map<string, any>(), summaryAudio = new Map<string, any>();
+  const teamKey = newId(), scopeKey = newId(), teamMembershipKey = newId(), userKey = newId();
+  const folders = new Map<string, any>(), documents = new Map<string, any>(), versions = new Map<string, any>(), audioVersions = new Map<string, any>(), summaries = new Map<string, any>(), summaryAudio = new Map<string, any>();
   const patches: Array<Record<string, unknown>> = [];
   const repository: ContentRepository = {
-    async getScope(key) { return key === scopeKey ? { key, organizationKey } : null; },
+    async getScope(key) { return key === scopeKey ? { key, teamKey } : null; },
     async role(key) { return key === scopeKey ? role : null; },
     async allowedScopeKeys() { return [scopeKey]; },
     async getFolder(key) { return folders.get(key) ?? null; },
@@ -33,16 +33,6 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async updateDocument(key, patch, options) { const current = documents.get(key); if (options?.expectedUpdatedAt && current.updatedAt !== options.expectedUpdatedAt) throw new Error('Document update conflict.'); patches.push(patch); const value = { ...current, ...patch }; documents.set(key, value); return value; },
     async setDocumentDeletion(key, marker, owner) { const current = documents.get(key); if (!current || (owner && current._internalDeletion?.owner !== owner)) return null; const value = { ...current, _internalDeletion: marker }; if (!marker) delete value._internalDeletion; documents.set(key, value); return value; },
     async deleteDocument(key) { documents.delete(key); },
-    async getShare(key) { return shares.get(key) ?? null; },
-    async listShares(_scopeKey, keys, options = {}) {
-      const at = options.at ?? new Date().toISOString();
-      return [...shares.values()].filter((value) => keys.includes(value.documentKey)
-        && (options.includeRevoked || !value.revokedAt)
-        && (options.includeExpired || !value.expiresAt || value.expiresAt > at));
-    },
-    async insertShare(value) { shares.set(value.key, value); return value; },
-    async updateShare(key, patch) { const value = { ...shares.get(key), ...patch }; shares.set(key, value); return value; },
-    async deleteShare(key) { shares.delete(key); },
     async getVersion(key) { return versions.get(key) ?? null; },
     async listVersions(_scopeKey, keys) { return [...versions.values()].filter((value) => keys.includes(value.documentKey)).sort((a, b) => b.version - a.version); },
     async createVersion(value) { const version = { ...value, key: newId(), version: [...versions.values()].filter((item) => item.documentKey === value.documentKey).length + 1, createdAt: now }; versions.set(version.key, version); return version; },
@@ -73,10 +63,10 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     },
     async transaction(operation) { return operation(repository); },
   };
-  const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: membershipKey, organizationId: organizationKey, status: 'active', orgRole: role } } } as any;
+  const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: teamMembershipKey, teamKey: teamKey, status: 'active', teamRole: role } } } as any;
   const folderKey = newId(); folders.set(folderKey, { key: folderKey, scopeKey, name: 'Root', embedding, createdAt: now, updatedAt: now });
   const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, content, embedding, isFavorite: false, createdAt: now, updatedAt: now }); return key; };
-  return { repository, context, folders, documents, shares, versions, audioVersions, summaries, summaryAudio, patches, scopeKey, folderKey, addDocument };
+  return { repository, context, folders, documents, versions, audioVersions, summaries, summaryAudio, patches, scopeKey, folderKey, addDocument };
 }
 
 describe('Content runtime', () => {
@@ -359,8 +349,6 @@ describe('Content runtime', () => {
     await runContentTool('document.move', { moves: [{ documentKey: rootKey, targetScopeKey: f.scopeKey }] }, f.context, { repository: f.repository });
     expect(f.documents.get(rootKey).folderKey).toBeUndefined();
 
-    const shared = await runContentTool('document.share', { shares: [{ documentKey: rootKey, permission: 'read' }] }, f.context, { repository: f.repository, random: (size) => new Uint8Array(size).fill(3) });
-    expect(shared.results[0]?.success).toBe(true);
     const versioned = await runContentTool('document.create-version', { documentKeys: [rootKey], contents: { [rootKey]: 'Generated version' }, types: { [rootKey]: 'enhancement' } }, f.context, { repository: f.repository, embed: async () => embedding });
     expect(versioned.results[0]?.success).toBe(true);
     expect([...f.versions.values()].at(-1)?.content).toBe('Generated version');
@@ -417,44 +405,9 @@ describe('Content runtime', () => {
     const targetFolderKey = newId();
     f.folders.set(targetFolderKey, { key: targetFolderKey, scopeKey: foreignScopeKey, name: 'Foreign', embedding, createdAt: now, updatedAt: now });
     const originalGetScope = f.repository.getScope;
-    f.repository.getScope = async (key) => key === foreignScopeKey ? { key, organizationKey: f.context.organizationKey } : originalGetScope(key);
+    f.repository.getScope = async (key) => key === foreignScopeKey ? { key, teamKey: f.context.teamKey } : originalGetScope(key);
     const output = await runContentTool('document.move', { moves: [{ documentKey: f.addDocument(), targetScopeKey: foreignScopeKey, targetFolderKey }] }, f.context, { repository: f.repository });
     expect(output.results[0]).toMatchObject({ success: false, error: { code: 'FOLDER_MOVE_FORBIDDEN' } });
-  });
-
-  test('returns a creation-only share token and persists only hashes', async () => {
-    const f = fixture('moderator'); const documentKey = f.addDocument();
-    const output = await runContentTool('document.share', { shares: [{ documentKey, permission: 'read', password: 'correct horse battery staple' }] }, f.context, { repository: f.repository, random: (size) => new Uint8Array(size).fill(7), clock: () => new Date(now) });
-    expect(output.results[0]?.data?.token).toHaveLength(43);
-    const persisted = [...f.shares.values()][0];
-    expect(persisted.tokenHash).toMatch(/^[a-f0-9]{64}$/);
-    expect(persisted.passwordHash).toMatch(/^scrypt:/);
-    expect(JSON.stringify(output)).not.toContain(persisted.tokenHash);
-    const listed = await runContentTool('document.list-shares', { documentKeys: [documentKey] }, f.context, { repository: f.repository, clock: () => new Date(now) });
-    expect(JSON.stringify(listed)).not.toContain('Hash');
-    expect(JSON.stringify(listed)).not.toContain(output.results[0]?.data?.token ?? 'token');
-  });
-
-  test('rejects already expired shares', async () => {
-    const f = fixture('moderator');
-    const output = await runContentTool('document.share', { shares: [{ documentKey: f.addDocument(), permission: 'read', expiresAt: '2026-07-21T00:00:00.000Z' }] }, f.context, { repository: f.repository, clock: () => new Date(now) });
-    expect(output.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_SHARE_INVALID' } });
-    expect(f.shares.size).toBe(0);
-  });
-
-  test('lists revoked and expired shares only when explicitly requested', async () => {
-    const f = fixture('moderator');
-    const documentKey = f.addDocument();
-    const base = { documentKey, scopeKey: f.scopeKey, permission: 'read', tokenHash: 'a'.repeat(64), createdAt: now, updatedAt: now };
-    const activeKey = newId(), revokedKey = newId(), expiredKey = newId();
-    f.shares.set(activeKey, { ...base, key: activeKey, expiresAt: '2027-07-22T12:00:00.000Z' });
-    f.shares.set(revokedKey, { ...base, key: revokedKey, revokedAt: now });
-    f.shares.set(expiredKey, { ...base, key: expiredKey, expiresAt: '2026-07-21T12:00:00.000Z' });
-
-    const active = await runContentTool('document.list-shares', { documentKeys: [documentKey] }, f.context, { repository: f.repository, clock: () => new Date(now) });
-    expect(active.results[0]?.data?.shares.map((share: any) => share.key)).toEqual([activeKey]);
-    const all = await runContentTool('document.list-shares', { documentKeys: [documentKey], includeRevoked: true, includeExpired: true }, f.context, { repository: f.repository, clock: () => new Date(now) });
-    expect(all.results[0]?.data?.shares.map((share: any) => share.key).sort()).toEqual([activeKey, revokedKey, expiredKey].sort());
   });
 
   test('maps document processing failures into Content taxonomy and retryability', async () => {
@@ -1444,7 +1397,7 @@ describe('Content runtime', () => {
     expect(storageDeletes).toBe(0);
   });
 
-  test('rejects descendant creation, sharing, versioning, move, and copy after a subtree freeze', async () => {
+  test('rejects descendant creation, versioning, move, and copy after a subtree freeze', async () => {
     const f = fixture('owner');
     const childKey = newId();
     f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, createdAt: now, updatedAt: now });
@@ -1468,7 +1421,6 @@ describe('Content runtime', () => {
       if (!raced) {
         raced = true;
         const calls = await Promise.all([
-          runContentTool('document.share', { shares: [{ documentKey: doomedKey, permission: 'read' }] }, f.context, { repository: f.repository }),
           runContentTool('document.create-version', { documentKeys: [doomedKey] }, f.context, { repository: f.repository }),
           runContentTool('document.move', { moves: [{ documentKey: movableKey, targetScopeKey: f.scopeKey, targetFolderKey: childKey }] }, f.context, { repository: f.repository }),
           runContentTool('document.copy', { copies: [{ documentKey: movableKey, targetScopeKey: f.scopeKey, targetFolderKey: childKey }] }, f.context, { repository: f.repository }),
@@ -1481,9 +1433,8 @@ describe('Content runtime', () => {
     const tripChanges: string[] = [];
     const deleted = await runContentTool('folder.delete', { folderKeys: [f.folderKey], recursive: true }, f.context, { repository: f.repository, storage, publishTripChange: async (scopeKey) => { tripChanges.push(scopeKey); } });
     expect(deleted.results[0]?.success).toBe(true);
-    expect(attempted).toHaveLength(4);
+    expect(attempted).toHaveLength(3);
     expect(attempted.every((item) => item.success === false)).toBe(true);
-    expect(f.shares.size).toBe(0);
     expect(f.versions.size).toBe(0);
     expect(f.summaries.has(doomedSummary.key)).toBe(false);
     expect(f.summaryAudio.has(doomedAudio.key)).toBe(false);
@@ -1640,15 +1591,13 @@ describe('Content runtime', () => {
     expect({ releases, executions }).toEqual({ releases: 1, executions: 0 });
   });
 
-  test('fences direct system-managed mail update, rename, move, copy, delete, and share mutations', async () => {
+  test('fences direct system-managed mail update, rename, move, copy, and delete mutations', async () => {
     const cases: Array<[string, (f: ReturnType<typeof fixture>, key: string) => [any, any]]> = [
       ['document.update', (_f, key) => ['document.update', { updates: [{ documentKey: key, content: 'Changed' }] }]],
       ['document.rename', (_f, key) => ['document.rename', { renames: [{ documentKey: key, name: 'Renamed' }] }]],
       ['document.move', (f, key) => ['document.move', { moves: [{ documentKey: key, targetScopeKey: f.scopeKey }] }]],
       ['document.copy', (f, key) => ['document.copy', { copies: [{ documentKey: key, targetScopeKey: f.scopeKey }] }]],
       ['document.delete', (_f, key) => ['document.delete', { documentKeys: [key] }]],
-      ['document.share', (_f, key) => ['document.share', { shares: [{ documentKey: key, permission: 'read' }] }]],
-      ['document.unshare', (_f, key) => ['document.unshare', { documentKeys: [key] }]],
     ];
     for (const [label, request] of cases) {
       const f = fixture('owner');
@@ -1718,13 +1667,10 @@ describe('Content runtime', () => {
   test('does not fence ordinary Archive document mutation families', async () => {
     const f = fixture('owner');
     const documentKey = f.addDocument('Ordinary body');
-    const dependencies = { repository: f.repository, embed: async () => embedding, random: (size: number) => new Uint8Array(size).fill(4) };
+    const dependencies = { repository: f.repository, embed: async () => embedding };
     await expect(runContentTool('document.update', { updates: [{ documentKey, isFavorite: true }] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
     await expect(runContentTool('document.rename', { renames: [{ documentKey, name: 'Renamed' }] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
     await expect(runContentTool('document.move', { moves: [{ documentKey, targetScopeKey: f.scopeKey }] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
-    const shared = await runContentTool('document.share', { shares: [{ documentKey, permission: 'read' }] }, f.context, dependencies);
-    expect(shared).toMatchObject({ summary: { succeeded: 1 } });
-    await expect(runContentTool('document.unshare', { documentKeys: [documentKey] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
   });
 
   test('allows favorites for every recognized system-managed mail kind', async () => {
@@ -1815,7 +1761,7 @@ describe('Content runtime', () => {
       repository: f.repository,
       executeAction: (async (candidate: any, input: any) => { request = candidate; expect(input).toMatchObject({ messages: [{ role: 'user' }] }); return { output: { text: 'Traduisez ce texte.' } }; }) as any,
     });
-    expect(request).toMatchObject({ mode: 'auto', organizationKey: f.context.organizationKey, actionSlug: 'text' });
+    expect(request).toMatchObject({ mode: 'auto', teamKey: f.context.teamKey, actionSlug: 'text' });
     expect(request).not.toHaveProperty('modelSlug');
     expect(output.results[0]).toMatchObject({ success: true, data: { documentKey, text: 'Traduisez ce texte.', language: 'French' } });
   });
@@ -1893,12 +1839,6 @@ describe('Content runtime', () => {
       else if (name === 'document.delete') input = { documentKeys: [documentKey] };
       else if (name === 'document.download') input = { documentKeys: [documentKey], format: 'original' };
       else if (name === 'document.export') input = { exports: [{ documentKey, format: 'txt' }] };
-      else if (name === 'document.share') input = { shares: [{ documentKey, permission: 'read' }] };
-      else if (name === 'document.unshare') {
-        const shareKey = newId();
-        f.shares.set(shareKey, { key: shareKey, scopeKey: f.scopeKey, documentKey, permission: 'read', tokenHash: 'a'.repeat(64), createdAt: now, updatedAt: now });
-        input = { shareKeys: [shareKey] };
-      } else if (name === 'document.list-shares') input = { documentKeys: [documentKey] };
       else if (name === 'document.create-version') input = { documentKeys: [documentKey], labels: { [documentKey]: 'Release' } };
       else if (name === 'document.find-version' || name === 'document.list-versions' || name === 'document.restore-version' || name === 'document.delete-version') {
         const current = f.documents.get(documentKey);
@@ -1917,7 +1857,7 @@ describe('Content runtime', () => {
       else if (name === 'content.search-history.list') input = { scopeKey: f.scopeKey };
       else if (name === 'content.search-history.delete') input = { scopeKey: f.scopeKey, normalizedQuery: 'source' };
       else if (name === 'content.neighbors') input = { documentKey };
-      else input = { organizationKey: f.context.organizationKey, query: 'source' };
+      else input = { teamKey: f.context.teamKey, query: 'source' };
       const output: any = await runContentTool(name, input, f.context, dependencies);
       if (output.summary) expect(output.summary.failed, name).toBe(0);
       else expect(output, name).toBeTruthy();

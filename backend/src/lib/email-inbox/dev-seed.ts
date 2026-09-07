@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { toArangoDoc } from '@/lib/db/base';
 import { archiveDocument, emailArchivePayloadContent, emailDraftPayloadSchema, emailMessagePayloadSchema, emailReplyContextPayloadSchema, emailThreadPayloadSchema, emailTonePayloadSchema, encodeEmailToneContent, prepareEmailReplyContextDocument, prepareEmailToneDocument } from './archive-payloads';
-import { organizationConnectorSchema } from './connector-schema';
+import { teamConnectorSchema } from './connector-schema';
 import { inboxSchema } from './inbox-schema';
 import { emailInboxKey } from './inbox-key';
 import { MAIL_DEV_FIXTURE_AT, MAIL_DEV_FIXTURE_PREFIX, mailDevFixtures } from './dev-fixtures';
@@ -38,9 +38,9 @@ function hasExplicitLoopbackHostname(value: string) {
 type FixtureCredentials = { encryptedCredentials: string; encryptionKeyId: string; accessTokenFingerprint: string };
 
 export function buildMailDevSeedManifest(input: {
-  organizationKey: string;
+  teamKey: string;
   scopeKey: string;
-  membershipKey: string;
+  teamMembershipKey: string;
   credentials: (accountKey: string, providerAccountId: string) => FixtureCredentials;
 }) {
   const accountKeys = ['studio', 'personal', 'community'].map((slug) => mailDevFixtureKey('mail-dev-connector', input.scopeKey, slug));
@@ -54,16 +54,16 @@ export function buildMailDevSeedManifest(input: {
   };
   const connectors = fixtures.accounts.map((account) => {
     const providerAccountId = `${MAIL_DEV_FIXTURE_PREFIX}:${account.slug}`;
-    return organizationConnectorSchema.parse({
+    return teamConnectorSchema.parse({
     key: account.accountKey,
-    organizationKey: input.organizationKey,
+    teamKey: input.teamKey,
     scopeKey: input.scopeKey,
     provider: 'gmail',
     providerAccountId,
     email: account.email,
     ...input.credentials(account.accountKey, providerAccountId),
     scopes: ['https://www.googleapis.com/auth/gmail.readonly'],
-    createdByMembershipKey: input.membershipKey,
+    createdByTeamMembershipKey: input.teamMembershipKey,
     status: 'error',
     syncEnabled: false,
     initialSyncCompleted: true,
@@ -76,7 +76,7 @@ export function buildMailDevSeedManifest(input: {
   });
   const inboxes = fixtures.accounts.map((account, index) => inboxSchema.parse({
     key: emailInboxKey(input.scopeKey, account.accountKey),
-    organizationKey: input.organizationKey,
+    teamKey: input.teamKey,
     scopeKey: input.scopeKey,
     connectorKey: account.accountKey,
     name: account.name,
@@ -163,7 +163,7 @@ export async function reconcileMailDevSeed(database: SeedDatabase, manifest: Ret
       COLLECT WITH COUNT INTO changed RETURN changed`, { '@collection': collection, values, preserveCredentials });
     return Number(await cursor.next() ?? 0);
   };
-  await persist('organizationConnectors', manifest.connectors.map(toArangoDoc), true);
+  await persist('teamConnectors', manifest.connectors.map(toArangoDoc), true);
   await persist('emailInboxes', manifest.inboxes.map(toArangoDoc));
   await persist('folders', manifest.exportFolders);
   await persist('emailThreads', manifest.emailThreads.map(toArangoDoc));
@@ -172,10 +172,10 @@ export async function reconcileMailDevSeed(database: SeedDatabase, manifest: Ret
   await persist('emailTones', manifest.emailTones.map(toArangoDoc));
   await persist('emailReplyContext', manifest.emailReplyContext.map(toArangoDoc));
   await persist('documents', manifest.documents.map(toArangoDoc));
-  await database.query(`LET fixtureConnectorKeys = (FOR connector IN organizationConnectors FILTER connector.scopeKey == @scopeKey && STARTS_WITH(connector.providerAccountId, @prefix) RETURN connector._key)
+  await database.query(`LET fixtureConnectorKeys = (FOR connector IN teamConnectors FILTER connector.scopeKey == @scopeKey && STARTS_WITH(connector.providerAccountId, @prefix) RETURN connector._key)
     LET staleConnectorKeys = MINUS(fixtureConnectorKeys, @keepConnectorKeys)
     LET removedInboxes = (FOR inbox IN emailInboxes FILTER inbox.scopeKey == @scopeKey && inbox.connectorKey IN staleConnectorKeys REMOVE inbox IN emailInboxes RETURN 1)
-    FOR connector IN organizationConnectors FILTER connector._key IN staleConnectorKeys REMOVE connector IN organizationConnectors`, { scopeKey: manifest.fixtures.threads[0]!.thread.scopeKey, prefix: MAIL_DEV_FIXTURE_PREFIX, keepConnectorKeys: manifest.connectors.map(({ key }) => key) });
+    FOR connector IN teamConnectors FILTER connector._key IN staleConnectorKeys REMOVE connector IN teamConnectors`, { scopeKey: manifest.fixtures.threads[0]!.thread.scopeKey, prefix: MAIL_DEV_FIXTURE_PREFIX, keepConnectorKeys: manifest.connectors.map(({ key }) => key) });
   const keepDocumentKeys = manifest.documents.map(({ key }) => key);
   for (const [collection, keep] of [['emailThreads', manifest.emailThreads.map(({ key }) => key)], ['emailMessages', manifest.emailMessages.map(({ key }) => key)], ['emailDrafts', manifest.emailDrafts.map(({ key }) => key)], ['emailTones', manifest.emailTones.map(({ key }) => key)], ['emailReplyContext', manifest.emailReplyContext.map(({ key }) => key)]] as const) {
     await database.query('FOR value IN @@collection FILTER value.scopeKey == @scopeKey && value.developmentFixtureIdentifier == @prefix && value._key NOT IN @keep REMOVE value IN @@collection', { '@collection': collection, scopeKey: manifest.fixtures.threads[0]!.thread.scopeKey, prefix: MAIL_DEV_FIXTURE_PREFIX, keep });
@@ -190,7 +190,7 @@ export async function reconcileMailDevSeed(database: SeedDatabase, manifest: Ret
 
 export async function verifyMailDevSeed(database: SeedDatabase, manifest: ReturnType<typeof buildMailDevSeedManifest>) {
   const cursor = await database.query(`LET connectorMismatches = (FOR expected IN @connectors
-      LET current = DOCUMENT(organizationConnectors, expected._key)
+      LET current = DOCUMENT(teamConnectors, expected._key)
       LET desired = current == null ? expected : MERGE(expected, { encryptedCredentials: current.encryptedCredentials, encryptionKeyId: current.encryptionKeyId, accessTokenFingerprint: current.accessTokenFingerprint })
       FILTER current == null || UNSET(current, "_id", "_rev") != desired RETURN 1)
     LET folderMismatches = (FOR expected IN @folders LET current = DOCUMENT(folders, expected._key) FILTER current == null || UNSET(current, "_id", "_rev") != expected RETURN 1)
@@ -204,7 +204,7 @@ export async function verifyMailDevSeed(database: SeedDatabase, manifest: Return
         || (expected.type == "document" && (target.folderKey != expected.folderKey || folder == null || folder.scopeKey != @scopeKey))
         || (expected.type == "image" && (collection == null || collection.scopeKey != @scopeKey || placement == null))
       RETURN 1)
-    LET fixtureConnectorKeys = (FOR connector IN organizationConnectors FILTER connector.scopeKey == @scopeKey && STARTS_WITH(connector.providerAccountId, @prefix) RETURN connector._key)
+    LET fixtureConnectorKeys = (FOR connector IN teamConnectors FILTER connector.scopeKey == @scopeKey && STARTS_WITH(connector.providerAccountId, @prefix) RETURN connector._key)
     LET extraFixtureConnectors = (FOR connectorKey IN fixtureConnectorKeys FILTER connectorKey NOT IN @connectorKeys RETURN 1)
     LET extraFixtureDocuments = (FOR document IN documents FILTER document.scopeKey == @scopeKey && document._key NOT IN @documentKeys LET payload = JSON_PARSE(document.content) FILTER document.developmentFixtureIdentifier == @prefix || (payload.kind == "mail-thread" && STARTS_WITH(payload.data.providerThreadId, @prefix)) || (payload.kind == "mail-message" && STARTS_WITH(payload.data.providerMessageId, @prefix)) || (payload.kind == "mail-tone" && STARTS_WITH(payload.data.identifier || "", @prefix)) || (CONTAINS(document.content, "<!-- vorinthex-mail-tone ") && CONTAINS(document.content, @toneIdentifierFragment)) RETURN 1)
     RETURN { connectorMismatches: LENGTH(connectorMismatches), folderMismatches: LENGTH(folderMismatches), documentMismatches: LENGTH(documentMismatches), attachmentMismatches: LENGTH(attachmentMismatches), extraFixtureConnectors: LENGTH(extraFixtureConnectors), extraFixtureDocuments: LENGTH(extraFixtureDocuments) }`, {

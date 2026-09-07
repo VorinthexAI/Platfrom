@@ -11,8 +11,10 @@ function mockDeps() {
         if (emailHash === 'hash:missing@example.com') return null;
         return { key: 'usr_test', email: 'person@example.com', emailHash } as any;
       },
-      async deleteUser(id: string) {
+      async deleteAccount(input: unknown, id: string) {
+        expect(input).toEqual({ confirmation: 'DELETE MY ACCOUNT' });
         deletedUsers.push(id);
+        return { deleted: true as const };
       },
       async hashUserEmail(email: string) {
         return `hash:${email.trim().toLowerCase()}`;
@@ -58,6 +60,13 @@ describe('Resend webhook payload processing', () => {
       deleted: true,
     });
     expect(bounced.deletedUsers).toEqual(['usr_test']);
+  });
+
+  test('does not erase the user when paid subscription revocation fails', async () => {
+    const bounced = mockDeps();
+    bounced.deps.deleteAccount = async () => { throw new Error('Polar unavailable'); };
+    await expect(processResendWebhookPayload({ type: 'email.bounced', data: { to: ['person@example.com'], bounce: { type: 'Permanent' } } }, bounced.deps as any)).rejects.toThrow('Polar unavailable');
+    expect(bounced.deletedUsers).toEqual([]);
   });
 
   test('keeps the user after a transient bounce', async () => {

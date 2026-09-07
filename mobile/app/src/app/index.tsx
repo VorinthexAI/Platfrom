@@ -13,6 +13,7 @@ import { vorinthexMarkSource } from "@/data/capability-icons";
 import { durations, easings } from "@/theme/motion";
 import { fonts, palette, tracking } from "@/theme/tokens";
 import { useAuthStore } from "@/state/auth";
+import { readLocalOnboardingState } from "@/lib/onboarding-state";
 
 const LOGO_SIZE = 150;
 
@@ -40,12 +41,11 @@ export default function SplashRoute() {
       withTiming(LOGO_SIZE + 110, { duration: 1200, easing: easings.inOut }),
     );
 
-    const timer = setTimeout(
-      () => router.replace((status === "authenticated"
-        ? useAuthStore.getState().user?.isOnboarded ? "/capability/archive" : "/onboarding"
-        : "/auth") as Href),
-      durations.splashHold + 300,
-    );
+    const timer = setTimeout(() => {
+      void readLocalOnboardingState().then((onboarding) => router.replace((status === "authenticated"
+        ? !useAuthStore.getState().user?.isOnboarded ? "/onboarding" : "/capability/archive"
+        : onboarding.complete || onboarding.previewComplete ? "/auth" : "/onboarding") as Href));
+    }, durations.splashHold + 300);
     return () => clearTimeout(timer);
   }, [logoOpacity, logoScale, router, status, sweepX, taglineOpacity, wordmarkOpacity]);
 

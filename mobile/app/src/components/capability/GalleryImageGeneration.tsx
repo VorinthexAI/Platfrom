@@ -129,7 +129,7 @@ export function GalleryImageGeneration({ collection, onClose, onGenerate, open }
       </ScrollView>
     </BottomSheet>
     <GalleryGenerationHistory error={historyError} history={history} loading={historyLoading} onClose={() => { historyRequest.current += 1; setHistoryOpen(false); }} onRemove={(item) => void removeHistory(item)} onSelect={(item) => { setPrompt(item.prompt); setHistoryOpen(false); }} open={open && historyOpen} removingPrompt={removingPrompt} />
-    {pickerOpen && open ? <EmailAttachmentPicker context={{ ...context, userKey }} contextKey={`${context.organizationKey}:${context.scopeKey}:image-generation-context`} galleryOnly imageUrls={referenceImageUrls} labels={referenceLabels} maxSelection={MAX_GALLERY_GENERATION_REFERENCES} onClose={() => setPickerOpen(false)} onDone={finishReferenceSelection} onSelectionLimitReached={(limit) => showToast({ title: `You can select up to ${limit} images.`, duration: 2_500 })} open selection={references} title="Reference images" /> : null}
+    {pickerOpen && open ? <EmailAttachmentPicker context={{ ...context, userKey }} contextKey={`${context.teamKey}:${context.scopeKey}:image-generation-context`} galleryOnly imageUrls={referenceImageUrls} labels={referenceLabels} maxSelection={MAX_GALLERY_GENERATION_REFERENCES} onClose={() => setPickerOpen(false)} onDone={finishReferenceSelection} onSelectionLimitReached={(limit) => showToast({ title: `You can select up to ${limit} images.`, duration: 2_500 })} open selection={references} title="Reference images" /> : null}
   </>;
 }
 

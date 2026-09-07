@@ -9,21 +9,21 @@ describe('email synchronization jobs', () => {
     const job = emailSyncJobSchema.parse({ schemaVersion: 1, kind: 'notification', emailAddress: 'person@example.com', historyId: '123', messageId: 'message', subscription: 'subscription' });
     expect(job).not.toHaveProperty('accessToken');
     expect(() => emailSyncJobSchema.parse({ ...job, refreshToken: 'secret' })).toThrow();
-    const repair = emailSyncJobSchema.parse({ schemaVersion: 1, kind: 'connector-reconciliation', organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w', reason: 'trash', operation: { kind: 'trash', threadKeys: ['cmrnlzf650002qc7k4p5zem5w'] }, operationKey, requestedAt: '2026-08-23T12:00:00.000Z' });
+    const repair = emailSyncJobSchema.parse({ schemaVersion: 1, kind: 'connector-reconciliation', teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w', reason: 'trash', operation: { kind: 'trash', threadKeys: ['cmrnlzf650002qc7k4p5zem5w'] }, operationKey, requestedAt: '2026-08-23T12:00:00.000Z' });
     expect(() => emailSyncJobSchema.parse({ ...repair, accessToken: 'secret' })).toThrow();
-    const initial = initialSyncJobSchema.parse({ schemaVersion: 1, kind: 'initial-sync', organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w', operationKey, requestedAt: '2026-08-23T12:00:00.000Z' });
+    const initial = initialSyncJobSchema.parse({ schemaVersion: 1, kind: 'initial-sync', teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w', operationKey, requestedAt: '2026-08-23T12:00:00.000Z' });
     expect(() => initialSyncJobSchema.parse({ ...initial, credentials: { accessToken: 'secret' } })).toThrow();
   });
 
   test('dispatches durable connector and watch reconciliation to canonical service operations', async () => {
     const calls: unknown[] = [];
     const service = { reconcileSends: async (...args: unknown[]) => { calls.push(['reconcile-sends', ...args]); return { recovered: 1, pending: 0, busy: false }; }, registerWatch: async (...args: unknown[]) => { calls.push(['register-watch', ...args]); return {}; } };
-    const target = { organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
+    const target = { teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
     expect(await processEmailSyncJob({ schemaVersion: 1, kind: 'connector-reconciliation', ...target, reason: 'send', sendDraftKey: target.connectorKey, operationKey, requestedAt: '2026-08-23T12:00:00.000Z' }, { connectors: {} as never, service: service as never })).toEqual({ synchronized: 1 });
     expect(await processEmailSyncJob({ schemaVersion: 1, kind: 'watch-reconciliation', ...target, operationKey, requestedAt: '2026-08-23T12:00:00.000Z' }, { connectors: {} as never, service: service as never })).toEqual({ renewed: 1 });
     expect(calls).toEqual([
-      ['reconcile-sends', { userKey: 'system', organizationKey: target.organizationKey, scopeKey: target.scopeKey }, target.connectorKey, target.connectorKey],
-      ['register-watch', { userKey: 'system', organizationKey: target.organizationKey, scopeKey: target.scopeKey }, target.connectorKey, undefined, true],
+      ['reconcile-sends', { userKey: 'system', teamKey: target.teamKey, scopeKey: target.scopeKey }, target.connectorKey, target.connectorKey],
+      ['register-watch', { userKey: 'system', teamKey: target.teamKey, scopeKey: target.scopeKey }, target.connectorKey, undefined, true],
     ]);
   });
 
@@ -45,7 +45,7 @@ describe('email synchronization jobs', () => {
   test('durably enqueues each OAuth lifecycle and routes only to the internal initial-sync service', async () => {
     const queued: Array<{ name: string; data: any; options: any }> = [];
     const queue = { add: async (name: string, data: any, options: any) => { queued.push({ name, data, options }); return { id: options.jobId }; } };
-    const target = { organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
+    const target = { teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
     const first = await enqueueEmailInitialSync({ ...target, operationKey }, queue as never);
     const second = await enqueueEmailInitialSync({ ...target, operationKey: '22222222-2222-4222-8222-222222222222' }, queue as never);
     expect(first.jobId).not.toBe(second.jobId);
@@ -53,7 +53,7 @@ describe('email synchronization jobs', () => {
     const calls: unknown[] = [];
     const service = { initialSync: async (...args: unknown[]) => { calls.push(args); return { synced: 1 }; }, sync: async () => { throw new Error('public sync must not be called'); }, ingestSubscriptionNotification: async () => { throw new Error('subscription ingestion must not be called'); } };
     expect(await processEmailSyncJob(queued[0]!.data, { service: service as never })).toEqual({ synchronized: 1 });
-    expect(calls).toEqual([[{ userKey: 'system', organizationKey: target.organizationKey, scopeKey: target.scopeKey }, target.connectorKey]]);
+    expect(calls).toEqual([[{ userKey: 'system', teamKey: target.teamKey, scopeKey: target.scopeKey }, target.connectorKey]]);
     await expect(processEmailSyncJob(queued[0]!.data, { service: { initialSync: async () => ({ synced: 100, initialSyncCompleted: false }) } as never })).rejects.toThrow('remains incomplete');
   });
 
@@ -66,13 +66,13 @@ describe('email synchronization jobs', () => {
   });
 
   test('fails connector repair jobs that report busy so BullMQ retries past the active lease', async () => {
-    const target = { organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
+    const target = { teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
     await expect(processEmailSyncJob({ schemaVersion: 1, kind: 'connector-reconciliation', ...target, reason: 'send', sendDraftKey: target.connectorKey, operationKey, requestedAt: '2026-08-23T12:00:00.000Z' }, { connectors: {} as never, service: { reconcileSends: async () => ({ recovered: 0, pending: 0, busy: true }) } as never })).rejects.toThrow('remains incomplete');
   });
 
   test('dispatches thread and clear-Trash continuations to canonical non-recursive operations', async () => {
     const calls: unknown[] = [];
-    const target = { organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
+    const target = { teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
     const service = {
       setReadState: async (...args: unknown[]) => { calls.push(['read', ...args]); return { succeeded: 1, failed: 0, repairPending: 0 }; },
       clearTrash: async (...args: unknown[]) => { calls.push(['clear', ...args]); return { providerMessagesDeleted: 3 }; },
@@ -82,27 +82,27 @@ describe('email synchronization jobs', () => {
     const trashSnapshotAt = '2026-08-23T11:59:00.000Z';
     expect(await processEmailSyncJob({ schemaVersion: 1, kind: 'clear-trash-continuation', ...target, operationKey, requestedAt: '2026-08-23T12:00:00.000Z', trashSnapshotAt, messages }, { service: service as never })).toEqual({ cleared: 3 });
     expect(calls).toEqual([
-      ['read', { userKey: 'system', organizationKey: target.organizationKey, scopeKey: target.scopeKey }, { threadKeys: [target.connectorKey], isRead: true }, true],
-      ['clear', { userKey: 'system', organizationKey: target.organizationKey, scopeKey: target.scopeKey }, { connectorKey: target.connectorKey }, true, messages, undefined, trashSnapshotAt],
+      ['read', { userKey: 'system', teamKey: target.teamKey, scopeKey: target.scopeKey }, { threadKeys: [target.connectorKey], isRead: true }, true],
+      ['clear', { userKey: 'system', teamKey: target.teamKey, scopeKey: target.scopeKey }, { connectorKey: target.connectorKey }, true, messages, undefined, trashSnapshotAt],
     ]);
   });
 
   test('keeps clear-Trash jobs failed for non-retryable permission and configuration errors', async () => {
-    const target = { organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
+    const target = { teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
     const job = { schemaVersion: 1 as const, kind: 'clear-trash-continuation' as const, ...target, operationKey, requestedAt: '2026-08-23T12:00:00.000Z', trashSnapshotAt: '2026-08-23T11:59:00.000Z', messages: [] };
     await expect(processEmailSyncJob(job, { service: { clearTrash: async () => { throw new GmailApiError(403, ['forbidden']); } } as never })).rejects.toMatchObject({ status: 403 });
     await expect(processEmailSyncJob(job, { service: { clearTrash: async () => { throw new GmailApiError(400, ['invalidArgument']); } } as never })).rejects.toMatchObject({ status: 400 });
   });
 
   test('completes definitive thread failures but retries repair-pending outcomes', async () => {
-    const target = { organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
+    const target = { teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
     const job = { schemaVersion: 1 as const, kind: 'connector-reconciliation' as const, ...target, reason: 'trash' as const, operation: { kind: 'trash' as const, threadKeys: [target.connectorKey] }, operationKey, requestedAt: '2026-08-23T12:00:00.000Z' };
     await expect(processEmailSyncJob(job, { service: { trashThread: async () => ({ succeeded: 0, failed: 1, repairPending: 0 }) } as never })).resolves.toEqual({ synchronized: 0 });
     await expect(processEmailSyncJob(job, { service: { trashThread: async () => ({ succeeded: 0, failed: 0, repairPending: 1 }) } as never })).rejects.toThrow('remains incomplete');
   });
 
   test('retries a delayed thread repair when the canonical operation reports an active connector lease', async () => {
-    const target = { organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
+    const target = { teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
     const job = { schemaVersion: 1 as const, kind: 'connector-reconciliation' as const, ...target, reason: 'read-state' as const, operation: { kind: 'read-state' as const, threadKeys: [target.connectorKey], isRead: true }, operationKey, requestedAt: '2026-08-23T12:00:00.000Z' };
     let repairQueued: boolean | undefined;
     const service = { setReadState: async (_actor: unknown, _input: unknown, queued: boolean) => { repairQueued = queued; return { succeeded: 0, failed: 0, repairPending: 1, items: [{ threadKey: target.connectorKey, status: 'repairPending', error: 'Email synchronization or sending is already running' }] }; } };
@@ -114,7 +114,7 @@ describe('email synchronization jobs', () => {
     const queued: Array<{ data: any; options: any }> = [];
     const marked: unknown[] = [];
     const connectorOne = 'cmrnlzf650002qc7k4p5zem5w', connectorTwo = 'cmrnlzf650002qc7k4p5zem6x';
-    const connectors = { listSyncTargetsByEmail: async () => [{ organizationKey: 'org-1', scopeKey: 'scope-1', connectorKey: connectorOne }, { organizationKey: 'org-1', scopeKey: 'scope-1', connectorKey: connectorTwo }], markNotificationPending: async (...args: unknown[]) => { marked.push(args); return true; } };
+    const connectors = { listSyncTargetsByEmail: async () => [{ teamKey: 'team-1', scopeKey: 'scope-1', connectorKey: connectorOne }, { teamKey: 'team-1', scopeKey: 'scope-1', connectorKey: connectorTwo }], markNotificationPending: async (...args: unknown[]) => { marked.push(args); return true; } };
     const queue = { add: async (_name: string, data: any, options: any) => { queued.push({ data, options }); return { id: options.jobId }; } };
     const notification = { schemaVersion: 1 as const, kind: 'notification' as const, emailAddress: 'person@example.com', historyId: '123', messageId: 'message', subscription: 'subscription' };
     expect(await processEmailSyncJob(notification, { connectors: connectors as never, service: {} as never, queue: queue as never })).toEqual({ synchronized: 2 });
@@ -125,12 +125,12 @@ describe('email synchronization jobs', () => {
     expect(queued[0]!.options.jobId).not.toBe(queued[1]!.options.jobId);
     const calls: unknown[] = [];
     await processEmailSyncJob(queued[0]!.data, { connectors: connectors as never, service: { sync: async () => { throw new Error('sync must not be called'); }, ingestSubscriptionNotification: async (...args: unknown[]) => { calls.push(args); return { synced: 1 }; } } as never });
-    expect(calls).toEqual([[{ userKey: 'system', organizationKey: 'org-1', scopeKey: 'scope-1' }, connectorOne, '123']]);
+    expect(calls).toEqual([[{ userKey: 'system', teamKey: 'team-1', scopeKey: 'scope-1' }, connectorOne, '123']]);
     expect(marked).toEqual([[connectorOne, '123'], [connectorTwo, '123']]);
   });
 
   test('deduplicates duplicate PubSub delivery while distinct and out-of-order notifications converge through persisted cursor', async () => {
-    const target = { organizationKey: 'org-1', scopeKey: 'scope-1', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
+    const target = { teamKey: 'team-1', scopeKey: 'scope-1', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
     const connectors = { listSyncTargetsByEmail: async () => [target], markNotificationPending: async () => true, clearPendingNotification: async () => true };
     const queued = new Map<string, any>();
     const queue = { add: async (_name: string, data: any, options: any) => { queued.set(options.jobId, data); return { id: options.jobId }; } };
@@ -149,33 +149,33 @@ describe('email synchronization jobs', () => {
   });
 
   test('retries subscription continuation jobs when the canonical service reports a busy connector', async () => {
-    const target = { organizationKey: 'org-1', scopeKey: 'scope-1', connectorKey: 'cmrnlzf650002qc7k4p5zem5w', sourceKey: 'a'.repeat(64), requestedAt: '2026-08-23T12:00:00.000Z' };
+    const target = { teamKey: 'team-1', scopeKey: 'scope-1', connectorKey: 'cmrnlzf650002qc7k4p5zem5w', sourceKey: 'a'.repeat(64), requestedAt: '2026-08-23T12:00:00.000Z' };
     await expect(processEmailSyncJob({ schemaVersion: 1, kind: 'connector-sync', ...target }, { service: { continueSubscription: async () => ({ synced: 0, busy: true }) } as never })).rejects.toThrow('synchronization is busy');
   });
 
   test('durably schedules deterministic history continuation work through subscription ingestion', async () => {
     const queued: Array<{ data: any; options: any }> = [];
     const queue = { add: async (_name: string, data: any, options: any) => { queued.push({ data, options }); return { id: options.jobId }; } };
-    const input = { organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w', pendingHistoryId: 'history-2', pendingThreadIds: Array.from({ length: 5 }, (_, index) => `thread-${index}`) };
+    const input = { teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w', pendingHistoryId: 'history-2', pendingThreadIds: Array.from({ length: 5 }, (_, index) => `thread-${index}`) };
     const first = await enqueueEmailSyncContinuation(input, queue as never);
     const second = await enqueueEmailSyncContinuation(input, queue as never);
     expect(first.jobId).toBe(second.jobId);
-    expect(queued[0]!.data).toMatchObject({ kind: 'connector-sync', organizationKey: input.organizationKey, scopeKey: input.scopeKey, connectorKey: input.connectorKey });
+    expect(queued[0]!.data).toMatchObject({ kind: 'connector-sync', teamKey: input.teamKey, scopeKey: input.scopeKey, connectorKey: input.connectorKey });
     const calls: unknown[] = [];
     await processEmailSyncJob(queued[0]!.data, { service: { continueSubscription: async (...args: unknown[]) => { calls.push(args); return { synced: 5 }; } } as never });
-    expect(calls).toEqual([[{ userKey: 'system', organizationKey: input.organizationKey, scopeKey: input.scopeKey }, input.connectorKey]]);
+    expect(calls).toEqual([[{ userKey: 'system', teamKey: input.teamKey, scopeKey: input.scopeKey }, input.connectorKey]]);
   });
 
   test('schedules connector-specific watch renewals', async () => {
     const queued: any[] = [];
-    const connectors = { listWatchRenewalTargets: async () => [{ organizationKey: 'broken', scopeKey: 'scope-1', connectorKey: 'connector-1' }, { organizationKey: 'healthy', scopeKey: 'scope-2', connectorKey: 'connector-2' }] };
+    const connectors = { listWatchRenewalTargets: async () => [{ teamKey: 'broken', scopeKey: 'scope-1', connectorKey: 'connector-1' }, { teamKey: 'healthy', scopeKey: 'scope-2', connectorKey: 'connector-2' }] };
     const queue = { add: async (_name: string, data: any) => { queued.push(data); return { id: 'job' }; } };
     expect(await processEmailSyncJob({ schemaVersion: 1, kind: 'renew-watches', day: '2026-08-12' }, { connectors: connectors as never, service: {} as never, queue: queue as never })).toEqual({ renewed: 2 });
     expect(queued.map(({ kind, connectorKey }) => ({ kind, connectorKey }))).toEqual([{ kind: 'connector-watch-renewal', connectorKey: 'connector-1' }, { kind: 'connector-watch-renewal', connectorKey: 'connector-2' }]);
   });
 
   test('keeps every watch renewal and reconciliation failure failed so BullMQ can retry it', async () => {
-    const target = { organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
+    const target = { teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
     const failure = new GmailApiError(403, ['forbidden']);
     const service = { registerWatch: async () => { throw failure; } };
     await expect(processEmailSyncJob({ schemaVersion: 1, kind: 'connector-watch-renewal', ...target, sourceKey: 'a'.repeat(64), requestedAt: '2026-08-23T12:00:00.000Z' }, { service: service as never })).rejects.toBe(failure);
@@ -183,7 +183,7 @@ describe('email synchronization jobs', () => {
   });
 
   test('does not replay healthy connector work when aggregate scheduling retries', async () => {
-    const connectors = { listSyncTargetsByEmail: async () => [{ organizationKey: 'broken', scopeKey: 'scope-1', connectorKey: 'connector-1' }, { organizationKey: 'healthy', scopeKey: 'scope-2', connectorKey: 'connector-2' }], markNotificationPending: async () => true };
+    const connectors = { listSyncTargetsByEmail: async () => [{ teamKey: 'broken', scopeKey: 'scope-1', connectorKey: 'connector-1' }, { teamKey: 'healthy', scopeKey: 'scope-2', connectorKey: 'connector-2' }], markNotificationPending: async () => true };
     const uniqueJobs = new Map<string, any>();
     let firstAttempt = true;
     const queue = { add: async (_name: string, data: any, options: any) => { if (firstAttempt && data.connectorKey === 'connector-1') throw new Error('queue unavailable'); uniqueJobs.set(options.jobId, data); return { id: options.jobId }; } };
@@ -205,9 +205,9 @@ describe('email synchronization jobs', () => {
       return job && !job.removed ? { getState: async () => job.state, remove: async () => { job.removed = true; removals += 1; } } : undefined;
     };
     const targets = [
-      { organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w', initialSyncCompleted: false },
-      { organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem6x', initialSyncCompleted: true, pendingNotificationHistoryId: '456' },
-      { organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem7y', initialSyncCompleted: true, pendingHistoryId: '789' },
+      { teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w', initialSyncCompleted: false },
+      { teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem6x', initialSyncCompleted: true, pendingNotificationHistoryId: '456' },
+      { teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem7y', initialSyncCompleted: true, pendingHistoryId: '789' },
     ];
     const dependencies = { connectors: { listSyncRecoveryTargets: async () => targets } as never, initialQueue: { add: add('initial'), getJob } as never, syncQueue: { add: add('sync'), getJob } as never };
     expect(await recoverEmailSyncQueue(dependencies)).toEqual({ enqueued: 3 });

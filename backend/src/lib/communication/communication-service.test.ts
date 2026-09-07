@@ -8,14 +8,14 @@ import { CommunicationService } from './communication-service';
 import type { CommunicationRepository, GeneralChannelAccess } from './repository';
 
 const now = '2026-07-24T12:00:00.000Z';
-const organizationKey = 'root-org';
-const membershipKey = newId();
+const teamKey = 'root-team';
+const teamMembershipKey = newId();
 const scopeKey = newId();
-const actor = { organizationKey, membershipKey };
+const actor = { teamKey, teamMembershipKey };
 
 function fixture() {
-  const channel = channelSchema.parse({ key: newId(), organizationKey, scopeKey, name: 'general', description: 'Organization-wide conversation', position: 0, createdAt: now, updatedAt: now });
-  const human = channelParticipantSchema.parse({ key: newId(), scopeKey, channelKey: channel.key, userOrganizationKey: membershipKey, joinedAt: now, createdAt: now, updatedAt: now });
+  const channel = channelSchema.parse({ key: newId(), teamKey, scopeKey, name: 'general', description: 'Team-wide conversation', position: 0, createdAt: now, updatedAt: now });
+  const human = channelParticipantSchema.parse({ key: newId(), scopeKey, channelKey: channel.key, userTeamKey: teamMembershipKey, joinedAt: now, createdAt: now, updatedAt: now });
   const atlas = channelParticipantSchema.parse({ key: newId(), scopeKey, channelKey: channel.key, orchestratorKey: newId(), joinedAt: now, createdAt: now, updatedAt: now });
   const metis = channelParticipantSchema.parse({ key: newId(), scopeKey, channelKey: channel.key, orchestratorKey: newId(), joinedAt: now, createdAt: now, updatedAt: now });
   const access: GeneralChannelAccess = { channel, humanParticipant: human, viewerUserKey: newId(), mentions: [
@@ -30,7 +30,7 @@ function fixture() {
   const reactionUsage = [{ reaction: '🔥', count: 4 }, { reaction: '✅', count: 2 }];
   const repository = {
     ensureGeneralChannel: async () => access,
-    getGeneralChannelAccess: async (_organization: string, member: string, key: string) => member === membershipKey && key === channel.key ? access : null,
+    getGeneralChannelAccess: async (_team: string, member: string, key: string) => member === teamMembershipKey && key === channel.key ? access : null,
     listMessages: async () => [], listMessageReplies: async () => [], listThreadMessages: async () => [], listHistory: async () => [],
     getMessage: async (key: string) => messages.find((message) => message.key === key) ?? null,
     insertMessage: async (message: Message) => { messages.push(message); return message; },
@@ -43,7 +43,7 @@ function fixture() {
     recordUserReaction: async () => {},
     listUserReactions: async () => reactionUsage,
     deleteMessage: async () => true,
-    editMessage: async (_channelKey: string, key: string, _membershipKey: string, content: string, editedAt: string) => {
+    editMessage: async (_channelKey: string, key: string, _teamMembershipKey: string, content: string, editedAt: string) => {
       const message = messages.find((item) => item.key === key);
       if (!message) return null;
       Object.assign(message, { content, editedAt, updatedAt: editedAt });
@@ -57,10 +57,10 @@ function fixture() {
 }
 
 describe('Communication service', () => {
-  test('provisions one shared general channel for an organization member', async () => {
+  test('provisions one shared general channel for a team member', async () => {
     const f = fixture();
     const access = await f.service.generalChannel(actor);
-    expect(access.channel).toMatchObject({ organizationKey, kind: 'group', name: 'general' });
+    expect(access.channel).toMatchObject({ teamKey, kind: 'group', name: 'general' });
     expect(access.mentions.map((mention) => mention.name)).toEqual(['everyone', 'Founder', 'Atlas', 'Metis']);
   });
 
@@ -160,7 +160,7 @@ describe('Communication service', () => {
     expect(f.messages.map(({ content }) => content)).toEqual(['@Atlas hello', 'Hello from Atlas.']);
   });
 
-  test('expands @everyone to organization members without dispatching orchestrators', async () => {
+  test('expands @everyone to team members without dispatching orchestrators', async () => {
     const f = fixture();
     const result = await f.service.persistUserMessage(actor, f.channel.key, '@everyone standup');
     expect(f.mentions).toHaveLength(1);

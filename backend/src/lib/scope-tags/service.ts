@@ -58,9 +58,9 @@ const project = (tag: z.infer<typeof tagSchema>) => publicScopeTagSchema.parse({
 
 function owner(context: ToolContext): ScopeTagOwner {
   if (context.principal.kind !== 'member') throw new ScopeTagError('FORBIDDEN', 'An authenticated member is required.');
-  const { user, userOrganization } = context.principal;
-  if (userOrganization.status !== 'active' || userOrganization.organizationId !== context.organizationKey || userOrganization.userId !== user.key) throw new ScopeTagError('FORBIDDEN', 'An active organization membership is required.');
-  return { organizationKey: context.organizationKey, scopeKey: context.runtimeScopeKey, userKey: user.key, membershipKey: userOrganization.key };
+  const { user, userTeam } = context.principal;
+  if (userTeam.status !== 'active' || userTeam.teamKey !== context.teamKey || userTeam.userId !== user.key) throw new ScopeTagError('FORBIDDEN', 'An active team membership is required.');
+  return { teamKey: context.teamKey, scopeKey: context.runtimeScopeKey, userKey: user.key, teamMembershipKey: userTeam.key };
 }
 
 export interface ScopeTagService {

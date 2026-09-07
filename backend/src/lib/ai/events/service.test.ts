@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { createToolEventService, toolEventInputSchema } from './service';
-import { addToolTokenUsage, chargeToolOutcome, currentFixedChargeReceipt, markFixedChargeOutcomeAccepted, markToolOutcomeAccepted, observeToolExecution, recordActionCost, recordActionUsage, runWithEventApp, SparkExecutionPendingError, SparkRefundError } from './runtime';
+import { runWithEventIdentifier } from './event-identifier';
+import { addToolTokenUsage, chargeToolOutcome, currentFixedChargeReceipt, markFixedChargeOutcomeAccepted, markToolOutcomeAccepted, observeToolExecution as observePersistedToolExecution, recordActionCost, recordActionUsage, runWithEventApp, SparkExecutionPendingError, SparkRefundError } from './runtime';
 import { APP_KEYS } from '@/lib/apps/registry';
+
+const APP_SCOPE_KEY = 'cmrnlzf640001qc7kazsr96k5';
+const observeToolExecution: typeof observePersistedToolExecution = (slug, context, execute, options = {}) => observePersistedToolExecution(slug, context, execute, { appScopeKey: APP_SCOPE_KEY, ...options });
 
 describe('tool events', () => {
   test('persists the normalized event fields without an embedding or payload', async () => {
@@ -9,44 +13,62 @@ describe('tool events', () => {
     const service = createToolEventService({
       id: () => 'event-1',
       now: () => '2026-09-02T12:00:00.000Z',
+      createIdentifier: () => 'f'.repeat(128),
       insert: async (event) => { inserted.push(event); return event as never; },
-      appExists: async () => true,
+      productScopeExists: async () => true,
     });
-    await service.record({ userId: 'user-1', scopeKey: 'scope-1', slug: 'document.summarize', appKey: APP_KEYS.ARCHIVE, microSparks: 2_000_000, inputTokens: 10, outputTokens: 5, totalTokens: 15 });
-    expect(inserted[0]).toEqual({ key: 'event-1', userId: 'user-1', scopeKey: 'scope-1', slug: 'document.summarize', appKey: APP_KEYS.ARCHIVE, createdAt: '2026-09-02T12:00:00.000Z', status: 'completed', microSparks: 2_000_000, sparkTransactionKey: null, inputTokens: 10, outputTokens: 5, totalTokens: 15 });
+    await service.record({ userId: 'user-1', scopeKey: 'scope-1', slug: 'document.summarize', appScopeKey: APP_SCOPE_KEY, microSparks: 2_000_000, inputTokens: 10, outputTokens: 5, totalTokens: 15 });
+    expect(inserted[0]).toEqual({ key: 'event-1', userId: 'user-1', scopeKey: 'scope-1', eventIdentifier: 'f'.repeat(128), slug: 'document.summarize', appScopeKey: APP_SCOPE_KEY, createdAt: '2026-09-02T12:00:00.000Z', status: 'completed', microSparks: 2_000_000, sparkTransactionKey: null, inputTokens: 10, outputTokens: 5, totalTokens: 15 });
   });
 
-  test('accepts registry-style slugs without maintaining an event allowlist', () => {
-    expect(toolEventInputSchema.parse({ userId: null, scopeKey: 'scope-1', slug: 'future-capability.execute', appKey: APP_KEYS.CORE }).slug).toBe('future-capability.execute');
-    expect(() => toolEventInputSchema.parse({ userId: null, scopeKey: '', slug: 'future-capability.execute', appKey: APP_KEYS.CORE })).toThrow();
-    expect(() => toolEventInputSchema.parse({ userId: null, scopeKey: null, slug: 'future-capability.execute', appKey: APP_KEYS.CORE })).toThrow();
-    expect(() => toolEventInputSchema.parse({ userId: null, scopeKey: 'scope-1', slug: 'not dotted', appKey: APP_KEYS.CORE })).toThrow();
-    expect(() => toolEventInputSchema.parse({ userId: null, scopeKey: 'scope-1', slug: 'folder.create', appKey: 'unknown' })).toThrow();
+  test('accepts arbitrary bounded slugs without maintaining an event allowlist', () => {
+    expect(toolEventInputSchema.parse({ userId: null, scopeKey: 'scope-1', slug: 'future-capability.execute', appScopeKey: APP_SCOPE_KEY }).slug).toBe('future-capability.execute');
+    expect(() => toolEventInputSchema.parse({ userId: null, scopeKey: '', slug: 'future-capability.execute', appScopeKey: APP_SCOPE_KEY })).toThrow();
+    expect(toolEventInputSchema.parse({ userId: null, scopeKey: null, slug: 'future-capability.execute', appScopeKey: APP_SCOPE_KEY }).scopeKey).toBeNull();
+    expect(toolEventInputSchema.parse({ userId: null, scopeKey: 'scope-1', slug: 'not dotted', appScopeKey: APP_SCOPE_KEY }).slug).toBe('not dotted');
+    expect(() => toolEventInputSchema.parse({ userId: null, scopeKey: 'scope-1', slug: '', appScopeKey: APP_SCOPE_KEY })).toThrow();
+    expect(() => toolEventInputSchema.parse({ userId: null, scopeKey: 'scope-1', slug: 'x'.repeat(201), appScopeKey: APP_SCOPE_KEY })).toThrow();
+    expect(() => toolEventInputSchema.parse({ userId: null, scopeKey: 'scope-1', slug: 'folder.create', appScopeKey: 'unknown' })).toThrow();
+  });
+
+  test('prefers an explicit identifier, then request context, then a random fallback', async () => {
+    const identifiers: string[] = [];
+    const service = createToolEventService({
+      id: () => 'event-1',
+      insert: async (event) => { identifiers.push(event.eventIdentifier); return event as never; },
+      productScopeExists: async () => true,
+      createIdentifier: () => 'c'.repeat(128),
+    });
+    const base = { userId: null, scopeKey: null, slug: 'navigation.opened', appScopeKey: APP_SCOPE_KEY } as const;
+    await runWithEventIdentifier('b'.repeat(128), () => service.record({ ...base, eventIdentifier: 'a'.repeat(128) }));
+    await runWithEventIdentifier('b'.repeat(128), () => service.record(base));
+    await service.record(base);
+    expect(identifiers).toEqual(['a'.repeat(128), 'b'.repeat(128), 'c'.repeat(128)]);
   });
 
   test('records request app and accumulated provider usage after execution', async () => {
     const events: Record<string, unknown>[] = [];
     const recorder = async (event: Record<string, unknown>) => { events.push(event); };
-    await runWithEventApp(APP_KEYS.GALLERY, async () => {
-      await observeToolExecution('image.generate', { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'system' } }, async () => {
+    await runWithEventApp(APP_KEYS.GALLERY, APP_SCOPE_KEY, async () => {
+      await observeToolExecution('image.generate', { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'system' } }, async () => {
         addToolTokenUsage({ inputTokens: 4, outputTokens: 6, totalTokens: 10 });
         return 'ok';
       });
     }, recorder);
     await Promise.resolve();
-    expect(events).toEqual([{ userId: null, scopeKey: 'scope-1', slug: 'image.generate', appKey: APP_KEYS.GALLERY, status: 'completed', microSparks: 0, sparkTransactionKey: null, inputTokens: 4, outputTokens: 6, totalTokens: 10 }]);
+    expect(events).toEqual([{ userId: null, scopeKey: 'scope-1', slug: 'image.generate', appScopeKey: APP_SCOPE_KEY, status: 'completed', microSparks: 0, sparkTransactionKey: null, inputTokens: 4, outputTokens: 6, totalTokens: 10 }]);
   });
 
   test('rejects an unknown app before inserting', async () => {
     let inserts = 0;
-    const service = createToolEventService({ appExists: async () => false, insert: async () => { inserts += 1; return {} as never; } });
-    await expect(service.record({ userId: null, scopeKey: 'scope-1', slug: 'folder.create', appKey: APP_KEYS.CORE })).rejects.toThrow('was not found');
+    const service = createToolEventService({ productScopeExists: async () => false, insert: async () => { inserts += 1; return {} as never; } });
+    await expect(service.record({ userId: null, scopeKey: 'scope-1', slug: 'folder.create', appScopeKey: APP_SCOPE_KEY })).rejects.toThrow('was not found');
     expect(inserts).toBe(0);
   });
 
   test('charges successful tools once and gives tool pricing precedence over enclosed actions', async () => {
     const events: unknown[] = [], charges: Array<{ userKey: string; input: Record<string, unknown> }> = [];
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     await observeToolExecution('document.summarize', context, async () => { await recordActionCost('text.generate'); return 'ok'; }, {
       recorder: async (input) => { events.push(input); }, idempotencyKey: 'request-1', id: () => 'event-1', hash: async () => 'a'.repeat(64),
       lookupCost: (input) => input.toolSlug ? { source: 'tool', slug: input.toolSlug, rule: { type: 'fixed', microSparks: 300 } } : { source: 'action', slug: input.actionSlug!, rule: { type: 'fixed', microSparks: 200 } },
@@ -58,7 +80,7 @@ describe('tool events', () => {
 
   test('never charges failed work even when an enclosed action is priced', async () => {
     const events: Record<string, unknown>[] = []; let charges = 0;
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     await expect(observeToolExecution('document.summarize', context, async () => { await recordActionCost('text.generate'); throw new Error('provider failed'); }, {
       recorder: async (input) => { events.push(input as Record<string, unknown>); }, idempotencyKey: 'request-1',
       lookupCost: (input) => input.actionSlug ? { source: 'action', slug: input.actionSlug, rule: { type: 'fixed', microSparks: 200 } } : null,
@@ -70,7 +92,7 @@ describe('tool events', () => {
 
   test('charges each successful action immediately with stable usage-free identities', async () => {
     const charged: Record<string, unknown>[] = [];
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     await observeToolExecution('document.summarize', context, async () => { await recordActionCost('text.generate'); await recordActionUsage('text.generate', {}, { inputTokens: 0, outputTokens: 0, totalTokens: 0 }); await recordActionCost('text.generate'); await recordActionUsage('text.generate', {}, { inputTokens: 0, outputTokens: 0, totalTokens: 0 }); }, {
       recorder: async () => {}, idempotencyKey: 'request-1', id: () => 'event-1', hash: async () => 'a'.repeat(64),
       lookupCost: (input) => input.actionSlug ? { source: 'action', slug: input.actionSlug, rule: { type: 'fixed', microSparks: 200 } } : null,
@@ -83,7 +105,7 @@ describe('tool events', () => {
   });
 
   test('keeps action request identity stable across usage and refunds an owned action when outer work fails', async () => {
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     const charges: Record<string, unknown>[] = [];
     const refunds: Record<string, unknown>[] = [];
     const run = (usage: { inputTokens: number; outputTokens: number; totalTokens: number }, fail = false) => observeToolExecution('app.translate', context, async () => {
@@ -105,7 +127,7 @@ describe('tool events', () => {
 
   test('reuses the original event key from a replayed charge', async () => {
     let recordedKey: string | undefined;
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     await observeToolExecution('document.summarize', context, async () => 'ok', {
       recorder: async (_input, options) => { recordedKey = options?.key; }, idempotencyKey: 'request-1', id: () => 'new-event', hash: async () => 'a'.repeat(64),
       lookupCost: (input) => input.toolSlug ? { source: 'tool', slug: input.toolSlug, rule: { type: 'fixed', microSparks: 300 } } : null,
@@ -122,7 +144,7 @@ describe('tool events', () => {
 
   test('does not charge system principals even when the tool is priced', async () => {
     let charges = 0, ids = 0, hashes = 0; const events: Record<string, unknown>[] = [];
-    await observeToolExecution('document.summarize', { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'system' } }, async () => { await recordActionCost('text.generate'); }, {
+    await observeToolExecution('document.summarize', { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'system' } }, async () => { await recordActionCost('text.generate'); }, {
       recorder: async (input) => { events.push(input as Record<string, unknown>); },
       lookupCost: (input) => ({ source: input.toolSlug ? 'tool' : 'action', slug: input.toolSlug ?? input.actionSlug!, rule: { type: 'fixed', microSparks: 300 } }),
       charge: async () => { charges += 1; return {} as never; }, id: () => { ids += 1; return 'event'; }, hash: async () => { hashes += 1; return 'a'.repeat(64); },
@@ -133,12 +155,12 @@ describe('tool events', () => {
 
   test('keeps execution outcomes authoritative when analytics recording fails', async () => {
     const failure = new Error('business failure');
-    await expect(observeToolExecution('document.read', { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'system' } }, async () => 'result', { recorder: async () => { throw new Error('analytics unavailable'); } })).resolves.toBe('result');
-    await expect(observeToolExecution('document.read', { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'system' } }, async () => { throw failure; }, { recorder: async () => { throw new Error('analytics unavailable'); } })).rejects.toBe(failure);
+    await expect(observeToolExecution('document.read', { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'system' } }, async () => 'result', { recorder: async () => { throw new Error('analytics unavailable'); } })).resolves.toBe('result');
+    await expect(observeToolExecution('document.read', { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'system' } }, async () => { throw failure; }, { recorder: async () => { throw new Error('analytics unavailable'); } })).rejects.toBe(failure);
   });
 
   test('rejects billable tools and actions without a stable request key before billable work starts', async () => {
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     let toolWork = 0;
     await expect(observeToolExecution('document.summarize', context, async () => { toolWork += 1; }, {
       recorder: async () => {}, lookupCost: (input) => input.toolSlug ? { source: 'tool', slug: input.toolSlug, rule: { type: 'fixed', microSparks: 300 } } : null,
@@ -152,8 +174,18 @@ describe('tool events', () => {
     expect(providerWork).toBe(0);
   });
 
+  test('blocks action provider work while refund debt exists', async () => {
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
+    let providerWork = 0;
+    await expect(observeToolExecution('document.read', context, async () => { await recordActionCost('text.generate'); providerWork += 1; }, {
+      recorder: async () => {}, idempotencyKey: 'debt-blocked', getBalance: async () => 1_000_000, getDebt: async () => 1,
+      lookupCost: (input) => input.actionSlug ? { source: 'action', slug: input.actionSlug, rule: { type: 'fixed', microSparks: 200 } } : null,
+    })).rejects.toMatchObject({ code: 'OUTSTANDING_DEBT' });
+    expect(providerWork).toBe(0);
+  });
+
   test('reuses one ledger debit when the same stable execution key is retried', async () => {
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     const ledger = new Map<string, { key: string; eventKey?: string }>(); let debits = 0; const recordedKeys: Array<string | undefined> = [];
     const run = () => observeToolExecution('document.summarize', context, async () => 'ok', {
       recorder: async (_input, options) => { recordedKeys.push(options?.key); }, idempotencyKey: 'stable-request', id: () => `event-${ledger.size + 1}`, hash: async () => 'a'.repeat(64),
@@ -175,7 +207,7 @@ describe('tool events', () => {
   });
 
   test('normalizes long stable request keys into bounded deterministic ledger keys', async () => {
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     const ledgerKeys: string[] = [];
     const run = () => observeToolExecution('document.summarize', context, async () => 'ok', {
       recorder: async () => {}, idempotencyKey: 'r'.repeat(200), hash: async () => 'a'.repeat(64),
@@ -189,7 +221,7 @@ describe('tool events', () => {
   });
 
   test('predebits fixed work and issues a full linked refund on failure', async () => {
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     const order: string[] = [];
     let refundInput: Record<string, unknown> | undefined;
     await expect(observeToolExecution('book.create', context, async () => { order.push('work'); throw new Error('failed'); }, {
@@ -203,7 +235,7 @@ describe('tool events', () => {
   });
 
   test('exposes applied and replayed fixed-charge receipts only inside canonical execution', async () => {
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     const seen: unknown[] = [];
     for (const status of ['applied', 'replayed'] as const) await observeToolExecution('book.create', context, async () => { seen.push(currentFixedChargeReceipt('book.create')); }, {
       input: {}, idempotencyKey: 'request', recorder: async () => {}, hash: async () => 'a'.repeat(64),
@@ -217,7 +249,7 @@ describe('tool events', () => {
   });
 
   test('completes rather than refunds a fixed charge after durable queue acceptance', async () => {
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     let completed = 0, refunded = 0;
     await expect(observeToolExecution('book.create', context, async () => {
       markFixedChargeOutcomeAccepted('book.create');
@@ -232,7 +264,7 @@ describe('tool events', () => {
   });
 
   test('prices Core extension preview by its action usage instead of the fixed generation charge', async () => {
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     const charges: Record<string, unknown>[] = [];
     await observeToolExecution('book.extend', context, async () => {
       expect(currentFixedChargeReceipt()).toBeNull();
@@ -249,7 +281,7 @@ describe('tool events', () => {
   });
 
   test('charges outcome-priced work only after canonical code establishes a cache miss', async () => {
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     const order: string[] = [];
     const options = {
       input: { query: 'Japan' }, idempotencyKey: 'request', recorder: async () => {}, hash: async (value: string) => value.includes('outcomeKey') ? 'b'.repeat(64) : 'a'.repeat(64),
@@ -261,7 +293,7 @@ describe('tool events', () => {
   });
 
   test('refunds an applied outcome charge when generation fails', async () => {
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     let refundInput: Record<string, unknown> | undefined;
     await expect(observeToolExecution('place.find-city', context, async () => { await chargeToolOutcome('JP:tokyo'); throw new Error('generation failed'); }, {
       input: { city: 'Tokyo' }, idempotencyKey: 'request', recorder: async () => {}, hash: async () => 'c'.repeat(64),
@@ -272,7 +304,7 @@ describe('tool events', () => {
   });
 
   test('keeps accepted durable outcomes and refunds only unfinished sibling outcomes', async () => {
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     const completed: string[] = [], refunded: string[] = [];
     let sequence = 0;
     await expect(observeToolExecution('place.find-children', context, async () => {
@@ -291,7 +323,7 @@ describe('tool events', () => {
   });
 
   test('surfaces refund failure without losing the execution error', async () => {
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     const workError = new Error('work failed'), refundError = new Error('refund failed');
     try {
       await observeToolExecution('book.create', context, async () => { throw workError; }, {
@@ -308,7 +340,7 @@ describe('tool events', () => {
   });
 
   test('does not refund a replayed successful debit when repeated work fails', async () => {
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     let refunds = 0;
     await expect(observeToolExecution('book.create', context, async () => { throw new Error('repeat failed'); }, {
       input: {}, idempotencyKey: 'request', recorder: async () => {}, hash: async () => 'd'.repeat(64),
@@ -319,7 +351,7 @@ describe('tool events', () => {
   });
 
   test('does not run a concurrent fixed operation while its durable lease is pending', async () => {
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     let work = 0, refunds = 0;
     await expect(observeToolExecution('book.create', context, async () => { work += 1; }, {
       input: {}, idempotencyKey: 'pending-request', recorder: async () => {},
@@ -330,7 +362,7 @@ describe('tool events', () => {
   });
 
   test('charges a later successful retry after the failed attempt was refunded', async () => {
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     let charges = 0, refunds = 0;
     const options = {
       input: {}, idempotencyKey: 'retry-request', recorder: async () => {},
@@ -343,7 +375,7 @@ describe('tool events', () => {
   });
 
   test('keeps nested tool charges independent by including each slug in its execution identity', async () => {
-    const context = { organizationKey: 'organization-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userOrganization: { key: 'member-1', organizationId: 'organization-1', userId: 'user-1', status: 'active' } } } as never;
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     const identities: string[] = [];
     const charge = async (_userKey: string, input: Record<string, unknown>) => { identities.push(input.executionIdentity as string); return { status: 'applied', transaction: { key: `charge-${identities.length}`, eventKey: input.eventKey } } as never; };
     await observeToolExecution('book.create', context, () => observeToolExecution('highlight.create', context, async () => 'ok', { input: {}, idempotencyKey: 'same', recorder: async () => {}, charge }), { input: {}, idempotencyKey: 'same', recorder: async () => {}, charge });

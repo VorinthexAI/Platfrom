@@ -6,6 +6,8 @@ import type { PublicToolDependencies } from './tool-definition';
 export const billingSummaryReadInputSchema = sparkHistoryInputSchema;
 export const billingSummaryReadOutputSchema = z.object({
   microSparkBalance: z.number().int().safe().nonnegative(),
+  microSparkDebt: z.number().int().safe().nonnegative(),
+  spendingBlocked: z.boolean(),
   transactions: z.array(sparkTransactionSchema),
 }).strict();
 
@@ -16,7 +18,7 @@ export function createBillingSummaryReadTool(getSummary: typeof sparkService.get
     isReadOnly: () => true,
     providerDefinition: {
       name: 'billing.summary.read',
-      description: 'Read the authenticated user\'s current credit balance and recent immutable billing history.',
+      description: 'Read the authenticated user\'s current credit balance, refund debt status, and recent immutable billing history.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -30,7 +32,7 @@ export function createBillingSummaryReadTool(getSummary: typeof sparkService.get
     async execute(rawInput: unknown, dependencies: PublicToolDependencies) {
       const input = billingSummaryReadInputSchema.parse(rawInput);
       const principal = dependencies.context.principal;
-      if (principal.kind !== 'member' || principal.userOrganization.status !== 'active' || principal.userOrganization.userId !== principal.user.key || principal.userOrganization.organizationId !== dependencies.context.organizationKey) {
+      if (principal.kind !== 'member' || principal.userTeam.status !== 'active' || principal.userTeam.userId !== principal.user.key || principal.userTeam.teamKey !== dependencies.context.teamKey) {
         throw new Error('billing.summary.read requires an active authenticated user membership.');
       }
       return billingSummaryReadOutputSchema.parse(await getSummary(principal.user.key, input));

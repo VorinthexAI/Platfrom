@@ -1,16 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import {
   ACCOUNT_GRANT_MICRO_SPARKS,
-  ACTION_METERED_TOOL_SLUGS,
+  ACTION_PRICED_OPERATION_TOOL_SLUGS,
   ACTION_COST_RULES,
-  BYTES_PER_GIB,
+  BYTES_PER_GB,
   COST_RULE_PRECEDENCE,
   HOURS_PER_BILLING_MONTH,
+  INBOX_INITIAL_SYNC_SPARKS,
+  INBOX_NEW_EMAIL_SPARKS,
   MICRO_SPARKS_PER_SPARK,
   TOOL_COST_RULES,
   TOOL_COST_POLICIES,
   FREE_TOOL_SLUGS,
-  OUTCOME_METERED_TOOL_SLUGS,
+  OUTCOME_PRICED_OPERATION_TOOL_SLUGS,
   STORAGE_BYTE_MILLISECOND_DENOMINATOR,
   calculateByteHours,
   calculateStorageMicroSparks,
@@ -22,11 +24,36 @@ import {
   validateFixedCostRule,
   calculateActionCostMicroSparks,
   calculateToolCostMicroSparks,
+  REFERRAL_PAID_REWARD_MICRO_SPARKS,
+  REFERRAL_PROGRAM_VERSION,
+  REFERRAL_SIGNUP_REWARD_MICRO_SPARKS,
   lookupToolCostPolicy,
+  lookupPurchaseGrant,
+  PURCHASE_GRANT_RULES,
+  resolvePurchaseGrantMicroSparks,
 } from './index';
 import { PUBLIC_TOOL_DEFINITIONS } from '@/lib/ai/tools/tool-definitions';
 
 describe('Spark costs', () => {
+  test('owns frozen validated purchase grants for every commerce product', () => {
+    expect(Object.isFrozen(PURCHASE_GRANT_RULES)).toBe(true);
+    expect(Object.values(PURCHASE_GRANT_RULES).every(Object.isFrozen)).toBe(true);
+    expect(Object.fromEntries(Object.entries(PURCHASE_GRANT_RULES).map(([productId, rule]) => [productId, rule.microSparks]))).toEqual({
+      'nova.weekly': 200_000_000,
+      'nova.monthly': 1_000_000_000,
+      'nova.monthly.discounted': 1_000_000_000,
+      'topup.small': 200_000_000,
+    });
+    expect(lookupPurchaseGrant('topup.small')).toBe(PURCHASE_GRANT_RULES['topup.small']);
+    expect(lookupPurchaseGrant('unknown.product')).toBeNull();
+    expect(resolvePurchaseGrantMicroSparks('nova.monthly')).toBe(1_000_000_000);
+    expect(() => lookupPurchaseGrant('invalid')).toThrow('Invalid dotted slug');
+    expect(() => resolvePurchaseGrantMicroSparks('unknown.product')).toThrow('No purchase grant');
+  });
+
+  test('versions exact referral rewards in integer microSparks', () => {
+    expect({ version: REFERRAL_PROGRAM_VERSION, signup: REFERRAL_SIGNUP_REWARD_MICRO_SPARKS, paid: REFERRAL_PAID_REWARD_MICRO_SPARKS }).toEqual({ version: 'v1', signup: 50_000_000, paid: 100_000_000 });
+  });
   test('converts decimal Sparks without floating-point arithmetic', () => {
     expect(MICRO_SPARKS_PER_SPARK).toBe(1_000_000);
     expect(ACCOUNT_GRANT_MICRO_SPARKS).toBe(100_000_000);
@@ -38,16 +65,16 @@ describe('Spark costs', () => {
     expect(() => formatMicroSparks(Number.MAX_SAFE_INTEGER + 1)).toThrow();
   });
 
-  test('calculates byte-hours and exact 24 Spark GiB-month pricing', () => {
-    const month = calculateByteHours(BYTES_PER_GIB, HOURS_PER_BILLING_MONTH);
+  test('calculates byte-hours and exact 30 Spark GB-month pricing', () => {
+    const month = calculateByteHours(BYTES_PER_GB, HOURS_PER_BILLING_MONTH);
     const exact = storageCostFraction(month);
-    expect(exact.numerator / exact.denominator).toBe(24_000_000n);
+    expect(exact.numerator / exact.denominator).toBe(30_000_000n);
     expect(exact.numerator % exact.denominator).toBe(0n);
-    expect(storageCostMicroSparks(month)).toBe(24_000_000);
+    expect(storageCostMicroSparks(month)).toBe(30_000_000);
     expect(storageCostMicroSparks(0)).toBe(0);
     expect(storageCostMicroSparks(1)).toBe(1);
     expect(() => calculateByteHours(-1, 1)).toThrow();
-    expect(() => storageCostMicroSparks(BigInt(Number.MAX_SAFE_INTEGER) * BigInt(BYTES_PER_GIB) * BigInt(HOURS_PER_BILLING_MONTH))).toThrow('safe integer range');
+    expect(() => storageCostMicroSparks(BigInt(Number.MAX_SAFE_INTEGER) * BigInt(BYTES_PER_GB) * BigInt(HOURS_PER_BILLING_MONTH))).toThrow('safe integer range');
   });
 
   test('keeps frozen canonical rule maps and validates all requested slugs', () => {
@@ -55,6 +82,7 @@ describe('Spark costs', () => {
     expect(Object.isFrozen(ACTION_COST_RULES)).toBe(true);
     expect(TOOL_COST_RULES['book.create']?.microSparks).toBe(100_000_000);
     expect(TOOL_COST_RULES['document.parse']?.microSparks).toBe(2_000_000);
+    expect({ initialSync: INBOX_INITIAL_SYNC_SPARKS, newEmail: INBOX_NEW_EMAIL_SPARKS }).toEqual({ initialSync: 100, newEmail: 1 });
     expect(Object.keys(ACTION_COST_RULES)).toEqual([]);
     expect(COST_RULE_PRECEDENCE).toEqual(['tool', 'action']);
     expect(lookupCostRule({ toolSlug: 'document.create', actionSlug: 'text' })).toBeNull();
@@ -67,7 +95,7 @@ describe('Spark costs', () => {
   test('calculates fixed quantities and provider fallback prices', () => {
     expect(calculateToolCostMicroSparks('document.parse', { documents: [{}, {}, {}] })).toBe(6_000_000);
     expect(calculateToolCostMicroSparks('document.scan', { pages: [{}, {}] })).toBe(5_000_000);
-    expect(calculateToolCostMicroSparks('image.caption', { images: ['a', 'b'] })).toBe(10_000_000);
+    expect(calculateToolCostMicroSparks('image.caption', { images: ['a', 'b'] })).toBe(0);
     expect(calculateToolCostMicroSparks('web.search')).toBe(25_000_000);
     expect(calculateActionCostMicroSparks('text', { inputTokens: 1, outputTokens: 1 })).toBe(550);
     expect(calculateActionCostMicroSparks('text', { inputTokens: 0, outputTokens: 0 })).toBe(0);
@@ -84,7 +112,7 @@ describe('Spark costs', () => {
     for (const slug of Object.keys(TOOL_COST_RULES)) expect(toolNames).toContain(slug);
     expect(lookupToolCostPolicy('place.guide.find')).toEqual({ mode: 'outcome', rule: TOOL_COST_RULES['place.guide.find'], paidOutcome: 'operation-completed' });
     expect(lookupToolCostPolicy('place.find-city')).toEqual({ mode: 'outcome', rule: TOOL_COST_RULES['place.find-city'], paidOutcome: 'operation-completed' });
-    expect(lookupToolCostPolicy('place.find-children')).toEqual({ mode: 'outcome', rule: TOOL_COST_RULES['place.find-city'], paidOutcome: 'operation-completed' });
+    expect(lookupToolCostPolicy('place.find-children')).toEqual({ mode: 'outcome', rule: TOOL_COST_RULES['place.find-children'], paidOutcome: 'operation-completed' });
     expect(Object.hasOwn(TOOL_COST_RULES, 'place.reference.generate')).toBe(false);
     expect(Object.hasOwn(TOOL_COST_RULES, 'place.open')).toBe(false);
   });
@@ -92,7 +120,7 @@ describe('Spark costs', () => {
   test('assigns exactly one explicit billing policy to every public tool', () => {
     const publicNames = PUBLIC_TOOL_DEFINITIONS.map(({ name }) => name).sort();
     expect(Object.keys(TOOL_COST_POLICIES).sort()).toEqual(publicNames);
-    const assignments = [...FREE_TOOL_SLUGS, ...ACTION_METERED_TOOL_SLUGS, ...OUTCOME_METERED_TOOL_SLUGS, ...Object.keys(TOOL_COST_RULES).filter((slug) => !OUTCOME_METERED_TOOL_SLUGS.includes(slug as never))];
+    const assignments = [...FREE_TOOL_SLUGS, ...ACTION_PRICED_OPERATION_TOOL_SLUGS, ...OUTCOME_PRICED_OPERATION_TOOL_SLUGS, ...Object.keys(TOOL_COST_RULES).filter((slug) => !OUTCOME_PRICED_OPERATION_TOOL_SLUGS.includes(slug as never))];
     expect(new Set(assignments).size).toBe(assignments.length);
     for (const slug of ['agents.core', 'app.enhance', 'app.search', 'app.translate', 'book.topic.suggest', 'conversation.message.send', 'document.rewrite', 'document.summarize', 'email.draft.create', 'feedback.create', 'image.create-visual-identity', 'image.ideas.create', 'inbox.sort', 'place.find', 'place.reference.generate', 'trip.guide.generate']) {
       expect(lookupToolCostPolicy(slug)).toEqual({ mode: 'action' });
@@ -103,6 +131,7 @@ describe('Spark costs', () => {
     for (const slug of ['place.open', 'place.update', 'document.find']) {
       expect(lookupToolCostPolicy(slug)).toEqual({ mode: 'free' });
     }
+    expect(lookupToolCostPolicy('agent.guide')).toEqual({ mode: 'free' });
   });
 
   test('carries exact storage fractions across split calculations', () => {

@@ -43,7 +43,7 @@ describe('Arango Spark repository', () => {
     const repository = createArangoSparkRepository(database, transact);
     await expect(repository.apply(input)).resolves.toMatchObject({ status: 'applied', transaction: { key: 'transaction-1', balanceAfterMicroSparks: 10 } });
     expect(declarations).toEqual([{ write: ['users', 'sparkTransactions'] }]);
-    expect(queries[1].query).toContain('UPDATE user WITH { microSparkBalance: nextBalance }');
+    expect(queries[1].query).toContain('UPDATE user WITH { microSparkBalance: nextBalance, microSparkDebt: debt - debtPayment }');
     expect(queries[1].query).toContain('INSERT ledgerRecord INTO sparkTransactions');
     expect(queries[1].bind?.record).toMatchObject({ _key: 'transaction-1' });
     expect(queries[1].bind?.record).not.toHaveProperty('key');
@@ -62,12 +62,14 @@ describe('Arango Spark repository', () => {
   test('distinguishes missing users, insufficient balances, invalid balances, and overflow', async () => {
     const missing: SparkTransactionRunner = async (_collections, operation) => operation({ query: async (query) => query.includes('RETURN user == null') ? cursor(null) : cursor() });
     await expect(createArangoSparkRepository({ query: async () => cursor() }, missing).apply(input)).rejects.toMatchObject({ code: 'USER_NOT_FOUND' });
-    const insufficient: SparkTransactionRunner = async (_collections, operation) => operation({ query: async (query) => query.includes('RETURN user == null') ? cursor(5) : cursor() });
+    const insufficient: SparkTransactionRunner = async (_collections, operation) => operation({ query: async (query) => query.includes('RETURN user == null') ? cursor({ balance: 5, debt: 0 }) : cursor() });
     await expect(createArangoSparkRepository({ query: async () => cursor() }, insufficient).apply({ ...input, deltaMicroSparks: -10 })).rejects.toEqual(new SparkRepositoryError('INSUFFICIENT_BALANCE', 'Spark balance is insufficient for this transaction.'));
-    const invalid: SparkTransactionRunner = async (_collections, operation) => operation({ query: async (query) => query.includes('RETURN user == null') ? cursor(-1) : cursor() });
+    const invalid: SparkTransactionRunner = async (_collections, operation) => operation({ query: async (query) => query.includes('RETURN user == null') ? cursor({ balance: -1, debt: 0 }) : cursor() });
     await expect(createArangoSparkRepository({ query: async () => cursor() }, invalid).apply(input)).rejects.toMatchObject({ code: 'INVALID_BALANCE' });
-    const overflow: SparkTransactionRunner = async (_collections, operation) => operation({ query: async (query) => query.includes('RETURN user == null') ? cursor(Number.MAX_SAFE_INTEGER) : cursor() });
+    const overflow: SparkTransactionRunner = async (_collections, operation) => operation({ query: async (query) => query.includes('RETURN user == null') ? cursor({ balance: Number.MAX_SAFE_INTEGER, debt: 0 }) : cursor() });
     await expect(createArangoSparkRepository({ query: async () => cursor() }, overflow).apply(input)).rejects.toEqual(new SparkRepositoryError('BALANCE_OVERFLOW', 'Spark balance would exceed the safe integer range.'));
+    const indebted: SparkTransactionRunner = async (_collections, operation) => operation({ query: async (query) => query.includes('RETURN user == null') ? cursor({ balance: 100, debt: 1 }) : cursor() });
+    await expect(createArangoSparkRepository({ query: async () => cursor() }, indebted).apply({ ...input, deltaMicroSparks: -10 })).rejects.toMatchObject({ code: 'OUTSTANDING_DEBT' });
   });
 
   test('propagates transaction failure', async () => {

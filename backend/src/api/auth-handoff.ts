@@ -13,7 +13,7 @@ import { getUserById } from '@/lib/db/users.node';
 import { generateAlias, pickWelcomeLine } from '@/lib/alias';
 import { randomToken, sha256 } from '@/lib/crypto';
 import { redisConnection } from '@/lib/redis';
-import { provisionPersonalAuthContext } from '@/lib/db/personal-auth-context.node';
+import { provisionPersonalAuthContext, selectPersonalAuthContext } from '@/lib/db/personal-auth-context.node';
 import { createTotpChallengeForIdentity, issueUserTokens, type LoginIdentityType, type SessionTokens } from './auth';
 
 /**
@@ -145,14 +145,14 @@ export async function claimHandoff(handoffPublicHash: string): Promise<HandoffCl
     }
 
     if (challenge.identityType !== 'user') {
-      if (!challenge.membershipKey) {
+      if (!challenge.teamMembershipKey) {
         await releaseAuthChallengeHandoffLease(challenge.key, leaseAt.toISOString());
         return null;
       }
       const totp = await createTotpChallengeForIdentity(
         challenge.identityType as LoginIdentityType,
         challenge.identityKey,
-        challenge.membershipKey,
+        challenge.teamMembershipKey,
       );
       if (!totp) {
         await releaseAuthChallengeHandoffLease(challenge.key, leaseAt.toISOString());
@@ -173,6 +173,7 @@ export async function claimHandoff(handoffPublicHash: string): Promise<HandoffCl
       return null;
     }
     await provisionPersonalAuthContext(user);
+    await selectPersonalAuthContext(user.key);
     const tokens = await issueUserTokens(user);
     if (!await completeAuthChallengeHandoffClaim(challenge.key, leaseAt.toISOString(), new Date().toISOString())) {
       throw new Error('handoff claim lease was lost');

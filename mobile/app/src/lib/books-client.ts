@@ -2,12 +2,11 @@ import { z } from "zod";
 
 import { apiClient } from "@/lib/api-client";
 import { assistantChangesSchema } from "@/lib/assistant-changes";
-import { publicApiClient } from "@/lib/public-api-client";
 import { appSearchResults, searchApp } from "@/lib/app-search-client";
 import { useAuthStore } from "@/state/auth";
 
 const keySchema = z.string().trim().min(1);
-const contextSchema = z.strictObject({ organizationKey: keySchema, scopeKey: keySchema });
+const contextSchema = z.strictObject({ teamKey: keySchema, scopeKey: keySchema });
 export const extensionChapterCountSchema = z.union([z.literal(1), z.literal(3), z.literal(5)]);
 export const bookStatusSchema = z.enum(["queued", "researching", "planning", "writing", "narrating", "finalizing", "failed", "ready", "cancelled"]);
 export const narratorVoiceSchema = z.strictObject({
@@ -66,9 +65,6 @@ export const createBookRequestSchema = contextSchema.extend({
 const detailRequestSchema = contextSchema;
 const mutationRequestSchema = contextSchema.extend({ requestKey: z.string().trim().min(1).max(200) });
 const favoriteRequestSchema = contextSchema.extend({ isFavorite: z.boolean() });
-export const bookShareDetailRequestSchema = contextSchema;
-export const bookShareUpdateRequestSchema = contextSchema.extend({ active: z.boolean() });
-export const publicBookShareReadRequestSchema = z.strictObject({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/) });
 export const chapterProgressRequestSchema = contextSchema.extend({
   progressSeconds: z.number().int().nonnegative(),
   isCompleted: z.boolean(),
@@ -93,14 +89,6 @@ export const bookExtensionRequestSchema = contextSchema.extend({
 
 const overviewResponseSchema = z.strictObject({ books: z.array(bookSchema) });
 const detailResponseSchema = z.strictObject({ book: bookSchema, chapters: z.array(bookChapterSchema) });
-export const bookShareSchema = z.strictObject({
-  key: keySchema,
-  url: z.url(),
-  active: z.boolean(),
-  createdAt: z.iso.datetime(),
-  updatedAt: z.iso.datetime(),
-});
-export const publicBookShareAccessSchema = z.strictObject({ status: z.enum(["active", "inactive"]) });
 const progressResponseSchema = z.strictObject({ chapter: bookChapterSchema, book: bookSchema });
 const assistantResponseSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("answer"), message: z.string().min(1), sources: z.array(z.strictObject({ documentKey: keySchema, name: z.string().min(1) })), changes: assistantChangesSchema }),
@@ -118,13 +106,12 @@ const failureSchema = z.strictObject({ success: z.literal(false), error: z.stric
 export type Book = z.infer<typeof bookSchema>;
 export type BookChapter = z.infer<typeof bookChapterSchema>;
 export type BookDetail = z.infer<typeof detailResponseSchema>;
-export type BookShare = z.infer<typeof bookShareSchema>;
-export type CreateBookInput = Omit<z.input<typeof createBookRequestSchema>, "organizationKey" | "scopeKey" | "generationRequestKey">;
+export type CreateBookInput = Omit<z.input<typeof createBookRequestSchema>, "teamKey" | "scopeKey" | "generationRequestKey">;
 export type BookStatus = z.infer<typeof bookStatusSchema>;
 export type NarratorVoice = z.infer<typeof narratorVoiceSchema>;
 export type ExtensionChapterCount = z.infer<typeof extensionChapterCountSchema>;
 export type BookExtensionPreview = z.infer<typeof bookExtensionPreviewResponseSchema>;
-export type BookExtensionInput = Omit<z.input<typeof bookExtensionRequestSchema>, "organizationKey" | "scopeKey">;
+export type BookExtensionInput = Omit<z.input<typeof bookExtensionRequestSchema>, "teamKey" | "scopeKey">;
 
 export class BookClientError extends Error {
   constructor(readonly code: string, message: string, readonly status?: number) {
@@ -139,7 +126,7 @@ function recordKey(value: Record<string, unknown> | null) {
 
 export function getBooksContext() {
   const state = useAuthStore.getState();
-  const parsed = contextSchema.safeParse({ organizationKey: recordKey(state.organization), scopeKey: recordKey(state.scope) });
+  const parsed = contextSchema.safeParse({ teamKey: recordKey(state.team), scopeKey: recordKey(state.scope) });
   if (!parsed.success) throw new Error("Books are unavailable for this session.");
   return parsed.data;
 }
@@ -186,17 +173,6 @@ export function createBook(input: CreateBookInput, generationRequestKey: string)
 export function fetchBookDetail(bookKey: string) { return request("post", `/books/${keySchema.parse(bookKey)}/detail`, {}, detailRequestSchema, detailResponseSchema); }
 export function previewBookExtension(bookKey: string, chapterCount: ExtensionChapterCount) { return request("post", `/books/${keySchema.parse(bookKey)}/extension/preview`, { chapterCount }, bookExtensionPreviewRequestSchema, bookExtensionPreviewResponseSchema, 30_000); }
 export function extendBook(bookKey: string, chapterCount: ExtensionChapterCount, titles: string[], requestKey: string) { return request("post", `/books/${keySchema.parse(bookKey)}/extension`, { chapterCount, titles, requestKey }, bookExtensionRequestSchema, bookSchema, 15 * 60_000); }
-export function fetchBookShareDetail(bookKey: string) { return request("post", `/books/${keySchema.parse(bookKey)}/share/detail`, {}, bookShareDetailRequestSchema, bookShareSchema); }
-export function updateBookShare(bookKey: string, active: boolean) { return request("post", `/books/${keySchema.parse(bookKey)}/share/update`, { active }, bookShareUpdateRequestSchema, bookShareSchema); }
-export async function fetchPublicBookShare(token: string) {
-  try {
-    const payload = publicBookShareReadRequestSchema.parse({ token });
-    const response = await publicApiClient.post("/public/books/shares/read", payload);
-    return unwrap(response.data, detailResponseSchema);
-  } catch (error) {
-    throw responseError(error);
-  }
-}
 export function retryBook(bookKey: string, requestKey: string) { return request("post", `/books/${keySchema.parse(bookKey)}/retry`, { requestKey }, mutationRequestSchema, bookSchema); }
 export function cancelBook(bookKey: string, requestKey: string) { return request("post", `/books/${keySchema.parse(bookKey)}/cancel`, { requestKey }, mutationRequestSchema, bookSchema); }
 export function setBookFavorite(bookKey: string, isFavorite: boolean) { return request("post", `/books/${keySchema.parse(bookKey)}/favorite`, { isFavorite }, favoriteRequestSchema, bookSchema); }
@@ -206,9 +182,9 @@ export function updateBookChapterProgress(bookKey: string, chapterKey: string, i
 }
 
 export async function askBookAssistant(message: string, requestKey: string) {
-  const { organizationKey, scopeKey } = getBooksContext();
+  const { teamKey, scopeKey } = getBooksContext();
   try {
-    const response = await apiClient.post("/assistant/respond", { organizationKey, scopeKey, input: { surface: "book-workspace", requestKey: z.string().trim().min(1).max(180).parse(requestKey), message: z.string().trim().min(1).max(8_000).parse(message), currentNote: { title: "", content: "" } } }, { timeout: 15 * 60_000 });
+    const response = await apiClient.post("/assistant/respond", { teamKey, scopeKey, input: { surface: "book-workspace", requestKey: z.string().trim().min(1).max(180).parse(requestKey), message: z.string().trim().min(1).max(8_000).parse(message), currentNote: { title: "", content: "" } } }, { timeout: 15 * 60_000 });
     return unwrap(response.data, assistantResponseSchema);
   } catch (error) {
     throw responseError(error);

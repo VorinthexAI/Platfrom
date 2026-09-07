@@ -24,12 +24,12 @@ describe('country search', () => {
       repository: { authorize: async (context) => { calls.push(context); }, findExact: async () => null, search: async (context, embedding) => { calls.push(context, embedding); return { country: { ...country, semanticVersion: 1, semanticHash: 'a'.repeat(64) }, score: 0.9 }; } },
       userSearches: { record: async (userKey: string, query: string) => { calls.push(['history', userKey, query]); return {} as never; } } as never,
     });
-    await expect(service.search({ organizationKey: 'org', query: ' portugal ', extra: true }, 'user')).rejects.toThrow('Unrecognized key');
-    await expect(service.search({ organizationKey: 'org', query: ' portugal ' }, 'user')).resolves.toEqual({ country: { name: 'Portugal', countryCode: 'PT', latitude: 39.61, longitude: -8.27 } });
-    expect(calls[0]).toEqual({ organizationKey: 'org', userKey: 'user' });
+    await expect(service.search({ teamKey: 'team', query: ' portugal ', extra: true }, 'user')).rejects.toThrow('Unrecognized key');
+    await expect(service.search({ teamKey: 'team', query: ' portugal ' }, 'user')).resolves.toEqual({ country: { name: 'Portugal', countryCode: 'PT', latitude: 39.61, longitude: -8.27 } });
+    expect(calls[0]).toEqual({ teamKey: 'team', userKey: 'user' });
     expect(calls[1]).toEqual(['history', 'user', 'portugal']);
     expect(calls[2]).toBe('portugal');
-    expect(countrySearchInputSchema.safeParse({ organizationKey: 'org', query: '' }).success).toBe(false);
+    expect(countrySearchInputSchema.safeParse({ teamKey: 'team', query: '' }).success).toBe(false);
   });
 
   test('authorizes before exact matching or embedding, prefers exact matches, and thresholds semantics', async () => {
@@ -39,13 +39,13 @@ describe('country search', () => {
     let embeds = 0;
     const history = { record: async () => { order.push('history'); return {} as never; } } as never;
     const exact = createCountrySearchService({ repository: { authorize: async () => { order.push('authorize'); }, findExact: async () => { order.push('exact'); return country; }, search: async () => { throw new Error('semantic not expected'); } }, embed: async () => { embeds += 1; return country.embedding; }, userSearches: history });
-    await expect(exact.search({ organizationKey: 'org', query: 'PT' }, 'user')).resolves.toMatchObject({ country: { countryCode: 'PT' } });
+    await expect(exact.search({ teamKey: 'team', query: 'PT' }, 'user')).resolves.toMatchObject({ country: { countryCode: 'PT' } });
     expect(order).toEqual(['authorize', 'history', 'exact']); expect(embeds).toBe(0);
 
     const semantic = createCountrySearchService({ repository: { authorize: async () => { order.push('authorize-2'); }, findExact: async () => null, search: async () => ({ country, score: 0.71 }) }, embed: async ({ signal, timeoutMs }) => { expect(signal).toBeInstanceOf(AbortSignal); expect(timeoutMs).toBe(321); embeds += 1; return country.embedding; }, userSearches: history });
-    await expect(semantic.search({ organizationKey: 'org', query: 'Iberian destination' }, 'user', { signal: new AbortController().signal, timeoutMs: 321 })).resolves.toEqual({ country: null });
+    await expect(semantic.search({ teamKey: 'team', query: 'Iberian destination' }, 'user', { signal: new AbortController().signal, timeoutMs: 321 })).resolves.toEqual({ country: null });
     expect(order.slice(-2)).toEqual(['authorize-2', 'history']); expect(embeds).toBe(1);
-    await expect(createCountrySearchService({ repository: { authorize: async () => { throw new Error('forbidden'); }, findExact: async () => country, search: async () => null }, embed: async () => { embeds += 1; return country.embedding; }, userSearches: history }).search({ organizationKey: 'org', query: 'Portugal' }, 'user')).rejects.toThrow('forbidden');
+    await expect(createCountrySearchService({ repository: { authorize: async () => { throw new Error('forbidden'); }, findExact: async () => country, search: async () => null }, embed: async () => { embeds += 1; return country.embedding; }, userSearches: history }).search({ teamKey: 'team', query: 'Portugal' }, 'user')).rejects.toThrow('forbidden');
     expect(embeds).toBe(1);
     expect(order.filter((entry) => entry === 'history')).toHaveLength(2);
   });

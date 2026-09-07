@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import { z, ZodError } from 'zod';
 import { authorizeContentExecution, ContentError, type RunAuthenticatedContentToolOptions } from '@/lib/ai/tools';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
+import { authenticatedTeamContext } from './auth';
 import { appEnhanceCapability, appTranslateCapability } from '@/lib/ai/personal-assistant/service-capabilities';
 import type { AssistantCapabilityContext } from '@/lib/ai/personal-assistant/capabilities';
 import type { AppTransformationService } from '@/lib/app-transformation/service';
@@ -16,17 +17,18 @@ import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/eve
 import { toolEventService, type ToolEventRecorder } from '@/lib/ai/events/service';
 import { createHash } from 'node:crypto';
 
-const contextSchema = z.object({ organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid() }).strict();
+const contextSchema = z.object({ teamKey: z.string().trim().min(1), scopeKey: z.string().cuid() }).strict();
 
 interface AppTransformationHandlerDependencies {
   getIdentity?: typeof getAuthIdentity;
-  authorize?: (input: { organizationKey: string; scopeKey: string }, options: Omit<RunAuthenticatedContentToolOptions, 'execute'>) => Promise<{ input: { organizationKey: string; scopeKey: string }; context: ToolContext }>;
+  authorize?: (input: { teamKey: string; scopeKey: string }, options: Omit<RunAuthenticatedContentToolOptions, 'execute'>) => Promise<{ input: { teamKey: string; scopeKey: string }; context: ToolContext }>;
   authorizationOptions?: Omit<RunAuthenticatedContentToolOptions, 'authenticatedUserKey' | 'execute'>;
   service?: AppTransformationService;
   email?: EmailService;
   content?: ContentToolDependencies;
   executeContent?: AssistantCapabilityContext['executeContent'];
   recordEvent?: ToolEventRecorder;
+  appScopeKey?: string;
   billing?: ToolBillingDependencies;
 }
 
@@ -37,9 +39,9 @@ function createHandler(capability: typeof appEnhanceCapability | typeof appTrans
     if (identity.identityType !== 'user') return c.json({ success: false, error: 'user session required' }, 403);
     try {
       const body = await parseJson(c, contextSchema.extend({ input: capability.inputSchema }).strict());
-      const { context } = await (dependencies.authorize ?? authorizeContentExecution)({ organizationKey: body.organizationKey, scopeKey: body.scopeKey }, {
+      const { context } = await (dependencies.authorize ?? authorizeContentExecution)({ teamKey: body.teamKey, scopeKey: body.scopeKey }, {
         ...dependencies.authorizationOptions,
-        authenticatedUserKey: identity.key,
+        ...authenticatedTeamContext(identity),
       });
       const rawRequestKey = c.req.header('idempotency-key');
       const requestKey = capability === appTranslateCapability
@@ -54,7 +56,7 @@ function createHandler(capability: typeof appEnhanceCapability | typeof appTrans
         executeContent: dependencies.executeContent,
         signal: c.req.raw.signal,
         timeoutMs: 4 * 60_000,
-      }), { recorder: dependencies.recordEvent ?? toolEventService.record, idempotencyKey: requestKey, input: body.input, ...dependencies.billing });
+      }), { recorder: dependencies.recordEvent ?? toolEventService.record, appScopeKey: dependencies.appScopeKey, idempotencyKey: requestKey, input: body.input, ...dependencies.billing });
       if (result.kind !== 'continue') throw new Error('App transformation returned an unsupported result.');
       return c.json({ success: true, data: result.result });
     } catch (error) {

@@ -13,10 +13,10 @@ export const PLACE_IMAGE_TOKEN_VALIDITY_MS = 60 * 60_000;
 export const PLACE_IMAGE_PNG_MAX_BYTES = Math.floor(GENERATED_IMAGE_BASE64_MAX_LENGTH / 4) * 3;
 
 export const travelPlaceImageInputSchema = z.object({
-  organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid(), imageRequestToken: z.string().min(1).max(PLACE_IMAGE_TOKEN_MAX_LENGTH),
+  teamKey: z.string().trim().min(1), scopeKey: z.string().cuid(), imageRequestToken: z.string().min(1).max(PLACE_IMAGE_TOKEN_MAX_LENGTH),
 }).strict();
 export const placeImageTokenSchema = z.object({
-  version: z.literal(5), organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid(),
+  version: z.literal(5), teamKey: z.string().trim().min(1), scopeKey: z.string().cuid(),
   issuedAt: z.number().int().nonnegative(), nonce: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   country: z.object({ name: z.string().trim().min(1).max(160), countryCode: placeCountryCodeSchema, continent: z.string().trim().min(1).max(80), latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180) }).strict(),
   hero: z.object({ title: z.string().trim().min(1).max(160), prompt: z.string().trim().min(1).max(4_000) }).strict(),
@@ -66,10 +66,10 @@ export function createPlaceImageGenerator(dependencies: PlaceImageDependencies) 
   const storage = dependencies.storage ?? documentStorage;
   return async (raw: unknown, userKey: string, execution: Pick<ExecuteActionOptions, 'signal' | 'timeoutMs'> = {}) => {
     const input = travelPlaceImageInputSchema.parse(raw);
-    const context: TravelAccessContext = { organizationKey: input.organizationKey, scopeKey: input.scopeKey, userKey };
+    const context: TravelAccessContext = { teamKey: input.teamKey, scopeKey: input.scopeKey, userKey };
     await dependencies.repository.authorizeRead(context);
     const token = placeImageTokenSchema.parse(decryptImageRequest(input.imageRequestToken));
-    if (token.organizationKey !== input.organizationKey || token.scopeKey !== input.scopeKey) throw new Error('Place image request token does not match the authorized scope.');
+    if (token.teamKey !== input.teamKey || token.scopeKey !== input.scopeKey) throw new Error('Place image request token does not match the authorized scope.');
     const currentTime = now();
     if (token.issuedAt > currentTime) throw new Error('Place image request token was issued in the future.');
     const expiresAt = token.issuedAt + PLACE_IMAGE_TOKEN_VALIDITY_MS;
@@ -87,7 +87,7 @@ export function createPlaceImageGenerator(dependencies: PlaceImageDependencies) 
       // A missing staged object is the only state that permits provider work.
     }
     const hash = tokenHash(input.imageRequestToken);
-    const inFlightKey = `${token.organizationKey}\0${token.scopeKey}\0${token.nonce}`;
+    const inFlightKey = `${token.teamKey}\0${token.scopeKey}\0${token.nonce}`;
     const existing = placeImageInFlight.get(inFlightKey);
     if (existing) return existing;
     const started = currentTime;
@@ -95,7 +95,7 @@ export function createPlaceImageGenerator(dependencies: PlaceImageDependencies) 
       try {
         const providerStarted = now();
         const response = await execute<Record<string, unknown>, ImageOutput>(
-          { mode: 'auto', organizationKey: input.organizationKey, actionSlug: 'image' },
+          { mode: 'auto', teamKey: input.teamKey, actionSlug: 'image' },
           { operation: 'generate', prompt: token.hero.prompt, count: 1, size: '1536x1024', aspectRatio: '3:2', quality: 'low', outputFormat: 'png' },
           { providers: ['image.primary'], signal: execution.signal, timeoutMs: execution.timeoutMs ?? 60_000 },
         );

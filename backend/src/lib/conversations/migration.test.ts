@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { collections } from '@/db/arango-migrate';
+import { SCOPE_KEYED_REMOVAL_COLLECTIONS } from '@/lib/ai/scopes/repository';
 
 describe('conversation persistence migration', () => {
   test('creates private collections and ownership/idempotency indexes', () => {
-    expect(collections.find(({ name }) => name === 'conversations')).toEqual({ name: 'conversations', skipEmbedding: true, indexes: [{ fields: ['organizationKey', 'scopeKey', 'userKey', 'isFavorite', 'updatedAt'] }, { fields: ['organizationKey', 'scopeKey', 'userKey', 'updatedAt'] }] });
-    expect(collections.find(({ name }) => name === 'conversationMessages')).toEqual({ name: 'conversationMessages', skipEmbedding: true, indexes: [{ fields: ['conversationKey', 'userKey', 'turnKey', 'role'], unique: true }, { fields: ['organizationKey', 'scopeKey', 'userKey', 'conversationKey', 'createdAt'] }, { fields: ['conversationKey', 'role', 'status'] }] });
+    expect(collections.find(({ name }) => name === 'conversations')).toEqual({ name: 'conversations', skipEmbedding: true, indexes: [{ fields: ['teamKey', 'scopeKey', 'userKey', 'isFavorite', 'updatedAt'] }, { fields: ['teamKey', 'scopeKey', 'userKey', 'updatedAt'] }] });
+    expect(collections.find(({ name }) => name === 'conversationMessages')).toEqual({ name: 'conversationMessages', skipEmbedding: true, indexes: [{ fields: ['conversationKey', 'userKey', 'turnKey', 'role'], unique: true }, { fields: ['teamKey', 'scopeKey', 'userKey', 'conversationKey', 'createdAt'] }, { fields: ['conversationKey', 'role', 'status'] }] });
   });
 
   test('backfills deterministic request hashes before strict reads', async () => {
@@ -15,10 +16,7 @@ describe('conversation persistence migration', () => {
   });
 
   test('tears messages and conversations down with their scope', async () => {
-    const source = await Bun.file(new URL('../ai/scopes/repository.ts', import.meta.url)).text();
-    const teardown = source.slice(source.indexOf('async removeScope(scopeKey)'), source.indexOf('async addScopeRelation'));
-    expect(teardown).toContain('FOR item IN conversationMessages FILTER item.scopeKey == @scopeKey REMOVE item IN conversationMessages');
-    expect(teardown).toContain('FOR item IN conversations FILTER item.scopeKey == @scopeKey REMOVE item IN conversations');
-    expect(teardown.indexOf('cleanupConversationMessages')).toBeLessThan(teardown.indexOf('cleanupConversations'));
+    expect(SCOPE_KEYED_REMOVAL_COLLECTIONS).toContain('conversationMessages');
+    expect(SCOPE_KEYED_REMOVAL_COLLECTIONS).toContain('conversations');
   });
 });

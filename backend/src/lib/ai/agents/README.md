@@ -39,7 +39,7 @@ and tool telemetry contains only stage, outcome, counts, confidence class, and
 duration, never request or result payloads. The public `agents.core` tool has
 one strict model input and lazily imports Core so `agents -> tools -> agents`
 does not create an eager initialization cycle. Its adapter injects the system
-prompt, current ISO date, request key, identity, organization, and scope.
+prompt, current ISO date, request key, identity, team, and scope.
 
 ## Live E2E
 

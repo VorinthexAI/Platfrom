@@ -1,7 +1,7 @@
 import * as SecureStore from "expo-secure-store";
 import { normalizeAuthContext, type AuthContext } from "./auth-helpers";
 
-const AUTH_CONTEXT_KEY = "vorinthex.auth.context.v1";
+const AUTH_CONTEXT_KEY = "vorinthex.auth.context.v2";
 
 export async function readAuthContext(): Promise<AuthContext | null> {
   const raw = await SecureStore.getItemAsync(AUTH_CONTEXT_KEY);

@@ -543,6 +543,15 @@
   text-decoration: underline;
 }
 
+.vui-subtle-button {
+  color: var(--vui-color-muted);
+  letter-spacing: 0.04em;
+}
+
+.vui-subtle-button:hover:not(:disabled) {
+  color: var(--vui-color-accent);
+}
+
 .vui-button-icon {
   aspect-ratio: 1;
   padding: 0;

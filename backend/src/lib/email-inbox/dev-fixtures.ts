@@ -21,6 +21,7 @@ const scenarios = [
   { slug: 'spam', subject: 'Unwanted prize notification', category: 'other', inboxCategory: 'Filtered', priority: 'low', state: 'filtered', unread: true, favorite: false, labels: ['SPAM', 'UNREAD'] },
   { slug: 'trash', subject: 'Old reservation receipt', category: 'updates', inboxCategory: 'Filtered', priority: 'low', state: 'done', unread: false, favorite: false, labels: ['TRASH', 'CATEGORY_UPDATES'] },
   { slug: 'primary-read', subject: 'Coffee and project catch-up', category: 'primary', inboxCategory: 'Important', priority: 'normal', state: 'waiting', unread: false, favorite: false, labels: ['INBOX', 'CATEGORY_PRIMARY'] },
+  { slug: 'purchase-unread', subject: 'Your order confirmation and receipt', category: 'updates', inboxCategory: 'Purchases', priority: 'normal', state: 'informational', unread: true, favorite: false, labels: ['INBOX', 'CATEGORY_UPDATES', 'UNREAD'] },
 ] as const;
 
 function thematicEmbedding(theme: string) {

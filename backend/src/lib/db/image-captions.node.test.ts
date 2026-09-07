@@ -39,7 +39,7 @@ describe('image caption pHash lookup', () => {
     const actorKey = 'cmrnlzf640001qc7kazsr96k6';
     await expect(findReusableImageCaption(scopeKey, '0000000000000000', actorKey, database)).resolves.toMatchObject({ key: nearerKey });
     expect(bindVars).toMatchObject({ scopeKey, actorKey, segment0: '0000', segment1: '0000', segment2: '0000', segment3: '0000' });
-    expect(query).toContain('actorMembership.organizationId == actorScope.organizationKey');
+    expect(query).toContain('actorMembership.teamKey == actorScope.teamKey');
     expect(query).toContain('FILTER elevated || scoped || collectionAccess');
     expect(query).toContain('image.imageCaptionKey == caption._key');
     expect(query).toContain('FILTER accessibleImage != null');

@@ -4,8 +4,8 @@ import { userHiddenSchema, type UserHidden, type UserHiddenSource } from '@/lib/
 
 export interface UserHiddenActor {
   userKey: string;
-  organizationKey: string;
-  membershipKey: string;
+  teamKey: string;
+  teamMembershipKey: string;
 }
 
 export interface UserHiddenRepository {
@@ -28,12 +28,12 @@ function accessFilters(source: string, sourceKey: string) {
     LET target = ${source} == "folder" ? DOCUMENT(folders, ${sourceKey}) : ${source} == "document" ? DOCUMENT(documents, ${sourceKey}) : ${source} == "collection" ? DOCUMENT(collections, ${sourceKey}) : ${source} == "image" ? DOCUMENT(images, ${sourceKey}) : null
     FILTER target != null && (!HAS(target, "_internalDeletion") || target._internalDeletion == null)
     LET scope = DOCUMENT(scopes, target.scopeKey)
-    FILTER scope != null && scope.organizationKey == @organizationKey
-    LET privileged = membership.orgRole IN ["owner", "admin"]
-    LET scoped = LENGTH(FOR member IN scopeMembers FILTER member.scopeKey == target.scopeKey && member.userOrganizationKey == @membershipKey && member.status == "active" LIMIT 1 RETURN 1) > 0
-    LET collectionAccess = LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == target.scopeKey && member.collectionKey == target._key && member.memberKey == @membershipKey LIMIT 1 RETURN 1) > 0
+    FILTER scope != null && scope.teamKey == @teamKey
+    LET privileged = membership.teamRole IN ["owner", "admin"]
+    LET scoped = LENGTH(FOR member IN scopeMembers FILTER member.scopeKey == target.scopeKey && member.userTeamKey == @teamMembershipKey && member.status == "active" LIMIT 1 RETURN 1) > 0
+    LET collectionAccess = target.ownerKey == @teamMembershipKey
     LET relationCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == target.scopeKey && relation.imageKey == target._key RETURN 1)
-    LET imageAccess = (target.createdByKey == @membershipKey && relationCount == 0) || LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == target.scopeKey && relation.imageKey == target._key LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null FOR member IN collectionMembers FILTER member.scopeKey == target.scopeKey && member.collectionKey == relation.collectionKey && member.memberKey == @membershipKey LIMIT 1 RETURN 1) > 0
+    LET imageAccess = (target.createdByKey == @teamMembershipKey && relationCount == 0) || LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == target.scopeKey && relation.imageKey == target._key LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null && collection.ownerKey == @teamMembershipKey LIMIT 1 RETURN 1) > 0
     FILTER ${source} == "collection" ? (privileged || collectionAccess) : ${source} == "image" ? (target.mutationPolicy != "system-only" && (privileged || imageAccess)) : (privileged || scoped)
   `;
 }
@@ -42,8 +42,8 @@ export function createUserHiddenRepository(database: UserHiddenDatabase = db): U
   return {
     async list(actor) {
       const rows = await (await database.query(`
-        LET membership = DOCUMENT(userOrganizations, @membershipKey)
-        FILTER membership != null && membership.userId == @userKey && membership.organizationId == @organizationKey && membership.status == "active"
+        LET membership = DOCUMENT(userTeams, @teamMembershipKey)
+        FILTER membership != null && membership.userId == @userKey && membership.teamKey == @teamKey && membership.status == "active"
         FOR hidden IN userHiddens
           FILTER hidden.userKey == @userKey
           ${accessFilters('hidden.source', 'hidden.sourceKey')}
@@ -64,8 +64,8 @@ export function createUserHiddenRepository(database: UserHiddenDatabase = db): U
     },
     async canAccess(actor, source, sourceKey) {
       const rows = await (await database.query(`
-        LET membership = DOCUMENT(userOrganizations, @membershipKey)
-        FILTER membership != null && membership.userId == @userKey && membership.organizationId == @organizationKey && membership.status == "active"
+        LET membership = DOCUMENT(userTeams, @teamMembershipKey)
+        FILTER membership != null && membership.userId == @userKey && membership.teamKey == @teamKey && membership.status == "active"
         ${accessFilters('@source', '@sourceKey')}
         RETURN true
       `, { ...actor, source, sourceKey })).all();

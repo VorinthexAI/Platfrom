@@ -12,6 +12,8 @@ function app(slug: string, index: number) {
     slug,
     name: `${slug} name`,
     description: `${slug} description`,
+    detailedDescription: `${slug} detailed description`,
+    logoUrl: `https://vorinthex.com/logos/${slug}.png`,
     version: "1.0.0",
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -22,8 +24,15 @@ function response(extra: ReturnType<typeof app>[] = []) {
   return { apps: [...CANONICAL_APP_SLUGS.map(app), ...extra] };
 }
 
+const products = { success: true, data: [{ key: "c000000000000000000000001", productId: "nova.weekly", priceCents: 799, discountedPriceCents: null, active: true, type: "subscription", billingPeriod: "week", currency: "USD", sparkGrantMicroSparks: 200_000_000, createdAt: timestamp, updatedAt: timestamp }] };
+const costs = { success: true, data: { charges: [{ key: "ai-usage", kind: "variable", name: "AI usage", description: "Varies by usage." }] } };
+
 function mockResponse(body: unknown) {
-  globalThis.fetch = (async () => ({ ok: true, status: 200, json: async () => body })) as typeof fetch;
+  globalThis.fetch = (async (input) => {
+    const path = String(input).split("/").at(-1);
+    const payload = path === "health" ? { ok: true } : path === "products" ? products : path === "costs" ? costs : body;
+    return { ok: true, status: 200, json: async () => payload };
+  }) as typeof fetch;
 }
 
 describe("apps registry parsing", () => {
@@ -35,6 +44,8 @@ describe("apps registry parsing", () => {
     expect(() => parseAppsRegistry({ apps: response().apps.map((entry, index) => index ? entry : { ...entry, unexpected: true }) })).toThrow();
     expect(() => parseAppsRegistry({ apps: response().apps.map((entry, index) => index ? entry : { ...entry, key: "not-a-cuid" }) })).toThrow();
     expect(() => parseAppsRegistry({ apps: response().apps.map((entry, index) => index ? entry : { ...entry, updatedAt: "yesterday" }) })).toThrow();
+    expect(() => parseAppsRegistry({ apps: response().apps.map((entry, index) => index ? entry : { ...entry, logoUrl: "not-a-url" }) })).toThrow();
+    expect(() => parseAppsRegistry({ apps: response().apps.map((entry, index) => index ? entry : { ...entry, logoUrl: undefined }) })).toThrow();
   });
 
   test("rejects duplicate keys, duplicate slugs, and missing canonical rows", () => {
@@ -49,6 +60,12 @@ describe("apps registry state", () => {
   beforeEach(() => {
     useAppsStore.setState({
       apps: [],
+      products: [],
+      sparkCosts: [],
+      sparkCostsStatus: "idle",
+      sparkCostsError: null,
+      productsStatus: "idle",
+      productsError: null,
       bootstrapStatus: "idle",
       bootstrapError: null,
       selectedApp: null,
@@ -58,18 +75,25 @@ describe("apps registry state", () => {
   });
 
   test("tracks bootstrap progress and initially selects Core", async () => {
-    let release!: (value: { ok: true; status: number; json: () => Promise<unknown> }) => void;
-    globalThis.fetch = (() => new Promise((resolve) => { release = resolve; })) as typeof fetch;
+    const releases = new Map<string, (value: { ok: true; status: number; json: () => Promise<unknown> }) => void>();
+    globalThis.fetch = ((input) => new Promise((resolve) => { releases.set(String(input).split("/").at(-1)!, resolve); })) as typeof fetch;
     const bootstrapping = useAppsStore.getState().bootstrap();
     expect(useAppsStore.getState().bootstrapStatus).toBe("bootstrapping");
-    release({ ok: true, status: 200, json: async () => response([app("future-app", 8)]) });
+    expect([...releases.keys()]).toEqual(["health", "products", "costs", "apps"]);
+    releases.get("apps")!({ ok: true, status: 200, json: async () => response([app("future-app", 8)]) });
+    releases.get("health")!({ ok: true, status: 200, json: async () => ({ ok: true }) });
+    releases.get("products")!({ ok: true, status: 200, json: async () => products });
+    releases.get("costs")!({ ok: true, status: 200, json: async () => costs });
     await bootstrapping;
+    await useAppsStore.getState().refreshProducts();
     expect(useAppsStore.getState()).toMatchObject({
       bootstrapStatus: "ready",
       currentAppKey: app("core", 6).key,
       selectedApp: { slug: "core" },
     });
     expect(useAppsStore.getState().apps.some(({ slug }) => slug === "future-app")).toBe(true);
+    expect(useAppsStore.getState().products).toHaveLength(1);
+    expect(useAppsStore.getState().sparkCosts).toHaveLength(1);
   });
 
   test("fails bootstrap on an invalid registry and can retry", async () => {
@@ -79,6 +103,36 @@ describe("apps registry state", () => {
     mockResponse(response());
     await useAppsStore.getState().bootstrap();
     expect(useAppsStore.getState().bootstrapStatus).toBe("ready");
+  });
+
+  test("keeps the registry ready when the product catalog is invalid and retries products independently", async () => {
+    globalThis.fetch = (async (input) => {
+      const path = String(input).split("/").at(-1);
+      const payload = path === "apps" ? response() : path === "health" ? { ok: true } : path === "costs" ? costs : { success: true, data: [{ ...products.data[0], productId: "forged.product" }] };
+      return { ok: true, status: 200, json: async () => payload };
+    }) as typeof fetch;
+    await useAppsStore.getState().bootstrap();
+    await useAppsStore.getState().refreshProducts();
+    expect(useAppsStore.getState()).toMatchObject({ bootstrapStatus: "ready", productsStatus: "unavailable", products: [], currentAppKey: app("core", 6).key });
+    mockResponse(response());
+    await useAppsStore.getState().refreshProducts();
+    expect(useAppsStore.getState()).toMatchObject({ bootstrapStatus: "ready", productsStatus: "ready", products: [{ productId: "nova.weekly" }] });
+  });
+
+  test("does not wait for commerce bootstrap before making the app registry ready", async () => {
+    const releases = new Map<string, (value: { ok: true; status: number; json: () => Promise<unknown> }) => void>();
+    globalThis.fetch = ((input) => {
+      const path = String(input).split("/").at(-1);
+      if (path === "apps") return Promise.resolve({ ok: true, status: 200, json: async () => response() });
+      return new Promise((resolve) => releases.set(path!, resolve));
+    }) as typeof fetch;
+
+    await useAppsStore.getState().bootstrap();
+    expect(useAppsStore.getState()).toMatchObject({ bootstrapStatus: "ready", productsStatus: "loading", currentAppKey: app("core", 6).key });
+    releases.get("health")!({ ok: true, status: 200, json: async () => ({ ok: true }) });
+    releases.get("products")!({ ok: true, status: 200, json: async () => products });
+    releases.get("costs")!({ ok: true, status: 200, json: async () => costs });
+    await useAppsStore.getState().refreshProducts();
   });
 
   test("synchronously selects workspaces and restores them after Core", async () => {

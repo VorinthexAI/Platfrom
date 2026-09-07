@@ -3,9 +3,8 @@ import { getAllVisitorSessionsChunked, listVisitorSessionsPage, upsertVisitorSes
 import { getAllUserSessionsChunked, listUserSessionsPage, upsertUserSessionByKey } from './user-sessions.node';
 import { getAllAuthChallengesChunked, listAuthChallengesPage, upsertAuthChallengeByKey } from './auth-challenges.node';
 import { getAllOrchestratorsChunked, listOrchestratorsPage, upsertOrchestratorByKey } from './orchestrators.node';
-import { getAllUserOrganizationsChunked, listUserOrganizationsPage, upsertUserOrganizationByKey } from './user-organization.node';
-import { getAllOrganizationsChunked, listOrganizationsPage, upsertOrganization } from './organizations.node';
-import { getAllProcessedWebhookEventsChunked, listProcessedWebhookEventsPage, upsertProcessedWebhookEventByKey } from './processed-webhook-events.node';
+import { getAllUserTeamsChunked, listUserTeamsPage, upsertUserTeamByKey } from './user-team.node';
+import { getAllTeamsChunked, listTeamsPage, upsertTeam } from './teams.node';
 import { getAllUsersChunked, listUsersPage, upsertUserByKey } from './users.node';
 import { getAllVisitorsChunked, listVisitorsPage, upsertVisitorByKey } from './visitors.node';
 import { getAllVoicesChunked, listVoicesPage, upsertVoiceByKey } from './voices.node';
@@ -26,7 +25,6 @@ import { getAllDocumentVersionsChunked, listDocumentVersionsPage, upsertDocument
 import { getAllImagesChunked, listImagesPage, upsertImageByKey } from './images.node';
 import { getAllCollectionsChunked, listCollectionsPage, upsertCollectionByKey } from './collections.node';
 import { getAllCollectionImagesChunked, listCollectionImagesPage, upsertCollectionImageByKey } from './collection-images.node';
-import { getAllCollectionMembersChunked, listCollectionMembersPage, upsertCollectionMemberByKey } from './collection-members.node';
 import { getAllTagsChunked, listTagsPage, upsertTagByKey } from './tags.node';
 import { getAllTagAssignmentsChunked, listTagAssignmentsPage, upsertTagAssignmentByKey } from './tag-assignments.node';
 import { getAllPlacesChunked, listPlacesPage, upsertPlaceByKey } from './places.node';
@@ -81,7 +79,6 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   images: { listPage: listImagesPage, getAllChunked: getAllImagesChunked, upsertByKey: upsertImageByKey },
   collections: { listPage: listCollectionsPage, getAllChunked: getAllCollectionsChunked, upsertByKey: upsertCollectionByKey },
   collectionImages: { listPage: listCollectionImagesPage, getAllChunked: getAllCollectionImagesChunked, upsertByKey: upsertCollectionImageByKey },
-  collectionMembers: { listPage: listCollectionMembersPage, getAllChunked: getAllCollectionMembersChunked, upsertByKey: upsertCollectionMemberByKey },
   tags: { listPage: listTagsPage, getAllChunked: getAllTagsChunked, upsertByKey: upsertTagByKey },
   tagAssignments: { listPage: listTagAssignmentsPage, getAllChunked: getAllTagAssignmentsChunked, upsertByKey: upsertTagAssignmentByKey },
   places: { listPage: listPlacesPage, getAllChunked: getAllPlacesChunked, upsertByKey: upsertPlaceByKey },
@@ -96,10 +93,9 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   chapterContexts: { listPage: listChapterContextsPage, getAllChunked: getAllChapterContextsChunked, upsertByKey: upsertChapterContextByKey },
   bookProgress: { listPage: listBookProgressPage, getAllChunked: getAllBookProgressChunked, upsertByKey: upsertBookProgressByKey },
   orchestrators: { listPage: listOrchestratorsPage, getAllChunked: getAllOrchestratorsChunked, upsertByKey: upsertOrchestratorByKey },
-  organizations: { listPage: listOrganizationsPage, getAllChunked: getAllOrganizationsChunked, upsertByKey: upsertOrganization },
-  processedWebhookEvents: { listPage: listProcessedWebhookEventsPage, getAllChunked: getAllProcessedWebhookEventsChunked, upsertByKey: upsertProcessedWebhookEventByKey },
+  teams: { listPage: listTeamsPage, getAllChunked: getAllTeamsChunked, upsertByKey: upsertTeam },
   userSessions: { listPage: listUserSessionsPage, getAllChunked: getAllUserSessionsChunked, upsertByKey: upsertUserSessionByKey },
-  userOrganizations: { listPage: listUserOrganizationsPage, getAllChunked: getAllUserOrganizationsChunked, upsertByKey: upsertUserOrganizationByKey },
+  userTeams: { listPage: listUserTeamsPage, getAllChunked: getAllUserTeamsChunked, upsertByKey: upsertUserTeamByKey },
   users: { listPage: listUsersPage, getAllChunked: getAllUsersChunked, upsertByKey: upsertUserByKey },
   visitorSessions: { listPage: listVisitorSessionsPage, getAllChunked: getAllVisitorSessionsChunked, upsertByKey: upsertVisitorSessionByKey },
   visitors: { listPage: listVisitorsPage, getAllChunked: getAllVisitorsChunked, upsertByKey: upsertVisitorByKey },

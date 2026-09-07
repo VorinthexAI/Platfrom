@@ -133,9 +133,9 @@ function persistedImageMatches(existing: Image, input: ProcessImageInput, image:
   return existing.origin === input.origin && existing.width === image.width && existing.height === image.height && (canonical || legacy);
 }
 
-export async function captionImageWithVertex(organizationKey: string, input: { filename: string; mimeType: string; bytes: Uint8Array; signal?: AbortSignal }) {
+export async function captionImageWithVertex(teamKey: string, input: { filename: string; mimeType: string; bytes: Uint8Array; signal?: AbortSignal }) {
   const providerInput: ImageCaptionInput = { imageUrls: [`data:${input.mimeType};base64,${Buffer.from(input.bytes).toString('base64')}`], purpose: 'caption' };
-  const response = await executeAction<ImageCaptionInput & { operation: 'caption' }, ImageCaptionOutput>({ mode: 'auto', organizationKey, actionSlug: 'image' }, { operation: 'caption', ...providerInput }, { providers: ['image.primary'], signal: input.signal, timeoutMs: 180_000 });
+  const response = await executeAction<ImageCaptionInput & { operation: 'caption' }, ImageCaptionOutput>({ mode: 'auto', teamKey, actionSlug: 'image' }, { operation: 'caption', ...providerInput }, { providers: ['image.primary'], signal: input.signal, timeoutMs: 180_000 });
   const output = imageCaptionOutputSchema.parse(response.output);
   return generatedImageCaptionSchema.parse(output.results[0]);
 }

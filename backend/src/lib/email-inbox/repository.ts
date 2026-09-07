@@ -6,10 +6,10 @@ import { createCanonicalEmailRepository } from './canonical-repository';
 type Database = Pick<typeof db, 'query' | 'collection'> & Partial<Pick<typeof db, 'beginTransaction'>>;
 
 export type ProviderThreadMetadataState = { providerThreadId: string; messages: Array<{ providerMessageId: string; labels: string[]; sentAt: string }> };
-export const EMAIL_OVERVIEW_FACETS = ['urgent', 'important', 'filtered', 'favorite'] as const;
+export const EMAIL_OVERVIEW_FACETS = ['urgent', 'important', 'purchases', 'filtered', 'favorite'] as const;
 export type EmailOverviewFacet = typeof EMAIL_OVERVIEW_FACETS[number];
 export type EmailOverviewReadState = 'read' | 'unread';
-export type EmailOverviewLegacyFilter = 'all' | 'important' | 'urgent' | 'needs_action' | 'filtered' | 'unread' | 'favorite' | 'trash';
+export type EmailOverviewLegacyFilter = 'all' | 'important' | 'urgent' | 'purchases' | 'needs_action' | 'filtered' | 'unread' | 'favorite' | 'trash';
 export type EmailCreatedAtRange = { createdFrom?: string; createdTo?: string };
 type EmailOverviewPage = EmailCreatedAtRange & { search?: string; cursor?: string; limit?: number };
 export type EmailOverviewRepositoryQuery = ({ filter: EmailOverviewLegacyFilter } | { readState: EmailOverviewReadState; facets: EmailOverviewFacet[] }) & EmailOverviewPage;

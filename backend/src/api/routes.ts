@@ -25,8 +25,8 @@ import { joinNewsletter } from './newsletter';
 import { parseJson, parseQuery, strictObject } from './validation';
 import {
   getFoundersAccount,
-  listFoundersOrganizationScopes,
-  listFoundersOrganizations,
+  listFoundersTeamScopes,
+  listFoundersTeams,
 } from './founders';
 import { joinPresence, leavePresence, presenceBeat, streamPresence } from './presence';
 import { unsubscribeFromUpdates } from './updates';
@@ -38,8 +38,8 @@ import {
 } from './system';
 import { invokeContentTool } from './content-tools';
 import { communicationHandlers } from './communication';
-import { bootstrapGuestAuth, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
-import { acceptGalleryCollectionInvite, activateGalleryCollectionShare, completeGalleryUploads, createGalleryCollection, createGalleryCollectionInvite, createGalleryCollectionShare, createGalleryHighlight, createGalleryMemory, createGallerySubject, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryHighlight, deleteGalleryImages, deleteGalleryMemory, deleteGallerySubject, findGalleryCollectionDuplicates, galleryOverview, galleryUploadStatus, leaveGalleryCollection, listGalleryCollectionMembers, listGalleryCollectionShares, listGalleryHighlights, listGalleryMemories, listGalleryPendingInvites, listGallerySubjectImages, listGallerySubjects, presignGalleryUploads, readGalleryHighlight, readGalleryMemory, rejectGalleryCollectionInvite, removeGalleryCollectionMember, revokeGalleryCollectionInvite, revokeGalleryCollectionShare, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryCollectionMemberRole, updateGalleryCollectionShare, updateGalleryImage } from './gallery';
+import { bootstrapGuestAuth, deleteAuthAccount, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
+import { completeGalleryUploads, createGalleryCollection, createGalleryHighlight, createGalleryMemory, createGallerySubject, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryHighlight, deleteGalleryImages, deleteGalleryMemory, deleteGallerySubject, findGalleryCollectionDuplicates, galleryOverview, galleryUploadStatus, listGalleryHighlights, listGalleryMemories, listGallerySubjectImages, listGallerySubjects, presignGalleryUploads, readGalleryHighlight, readGalleryMemory, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryImage } from './gallery';
 import { travelHandlers } from './travel';
 import { countryHandlers } from './countries';
 import { emailHandlers } from './email-inbox';
@@ -50,7 +50,6 @@ import { streamEvents } from './events';
 import { searchApp } from './app-search';
 import { appTransformationHandlers } from './app-transformation';
 import { appSpeechHandler } from './app-speech';
-import { publicBookShareHandlers } from './public-book-shares';
 import { deleteImageGenerationHistory, generateImage, listImageGenerationHistory } from './image-generation';
 import { conversationHandlers } from './conversations';
 import { transientAttachmentHandlers } from './transient-attachments';
@@ -60,6 +59,14 @@ import { listApps } from './apps';
 import { tagHandlers } from './tags';
 import { recordAnalyticsEvent } from './event-ingestion';
 import { getBillingSummary } from './billing';
+import { getReferralSummary } from './referrals';
+import { referralCodeTransportSchema } from './auth-referral-code';
+import { commerceHandlers } from './commerce';
+import { onboardingSandboxHandlers } from './onboarding-sandbox';
+import { scopeHandlers } from './scopes';
+import { appNotificationHandlers } from './app-notifications';
+import { teamHandlers } from './teams';
+import { listCosts } from './costs';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -69,18 +76,38 @@ const challengeTokenHashBodyBase = strictObject({
 const emailSchema = z.string().trim().toLowerCase().email().max(254);
 const emailBody = strictObject({ email: emailSchema });
 const oauthProviderSchema = z.enum(['google', 'apple']);
+export const authTransportSchemas = Object.freeze({
+  signup: strictObject({ email: emailSchema, name: z.string().optional(), country_code: countryCodeSchema.optional() }),
+  login: emailBody.extend({ country_code: countryCodeSchema.optional(), referral_code: referralCodeTransportSchema.optional() }),
+  oauthStart: strictObject({ provider: oauthProviderSchema, redirect_uri: z.string().url(), referral_code: referralCodeTransportSchema.optional() }),
+  mobileOAuthStart: strictObject({ redirect_uri: z.string().url(), referral_code: referralCodeTransportSchema.optional() }),
+  mobileGoogle: strictObject({ id_token: z.string().min(100).max(16_384), referral_code: referralCodeTransportSchema.optional() }),
+  mobileApple: strictObject({ id_token: z.string().min(100).max(16_384), nonce: z.string().uuid(), name: z.string().trim().min(1).max(200).optional(), referral_code: referralCodeTransportSchema.optional() }),
+});
 
 export function registerRoutes(app: Hono) {
   app.get('/apps', listApps);
+  app.post('/onboarding/sandbox/sessions', onboardingSandboxHandlers.createSession);
+  app.post('/onboarding/sandbox/answers', onboardingSandboxHandlers.answer);
+  app.get('/products', commerceHandlers.listProducts);
+  app.get('/costs', listCosts);
+  app.post('/payments/checkouts', commerceHandlers.createCheckout);
+  app.post('/payments/checkout-handoffs', commerceHandlers.issueCheckoutHandoff);
+  app.post('/payments/checkout-handoffs/resolve', commerceHandlers.inspectCheckoutHandoff);
+  app.post('/payments/checkout-handoffs/continue', commerceHandlers.continueCheckoutHandoff);
+  app.get('/subscriptions/current', commerceHandlers.currentSubscription);
+  app.post('/subscriptions/current/cancel', commerceHandlers.cancelSubscription);
+  app.post('/subscriptions/current/restore', commerceHandlers.restoreSubscription);
   app.get('/billing/summary', getBillingSummary);
+  app.get('/referrals/summary', getReferralSummary);
   app.post('/auth/signup', async (c) => {
-    const body = await parseJson(c, strictObject({ email: emailSchema, name: z.string().optional(), country_code: countryCodeSchema.optional() }));
+    const body = await parseJson(c, authTransportSchemas.signup);
     return c.json(await createUserWithAuth(body), 201);
   });
 
   app.post('/auth/login', async (c) => {
-    const body = await parseJson(c, emailBody.extend({ country_code: countryCodeSchema.optional() }));
-    const result = await requestSignInEmail(body.email, body.country_code);
+    const body = await parseJson(c, authTransportSchemas.login);
+    const result = await requestSignInEmail(body.email, body.country_code, body.referral_code);
     if (!result.allowed) {
       if ('foundersGateRequired' in result) {
         return c.json({ error: 'founders gate required', action: 'founders_gate', founders_gate_required: true }, 403);
@@ -89,17 +116,8 @@ export function registerRoutes(app: Hono) {
     }
     return c.json({
       ok: true,
-      email_sent: !('organizationMfaRequired' in result),
+      email_sent: true,
       expires_at: result.expiresAt.toISOString(),
-      ...('organizationMfaRequired' in result
-        ? {
-          organization_mfa_required: true,
-          status: result.status,
-          totp_challenge_token_hash: result.totpChallengeToken,
-          name: result.name,
-          organization_title: result.organizationTitle,
-        }
-        : {}),
       ...('handoffTokenHash' in result && result.handoffTokenHash
         ? {
           handoff_token_hash: result.handoffTokenHash,
@@ -120,13 +138,10 @@ export function registerRoutes(app: Hono) {
   });
 
   app.get('/auth/oauth/start', async (c) => {
-    const query = parseQuery(c, strictObject({
-      provider: oauthProviderSchema,
-      redirect_uri: z.string().url(),
-    }));
+    const query = parseQuery(c, authTransportSchemas.oauthStart);
     try {
       return c.json({
-        authorization_url: await buildOAuthAuthorizationUrl(query.provider, query.redirect_uri),
+        authorization_url: await buildOAuthAuthorizationUrl(query.provider, query.redirect_uri, undefined, query.referral_code),
       });
     } catch {
       return c.json({ error: 'oauth provider is not configured' }, 503);
@@ -147,14 +162,6 @@ export function registerRoutes(app: Hono) {
       redirectUri: body.redirect_uri,
     });
     if (!result) return c.json({ error: 'oauth sign in failed' }, 401);
-    if (result.status === 'founders_gate_required') {
-      return c.json({ error: 'founders gate required', action: 'founders_gate', founders_gate_required: true }, 403);
-    }
-    if (result.status === 'mfa_required') {
-      // The organization enforces MFA — OAuth can't skip the TOTP flow;
-      // the client sends the member through the email sign-in path.
-      return c.json({ error: 'mfa required', action: 'mfa', mfa_required: true }, 403);
-    }
     setSessionForRequest(c, result);
     return c.json({
       ok: true,
@@ -169,24 +176,18 @@ export function registerRoutes(app: Hono) {
 
   app.get('/auth/mobile/oauth/:provider', async (c) => {
     const provider = oauthProviderSchema.parse(c.req.param('provider'));
-    const query = parseQuery(c, strictObject({ redirect_uri: z.string().url() }));
+    const query = parseQuery(c, authTransportSchemas.mobileOAuthStart);
     try {
-      return c.json({ authorization_url: await buildMobileOAuthAuthorizationUrl(provider, query.redirect_uri) });
+      return c.json({ authorization_url: await buildMobileOAuthAuthorizationUrl(provider, query.redirect_uri, query.referral_code) });
     } catch {
       return c.json({ error: 'mobile oauth is not configured' }, 503);
     }
   });
 
   app.post('/auth/mobile/google', async (c) => {
-    const body = await parseJson(c, strictObject({ id_token: z.string().min(100).max(16_384) }));
-    const result = await completeNativeGoogleSignIn(body.id_token);
+    const body = await parseJson(c, authTransportSchemas.mobileGoogle);
+    const result = await completeNativeGoogleSignIn(body.id_token, body.referral_code);
     if (!result) return c.json({ error: 'google sign in failed' }, 401);
-    if (result.status === 'founders_gate_required') {
-      return c.json({ error: 'founders gate required', action: 'founders_gate', founders_gate_required: true }, 403);
-    }
-    if (result.status === 'mfa_required') {
-      return c.json({ error: 'mfa required', action: 'mfa', mfa_required: true }, 403);
-    }
     setSessionForRequest(c, result);
     return c.json({
       ok: true,
@@ -200,19 +201,9 @@ export function registerRoutes(app: Hono) {
   });
 
   app.post('/auth/mobile/apple', async (c) => {
-    const body = await parseJson(c, strictObject({
-      id_token: z.string().min(100).max(16_384),
-      nonce: z.string().uuid(),
-      name: z.string().trim().min(1).max(200).optional(),
-    }));
-    const result = await completeNativeAppleSignIn(body.id_token, body.nonce, body.name);
+    const body = await parseJson(c, authTransportSchemas.mobileApple);
+    const result = await completeNativeAppleSignIn(body.id_token, body.nonce, body.name, body.referral_code);
     if (!result) return c.json({ error: 'apple sign in failed' }, 401);
-    if (result.status === 'founders_gate_required') {
-      return c.json({ error: 'founders gate required', action: 'founders_gate', founders_gate_required: true }, 403);
-    }
-    if (result.status === 'mfa_required') {
-      return c.json({ error: 'mfa required', action: 'mfa', mfa_required: true }, 403);
-    }
     setSessionForRequest(c, result);
     return c.json({
       ok: true,
@@ -246,10 +237,6 @@ export function registerRoutes(app: Hono) {
     if (!result) return c.json({ error: 'oauth sign in failed' }, 401);
     if (!result.mobileRedirectUri) return c.json({ error: 'invalid mobile oauth state' }, 401);
     const redirect = new URL(result.mobileRedirectUri);
-    if (result.status !== 'authenticated') {
-      redirect.searchParams.set('error', result.status === 'founders_gate_required' ? 'founders_gate_required' : 'mfa_required');
-      return c.redirect(redirect.toString(), 302);
-    }
     const code = await createMobileOAuthGrant({
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
@@ -314,7 +301,7 @@ export function registerRoutes(app: Hono) {
   app.post('/auth/totp/reset/request', async (c) => {
     const body = await parseJson(c, challengeTokenHashBodyBase);
     const result = await requestMfaResetEmail(body.challenge_token_hash);
-    if (!result) return c.json({ error: 'invalid or expired founder MFA challenge' }, 401);
+    if (!result) return c.json({ error: 'invalid or expired team MFA challenge' }, 401);
     return c.json({
       ok: result.ok,
       email_sent: true,
@@ -379,7 +366,9 @@ export function registerRoutes(app: Hono) {
       authenticated: true,
       identity: result.identity,
       name: result.name,
-      organization_title: result.organizationTitle,
+      team_title: result.teamTitle,
+      teamKey: result.teamKey,
+      scopeKey: result.scopeKey,
       ...camelSessionTokenPayload(c, result),
     });
   });
@@ -394,7 +383,9 @@ export function registerRoutes(app: Hono) {
     return c.json({
       identity: result.identity,
       name: result.name,
-      organizationTitle: result.organizationTitle,
+      teamTitle: result.teamTitle,
+      teamKey: result.teamKey,
+      scopeKey: result.scopeKey,
       ...camelSessionTokenPayload(c, result),
     });
   });
@@ -402,6 +393,7 @@ export function registerRoutes(app: Hono) {
   app.post('/auth/guest', bootstrapGuestAuth);
   app.get('/auth/me', getAuthAccount);
   app.patch('/auth/me', patchAuthAccount);
+  app.post('/auth/me/delete', deleteAuthAccount);
   app.patch('/auth/me/profile', updateAccountProfile);
   app.post('/auth/me/profile/avatar/uploads/presign', presignAccountAvatar);
   app.post('/auth/me/profile/avatar/uploads/complete', completeAccountAvatar);
@@ -409,12 +401,21 @@ export function registerRoutes(app: Hono) {
   app.post('/auth/me/hiddens', userHiddenHandlers.hide);
   app.delete('/auth/me/hiddens', userHiddenHandlers.reveal);
   app.post('/auth/logout', logoutAuthAccount);
+  app.put('/auth/me/push-subscription', appNotificationHandlers.register);
+  app.delete('/auth/me/push-subscription', appNotificationHandlers.unregister);
+  app.post('/auth/me/notifications', appNotificationHandlers.list);
   app.post('/tickets', ticketHandler);
   app.post('/feedback', feedbackHandlers.create);
   app.post('/feedback/list', feedbackHandlers.list);
   app.put('/feedback/:ticketKey/vote', feedbackHandlers.vote);
 
   app.post('/app/search', searchApp);
+  app.post('/app/notify', appNotificationHandlers.notify);
+  app.post('/scopes/list', scopeHandlers.list);
+  app.post('/scopes', scopeHandlers.create);
+  app.post('/scopes/select', scopeHandlers.select);
+  app.post('/teams/list', teamHandlers.list);
+  app.post('/teams/select', teamHandlers.select);
   app.post('/tags/list', tagHandlers.list);
   app.post('/tags', tagHandlers.create);
   app.patch('/tags/:tagKey', tagHandlers.update);
@@ -470,20 +471,6 @@ export function registerRoutes(app: Hono) {
   app.post('/gallery/collections', createGalleryCollection);
   app.post('/gallery/collections/update', updateGalleryCollection);
   app.post('/gallery/collections/delete', deleteGalleryCollection);
-  app.post('/gallery/collections/members', listGalleryCollectionMembers);
-  app.post('/gallery/collections/members/role', updateGalleryCollectionMemberRole);
-  app.post('/gallery/collections/members/remove', removeGalleryCollectionMember);
-  app.post('/gallery/collections/leave', leaveGalleryCollection);
-  app.post('/gallery/invites/pending', listGalleryPendingInvites);
-  app.post('/gallery/invites', createGalleryCollectionInvite);
-  app.post('/gallery/invites/accept', acceptGalleryCollectionInvite);
-  app.post('/gallery/invites/reject', rejectGalleryCollectionInvite);
-  app.post('/gallery/invites/revoke', revokeGalleryCollectionInvite);
-  app.post('/gallery/collections/shares/list', listGalleryCollectionShares);
-  app.post('/gallery/collections/shares', createGalleryCollectionShare);
-  app.post('/gallery/collections/shares/update', updateGalleryCollectionShare);
-  app.post('/gallery/collections/shares/revoke', revokeGalleryCollectionShare);
-  app.post('/gallery/shares/activate', activateGalleryCollectionShare);
   app.post('/gallery/uploads/presign', presignGalleryUploads);
   app.post('/gallery/uploads/complete', completeGalleryUploads);
   app.post('/gallery/uploads/status', galleryUploadStatus);
@@ -577,33 +564,29 @@ export function registerRoutes(app: Hono) {
   app.post('/books/:bookKey/detail', bookHandlers.detail);
   app.post('/books/:bookKey/extension/preview', bookHandlers.extensionPreview);
   app.post('/books/:bookKey/extension', bookHandlers.extensionGenerate);
-  app.post('/books/:bookKey/share/detail', bookHandlers.shareDetail);
-  app.post('/books/:bookKey/share/update', bookHandlers.shareUpdate);
   app.patch('/books/:bookKey/chapters/:chapterKey/progress', bookHandlers.progress);
   app.post('/books/:bookKey/retry', bookHandlers.retry);
   app.post('/books/:bookKey/cancel', bookHandlers.cancel);
   app.post('/books/:bookKey/favorite', bookHandlers.setFavorite);
   app.delete('/books/:bookKey', bookHandlers.delete);
-  app.post('/public/books/shares/read', publicBookShareHandlers.read);
-  app.get('/public/books/shares/stream', publicBookShareHandlers.stream);
 
   app.get('/founders/me', getFoundersAccount);
-  app.get('/founders/organizations', listFoundersOrganizations);
-  app.get('/founders/organizations/:organizationKey/scopes', listFoundersOrganizationScopes);
-  app.get('/founders/organizations/:organizationKey/communication/channels', communicationHandlers.listChannels);
-  app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages', communicationHandlers.listMessages);
-  app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/typing', communicationHandlers.typingStream);
-  app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/typing', communicationHandlers.typing);
-  app.delete('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages/:messageKey', communicationHandlers.deleteMessage);
-  app.patch('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages/:messageKey', communicationHandlers.editMessage);
-  app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages', communicationHandlers.postMessage);
-  app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages/:messageKey/reactions', communicationHandlers.react);
-  app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages/:messageKey/replies', communicationHandlers.readReplies);
-  app.get('/founders/organizations/:organizationKey/communication/reactions', communicationHandlers.frequentReactions);
-  app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/polls', communicationHandlers.createPoll);
-  app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/polls/:pollKey', communicationHandlers.readPoll);
-  app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/polls/:pollKey/votes', communicationHandlers.votePoll);
-  app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/polls/:pollKey/close', communicationHandlers.closePoll);
+  app.get('/founders/teams', listFoundersTeams);
+  app.get('/founders/teams/:teamKey/scopes', listFoundersTeamScopes);
+  app.get('/founders/teams/:teamKey/communication/channels', communicationHandlers.listChannels);
+  app.get('/founders/teams/:teamKey/communication/channels/:channelKey/messages', communicationHandlers.listMessages);
+  app.get('/founders/teams/:teamKey/communication/channels/:channelKey/typing', communicationHandlers.typingStream);
+  app.post('/founders/teams/:teamKey/communication/channels/:channelKey/typing', communicationHandlers.typing);
+  app.delete('/founders/teams/:teamKey/communication/channels/:channelKey/messages/:messageKey', communicationHandlers.deleteMessage);
+  app.patch('/founders/teams/:teamKey/communication/channels/:channelKey/messages/:messageKey', communicationHandlers.editMessage);
+  app.post('/founders/teams/:teamKey/communication/channels/:channelKey/messages', communicationHandlers.postMessage);
+  app.post('/founders/teams/:teamKey/communication/channels/:channelKey/messages/:messageKey/reactions', communicationHandlers.react);
+  app.get('/founders/teams/:teamKey/communication/channels/:channelKey/messages/:messageKey/replies', communicationHandlers.readReplies);
+  app.get('/founders/teams/:teamKey/communication/reactions', communicationHandlers.frequentReactions);
+  app.post('/founders/teams/:teamKey/communication/channels/:channelKey/polls', communicationHandlers.createPoll);
+  app.get('/founders/teams/:teamKey/communication/channels/:channelKey/polls/:pollKey', communicationHandlers.readPoll);
+  app.post('/founders/teams/:teamKey/communication/channels/:channelKey/polls/:pollKey/votes', communicationHandlers.votePoll);
+  app.post('/founders/teams/:teamKey/communication/channels/:channelKey/polls/:pollKey/close', communicationHandlers.closePoll);
 
   app.get('/system/orchestrators', listSystemOrchestrators);
   app.post('/system/orchestrators', createSystemOrchestrator);

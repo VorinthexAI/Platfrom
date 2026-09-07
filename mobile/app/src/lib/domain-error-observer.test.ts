@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { createObservedHttpError, extractDomainErrorCode, observeDomainError, rejectObservedDomainError, subscribeDomainErrors } from "./domain-error-observer";
+import { createObservedHttpError, extractDomainErrorCode, extractDomainErrorMessage, observeDomainError, rejectObservedDomainError, subscribeDomainErrors } from "./domain-error-observer";
 
 test("extracts exact codes from Axios responses, envelopes, and direct SSE errors", () => {
   expect(extractDomainErrorCode({ response: { data: { success: false, error: { code: "INSUFFICIENT_BALANCE" } } } })).toBe("INSUFFICIENT_BALANCE");
@@ -12,6 +12,11 @@ test("extracts exact codes from Axios responses, envelopes, and direct SSE error
 test("does not treat storage or similar text as insufficient balance", () => {
   expect(extractDomainErrorCode({ code: "STORAGE_UNFUNDED" })).toBe("STORAGE_UNFUNDED");
   expect(extractDomainErrorCode(new Error("INSUFFICIENT_BALANCE"))).toBeUndefined();
+});
+
+test("extracts authoritative messages from HTTP error envelopes", () => {
+  expect(extractDomainErrorMessage({ response: { data: { success: false, error: { code: "ACCOUNT_SHARED_ACCESS", message: "Remove shared access." } } } })).toBe("Remove shared access.");
+  expect(extractDomainErrorMessage(new Error("Network unavailable."))).toBe("Network unavailable.");
 });
 
 test("parses non-2xx streaming backend envelopes through the same observer", () => {

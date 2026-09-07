@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { connectorPublic } from './connector-repository';
 import { decryptEmailConnectorCredentials, encryptEmailConnectorCredentials, resolveEmailConnectorKeyring, tokenFingerprint } from './connector-crypto';
-import { organizationConnectorSchema } from './connector-schema';
+import { teamConnectorSchema } from './connector-schema';
 
-const binding = { organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', providerAccountId: 'google-1' };
+const binding = { teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', providerAccountId: 'google-1' };
 const keyring = resolveEmailConnectorKeyring({
   EMAIL_CONNECTOR_ACTIVE_KEY_ID: 'current',
   EMAIL_CONNECTOR_CREDENTIAL_KEYS: JSON.stringify({ current: Buffer.alloc(32, 7).toString('base64'), previous: Buffer.alloc(32, 3).toString('base64') }),
@@ -25,9 +25,9 @@ describe('email connector credential security', () => {
 
   test('fingerprints tokens and strips all credential fields from DTOs', () => {
     const now = '2026-08-11T12:00:00.000Z';
-    const connector = organizationConnectorSchema.parse({
+    const connector = teamConnectorSchema.parse({
       key: 'cmrnlzf650002qc7k4p5zem5w', ...binding, provider: 'gmail', email: 'person@example.com', encryptedCredentials: 'ciphertext', encryptionKeyId: 'current',
-      accessTokenFingerprint: tokenFingerprint('access-secret'), scopes: ['email'], createdByMembershipKey: 'cmrnlzf640001qc7kazsr96k5', status: 'active', syncLeaseToken: '123e4567-e89b-42d3-a456-426614174000', syncLeaseExpiresAt: now, syncPendingHistoryId: '123', syncPendingThreadIds: ['thread'], createdAt: now, updatedAt: now,
+      accessTokenFingerprint: tokenFingerprint('access-secret'), scopes: ['email'], createdByTeamMembershipKey: 'cmrnlzf640001qc7kazsr96k5', status: 'active', syncLeaseToken: '123e4567-e89b-42d3-a456-426614174000', syncLeaseExpiresAt: now, syncPendingHistoryId: '123', syncPendingThreadIds: ['thread'], createdAt: now, updatedAt: now,
     });
     expect(tokenFingerprint('access-secret')).toMatch(/^[a-f0-9]{64}$/);
     expect(connectorPublic(connector)).not.toHaveProperty('encryptedCredentials');
@@ -35,7 +35,7 @@ describe('email connector credential security', () => {
     expect(connectorPublic(connector)).not.toHaveProperty('accessTokenFingerprint');
     expect(connectorPublic(connector)).not.toHaveProperty('syncLeaseToken');
     expect(connectorPublic(connector)).not.toHaveProperty('syncLeaseExpiresAt');
-    expect(connectorPublic(connector)).not.toHaveProperty('createdByMembershipKey');
+    expect(connectorPublic(connector)).not.toHaveProperty('createdByTeamMembershipKey');
     expect(connectorPublic(connector)).not.toHaveProperty('syncPendingHistoryId');
     expect(connectorPublic(connector)).not.toHaveProperty('syncPendingThreadIds');
     expect(connectorPublic(connector)).not.toHaveProperty('providerAccountId');

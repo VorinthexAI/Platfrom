@@ -1,9 +1,9 @@
 import { z } from 'zod';
-import { BYTES_PER_GIB as COST_BYTES_PER_GIB, calculateStorageMicroSparks, STORAGE_BYTE_MILLISECOND_DENOMINATOR } from '@/lib/costs';
+import { BYTES_PER_GB as COST_BYTES_PER_GB, calculateStorageMicroSparks, STORAGE_BYTE_MILLISECOND_DENOMINATOR } from '@/lib/costs';
 import { SparkRepositoryError } from '@/lib/sparks/repository';
 
 export const HOUR_MS = 60 * 60 * 1_000;
-export const BYTES_PER_GIB = BigInt(COST_BYTES_PER_GIB);
+export const BYTES_PER_GB = BigInt(COST_BYTES_PER_GB);
 export const STORAGE_CHARGE_DENOMINATOR = STORAGE_BYTE_MILLISECOND_DENOMINATOR;
 
 const hourTimestampSchema = z.string().datetime().refine((value) => Date.parse(value) % HOUR_MS === 0, 'Timestamp must be aligned to a UTC hour.');

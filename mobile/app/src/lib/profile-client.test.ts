@@ -61,8 +61,8 @@ test("serializes name updates so the server cannot commit them out of order", as
 });
 
 test("creates a scoped ticket with an idempotency key", async () => {
-  await client.createSupportTicket({ organizationKey: "org", scopeKey: "scope", message: "Something broke" }, "request-key");
-  expect(calls).toEqual([{ method: "POST", path: "/tickets", body: { organizationKey: "org", scopeKey: "scope", message: "Something broke" }, config: { headers: { "Idempotency-Key": "request-key" } } }]);
+  await client.createSupportTicket({ teamKey: "team", scopeKey: "scope", message: "Something broke" }, "request-key");
+  expect(calls).toEqual([{ method: "POST", path: "/tickets", body: { teamKey: "team", scopeKey: "scope", message: "Something broke" }, config: { headers: { "Idempotency-Key": "request-key" } } }]);
 });
 
 const feedback = { key: "feedback-key", message: "Add keyboard shortcuts", upvotes: 4, downvotes: 1, viewerVote: "up", createdAt: "2026-09-03T12:00:00.000Z" };
@@ -72,27 +72,27 @@ test("creates, lists, and votes on scoped feedback with strict response parsing"
   responses.set("/feedback/list", { success: true, data: { items: [feedback], nextCursor: null } });
   responses.set("/feedback/feedback-key/vote", { success: true, data: { ...feedback, viewerVote: "down", upvotes: 3, downvotes: 2 } });
 
-  await expect(client.createFeedback({ organizationKey: "org", scopeKey: "scope", message: "Add keyboard shortcuts" }, "create-key")).resolves.toEqual(feedback);
-  await expect(client.listFeedback({ organizationKey: "org", scopeKey: "scope", limit: 50 })).resolves.toEqual({ items: [feedback], nextCursor: null });
-  await expect(client.setFeedbackVote({ organizationKey: "org", scopeKey: "scope", ticketKey: "feedback-key", vote: "down" }, "vote-key")).resolves.toEqual({ ...feedback, viewerVote: "down", upvotes: 3, downvotes: 2 });
+  await expect(client.createFeedback({ teamKey: "team", scopeKey: "scope", message: "Add keyboard shortcuts" }, "create-key")).resolves.toEqual(feedback);
+  await expect(client.listFeedback({ teamKey: "team", scopeKey: "scope", limit: 50 })).resolves.toEqual({ items: [feedback], nextCursor: null });
+  await expect(client.setFeedbackVote({ teamKey: "team", scopeKey: "scope", ticketKey: "feedback-key", vote: "down" }, "vote-key")).resolves.toEqual({ ...feedback, viewerVote: "down", upvotes: 3, downvotes: 2 });
 
   expect(calls).toEqual([
-    { method: "POST", path: "/feedback", body: { organizationKey: "org", scopeKey: "scope", message: "Add keyboard shortcuts" }, config: { headers: { "Idempotency-Key": "create-key" } } },
-    { method: "POST", path: "/feedback/list", body: { organizationKey: "org", scopeKey: "scope", limit: 50 }, config: undefined },
-    { method: "PUT", path: "/feedback/feedback-key/vote", body: { organizationKey: "org", scopeKey: "scope", vote: "down" }, config: { headers: { "Idempotency-Key": "vote-key" } } },
+    { method: "POST", path: "/feedback", body: { teamKey: "team", scopeKey: "scope", message: "Add keyboard shortcuts" }, config: { headers: { "Idempotency-Key": "create-key" } } },
+    { method: "POST", path: "/feedback/list", body: { teamKey: "team", scopeKey: "scope", limit: 50 }, config: undefined },
+    { method: "PUT", path: "/feedback/feedback-key/vote", body: { teamKey: "team", scopeKey: "scope", vote: "down" }, config: { headers: { "Idempotency-Key": "vote-key" } } },
   ]);
 });
 
 test("orders server feedback oldest-first so new optimistic rows append at the bottom", async () => {
   const older = { ...feedback, key: "older", createdAt: "2026-09-02T12:00:00.000Z" };
   responses.set("/feedback/list", { success: true, data: { items: [feedback, older], nextCursor: null } });
-  await expect(client.listFeedback({ organizationKey: "org", scopeKey: "scope" })).resolves.toEqual({ items: [older, feedback], nextCursor: null });
+  await expect(client.listFeedback({ teamKey: "team", scopeKey: "scope" })).resolves.toEqual({ items: [older, feedback], nextCursor: null });
 });
 
 test("profile request schemas reject unknown or invalid input", () => {
-  expect(client.ticketSchema.safeParse({ organizationKey: "org", scopeKey: "scope", message: "Issue", extra: true }).success).toBe(false);
-  expect(client.feedbackListSchema.safeParse({ organizationKey: "org", scopeKey: "scope", extra: true }).success).toBe(false);
-  expect(client.feedbackVoteRequestSchema.safeParse({ organizationKey: "org", scopeKey: "scope", ticketKey: "ticket", vote: "maybe" }).success).toBe(false);
+  expect(client.ticketSchema.safeParse({ teamKey: "team", scopeKey: "scope", message: "Issue", extra: true }).success).toBe(false);
+  expect(client.feedbackListSchema.safeParse({ teamKey: "team", scopeKey: "scope", extra: true }).success).toBe(false);
+  expect(client.feedbackVoteRequestSchema.safeParse({ teamKey: "team", scopeKey: "scope", ticketKey: "ticket", vote: "maybe" }).success).toBe(false);
   expect(client.avatarUploadSchema.safeParse({ filename: "../avatar.png", mimeType: "image/png", sizeBytes: 4, uri: "file:///avatar.png" }).success).toBe(false);
 });
 

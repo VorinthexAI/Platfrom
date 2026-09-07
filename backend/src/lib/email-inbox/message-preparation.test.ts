@@ -14,8 +14,8 @@ describe('canonical mail preparation', () => {
     for (const caller of ['initial sync', 'incremental sync']) {
       const classified: string[] = [], embedded: string[] = [], saved: unknown[] = [];
       await sortAndPersistInboxThread({
-        organizationKey: 'org-1', thread: { scopeKey, accountKey: connectorKey, providerThreadId: 'thread' }, messages,
-        classify: (async (_organization: string, input: { labels: string[]; body: string }) => { classified.push(input.body); return input.labels.includes('TRASH') ? { priority: 'low', state: 'filtered', category: 'other', intent: 'Filtered' } : { priority: 'urgent', state: 'needs_action', category: 'primary', intent: 'Urgent' }; }) as never,
+        teamKey: 'team-1', thread: { scopeKey, accountKey: connectorKey, providerThreadId: 'thread' }, messages,
+        classify: (async (_team: string, input: { labels: string[]; body: string }) => { classified.push(input.body); return input.labels.includes('TRASH') ? { priority: 'low', state: 'filtered', category: 'other', isPurchase: false, intent: 'Filtered' } : { priority: 'urgent', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Urgent' }; }) as never,
         prepareDocument: async ({ content, semanticSource }) => { embedded.push(semanticSource); return { content, embedding: [semanticSource.length], contentChunks: [semanticSource], chunkEmbeddings: [[semanticSource.length]], semanticChunkCount: 1, semanticContentHash: 'hash' }; },
         repository: { syncThread: async (input: unknown) => { saved.push(input); return input; } } as never,
         beforePersist: async () => undefined,
@@ -36,7 +36,7 @@ describe('canonical mail preparation', () => {
     let classifications = 0, writes = 0;
     const duplicate = { scopeKey, accountKey: connectorKey, providerMessageId: 'duplicate', from: 'sender@example.com', to: ['me@example.com'], subject: 'Subject', body: 'Body', summary: 'Body', direction: 'inbound' as const, sentAt: '2026-08-23T10:00:00.000Z', hasAttachments: false, replyDepth: 0 };
     await expect(sortAndPersistInboxThread({
-      organizationKey: 'org-1', thread: { scopeKey, accountKey: connectorKey, providerThreadId: 'thread' }, messages: [duplicate, { ...duplicate, body: 'Conflicting duplicate' }],
+      teamKey: 'team-1', thread: { scopeKey, accountKey: connectorKey, providerThreadId: 'thread' }, messages: [duplicate, { ...duplicate, body: 'Conflicting duplicate' }],
       classify: (async () => { classifications += 1; return {}; }) as never,
       prepareDocument: async ({ content, semanticSource }) => ({ content, embedding: [1], contentChunks: [semanticSource], chunkEmbeddings: [[1]], semanticChunkCount: 1, semanticContentHash: 'hash' }),
       repository: { syncThread: async () => { writes += 1; return {}; } } as never,
@@ -50,8 +50,8 @@ describe('canonical mail preparation', () => {
     let activeClassifications = 0, maxClassifications = 0, activeEmbeddings = 0, maxEmbeddings = 0;
     const messages = Array.from({ length: 40 }, (_, index) => ({ scopeKey, accountKey: connectorKey, providerMessageId: `message-${index}`, from: 'sender@example.com', to: ['me@example.com'], subject: 'Subject', body: `Body ${index}`, summary: 'Body', direction: 'inbound' as const, sentAt: new Date(Date.parse('2026-08-23T10:00:00.000Z') + index).toISOString(), hasAttachments: false, replyDepth: 0 }));
     await sortAndPersistInboxThread({
-      organizationKey: 'org-1', thread: { scopeKey, accountKey: connectorKey, providerThreadId: 'thread' }, messages,
-      classify: (async () => { activeClassifications += 1; maxClassifications = Math.max(maxClassifications, activeClassifications); await Bun.sleep(1); activeClassifications -= 1; return { priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }; }) as never,
+      teamKey: 'team-1', thread: { scopeKey, accountKey: connectorKey, providerThreadId: 'thread' }, messages,
+      classify: (async () => { activeClassifications += 1; maxClassifications = Math.max(maxClassifications, activeClassifications); await Bun.sleep(1); activeClassifications -= 1; return { priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }; }) as never,
       prepareDocument: async ({ content, semanticSource }) => { activeEmbeddings += 1; maxEmbeddings = Math.max(maxEmbeddings, activeEmbeddings); await Bun.sleep(1); activeEmbeddings -= 1; return { content, embedding: [1], contentChunks: [semanticSource], chunkEmbeddings: [[1]], semanticChunkCount: 1, semanticContentHash: 'hash' }; },
       repository: { syncThread: async (input: unknown) => input } as never,
       beforePersist: async () => undefined,
@@ -71,8 +71,8 @@ describe('canonical mail preparation', () => {
     ];
     let saved: any;
     await sortAndPersistInboxThread({
-      organizationKey: 'org-1', thread: { scopeKey, accountKey: connectorKey, providerThreadId: 'thread' }, messages,
-      classify: (async (_organization: string, input: { labels: string[] }) => input.labels.includes('INBOX') ? { priority: 'high', state: 'needs_action', category: 'primary', intent: 'Active' } : { priority: 'low', state: 'filtered', category: 'other', intent: 'Filtered' }) as never,
+      teamKey: 'team-1', thread: { scopeKey, accountKey: connectorKey, providerThreadId: 'thread' }, messages,
+      classify: (async (_team: string, input: { labels: string[] }) => input.labels.includes('INBOX') ? { priority: 'high', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Active' } : { priority: 'low', state: 'filtered', category: 'other', isPurchase: false, intent: 'Filtered' }) as never,
       prepareDocument: async ({ content, semanticSource }) => ({ content, embedding: [semanticSource.length], contentChunks: [semanticSource], chunkEmbeddings: [[semanticSource.length]], semanticChunkCount: 1, semanticContentHash: 'hash' }),
       repository: { syncThread: async (input: unknown) => { saved = input; return input; } } as never,
       beforePersist: async () => undefined,
@@ -86,16 +86,36 @@ describe('canonical mail preparation', () => {
     const base = { scopeKey, accountKey: connectorKey, from: 'sender@example.com', to: ['me@example.com'], summary: 'old', direction: 'inbound' as const, hasAttachments: false, replyDepth: 0 };
     let saved: any;
     await sortAndPersistInboxThread({
-      organizationKey: 'org-1', thread: { scopeKey, accountKey: connectorKey, providerThreadId: 'thread' }, messages: [
+      teamKey: 'team-1', thread: { scopeKey, accountKey: connectorKey, providerThreadId: 'thread' }, messages: [
         { ...base, providerMessageId: 'trash', subject: 'Trash', body: 'Trash', labels: ['TRASH'], sentAt: '2026-08-23T10:00:00.000Z' },
         { ...base, providerMessageId: 'spam', subject: 'Spam', body: 'Spam', labels: ['SPAM'], sentAt: '2026-08-23T11:00:00.000Z' },
       ],
-      classify: (async () => ({ priority: 'low', state: 'filtered', category: 'other', intent: 'Filtered' })) as never,
+      classify: (async () => ({ priority: 'low', state: 'filtered', category: 'other', isPurchase: false, intent: 'Filtered' })) as never,
       prepareDocument: async ({ content, semanticSource }) => ({ content, embedding: [1], contentChunks: [semanticSource], chunkEmbeddings: [[1]], semanticChunkCount: 1, semanticContentHash: 'hash' }),
       repository: { syncThread: async (input: unknown) => { saved = input; return input; } } as never,
       beforePersist: async () => undefined,
       lease: { kind: 'sync', connectorKey, token: 'lease-token' },
     });
     expect(saved.thread).toMatchObject({ subject: 'Spam', inboxCategory: 'Filtered', labels: ['TRASH', 'SPAM'], inInbox: true });
+  });
+
+  test('applies Filtered, Purchases, Urgent, Important thread precedence', async () => {
+    const base = { scopeKey, accountKey: connectorKey, to: ['me@example.com'], summary: 'old', labels: ['INBOX'], direction: 'inbound' as const, hasAttachments: false, replyDepth: 0 };
+    const messages = [
+      { ...base, providerMessageId: 'important', from: 'one@example.com', subject: 'Important', body: 'Important', sentAt: '2026-08-23T10:00:00.000Z' },
+      { ...base, providerMessageId: 'urgent', from: 'two@example.com', subject: 'Urgent', body: 'Urgent', sentAt: '2026-08-23T11:00:00.000Z' },
+      { ...base, providerMessageId: 'purchase', from: 'three@example.com', subject: 'Receipt', body: 'Receipt', sentAt: '2026-08-23T12:00:00.000Z' },
+    ];
+    let saved: any;
+    await sortAndPersistInboxThread({
+      teamKey: 'team-1', thread: { scopeKey, accountKey: connectorKey, providerThreadId: 'precedence' }, messages,
+      classify: (async (_team: string, input: { subject: string }) => ({ priority: input.subject === 'Urgent' ? 'urgent' : 'normal', state: 'needs_action', category: 'primary', isPurchase: input.subject === 'Receipt', intent: 'Review' })) as never,
+      prepareDocument: async ({ content, semanticSource }) => ({ content, embedding: [1], contentChunks: [semanticSource], chunkEmbeddings: [[1]], semanticChunkCount: 1, semanticContentHash: 'hash' }),
+      repository: { syncThread: async (input: unknown) => { saved = input; return input; } } as never,
+      beforePersist: async () => undefined,
+      lease: { kind: 'sync', connectorKey, token: 'lease-token' },
+    });
+    expect(saved.thread.inboxCategory).toBe('Purchases');
+    expect(saved.messages.map(({ inboxCategory }: any) => inboxCategory)).toEqual(['Important', 'Urgent', 'Purchases']);
   });
 });

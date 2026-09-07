@@ -13,7 +13,7 @@ This phase is self-contained. The schema below is what you're building against; 
 The system is multi-tenant: a `company` can own multiple `apps`. A single `user` can belong to multiple `companies` (one login, many memberships). Permissions work on two independent axes:
 
 1. **`company_roles`** — fixed, global, four values only: `owner`, `admin`, `moderator`, `viewer`. Never editable. Never company-specific. No endpoint should ever allow creating, modifying, or deleting a row in this table — it is seeded once and stays that way permanently.
-2. **`company_titles`** — flexible, per-company, e.g. "Founder", "CMO". Purely organizational/display metadata, zero security implications. A company can define its own beyond the seeded defaults (founder/cco/cmo/cto).
+2. **`company_titles`** — flexible, per-company, e.g. "Founder", "CMO". Purely team/display metadata, zero security implications. A company can define its own beyond the seeded defaults (founder/cco/cmo/cto).
 
 A member's actual data access is controlled separately via `company_member_app_access` (which apps within the company they can see data for) — this becomes critical once event/output data starts flowing in later phases, but build the table and the access-granting logic now even though nothing reads it yet.
 

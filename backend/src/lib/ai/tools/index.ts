@@ -17,6 +17,7 @@ import { PUBLIC_TOOL_DEFINITIONS, TRUSTED_TOOL_DEFINITIONS, UNIFIED_TOOL_DEFINIT
 import type { PublicToolDependencies } from './tool-definition';
 import { WORKSPACE_TOOL_DEFINITIONS, type WorkspaceToolDependencies } from './workspace-tool-definitions';
 import type { TrustedEmailToolDependencies, TrustedEmailToolName } from './email-ingestion-tool-definitions';
+import type { TrustedAccountToolDependencies, TrustedAccountToolName } from './account-tool-definitions';
 import { CONVERSATION_TOOL_DEFINITIONS } from './conversation-tool-definitions';
 import type { AgentRuntimeDependencies } from '@/lib/ai/agents';
 import { AGENT_TOOL_DEFINITIONS } from './agent-tool-definitions';
@@ -25,6 +26,8 @@ import { webSearchTool, type WebSearchToolDependencies } from './web-search';
 import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
 import { APP_KEYS } from '@/lib/apps/registry';
 import type { ToolEventRecorder } from '@/lib/ai/events/service';
+import type { TeamService } from '@/lib/teams';
+import type { CostService } from '@/lib/costs/service';
 
 /** A tool name has exactly one registry entry. */
 export const TOOL_NAMES = UNIFIED_TOOL_DEFINITIONS.map(({ name }) => name) as [string, ...string[]];
@@ -36,6 +39,8 @@ const workspaceToolDefinitionsByName = new Map(WORKSPACE_TOOL_DEFINITIONS.map((d
 const trustedToolDefinitionsByName = new Map(TRUSTED_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
 const conversationToolDefinitionsByName = new Map(CONVERSATION_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
 const agentToolDefinitionsByName = new Map(AGENT_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
+export type TrustedToolName = TrustedEmailToolName | TrustedAccountToolName;
+export type TrustedToolDependencies = TrustedEmailToolDependencies & TrustedAccountToolDependencies;
 
 /** Input validation for the one canonical definition of each public tool. */
 export const toolInputSchemas: Record<string, z.ZodTypeAny> = Object.fromEntries(
@@ -52,7 +57,7 @@ export function isToolReadOnly(name: string, rawInput: unknown) {
 }
 export interface ToolDependencies extends RouterDependencies, DocumentParseDependencies, Pick<ImageCaptionToolDependencies, 'executeImageCaption'>, Pick<ImageCreateVisualIdentityToolDependencies, 'executeDescription'>, Pick<WebSearchToolDependencies, 'executeSearch'> {
   signal?: AbortSignal;
-  organizationKey?: string;
+  teamKey?: string;
   contentContext?: ToolContext;
   contentDependencies?: ContentToolDependencies;
   timeoutMs?: number;
@@ -71,11 +76,17 @@ export interface ToolDependencies extends RouterDependencies, DocumentParseDepen
   accountProfileService?: WorkspaceToolDependencies['accountProfile'];
   ticketService?: WorkspaceToolDependencies['tickets'];
   scopeTagService?: WorkspaceToolDependencies['scopeTags'];
+  commerceService?: WorkspaceToolDependencies['commerce'];
+  costService?: CostService;
+  appNotificationService?: WorkspaceToolDependencies['appNotifications'];
+  scopeService?: WorkspaceToolDependencies['scopes'];
+  teamService?: TeamService;
   conversationService?: AgentToolDependencies['conversations'];
   currentConversationKey?: string;
   currentReferenceImageKeys?: string[];
   agentDependencies?: AgentRuntimeDependencies;
   recordEvent?: ToolEventRecorder;
+  appScopeKey?: string;
   billing?: ToolBillingDependencies;
 }
 
@@ -91,7 +102,7 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
     if (toolName === imageCaptionTool.name) return imageCaptionTool.execute(rawInput, dependencies);
     if (toolName === imageCreateVisualIdentityTool.name) return imageCreateVisualIdentityTool.execute(rawInput, dependencies);
     if (toolName === webSearchTool.name) return webSearchTool.execute(rawInput, {
-      organizationKey: dependencies.contentContext.organizationKey,
+      teamKey: dependencies.contentContext.teamKey,
       executeSearch: dependencies.executeSearch,
       adapters: dependencies.adapters,
       env: dependencies.env,
@@ -120,6 +131,10 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
       accountProfile: dependencies.accountProfileService,
       tickets: dependencies.ticketService,
       scopeTags: dependencies.scopeTagService,
+      commerce: dependencies.commerceService,
+      costs: dependencies.costService,
+      appNotifications: dependencies.appNotificationService,
+      scopes: dependencies.scopeService,
       signal: dependencies.signal,
       timeoutMs: dependencies.timeoutMs,
       content: {
@@ -133,6 +148,7 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
     return (definition.execute as (input: unknown, dependencies: PublicToolDependencies) => Promise<unknown>)(rawInput, {
       context: dependencies.contentContext,
       requestKey: dependencies.requestKey,
+      teamService: dependencies.teamService,
       executeContent: dependencies.executeWorkspaceContent,
       content: {
         adapters: dependencies.adapters,
@@ -141,15 +157,18 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
         ingestion: { ...dependencies, ...dependencies.contentDependencies?.ingestion },
       },
     });
-  }, { recorder: dependencies.recordEvent, idempotencyKey: dependencies.requestKey, input: rawInput, ...dependencies.billing });
+  }, { recorder: dependencies.recordEvent, appScopeKey: dependencies.appScopeKey, idempotencyKey: dependencies.requestKey, input: rawInput, ...dependencies.billing });
 }
 
 /** Executes a system-only tool without exposing it to Core or model providers. */
-export async function runTrustedTool(name: TrustedEmailToolName, rawInput: unknown, dependencies: TrustedEmailToolDependencies): Promise<unknown> {
+export async function runTrustedTool(name: TrustedToolName, rawInput: unknown, dependencies: TrustedToolDependencies): Promise<unknown> {
   const definition = trustedToolDefinitionsByName.get(name);
   if (!definition) throw new Error(`Unknown trusted tool ${name}`);
   definition.inputSchema.parse(rawInput);
-  return observeToolExecution(name, dependencies.context, () => (definition.execute as (input: unknown, dependencies: TrustedEmailToolDependencies) => Promise<unknown>)(rawInput, dependencies), { appKey: APP_KEYS.SIGNAL, recorder: dependencies.recordEvent, input: rawInput });
+  if (name === 'account.delete') {
+    return (definition.execute as (input: unknown, dependencies: TrustedToolDependencies) => Promise<unknown>)(rawInput, dependencies);
+  }
+  return observeToolExecution(name, dependencies.context, () => (definition.execute as (input: unknown, dependencies: TrustedToolDependencies) => Promise<unknown>)(rawInput, dependencies), { appKey: APP_KEYS.SIGNAL, appScopeKey: 'appScopeKey' in dependencies ? dependencies.appScopeKey as string | undefined : undefined, recorder: dependencies.recordEvent, input: rawInput });
 }
 
 export { sanitizeAgentInput, sanitizedAgentMessageSchema } from './input-sanitizer';

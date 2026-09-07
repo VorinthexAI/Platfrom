@@ -8,7 +8,7 @@ export const channelParticipantSchema = z.object({
   key: z.string().cuid(),
   scopeKey: z.string().cuid(),
   channelKey: communicationChannelKeySchema,
-  userOrganizationKey: z.string().trim().min(1).max(160).optional(),
+  userTeamKey: z.string().trim().min(1).max(160).optional(),
   orchestratorKey: z.string().trim().min(1).max(160).optional(),
   lastReadMessageKey: z.string().cuid().optional(),
   joinedAt: z.string().datetime(),
@@ -16,8 +16,8 @@ export const channelParticipantSchema = z.object({
   updatedAt: z.string().datetime(),
   embedding: z.array(z.number().finite()).default([]),
 }).superRefine((participant, ctx) => {
-  if (Boolean(participant.userOrganizationKey) === Boolean(participant.orchestratorKey)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['userOrganizationKey'], message: 'Exactly one participant identity is required' });
+  if (Boolean(participant.userTeamKey) === Boolean(participant.orchestratorKey)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['userTeamKey'], message: 'Exactly one participant identity is required' });
   }
 });
 

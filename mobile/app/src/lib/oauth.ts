@@ -8,6 +8,7 @@ import * as WebBrowser from "expo-web-browser";
 import { Platform } from "react-native";
 
 import { getJson, postJson } from "./api-client";
+import { clearPendingReferralCode, readPendingReferralCode } from "./pending-referral-vault";
 
 export type OAuthProvider = "google" | "apple";
 
@@ -34,7 +35,10 @@ export function exchangeOAuthCode(code: string) {
 
 async function launchBrowserOAuth(provider: OAuthProvider) {
   const query = new URLSearchParams({ redirect_uri: MOBILE_OAUTH_REDIRECT_URI });
+  const referralCode = await readPendingReferralCode();
+  if (referralCode) query.set("referral_code", referralCode);
   const start = await getJson<OAuthStart>(`/auth/mobile/oauth/${provider}?${query}`);
+  if (referralCode) await clearPendingReferralCode().catch(() => undefined);
   const result = await WebBrowser.openAuthSessionAsync(start.authorization_url, MOBILE_OAUTH_REDIRECT_URI);
   if (result.type !== "success") return false;
 
@@ -48,6 +52,7 @@ async function launchBrowserOAuth(provider: OAuthProvider) {
 }
 
 export async function launchOAuthProvider(provider: OAuthProvider) {
+  const referralCode = await readPendingReferralCode();
   if (provider === "google" && Platform.OS === "android") {
     if (!GOOGLE_WEB_CLIENT_ID) throw new Error("Google sign in is not configured.");
     GoogleSignin.configure({ webClientId: GOOGLE_WEB_CLIENT_ID });
@@ -57,7 +62,8 @@ export async function launchOAuthProvider(provider: OAuthProvider) {
     if (response.type !== "success") return false;
     if (!response.data.idToken) throw new Error("Google returned an incomplete sign-in response.");
     try {
-      await postJson<{ id_token: string }, unknown>("/auth/mobile/google", { id_token: response.data.idToken });
+      await postJson<{ id_token: string; referral_code?: string }, unknown>("/auth/mobile/google", { id_token: response.data.idToken, ...(referralCode ? { referral_code: referralCode } : {}) });
+      if (referralCode) await clearPendingReferralCode().catch(() => undefined);
       return true;
     } catch (error) {
       if (!isAxiosError(error) || (error.response?.status !== 404 && error.response?.status !== 405)) throw error;
@@ -97,11 +103,13 @@ export async function launchOAuthProvider(provider: OAuthProvider) {
           return "";
         }
       });
-      await postJson<{ id_token: string; nonce: string; name?: string }, unknown>("/auth/mobile/apple", {
+      await postJson<{ id_token: string; nonce: string; name?: string; referral_code?: string }, unknown>("/auth/mobile/apple", {
         id_token: credential.identityToken,
         nonce,
         ...(pendingName ? { name: pendingName } : {}),
+        ...(referralCode ? { referral_code: referralCode } : {}),
       });
+      if (referralCode) await clearPendingReferralCode().catch(() => undefined);
       await SecureStore.deleteItemAsync(PENDING_APPLE_NAME_KEY);
       return true;
     } catch (error) {

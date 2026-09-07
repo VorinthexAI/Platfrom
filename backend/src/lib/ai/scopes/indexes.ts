@@ -5,9 +5,9 @@ import type { ScopesSetupDatabase } from './types';
 export async function ensureScopesCollection(database: ScopesSetupDatabase = db): Promise<void> {
   const collection = database.collection(SCOPES_COLLECTION);
   if (!(await collection.exists())) await collection.create();
-  await collection.ensureIndex({ type: 'persistent', fields: ['organizationKey', 'slug'], unique: true });
-  await collection.ensureIndex({ type: 'persistent', fields: ['organizationKey'], unique: false });
-  await collection.ensureIndex({ type: 'persistent', fields: ['organizationKey', 'position'], unique: false });
+  await collection.ensureIndex({ type: 'persistent', fields: ['teamKey', 'slug'], unique: true });
+  await collection.ensureIndex({ type: 'persistent', fields: ['teamKey'], unique: false });
+  await collection.ensureIndex({ type: 'persistent', fields: ['teamKey', 'position'], unique: false });
 }
 
 export async function ensureScopeScopesCollection(database: ScopesSetupDatabase = db): Promise<void> {
@@ -21,9 +21,9 @@ export async function ensureScopeScopesCollection(database: ScopesSetupDatabase 
 export async function ensureScopeMembersCollection(database: ScopesSetupDatabase = db): Promise<void> {
   const collection = database.collection(SCOPE_MEMBERS_COLLECTION);
   if (!(await collection.exists())) await collection.create();
-  await collection.ensureIndex({ type: 'persistent', fields: ['scopeKey', 'userOrganizationKey'], unique: true });
+  await collection.ensureIndex({ type: 'persistent', fields: ['scopeKey', 'userTeamKey'], unique: true });
   await collection.ensureIndex({ type: 'persistent', fields: ['scopeKey'], unique: false });
-  await collection.ensureIndex({ type: 'persistent', fields: ['userOrganizationKey'], unique: false });
+  await collection.ensureIndex({ type: 'persistent', fields: ['userTeamKey'], unique: false });
   await collection.ensureIndex({ type: 'persistent', fields: ['scopeKey', 'status'], unique: false });
-  await collection.ensureIndex({ type: 'persistent', fields: ['userOrganizationKey', 'source'], unique: false });
+  await collection.ensureIndex({ type: 'persistent', fields: ['userTeamKey', 'source'], unique: false });
 }

@@ -4,6 +4,7 @@ import {
   consumeFounderRecoveryAndStartSetup,
   consumeSetupAuthorizationAndStartSetup,
   consumeTotpChallengeAndAdvanceMembership,
+  deleteAuthChallenge,
   exchangeFounderTotpForRecovery,
   getAuthChallengeByTokenHash,
   insertAuthChallenge,
@@ -21,18 +22,21 @@ import QRCode from 'qrcode';
 import { z } from 'zod';
 import { sendBrandedEmail } from './email';
 import { defaultNameFromEmail, hashUserEmail, normalizeEmail, upsertUserByEmail } from './users';
-import { countryCodeSchema, getUserByEmailHash, getUserById, getUserByRefreshTokenHash, revokeLegacyRefreshToken, updateUser, type User } from '@/lib/db/users.node';
-import { getAuthSessionById, getAuthSessionByRefreshTokenHash, insertAuthSession, revokeAuthSession } from '@/lib/db/auth-sessions.node';
-import { provisionPersonalAuthContext } from '@/lib/db/personal-auth-context.node';
-import { getOrganizationById } from '@/lib/db/organizations.node';
+import { countryCodeSchema, getUserByEmailHash, getUserById, touchUserLastLogin, updateUser, type User } from '@/lib/db/users.node';
+import { getAuthSessionById, getAuthSessionByRefreshTokenHash, getSelectedTeamMfaState, insertAuthSession, revokeAuthSession } from '@/lib/db/auth-sessions.node';
+import { provisionPersonalAuthContext, selectPersonalAuthContext } from '@/lib/db/personal-auth-context.node';
+import { getTeamById } from '@/lib/db/teams.node';
 import {
-  getUserOrganizationById,
-  listActiveUserOrganizationsByUser,
-  type UserOrganization,
-} from '@/lib/db/user-organization.node';
+  getUserTeamById,
+  listActiveUserTeamsByUser,
+  type UserTeam,
+} from '@/lib/db/user-team.node';
 import { generateAlias, pickWelcomeLine } from '@/lib/alias';
 import { redisConnection } from '@/lib/redis';
 import { approveHandoff, createHandoffSecret, HANDOFF_CLAIM_WINDOW_MS } from './auth-handoff';
+import { rawReferralCodeSchema } from '@/lib/referrals/contracts';
+import { normalizeReferralCode } from '@/lib/referrals/service';
+import { completeReferralForNewlyVerifiedUser } from './auth-referrals';
 
 const EMAIL_LINK_TTL_MS = 15 * 60 * 1000;
 const TOTP_CHALLENGE_TTL_MS = 10 * 60 * 1000;
@@ -61,29 +65,29 @@ export interface AuthIdentity {
   identityType: AuthIdentityType;
   sessionId?: string;
   founderAssured?: boolean;
-  founderMembershipKey?: string;
-  founderMfaVersion?: number;
+  teamMembershipKey?: string;
+  teamMfaVersion?: number;
 }
 
 interface LoginIdentity {
   type: LoginIdentityType;
   key: string;
   linkKey: string;
-  organizationId: string;
-  orgRole: UserOrganization['orgRole'];
+  teamKey: string;
+  teamRole: UserTeam['teamRole'];
   email: string;
   emailHash: string;
   name: string | null;
-  organizationTitle: string | null;
+  teamTitle: string | null;
   orchestratorKey: string | null;
-  organizationIsRoot: boolean;
-  organizationIsPersonal: boolean;
-  organizationMfaEnabled: boolean;
+  teamIsRoot: boolean;
+  teamIsPersonal: boolean;
+  teamMfaEnabled: boolean;
   isMfaEnabled: boolean;
   totpSecret: string | null;
   lastTotpTimeStep: number | null;
-  mfaVersion: number;
-  mfaRecoveryPending: boolean;
+  teamMfaVersion: number;
+  teamMfaRecoveryPending: boolean;
 }
 
 type ChallengeIdentityType = typeof authIdentityTypeSchema._type;
@@ -132,11 +136,21 @@ async function signAccessTokenPayload(payload: string) {
   return sha256(`${payload}.${requiredEnv('ACCESS_TOKEN_SECRET')}`);
 }
 
-async function createSignedOAuthState(provider: OAuthProvider, redirectUri: string, mobileRedirectUri?: string) {
+const signedOAuthStateSchema = z.object({
+  provider: z.enum(['google', 'apple']),
+  redirectUri: z.string().url(),
+  mobileRedirectUri: z.string().url().optional(),
+  referralCode: rawReferralCodeSchema.nullable().default(null),
+  nonce: z.string().min(1),
+  exp: z.number(),
+}).strict();
+
+async function createSignedOAuthState(provider: OAuthProvider, redirectUri: string, mobileRedirectUri?: string, referralCode?: string) {
   const payload = jsonBase64Url({
     provider,
     redirectUri,
     mobileRedirectUri,
+    referralCode: referralCode ?? null,
     nonce: randomToken('oauth_'),
     exp: Date.now() + 10 * 60 * 1000,
   });
@@ -149,8 +163,8 @@ async function verifySignedOAuthState(provider: OAuthProvider, state: string, re
   const expected = await signAccessTokenPayload(payload);
   if (!timingSafeEqual(signature, expected)) return false;
   try {
-    const parsed = JSON.parse(base64UrlDecode(payload)) as { provider?: string; redirectUri?: string; mobileRedirectUri?: string; exp?: number };
-    return parsed.provider === provider && parsed.redirectUri === redirectUri && typeof parsed.exp === 'number' && parsed.exp > Date.now()
+    const parsed = signedOAuthStateSchema.parse(JSON.parse(base64UrlDecode(payload)));
+    return parsed.provider === provider && parsed.redirectUri === redirectUri && parsed.exp > Date.now()
       ? parsed
       : null;
   } catch {
@@ -160,37 +174,37 @@ async function verifySignedOAuthState(provider: OAuthProvider, state: string, re
 
 async function membershipIdentity(
   user: User,
-  membership: UserOrganization,
+  membership: UserTeam,
 ): Promise<LoginIdentity | null> {
-  const organization = await getOrganizationById(membership.organizationId);
-  if (!organization?.isActive) return null;
+  const team = await getTeamById(membership.teamKey);
+  if (!team?.isActive) return null;
   return {
-    type: loginIdentityTypeForMembership(membership.orgRole, organization.is_root),
+    type: loginIdentityTypeForMembership(membership.teamRole, team.is_root),
     key: user.key,
     linkKey: membership.key,
-    organizationId: membership.organizationId,
-    orgRole: membership.orgRole,
+    teamKey: membership.teamKey,
+    teamRole: membership.teamRole,
     email: user.email,
     emailHash: user.emailHash,
     name: user.name,
-    organizationTitle: membership.orgTitle,
+    teamTitle: membership.teamTitle,
     orchestratorKey: membership.orchestratorKey,
-    organizationIsRoot: organization.is_root,
-    organizationIsPersonal: organization.slug === `personal-${user.key}`,
-    organizationMfaEnabled: organization.mfa_enabled,
+    teamIsRoot: team.is_root,
+    teamIsPersonal: team.slug === `personal-${user.key}`,
+    teamMfaEnabled: team.mfa_enabled,
     isMfaEnabled: membership.isMfaEnabled,
     totpSecret: membership.totpSecret,
     lastTotpTimeStep: membership.lastTotpTimeStep,
-    mfaVersion: membership.mfaVersion,
-    mfaRecoveryPending: membership.mfaRecoveryPending,
+    teamMfaVersion: membership.teamMfaVersion,
+    teamMfaRecoveryPending: membership.teamMfaRecoveryPending,
   };
 }
 
-export function loginIdentityTypeForMembership(orgRole: UserOrganization['orgRole'], organizationIsRoot: boolean): LoginIdentityType {
-  return orgRole === 'owner' && organizationIsRoot ? 'superAdmin' : 'member';
+export function loginIdentityTypeForMembership(teamRole: UserTeam['teamRole'], teamIsRoot: boolean): LoginIdentityType {
+  return teamRole === 'owner' && teamIsRoot ? 'superAdmin' : 'member';
 }
 
-const membershipRoleRank: Record<UserOrganization['orgRole'], number> = {
+const membershipRoleRank: Record<UserTeam['teamRole'], number> = {
   owner: 4,
   admin: 3,
   moderator: 2,
@@ -200,50 +214,50 @@ const membershipRoleRank: Record<UserOrganization['orgRole'], number> = {
 
 function strongestIdentity(identities: LoginIdentity[]): LoginIdentity | null {
   return identities.reduce<LoginIdentity | null>((best, identity) => {
-    if (!best || membershipRoleRank[identity.orgRole] > membershipRoleRank[best.orgRole]) return identity;
+    if (!best || membershipRoleRank[identity.teamRole] > membershipRoleRank[best.teamRole]) return identity;
     return best;
   }, null);
 }
 
-async function organizationMembershipIdentity(user: User): Promise<LoginIdentity | null> {
-  const memberships = await listActiveUserOrganizationsByUser(user.key);
+async function teamMembershipIdentity(user: User): Promise<LoginIdentity | null> {
+  const memberships = await listActiveUserTeamsByUser(user.key);
   const identities = (await Promise.all(memberships.map((membership) => membershipIdentity(user, membership))))
     .filter((identity): identity is LoginIdentity => identity !== null);
   // MFA-enforcing memberships always win over ordinary personal ownership.
-  const root = identities.find((identity) => identity.organizationIsRoot && identity.organizationMfaEnabled);
+  const root = identities.find((identity) => identity.teamIsRoot && identity.teamMfaEnabled);
   if (root) return root;
-  const enforced = identities.find((identity) => identity.organizationMfaEnabled);
+  const enforced = identities.find((identity) => identity.teamMfaEnabled);
   if (enforced) return enforced;
-  // A real organization membership takes precedence over the automatically
+  // A real team membership takes precedence over the automatically
   // provisioned personal workspace, even when personal ownership ranks higher.
-  return strongestIdentity(identities.filter((identity) => !identity.organizationIsPersonal))
+  return strongestIdentity(identities.filter((identity) => !identity.teamIsPersonal))
     ?? strongestIdentity(identities);
 }
 
-async function rootOrganizationMembershipIdentity(user: User): Promise<LoginIdentity | null> {
-  const memberships = await listActiveUserOrganizationsByUser(user.key);
+async function rootTeamMembershipIdentity(user: User): Promise<LoginIdentity | null> {
+  const memberships = await listActiveUserTeamsByUser(user.key);
   for (const membership of memberships) {
     const identity = await membershipIdentity(user, membership);
-    if (identity?.organizationIsRoot) return identity;
+    if (identity?.teamIsRoot) return identity;
   }
   return null;
 }
 
 /**
- * Whether ANY of the user's active memberships belongs to an organization
- * that enforces MFA. `organization.mfa_enabled` is the single source of
+ * Whether ANY of the user's active memberships belongs to a team
+ * that enforces MFA. `team.mfa_enabled` is the single source of
  * truth for that decision — `is_root` only routes WHICH sign-in front door
  * is used (founders gate vs the regular TOTP flow), never whether MFA is
  * required. Prefers a root membership so founders always land on their
  * gate.
  */
 async function mfaEnforcedMembershipIdentity(user: User): Promise<LoginIdentity | null> {
-  const memberships = await listActiveUserOrganizationsByUser(user.key);
+  const memberships = await listActiveUserTeamsByUser(user.key);
   let enforced: LoginIdentity | null = null;
   for (const membership of memberships) {
     const identity = await membershipIdentity(user, membership);
-    if (!identity?.organizationMfaEnabled) continue;
-    if (identity.organizationIsRoot) return identity;
+    if (!identity?.teamMfaEnabled) continue;
+    if (identity.teamIsRoot) return identity;
     enforced ??= identity;
   }
   return enforced;
@@ -253,32 +267,43 @@ export async function findLoginIdentityByEmail(email: string): Promise<LoginIden
   const normalized = normalizeEmail(email);
   const user = await getUserByEmailHash(await hashUserEmail(normalized));
   if (!user) return null;
-  return organizationMembershipIdentity(user);
+  return teamMembershipIdentity(user);
 }
 
 async function getLoginIdentityByMembership(
   identityType: LoginIdentityType,
   identityKey: string,
-  membershipKey: string,
+  teamMembershipKey: string,
 ): Promise<LoginIdentity | null> {
   const [user, membership] = await Promise.all([
     getUserById(identityKey),
-    getUserOrganizationById(membershipKey),
+    getUserTeamById(teamMembershipKey),
   ]);
   if (!user || !membership || membership.userId !== user.key || membership.status !== 'active') return null;
   const identity = await membershipIdentity(user, membership);
   return identity?.type === identityType ? identity : null;
 }
 
-async function getChallengeLoginIdentity(challenge: Pick<AuthChallenge, 'identityKey' | 'identityType' | 'membershipKey'>) {
-  if (challenge.identityType === 'user' || !challenge.membershipKey) return null;
-  return getLoginIdentityByMembership(challenge.identityType, challenge.identityKey, challenge.membershipKey);
+async function getChallengeLoginIdentity(challenge: Pick<AuthChallenge, 'identityKey' | 'identityType' | 'teamMembershipKey'>) {
+  if (challenge.identityType === 'user' || !challenge.teamMembershipKey) return null;
+  return getLoginIdentityByMembership(challenge.identityType, challenge.identityKey, challenge.teamMembershipKey);
 }
 
 export function getAuthSessionPolicy(identityType: AuthIdentityType, founderAssured = false) {
   return identityType === 'superAdmin' || founderAssured
     ? { accessMaxAgeSeconds: FOUNDER_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: FOUNDER_REFRESH_MAX_AGE_SECONDS }
     : { accessMaxAgeSeconds: STANDARD_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: STANDARD_REFRESH_MAX_AGE_SECONDS };
+}
+
+export function teamAssurance(identity: AuthIdentity | null | undefined) {
+  const teamMembershipKey = identity?.teamMembershipKey;
+  const teamMfaVersion = identity?.teamMfaVersion;
+  return teamMembershipKey && typeof teamMfaVersion === 'number' ? { teamMembershipKey, teamMfaVersion } : undefined;
+}
+
+export function authenticatedTeamContext(identity: AuthIdentity) {
+  const assurance = teamAssurance(identity);
+  return { authenticatedUserKey: identity.key, ...(assurance ? { teamAssurance: assurance } : {}) };
 }
 
 export function resolveRefreshedIdentityType(
@@ -304,8 +329,8 @@ export async function createAccessToken(identity: AuthIdentity | string, session
     sid: normalized.sessionId,
     identityType: normalized.identityType,
     founder: normalized.founderAssured === true,
-    founderMembershipKey: normalized.founderMembershipKey,
-    founderMfaVersion: normalized.founderMfaVersion,
+    teamMembershipKey: normalized.teamMembershipKey,
+    teamMfaVersion: normalized.teamMfaVersion,
     iat: now,
     exp: Math.min(now + ttlSeconds, sessionExpiry),
   }));
@@ -326,26 +351,32 @@ export async function verifyAccessToken(token: string): Promise<AuthIdentity | n
       sid?: string;
       identityType?: AuthIdentityType;
       founder?: boolean;
-      founderMembershipKey?: string;
-      founderMfaVersion?: number;
+      teamMembershipKey?: string;
+      teamMfaVersion?: number;
       exp?: number;
     };
     if (typeof parsed.sub !== 'string' || !parsed.sub.trim() || typeof parsed.exp !== 'number' || parsed.exp <= Math.floor(Date.now() / 1000)) return null;
     if (parsed.sid !== undefined && (typeof parsed.sid !== 'string' || !parsed.sid.trim())) return null;
     if (parsed.identityType !== undefined && !['user', 'member', 'superAdmin'].includes(parsed.identityType)) return null;
-    if (parsed.founderMembershipKey !== undefined && typeof parsed.founderMembershipKey !== 'string') return null;
-    if (parsed.founderMfaVersion !== undefined && typeof parsed.founderMfaVersion !== 'number') return null;
+    if (parsed.teamMembershipKey !== undefined && typeof parsed.teamMembershipKey !== 'string') return null;
+    if (parsed.teamMfaVersion !== undefined && typeof parsed.teamMfaVersion !== 'number') return null;
     if (parsed.sid) {
       const session = await getAuthSessionById(parsed.sid);
       if (!session || session.userId !== parsed.sub || session.revokedAt || !isRefreshTokenActive(session.expiresAt)) return null;
+      const selected = await getSelectedTeamMfaState(parsed.sub);
+      if (selected?.mfaEnabled && (
+        !selected.membershipMfaEnabled
+        || parsed.teamMembershipKey !== selected.teamMembershipKey
+        || parsed.teamMfaVersion !== selected.teamMfaVersion
+      )) return null;
     }
     return {
       key: parsed.sub,
       identityType: parsed.identityType ?? 'user',
       ...(parsed.sid ? { sessionId: parsed.sid } : {}),
       founderAssured: parsed.founder === true,
-      ...(parsed.founderMembershipKey ? { founderMembershipKey: parsed.founderMembershipKey } : {}),
-      ...(typeof parsed.founderMfaVersion === 'number' ? { founderMfaVersion: parsed.founderMfaVersion } : {}),
+      ...(parsed.teamMembershipKey ? { teamMembershipKey: parsed.teamMembershipKey } : {}),
+      ...(typeof parsed.teamMfaVersion === 'number' ? { teamMfaVersion: parsed.teamMfaVersion } : {}),
     };
   } catch {
     return null;
@@ -353,19 +384,20 @@ export async function verifyAccessToken(token: string): Promise<AuthIdentity | n
 }
 
 export async function issueTokens(identity: LoginIdentity, sessionExpiresAt?: Date, founderAssured = false, mfaAssured = founderAssured): Promise<SessionTokens> {
-  const policy = getAuthSessionPolicy(identity.type, founderAssured);
+  const sessionIdentityType: AuthIdentityType = founderAssured ? identity.type : 'user';
+  const policy = getAuthSessionPolicy(sessionIdentityType, founderAssured);
   const issuedAt = Date.now();
   sessionExpiresAt ??= new Date(issuedAt + policy.refreshMaxAgeSeconds * 1000);
   const remainingSeconds = Math.max(0, Math.floor((sessionExpiresAt.getTime() - issuedAt) / 1000));
   const sessionId = newId();
   const accessToken = await createAccessToken({
     key: identity.key,
-    identityType: identity.type,
+    identityType: sessionIdentityType,
     sessionId,
     founderAssured,
-    ...(founderAssured ? {
-      founderMembershipKey: identity.linkKey,
-      founderMfaVersion: identity.mfaVersion,
+    ...(mfaAssured ? {
+      teamMembershipKey: identity.linkKey,
+      teamMfaVersion: identity.teamMfaVersion,
     } : {}),
   }, sessionExpiresAt);
   const refreshToken = randomToken(founderAssured ? 'vrtx_refresh_founder_' : 'vrtx_refresh_');
@@ -374,15 +406,16 @@ export async function issueTokens(identity: LoginIdentity, sessionExpiresAt?: Da
   await insertAuthSession({
     key: sessionId,
     userId: identity.key,
-    identityType: identity.type,
+    identityType: sessionIdentityType,
     refreshTokenHash,
     expiresAt: sessionExpiresAt.toISOString(),
     revokedAt: null,
-    founderMembershipKey: mfaAssured ? identity.linkKey : null,
-    founderMfaVersion: mfaAssured ? identity.mfaVersion : null,
+    teamMembershipKey: mfaAssured ? identity.linkKey : null,
+    teamMfaVersion: mfaAssured ? identity.teamMfaVersion : null,
     createdAt: now,
     updatedAt: now,
   });
+  await touchUserLastLogin(identity.key, now);
   return { accessToken, refreshToken, accessTokenMaxAgeSeconds: Math.min(policy.accessMaxAgeSeconds, remainingSeconds), refreshTokenMaxAgeSeconds: remainingSeconds, sessionExpiresAt: sessionExpiresAt.toISOString() };
 }
 
@@ -403,11 +436,12 @@ export async function issueUserTokens(user: Pick<User, 'key'>, sessionExpiresAt?
     refreshTokenHash,
     expiresAt: sessionExpiresAt.toISOString(),
     revokedAt: null,
-    founderMembershipKey: null,
-    founderMfaVersion: null,
+    teamMembershipKey: null,
+    teamMfaVersion: null,
     createdAt: now,
     updatedAt: now,
   });
+  await touchUserLastLogin(user.key, now);
   return { accessToken, refreshToken, accessTokenMaxAgeSeconds: Math.min(policy.accessMaxAgeSeconds, remainingSeconds), refreshTokenMaxAgeSeconds: remainingSeconds, sessionExpiresAt: sessionExpiresAt.toISOString() };
 }
 
@@ -420,33 +454,31 @@ export async function issueUserTokens(user: Pick<User, 'key'>, sessionExpiresAt?
 export async function refreshAccessToken(refreshToken: string): Promise<SessionTokens | null> {
   const tokenHash = await sha256(refreshToken);
   const session = await getAuthSessionByRefreshTokenHash(tokenHash);
-  const legacyUser = session ? null : await getUserByRefreshTokenHash(tokenHash);
-  const user = await getUserById(session?.userId ?? legacyUser?.key ?? '');
-  const expiresAt = session?.expiresAt ?? legacyUser?.refreshTokenExpiresAt;
-  if (!user || session?.revokedAt || !isRefreshTokenActive(expiresAt ?? null)) return null;
-  const mfaMembershipKey = session?.founderMembershipKey ?? legacyUser?.refreshFounderMembershipKey;
-  const mfaVersion = session?.founderMfaVersion ?? legacyUser?.refreshFounderMfaVersion;
-  const mfaAssured = Boolean(mfaMembershipKey) && typeof mfaVersion === 'number';
+  if (!session || session.revokedAt || !isRefreshTokenActive(session.expiresAt)) return null;
+  const user = await getUserById(session.userId);
+  if (!user) return null;
+  const expiresAt = session.expiresAt;
+  const mfaTeamMembershipKey = session.teamMembershipKey;
+  const teamMfaVersion = session.teamMfaVersion;
+  const mfaAssured = Boolean(mfaTeamMembershipKey) && typeof teamMfaVersion === 'number';
   const storedIdentityType = session?.identityType;
   const needsMembership = storedIdentityType === 'member' || storedIdentityType === 'superAdmin';
   const identity = mfaAssured
-    ? await getLoginIdentityByMembership('superAdmin', user.key, mfaMembershipKey!)
-      ?? await getLoginIdentityByMembership('member', user.key, mfaMembershipKey!)
-    : needsMembership || !session
-      ? await organizationMembershipIdentity(user)
+    ? await getLoginIdentityByMembership('superAdmin', user.key, mfaTeamMembershipKey!)
+      ?? await getLoginIdentityByMembership('member', user.key, mfaTeamMembershipKey!)
+    : needsMembership
+      ? await teamMembershipIdentity(user)
       : null;
   if (needsMembership && !identity) return null;
   if (storedIdentityType === 'superAdmin' && identity?.type !== 'superAdmin') return null;
-  if (identity?.organizationMfaEnabled && (
+  if (identity?.teamMfaEnabled && (
     !mfaAssured ||
     !identity.isMfaEnabled ||
-    identity.linkKey !== mfaMembershipKey ||
-    identity.mfaVersion !== mfaVersion
+    identity.linkKey !== mfaTeamMembershipKey ||
+    identity.teamMfaVersion !== teamMfaVersion
   )) return null;
-  const founderAssured = refreshToken.startsWith('vrtx_refresh_founder_') && identity?.organizationIsRoot === true && mfaAssured;
-  // Legacy durable sessions without MFA were user sessions. Never infer a
-  // stronger identity from organization membership during token refresh.
-  const identityType = resolveRefreshedIdentityType(storedIdentityType, identity?.type, Boolean(session), mfaAssured);
+  const founderAssured = refreshToken.startsWith('vrtx_refresh_founder_') && identity?.teamIsRoot === true && mfaAssured;
+  const identityType = resolveRefreshedIdentityType(storedIdentityType, identity?.type, true, mfaAssured);
   const policy = getAuthSessionPolicy(identityType, founderAssured);
   const sessionExpiresAt = new Date(Math.min(
     Date.parse(expiresAt!),
@@ -458,11 +490,11 @@ export async function refreshAccessToken(refreshToken: string): Promise<SessionT
     {
       key: identity?.key ?? user.key,
       identityType,
-      ...(session ? { sessionId: session.key } : {}),
+      sessionId: session.key,
       founderAssured,
-      ...(founderAssured && identity ? {
-        founderMembershipKey: identity.linkKey,
-        founderMfaVersion: identity.mfaVersion,
+      ...(mfaAssured && identity ? {
+        teamMembershipKey: identity.linkKey,
+        teamMfaVersion: identity.teamMfaVersion,
       } : {}),
     },
     sessionExpiresAt,
@@ -479,15 +511,11 @@ export async function refreshAccessToken(refreshToken: string): Promise<SessionT
 export async function refreshTokenMatchesIdentity(refreshToken: string, identity: AuthIdentity): Promise<boolean> {
   const tokenHash = await sha256(refreshToken);
   const session = await getAuthSessionByRefreshTokenHash(tokenHash);
-  if (session) {
-    return session.key === identity.sessionId
-      && session.userId === identity.key
-      && !session.revokedAt
-      && isRefreshTokenActive(session.expiresAt);
-  }
-  if (identity.sessionId) return false;
-  const legacyUser = await getUserByRefreshTokenHash(tokenHash);
-  return legacyUser?.key === identity.key && isRefreshTokenActive(legacyUser.refreshTokenExpiresAt);
+  return Boolean(session)
+    && session!.key === identity.sessionId
+    && session!.userId === identity.key
+    && !session!.revokedAt
+    && isRefreshTokenActive(session!.expiresAt);
 }
 
 export async function revokeSession(identity: AuthIdentity, refreshToken?: string | null): Promise<boolean> {
@@ -495,20 +523,15 @@ export async function revokeSession(identity: AuthIdentity, refreshToken?: strin
   if (!refreshToken) return false;
   const session = await getAuthSessionByRefreshTokenHash(await sha256(refreshToken));
   const revokedAt = new Date().toISOString();
-  if (session) {
-    if (session.userId !== identity.key) return false;
-    return revokeAuthSession(session.key, identity.key, revokedAt);
-  }
-  return revokeLegacyRefreshToken(identity.key, await sha256(refreshToken), revokedAt);
+  if (!session || session.userId !== identity.key) return false;
+  return revokeAuthSession(session.key, identity.key, revokedAt);
 }
 
 export async function revokeRefreshSession(refreshToken: string): Promise<boolean> {
   const tokenHash = await sha256(refreshToken);
   const session = await getAuthSessionByRefreshTokenHash(tokenHash);
   const revokedAt = new Date().toISOString();
-  if (session) return revokeAuthSession(session.key, session.userId, revokedAt);
-  const legacyUser = await getUserByRefreshTokenHash(tokenHash);
-  return legacyUser ? revokeLegacyRefreshToken(legacyUser.key, tokenHash, revokedAt) : false;
+  return session ? revokeAuthSession(session.key, session.userId, revokedAt) : false;
 }
 
 export function isRefreshTokenActive(expiresAt: string | null, now = Date.now()): boolean {
@@ -534,24 +557,45 @@ export function isChallengeUsableForPurpose<T extends Pick<AuthChallenge, 'kind'
   );
 }
 
+const MFA_CHALLENGE_MAX_ATTEMPTS = 5;
+const MFA_CHALLENGE_ATTEMPT_WINDOW_SECONDS = 10 * 60;
+
+async function mfaChallengeThrottled(storedTokenHash: string) {
+  try {
+    return Number(await redisConnection.get(`auth:mfa-attempts:${storedTokenHash}`) ?? 0) >= MFA_CHALLENGE_MAX_ATTEMPTS;
+  } catch {
+    return false;
+  }
+}
+
+async function recordFailedMfaChallengeAttempt(storedTokenHash: string) {
+  try {
+    const key = `auth:mfa-attempts:${storedTokenHash}`;
+    const count = await redisConnection.incr(key);
+    if (count === 1) await redisConnection.expire(key, MFA_CHALLENGE_ATTEMPT_WINDOW_SECONDS);
+  } catch {
+    // The public auth IP limiter remains fail-closed when Redis is unavailable.
+  }
+}
+
 export async function createChallenge(
   identityKey: string,
   kind: ChallengeKind,
   ttlMs: number,
   identityType: ChallengeIdentityType = 'user',
-  options: { withHandoff?: boolean; membershipKey?: string } = {},
+  options: { withHandoff?: boolean; teamMembershipKey?: string; scopeKey?: string; referralCode?: string } = {},
 ) {
   const prepared = await prepareChallenge(identityKey, kind, ttlMs, identityType, options);
   await insertAuthChallenge(prepared.document);
   return prepared.result;
 }
 
-async function prepareChallenge(
+export async function prepareChallenge(
   identityKey: string,
   kind: ChallengeKind,
   ttlMs: number,
   identityType: ChallengeIdentityType,
-  options: { withHandoff?: boolean; membershipKey?: string } = {},
+  options: { withHandoff?: boolean; teamMembershipKey?: string; scopeKey?: string; referralCode?: string } = {},
 ) {
   const token = randomToken(`vrtx_${kind}_`);
   const publicTokenHash = await createChallengeTokenHash(token);
@@ -564,7 +608,9 @@ async function prepareChallenge(
     key: newId(),
     identityKey,
     identityType,
-    membershipKey: options.membershipKey ?? null,
+    teamMembershipKey: options.teamMembershipKey ?? null,
+    scopeKey: options.scopeKey ?? null,
+    referralCode: options.referralCode ?? null,
     kind,
     tokenHash: storedTokenHash,
     expiresAt: expiresAt.toISOString(),
@@ -584,11 +630,12 @@ async function prepareChallenge(
 export async function createTotpChallengeForIdentity(
   identityType: LoginIdentityType,
   identityKey: string,
-  membershipKey: string,
+  teamMembershipKey: string,
   kind: 'totp' | 'founder_totp' | 'founder_setup' = 'totp',
+  scopeKey?: string,
 ): Promise<TotpChallengeValidationResult | null> {
-  const auth = await getLoginIdentityByMembership(identityType, identityKey, membershipKey);
-  if (!auth) return null;
+  const auth = await getLoginIdentityByMembership(identityType, identityKey, teamMembershipKey);
+  if (!auth?.teamMfaEnabled) return null;
 
   const founderChallenge = kind !== 'totp';
   if (founderChallenge) {
@@ -603,7 +650,7 @@ export async function createTotpChallengeForIdentity(
     kind,
     founderChallenge ? FOUNDER_CHALLENGE_TTL_MS : TOTP_CHALLENGE_TTL_MS,
     auth.type,
-    { membershipKey: auth.linkKey },
+    { teamMembershipKey: auth.linkKey, scopeKey },
   );
   return {
     status: auth.isMfaEnabled ? 'totp_required' : 'totp_setup_required',
@@ -623,7 +670,8 @@ export async function consumeChallenge(tokenHash: string, kind: ChallengeKind) {
     id: updated.key,
     identityKey: updated.identityKey,
     identityType: updated.identityType,
-    membershipKey: updated.membershipKey,
+    teamMembershipKey: updated.teamMembershipKey,
+    referralCode: updated.referralCode,
     kind: updated.kind,
     userId: updated.identityType === 'user' ? updated.identityKey : undefined,
     expiresAt: new Date(updated.expiresAt),
@@ -664,8 +712,8 @@ function requiredEnv(name: string) {
   return value;
 }
 
-export async function buildOAuthAuthorizationUrl(provider: OAuthProvider, redirectUri: string, mobileRedirectUri?: string) {
-  const state = await createSignedOAuthState(provider, redirectUri, mobileRedirectUri);
+export async function buildOAuthAuthorizationUrl(provider: OAuthProvider, redirectUri: string, mobileRedirectUri?: string, referralCode?: string) {
+  const state = await createSignedOAuthState(provider, redirectUri, mobileRedirectUri, referralCode);
   if (provider === 'google') {
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.searchParams.set('client_id', requiredEnv('GOOGLE_OAUTH_CLIENT_ID'));
@@ -801,7 +849,7 @@ async function buildAppleClientSecret() {
     kid: requiredEnv('APPLE_OAUTH_KEY_ID'),
   };
   const payload = {
-    iss: requiredEnv('APPLE_OAUTH_TEAM_ID'),
+    iss: requiredEnv('APPLE_OAUTH_TEAM_KEY'),
     iat: now,
     exp: now + 60 * 60 * 24 * 30,
     aud: 'https://appleid.apple.com',
@@ -865,29 +913,21 @@ async function exchangeAppleCode(code: string, redirectUri: string) {
 async function completeOAuthProfile(
   profile: { email: string; name: string | null; profileUrl: string | null },
   mobileRedirectUri?: string,
+  referralCode?: string | null,
 ) {
   const normalized = normalizeEmail(profile.email);
 
-  // Members of MFA-enforcing organizations never get a session through
-  // OAuth — a provider click can't be allowed to skip the TOTP gate.
-  // The decision is organization.mfa_enabled (the root organization has
-  // it set true); is_root only picks which front door they're sent to.
   const existingUser = await getUserByEmailHash(await hashUserEmail(normalized));
-  const enforced = existingUser ? await mfaEnforcedMembershipIdentity(existingUser) : null;
-  if (enforced?.organizationIsRoot) {
-    return { status: 'founders_gate_required' as const, mobileRedirectUri };
-  }
-  if (enforced) {
-    return { status: 'mfa_required' as const, mobileRedirectUri };
-  }
-
   const user = await upsertUserByEmail(normalized, {
     ...(profile.name ? { name: profile.name } : {}),
     isVerified: true,
     lastLoginAt: new Date().toISOString(),
+    ...(!(existingUser?.isVerified ?? false) && referralCode ? { pendingReferralCode: normalizeReferralCode(referralCode) } : {}),
   }, { initializeNameOnly: true });
   await provisionPersonalAuthContext(user);
+  await selectPersonalAuthContext(user.key);
   const tokens = await issueUserTokens(user);
+  await completeReferralForNewlyVerifiedUser({ userKey: user.key, wasVerified: existingUser?.isVerified ?? false, referralCode });
   const alias = user.alias ?? generateAlias(user.key);
   return {
     status: 'authenticated' as const,
@@ -911,20 +951,20 @@ export async function completeOAuthSignIn(input: {
   const profile = input.provider === 'google'
     ? await exchangeGoogleCode(input.code, input.redirectUri)
     : await exchangeAppleCode(input.code, input.redirectUri);
-  return profile ? completeOAuthProfile(profile, state.mobileRedirectUri) : null;
+  return profile ? completeOAuthProfile(profile, state.mobileRedirectUri, state.referralCode) : null;
 }
 
-export async function completeNativeGoogleSignIn(idToken: string) {
+export async function completeNativeGoogleSignIn(idToken: string, referralCode?: string) {
   const profile = await verifyGoogleIdentityToken(idToken);
-  return profile ? completeOAuthProfile(profile) : null;
+  return profile ? completeOAuthProfile(profile, undefined, referralCode) : null;
 }
 
-export async function completeNativeAppleSignIn(idToken: string, nonce: string, name?: string) {
+export async function completeNativeAppleSignIn(idToken: string, nonce: string, name?: string, referralCode?: string) {
   const profile = await verifyAppleIdentityToken(idToken, undefined, {
     clientId: requiredEnv('APPLE_NATIVE_CLIENT_ID'),
     nonce,
   });
-  return profile ? completeOAuthProfile({ ...profile, name: name?.trim() || profile.name }) : null;
+  return profile ? completeOAuthProfile({ ...profile, name: name?.trim() || profile.name }, undefined, referralCode) : null;
 }
 
 function allowedMobileOAuthRedirect(uri: string) {
@@ -940,10 +980,10 @@ export function mobileOAuthCallbackUri(provider: OAuthProvider) {
   return new URL(`/api/v1/auth/mobile/oauth/${provider}/callback`, origin).toString();
 }
 
-export async function buildMobileOAuthAuthorizationUrl(provider: OAuthProvider, mobileRedirectUri: string) {
+export async function buildMobileOAuthAuthorizationUrl(provider: OAuthProvider, mobileRedirectUri: string, referralCode?: string) {
   if (!allowedMobileOAuthRedirect(mobileRedirectUri)) throw new Error('mobile OAuth redirect is not allowed');
   const callbackUri = mobileOAuthCallbackUri(provider);
-  return buildOAuthAuthorizationUrl(provider, callbackUri, mobileRedirectUri);
+  return buildOAuthAuthorizationUrl(provider, callbackUri, mobileRedirectUri, referralCode);
 }
 
 const mobileGrantSchema = z.object({
@@ -1051,7 +1091,7 @@ async function deliverMfaResetEmail(input: { email: string; name: string; magicL
     label: 'Platform',
     eyebrow: 'MFA recovery',
     headline: 'Recover your MFA',
-    bodyHtml: `<p style="margin:0 0 16px;">Hi ${input.name},</p><p style="margin:0;">Follow the link below to set up a new authenticator. Access stays locked until setup is complete, and the link expires in 5 minutes.</p>`,
+    bodyHtml: `<p style="margin:0 0 16px;">Hi ${input.name},</p><p style="margin:0;">Follow the link below to set up a new authenticator. Access stays locked until setup is complete, and the link expires in 15 minutes.</p>`,
     actionUrl: input.magicLink,
     actionLabel: 'Set up a new authenticator',
     supportingHtml: 'If you did not request this, you can ignore this email.',
@@ -1063,64 +1103,20 @@ async function deliverMfaResetEmail(input: { email: string; name: string; magicL
   });
 }
 
-export async function requestSignInEmail(email: string, countryCode?: z.infer<typeof countryCodeSchema>) {
+export async function requestSignInEmail(email: string, countryCode?: z.infer<typeof countryCodeSchema>, referralCode?: string) {
   const normalized = normalizeEmail(email);
-  const identity = await findLoginIdentityByEmail(normalized);
-  if (identity) {
-    // Routing only: root members sign in through the founders gate. The
-    // MFA *requirement* itself is organization.mfa_enabled (true on the
-    // root organization), checked below for every other organization.
-    if (identity.organizationIsRoot) {
-      return {
-        allowed: false as const,
-        foundersGateRequired: true as const,
-      };
-    }
-    if (identity.organizationMfaEnabled) {
-      const challenge = await createTotpChallengeForIdentity(identity.type, identity.key, identity.linkKey);
-      if (!challenge) return { allowed: false as const };
-      return {
-        allowed: true as const,
-        organizationMfaRequired: true as const,
-        status: challenge.status,
-        totpChallengeToken: challenge.totpChallengeToken,
-        expiresAt: challenge.expiresAt,
-        name: identity.name,
-        organizationTitle: identity.organizationTitle,
-      };
-    }
-
-    if (!identity.organizationIsPersonal) {
-      const challenge = await createChallenge(identity.key, 'email', EMAIL_LINK_TTL_MS, identity.type, {
-        withHandoff: true,
-        membershipKey: identity.linkKey,
-      });
-      const magicLink = buildMagicLink(challenge.tokenHash, 'member');
-      await deliverMemberSignInEmail({
-        email: normalized,
-        name: memberGreetingName(identity),
-        magicLink,
-        mfaEnabled: false,
-        expiresAt: challenge.expiresAt,
-      });
-      return {
-        allowed: true as const,
-        expiresAt: challenge.expiresAt,
-        handoffTokenHash: challenge.handoffTokenHash,
-        handoffExpiresAt: new Date(challenge.expiresAt.getTime() + HANDOFF_CLAIM_WINDOW_MS),
-      };
-    }
-  }
-
-  // Users without an organization membership sign in directly without TOTP.
+  // Email possession establishes only base user authentication. Team
+  // MFA is evaluated later against the explicitly selected membership.
   const existingUser = await getUserByEmailHash(await hashUserEmail(normalized));
   const user = existingUser ?? await upsertUserByEmail(normalized, {
     name: defaultNameFromEmail(normalized),
     profileUrl: null,
     ...(countryCode ? { countryCode } : {}),
+    ...(referralCode ? { pendingReferralCode: normalizeReferralCode(referralCode) } : {}),
   });
+  if (existingUser && !existingUser.isVerified && referralCode) await updateUser(existingUser.key, { pendingReferralCode: normalizeReferralCode(referralCode), updatedAt: new Date().toISOString() });
 
-  const challenge = await createChallenge(user.key, 'email', EMAIL_LINK_TTL_MS, 'user', { withHandoff: true });
+  const challenge = await createChallenge(user.key, 'email', EMAIL_LINK_TTL_MS, 'user', { withHandoff: true, referralCode });
   const magicLink = buildMagicLink(challenge.tokenHash, 'user');
   await deliverSignInEmail({ email: normalized, magicLink, expiresAt: challenge.expiresAt });
   return {
@@ -1144,7 +1140,7 @@ export async function requestFoundersGate(email: string) {
   const user = await getUserByEmailHash(await hashUserEmail(normalized));
   const fallbackExpiresAt = new Date(Date.now() + FOUNDER_CHALLENGE_TTL_MS);
   if (!user) return accepted(fallbackExpiresAt);
-  const identity = await rootOrganizationMembershipIdentity(user);
+  const identity = await rootTeamMembershipIdentity(user);
   if (!identity) return accepted(fallbackExpiresAt);
 
   try {
@@ -1159,7 +1155,7 @@ export async function requestFoundersGate(email: string) {
       'founder_email',
       FOUNDER_CHALLENGE_TTL_MS,
       identity.type,
-      { membershipKey: identity.linkKey },
+      { teamMembershipKey: identity.linkKey },
     );
     void deliverMemberSignInEmail({
       email: normalized,
@@ -1180,40 +1176,52 @@ export async function requestFoundersGate(email: string) {
 export async function requestMfaResetEmail(challengeToken: string) {
   const storedTokenHash = await sha256(challengeToken);
   const pending = await getAuthChallengeByTokenHash(storedTokenHash);
-  if (!isChallengeUsableForPurpose(pending, ['founder_totp']) || pending?.identityType === 'user') {
+  if (!isChallengeUsableForPurpose(pending, ['totp', 'founder_totp']) || pending?.identityType === 'user') {
     return null;
   }
   const identity = await getChallengeLoginIdentity(pending);
-  if (!identity?.organizationIsRoot || (!identity.isMfaEnabled && !identity.mfaRecoveryPending)) return null;
+  if (!identity?.teamMfaEnabled || (!identity.isMfaEnabled && !identity.teamMfaRecoveryPending)) return null;
+  const recoveryKind = identity.teamIsRoot ? 'founder_recovery' : 'team_recovery';
   const recovery = await prepareChallenge(
     identity.key,
-    'founder_recovery',
-    FOUNDER_CHALLENGE_TTL_MS,
+    recoveryKind,
+    EMAIL_LINK_TTL_MS,
     identity.type,
-    { membershipKey: identity.linkKey },
+    { teamMembershipKey: identity.linkKey, ...(pending.scopeKey ? { scopeKey: pending.scopeKey } : {}) },
   );
+  await insertAuthChallenge(recovery.document);
+  try {
+    // The recovery token is durable before delivery, while the source remains
+    // retryable until the provider accepts the email.
+    await deliverMfaResetEmail({
+      email: identity.email,
+      name: memberGreetingName(identity),
+      magicLink: buildMfaLink(recovery.result.tokenHash),
+      expiresAt: recovery.result.expiresAt,
+    });
+  } catch (error) {
+    await deleteAuthChallenge(recovery.document.key).catch(() => undefined);
+    throw error;
+  }
   const exchangedAt = new Date().toISOString();
   if (!await exchangeFounderTotpForRecovery({
     sourceTokenHash: storedTokenHash,
     identityKey: identity.key,
     identityType: identity.type,
-    membershipKey: identity.linkKey,
+    teamMembershipKey: identity.linkKey,
     exchangedAt,
     recoveryChallenge: recovery.document,
-  })) return null;
-  await deliverMfaResetEmail({
-    email: identity.email,
-    name: memberGreetingName(identity),
-    magicLink: buildMfaLink(recovery.result.tokenHash),
-    expiresAt: recovery.result.expiresAt,
-  });
+  })) {
+    await deleteAuthChallenge(recovery.document.key).catch(() => undefined);
+    return null;
+  }
   return { ok: true as const, expiresAt: recovery.result.expiresAt };
 }
 
 export async function validateMagicLink(token: string): Promise<MagicLinkValidationResult | null> {
   const storedTokenHash = await sha256(token);
   const pending = await getAuthChallengeByTokenHash(storedTokenHash);
-  if (pending?.kind === 'founder_recovery') return startTotpSetup(token);
+  if (pending?.kind === 'founder_recovery' || pending?.kind === 'team_recovery') return startTotpSetup(token);
   if (!pending || (pending.kind !== 'email' && pending.kind !== 'founder_email')) return null;
   const emailChallenge = await consumeChallenge(token, pending.kind);
   if (!emailChallenge) return null;
@@ -1228,7 +1236,9 @@ export async function validateMagicLink(token: string): Promise<MagicLinkValidat
       updatedAt: new Date().toISOString(),
     });
     await provisionPersonalAuthContext(verifiedUser);
+    await selectPersonalAuthContext(verifiedUser.key);
     const tokens = await issueUserTokens(verifiedUser);
+    await completeReferralForNewlyVerifiedUser({ userKey: verifiedUser.key, wasVerified: user.isVerified, referralCode: emailChallenge.referralCode });
     // Publish only after verification and session prerequisites are durable,
     // otherwise the waiting client can race ahead and burn its one-shot claim.
     try {
@@ -1252,8 +1262,8 @@ export async function validateMagicLink(token: string): Promise<MagicLinkValidat
   const auth = await getChallengeLoginIdentity(emailChallenge);
   if (!auth) return null;
   if (emailChallenge.kind === 'founder_email') {
-    if (!auth.organizationIsRoot) return null;
-    if (auth.mfaRecoveryPending) {
+    if (!auth.teamIsRoot) return null;
+    if (auth.teamMfaRecoveryPending) {
       const invalidatedAt = new Date().toISOString();
       await Promise.all([
         consumeActiveAuthChallengesByIdentityAndKind(auth.key, auth.type, 'founder_totp', invalidatedAt),
@@ -1264,7 +1274,7 @@ export async function validateMagicLink(token: string): Promise<MagicLinkValidat
         'founder_totp',
         FOUNDER_CHALLENGE_TTL_MS,
         auth.type,
-        { membershipKey: auth.linkKey },
+        { teamMembershipKey: auth.linkKey },
       );
       return {
         status: 'mfa_recovery_required',
@@ -1280,7 +1290,7 @@ export async function validateMagicLink(token: string): Promise<MagicLinkValidat
     );
   }
   await approveHandoff({ key: emailChallenge.id, handoffTokenHash: emailChallenge.handoffTokenHash });
-  if (auth.organizationMfaEnabled) {
+  if (auth.teamMfaEnabled) {
     return createTotpChallengeForIdentity(emailChallenge.identityType, emailChallenge.identityKey, auth.linkKey);
   }
   await updateUser(auth.key, {
@@ -1290,7 +1300,7 @@ export async function validateMagicLink(token: string): Promise<MagicLinkValidat
   await provisionPersonalAuthContext({ key: auth.key, name: auth.name, email: auth.email });
   return {
     status: 'authenticated',
-    identity: { key: auth.key, identityType: auth.type },
+    identity: { key: auth.key, identityType: 'user' as const },
     ...(await issueTokens(auth)),
     alias: auth.name ?? defaultNameFromEmail(auth.email) ?? auth.email,
     aliasSlug: null,
@@ -1311,27 +1321,27 @@ export async function createUserWithAuth(input: { email: string; name?: string; 
 export async function startTotpSetup(challengeToken: string) {
   const storedTokenHash = await sha256(challengeToken);
   const pending = await getAuthChallengeByTokenHash(storedTokenHash);
-  if (!isChallengeUsableForPurpose(pending, ['totp', 'founder_setup', 'founder_recovery'])) return null;
+  if (!isChallengeUsableForPurpose(pending, ['totp', 'founder_setup', 'founder_recovery', 'team_recovery'])) return null;
   if (pending.identityType === 'user') return null;
   const identity = await getChallengeLoginIdentity(pending);
-  if (!identity) return null;
-  const isRecovery = pending.kind === 'founder_recovery';
+  if (!identity?.teamMfaEnabled) return null;
+  const isRecovery = pending.kind === 'founder_recovery' || pending.kind === 'team_recovery';
   if (isRecovery
-    ? (!identity.isMfaEnabled && !identity.mfaRecoveryPending)
-    : (identity.isMfaEnabled || identity.mfaRecoveryPending)) return null;
-  if (pending.kind !== 'totp' && !identity.organizationIsRoot) return null;
+    ? (!identity.isMfaEnabled && !identity.teamMfaRecoveryPending)
+    : (identity.isMfaEnabled || identity.teamMfaRecoveryPending)) return null;
+  if ((pending.kind === 'founder_setup' || pending.kind === 'founder_recovery') && !identity.teamIsRoot) return null;
 
   const secret = generateSecret();
   const encryptedSecret = await encryptSecret(secret);
   const otpauthUrl = generateURI({ issuer: ISSUER, label: identity.email, secret });
   const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl, { errorCorrectionLevel: 'M', margin: 1 });
-  const setupKind = pending.kind === 'totp' ? 'totp' : 'founder_setup';
+  const setupKind = pending.kind === 'totp' || pending.kind === 'team_recovery' ? 'totp' : 'founder_setup';
   const setupChallenge = await prepareChallenge(
     identity.key,
     setupKind,
     setupKind === 'totp' ? TOTP_CHALLENGE_TTL_MS : FOUNDER_CHALLENGE_TTL_MS,
     identity.type,
-    { membershipKey: identity.linkKey },
+    { teamMembershipKey: identity.linkKey, ...(pending.scopeKey ? { scopeKey: pending.scopeKey } : {}) },
   );
 
   if (isRecovery) {
@@ -1340,8 +1350,8 @@ export async function startTotpSetup(challengeToken: string) {
       recoveryTokenHash: storedTokenHash,
       identityKey: identity.key,
       identityType: identity.type,
-      membershipKey: identity.linkKey,
-      expectedMfaVersion: identity.mfaVersion,
+      teamMembershipKey: identity.linkKey,
+      expectedMfaVersion: identity.teamMfaVersion,
       encryptedSecret,
       startedAt,
       setupChallenge: setupChallenge.document,
@@ -1363,7 +1373,7 @@ export async function startTotpSetup(challengeToken: string) {
     sourceKind: pending.kind,
     identityKey: identity.key,
     identityType: identity.type,
-    membershipKey: identity.linkKey,
+    teamMembershipKey: identity.linkKey,
     encryptedSecret,
     startedAt,
     setupChallenge: setupChallenge.document,
@@ -1405,23 +1415,27 @@ export async function verifySuccessiveTotpCodes(secret: string, codes: [string, 
 
 export async function completeTotpSetup(challengeToken: string, codes: [string, string]) {
   const storedTokenHash = await sha256(challengeToken);
+  if (await mfaChallengeThrottled(storedTokenHash)) return { ok: false as const, error: 'challenge throttled' };
   const challenge = await getAuthChallengeByTokenHash(storedTokenHash);
   if (!isChallengeUsableForPurpose(challenge, ['totp', 'founder_setup']) || challenge?.identityType === 'user') {
     return { ok: false as const, error: 'invalid challenge' };
   }
   const auth = await getChallengeLoginIdentity(challenge);
-  if (!auth?.totpSecret) return { ok: false as const, error: 'setup unavailable' };
+  if (!auth?.teamMfaEnabled || !auth.totpSecret) return { ok: false as const, error: 'setup unavailable' };
   if (auth.isMfaEnabled) {
     return { ok: false as const, error: 'setup unavailable' };
   }
 
   const lastTimeStep = await verifySuccessiveTotpCodes(await decryptSecret(auth.totpSecret), codes);
-  if (!lastTimeStep) return { ok: false as const, error: 'invalid totp codes' };
+  if (!lastTimeStep) {
+    await recordFailedMfaChallengeAttempt(storedTokenHash);
+    return { ok: false as const, error: 'invalid totp codes' };
+  }
   const completedAt = new Date().toISOString();
   if (!await consumeTotpChallengeAndAdvanceMembership({
     tokenHash: storedTokenHash,
     kind: challenge.kind,
-    membershipKey: auth.linkKey,
+    teamMembershipKey: auth.linkKey,
     timeStep: lastTimeStep,
     consumedAt: completedAt,
     completeSetup: true,
@@ -1436,21 +1450,24 @@ export async function completeTotpSetup(challengeToken: string, codes: [string, 
   await provisionPersonalAuthContext({ key: auth.key, name: auth.name, email: auth.email });
   return {
     ok: true as const,
-    identity: { key: auth.key, identityType: auth.type },
+    identity: { key: auth.key, identityType: challenge.kind === 'founder_setup' ? auth.type : 'user' as const },
     name: auth.name,
-    organizationTitle: auth.organizationTitle,
+    teamTitle: auth.teamTitle,
+    teamKey: auth.teamKey,
+    scopeKey: challenge.scopeKey,
     ...(await issueTokens(auth, undefined, challenge.kind === 'founder_setup', true)),
   };
 }
 
 export async function verifyTotpAndIssueSession(challengeToken: string, code: string) {
   const storedTokenHash = await sha256(challengeToken);
+  if (await mfaChallengeThrottled(storedTokenHash)) return null;
   const challenge = await getAuthChallengeByTokenHash(storedTokenHash);
   if (!isChallengeUsableForPurpose(challenge, ['totp', 'founder_totp']) || challenge?.identityType === 'user') {
     return null;
   }
   const auth = await getChallengeLoginIdentity(challenge);
-  if (!auth?.totpSecret || !auth.isMfaEnabled) return null;
+  if (!auth?.teamMfaEnabled || !auth.totpSecret || !auth.isMfaEnabled) return null;
 
   const result = await verifyTotpToken({
     token: code,
@@ -1461,12 +1478,15 @@ export async function verifyTotpAndIssueSession(challengeToken: string, code: st
     epochTolerance: TOTP_PERIOD_SECONDS,
     afterTimeStep: auth.lastTotpTimeStep ?? undefined,
   });
-  if (!result.valid) return null;
+  if (!result.valid) {
+    await recordFailedMfaChallengeAttempt(storedTokenHash);
+    return null;
+  }
   const verifiedAt = new Date().toISOString();
   if (!await consumeTotpChallengeAndAdvanceMembership({
     tokenHash: storedTokenHash,
     kind: challenge.kind,
-    membershipKey: auth.linkKey,
+    teamMembershipKey: auth.linkKey,
     timeStep: result.timeStep,
     consumedAt: verifiedAt,
   })) return null;
@@ -1477,9 +1497,11 @@ export async function verifyTotpAndIssueSession(challengeToken: string, code: st
   });
   await provisionPersonalAuthContext({ key: auth.key, name: auth.name, email: auth.email });
   return {
-    identity: { key: auth.key, identityType: auth.type },
+    identity: { key: auth.key, identityType: challenge.kind === 'founder_totp' ? auth.type : 'user' as const },
     name: auth.name,
-    organizationTitle: auth.organizationTitle,
+    teamTitle: auth.teamTitle,
+    teamKey: auth.teamKey,
+    scopeKey: challenge.scopeKey,
     ...(await issueTokens(auth, undefined, challenge.kind === 'founder_totp', true)),
   };
 }

@@ -122,7 +122,7 @@ function OlderMessageSkeletons() {
 }
 
 function ConversationWatermark() {
-  return <View pointerEvents="none" style={styles.coreWatermark}><Text style={styles.coreWatermarkText}>Core</Text><View style={styles.coreWatermarkMark}><ChromeIcon glow={0.5} size={104} source={assistantIconSource} /></View><Text style={styles.coreWatermarkText}>Your personal AI agent connecting Vorinthex AI</Text></View>;
+  return <View pointerEvents="none" style={styles.coreWatermark}><Text style={styles.coreWatermarkText}>Core</Text><View style={styles.coreWatermarkMark}><ChromeIcon glow={0.5} size={104} source={assistantIconSource} /></View><Text style={styles.coreWatermarkText}>Your personal AI for finding answers, natural conversation, and image creation across Vorinthex AI</Text></View>;
 }
 
 const messageKey = ({ key }: OptimisticMessage) => key;
@@ -135,11 +135,11 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
   const router = useRouter();
   const { showToast } = useToast();
   const userKey = useAuthStore((state) => state.user?.key ?? "");
-  const organizationKey = useAuthStore((state) => String(state.organization?.key ?? ""));
+  const teamKey = useAuthStore((state) => String(state.team?.key ?? ""));
   const scopeKey = useAuthStore((state) => String(state.scope?.key ?? ""));
-  const context = useMemo(() => ({ userKey, organizationKey, scopeKey }), [organizationKey, scopeKey, userKey]);
+  const context = useMemo(() => ({ userKey, teamKey, scopeKey }), [teamKey, scopeKey, userKey]);
   const identity = conversationContextIdentity(context);
-  const configured = Boolean(userKey && organizationKey && scopeKey);
+  const configured = Boolean(userKey && teamKey && scopeKey);
   const [sheet, setSheet] = useState<Sheet>();
   const [selected, setSelected] = useState<Conversation>();
   const [input, setInput] = useState("");

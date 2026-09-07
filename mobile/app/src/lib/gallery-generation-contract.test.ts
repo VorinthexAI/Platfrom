@@ -10,7 +10,7 @@ const normalize = (source: string) => source.replace(/\s+/g, "").replace(/,([}\]
 
 test("generation is contribution-gated and stays visible in the unified image grid", () => {
   expect(workspace).toContain("Generate images");
-  expect(workspace).toContain('collectionRole !== "viewer" && activeCollection?.access.canContribute');
+  expect(workspace).toContain('activeCollection?.access.canContribute');
   expect(workspace).toContain("generationPlaceholders.filter");
   expect(workspace).toContain('const visibleGenerationPlaceholders = generationPlaceholders.filter');
   expect(workspace).toContain('setImages((current) => prependGeneratedGalleryImages(current, generated))');

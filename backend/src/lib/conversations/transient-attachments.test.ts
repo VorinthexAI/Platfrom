@@ -12,11 +12,11 @@ import {
   type TransientAttachmentRecord,
 } from './transient-attachments';
 
-const organizationKey = 'organization';
+const teamKey = 'team';
 const scopeKey = newId();
 const userKey = newId();
 const conversationKey = newId();
-const owner: TransientAttachmentOwner = { organizationKey, scopeKey, userKey };
+const owner: TransientAttachmentOwner = { teamKey, scopeKey, userKey };
 const now = new Date('2026-09-02T12:00:00.000Z');
 
 function harness() {
@@ -31,7 +31,7 @@ function harness() {
   };
   const dependencies: TransientAttachmentDependencies = {
     redis: redis as never,
-    repository: { read: async (selected, key) => selected.organizationKey === organizationKey && selected.scopeKey === scopeKey && selected.userKey === userKey && key === conversationKey ? {} as never : null },
+    repository: { read: async (selected, key) => selected.teamKey === teamKey && selected.scopeKey === scopeKey && selected.userKey === userKey && key === conversationKey ? {} as never : null },
     storage: {
       async upload({ key, bytes, mimeType }) { objects.set(key, { bytes: new Uint8Array(bytes), mimeType }); return { storageKey: key }; },
       async download(key) { const value = objects.get(key); if (!value) throw new Error('missing object'); return { ...value, sizeBytes: value.bytes.byteLength }; },
@@ -73,7 +73,7 @@ describe('transient conversation attachments', () => {
     expect(reserved.uploads[0]).toMatchObject({ clientKey: 'image', headers: { 'Content-Type': 'image/png' } });
     for (const [index, upload] of reserved.uploads.entries()) {
       const record = JSON.parse(context.values.get(`conversation-attachment:${upload.attachmentKey}`)!) as TransientAttachmentRecord;
-      expect(record).toMatchObject({ organizationKey, scopeKey, userKey, conversationKey, requestKey: 'request-1', status: 'reserved' });
+      expect(record).toMatchObject({ teamKey, scopeKey, userKey, conversationKey, requestKey: 'request-1', status: 'reserved' });
       context.objects.set(record.storageKey, index === 0 ? { bytes: png, mimeType: 'image/png' } : { bytes: text, mimeType: 'text/plain' });
     }
     const completed = await completeTransientAttachments({ conversationKey, requestKey: 'request-1', attachmentKeys: reserved.uploads.map(({ attachmentKey }) => attachmentKey) }, owner, context.dependencies);

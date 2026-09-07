@@ -20,7 +20,7 @@ export const appSearchInputSchema = z.strictObject({
     collectionKey: z.string().min(1).optional(),
     connectorKey: z.string().min(1).optional(),
     readState: z.enum(["read", "unread"]).optional(),
-    emailFacets: z.array(z.enum(["urgent", "important", "filtered", "favorite"])).max(4).optional(),
+    emailFacets: z.array(z.enum(["urgent", "important", "purchases", "filtered", "favorite"])).max(5).optional(),
     createdFrom: z.string().datetime({ offset: true }).transform((value) => new Date(value).toISOString()).optional(),
     createdTo: z.string().datetime({ offset: true }).transform((value) => new Date(value).toISOString()).optional(),
     tagKeys: z.array(z.string().min(1)).min(1).max(20).refine((keys) => new Set(keys).size === keys.length, "Tag keys must be distinct.").optional(),
@@ -52,10 +52,10 @@ export function appSearchQueryKey(contextIdentity: string, input: AppSearchInput
 
 function context() {
   const state = useAuthStore.getState();
-  const organizationKey = String(state.organization?.key ?? "");
+  const teamKey = String(state.team?.key ?? "");
   const scopeKey = String(state.scope?.key ?? "");
-  if (!organizationKey || !scopeKey) throw new Error("Search is unavailable for this session.");
-  return { organizationKey, scopeKey };
+  if (!teamKey || !scopeKey) throw new Error("Search is unavailable for this session.");
+  return { teamKey, scopeKey };
 }
 
 function responseError(error: unknown) {

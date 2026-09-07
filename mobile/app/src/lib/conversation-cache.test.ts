@@ -15,13 +15,13 @@ import {
 } from "./conversation-cache";
 
 const at = "2026-09-01T10:00:00.000Z";
-const context = { userKey: "user", organizationKey: "org", scopeKey: "scope" };
+const context = { userKey: "user", teamKey: "team", scopeKey: "scope" };
 const conversation = (key: string, input: Partial<{ name: string; isFavorite: boolean; updatedAt: string }> = {}) => ({ key, name: input.name ?? key, isFavorite: input.isFavorite ?? false, createdAt: at, updatedAt: input.updatedAt ?? at });
 const infinite = (pages: ReturnType<typeof conversation>[][]) => ({ pages: pages.map((conversations, index) => ({ conversations, cursor: index < pages.length - 1 ? `cursor-${index}` : undefined })), pageParams: pages.map((_, index) => index ? `cursor-${index - 1}` : undefined) });
 
 test("keys include full identity, normalized query, and favoriteOnly", () => {
   const key = conversationQueryKeys.list(context, { query: " Plan ", favoriteOnly: true });
-  expect(key).toEqual(["conversations", "user", "org", "scope", "lists", "list", { query: "plan", favoriteOnly: true }]);
+  expect(key).toEqual(["conversations", "user", "team", "scope", "lists", "list", { query: "plan", favoriteOnly: true }]);
   expect(conversationListFilterFromKey(key)).toEqual({ query: "plan", favoriteOnly: true });
   expect(conversationQueryKeys.list({ ...context, userKey: "other" }, { query: " Plan ", favoriteOnly: true })).not.toEqual(key);
 });

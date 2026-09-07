@@ -18,8 +18,8 @@ export function BellIcon({ variant = "inherit", size = "md", strokeWidth = 1.4, 
   const pixelSize = sizes[size];
   return (
     <svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" {...props}>
-      <path d="M5 12h14" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" />
-      <path d="M12 5v14" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <path d="M18 9a6 6 0 0 0-12 0c0 6-3 7-3 7h18s-3-1-3-7Z" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M14.2 20a2.4 2.4 0 0 1-4.4 0" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" />
     </svg>
   );
 }

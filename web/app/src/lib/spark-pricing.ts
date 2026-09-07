@@ -1,23 +1,30 @@
 export const SPARK_PRICING_CURRENCY = "USD" as const;
 export const NEWCOMER_FREE_SPARKS = 100;
 
-export const SPARK_MONTHLY_PLANS = [
-  { name: "Moon", price: 19.99, sparks: 1_000 },
-  { name: "Comet", price: 39.99, sparks: 5_000 },
-  { name: "Nova", price: 99.99, sparks: 25_000 },
+export const SPARK_SUBSCRIPTIONS = [
+  {
+    name: "Monthly",
+    price: 19.99,
+    referencePrice: 24.99,
+    sparks: 1_000,
+    cadence: "month",
+    badge: "Best Value",
+  },
+  {
+    name: "Weekly",
+    price: 7.99,
+    sparks: 200,
+    cadence: "week",
+  },
 ] as const;
 
-export const SPARK_TOP_UPS = [
-  { sparks: 500, price: 14.99 },
-  { sparks: 2_500, price: 49.99 },
-  { sparks: 10_000, price: 149.99 },
-  { sparks: 50_000, price: 599.99 },
-] as const;
+export const SPARK_TOP_UP = { sparks: 200, price: 9.99 } as const;
 
-export const SPARK_ON_DEMAND = {
-  name: "On-Demand",
-  description: "Overflow Sparks added after the included balance runs out",
-  requiresPlan: "Nova",
+export const REFERRAL_REWARDS = {
+  signup: 50,
+  firstSubscriptionPurchase: 100,
+  recipient: "referrer",
+  frequency: "one-time per referred user at each stage",
 } as const;
 
 export function formatSparkCount(sparks: number) {

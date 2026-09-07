@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { useUiStore } from "../state/ui";
 
 test("opens and closes the shared Sparks sheet idempotently", () => {
-  useUiStore.setState({ sparksSheetOpen: false, sparksSheetReason: null });
+  useUiStore.setState({ sparksSheetOpen: false, sparksSheetReason: null, paywallOpen: false });
   let changes = 0;
   const unsubscribe = useUiStore.subscribe(() => { changes += 1; });
   useUiStore.getState().openSparksSheet();
@@ -19,4 +19,19 @@ test("opens and closes the shared Sparks sheet idempotently", () => {
   expect(useUiStore.getState().sparksSheetReason).toBeNull();
   expect(changes).toBe(3);
   unsubscribe();
+});
+
+test("opens and closes the paywall independently above Sparks", () => {
+  useUiStore.getState().openSparksSheet();
+  useUiStore.getState().openPaywall();
+  expect(useUiStore.getState()).toMatchObject({ sparksSheetOpen: true, paywallOpen: true });
+  useUiStore.getState().closePaywall();
+  expect(useUiStore.getState()).toMatchObject({ sparksSheetOpen: true, paywallOpen: false });
+});
+
+test("consumes internal onboarding referral entry once", () => {
+  useUiStore.setState({ onboardingReferralEntry: false });
+  useUiStore.getState().enterOnboardingReferral();
+  expect(useUiStore.getState().consumeOnboardingReferralEntry()).toBe(true);
+  expect(useUiStore.getState().consumeOnboardingReferralEntry()).toBe(false);
 });

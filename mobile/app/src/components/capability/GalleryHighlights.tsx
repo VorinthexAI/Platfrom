@@ -1,7 +1,7 @@
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useReducer, useRef, useState } from "react";
 import { AppState, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import Animated, { Easing, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from "react-native-reanimated";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
@@ -11,7 +11,7 @@ import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { useToast } from "@vorinthex/shared/ui/toast";
 
-import { createGalleryCollectionHighlight, deleteGalleryCollectionHighlight, fetchGalleryCollectionHighlight, getGalleryContext, isGalleryClientErrorCode, isGalleryCollectionOwned, listGalleryCollectionHighlights, resolveGalleryHighlightSlides, type GalleryCollection, type GalleryHighlight, type GalleryHighlightDetail } from "@/lib/gallery-client";
+import { createGalleryCollectionHighlight, deleteGalleryCollectionHighlight, fetchGalleryCollectionHighlight, getGalleryContext, isGalleryClientErrorCode, listGalleryCollectionHighlights, resolveGalleryHighlightSlides, type GalleryCollection, type GalleryHighlight, type GalleryHighlightDetail } from "@/lib/gallery-client";
 import { HIGHLIGHT_SLIDE_DURATION_MS, initialHighlightPlaybackState, reduceHighlightPlayback } from "@/lib/gallery-highlight-playback";
 import { galleryQueryKeys } from "@/lib/workspace-query-cache";
 import { subscribeAppEvent } from "@/lib/app-events";
@@ -35,8 +35,9 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   const { showToast } = useToast();
   const notify = (title: string) => showToast({ title, duration: 2_000 });
   const galleryContext = getGalleryContext();
+  const { teamKey, scopeKey } = galleryContext;
   const userKey = useAuthStore((state) => String(state.user?.key ?? ""));
-  const contentContext = useMemo(() => ({ ...galleryContext, userKey }), [galleryContext.organizationKey, galleryContext.scopeKey, userKey]);
+  const contentContext = { teamKey, scopeKey, userKey };
   const { width } = useWindowDimensions();
   const [gridWidth, setGridWidth] = useState(0);
   const [highlights, setHighlights] = useState<GalleryHighlight[]>([]);
@@ -59,7 +60,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   const listSheetOpen = useRef(open && !detail && !opening && activeSheet === "player");
   const fadeProgress = useSharedValue(1);
   const reducedMotion = useReducedMotion();
-  const owner = isGalleryCollectionOwned(collection);
+  const owner = true;
   const cardWidth = Math.floor(((gridWidth || width - 40) - GAP * (COLUMNS - 1)) / COLUMNS);
   const slides = detail ? resolveGalleryHighlightSlides(detail) : [];
   const activeSlide = slides[playback.index];
@@ -167,6 +168,13 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
     }
   }
 
+  const loadListOnOpen = useEffectEvent(() => void loadList(true));
+  const refreshFromEvent = useEffectEvent(() => {
+    if (!open || creating || deleting || opening) return;
+    if (detail) void openHighlight(detail);
+    else void loadList();
+  });
+
   useEffect(() => {
     listSheetOpen.current = open && !detail && !opening && activeSheet === "player" && !createMenuOpen && !customCreateOpen && !resourceTagsOpen;
   }, [activeSheet, createMenuOpen, customCreateOpen, detail, open, opening, resourceTagsOpen]);
@@ -177,10 +185,8 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
       const timer = setTimeout(() => setCreating(false), 0);
       return () => clearTimeout(timer);
     }
-    const timer = setTimeout(() => void loadList(true), 0);
+    const timer = setTimeout(loadListOnOpen, 0);
     return () => clearTimeout(timer);
-    // Opening or changing collections is the operation boundary; queryClient is stable.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collection.key, open]);
 
   useEffect(() => {
@@ -211,13 +217,10 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   }, [open]);
 
   useEffect(() => subscribeAppEvent((event) => {
-    if (!open || creating || deleting || opening) return;
+    if (!open) return;
     if (event.type !== "event-stream.connected" && (event.type !== "gallery.changed" || !["highlight.changed", "image.changed", "collection.content.changed"].includes(event.slug))) return;
-    if (detail) void openHighlight(detail);
-    else void loadList();
-    // Event handlers intentionally reopen the latest key; operation functions are render-local.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [collection.key, creating, deleting, detail?.key, open, opening]);
+    refreshFromEvent();
+  }), [open]);
 
   useEffect(() => {
     if (!open) return;

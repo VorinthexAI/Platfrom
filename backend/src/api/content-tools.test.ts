@@ -7,8 +7,8 @@ import { registerRoutes } from './routes';
 import { validateQueryParams } from './middleware';
 import { SparkRepositoryError } from '@/lib/sparks/repository';
 
-const organizationKey = newId(), scopeKey = newId(), folderKey = newId();
-function request(dependencies: Parameters<typeof createContentToolHandler>[0], tool = 'folder.list', body: unknown = { organizationKey, scopeKey, input: { scopeKey } }, headers: Record<string, string> = {}) {
+const teamKey = newId(), scopeKey = newId(), folderKey = newId();
+function request(dependencies: Parameters<typeof createContentToolHandler>[0], tool = 'folder.list', body: unknown = { teamKey, scopeKey, input: { scopeKey } }, headers: Record<string, string> = {}) {
   const app = new Hono(); app.post('/content/tools/:tool', createContentToolHandler(dependencies));
   return app.request(`/content/tools/${tool}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
 }
@@ -25,18 +25,19 @@ describe('Content tool API', () => {
   test('rejects invalid tools, bodies, and caller-selected membership fields', async () => {
     const deps = { getIdentity: async () => ({ key: newId(), identityType: 'user' as const }), run: async () => ({}) };
     expect((await request(deps, 'unknown')).status).toBe(400);
-    expect((await request(deps, 'folder.list', { organizationKey, scopeKey, input: { scopeKey: 'invalid' } })).status).toBe(400);
-    expect((await request(deps, 'folder.list', { organizationKey, scopeKey, input: {}, membershipKey: newId() })).status).toBe(400);
-    expect((await request(deps, 'folder.list', { organizationKey, scopeKey, agentKey: newId(), input: { scopeKey } })).status).toBe(400);
+    expect((await request(deps, 'folder.list', { teamKey, scopeKey, input: { scopeKey: 'invalid' } })).status).toBe(400);
+    expect((await request(deps, 'folder.list', { teamKey, scopeKey, input: {}, teamMembershipKey: newId() })).status).toBe(400);
+    expect((await request(deps, 'folder.list', { teamKey, scopeKey, agentKey: newId(), input: { scopeKey } })).status).toBe(400);
   });
 
-  test('dispatches only the authenticated user key and forwards mutation idempotency', async () => {
+  test('injects session-bound team assurance and forwards mutation idempotency', async () => {
     const userKey = newId(); let call: any;
-    const response = await request({ getIdentity: async () => ({ key: userKey, identityType: 'user' }), run: async (input, options) => { call = { input, options }; return { results: [] }; } }, 'folder.create', { organizationKey, scopeKey, input: { folders: [{ scopeKey, name: 'Plans' }] } }, { 'idempotency-key': 'request-1' });
+    const assurance = { teamMembershipKey: newId(), teamMfaVersion: 3 };
+    const response = await request({ getIdentity: async () => ({ key: userKey, identityType: 'user', ...assurance }), run: async (input, options) => { call = { input, options }; return { results: [] }; } }, 'folder.create', { teamKey, scopeKey, input: { folders: [{ scopeKey, name: 'Plans' }] } }, { 'idempotency-key': 'request-1' });
     expect(response.status).toBe(200);
     expect(call.input.input).toMatchObject({ idempotencyKey: 'request-1' });
     expect(call.options.authenticatedUserKey).toBe(userKey);
-    expect(JSON.stringify(call)).not.toContain('membershipKey');
+    expect(call.options.teamAssurance).toEqual(assurance);
   });
 
   test('keeps read inputs clean, forwards the execution key, and rejects mutation mismatches', async () => {
@@ -45,9 +46,9 @@ describe('Content tool API', () => {
     expect((await request(deps, 'folder.list', undefined, { 'idempotency-key': 'ignored' })).status).toBe(200);
     expect(dispatched.input.idempotencyKey).toBeUndefined();
     expect(executionOptions.requestKey).toBe('ignored');
-    expect((await request(deps, 'document.translate', { organizationKey, scopeKey, input: { documentKeys: [newId()], targetLanguage: 'French' } }, { 'idempotency-key': 'ignored-preview' })).status).toBe(400);
+    expect((await request(deps, 'document.translate', { teamKey, scopeKey, input: { documentKeys: [newId()], targetLanguage: 'French' } }, { 'idempotency-key': 'ignored-preview' })).status).toBe(400);
     expect(dispatched.input.idempotencyKey).toBeUndefined();
-    const mismatch = await request(deps, 'folder.create', { organizationKey, scopeKey, input: { folders: [{ scopeKey, name: 'Plans' }], idempotencyKey: 'body' } }, { 'idempotency-key': 'header' });
+    const mismatch = await request(deps, 'folder.create', { teamKey, scopeKey, input: { folders: [{ scopeKey, name: 'Plans' }], idempotencyKey: 'body' } }, { 'idempotency-key': 'header' });
     expect(mismatch.status).toBe(409);
   });
 
@@ -56,9 +57,9 @@ describe('Content tool API', () => {
     const response = await request({
       getIdentity: async () => ({ key: newId(), identityType: 'user' }),
       run: async (input) => { dispatched = input; return { folders: [], documents: [], files: [] }; },
-    }, 'content.neighbors', { organizationKey, scopeKey, input: { folderKey } });
+    }, 'content.neighbors', { teamKey, scopeKey, input: { folderKey } });
     expect(response.status).toBe(200);
-    expect(dispatched).toMatchObject({ organizationKey, scopeKey, tool: 'content.neighbors', input: { folderKey } });
+    expect(dispatched).toMatchObject({ teamKey, scopeKey, tool: 'content.neighbors', input: { folderKey } });
   });
 
   test('maps structured Content failures to HTTP statuses', async () => {
@@ -72,11 +73,11 @@ describe('Content tool API', () => {
 
   test('normalizes document base64 without retaining encoded content and enforces size', async () => {
     let input: any; const user = { key: newId(), identityType: 'user' as const };
-    const valid = await request({ getIdentity: async () => user, maxDocumentBytes: 4, run: async (requestInput) => { input = requestInput.input; return {}; } }, 'document.parse', { organizationKey, scopeKey, input: { scopeKey, folderKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 3, encoding: 'base64', content: 'YWJj' } } }, { 'idempotency-key': 'parse-request' });
+    const valid = await request({ getIdentity: async () => user, maxDocumentBytes: 4, run: async (requestInput) => { input = requestInput.input; return {}; } }, 'document.parse', { teamKey, scopeKey, input: { scopeKey, folderKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 3, encoding: 'base64', content: 'YWJj' } } }, { 'idempotency-key': 'parse-request' });
     expect(valid.status).toBe(200);
     expect(input.file.bytes).toEqual(new Uint8Array([97, 98, 99]));
     expect(input.file.content).toBeUndefined();
-    const tooLarge = await request({ getIdentity: async () => user, maxDocumentBytes: 2, run: async () => ({}) }, 'document.parse', { organizationKey, scopeKey, input: { scopeKey, folderKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 3, encoding: 'base64', content: 'YWJj' } } });
+    const tooLarge = await request({ getIdentity: async () => user, maxDocumentBytes: 2, run: async () => ({}) }, 'document.parse', { teamKey, scopeKey, input: { scopeKey, folderKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 3, encoding: 'base64', content: 'YWJj' } } });
     expect(tooLarge.status).toBe(400);
     expect(await tooLarge.json()).toMatchObject({ error: { code: 'DOCUMENT_TOO_LARGE' } });
   });
@@ -86,17 +87,18 @@ describe('Content tool API', () => {
     const charges: Record<string, unknown>[] = [], refunds: Record<string, unknown>[] = [];
     let executions = 0;
     const serviceOptions = {
-      resolveMembership: async () => ({ key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' }),
+      resolveMembership: async () => ({ key: newId(), teamKey: teamKey, userId: userKey, status: 'active' }),
       resolveUser: async () => ({ key: userKey, currentScopeKey: scopeKey }),
       authorizeScope: async () => ({ allowed: true }),
       execute: async () => { executions += 1; return { results: [] }; },
       recordEvent: async () => {},
+      appScopeKey: newId(),
       billing: {
         charge: async (_key: string, input: Record<string, unknown>) => { charges.push(input); return { status: 'applied', transaction: { key: newId(), eventKey: input.eventKey } } as never; },
         refund: async (_key: string, input: Record<string, unknown>) => { refunds.push(input); return { status: 'applied', transaction: { key: newId() } } as never; },
       },
     } as never;
-    const body = { organizationKey, scopeKey, input: { scopeKey, folderKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 3, encoding: 'base64', content: 'YWJj' } } };
+    const body = { teamKey, scopeKey, input: { scopeKey, folderKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 3, encoding: 'base64', content: 'YWJj' } } };
     expect((await request({ getIdentity: async () => ({ key: userKey, identityType: 'user' }), serviceOptions }, 'document.parse', body, { 'idempotency-key': 'parse-billed' })).status).toBe(200);
     expect(charges[0]).toMatchObject({ kind: 'tool', toolSlug: 'document.parse', microSparks: 2_000_000 });
 
@@ -112,7 +114,7 @@ describe('Content tool API', () => {
   test('rejects oversized request bodies before JSON and base64 normalization', async () => {
     const user = { key: newId(), identityType: 'user' as const };
     const response = await request({ getIdentity: async () => user, maxDocumentBytes: 1, run: async () => ({}) }, 'document.parse', {
-      organizationKey,
+      teamKey,
       scopeKey,
       input: { scopeKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 1, encoding: 'base64', content: 'A'.repeat(70_000) } },
     });
@@ -128,7 +130,7 @@ describe('Content tool API', () => {
     registerRoutes(api);
     const registered = await app.request('/api/v1/content/tools/not-a-tool', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     expect(await registered.json()).toMatchObject({ error: { code: 'CONTENT_INVALID_INPUT' } });
-    const response = await app.request('/api/v1/content/tools/not-a-tool?membershipKey=other', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const response = await app.request('/api/v1/content/tools/not-a-tool?teamMembershipKey=other', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     expect(response.status).toBe(400);
   });
 });

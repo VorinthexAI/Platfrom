@@ -8,21 +8,23 @@ import { parseJson } from './validation';
 import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
 import { toolEventService, type ToolEventRecorder } from '@/lib/ai/events/service';
 import { sparkErrorResponse } from './errors';
+import { authenticatedTeamContext } from './auth';
 
 export const ticketHttpInputSchema = z.object({
-  organizationKey: z.string().cuid(),
+  teamKey: z.string().cuid(),
   scopeKey: z.string().cuid(),
   message: ticketSubmitInputSchema.shape.message,
 }).strict();
-export const feedbackListHttpInputSchema = z.object({ organizationKey: z.string().cuid(), scopeKey: z.string().cuid(), cursor: feedbackListInputSchema.shape.cursor, limit: feedbackListInputSchema.shape.limit.optional() }).strict();
-export const feedbackVoteHttpInputSchema = z.object({ organizationKey: z.string().cuid(), scopeKey: z.string().cuid(), vote: feedbackVoteInputSchema.shape.vote }).strict();
+export const feedbackListHttpInputSchema = z.object({ teamKey: z.string().cuid(), scopeKey: z.string().cuid(), cursor: feedbackListInputSchema.shape.cursor, limit: feedbackListInputSchema.shape.limit.optional() }).strict();
+export const feedbackVoteHttpInputSchema = z.object({ teamKey: z.string().cuid(), scopeKey: z.string().cuid(), vote: feedbackVoteInputSchema.shape.vote }).strict();
 
 export interface TicketHandlerDependencies {
   getIdentity?: typeof getAuthIdentity;
-  authorize?: (input: { organizationKey: string; scopeKey: string }, options: Omit<RunAuthenticatedContentToolOptions, 'execute'>) => Promise<{ context: ToolContext }>;
+  authorize?: (input: { teamKey: string; scopeKey: string }, options: Omit<RunAuthenticatedContentToolOptions, 'execute'>) => Promise<{ context: ToolContext }>;
   authorizationOptions?: Omit<RunAuthenticatedContentToolOptions, 'authenticatedUserKey' | 'execute'>;
   service?: TicketService;
   recordEvent?: ToolEventRecorder;
+  appScopeKey?: string;
   billing?: ToolBillingDependencies;
 }
 
@@ -30,11 +32,10 @@ export function createTicketHandler(dependencies: TicketHandlerDependencies = {}
   return async (c: Context) => {
     const identity = await (dependencies.getIdentity ?? getAuthIdentity)(c);
     if (!identity) return c.json({ success: false, error: 'authentication required' }, 401);
-    if (identity.identityType !== 'user') return c.json({ success: false, error: 'user session required' }, 403);
     try {
       const idempotencyKey = ticketIdempotencyKeySchema.parse(c.req.header('idempotency-key'));
-      const { organizationKey, scopeKey, message } = await parseJson(c, ticketHttpInputSchema);
-      const { context } = await (dependencies.authorize ?? authorizeContentExecution)({ organizationKey, scopeKey }, { ...dependencies.authorizationOptions, authenticatedUserKey: identity.key });
+      const { teamKey, scopeKey, message } = await parseJson(c, ticketHttpInputSchema);
+      const { context } = await (dependencies.authorize ?? authorizeContentExecution)({ teamKey, scopeKey }, { ...dependencies.authorizationOptions, ...authenticatedTeamContext(identity) });
       const ticket = await (dependencies.service ?? getDefaultTicketService()).submit({ message }, context, idempotencyKey);
       return c.json({ success: true, data: ticket }, 201);
     } catch (error) {
@@ -51,10 +52,9 @@ export function createTicketHandler(dependencies: TicketHandlerDependencies = {}
 async function authorizedRequest(c: Context, dependencies: TicketHandlerDependencies, schema: z.ZodTypeAny) {
   const identity = await (dependencies.getIdentity ?? getAuthIdentity)(c);
   if (!identity) return { response: c.json({ success: false, error: 'authentication required' }, 401) };
-  if (identity.identityType !== 'user') return { response: c.json({ success: false, error: 'user session required' }, 403) };
-  const input = await parseJson(c, schema) as { organizationKey: string; scopeKey: string } & Record<string, unknown>;
-  const { organizationKey, scopeKey, ...body } = input;
-  const { context } = await (dependencies.authorize ?? authorizeContentExecution)({ organizationKey, scopeKey }, { ...dependencies.authorizationOptions, authenticatedUserKey: identity.key });
+  const input = await parseJson(c, schema) as { teamKey: string; scopeKey: string } & Record<string, unknown>;
+  const { teamKey, scopeKey, ...body } = input;
+  const { context } = await (dependencies.authorize ?? authorizeContentExecution)({ teamKey, scopeKey }, { ...dependencies.authorizationOptions, ...authenticatedTeamContext(identity) });
   return { body, context };
 }
 
@@ -78,7 +78,7 @@ export function createFeedbackHandlers(dependencies: TicketHandlerDependencies =
         const request = await authorizedRequest(c, dependencies, ticketHttpInputSchema);
         if ('response' in request) return request.response;
         const input = ticketSubmitInputSchema.parse(request.body);
-        const ticket = await observeToolExecution('feedback.create', request.context, () => (dependencies.service ?? getDefaultTicketService()).createFeedback(input, request.context, idempotencyKey), { recorder: dependencies.recordEvent ?? toolEventService.record, idempotencyKey, input, ...dependencies.billing });
+        const ticket = await observeToolExecution('feedback.create', request.context, () => (dependencies.service ?? getDefaultTicketService()).createFeedback(input, request.context, idempotencyKey), { recorder: dependencies.recordEvent ?? toolEventService.record, appScopeKey: dependencies.appScopeKey, idempotencyKey, input, ...dependencies.billing });
         return c.json({ success: true, data: ticket }, 201);
       } catch (error) { return feedbackError(c, error); }
     },

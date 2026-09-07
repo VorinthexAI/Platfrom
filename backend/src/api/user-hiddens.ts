@@ -16,14 +16,14 @@ export function createUserHiddenHandlers(options: {
 } = {}) {
   const getIdentity = options.getIdentity ?? getAuthIdentity;
   const getContext = options.getContext ?? getPersonalAuthContext;
-  const run = (operation: (c: Context, actor: { userKey: string; organizationKey: string; membershipKey: string; service?: UserHiddenService }) => Promise<unknown>) => async (c: Context) => {
+  const run = (operation: (c: Context, actor: { userKey: string; teamKey: string; teamMembershipKey: string; service?: UserHiddenService }) => Promise<unknown>) => async (c: Context) => {
     const identity = await getIdentity(c);
     if (!identity) return c.json({ error: 'authentication required' }, 401);
     if (identity.identityType !== 'user') return c.json({ error: 'user authentication required' }, 403);
     const context = await getContext(identity.key);
     if (!context) return c.json({ error: 'user context not found' }, 404);
     try {
-      return c.json(await operation(c, { userKey: identity.key, organizationKey: context.organization.key, membershipKey: context.membership.key, service: options.service }));
+      return c.json(await operation(c, { userKey: identity.key, teamKey: context.team.key, teamMembershipKey: context.membership.key, service: options.service }));
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ error: 'invalid hidden content input' }, 400);
       if (error instanceof UserHiddenSourceNotFoundError) return c.json({ error: 'source not found' }, 404);

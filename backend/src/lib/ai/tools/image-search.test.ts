@@ -8,14 +8,14 @@ const embedding = currentEmbeddingSchema.parse(Array.from({ length: EMBEDDING_DI
 const now = '2026-08-11T12:00:00.000Z';
 
 function context(): ToolContext {
-  const organizationKey = newId();
+  const teamKey = newId();
   return {
-    organizationKey,
+    teamKey,
     runtimeScopeKey: newId(),
     principal: {
       kind: 'member',
       user: { key: newId() },
-      userOrganization: { key: newId(), organizationId: organizationKey, status: 'active', orgRole: 'member' },
+      userTeam: { key: newId(), teamKey: teamKey, status: 'active', teamRole: 'member' },
       scopeMember: null,
     } as never,
   };
@@ -40,8 +40,8 @@ describe('image.search tool', () => {
     let searched: any;
     const output = await imageSearchTool.execute({ query: 'snowy mountain' }, {
       context: toolContext,
-      async executeEmbedding(organizationKey, input) {
-        embedded = { organizationKey, input };
+      async executeEmbedding(teamKey, input) {
+        embedded = { teamKey, input };
         return { output: { embedding } } as never;
       },
       listMatchingVisualIdentities: async () => [],
@@ -52,13 +52,13 @@ describe('image.search tool', () => {
     });
 
     expect(embedded).toEqual({
-      organizationKey: toolContext.organizationKey,
+      teamKey: toolContext.teamKey,
       input: { text: prepareEmbeddingText('snowy mountain', 'query') },
     });
     expect(searched).toMatchObject({
-      organizationKey: toolContext.organizationKey,
+      teamKey: toolContext.teamKey,
       scopeKey: toolContext.runtimeScopeKey,
-      actorKey: (toolContext.principal as any).userOrganization.key,
+      actorKey: (toolContext.principal as any).userTeam.key,
       limit: 50,
     });
     expect(searched.threshold).toBeUndefined();
@@ -82,7 +82,7 @@ describe('image.search tool', () => {
     const preparedQuery = prepareEmbeddingText('city', 'query');
     await imageSearchTool.execute({ query: `  ${preparedQuery}  `, threshold: 0 }, {
       context: toolContext,
-      executeEmbedding: async (_organizationKey, input) => { expect(input.text).toBe(preparedQuery); return { output: { embedding } } as never; },
+      executeEmbedding: async (_teamKey, input) => { expect(input.text).toBe(preparedQuery); return { output: { embedding } } as never; },
       listMatchingVisualIdentities: async () => [],
       async searchImages(input) { expect(input.threshold).toBe(0); return []; },
     });
@@ -128,7 +128,7 @@ describe('image.search tool', () => {
       async listMatchingVisualIdentities(scopeKey, query) {
         identityLookups += 1;
         expect({ scopeKey, query }).toEqual({ scopeKey: toolContext.runtimeScopeKey, query: 'photos of Hugo' });
-        return [{ key: identityKey, scopeKey: toolContext.runtimeScopeKey, createdByKey: (toolContext.principal as any).userOrganization.key, name: 'Hugo', description: 'A saved identity.', referenceImageKey: newId(), embedding: identityEmbedding, createdAt: now, updatedAt: now }];
+        return [{ key: identityKey, scopeKey: toolContext.runtimeScopeKey, createdByKey: (toolContext.principal as any).userTeam.key, name: 'Hugo', description: 'A saved identity.', referenceImageKey: newId(), embedding: identityEmbedding, createdAt: now, updatedAt: now }];
       },
       async searchImages(input) {
         searches.push(input);
@@ -142,9 +142,9 @@ describe('image.search tool', () => {
     expect(identityLookups).toBe(1);
     expect(searches).toHaveLength(2);
     expect(searches.find(({ embedding: value }) => value === identityEmbedding)).toEqual({
-      organizationKey: toolContext.organizationKey,
+      teamKey: toolContext.teamKey,
       scopeKey: toolContext.runtimeScopeKey,
-      actorKey: (toolContext.principal as any).userOrganization.key,
+      actorKey: (toolContext.principal as any).userTeam.key,
       collectionKey,
       embedding: identityEmbedding,
       limit: 3,
@@ -181,7 +181,7 @@ describe('image.search tool', () => {
     let listed: any;
     let metrics: { mode: string; resultCount: number; durationMs: number } | undefined;
     const identity = {
-      key: identityKey, scopeKey: toolContext.runtimeScopeKey, createdByKey: (toolContext.principal as any).userOrganization.key, name: 'Alex', description: 'A person wearing a blue coat.',
+      key: identityKey, scopeKey: toolContext.runtimeScopeKey, createdByKey: (toolContext.principal as any).userTeam.key, name: 'Alex', description: 'A person wearing a blue coat.',
       referenceImageKey: newId(), embedding, createdAt: now, updatedAt: now,
     };
     const first = { image: result(toolContext.runtimeScopeKey).image, confidence: 1 }, second = { image: result(toolContext.runtimeScopeKey).image, confidence: 0.81 };
@@ -190,7 +190,7 @@ describe('image.search tool', () => {
       canAccessCollection: async () => true,
       getCollection: async () => ({ key: collectionKey }) as never,
       async getVisualIdentity(scopeKey, key, actorKey) {
-        expect({ scopeKey, key, actorKey }).toEqual({ scopeKey: toolContext.runtimeScopeKey, key: identityKey, actorKey: (toolContext.principal as any).userOrganization.key });
+        expect({ scopeKey, key, actorKey }).toEqual({ scopeKey: toolContext.runtimeScopeKey, key: identityKey, actorKey: (toolContext.principal as any).userTeam.key });
         return identity;
       },
       async listVisualIdentityImages(scopeKey, key, requestedCollectionKey) { listed = { scopeKey, key, collectionKey: requestedCollectionKey }; return [first, second]; },
@@ -261,11 +261,11 @@ describe('image.search tool', () => {
     })).rejects.toThrow();
   });
 
-  test('requires an active member in the current organization', async () => {
+  test('requires an active member in the current team', async () => {
     const systemContext = { ...context(), principal: { kind: 'system' } as never };
     await expect(imageSearchTool.execute({ query: 'city' }, { context: systemContext })).rejects.toMatchObject({ code: 'human_principal_required' });
-    const otherOrganization = context();
-    (otherOrganization.principal as any).userOrganization.organizationId = newId();
-    await expect(imageSearchTool.execute({ query: 'city' }, { context: otherOrganization })).rejects.toMatchObject({ code: 'organization_forbidden' });
+    const otherTeam = context();
+    (otherTeam.principal as any).userTeam.teamKey = newId();
+    await expect(imageSearchTool.execute({ query: 'city' }, { context: otherTeam })).rejects.toMatchObject({ code: 'team_forbidden' });
   });
 });

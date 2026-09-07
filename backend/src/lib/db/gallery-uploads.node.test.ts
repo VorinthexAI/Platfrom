@@ -4,7 +4,7 @@ import { galleryUploadSchema } from './gallery-uploads.node';
 
 const validUpload = {
   key: newId(),
-  organizationKey: newId(),
+  teamKey: newId(),
   scopeKey: newId(),
   actorKey: newId(),
   imageKey: newId(),

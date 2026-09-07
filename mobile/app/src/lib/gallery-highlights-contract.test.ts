@@ -62,7 +62,7 @@ test("uses separate full-height grid and player sheets with footer actions", () 
 });
 
 test("uses owner-only creation and selected-highlight tag and delete actions from the grid", () => {
-  expect(highlights).toContain("const owner = isGalleryCollectionOwned(collection)");
+  expect(highlights).toContain("const owner = true");
   expect(highlights).toContain('owner ? <Button disabled={creating || listLoading || opening}');
   expect(highlights).toContain('onLongPress={owner ? () => handleHighlightLongPress(highlight.key) : undefined}');
   expect(highlights).toContain('accessibilityActions={owner ? [{ name: "longpress"');

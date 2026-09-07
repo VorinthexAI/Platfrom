@@ -64,64 +64,63 @@ suite('Content live E2E', () => {
     } while (token);
   }
 
-  async function cleanupOrganization(organizationKey: string) {
-    const scopeKeys = await (await db.query('FOR scope IN scopes FILTER scope.organizationKey == @organizationKey RETURN scope._key', { organizationKey })).all();
+  async function cleanupTeam(teamKey: string) {
+    const scopeKeys = await (await db.query('FOR scope IN scopes FILTER scope.teamKey == @teamKey RETURN scope._key', { teamKey })).all();
     const removals: Array<[string, string, Record<string, unknown>]> = [
-      ['shares', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['documentSummaries', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['documentAudioVersions', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['documentVersions', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['documents', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['folders', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['contentSearchQueries', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
-      ['userSearches', 'row.userKey IN (FOR user IN users FILTER user.organizationId == @organizationKey RETURN user._key)', { organizationKey }],
-      ['contentIdempotency', 'row.organizationKey == @organizationKey', { organizationKey }],
+      ['userSearches', 'row.userKey IN (FOR user IN users FILTER user.teamKey == @teamKey RETURN user._key)', { teamKey }],
+      ['contentIdempotency', 'row.teamKey == @teamKey', { teamKey }],
       ['scopeMembers', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['scopeScopes', 'row.parentKey IN @scopeKeys OR row.childKey IN @scopeKeys', { scopeKeys }],
-      ['userOrganizations', 'row.organizationId == @organizationKey', { organizationKey }],
-      ['users', 'row.organizationId == @organizationKey', { organizationKey }],
+      ['userTeams', 'row.teamKey == @teamKey', { teamKey }],
+      ['users', 'row.teamKey == @teamKey', { teamKey }],
       ['scopes', 'row._key IN @scopeKeys', { scopeKeys }],
     ];
     for (const [collection, filter, bindVars] of removals) {
       await db.query(`FOR row IN ${collection} FILTER ${filter} REMOVE row IN ${collection}`, bindVars);
     }
-    await db.query('FOR row IN organizations FILTER row._key == @organizationKey REMOVE row IN organizations', { organizationKey });
+    await db.query('FOR row IN teams FILTER row._key == @teamKey REMOVE row IN teams', { teamKey });
   }
 
   afterAll(async () => {
     for (const prefix of prefixes) await removeObjects(prefix);
-    for (const organizationKey of roots) await cleanupOrganization(organizationKey);
+    for (const teamKey of roots) await cleanupTeam(teamKey);
   });
 
   test('executes every Content tool through Arango transactions and LocalStack S3', async () => {
-    const stale = await (await db.query('FOR organization IN organizations FILTER organization.name IN ["Content E2E", "Content outsider"] RETURN organization._key')).all();
-    for (const organizationKey of stale) {
-      await removeObjects(`content/${organizationKey}/`);
-      await cleanupOrganization(organizationKey);
+    const stale = await (await db.query('FOR team IN teams FILTER team.name IN ["Content E2E", "Content outsider"] RETURN team._key')).all();
+    for (const teamKey of stale) {
+      await removeObjects(`content/${teamKey}/`);
+      await cleanupTeam(teamKey);
     }
-    const organizationKey = newId();
-    const outsiderOrganizationKey = newId();
+    const teamKey = newId();
+    const outsiderTeamKey = newId();
     const scopeKey = newId();
     const secondScopeKey = newId();
     const unauthorizedScopeKey = newId();
     const outsiderScopeKey = newId();
     const userKey = newId();
-    const membershipKey = newId();
+    const teamMembershipKey = newId();
     const testPrefix = `content/${scopeKey}/`;
-    roots.add(organizationKey);
-    roots.add(outsiderOrganizationKey);
+    roots.add(teamKey);
+    roots.add(outsiderTeamKey);
     prefixes.add(testPrefix);
     prefixes.add(`content/${secondScopeKey}/`);
 
     const save = (collection: string, value: Record<string, unknown>) => db.collection(collection).save(value);
-    await save('organizations', { _key: organizationKey, name: 'Content E2E', is_root: false, slug: `archive-${organizationKey}`, description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: now, updatedAt: now, embedding: [] });
-    await save('organizations', { _key: outsiderOrganizationKey, name: 'Content outsider', is_root: false, slug: `outside-${outsiderOrganizationKey}`, description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: now, updatedAt: now, embedding: [] });
-    for (const [key, organization, slug] of [[scopeKey, organizationKey, 'primary'], [secondScopeKey, organizationKey, 'secondary'], [unauthorizedScopeKey, organizationKey, 'unauthorized'], [outsiderScopeKey, outsiderOrganizationKey, 'outsider']] as const) {
-      await save('scopes', { _key: key, organizationKey: organization, slug: `${slug}-${key}`, name: slug, summary: `${slug} archive scope`, description: `${slug} documents`, position: 1, level: 1, deletedAt: null, embedding: [] });
+    await save('teams', { _key: teamKey, name: 'Content E2E', is_root: false, slug: `archive-${teamKey}`, description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: now, updatedAt: now, embedding: [] });
+    await save('teams', { _key: outsiderTeamKey, name: 'Content outsider', is_root: false, slug: `outside-${outsiderTeamKey}`, description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: now, updatedAt: now, embedding: [] });
+    for (const [key, team, slug] of [[scopeKey, teamKey, 'primary'], [secondScopeKey, teamKey, 'secondary'], [unauthorizedScopeKey, teamKey, 'unauthorized'], [outsiderScopeKey, outsiderTeamKey, 'outsider']] as const) {
+      await save('scopes', { _key: key, teamKey: team, slug: `${slug}-${key}`, name: slug, summary: `${slug} archive scope`, description: `${slug} documents`, position: 1, level: 1, deletedAt: null, embedding: [] });
     }
-    await save('users', { _key: userKey, organizationId: organizationKey, email: `${userKey}@example.test`, emailHash: userKey, countryCode: 'SE', name: 'Content Owner', createdAt: now, updatedAt: now, embedding: [] });
-    await save('userOrganizations', { _key: membershipKey, organizationId: organizationKey, userId: userKey, orgRole: 'member', status: 'active', joinedAt: now, createdAt: now, updatedAt: now, embedding: [] });
-    await save('scopeMembers', { _key: newId(), scopeKey, userOrganizationKey: membershipKey, role: 'owner', status: 'active' });
+    await save('users', { _key: userKey, teamKey: teamKey, email: `${userKey}@example.test`, emailHash: userKey, countryCode: 'SE', name: 'Content Owner', createdAt: now, updatedAt: now, embedding: [] });
+    await save('userTeams', { _key: teamMembershipKey, teamKey: teamKey, userId: userKey, teamRole: 'member', status: 'active', joinedAt: now, createdAt: now, updatedAt: now, embedding: [] });
+    await save('scopeMembers', { _key: newId(), scopeKey, userTeamKey: teamMembershipKey, role: 'owner', status: 'active' });
     await save('scopeScopes', { _key: newId(), parentKey: scopeKey, childKey: secondScopeKey, level: 1 });
 
     let randomSeed = 1;
@@ -145,17 +144,17 @@ suite('Content live E2E', () => {
       },
       scanDocument: async () => ({ documentKey: newId(), content: 'Scanned deterministic text.', storageKeys: [] }),
       generateExport: (input: any) => generateDocumentExport(input, { pdfRenderer: async () => new TextEncoder().encode('%PDF-1.4\n%%EOF') }),
-      random: (size: number) => Uint8Array.from({ length: size }, (_, index) => (organizationKey.charCodeAt(index % organizationKey.length) + randomSeed + index) % 255 + 1),
+      random: (size: number) => Uint8Array.from({ length: size }, (_, index) => (teamKey.charCodeAt(index % teamKey.length) + randomSeed + index) % 255 + 1),
       clock: () => new Date(now),
       canPermanentlyDelete: () => true,
     };
     const context = {
-      organizationKey,
+      teamKey,
       runtimeScopeKey: scopeKey,
       principal: {
         kind: 'member',
-        user: { key: userKey, organizationId: organizationKey },
-        userOrganization: { key: membershipKey, organizationId: organizationKey, userId: userKey, orgRole: 'owner', status: 'active' },
+        user: { key: userKey, teamKey: teamKey },
+        userTeam: { key: teamMembershipKey, teamKey: teamKey, userId: userKey, teamRole: 'owner', status: 'active' },
         scopeMember: null,
       },
     };
@@ -172,27 +171,27 @@ suite('Content live E2E', () => {
       return output;
     };
 
-    const authorizedList = await runAuthenticatedContentTool({ organizationKey, scopeKey, tool: 'folder.list', input: { scopeKey } }, {
+    const authorizedList = await runAuthenticatedContentTool({ teamKey, scopeKey, tool: 'folder.list', input: { scopeKey } }, {
       authenticatedUserKey: userKey,
       execute: ((tool: string, input: unknown, resolvedContext: unknown) => runContentTool(tool, input, resolvedContext, dependencies)) as any,
     });
     outputSchemas['folder.list']!.parse(authorizedList);
     covered.add('folder.list');
 
-    const inheritedList = await runAuthenticatedContentTool({ organizationKey, scopeKey: secondScopeKey, tool: 'folder.list', input: { scopeKey: secondScopeKey } }, {
+    const inheritedList = await runAuthenticatedContentTool({ teamKey, scopeKey: secondScopeKey, tool: 'folder.list', input: { scopeKey: secondScopeKey } }, {
       authenticatedUserKey: userKey,
       execute: ((tool: string, input: unknown, resolvedContext: unknown) => runContentTool(tool, input, resolvedContext, dependencies)) as any,
     });
     outputSchemas['folder.list']!.parse(inheritedList);
 
-    await expect(runAuthenticatedContentTool({ organizationKey, scopeKey: unauthorizedScopeKey, tool: 'folder.list', input: { scopeKey: unauthorizedScopeKey } }, {
+    await expect(runAuthenticatedContentTool({ teamKey, scopeKey: unauthorizedScopeKey, tool: 'folder.list', input: { scopeKey: unauthorizedScopeKey } }, {
       authenticatedUserKey: userKey,
       execute: ((tool: string, input: unknown, resolvedContext: unknown) => runContentTool(tool, input, resolvedContext, dependencies)) as any,
     })).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
 
-    const created = await call('folder.create', { folders: [{ scopeKey, name: 'Root' }, { scopeKey, name: 'Destination' }], idempotencyKey: `folders-${organizationKey}` });
+    const created = await call('folder.create', { folders: [{ scopeKey, name: 'Root' }, { scopeKey, name: 'Destination' }], idempotencyKey: `folders-${teamKey}` });
     expect(created.summary).toEqual({ requested: 2, succeeded: 2, failed: 0 });
-    const replay = await call('folder.create', { folders: [{ scopeKey, name: 'Root' }, { scopeKey, name: 'Destination' }], idempotencyKey: `folders-${organizationKey}` });
+    const replay = await call('folder.create', { folders: [{ scopeKey, name: 'Root' }, { scopeKey, name: 'Destination' }], idempotencyKey: `folders-${teamKey}` });
     expect(replay).toEqual(created);
     const rootFolderKey = created.results[0].data.folder.key;
     const destinationFolderKey = created.results[1].data.folder.key;
@@ -218,15 +217,15 @@ suite('Content live E2E', () => {
     const text = '# Content Roadmap\n\nDeterministic source body.\n\n```ts\nsecretCode()\n```\n\nFinal paragraph.';
     const processed = await call('document.parse', {
       file: { filename: 'roadmap.md', mimeType: 'text/markdown', sizeBytes: new TextEncoder().encode(text).byteLength, bytes: new TextEncoder().encode(text) },
-      scopeKey, folderKey: childFolderKey, idempotencyKey: `processing-${organizationKey}`,
+      scopeKey, folderKey: childFolderKey, idempotencyKey: `processing-${teamKey}`,
     });
     const documentKey = processed.document.key;
     expect(processingOrder).toEqual(['document.parse', 'document-validate', 'storage-upload', 'document-extract', 'document-cleanup', 'document-embed', 'document-insert']);
     const createdDocument = await call('document.create', {
-      scopeKey, folderKey: childFolderKey, name: 'Created note', content: 'Created directly through Content.', idempotencyKey: `created-${organizationKey}`,
+      scopeKey, folderKey: childFolderKey, name: 'Created note', content: 'Created directly through Content.', idempotencyKey: `created-${teamKey}`,
     });
     expect(createdDocument.document.key).toBeString();
-    expect((await call('document.find', { documentKeys: [documentKey], include: ['content', 'embedding', 'folder', 'shares'] })).results[0].data.document.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
+    expect((await call('document.find', { documentKeys: [documentKey], include: ['content', 'embedding', 'folder'] })).results[0].data.document.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
     expect((await call('document.list', { scopeKey, folderKey: childFolderKey, extensions: ['md'] })).documents.map((item: any) => item.key)).toContain(documentKey);
 
     const [{ Hono }, { createContentToolHandler }] = await Promise.all([import('hono'), import('@/api/content-tools')]);
@@ -238,15 +237,15 @@ suite('Content live E2E', () => {
     const unauthorizedResponse = await api.request('/content/tools/folder.list', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ organizationKey, scopeKey: unauthorizedScopeKey, input: { scopeKey: unauthorizedScopeKey } }),
+      body: JSON.stringify({ teamKey, scopeKey: unauthorizedScopeKey, input: { scopeKey: unauthorizedScopeKey } }),
     });
     expect(unauthorizedResponse.status).toBe(403);
     const apiText = Array.from({ length: 2_105 }, (_, index) => `word${index}`).join(' ');
     const apiResponse = await api.request('/content/tools/document.parse', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'idempotency-key': `http-processing-${organizationKey}` },
+      headers: { 'content-type': 'application/json', 'idempotency-key': `http-processing-${teamKey}` },
       body: JSON.stringify({
-        organizationKey,
+        teamKey,
         scopeKey,
         input: {
           scopeKey,
@@ -279,16 +278,6 @@ suite('Content live E2E', () => {
     await call('document.move', { moves: [{ documentKey, targetScopeKey: scopeKey, targetFolderKey: rootFolderKey }] });
     expect((await db.collection('documents').document(documentKey)).embedding).toEqual(beforeMoveEmbedding);
 
-    const share = await call('document.share', { shares: [{ documentKey, permission: 'comment', password: 'correct horse battery staple', expiresAt: '2027-07-22T12:00:00.000Z' }] });
-    const shareKey = share.results[0].data.share.key;
-    const shareToken = share.results[0].data.token;
-    const rawShare = await db.collection('shares').document(shareKey);
-    expect(JSON.stringify(rawShare)).not.toContain(shareToken);
-    expect(rawShare.tokenHash).toMatch(/^[a-f0-9]{64}$/);
-    expect(rawShare.passwordHash).toStartWith('scrypt:');
-    const listedShares = await call('document.list-shares', { documentKeys: [documentKey] });
-    expect(JSON.stringify(listedShares)).not.toContain('tokenHash');
-
     const versionOne = (await call('document.create-version', { documentKeys: [documentKey], labels: { [documentKey]: 'Release one' } })).results[0].data.version;
     expect(typeof (await db.collection('documentVersions').document(versionOne.key)).content).toBe('string');
     const versionTwo = (await call('document.create-version', { documentKeys: [documentKey], labels: { [documentKey]: 'Release two' }, atomic: true })).results[0].data.version;
@@ -298,9 +287,8 @@ suite('Content live E2E', () => {
     const restoredVersion = await call('document.restore-version', { restores: [{ documentKey, versionKey: versionOne.key, createBackupVersion: true }], atomic: true });
     expect(restoredVersion.results[0].data.document.key).toBe(documentKey);
 
-    const copied = await call('document.copy', { copies: [{ documentKey, targetScopeKey: scopeKey, targetFolderKey: destinationFolderKey, newName: 'Complete Copy', includeVersions: true, includeShares: true }] });
+    const copied = await call('document.copy', { copies: [{ documentKey, targetScopeKey: scopeKey, targetFolderKey: destinationFolderKey, newName: 'Complete Copy', includeVersions: true }] });
     const copiedDocumentKey = copied.results[0].data.document.key;
-    expect(copied.results[0].data.shares).toHaveLength(1);
     const copiedVersions = await call('document.list-versions', { documentKeys: [copiedDocumentKey] });
     expect(copiedVersions.results[0].data.versions.length).toBeGreaterThanOrEqual(3);
 
@@ -312,25 +300,25 @@ suite('Content live E2E', () => {
     expect(exports.summary).toEqual({ requested: 1, succeeded: 1, failed: 0 });
 
     expect((await call('document.summarize', { documentKeys: [documentKey, copiedDocumentKey], combine: true })).results[0].data.text).toContain('deterministic');
-    const persistedSummary = await call('document.summarize', { documentKeys: [copiedDocumentKey], topic: 'systems', persist: true, idempotencyKey: `summary-${organizationKey}` });
+    const persistedSummary = await call('document.summarize', { documentKeys: [copiedDocumentKey], topic: 'systems', persist: true, idempotencyKey: `summary-${teamKey}` });
     const summaryKey = persistedSummary.results[0].data.summary.key;
     expect((await call('document.list-summaries', { documentKeys: [copiedDocumentKey] })).results[0].data.summaries[0].key).toBe(summaryKey);
     expect((await call('document.find-summary', { summaryKeys: [summaryKey] })).results[0].data.summary.summary).toContain('deterministic');
     expect((await call('document.topics', { documentKey })).topics).toEqual(['Deterministic systems', 'Archive']);
     const enhancementPreview = await call('document.enhance', { documentKeys: [documentKey], mode: 'preview' });
     expect(enhancementPreview.results[0].data.text).toContain('enhance');
-    const enhancementReplace = await call('document.enhance', { documentKeys: [documentKey], mode: 'replace', idempotencyKey: `enhance-replace-${organizationKey}` });
+    const enhancementReplace = await call('document.enhance', { documentKeys: [documentKey], mode: 'replace', idempotencyKey: `enhance-replace-${teamKey}` });
     expect(enhancementReplace.results[0].data.persistedDocumentKey).toBe(documentKey);
     const translationPreview = await call('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'preview' });
     expect(translationPreview.results[0].data.text).toContain('deterministic');
-    const translationCopy = await call('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'copy', idempotencyKey: `translate-copy-${organizationKey}` });
+    const translationCopy = await call('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'copy', idempotencyKey: `translate-copy-${teamKey}` });
     expect(translationCopy.results[0].data.persistedDocumentKey).toBeString();
-    const translationReplace = await call('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'replace', idempotencyKey: `translate-replace-${organizationKey}` });
+    const translationReplace = await call('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'replace', idempotencyKey: `translate-replace-${teamKey}` });
     expect(translationReplace.results[0].data.persistedDocumentKey).toBe(documentKey);
     const rewrite = await call('document.rewrite', { rewrites: [{ documentKey, instruction: 'Improve clarity', mode: 'preview' }, { documentKey: copiedDocumentKey, instruction: 'Shorten', mode: 'copy' }] });
     expect(rewrite.results[0].data.text).toContain('deterministic');
     expect(rewrite.results[1].data.persistedDocumentKey).toBeString();
-    const rewriteReplace = await call('document.rewrite', { rewrites: [{ documentKey, instruction: 'Replace clearly', mode: 'replace' }], idempotencyKey: `rewrite-${organizationKey}` });
+    const rewriteReplace = await call('document.rewrite', { rewrites: [{ documentKey, instruction: 'Replace clearly', mode: 'replace' }], idempotencyKey: `rewrite-${teamKey}` });
     expect(rewriteReplace.results[0].data.persistedDocumentKey).toBe(documentKey);
 
     const secondFolders = await call('folder.create', { folders: [{ scopeKey: secondScopeKey, name: 'Project Documents' }] });
@@ -340,12 +328,12 @@ suite('Content live E2E', () => {
     const outsiderFolderKey = newId();
     const outsiderDocumentKey = newId();
     await save('folders', { _key: outsiderFolderKey, scopeKey: outsiderScopeKey, name: 'Private outsider', embedding, createdAt: now, updatedAt: now });
-    await save('documents', { _key: outsiderDocumentKey, scopeKey: outsiderScopeKey, folderKey: outsiderFolderKey, name: 'Forbidden source', extension: 'txt', mimeType: 'text/plain', storageKey: `content/${outsiderOrganizationKey}/${outsiderScopeKey}/${outsiderDocumentKey}/original.txt`, sizeBytes: 8, content: 'roadmap', embedding, createdAt: now, updatedAt: now });
+    await save('documents', { _key: outsiderDocumentKey, scopeKey: outsiderScopeKey, folderKey: outsiderFolderKey, name: 'Forbidden source', extension: 'txt', mimeType: 'text/plain', storageKey: `content/${outsiderTeamKey}/${outsiderScopeKey}/${outsiderDocumentKey}/original.txt`, sizeBytes: 8, content: 'roadmap', embedding, createdAt: now, updatedAt: now });
     const scopedSearch = await call('document.search', { scopeKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey, secondScopeKey] }, { type: 'folder', folderKeys: [rootFolderKey], includeDescendants: true }], include: ['snippet', 'content', 'folder', 'scoreBreakdown'] });
     expect(scopedSearch.results.some((item: any) => item.documentKey === documentKey)).toBe(true);
-    const organizationSearch = await call('document.search-all', { organizationKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey, secondScopeKey, outsiderScopeKey] }], include: ['snippet', 'scope', 'scoreBreakdown'] });
-    expect(organizationSearch.results.map((item: any) => item.documentKey)).toContain(secondDocument.document.key);
-    expect(organizationSearch.results.map((item: any) => item.documentKey)).not.toContain(outsiderDocumentKey);
+    const teamSearch = await call('document.search-all', { teamKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey, secondScopeKey, outsiderScopeKey] }], include: ['snippet', 'scope', 'scoreBreakdown'] });
+    expect(teamSearch.results.map((item: any) => item.documentKey)).toContain(secondDocument.document.key);
+    expect(teamSearch.results.map((item: any) => item.documentKey)).not.toContain(outsiderDocumentKey);
     const contentSearch = await call('content.search', { scopeKey, query: 'semantic roadmap', minimumScore: 0.1 });
     expect(contentSearch.documents.some((item: any) => item.documentKey === documentKey)).toBe(true);
     const contentSearchReplay = await call('content.search', { scopeKey, query: '  SEMANTIC   ROADMAP  ', minimumScore: 0.1 });
@@ -368,9 +356,6 @@ suite('Content live E2E', () => {
     const copiedFolderDocuments = await call('document.list', { scopeKey, folderKey: copiedFolder.results[0].data.folder.key });
     expect(copiedFolderDocuments.documents.length).toBe(copiedFolder.results[0].data.documentCount);
 
-    const unshared = await call('document.unshare', { shareKeys: [shareKey], atomic: true });
-    expect(unshared.results[0].data.share.revokedAt).toBe(now);
-    expect((await call('document.list-shares', { documentKeys: [documentKey], includeRevoked: true })).results[0].data.shares[0].revokedAt).toBe(now);
     const archivedDocument = await call('document.archive', { documentKeys: [documentKey], atomic: true });
     expect(archivedDocument.results[0].data.document.deletedAt).toBe(now);
     await call('document.delete-version', { versionKeys: [versionTwo.key], atomic: true });
@@ -388,7 +373,7 @@ suite('Content live E2E', () => {
     await call('document.archive', { documentKeys: [copiedDocumentKey] });
     const copiedRaw = await db.collection('documents').document(copiedDocumentKey);
     const copiedStorageKey = copiedRaw.storageKey;
-    expect((await call('document.delete', { documentKeys: [copiedDocumentKey], deleteVersions: true, deleteShares: true })).summary.failed).toBe(0);
+    expect((await call('document.delete', { documentKeys: [copiedDocumentKey] })).summary.failed).toBe(0);
     expect(await (await db.query('RETURN DOCUMENT(documents, @key) == null', { key: copiedDocumentKey })).next()).toBe(true);
     expect(await (await db.query('RETURN DOCUMENT(documentSummaries, @key) == null', { key: summaryKey })).next()).toBe(true);
     await expect(s3.send(new GetObjectCommand({ Bucket: bucket, Key: copiedStorageKey }))).rejects.toBeDefined();
@@ -400,7 +385,7 @@ suite('Content live E2E', () => {
     expect(await (await db.query('RETURN DOCUMENT(folders, @key) == null', { key: disposableKey })).next()).toBe(true);
 
     expect([...covered].sort()).toEqual([...toolNames].sort());
-    const ledger = await db.query(`FOR row IN contentIdempotency FILTER row.organizationKey == @organizationKey RETURN row`, { organizationKey });
+    const ledger = await db.query(`FOR row IN contentIdempotency FILTER row.teamKey == @teamKey RETURN row`, { teamKey });
     const claims = await ledger.all();
     expect(claims.length).toBeGreaterThan(0);
     expect(claims.every((claim: any) => claim.status === 'completed' && typeof claim.responseCiphertext === 'string' && !('response' in claim))).toBe(true);
@@ -409,51 +394,27 @@ suite('Content live E2E', () => {
     expect(remaining.KeyCount ?? 0).toBe(0);
   }, 180_000);
 
-  test('migrates plaintext shares and legacy versions in a fresh database', async () => {
+  test('migrates legacy versions in a fresh database', async () => {
     const { Database } = await import('arangojs');
-    const { migrateContentShares, migrateContentVersions } = await import('@/db/arango-migrate');
+    const { migrateContentVersions } = await import('@/db/arango-migrate');
     const temporaryName = `archive_e2e_${newId().replaceAll('-', '')}`;
     const root = new Database({ url: process.env.ARANGO_URL!, auth: { username: process.env.ARANGO_USERNAME!, password: process.env.ARANGO_ROOT_PASSWORD! } });
     await root.createDatabase(temporaryName);
     const temporary = root.database(temporaryName);
     try {
-      await temporary.createCollection('documentShares');
-      await temporary.createCollection('shares');
-      await temporary.createCollection('documents');
       await temporary.createCollection('documentVersions');
-      await temporary.collection('documentShares').ensureIndex({ type: 'persistent', fields: ['token'], unique: true });
-      const shareKeys = Array.from({ length: 105 }, () => newId());
-      const migrationScopeKey = newId();
-      const migratedAt = '2026-07-22T12:00:00.000Z';
-      const shareDocumentKeys = Array.from({ length: 105 }, () => newId());
-      await temporary.collection('documents').import(shareDocumentKeys.map((key) => ({ _key: key, scopeKey: migrationScopeKey })));
-      await temporary.collection('documentShares').import(shareKeys.map((key, index) => ({ _key: key, scopeKey: migrationScopeKey, documentKey: shareDocumentKeys[index], token: `legacy-token-${index}`, permission: index % 2 ? 'read' : 'edit', createdAt: migratedAt, updatedAt: migratedAt })));
       const versionKeys = Array.from({ length: 55 }, () => newId());
       const legacyDocumentKey = newId();
       await temporary.collection('documentVersions').import(versionKeys.map((key, index) => ({ _key: key, documentKey: legacyDocumentKey, version: index + 1, content: `Historical paragraph ${index}\n\nSecond block`, embedding })));
 
-      await migrateContentShares(temporary);
       await migrateContentVersions(temporary);
-      await migrateContentShares(temporary);
-      await migrateContentShares(temporary);
       await migrateContentVersions(temporary);
-      await temporary.collection('shares').ensureIndex({ type: 'persistent', fields: ['tokenHash'], unique: true });
       await temporary.collection('documentVersions').ensureIndex({ type: 'persistent', fields: ['documentKey', 'version'], unique: true });
 
-      const shares = await (await temporary.query('FOR share IN shares FILTER share.sourceType == "document" SORT share._key RETURN share')).all();
-      expect(shares).toHaveLength(105);
-      expect(shares.every((share: any) => !('token' in share) && /^[a-f0-9]{64}$/.test(share.tokenHash))).toBe(true);
-      expect(new Set(shares.map((share: any) => share.tokenHash)).size).toBe(105);
-      expect(shares[0].permission).toBe('comment');
-      expect(shares.every((share: any) => share.sourceType === 'document' && shareDocumentKeys.includes(share.sourceKey))).toBe(true);
-      expect(await temporary.collection('documentShares').exists()).toBe(false);
       const versions = await (await temporary.query('FOR version IN documentVersions SORT version._key RETURN version')).all();
       expect(versions).toHaveLength(55);
       expect(versions.every((version: any) => !('html' in version) && !('json' in version) && version.embedding.length === EMBEDDING_DIMENSIONS)).toBe(true);
-      const shareIndexes = await temporary.collection('shares').indexes();
       const versionIndexes = await temporary.collection('documentVersions').indexes();
-      expect(shareIndexes.some((index: any) => index.unique && index.fields?.join(',') === 'tokenHash')).toBe(true);
-      expect(shareIndexes.some((index: any) => index.fields?.join(',') === 'token')).toBe(false);
       expect(versionIndexes.some((index: any) => index.unique && index.fields?.join(',') === 'documentKey,version')).toBe(true);
     } finally {
       temporary.close();

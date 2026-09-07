@@ -4,14 +4,14 @@ import { imageCaptionTool } from './image-caption';
 
 describe('image.caption tool', () => {
   test('validates URLs and returns ordered scored results from the executor', async () => {
-    let receivedOrganization = '';
+    let receivedTeam = '';
     let receivedInput: unknown;
     const output = await imageCaptionTool.execute({
       imageUrls: ['https://cdn.example.com/one.jpg', 'https://cdn.example.com/two.jpg'],
     }, {
-      organizationKey: 'organization-key',
-      async executeImageCaption(organizationKey, input) {
-        receivedOrganization = organizationKey;
+      teamKey: 'team-key',
+      async executeImageCaption(teamKey, input) {
+        receivedTeam = teamKey;
         receivedInput = input;
         return { output: { results: [
           { caption: 'First rich caption.', score: 92 },
@@ -20,7 +20,7 @@ describe('image.caption tool', () => {
       },
     });
 
-    expect(receivedOrganization).toBe('organization-key');
+    expect(receivedTeam).toBe('team-key');
     expect(receivedInput).toEqual({ imageUrls: ['https://cdn.example.com/one.jpg', 'https://cdn.example.com/two.jpg'], purpose: 'caption' });
     expect(output).toEqual({ results: [
       { caption: 'First rich caption.', score: 92 },

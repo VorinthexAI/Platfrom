@@ -1,32 +1,43 @@
 import { isAxiosError } from "axios";
 import { create } from "zustand";
 
-import { getJson, onUnauthorized, patchJson, revokeRemoteSession } from "@/lib/api-client";
+import { apiClient, getJson, onUnauthorized, patchJson, postJson, revokeRemoteSession } from "@/lib/api-client";
 import { clearAuthContext, readAuthContext, writeAuthContext } from "@/lib/auth-context-vault";
 import { hasCompleteAuthContext, normalizeAuthContext, type AuthUser } from "@/lib/auth-helpers";
 import { tokenVault } from "@/lib/token-vault";
-import { useOnboardingStore } from "@/state/onboarding";
+import { clearOnboardingCompletion, markOnboardingComplete, resetOnboardingSession } from "@/lib/onboarding-state";
+import type { ScopeSummary } from "@/lib/scope-client";
 
 let authOperation = 0;
+let scopeMutation = 0;
+let confirmedScope: Record<string, unknown> | null = null;
 
 export type AuthStatus = "bootstrapping" | "authenticated" | "unauthenticated";
 
 type AuthState = {
   status: AuthStatus;
   user: AuthUser | null;
-  organization: Record<string, unknown> | null;
+  team: Record<string, unknown> | null;
+  teamMembership: Record<string, unknown> | null;
+  teamSelectionEnabled: boolean;
   scope: Record<string, unknown> | null;
   bootstrap: () => Promise<void>;
   hydrate: () => Promise<void>;
   reconnectContentContext: () => Promise<void>;
   completeOnboarding: () => Promise<void>;
+  optimisticScope: (scope: ScopeSummary) => OptimisticScopeUpdate;
   optimisticProfile: (patch: ProfilePatch) => OptimisticProfileUpdate;
+  deleteAccount: () => Promise<void>;
   signOut: () => Promise<void>;
 };
 
 export type ProfilePatch = Pick<AuthUser, "avatarUrl" | "name">;
 export type OptimisticProfileUpdate = {
   reconcile: (patch?: ProfilePatch) => void;
+  rollback: () => void;
+};
+export type OptimisticScopeUpdate = {
+  reconcile: (scope: ScopeSummary) => void;
   rollback: () => void;
 };
 
@@ -41,9 +52,9 @@ function profileKeys(patch: ProfilePatch) {
   return Object.keys(patch) as (keyof ProfilePatch)[];
 }
 
-function queueProfileContextWrite(state: Pick<AuthState, "organization" | "scope" | "status" | "user">, operation: number) {
+function queueProfileContextWrite(state: Pick<AuthState, "team" | "teamMembership" | "teamSelectionEnabled" | "scope" | "status" | "user">, operation: number) {
   if (state.status !== "authenticated" || !state.user) return;
-  const context = { user: state.user, organization: state.organization, scope: state.scope };
+  const context = { user: state.user, team: state.team, teamMembership: state.teamMembership, teamSelectionEnabled: state.teamSelectionEnabled, scope: confirmedScope ?? state.scope };
   profileVaultWrites = profileVaultWrites.then(async () => {
     if (operation === authOperation) await writeAuthContext(context);
   }).catch(() => undefined);
@@ -56,7 +67,9 @@ async function loadContext() {
 const signedOutState = {
   status: "unauthenticated" as const,
   user: null,
-  organization: null,
+  team: null,
+  teamMembership: null,
+  teamSelectionEnabled: false,
   scope: null,
 };
 
@@ -67,7 +80,9 @@ function isGuest(user: AuthUser | null) {
 export const useAuthStore = create<AuthState>((set, get) => ({
   status: "bootstrapping",
   user: null,
-  organization: null,
+  team: null,
+  teamMembership: null,
+  teamSelectionEnabled: false,
   scope: null,
   bootstrap: async () => {
     const operation = ++authOperation;
@@ -87,6 +102,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         return;
       }
       if (operation === authOperation) {
+        confirmedScope = context.scope;
         await writeAuthContext(context);
         if (operation === authOperation) set({ status: "authenticated", ...context });
       }
@@ -105,15 +121,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         if (operation === authOperation) set(signedOutState);
         return;
       }
-      if (operation === authOperation) set(cached && hasCompleteAuthContext(cached)
-        ? { status: "authenticated", ...cached }
-        : signedOutState);
+      if (operation === authOperation) {
+        confirmedScope = cached && hasCompleteAuthContext(cached) ? cached.scope : null;
+        set(cached && hasCompleteAuthContext(cached) ? { status: "authenticated", ...cached } : signedOutState);
+      }
     }
   },
   hydrate: async () => {
     const operation = ++authOperation;
     const context = await loadContext();
     if (operation === authOperation) {
+      confirmedScope = context.scope;
       await writeAuthContext(context);
       if (operation === authOperation) set({ status: "authenticated", ...context });
     }
@@ -123,17 +141,48 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const context = await loadContext();
     if (!hasCompleteAuthContext(context)) throw new Error("Archive execution context is unavailable.");
     if (operation === authOperation) {
+      confirmedScope = context.scope;
       await writeAuthContext(context);
       if (operation === authOperation) set({ status: "authenticated", ...context });
     }
   },
   completeOnboarding: async () => {
     const operation = ++authOperation;
-    const context = normalizeAuthContext(await patchJson<{ isOnboarded: true }, unknown>("/auth/me", { isOnboarded: true }));
-    if (operation === authOperation) {
-      await writeAuthContext(context);
-      if (operation === authOperation) set({ status: "authenticated", ...context });
+    const previousUser = get().user;
+    if (!previousUser) throw new Error("Onboarding completion requires an authenticated user.");
+    set({ user: { ...previousUser, isOnboarded: true } });
+    try {
+      const context = normalizeAuthContext(await patchJson<{ isOnboarded: true }, unknown>("/auth/me", { isOnboarded: true }));
+      if (operation === authOperation) {
+        confirmedScope = context.scope;
+        await Promise.all([writeAuthContext(context), markOnboardingComplete().catch(() => undefined)]);
+        if (operation === authOperation) set({ status: "authenticated", ...context });
+      }
+    } catch (error) {
+      if (operation === authOperation) {
+        set({ user: previousUser });
+      }
+      throw error;
     }
+  },
+  optimisticScope: (scope) => {
+    const operation = authOperation;
+    const mutation = ++scopeMutation;
+    const previous = get().scope;
+    const apply = (next: Record<string, unknown> | null, persist: boolean) => {
+      const current = get();
+      if (operation !== authOperation || mutation !== scopeMutation || current.status !== "authenticated") return;
+      set({ scope: next });
+      if (persist) {
+        confirmedScope = next;
+        queueProfileContextWrite(get(), operation);
+      }
+    };
+    apply(scope, false);
+    return {
+      reconcile: (selected) => apply(selected, true),
+      rollback: () => apply(previous, false),
+    };
   },
   optimisticProfile: (patch) => {
     const keys = profileKeys(patch);
@@ -175,19 +224,29 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       rollback: () => settle("failed", {}),
     };
   },
+  deleteAccount: async () => {
+    await postJson<{ confirmation: "DELETE MY ACCOUNT" }, { deleted: true }>("/auth/me/delete", { confirmation: "DELETE MY ACCOUNT" });
+    authOperation += 1;
+    confirmedScope = null;
+    set(signedOutState);
+    await Promise.allSettled([tokenVault.clear(), clearAuthContext(), clearOnboardingCompletion()]);
+  },
   signOut: async () => {
     authOperation += 1;
-    useOnboardingStore.getState().reset();
+    confirmedScope = null;
+    resetOnboardingSession();
     set(signedOutState);
+    const pushCleanup = apiClient.delete("/auth/me/push-subscription", { data: {}, timeout: 2_000 }).catch(() => undefined);
     const session = await tokenVault.read().catch(() => null);
-    await Promise.allSettled([tokenVault.clear(), clearAuthContext()]);
+    await Promise.allSettled([pushCleanup, tokenVault.clear(), clearAuthContext()]);
     if (session) await revokeRemoteSession(session).catch(() => undefined);
   },
 }));
 
 onUnauthorized(() => {
   authOperation += 1;
-  useOnboardingStore.getState().reset();
+  confirmedScope = null;
+  resetOnboardingSession();
   void clearAuthContext();
   useAuthStore.setState(signedOutState);
 });

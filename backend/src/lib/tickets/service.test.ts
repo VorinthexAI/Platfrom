@@ -6,8 +6,8 @@ import { createTicketService, TicketAccessError, TicketFeedbackRejectedError, Ti
 import type { TicketRepository } from './repository';
 import type { executeAsk } from '@/lib/ai/router';
 
-const organizationKey = newId(), scopeKey = newId(), userKey = newId(), membershipKey = newId();
-const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: membershipKey, organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+const teamKey = newId(), scopeKey = newId(), userKey = newId(), teamMembershipKey = newId();
+const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: teamMembershipKey, teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
 const askResult = (text: string) => ({ output: { text, toolCalls: [], stopReason: 'stop' }, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, providerId: 'openrouter', modelId: 'model', externalModelId: 'external', rawResponse: {} });
 
 describe('ticket service', () => {
@@ -16,9 +16,9 @@ describe('ticket service', () => {
     const repository = { createOrReplay: async (...args: Parameters<TicketRepository['createOrReplay']>) => { stored = args; return { state: 'created' as const, ticket: args[0] }; } } as TicketRepository;
     const service = createTicketService({ repository, embed: async (input) => { expect(input).toEqual({ text: 'Please help', purpose: 'document' }); return Array(EMBEDDING_DIMENSIONS).fill(0); }, id: () => 'cm1234567890123456789012', now: () => '2026-09-03T10:00:00.000Z' });
     const result = await service.submit({ message: '  Please help  ' }, context, 'request-1');
-    expect(stored?.[0]).toMatchObject({ organizationKey, scopeKey, userKey, message: 'Please help', idempotencyKey: 'request-1' });
+    expect(stored?.[0]).toMatchObject({ teamKey, scopeKey, userKey, message: 'Please help', idempotencyKey: 'request-1' });
     expect(stored?.[0].requestHash).toMatch(/^[a-f0-9]{64}$/);
-    expect(stored?.[1]).toBe(membershipKey);
+    expect(stored?.[1]).toBe(teamMembershipKey);
     expect(result).toEqual({ key: 'cm1234567890123456789012', message: 'Please help', upvotes: 0, downvotes: 0, viewerVote: null, createdAt: '2026-09-03T10:00:00.000Z' });
     expect(result).not.toHaveProperty('embedding');
     expect(result).not.toHaveProperty('requestHash');
@@ -46,7 +46,7 @@ describe('ticket service', () => {
   test('creates, lists, and votes on feedback through trusted repository context', async () => {
     const calls: unknown[][] = [];
     const feedback = {
-      key: 'cm1234567890123456789012', organizationKey, scopeKey, userKey, message: 'Dark mode', embedding: Array(EMBEDDING_DIMENSIONS).fill(0),
+      key: 'cm1234567890123456789012', teamKey, scopeKey, userKey, message: 'Dark mode', embedding: Array(EMBEDDING_DIMENSIONS).fill(0),
       idempotencyKey: 'feedback-1', requestHash: 'a'.repeat(64), type: 'feedback' as const, upvotes: 0, downvotes: 0, createdAt: '2026-09-03T10:00:00.000Z',
     };
     const repository = {
@@ -58,17 +58,17 @@ describe('ticket service', () => {
     await expect(service.createFeedback({ message: ' Dark mode ' }, context, 'feedback-1')).resolves.toMatchObject({ message: 'Dark mode', upvotes: 0, downvotes: 0, viewerVote: null });
     await expect(service.listFeedback({}, context)).resolves.toEqual({ items: [{ key: feedback.key, message: feedback.message, upvotes: 2, downvotes: 0, viewerVote: 'up', createdAt: feedback.createdAt }], nextCursor: feedback.key });
     await expect(service.setFeedbackVote({ ticketKey: feedback.key, vote: 'up' }, context, 'vote-1')).resolves.toMatchObject({ upvotes: 1, downvotes: 0, viewerVote: 'up' });
-    expect(calls[0]).toEqual(['create', expect.objectContaining({ type: 'feedback', upvotes: 0, downvotes: 0 }), membershipKey]);
-    expect(calls[1]).toEqual(['list', { organizationKey, scopeKey, userKey, membershipKey, limit: 20 }]);
-    expect(calls[2]).toEqual(['vote', expect.objectContaining({ organizationKey, scopeKey, userKey, membershipKey, ticketKey: feedback.key, vote: 'up' })]);
+    expect(calls[0]).toEqual(['create', expect.objectContaining({ type: 'feedback', upvotes: 0, downvotes: 0 }), teamMembershipKey]);
+    expect(calls[1]).toEqual(['list', { teamKey, scopeKey, userKey, teamMembershipKey, limit: 20 }]);
+    expect(calls[2]).toEqual(['vote', expect.objectContaining({ teamKey, scopeKey, userKey, teamMembershipKey, ticketKey: feedback.key, vote: 'up' })]);
   });
 
   test('strictly validates feedback through the provider-neutral text action before persistence', async () => {
     const sequence: string[] = [];
     let actionRequest: unknown;
     const repository = { createOrReplay: async (ticket: never) => { sequence.push('persist'); return { state: 'created' as const, ticket }; } } as unknown as TicketRepository;
-    const ask = (async (requestedOrganizationKey: string, input: unknown, options: unknown) => {
-      expect(requestedOrganizationKey).toBe(organizationKey);
+    const ask = (async (requestedTeamKey: string, input: unknown, options: unknown) => {
+      expect(requestedTeamKey).toBe(teamKey);
       actionRequest = { input, options };
       sequence.push('classify');
       return askResult('{"valid":true}');

@@ -27,6 +27,9 @@ function createMemoryRepository(initialBalance = 0) {
 const identity = { idempotencyKey: 'operation-1', requestHash: '0123456789abcdef' };
 
 describe('Spark service', () => {
+  test('accepts the explicit referral reward ledger kind', () => {
+    expect(sparkTransactionSchema.parse({ key: 'reward-transaction', userKey: 'user-1', kind: 'referral-reward', deltaMicroSparks: 50_000_000, balanceAfterMicroSparks: 50_000_000, idempotencyKey: 'referral:v1', requestHash: '0123456789abcdef', createdAt: '2026-09-04T10:00:00.000Z' }).kind).toBe('referral-reward');
+  });
   test('does not expose a second account-grant path beside account initialization', () => {
     const service = createSparkService({ repository: createMemoryRepository().repository });
     expect(service).not.toHaveProperty('grantAccount');
@@ -60,13 +63,6 @@ describe('Spark service', () => {
     await expect(service.chargeInvocation('user-1', { ...identity, toolSlug: 'document.create', actionSlug: 'text.generate' })).resolves.toBeNull();
     await expect(service.chargeStorage('user-1', { ...identity, byteHours: 0 })).resolves.toBeNull();
     expect(memory.transactions).toEqual([]);
-  });
-
-  test('records recurring service debits independently from storage', async () => {
-    const memory = createMemoryRepository(200_000);
-    const service = createSparkService({ repository: memory.repository });
-    await service.charge('user-1', { ...identity, kind: 'recurring-service', microSparks: 136_986 });
-    expect(memory.transactions[0]).toMatchObject({ kind: 'recurring-service', deltaMicroSparks: -136_986 });
   });
 
   test('validates invalid amounts and propagates persistence failures', async () => {

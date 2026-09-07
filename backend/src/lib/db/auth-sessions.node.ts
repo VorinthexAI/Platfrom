@@ -12,8 +12,8 @@ export const authSessionSchema = z.object({
   refreshTokenHash: z.string(),
   expiresAt: z.string().datetime(),
   revokedAt: z.string().datetime().nullable().default(null),
-  founderMembershipKey: z.string().nullable().default(null),
-  founderMfaVersion: z.number().int().nonnegative().nullable().default(null),
+  teamMembershipKey: z.string().nullable().default(null),
+  teamMfaVersion: z.number().int().nonnegative().nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   embedding: z.array(z.number()).default([]),
@@ -44,4 +44,35 @@ export async function revokeAuthSession(key: string, userId: string, revokedAt: 
       RETURN NEW
   `);
   return Boolean(await cursor.next());
+}
+
+export async function getSelectedTeamMfaState(userId: string): Promise<{
+  teamMembershipKey: string;
+  mfaEnabled: boolean;
+  membershipMfaEnabled: boolean;
+  teamMfaVersion: number;
+} | null> {
+  const cursor = await db.query<{
+    teamMembershipKey: string;
+    mfaEnabled: boolean;
+    membershipMfaEnabled: boolean;
+    teamMfaVersion: number;
+  }>(aql`
+    LET user = DOCUMENT(users, ${userId})
+    LET scope = user == null ? null : DOCUMENT(scopes, user.currentScopeKey)
+    LET team = scope == null ? null : DOCUMENT(teams, scope.teamKey)
+    LET membership = team == null ? null : FIRST(
+      FOR link IN userTeams
+        FILTER link.userId == ${userId} && link.teamKey == team._key && link.status == "active"
+        LIMIT 1 RETURN link
+    )
+    FILTER team != null && team.isActive == true && membership != null
+    RETURN {
+      teamMembershipKey: membership._key,
+      mfaEnabled: team.mfa_enabled == true,
+      membershipMfaEnabled: membership.isMfaEnabled == true,
+      teamMfaVersion: HAS(membership, "teamMfaVersion") ? membership.teamMfaVersion : 0
+    }
+  `);
+  return await cursor.next() ?? null;
 }

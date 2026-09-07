@@ -25,7 +25,7 @@ describe('canonical email persistence schemas', () => {
   });
 
   test('keeps attachment storage canonical and export identities one-way', () => {
-    const completed = { key, organizationKey: 'organization', scopeKey: otherKey, connectorKey: key, providerMessageId: 'message', partPath: '1.2', contentHash: 'a'.repeat(64), kind: 'image', filename: 'photo.png', mimeType: 'image/png', sizeBytes: 4, storageKey: `email/${otherKey}/${key}`, status: 'completed', galleryImageKey: otherKey, createdAt: now, updatedAt: now };
+    const completed = { key, teamKey: 'team', scopeKey: otherKey, connectorKey: key, providerMessageId: 'message', partPath: '1.2', contentHash: 'a'.repeat(64), kind: 'image', filename: 'photo.png', mimeType: 'image/png', sizeBytes: 4, storageKey: `email/${otherKey}/${key}`, status: 'completed', galleryImageKey: otherKey, createdAt: now, updatedAt: now };
     expect(emailAttachmentSchema.parse(completed)).toMatchObject({ storageKey: `email/${otherKey}/${key}` });
     expect(() => emailAttachmentSchema.parse({ ...completed, archiveDocumentKey: otherKey })).toThrow();
     expect(() => emailAttachmentSchema.parse({ ...completed, status: 'processing' })).toThrow();

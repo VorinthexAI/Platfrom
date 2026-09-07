@@ -26,11 +26,11 @@ export type ImageSimilarityOutput = z.infer<typeof imageSimilarityOutputSchema>;
 
 export function imageSearchActor(context: ToolContext): string {
   if (context.principal.kind !== 'member') {
-    throw new ToolExecutionError('human_principal_required', 'A human organization member must search Gallery images');
+    throw new ToolExecutionError('human_principal_required', 'A human team member must search Gallery images');
   }
-  const membership = context.principal.userOrganization;
-  if (membership.status !== 'active' || membership.organizationId !== context.organizationKey) {
-    throw new ToolExecutionError('organization_forbidden', 'Active organization membership is required');
+  const membership = context.principal.userTeam;
+  if (membership.status !== 'active' || membership.teamKey !== context.teamKey) {
+    throw new ToolExecutionError('team_forbidden', 'Active team membership is required');
   }
   return membership.key;
 }

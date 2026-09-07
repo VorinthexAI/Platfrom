@@ -31,6 +31,13 @@ function responseErrorMessage(payload: unknown) {
   return typeof error?.message === "string" ? error.message : undefined;
 }
 
+export function extractDomainErrorMessage(value: unknown): string | undefined {
+  const root = record(value);
+  const response = record(root?.response);
+  return responseErrorMessage(response?.data ?? value)
+    ?? (value instanceof Error ? value.message : undefined);
+}
+
 export function createObservedHttpError(status: number, responseText: string) {
   let data: unknown;
   try { data = JSON.parse(responseText); } catch { data = undefined; }

@@ -18,7 +18,7 @@ test("keeps menu spacing explicit without changing generic sheet layouts", () =>
 });
 
 test("uses the shared menu layout across app option sheets", () => {
-  for (const file of ["AscendWorkspace.tsx", "KnowledgeWorkspace.tsx", "GalleryWorkspace.tsx", "GalleryCollectionSharing.tsx", "EmailWorkspace.tsx", "TravelWorkspace.tsx", "WorkspaceAppSwitcher.tsx"]) {
+  for (const file of ["AscendWorkspace.tsx", "KnowledgeWorkspace.tsx", "GalleryWorkspace.tsx", "EmailWorkspace.tsx", "TravelWorkspace.tsx", "WorkspaceAppSwitcher.tsx"]) {
     expect(readFileSync(resolve(root, `mobile/app/src/components/capability/${file}`), "utf8"), file).toContain("<BottomSheetMenu>");
   }
 });

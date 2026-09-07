@@ -4,7 +4,6 @@ import { documentStorage } from '@/lib/ai/document-processing/storage';
 import { toArangoDoc } from '@/lib/db/base';
 import { closeDb, db, withTransaction } from '@/lib/db/client';
 import { collectionImageSchema, type CollectionImage } from '@/lib/db/collection-images.node';
-import { collectionMemberSchema, type CollectionMember } from '@/lib/db/collection-members.node';
 import { collectionSchema, type Collection } from '@/lib/db/collections.node';
 import { imageCaptionRecordSchema, PERCEPTUAL_HASH_ALGORITHM, type ImageCaptionRecord } from '@/lib/db/image-captions.node';
 import { imageSchema, type Image } from '@/lib/db/images.node';
@@ -87,7 +86,6 @@ async function main() {
   const collectionDocuments: Collection[] = [];
   const imageDocuments: Image[] = [];
   const captionDocuments: ImageCaptionRecord[] = [];
-  const collectionMemberships: CollectionMember[] = [];
   const imageRelations: CollectionImage[] = [];
   let imageIndex = 0;
 
@@ -152,6 +150,7 @@ async function main() {
     collectionDocuments.push(collectionSchema.parse({
       key: collectionKey,
       scopeKey,
+      ownerKey: actorKey,
       name: fixtureCollection.name,
       description: `${FIXTURE_MARKER} ${fixtureCollection.description}`,
       coverImageKey: collectionImages[0],
@@ -160,14 +159,12 @@ async function main() {
       createdAt: NOW,
       updatedAt: NOW,
     }));
-    collectionMemberships.push(collectionMemberSchema.parse({ key: galleryDevelopmentFixtureKey(scopeKey, 'membership', fixtureCollection.slug), scopeKey, collectionKey, memberKey: actorKey, role: 'owner', createdAt: NOW }));
   }
 
-  await withTransaction({ write: ['collections', 'collectionMembers', 'images', 'imageCaptions', 'collectionImages'] }, async (transaction) => {
+  await withTransaction({ write: ['collections', 'images', 'imageCaptions', 'collectionImages'] }, async (transaction) => {
     for (const caption of captionDocuments) await transaction.query('UPSERT { _key: @key } INSERT @document REPLACE @document IN imageCaptions', { key: caption.key, document: toArangoDoc(caption) });
     for (const image of imageDocuments) await transaction.query('UPSERT { _key: @key } INSERT @document REPLACE @document IN images', { key: image.key, document: toArangoDoc(image) });
     for (const collection of collectionDocuments) await transaction.query('UPSERT { _key: @key } INSERT @document REPLACE @document IN collections', { key: collection.key, document: toArangoDoc(collection) });
-    for (const membership of collectionMemberships) await transaction.query('UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, memberKey: @memberKey } INSERT @document UPDATE {} IN collectionMembers', { scopeKey: membership.scopeKey, collectionKey: membership.collectionKey, memberKey: membership.memberKey, document: toArangoDoc(membership) });
     for (const relation of imageRelations) await transaction.query('UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: @imageKey } INSERT @document UPDATE {} IN collectionImages', { scopeKey: relation.scopeKey, collectionKey: relation.collectionKey, imageKey: relation.imageKey, document: toArangoDoc(relation) });
   });
 

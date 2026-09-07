@@ -12,7 +12,7 @@ const MAX_FILTER_VALUES = 50;
 const filterValuesSchema = z.array(z.string().trim().min(1).max(160)).min(1).max(MAX_FILTER_VALUES).transform((values) => [...new Set(values)]);
 export const retrievalFiltersSchema = z.object({
   keys: filterValuesSchema.optional(),
-  organizationKey: z.string().trim().min(1).max(160).optional(),
+  teamKey: z.string().trim().min(1).max(160).optional(),
   scopeKeys: filterValuesSchema.optional(),
   channelKeys: filterValuesSchema.optional(),
   statuses: filterValuesSchema.optional(),
@@ -35,8 +35,8 @@ export const retrievalInputSchema = z.object({
 });
 
 export interface RetrievalContext {
-  organizationKey: string;
-  membershipKey: string;
+  teamKey: string;
+  teamMembershipKey: string;
   exclude?: Record<string, string[]>;
 }
 
@@ -68,8 +68,8 @@ function metadataFor(node: string) {
 function validateFilters(node: string, filters: RetrievalFilters | undefined, context: RetrievalContext) {
   if (!filters) return;
   const metadata = metadataFor(node);
-  if (filters.organizationKey && filters.organizationKey !== context.organizationKey) throw new Error('Retrieval organization filter must match the authorized organization');
-  if (filters.organizationKey && metadata.access === 'global') throw new Error(`Node ${node} does not support organization filters`);
+  if (filters.teamKey && filters.teamKey !== context.teamKey) throw new Error('Retrieval team filter must match the authorized team');
+  if (filters.teamKey && metadata.access === 'global') throw new Error(`Node ${node} does not support team filters`);
   if (filters.scopeKeys && !metadata.schemaFields.includes('scopeKey')) throw new Error(`Node ${node} does not support scope filters`);
   if (filters.channelKeys && metadata.access !== 'channel' && metadata.access !== 'channel-self') throw new Error(`Node ${node} does not support channel filters`);
   if (filters.statuses && !metadata.schemaFields.includes('status')) throw new Error(`Node ${node} does not support status filters`);
@@ -80,22 +80,22 @@ export async function retrieveNodeDocuments(node: string, embedding: number[] | 
   validateFilters(node, filters, context);
   const has = (field: string) => metadata.schemaFields.includes(field);
   const query = `
-    LET membership = DOCUMENT(userOrganizations, @membershipKey)
-    LET membershipActive = membership != null && membership.organizationId == @organizationKey && membership.status == "active"
+    LET membership = DOCUMENT(userTeams, @teamMembershipKey)
+    LET membershipActive = membership != null && membership.teamKey == @teamKey && membership.status == "active"
     LET viewerUserKey = membershipActive ? membership.userId : null
-    LET privileged = membershipActive && membership.orgRole IN ["owner", "admin"]
+    LET privileged = membershipActive && membership.teamRole IN ["owner", "admin"]
     LET authorizedScopeKeys = !membershipActive ? [] : privileged ? (
-      FOR scope IN scopes FILTER scope.organizationKey == @organizationKey RETURN scope._key
+      FOR scope IN scopes FILTER scope.teamKey == @teamKey RETURN scope._key
     ) : (
       FOR link IN scopeMembers
-        FILTER link.userOrganizationKey == @membershipKey && link.status == "active"
-        FOR scope IN scopes FILTER scope._key == link.scopeKey && scope.organizationKey == @organizationKey
+        FILTER link.userTeamKey == @teamMembershipKey && link.status == "active"
+        FOR scope IN scopes FILTER scope._key == link.scopeKey && scope.teamKey == @teamKey
         RETURN scope._key
     )
     LET authorizedChannelKeys = !membershipActive ? [] : (
       FOR channel IN channels
-        FILTER channel.organizationKey == @organizationKey && channel.archivedAt == null
-        FILTER LENGTH(FOR participant IN channelParticipants FILTER participant.channelKey == channel._key && participant.userOrganizationKey == @membershipKey LIMIT 1 RETURN 1) > 0
+        FILTER channel.teamKey == @teamKey && channel.archivedAt == null
+        FILTER LENGTH(FOR participant IN channelParticipants FILTER participant.channelKey == channel._key && participant.userTeamKey == @teamMembershipKey LIMIT 1 RETURN 1) > 0
         RETURN channel._key
     )
     FOR document IN @@collection
@@ -107,12 +107,12 @@ export async function retrieveNodeDocuments(node: string, embedding: number[] | 
       FILTER @access != "channel" || document.channelKey IN authorizedChannelKeys
       FILTER @access != "channel-self" || document._key IN authorizedChannelKeys
       FILTER @access != "scope" || document.scopeKey IN authorizedScopeKeys
-      FILTER @access != "organization" || document.organizationKey == @organizationKey || document.organizationId == @organizationKey
-      FILTER @access != "organization-self" || document._key == @organizationKey
+      FILTER @access != "team" || document.teamKey == @teamKey
+      FILTER @access != "team-self" || document._key == @teamKey
       FILTER @access != "user" || document.userKey == viewerUserKey || document.userId == viewerUserKey
       FILTER document._key NOT IN @excludeKeys
       FILTER LENGTH(@filterKeys) == 0 || document._key IN @filterKeys
-      FILTER @filterOrganizationKey == null || @filterOrganizationKey == @organizationKey
+      FILTER @filterTeamKey == null || @filterTeamKey == @teamKey
       FILTER LENGTH(@filterScopeKeys) == 0 || document.scopeKey IN @filterScopeKeys
       FILTER LENGTH(@filterChannelKeys) == 0 || (@access == "channel-self" ? document._key : document.channelKey) IN @filterChannelKeys
       FILTER LENGTH(@filterStatuses) == 0 || document.status IN @filterStatuses
@@ -131,11 +131,11 @@ export async function retrieveNodeDocuments(node: string, embedding: number[] | 
   const bindVars = {
     '@collection': metadata.collectionName,
     access: metadata.access,
-    organizationKey: context.organizationKey,
-    membershipKey: context.membershipKey,
+    teamKey: context.teamKey,
+    teamMembershipKey: context.teamMembershipKey,
     excludeKeys: context.exclude?.[node] ?? [],
     filterKeys: filters?.keys ?? [],
-    filterOrganizationKey: filters?.organizationKey ?? null,
+    filterTeamKey: filters?.teamKey ?? null,
     filterScopeKeys: filters?.scopeKeys ?? [],
     filterChannelKeys: filters?.channelKeys ?? [],
     filterStatuses: filters?.statuses ?? [],

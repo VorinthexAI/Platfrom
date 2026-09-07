@@ -14,7 +14,7 @@ test('preserves ordered pages and reconciles Textract with visual transcription'
     async upload(input: any) { uploaded.push(input.key); return { storageKey: input.key }; },
     async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; },
   };
-  const output = await scanDocumentImages({ scopeKey: newId(), name: 'Receipt', idempotencyKey: 'stable-scan', pages: [scanPage(0), scanPage(1)] }, 'organization', {
+  const output = await scanDocumentImages({ scopeKey: newId(), name: 'Receipt', idempotencyKey: 'stable-scan', pages: [scanPage(0), scanPage(1)] }, 'team', {
     storage,
     fileAction: { execute: async (input) => ({ text: `textract:${input.storageKey.at(-5)}`, metadata: {} }) },
     caption: async (input: any) => {
@@ -35,7 +35,7 @@ test('preserves ordered pages and reconciles Textract with visual transcription'
 
 test('cleans retained scan objects when processing fails', async () => {
   const deleted: string[] = [];
-  await expect(scanDocumentImages({ scopeKey: newId(), pages: [scanPage()], idempotencyKey: 'failed' }, 'organization', {
+  await expect(scanDocumentImages({ scopeKey: newId(), pages: [scanPage()], idempotencyKey: 'failed' }, 'team', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete(key) { deleted.push(key); }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
     fileAction: { execute: async () => { throw new Error('offline'); } },
     caption: async () => ({ results: [{ caption: 'visual', score: 80 }] }),
@@ -45,7 +45,7 @@ test('cleans retained scan objects when processing fails', async () => {
 
 test('creates OCR content when the visual provider is unavailable', async () => {
   let captionCalls = 0;
-  const output = await scanDocumentImages({ scopeKey: newId(), idempotencyKey: 'ocr-fallback', pages: [scanPage()] }, 'organization', {
+  const output = await scanDocumentImages({ scopeKey: newId(), idempotencyKey: 'ocr-fallback', pages: [scanPage()] }, 'team', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
     fileAction: { execute: async () => ({ text: 'Reliable Textract text', metadata: { averageConfidence: 99, minimumConfidence: 98 } }) },
     caption: async () => { captionCalls += 1; throw new Error('visual provider unavailable'); },
@@ -55,7 +55,7 @@ test('creates OCR content when the visual provider is unavailable', async () => 
 });
 
 test('uses OCR content when visual reconciliation fails', async () => {
-  const output = await scanDocumentImages({ scopeKey: newId(), idempotencyKey: 'reconciliation-fallback', pages: [scanPage()] }, 'organization', {
+  const output = await scanDocumentImages({ scopeKey: newId(), idempotencyKey: 'reconciliation-fallback', pages: [scanPage()] }, 'team', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
     fileAction: { execute: async () => ({ text: 'Primary OCR', metadata: {} }) },
     caption: async (input: any) => {
@@ -75,7 +75,7 @@ test('finishes parallel OCR before starting visual work only for uncertain pages
   const extractionGate = new Promise<void>((resolve) => { releaseExtraction = resolve; });
   let allOcrStarted!: () => void;
   const ocrStartedSignal = new Promise<void>((resolve) => { allOcrStarted = resolve; });
-  const operation = scanDocumentImages({ scopeKey: newId(), idempotencyKey: 'parallel-scan', pages: Array.from({ length: pageCount }, (_, index) => scanPage(index)) }, 'organization', {
+  const operation = scanDocumentImages({ scopeKey: newId(), idempotencyKey: 'parallel-scan', pages: Array.from({ length: pageCount }, (_, index) => scanPage(index)) }, 'team', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
     fileAction: { execute: async () => { ocrStarted += 1; if (ocrStarted === pageCount) allOcrStarted(); await extractionGate; return { text: 'primary', metadata: {} }; } },
     caption: async (input: any) => {

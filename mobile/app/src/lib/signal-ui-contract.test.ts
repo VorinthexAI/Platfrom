@@ -29,8 +29,8 @@ test("Signal does not expose manual inbox synchronization", () => {
   expect(workspace).not.toContain("async function synchronize()");
 });
 
-test("Signal exposes Read/Unread tabs and four independent normalized facets", () => {
-  for (const value of ['{ facet: "urgent", label: "Urgent" }', '{ facet: "important", label: "Important" }', '{ facet: "filtered", label: "Filtered" }', '{ facet: "favorite", label: "Favorite" }']) expect(workspace).toContain(value);
+test("Signal exposes Read/Unread tabs and five independent normalized facets", () => {
+  for (const value of ['{ facet: "urgent", label: "Urgent" }', '{ facet: "important", label: "Important" }', '{ facet: "purchases", label: "Purchases" }', '{ facet: "filtered", label: "Filtered" }', '{ facet: "favorite", label: "Favorite" }']) expect(workspace).toContain(value);
   expect(workspace).toContain("const defaultInboxQuery = () => normalizeEmailOverviewQuery()");
   expect(workspace).toContain('accessibilityLabel="Email read state"');
   expect(workspace).toContain('accessibilityLabel="Filter inbox"');
@@ -220,9 +220,9 @@ test("Signal root puts shared search before tabs and uses a measured exact three
 });
 
 test("Signal follows the authenticated scope and keeps resolved empty lists refreshable", () => {
-  expect(workspace).toContain('const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "")');
+  expect(workspace).toContain('const teamKey = useAuthStore((state) => typeof state.team?.key === "string" ? state.team.key : "")');
   expect(workspace).toContain('const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "")');
-  expect(workspace).toContain("const emailContext = { organizationKey, scopeKey }");
+  expect(workspace).toContain("const emailContext = { teamKey, scopeKey }");
   expect(workspace).not.toContain("scrollEnabled={!rootEmpty}");
   expect(workspace).not.toContain("scrollEnabled={!inboxEmpty}");
   expect(workspace).toContain("refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />}");
@@ -269,7 +269,7 @@ test("new email snapshots every built-in and custom tone selector", () => {
 });
 
 test("native back closes the topmost new-email descendant and remains history-aware", () => {
-  expect(workspace).toMatch(/navigation\.addListener\("beforeRemove"[\s\S]*?if \(newEmailReviewOpen\)[\s\S]*?closeLatestNewEmailReview\(\)[\s\S]*?if \(newEmailAlternativesOpen\)[\s\S]*?returnToNewEmailContent\(\)[\s\S]*?if \(newEmailContentOpen\)[\s\S]*?invalidateNewEmailAlternatives\(\)[\s\S]*?setNewEmailRecipientsOpen\(true\)[\s\S]*?if \(newEmailRecipientsOpen\)[\s\S]*?closeLatestNewEmailRecipients\(\)/);
+  expect(workspace).toMatch(/navigation\.addListener\("beforeRemove"[\s\S]*?if \(newEmailReviewOpen\)[\s\S]*?closeLatestNewEmailReview\(\)[\s\S]*?if \(newEmailAlternativesOpen\)[\s\S]*?returnToNewEmailContent\(\)[\s\S]*?if \(newEmailContentOpen\)[\s\S]*?invalidateNewEmailAlternativesFromEffect\(\)[\s\S]*?setNewEmailRecipientsOpen\(true\)[\s\S]*?if \(newEmailRecipientsOpen\)[\s\S]*?closeLatestNewEmailRecipients\(\)/);
   expect(workspace).toContain("const closeLatestNewEmailReview = useEffectEvent(closeNewEmailReview)");
   expect(workspace).toMatch(/if \(selected\) \{\s*event\.preventDefault\(\);\s*clearSelectedThreadFromEffect\(\);[\s\S]*?if \(initialConnectorKey && \(!navigatedFromRoot \|\| !router\.canGoBack\(\)\)\)/);
   expect(workspace).toMatch(/function returnToSignalRoot[\s\S]*?router\.canGoBack\(\)[\s\S]*?router\.back\(\)[\s\S]*?router\.replace/);
@@ -296,7 +296,7 @@ test("new-email close and navigation cannot invalidate an in-flight send", () =>
 test("root inboxes category renders only connected inbox cards", () => {
   expect(client).toContain("unassignedDrafts: z.array(emailDraftSchema).default([])");
   expect(workspace).toContain("visibleAccounts.map((account) => { const accountSelected");
-  expect(workspace).toContain("const visibleUnassignedDrafts: EmailDraft[] = []");
+  expect(workspace).not.toContain("visibleUnassignedDrafts");
   expect(workspace).not.toContain("visibleUnassignedDrafts.map");
   expect(workspace).not.toContain('sheet === "assignDraft"');
   expect(workspace).not.toContain("assignEmailDraftForContext");
@@ -638,7 +638,7 @@ test("Signal root search is debounced, semantic, cancellable, and tab-specific",
   expect(workspace).toContain('searchEmailTonesForContext(context, query, false, controller.signal, selectedTagKeys)');
   expect(workspace).toContain('searchEmailInboxesForContext(context, query, true, controller.signal, selectedTagKeys)');
   expect(workspace).toContain('searchEmailTonesForContext(context, query, true, controller.signal, selectedTagKeys)');
-  expect(workspace).toContain('const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey }');
+  expect(workspace).toContain('const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey }');
   expect(workspace).toContain('setRootSearchResults(rootTab === "inboxes" ? { tab: rootTab, filterKey, inboxes: [] } : { tab: rootTab, filterKey, tones: [] })');
   expect(workspace).toContain('}, 300)');
   expect(workspace).toContain('}, 800)');
@@ -1102,7 +1102,7 @@ test("reply review reuses canonical attachment selection and sends the final sel
   expect(workspace).toContain('onPress={removeAllReplyAttachments} shape="pill" size="xs"');
   expect(workspace).toMatch(/open=\{readerSheetOpen && replyEditorOpen\}[\s\S]*?contentContainerStyle={styles\.newEmailForm}[\s\S]*?style={styles\.newEmailBodyInput}[\s\S]*?<ButtonSizeProvider overrideParent size="xs">/);
   expect(workspace).toContain('accessibilityLabel={`${replyAttachments.length} reply attachments`}');
-  expect(workspace).toContain('<EmailAttachmentPicker context={historyContext} contextKey={`${emailContext.organizationKey}:${emailContext.scopeKey}:reply:${selectedReply?.key ?? selected?.thread.key ?? "empty"}`}');
+  expect(workspace).toContain('<EmailAttachmentPicker context={historyContext} contextKey={`${emailContext.teamKey}:${emailContext.scopeKey}:reply:${selectedReply?.key ?? selected?.thread.key ?? "empty"}`}');
   expect(send).toContain('const attachmentsChanged = !sameAttachmentSelection(replyAttachments, current.attachments ?? [])');
   expect(send).toContain('attachmentsChanged ? { attachments: replyAttachments }');
   expect(send.indexOf('updateEmailDraftForContext(context, current.key')).toBeLessThan(send.indexOf('sendEmailDraftForContext(context, prepared.key'));
@@ -1258,7 +1258,7 @@ test("inbox Trash is scoped to the selected connector and clears with partial fa
 });
 
 test("context changes synchronously remount and cancel a clean new-email session", () => {
-  expect(workspace).toContain('const sessionKey = `${emailContext.organizationKey}:${emailContext.scopeKey}:${initialConnectorKey ?? "root"}:${initialThreadKey ?? "inbox"}:${initialMessageKey ?? "latest"}:${initialDraftKey ?? ""}:${initialToneKey ?? ""}:${initialCollectionKind ?? ""}:${initialSearchQuery ?? ""}:${openAttachments ? "attachments" : "reader"}`');
+  expect(workspace).toContain('const sessionKey = `${emailContext.teamKey}:${emailContext.scopeKey}:${initialConnectorKey ?? "root"}:${initialThreadKey ?? "inbox"}:${initialMessageKey ?? "latest"}:${initialDraftKey ?? ""}:${initialToneKey ?? ""}:${initialCollectionKind ?? ""}:${initialSearchQuery ?? ""}:${openAttachments ? "attachments" : "reader"}`');
   expect(workspace).toContain('<EmailWorkspaceSession emailContext={emailContext} initialCollectionKind={initialCollectionKind} initialConnectorKey={initialConnectorKey} initialDraftKey={initialDraftKey} initialMessageKey={initialMessageKey} initialSearchQuery={initialSearchQuery} initialThreadKey={initialThreadKey} initialToneKey={initialToneKey} key={sessionKey} navigatedFromRoot={navigatedFromRoot} openAttachments={openAttachments} />');
   for (const initialState of ['useState("")', 'useState<string[]>([])', 'useState<NewEmailAlternative[]>([])', 'useState(false)']) expect(workspace).toContain(initialState);
   expect(workspace).toContain("newEmailGeneration.current += 1");
@@ -1345,7 +1345,7 @@ test("provider-duration operations capture context and guard every continuation"
     const start = workspace.indexOf(`async function ${name}`);
     const end = workspace.indexOf("\n  async function ", start + 20);
     const operation = workspace.slice(start, end < 0 ? undefined : end);
-    expect(operation).toContain("const context = { organizationKey: emailContext.organizationKey, scopeKey: emailContext.scopeKey }");
+    expect(operation).toContain("const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey }");
     expect(operation).toMatch(/operationIsCurrent|contextIsCurrent/);
   }
   expect(workspace).toContain("disconnectEmailForContext(context, connectorKey)");

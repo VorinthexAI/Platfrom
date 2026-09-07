@@ -7,6 +7,8 @@ import { Canvas } from "@/components/three/Canvas";
 import { getDotTexture } from "@/components/three/dot-texture";
 import { createRandom } from "@/lib/random";
 
+/* eslint react/no-unknown-property: ["warn", { "ignore": ["args", "attach", "depthWrite", "map", "rotation", "sizeAttenuation", "transparent"] }] */
+
 const SILVER_100 = "#dde2e5";
 const SILVER_300 = "#aeb6bc";
 const OBSIDIAN = "#030507";

@@ -5,8 +5,8 @@ import { toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { createEmailRepository } from './repository';
 
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
-const organizationKey = 'cmrnlzf650002qc7k4p5zem5w';
-const membershipKey = 'cmrnlzf660003qc7kmember001';
+const teamKey = 'cmrnlzf650002qc7k4p5zem5w';
+const teamMembershipKey = 'cmrnlzf660003qc7kmember001';
 const credentials = () => ({ encryptedCredentials: 'v1:fixture:fixture:fixture', encryptionKeyId: 'fixture', accessTokenFingerprint: '0'.repeat(64) });
 
 describe('mail development seed safety', () => {
@@ -18,12 +18,12 @@ describe('mail development seed safety', () => {
   });
 
   test('builds schema-valid deterministic disabled connectors, inboxes, and archive documents', () => {
-    const first = buildMailDevSeedManifest({ organizationKey, scopeKey, membershipKey, credentials });
-    const second = buildMailDevSeedManifest({ organizationKey, scopeKey, membershipKey, credentials });
+    const first = buildMailDevSeedManifest({ teamKey, scopeKey, teamMembershipKey, credentials });
+    const second = buildMailDevSeedManifest({ teamKey, scopeKey, teamMembershipKey, credentials });
     expect(second).toEqual(first);
     expect(first.connectors).toHaveLength(3);
-    expect(first.fixtures.threads).toHaveLength(27);
-    expect(first.fixtures.threads.reduce((sum, thread) => sum + thread.messages.length, 0)).toBe(54);
+    expect(first.fixtures.threads).toHaveLength(30);
+    expect(first.fixtures.threads.reduce((sum, thread) => sum + thread.messages.length, 0)).toBe(60);
     expect(first.fixtures.drafts).toHaveLength(6);
     expect(first.fixtures.tones).toHaveLength(3);
     expect(first.fixtures.replyContext).toHaveLength(5);
@@ -40,7 +40,7 @@ describe('mail development seed safety', () => {
     const threadExportKeys = new Set(first.emailThreads.map((thread) => mailDevFixtureKey('email-archive-thread-export', thread.key)));
     const messageExportKeys = new Set(first.emailMessages.map((message) => mailDevFixtureKey('email-archive-message-export', message.key)));
     const threadDocuments = first.documents.filter((document) => threadExportKeys.has(document.key));
-    expect(threadDocuments).toHaveLength(27);
+    expect(threadDocuments).toHaveLength(30);
     expect(threadDocuments.every(({ key }) => !first.emailThreads.some((thread) => thread.key === key))).toBe(true);
     const inboxExportKeys = new Set(first.inboxes.map(({ connectorKey }) => mailDevFixtureKey('email-archive-export-inbox', scopeKey, connectorKey)));
     expect(threadDocuments.every(({ folderKey }) => typeof folderKey === 'string' && inboxExportKeys.has(folderKey))).toBe(true);
@@ -57,7 +57,7 @@ describe('mail development seed safety', () => {
   });
 
   test('canonical thread detail preserves fixture attachments on every message', async () => {
-    const manifest = buildMailDevSeedManifest({ organizationKey, scopeKey, membershipKey, credentials });
+    const manifest = buildMailDevSeedManifest({ teamKey, scopeKey, teamMembershipKey, credentials });
     const fixture = manifest.fixtures.threads.find(({ messages }) => messages.every(({ hasAttachments }) => hasAttachments));
     if (!fixture) throw new Error('Expected an attachment fixture spanning both thread messages.');
     const threadKey = mailDevFixtureKey('mail-thread', scopeKey, fixture.thread.accountKey, fixture.thread.providerThreadId);
@@ -78,12 +78,12 @@ describe('mail development seed safety', () => {
   test('reconciliation uses change-filtered upserts and fixture-bounded stale cleanup', async () => {
     const queries: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const database = { async query(query: string, bindVars?: Record<string, unknown>) { queries.push({ query, bindVars }); return { async next() { return 0; }, async all() { return []; } }; } };
-    const manifest = buildMailDevSeedManifest({ organizationKey, scopeKey, membershipKey, credentials });
+    const manifest = buildMailDevSeedManifest({ teamKey, scopeKey, teamMembershipKey, credentials });
     await reconcileMailDevSeed(database, manifest);
     const upserts = queries.filter(({ query }) => query.includes('UPSERT'));
     expect(upserts).toHaveLength(9);
     expect(upserts.every(({ query }) => query.includes('FILTER current == null ||'))).toBe(true);
-    expect(upserts.map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['organizationConnectors', 'emailInboxes', 'folders', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'documents']);
+    expect(upserts.map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['teamConnectors', 'emailInboxes', 'folders', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'documents']);
     const staleConnectors = queries.find(({ query }) => query.includes('staleConnectorKeys'))!;
     expect(staleConnectors.query).toContain('REMOVE inbox IN emailInboxes');
     const staleDocuments = queries.find(({ query }) => query.includes('document.developmentFixtureIdentifier == @prefix'))!;
@@ -94,8 +94,8 @@ describe('mail development seed safety', () => {
   test('verification compares exact fixture state while preserving only encrypted credential fields', async () => {
     let query = '';
     const database = { async query(value: string) { query = value; return { async next() { return { connectorMismatches: 0, folderMismatches: 0, documentMismatches: 0, attachmentMismatches: 0, extraFixtureConnectors: 0, extraFixtureDocuments: 0 }; }, async all() { return []; } }; } };
-    const manifest = buildMailDevSeedManifest({ organizationKey, scopeKey, membershipKey, credentials });
-    await expect(verifyMailDevSeed(database, manifest)).resolves.toMatchObject({ connectors: 3, threads: 27, messages: 54, attachmentReferences: 13 });
+    const manifest = buildMailDevSeedManifest({ teamKey, scopeKey, teamMembershipKey, credentials });
+    await expect(verifyMailDevSeed(database, manifest)).resolves.toMatchObject({ connectors: 3, threads: 30, messages: 60, attachmentReferences: 13 });
     expect(query).toContain('UNSET(current, "_id", "_rev") != desired');
     expect(query).toContain('extraFixtureDocuments');
     expect(query).toContain('folderMismatches');
@@ -107,7 +107,7 @@ describe('mail development seed safety', () => {
 
   test('verification rejects any extra fixture-owned entity', async () => {
     const database = { async query() { return { async next() { return { connectorMismatches: 0, folderMismatches: 0, documentMismatches: 0, attachmentMismatches: 0, extraFixtureConnectors: 0, extraFixtureDocuments: 1 }; }, async all() { return []; } }; } };
-    const manifest = buildMailDevSeedManifest({ organizationKey, scopeKey, membershipKey, credentials });
+    const manifest = buildMailDevSeedManifest({ teamKey, scopeKey, teamMembershipKey, credentials });
     await expect(verifyMailDevSeed(database, manifest)).rejects.toThrow('Mail fixture verification failed');
   });
 });

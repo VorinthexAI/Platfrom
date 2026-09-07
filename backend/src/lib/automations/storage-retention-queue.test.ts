@@ -12,6 +12,7 @@ function fakeQueue() {
     async upsertJobScheduler(...args: unknown[]) { schedulers.push(args); return {}; },
   };
 }
+const noNotifications = { async notifyStorageRetentionWarning() { return null; } };
 
 describe('storage retention queue', () => {
   test('uses exactly 90 elapsed days across calendar and daylight-saving boundaries', () => {
@@ -20,7 +21,7 @@ describe('storage retention queue', () => {
     expect(Date.parse(due) - Date.parse(failedAt)).toBe(STORAGE_RETENTION_MS);
     expect(due).toBe('2026-05-30T01:30:00.000Z');
     const base = { key: 'state', userKey: 'user-1', paymentPastDueAt: failedAt, wipeDueAt: due, minimumBalanceMicroSparks: 10, balanceMicroSparks: 0 };
-    expect(storageRetentionAction(base, new Date(Date.parse(due) - 1))).toBe('wait');
+    expect(storageRetentionAction(base, new Date(Date.parse(due) - 1))).toBe('warn');
     expect(storageRetentionAction(base, new Date(due))).toBe('wipe');
     expect(storageRetentionAction({ ...base, balanceMicroSparks: 9 }, new Date(due))).toBe('wipe');
     expect(storageRetentionAction({ ...base, balanceMicroSparks: 10 }, new Date(due))).toBe('fund');
@@ -60,7 +61,7 @@ describe('storage retention queue', () => {
 
   test('clears positive balances prospectively and queues only due zero balances', async () => {
     const queue = fakeQueue(), funded: string[] = [];
-    const base = { key: 'state', paymentPastDueAt: '2026-01-01T00:00:00.000Z' };
+    const base = { key: 'state', paymentPastDueAt: '2026-01-01T00:00:00.000Z', storedBytes: '1', monthlyCostSparks: '0.000001' };
     const repository = {
       async listUnfunded() { return [
         { ...base, userKey: 'restored', wipeDueAt: '2026-02-01T00:00:00.000Z', minimumBalanceMicroSparks: 10, balanceMicroSparks: 10 },
@@ -71,14 +72,14 @@ describe('storage retention queue', () => {
       async markFunded(userKey: string) { funded.push(userKey); return true; },
       async wipe() { return { status: 'stale' as const }; },
     };
-    expect(await scanStorageRetention({ repository, queue: queue as never, now: () => new Date('2026-09-04T00:00:00.000Z') })).toEqual({ scanned: 4, funded: 1, enqueued: 1 });
+    expect(await scanStorageRetention({ repository, notifications: noNotifications, queue: queue as never, now: () => new Date('2026-09-04T00:00:00.000Z') })).toEqual({ scanned: 4, funded: 1, warned: 0, enqueued: 1 });
     expect(funded).toEqual(['restored']);
     expect(queue.added.map((item) => item.data.userKey)).toEqual(['due']);
   });
 
   test('scans unfunded users in bounded keyset pages', async () => {
     const queue = fakeQueue();
-    const states = Array.from({ length: STORAGE_RETENTION_SCAN_BATCH_SIZE + 1 }, (_, index) => ({ key: `state-${String(index).padStart(3, '0')}`, userKey: `user-${index}`, paymentPastDueAt: '2026-01-01T00:00:00.000Z', wipeDueAt: '2026-04-01T00:00:00.000Z', minimumBalanceMicroSparks: 10, balanceMicroSparks: 0 }));
+    const states = Array.from({ length: STORAGE_RETENTION_SCAN_BATCH_SIZE + 1 }, (_, index) => ({ key: `state-${String(index).padStart(3, '0')}`, userKey: `user-${index}`, paymentPastDueAt: '2026-01-01T00:00:00.000Z', wipeDueAt: '2026-04-01T00:00:00.000Z', minimumBalanceMicroSparks: 10, balanceMicroSparks: 0, storedBytes: '1', monthlyCostSparks: '0.000001' }));
     const pages: Array<{ afterKey?: string; limit?: number } | undefined> = [];
     const repository = {
       async listUnfunded(input?: { afterKey?: string; limit?: number }) {
@@ -88,14 +89,14 @@ describe('storage retention queue', () => {
       },
       async markFunded() { return false; }, async wipe() { return { status: 'stale' as const }; },
     };
-    await expect(scanStorageRetention({ repository, queue: queue as never, now: () => new Date('2026-04-01T00:00:00.000Z') })).resolves.toEqual({ scanned: states.length, funded: 0, enqueued: states.length });
+    await expect(scanStorageRetention({ repository, notifications: noNotifications, queue: queue as never, now: () => new Date('2026-04-01T00:00:00.000Z') })).resolves.toEqual({ scanned: states.length, funded: 0, warned: 0, enqueued: states.length });
     expect(pages).toEqual([{ afterKey: undefined, limit: STORAGE_RETENTION_SCAN_BATCH_SIZE }, { afterKey: states[STORAGE_RETENTION_SCAN_BATCH_SIZE - 1]!.key, limit: STORAGE_RETENTION_SCAN_BATCH_SIZE }]);
   });
 
   test('installs a daily UTC scheduler and performs startup recovery', async () => {
     const queue = fakeQueue(); let closed = 0;
     const repository = { async listUnfunded() { return []; }, async markFunded() { return false; }, async wipe() { return { status: 'stale' as const }; } };
-    const handle = await startStorageRetention({ repository, queue: queue as never, workerFactory: () => ({ on() {}, async close() { closed += 1; } }) });
+    const handle = await startStorageRetention({ repository, notifications: noNotifications, queue: queue as never, workerFactory: () => ({ on() {}, async close() { closed += 1; } }) });
     expect(queue.schedulers[0]?.[0]).toBe(STORAGE_RETENTION_SCHEDULER_ID);
     expect(queue.schedulers[0]?.[1]).toEqual(STORAGE_RETENTION_REPEAT);
     await handle.close();
@@ -106,9 +107,9 @@ describe('storage retention queue', () => {
     const attempted: string[] = [];
     const queue = fakeQueue();
     queue.add = async (_name, data: any, options: any) => { attempted.push(data.userKey); if (data.userKey === 'first') throw new Error('redis write failed'); queue.added.push({ data, options }); return { id: options.jobId }; };
-    const state = { key: 'state', paymentPastDueAt: '2026-01-01T00:00:00.000Z', wipeDueAt: '2026-04-01T00:00:00.000Z', minimumBalanceMicroSparks: 10, balanceMicroSparks: 0 };
+    const state = { key: 'state', paymentPastDueAt: '2026-01-01T00:00:00.000Z', wipeDueAt: '2026-04-01T00:00:00.000Z', minimumBalanceMicroSparks: 10, balanceMicroSparks: 0, storedBytes: '1', monthlyCostSparks: '0.000001' };
     const repository = { async listUnfunded() { return [{ ...state, userKey: 'first' }, { ...state, userKey: 'second' }]; }, async markFunded() { return false; }, async wipe() { return { status: 'stale' as const }; } };
-    await expect(scanStorageRetention({ repository, queue: queue as never, now: () => new Date('2026-04-01T00:00:00.000Z') })).rejects.toThrow('redis write failed');
+    await expect(scanStorageRetention({ repository, notifications: noNotifications, queue: queue as never, now: () => new Date('2026-04-01T00:00:00.000Z') })).rejects.toThrow('redis write failed');
     expect(attempted).toEqual(['first', 'second']);
     expect(queue.added.map(({ data }) => data.userKey)).toEqual(['second']);
   });
@@ -125,33 +126,33 @@ describe('storage retention queue', () => {
     const queue = fakeQueue();
     const failedAt = '2026-01-01T00:00:00.000Z';
     const due = storageWipeDueAt(failedAt);
-    const state = { key: 'state', userKey: 'user-1', paymentPastDueAt: failedAt, wipeDueAt: due, minimumBalanceMicroSparks: 25, balanceMicroSparks: 0, fundedAt: undefined as string | undefined };
+    const state = { key: 'state', userKey: 'user-1', paymentPastDueAt: failedAt, wipeDueAt: due, minimumBalanceMicroSparks: 25, balanceMicroSparks: 0, storedBytes: '1', monthlyCostSparks: '0.000001', fundedAt: undefined as string | undefined };
     const repository = {
       async listUnfunded() { return state.fundedAt ? [] : [{ ...state }]; },
       async markFunded(_userKey: string, fundedAt: string) { if (state.balanceMicroSparks < state.minimumBalanceMicroSparks) return false; state.fundedAt = fundedAt; return true; },
       async wipe(input: { expectedWipeDueAt: string; now: string }) { return !state.fundedAt && state.balanceMicroSparks < state.minimumBalanceMicroSparks && input.expectedWipeDueAt === state.wipeDueAt && input.now >= state.wipeDueAt ? { status: 'wiped' as const, processed: 1 } : { status: 'stale' as const }; },
     };
 
-    await scanStorageRetention({ repository, queue: queue as never, now: () => new Date(Date.parse(due) - 1) });
+    await scanStorageRetention({ repository, notifications: noNotifications, queue: queue as never, now: () => new Date(Date.parse(due) - 1) });
     expect(queue.added).toHaveLength(0);
-    await scanStorageRetention({ repository, queue: queue as never, now: () => new Date(due) });
+    await scanStorageRetention({ repository, notifications: noNotifications, queue: queue as never, now: () => new Date(due) });
     expect(queue.added).toHaveLength(1);
 
     state.balanceMicroSparks = 25;
     await expect(processStorageRetentionJob(queue.added[0]!.data, { repository, now: () => new Date(Date.parse(due) + 1) })).resolves.toEqual({ status: 'stale' });
-    await expect(scanStorageRetention({ repository, queue: queue as never, now: () => new Date(Date.parse(due) + 2) })).resolves.toMatchObject({ funded: 1, enqueued: 0 });
+    await expect(scanStorageRetention({ repository, notifications: noNotifications, queue: queue as never, now: () => new Date(Date.parse(due) + 2) })).resolves.toMatchObject({ funded: 1, warned: 0, enqueued: 0 });
     expect(state.fundedAt).toBe(new Date(Date.parse(due) + 2).toISOString());
   });
 
   test('enqueues the persisted next batch and scanner recovers a commit-before-enqueue crash', async () => {
     const due = '2026-04-01T00:00:00.000Z';
     const queue = fakeQueue();
-    const state = { key: 'state', userKey: 'user', paymentPastDueAt: '2026-01-01T00:00:00.000Z', wipeDueAt: due, minimumBalanceMicroSparks: 10, balanceMicroSparks: 100, wipeBatch: 1, wipeStartedAt: due };
+    const state = { key: 'state', userKey: 'user', paymentPastDueAt: '2026-01-01T00:00:00.000Z', wipeDueAt: due, minimumBalanceMicroSparks: 10, balanceMicroSparks: 100, storedBytes: '1', monthlyCostSparks: '0.000001', wipeBatch: 1, wipeStartedAt: due };
     const repository = {
       async listUnfunded() { return [state]; }, async markFunded() { return false; },
       async wipe(input: { batch: number }) { return input.batch === 1 ? { status: 'continued' as const, nextBatch: 2, processed: 1000 } : { status: 'stale' as const }; },
     };
-    await scanStorageRetention({ repository, queue: queue as never, now: () => new Date(due) });
+    await scanStorageRetention({ repository, notifications: noNotifications, queue: queue as never, now: () => new Date(due) });
     expect(queue.added[0]?.data.batch).toBe(1);
     await processStorageRetentionJob(queue.added[0]!.data, { repository, queue: queue as never, now: () => new Date(due) });
     expect(queue.added[1]?.data.batch).toBe(2);
@@ -173,5 +174,20 @@ describe('storage retention queue', () => {
     await expect(processStorageRetentionJob(first, { repository, queue: queue as never })).resolves.toEqual({ status: 'continued', nextBatch: 1, processed: 1000 });
     await expect(processStorageRetentionJob(first, { repository, queue: queue as never })).resolves.toEqual({ status: 'stale' });
     await expect(processStorageRetentionJob(queue.added[0]!.data, { repository, queue: queue as never })).resolves.toEqual({ status: 'wiped', processed: 1 });
+  });
+
+  test('warns once through the canonical service before the deadline and never at wipe due time', async () => {
+    const due = '2026-04-03T12:00:00.000Z';
+    const state = { key: 'state', userKey: 'user', paymentPastDueAt: '2026-01-03T12:00:00.000Z', wipeDueAt: due, minimumBalanceMicroSparks: 10, balanceMicroSparks: 0, storedBytes: '6000000000', monthlyCostSparks: '180' };
+    const warnings: unknown[] = [];
+    const repository = { async listUnfunded() { return [state]; }, async markFunded() { return false; }, async wipe() { return { status: 'stale' as const }; } };
+    const notifications = { async notifyStorageRetentionWarning(input: unknown) { warnings.push(input); return { key: 'notification', deliveries: 0, recipients: 1, replayed: false }; } };
+    await expect(scanStorageRetention({ repository, notifications, queue: fakeQueue() as never, now: () => new Date('2026-02-05T12:00:00.001Z') })).resolves.toMatchObject({ warned: 1, enqueued: 0 });
+    expect(warnings).toEqual([{ userKey: 'user', paymentPastDueAt: state.paymentPastDueAt, wipeDueAt: due, monthlyCostSparks: '180', now: '2026-02-05T12:00:00.001Z' }]);
+
+    warnings.length = 0;
+    const queue = fakeQueue();
+    await expect(scanStorageRetention({ repository, notifications, queue: queue as never, now: () => new Date(due) })).resolves.toMatchObject({ warned: 0, enqueued: 1 });
+    expect(warnings).toHaveLength(0);
   });
 });

@@ -60,12 +60,12 @@ describe('Gmail Pub/Sub webhook', () => {
     try {
       expect((await app.request('/hook', { method: 'POST', headers: { authorization: 'Bearer signed', 'content-type': 'application/json' }, body: JSON.stringify(envelope) })).status).toBe(204);
       await processEmailSyncJob(queued, {
-        connectors: { listSyncTargetsByEmail: async () => [{ organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' }], markNotificationPending: async () => true } as never,
+        connectors: { listSyncTargetsByEmail: async () => [{ teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' }], markNotificationPending: async () => true } as never,
         queue: { add: async (_name: string, job: unknown) => { connectorJobs.push(job); return {} as never; } },
       });
       expect(connectorJobs).toHaveLength(1);
       await processEmailSyncJob(connectorJobs[0], { connectors: { clearPendingNotification: async () => true } as never, service: { sync: async () => { throw new Error('sync must not be called'); }, ingestSubscriptionNotification: async (...args: unknown[]) => { synced.push(args); return {}; } } as never });
-      expect(synced).toEqual([[{ userKey: 'system', organizationKey: 'org-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5' }, 'cmrnlzf650002qc7k4p5zem5w', payload.historyId]]);
+      expect(synced).toEqual([[{ userKey: 'system', teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5' }, 'cmrnlzf650002qc7k4p5zem5w', payload.historyId]]);
     } finally {
       if (previous.audience === undefined) delete process.env.GMAIL_PUBSUB_PUSH_AUDIENCE; else process.env.GMAIL_PUBSUB_PUSH_AUDIENCE = previous.audience;
       if (previous.email === undefined) delete process.env.GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL; else process.env.GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL = previous.email;

@@ -10,7 +10,7 @@ export const ticketVoteValueSchema = z.enum(['up', 'down']);
 
 export const ticketSchema = z.object({
   key: z.string().cuid(),
-  organizationKey: z.string().cuid(),
+  teamKey: z.string().cuid(),
   scopeKey: z.string().cuid(),
   userKey: z.string().cuid(),
   message: z.string().trim().min(1).max(8_000),
@@ -32,9 +32,9 @@ export type TicketListResult = { state: 'ok'; tickets: Array<{ ticket: Ticket; v
 export type TicketVoteResult = { state: 'ok'; ticket: Ticket; viewerVote: z.infer<typeof ticketVoteValueSchema> | null } | { state: 'not_found' } | { state: 'forbidden' };
 
 export interface TicketRepository {
-  createOrReplay(ticket: Ticket, membershipKey: string): Promise<TicketWriteResult>;
-  listFeedback(input: { organizationKey: string; scopeKey: string; userKey: string; membershipKey: string; cursor?: string; limit: number }): Promise<TicketListResult>;
-  setFeedbackVote(input: { organizationKey: string; scopeKey: string; userKey: string; membershipKey: string; ticketKey: string; vote: z.infer<typeof ticketVoteValueSchema> | null; voteKey: string; now: string }): Promise<TicketVoteResult>;
+  createOrReplay(ticket: Ticket, teamMembershipKey: string): Promise<TicketWriteResult>;
+  listFeedback(input: { teamKey: string; scopeKey: string; userKey: string; teamMembershipKey: string; cursor?: string; limit: number }): Promise<TicketListResult>;
+  setFeedbackVote(input: { teamKey: string; scopeKey: string; userKey: string; teamMembershipKey: string; ticketKey: string; vote: z.infer<typeof ticketVoteValueSchema> | null; voteKey: string; now: string }): Promise<TicketVoteResult>;
 }
 
 export interface TicketDatabase {
@@ -45,32 +45,32 @@ type TicketTransactionRunner = <T>(collections: { read: string[]; write: string[
 
 export function createTicketRepository(database: TicketDatabase = db, transact: TicketTransactionRunner = withTransaction as TicketTransactionRunner): TicketRepository {
   return {
-    async createOrReplay(ticket, membershipKey) {
+    async createOrReplay(ticket, teamMembershipKey) {
       const value = ticketSchema.parse(ticket);
-      membershipKey = z.string().cuid().parse(membershipKey);
-      return transact({ read: ['users', 'userOrganizations', 'scopes', 'scopeMembers'], write: [TICKETS_COLLECTION] }, async (transaction) => {
+      teamMembershipKey = z.string().cuid().parse(teamMembershipKey);
+      return transact({ read: ['users', 'userTeams', 'scopes', 'scopeMembers'], write: [TICKETS_COLLECTION] }, async (transaction) => {
         const cursor = await transaction.query(`
           LET user = DOCUMENT(users, @userKey)
-          LET membership = DOCUMENT(userOrganizations, @membershipKey)
+          LET membership = DOCUMENT(userTeams, @teamMembershipKey)
           LET scope = DOCUMENT(scopes, @scopeKey)
           LET scopeMember = FIRST(
             FOR member IN scopeMembers
               FILTER member.scopeKey == @scopeKey
-                && member.userOrganizationKey == @membershipKey
+                && member.userTeamKey == @teamMembershipKey
                 && member.status == "active"
               LIMIT 1
               RETURN member
           )
           FILTER user != null
             && membership != null
-            && membership.organizationId == @organizationKey
+            && membership.teamKey == @teamKey
             && membership.userId == @userKey
             && membership.status == "active"
             && scope != null
-            && scope.organizationKey == @organizationKey
-            && (membership.orgRole IN ["owner", "admin"] || scopeMember != null)
+            && scope.teamKey == @teamKey
+            && (membership.teamRole IN ["owner", "admin"] || scopeMember != null)
           UPSERT {
-            organizationKey: @organizationKey,
+            teamKey: @teamKey,
             userKey: @userKey,
             idempotencyKey: @idempotencyKey
           }
@@ -80,8 +80,8 @@ export function createTicketRepository(database: TicketDatabase = db, transact: 
           RETURN { ticket: NEW, previousHash: OLD == null ? null : OLD.requestHash }
         `, {
           '@collection': TICKETS_COLLECTION,
-          membershipKey,
-          organizationKey: value.organizationKey,
+          teamMembershipKey,
+          teamKey: value.teamKey,
           scopeKey: value.scopeKey,
           userKey: value.userKey,
           idempotencyKey: value.idempotencyKey,
@@ -95,17 +95,17 @@ export function createTicketRepository(database: TicketDatabase = db, transact: 
       });
     },
     async listFeedback(input) {
-      return transact({ read: ['users', 'userOrganizations', 'scopes', 'scopeMembers', TICKETS_COLLECTION, TICKET_VOTES_COLLECTION], write: [] }, async (transaction) => {
+      return transact({ read: ['users', 'userTeams', 'scopes', 'scopeMembers', TICKETS_COLLECTION, TICKET_VOTES_COLLECTION], write: [] }, async (transaction) => {
         const cursor = await transaction.query(`
           LET user = DOCUMENT(users, @userKey)
-          LET membership = DOCUMENT(userOrganizations, @membershipKey)
+          LET membership = DOCUMENT(userTeams, @teamMembershipKey)
           LET scope = DOCUMENT(scopes, @scopeKey)
-          LET scopeMember = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @membershipKey && member.status == "active" LIMIT 1 RETURN member)
-          LET authorized = user != null && membership != null && membership.organizationId == @organizationKey && membership.userId == @userKey && membership.status == "active" && scope != null && scope.organizationKey == @organizationKey && (membership.orgRole IN ["owner", "admin"] || scopeMember != null)
-          LET cursorTicket = @cursor == null ? null : FIRST(FOR item IN @@tickets FILTER item._key == @cursor && item.organizationKey == @organizationKey && item.scopeKey == @scopeKey && item.type == "feedback" LIMIT 1 RETURN item)
+          LET scopeMember = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userTeamKey == @teamMembershipKey && member.status == "active" LIMIT 1 RETURN member)
+          LET authorized = user != null && membership != null && membership.teamKey == @teamKey && membership.userId == @userKey && membership.status == "active" && scope != null && scope.teamKey == @teamKey && (membership.teamRole IN ["owner", "admin"] || scopeMember != null)
+          LET cursorTicket = @cursor == null ? null : FIRST(FOR item IN @@tickets FILTER item._key == @cursor && item.teamKey == @teamKey && item.scopeKey == @scopeKey && item.type == "feedback" LIMIT 1 RETURN item)
           LET rows = authorized ? (
             FOR ticket IN @@tickets
-              FILTER ticket.organizationKey == @organizationKey && ticket.scopeKey == @scopeKey && ticket.type == "feedback"
+              FILTER ticket.teamKey == @teamKey && ticket.scopeKey == @scopeKey && ticket.type == "feedback"
               FILTER cursorTicket == null || ticket.createdAt < cursorTicket.createdAt || (ticket.createdAt == cursorTicket.createdAt && ticket._key < cursorTicket._key)
               SORT ticket.createdAt DESC, ticket._key DESC
               LIMIT @pageSize
@@ -122,15 +122,15 @@ export function createTicketRepository(database: TicketDatabase = db, transact: 
       });
     },
     async setFeedbackVote(input) {
-      return transact({ read: ['users', 'userOrganizations', 'scopes', 'scopeMembers'], write: [TICKETS_COLLECTION, TICKET_VOTES_COLLECTION] }, async (transaction) => {
+      return transact({ read: ['users', 'userTeams', 'scopes', 'scopeMembers'], write: [TICKETS_COLLECTION, TICKET_VOTES_COLLECTION] }, async (transaction) => {
         const authorizationCursor = await transaction.query(`
           LET user = DOCUMENT(users, @userKey)
-          LET membership = DOCUMENT(userOrganizations, @membershipKey)
+          LET membership = DOCUMENT(userTeams, @teamMembershipKey)
           LET scope = DOCUMENT(scopes, @scopeKey)
-          LET scopeMember = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userOrganizationKey == @membershipKey && member.status == "active" LIMIT 1 RETURN member)
-          LET authorized = user != null && membership != null && membership.organizationId == @organizationKey && membership.userId == @userKey && membership.status == "active" && scope != null && scope.organizationKey == @organizationKey && (membership.orgRole IN ["owner", "admin"] || scopeMember != null)
+          LET scopeMember = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && member.userTeamKey == @teamMembershipKey && member.status == "active" LIMIT 1 RETURN member)
+          LET authorized = user != null && membership != null && membership.teamKey == @teamKey && membership.userId == @userKey && membership.status == "active" && scope != null && scope.teamKey == @teamKey && (membership.teamRole IN ["owner", "admin"] || scopeMember != null)
           LET ticket = DOCUMENT(@@tickets, @ticketKey)
-          LET selected = authorized && ticket != null && ticket.organizationKey == @organizationKey && ticket.scopeKey == @scopeKey && ticket.type == "feedback" ? ticket : null
+          LET selected = authorized && ticket != null && ticket.teamKey == @teamKey && ticket.scopeKey == @scopeKey && ticket.type == "feedback" ? ticket : null
           RETURN { authorized, selected: selected != null }
         `, { '@tickets': TICKETS_COLLECTION, ...input });
         const authorization = await authorizationCursor.next() as { authorized: boolean; selected: boolean } | undefined;
@@ -142,7 +142,7 @@ export function createTicketRepository(database: TicketDatabase = db, transact: 
         } else {
           await transaction.query(`
             UPSERT { ticketKey: @ticketKey, userKey: @userKey }
-              INSERT { _key: @voteKey, organizationKey: @organizationKey, scopeKey: @scopeKey, ticketKey: @ticketKey, userKey: @userKey, vote: @vote, createdAt: @now, updatedAt: @now }
+              INSERT { _key: @voteKey, teamKey: @teamKey, scopeKey: @scopeKey, ticketKey: @ticketKey, userKey: @userKey, vote: @vote, createdAt: @now, updatedAt: @now }
               UPDATE { vote: @vote, updatedAt: @now }
               IN @@votes
           `, { '@votes': TICKET_VOTES_COLLECTION, ...input });

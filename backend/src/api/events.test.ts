@@ -13,6 +13,7 @@ describe('app event routing', () => {
     expect(parseEventEnvelope('{"route":"scope","scopeKey":"scope-1","event":"inbox.changed"}')).toEqual({ route: 'scope', scopeKey: 'scope-1', event: 'inbox.changed' });
     expect(parseEventEnvelope('{"route":"scope","scopeKey":"scope-1","event":"book.changed"}')).toEqual({ route: 'scope', scopeKey: 'scope-1', event: 'book.changed' });
     expect(parseEventEnvelope('{"route":"user","userKey":"user-1","event":"conversation.changed"}')).toEqual({ route: 'user', userKey: 'user-1', event: 'conversation.changed' });
+    expect(parseEventEnvelope('{"route":"user","userKey":"user-1","event":"referral.reward.created"}')).toEqual({ route: 'user', userKey: 'user-1', event: 'referral.reward.created' });
     expect(parseEventEnvelope('{"route":"scope","scopeKey":"scope-1","event":"inbox.changed","credentials":"no"}')).toBeNull();
     expect(parseEventEnvelope('{"route":"scope","scopeKey":"scope-1","event":"trip.changed","tripKey":"secret"}')).toBeNull();
     expect(parseEventEnvelope('not json')).toBeNull();
@@ -25,14 +26,14 @@ describe('app event routing', () => {
     expect(await shouldDeliverEvent(envelope, 'user-2', membership)).toBe(false);
   });
 
-  test('checks current collection membership for every event', async () => {
+  test('checks current collection access for every event', async () => {
     const envelope = parseEventEnvelope('{"route":"collection","collectionKey":"collection-1","event":"collection.content.changed"}')!;
-    let member = true;
+    let accessible = true;
     let checks = 0;
-    const checkMembership = async () => { checks += 1; return member; };
-    expect(await shouldDeliverEvent(envelope, 'user-1', checkMembership)).toBe(true);
-    member = false;
-    expect(await shouldDeliverEvent(envelope, 'user-1', checkMembership)).toBe(false);
+    const checkAccess = async () => { checks += 1; return accessible; };
+    expect(await shouldDeliverEvent(envelope, 'user-1', checkAccess)).toBe(true);
+    accessible = false;
+    expect(await shouldDeliverEvent(envelope, 'user-1', checkAccess)).toBe(false);
     expect(checks).toBe(2);
   });
 
@@ -42,35 +43,25 @@ describe('app event routing', () => {
     expect(await shouldDeliverEvent(envelope, 'outsider', async () => false, async () => false)).toBe(false);
   });
 
-  test('delivers highlight changes to current collection members until access is revoked', async () => {
+  test('delivers highlight changes while collection access remains authorized', async () => {
     const envelope = parseEventEnvelope('{"route":"collection","collectionKey":"collection-1","event":"highlight.changed"}')!;
     let active = true;
-    const member = async () => active;
-    expect(await shouldDeliverEvent(envelope, 'collaborator', member)).toBe(true);
-    expect(await shouldDeliverEvent(envelope, 'viewer', member)).toBe(true);
+    const access = async () => active;
+    expect(await shouldDeliverEvent(envelope, 'owner', access)).toBe(true);
+    expect(await shouldDeliverEvent(envelope, 'manager', access)).toBe(true);
     active = false;
-    expect(await shouldDeliverEvent(envelope, 'former-member', member)).toBe(false);
+    expect(await shouldDeliverEvent(envelope, 'former-owner', access)).toBe(false);
   });
 
-  test('passes the slug to authorization so owner-only cache families deny readers', async () => {
-    const viewer = async (_userKey: string, _collectionKey: string, event: string) => !event.endsWith('invites.changed') && !event.endsWith('shares.changed');
-    const content = parseEventEnvelope('{"route":"collection","collectionKey":"collection-1","event":"collection.content.changed"}')!;
-    const invites = parseEventEnvelope('{"route":"collection","collectionKey":"collection-1","event":"collection.invites.changed"}')!;
-    const shares = parseEventEnvelope('{"route":"collection","collectionKey":"collection-1","event":"collection.shares.changed"}')!;
-    expect(await shouldDeliverEvent(content, 'viewer', viewer)).toBe(true);
-    expect(await shouldDeliverEvent(invites, 'viewer', viewer)).toBe(false);
-    expect(await shouldDeliverEvent(shares, 'collaborator', viewer)).toBe(false);
-  });
-
-  test('collection routing query binds membership through the live scope organization', async () => {
+  test('collection routing query binds membership through the live scope team', async () => {
     const source = await Bun.file(new URL('./events.ts', import.meta.url)).text();
-    expect(source).toContain('membership.organizationId == scope.organizationKey');
+    expect(source).toContain('membership.teamKey == scope.teamKey');
     expect(source).toContain('member.scopeKey == collection.scopeKey');
-    expect(source).toContain('membership.orgRole IN ["owner", "admin"]');
+    expect(source).toContain('membership.teamRole IN ["owner", "admin"]');
     expect(source).toContain('scopeRole IN ["owner", "admin", "moderator"]');
     expect(source).toContain('member.status == "active"');
-    expect(source).toContain('collectionMembership.role == "owner"');
-    expect(source).toContain('ownerOnly');
+    expect(source).toContain('manager OR collection.ownerKey == membership._key');
+    expect(source).not.toContain('collectionMembers');
     expect(source).toContain('export async function hasScopeEventAccess');
   });
 });

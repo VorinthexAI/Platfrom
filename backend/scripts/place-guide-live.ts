@@ -28,7 +28,7 @@ for (const destination of destinations.slice(0, Number.isFinite(destinationLimit
     decryptImageRequest: (token) => tokens.get(token),
     placeImages: { log: () => {}, onMetrics: (metrics) => { imageMetrics.current = metrics; } },
   });
-  const context = { organizationKey: 'place-guide-live', scopeKey: newId() };
+  const context = { teamKey: 'place-guide-live', scopeKey: newId() };
 
   const measure = async (kind: 'country' | 'city') => {
     delete imageMetrics.current;

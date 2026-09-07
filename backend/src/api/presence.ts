@@ -10,11 +10,12 @@ import {
   markVisitorSessionDisconnected,
 } from '@/lib/db/visitor-sessions.node';
 import {
-  insertUserSession,
+  deleteUserSession,
+  insertUserSessionUnlessDeleting,
   listOpenUserSessions,
   markUserSessionDisconnected,
 } from '@/lib/db/user-sessions.node';
-import { getUserById } from '@/lib/db/users.node';
+import { getUserById, touchUserLastSeen } from '@/lib/db/users.node';
 import {
   getVisitorByDistinctId,
   insertVisitor,
@@ -23,9 +24,11 @@ import {
 } from '@/lib/db/visitors.node';
 import { newId } from '@/lib/ids';
 import { redisConnection } from '@/lib/redis';
-import { getRootOrganizationId } from '@/lib/db/organizations.node';
+import { getRootTeamKey } from '@/lib/db/teams.node';
+import { getPersonalAuthContext } from '@/lib/db/personal-auth-context.node';
 import { getUserId } from './security';
 import { parseJson, strictObject } from './validation';
+import { createPresenceSession, invalidatePresenceSessions, leavePresenceSession, refreshPresenceSession } from '@/lib/presence/session-state';
 
 /**
  * Live presence: who is exploring the galaxy right now, and where.
@@ -44,8 +47,10 @@ import { parseJson, strictObject } from './validation';
 
 const PRESENCE_CHANNEL = 'presence:events';
 const SESSION_PREFIX = 'presence:s:';
+const LAST_SEEN_WRITE_PREFIX = 'presence:last-seen-write:';
 /** Sessions survive this long without a heartbeat (client beats ~5s). */
 const SESSION_TTL_SECONDS = 45;
+const LAST_SEEN_WRITE_INTERVAL_SECONDS = 300;
 const SWEEP_INTERVAL_MS = 30_000;
 const HEARTBEAT_INTERVAL_MS = 25_000;
 const PRESENCE_EVENT = 'presence-event';
@@ -55,6 +60,11 @@ const positionSchema = z.tuple([coordinate, coordinate, coordinate]);
 const presenceSourceSchema = z.enum(['web', 'mobile', 'desktop', 'tv']);
 export type PresencePosition = z.infer<typeof positionSchema>;
 export type PresenceSource = z.infer<typeof presenceSourceSchema>;
+
+async function touchAuthenticatedLastSeen(userKey: string, seenAt: string): Promise<void> {
+  const claimed = await redisConnection.set(LAST_SEEN_WRITE_PREFIX + userKey, '1', 'EX', LAST_SEEN_WRITE_INTERVAL_SECONDS, 'NX');
+  if (claimed === 'OK') await touchUserLastSeen(userKey, seenAt);
+}
 
 interface SessionRecord {
   /** funnel tag: authed user session vs anonymous visitor session */
@@ -168,7 +178,7 @@ async function resolvePresenceVisitor(distinctId: string | null): Promise<Visito
     try {
       return await insertVisitor({
         key: newId(),
-        organizationId: await getRootOrganizationId(),
+        teamKey: await getRootTeamKey(),
         distinctId,
         alias,
         lastSeenAt: now,
@@ -205,14 +215,14 @@ export async function joinPresence(c: Context) {
   const userId = await getUserId(c);
   if (userId) {
     const user = await getUserById(userId);
-    if (user) {
+    if (user && !user.deletionRequestedAt) {
+      const authContext = await getPersonalAuthContext(user.key);
+      if (!authContext) return c.json({ ok: false, error: 'active team context is required' }, 403);
       const alias = user.alias ?? generateAlias(user.key);
       const record: SessionRecord = { t: 'user', v: user.key, k: nodeKey, a: alias, s: body.source, p: position };
-      // Redis first: the sweeper must never see the ledger node before its key.
-      await redisConnection.set(SESSION_PREFIX + sessionKey, JSON.stringify(record), 'EX', SESSION_TTL_SECONDS);
-      await insertUserSession({
+      const inserted = await insertUserSessionUnlessDeleting({
         key: nodeKey,
-        organizationId: user.organizationId,
+        teamKey: authContext.team.key,
         userId: user.key,
         alias,
         source: body.source,
@@ -222,12 +232,25 @@ export async function joinPresence(c: Context) {
         createdAt: now,
         updatedAt: now,
       });
+      if (!inserted) return c.json({ ok: false, error: 'account deletion is in progress' }, 410);
+      try {
+        if (!await createPresenceSession(sessionKey, user.key, JSON.stringify(record), SESSION_TTL_SECONDS)) {
+          await deleteUserSession(nodeKey).catch(() => undefined);
+          return c.json({ ok: false, error: 'account deletion is in progress' }, 410);
+        }
+      } catch (error) {
+        await deleteUserSession(nodeKey).catch(() => undefined);
+        throw error;
+      }
+      await touchAuthenticatedLastSeen(user.key, now);
       await publishPresence({ type: 'join', session: sessionKey, alias, position, at: now, t: 'user' });
       ensureSubscriber();
       ensureSweeper();
       return c.json({ ok: true, session_key: sessionKey, visitor_key: user.key, alias }, 201);
     }
-    // Token resolved to a user that no longer exists — fall through to anon.
+    // Never let an authenticated request bypass a deleted/fenced account by
+    // falling through into the anonymous presence funnel.
+    return c.json({ ok: false, error: 'account is unavailable' }, 410);
   }
 
   // Anonymous funnel: distinct-id visitor + a fresh visitorSessions node.
@@ -238,10 +261,12 @@ export async function joinPresence(c: Context) {
 
   const record: SessionRecord = { t: 'visitor', v: visitor.key, k: nodeKey, a: visitor.alias, s: body.source, p: position };
   // Redis first: the sweeper must never see the ledger node before its key.
-  await redisConnection.set(SESSION_PREFIX + sessionKey, JSON.stringify(record), 'EX', SESSION_TTL_SECONDS);
+  if (!await createPresenceSession(sessionKey, null, JSON.stringify(record), SESSION_TTL_SECONDS)) {
+    return c.json({ ok: false, error: 'session is unavailable' }, 410);
+  }
   await insertVisitorSession({
     key: nodeKey,
-    organizationId: visitor.organizationId,
+    teamKey: visitor.teamKey,
     visitorId: visitor.key,
     alias: visitor.alias,
     source: body.source,
@@ -278,8 +303,19 @@ export async function presenceBeat(c: Context) {
     return c.json({ ok: false, error: 'corrupt session' }, 410);
   }
   record.p = body.position;
-  await redisConnection.set(key, JSON.stringify(record), 'EX', SESSION_TTL_SECONDS);
-  await publishPresence({ type: 'move', session: body.session_key, position: body.position, at: new Date().toISOString() });
+  if (record.t === 'user') {
+    const user = await getUserById(record.v);
+    if (!user || user.deletionRequestedAt) {
+      await invalidatePresenceSessions(record.v, [body.session_key]);
+      return c.json({ ok: false, error: 'account deletion is in progress' }, 410);
+    }
+  }
+  if (!await refreshPresenceSession(body.session_key, record.t === 'user' ? record.v : null, JSON.stringify(record), SESSION_TTL_SECONDS)) {
+    return c.json({ ok: false, error: 'unknown or expired session' }, 410);
+  }
+  const seenAt = new Date().toISOString();
+  if (record.t === 'user') await touchAuthenticatedLastSeen(record.v, seenAt);
+  await publishPresence({ type: 'move', session: body.session_key, position: body.position, at: seenAt });
   return c.json({ ok: true });
 }
 
@@ -293,15 +329,16 @@ export async function leavePresence(c: Context) {
   const now = new Date().toISOString();
   const raw = await redisConnection.get(key);
   if (raw) {
-    await redisConnection.del(key);
     try {
       const record = JSON.parse(raw) as SessionRecord;
+      await leavePresenceSession(body.session_key, record.t === 'user' ? record.v : null);
       // Route the disconnect stamp to the funnel this session belongs to;
       // legacy records without a tag default to the visitor funnel and the
       // sweeper reconciles anything that lands in the wrong collection.
-      if (record.t === 'user') await markUserSessionDisconnected(record.k, now);
+      if (record.t === 'user') { await markUserSessionDisconnected(record.k, now); await touchUserLastSeen(record.v, now); }
       else await markVisitorSessionDisconnected(record.k, now);
     } catch {
+      await redisConnection.del(key);
       // Corrupt record — the sweeper reconciles the ledger.
     }
   }

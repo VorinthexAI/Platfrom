@@ -16,7 +16,7 @@ describe('book reader persistence', () => {
       detailBind = bind; detailQuery = query;
       return { all: async () => [{ book, chapters: [{ chapter, progress: { _key: progressKey, scopeKey, userKey, bookKey, chapterKey, progressSeconds: 12, isCompleted: false, completedAt: null, createdAt: now, updatedAt: now } }] }] };
     } };
-    const detail = await createBookRepository(database).detail({ organizationKey: 'organization', scopeKey, userKey }, bookKey);
+    const detail = await createBookRepository(database).detail({ teamKey: 'team', scopeKey, userKey }, bookKey);
     expect(detailQuery).toContain('FOR book IN books'); expect(detailQuery).toContain('FOR chapter IN bookChapters'); expect(detailQuery).toContain('FOR item IN bookProgress'); expect(detailQuery).not.toContain('documents'); expect(detailQuery).not.toContain('folders');
     expect(detailBind).toEqual({ scopeKey, userKey, bookKey });
     expect(detail.chapters[0]?.chapter.content).toBe('Canonical Archive transcript');
@@ -33,7 +33,7 @@ describe('book reader persistence', () => {
       current = current ? { ...current, progressSeconds: Math.max(Number(current.progressSeconds), Number(incoming.progressSeconds)), isCompleted: Boolean(current.isCompleted) || Boolean(incoming.isCompleted), completedAt: current.isCompleted ? current.completedAt : incoming.isCompleted ? incoming.completedAt : current.completedAt, updatedAt: incoming.updatedAt } : incoming;
       return { all: async () => [current] };
     } };
-    const repository = createBookRepository(database); const context = { organizationKey: 'organization', scopeKey, userKey };
+    const repository = createBookRepository(database); const context = { teamKey: 'team', scopeKey, userKey };
     const first = { key: newId(), scopeKey, userKey, bookKey, chapterKey, progressSeconds: 120, isCompleted: true, completedAt: now, createdAt: now, updatedAt: now };
     await repository.upsertProgress(context, bookKey, chapterKey, first);
     const replay = await repository.upsertProgress(context, bookKey, chapterKey, { ...first, key: newId(), progressSeconds: 10, isCompleted: false, completedAt: null, updatedAt: '2026-08-25T12:01:00.000Z' });

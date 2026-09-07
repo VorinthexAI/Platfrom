@@ -10,7 +10,7 @@ const metadataSchema = z.record(z.string().min(1).max(64), metadataValueSchema).
 export const sparkTransactionSchema = z.strictObject({
   key: boundedKeySchema,
   userKey: boundedKeySchema,
-  kind: z.enum(["account-grant", "tool", "action", "storage", "recurring-service", "refund", "adjustment", "expiration"]),
+  kind: z.enum(["account-grant", "referral-reward", "purchase", "tool", "action", "storage", "recurring-service", "refund", "adjustment", "expiration"]),
   deltaMicroSparks: z.number().int().safe().refine((value) => value !== 0),
   idempotencyKey: boundedKeySchema,
   requestHash: z.string().trim().min(16).max(128).regex(/^[A-Za-z0-9:_-]+$/),
@@ -22,23 +22,57 @@ export const sparkTransactionSchema = z.strictObject({
   createdAt: z.string().datetime({ offset: true }),
 });
 
-export const billingSummarySchema = z.strictObject({
+export const billingSummarySchema = z.object({
   microSparkBalance: z.number().int().safe().nonnegative(),
+  microSparkDebt: z.number().int().safe().nonnegative().default(0),
+  spendingBlocked: z.boolean().default(false),
   transactions: z.array(sparkTransactionSchema).max(1),
+}).refine((summary) => summary.spendingBlocked === (summary.microSparkDebt > 0), {
+  message: "Spending block must match the outstanding Spark debt.",
+  path: ["spendingBlocked"],
 });
 
-const billingSummaryEnvelopeSchema = z.strictObject({
+const billingSummaryEnvelopeSchema = z.object({
   success: z.literal(true),
   data: billingSummarySchema,
 });
 
 export type BillingSummary = z.infer<typeof billingSummarySchema>;
 
+export const subscriptionSchema = z.strictObject({
+  key: z.string().cuid(),
+  userKey: z.string().cuid(),
+  productKey: z.string().cuid(),
+  status: z.enum(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]),
+  cancelAtPeriodEnd: z.boolean(),
+  currentPeriodStart: z.string().datetime({ offset: true }).nullable(),
+  currentPeriodEnd: z.string().datetime({ offset: true }).nullable(),
+  createdAt: z.string().datetime({ offset: true }),
+  updatedAt: z.string().datetime({ offset: true }),
+});
+
+const subscriptionEnvelopeSchema = z.strictObject({ success: z.literal(true), data: subscriptionSchema.nullable() });
+export type CurrentSubscription = z.infer<typeof subscriptionSchema>;
+
 export const billingSummaryQueryKey = (userKey: string) => ["billing-summary", userKey] as const;
+export const currentSubscriptionQueryKey = (userKey: string) => ["billing-subscription", userKey] as const;
 
 export async function fetchBillingSummary(): Promise<BillingSummary> {
   const response = await apiClient.get("/billing/summary", { params: { limit: 1 } });
   return billingSummaryEnvelopeSchema.parse(response.data).data;
+}
+
+export async function fetchCurrentSubscription(): Promise<CurrentSubscription | null> {
+  const response = await apiClient.get("/subscriptions/current");
+  return subscriptionEnvelopeSchema.parse(response.data).data;
+}
+
+export async function setSubscriptionCancellation(cancelAtPeriodEnd: boolean): Promise<CurrentSubscription> {
+  const action = cancelAtPeriodEnd ? "cancel" : "restore";
+  const response = await apiClient.post(`/subscriptions/current/${action}`, {});
+  const subscription = subscriptionEnvelopeSchema.parse(response.data).data;
+  if (!subscription) throw new Error("Subscription update returned no subscription.");
+  return subscription;
 }
 
 export function wholeSparks(microSparkBalance: number) {

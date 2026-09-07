@@ -52,7 +52,7 @@ async function main() {
   const fixture = await cursor.next() as { collectionKey: string; destinationCollectionKeys: string[]; imageKeys: string[]; actionImages: Array<{ key: string; isFavorite: boolean }> } | undefined;
   if (!fixture || fixture.imageKeys.length < 2 || fixture.destinationCollectionKeys.length !== 2 || fixture.actionImages.length !== 2) throw new Error('Seeded Gallery fixtures are unavailable. Run seed:dev-media first.');
 
-  const context = { organizationKey: auth.organization.key, scopeKey: auth.scope.key, membership: auth.membership };
+  const context = { teamKey: auth.team.key, scopeKey: auth.scope.key, membership: auth.membership };
   const query = `gallery live e2e ${Date.now()}`;
   await galleryOperations.search({ query, limit: 5 }, context);
   const normalizedQuery = query.toLowerCase();

@@ -45,7 +45,8 @@ describe('dev Gallery location fixtures', () => {
   test('uses canonical image and Gallery deletion paths', async () => {
     const source = await Bun.file(new URL('./seed-dev-gallery-locations.ts', import.meta.url)).text();
     expect(source).toContain('processImage({');
-    expect(source).toContain('repository.createCollection(collection, member)');
+    expect(source).toContain('repository.createCollection(collection)');
+    expect(source).not.toContain('collectionMembers');
     expect(source).toContain('repository.addImageToCollection(relation)');
     expect(source).toContain('galleryOperations.deleteImages');
     expect(source).toContain('galleryOperations.deleteCollection');

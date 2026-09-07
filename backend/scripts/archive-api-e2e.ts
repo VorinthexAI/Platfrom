@@ -56,7 +56,7 @@ const guestResponse = await fetch(`${apiBase}/api/v1/auth/guest`, {
 });
 if (!guestResponse.ok) throw new Error(`Guest bootstrap failed with ${guestResponse.status}: ${await guestResponse.text()}`);
 const guest = object(await guestResponse.json());
-const organizationKey = string(object(guest.organization).key, 'organization key');
+const teamKey = string(object(guest.team).key, 'team key');
 const scopeKey = string(object(guest.main_scope).key, 'scope key');
 let accessToken = string(guestResponse.headers.get('x-access-token'), 'access token');
 let refreshToken = string(guestResponse.headers.get('x-refresh-token'), 'refresh token');
@@ -71,7 +71,7 @@ async function tool(name: string, input: Record<string, unknown>) {
       'x-vorinthex-api-key': process.env.API_KEY ?? '',
       'x-vorinthex-session-transport': 'header',
     },
-    body: JSON.stringify({ organizationKey, scopeKey, input }),
+    body: JSON.stringify({ teamKey, scopeKey, input }),
   });
   const body = object(await response.json());
   accessToken = response.headers.get('x-access-token') ?? accessToken;

@@ -6,25 +6,25 @@ import { newId } from '@/lib/ids';
 import { createTravelRepository } from '@/lib/travel/repository';
 
 const userKey = newId();
-const organizationKey = newId();
-const membershipKey = newId();
+const teamKey = newId();
+const teamMembershipKey = newId();
 const scopeKey = newId();
-const scopeMembershipKey = newId();
+const scopeTeamMembershipKey = newId();
 const placeKey = newId();
 const now = new Date().toISOString();
-const context = { organizationKey, scopeKey, userKey };
+const context = { teamKey, scopeKey, userKey };
 
 async function cleanup() {
   await db.query(aql`FOR item IN places FILTER item.scopeKey == ${scopeKey} REMOVE item IN places`);
   await db.query(aql`FOR item IN scopeMembers FILTER item.scopeKey == ${scopeKey} REMOVE item IN scopeMembers`);
   await db.query(aql`REMOVE ${scopeKey} IN scopes OPTIONS { ignoreErrors: true }`);
-  await db.query(aql`REMOVE ${membershipKey} IN userOrganizations OPTIONS { ignoreErrors: true }`);
+  await db.query(aql`REMOVE ${teamMembershipKey} IN userTeams OPTIONS { ignoreErrors: true }`);
 }
 
 try {
-  await db.query(aql`INSERT { _key: ${membershipKey}, organizationId: ${organizationKey}, userId: ${userKey}, orgRole: "owner", status: "active" } INTO userOrganizations`);
-  await db.query(aql`INSERT { _key: ${scopeKey}, organizationKey: ${organizationKey}, slug: ${`travel-e2e-${scopeKey}`}, name: "Travel E2E" } INTO scopes`);
-  await db.query(aql`INSERT { _key: ${scopeMembershipKey}, scopeKey: ${scopeKey}, userOrganizationKey: ${membershipKey}, role: "owner", status: "active" } INTO scopeMembers`);
+  await db.query(aql`INSERT { _key: ${teamMembershipKey}, teamKey: ${teamKey}, userId: ${userKey}, teamRole: "owner", status: "active" } INTO userTeams`);
+  await db.query(aql`INSERT { _key: ${scopeKey}, teamKey: ${teamKey}, slug: ${`travel-e2e-${scopeKey}`}, name: "Travel E2E" } INTO scopes`);
+  await db.query(aql`INSERT { _key: ${scopeTeamMembershipKey}, scopeKey: ${scopeKey}, userTeamKey: ${teamMembershipKey}, role: "owner", status: "active" } INTO scopeMembers`);
 
   const repository = createTravelRepository();
   const place = placeSchema.parse({ key: placeKey, userKey, scopeKey, saved: true, name: 'Stockholm', summary: '', countryCode: 'SE', latitude: 59.3293, longitude: 18.0686, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), embeddingContentVersion: 2, createdAt: now });

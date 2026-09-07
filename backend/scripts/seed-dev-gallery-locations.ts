@@ -4,7 +4,6 @@ import { hashUserEmail } from '@/api/users';
 import { processImage } from '@/lib/ai/image-processing';
 import { closeDb, db } from '@/lib/db/client';
 import { collectionImageSchema } from '@/lib/db/collection-images.node';
-import { collectionMemberSchema } from '@/lib/db/collection-members.node';
 import { collectionSchema } from '@/lib/db/collections.node';
 import { getPersonalAuthContext } from '@/lib/db/personal-auth-context.node';
 import { getUserByEmailHash } from '@/lib/db/users.node';
@@ -29,9 +28,9 @@ async function main() {
   if (!auth) throw new Error(`Personal Gallery context for ${GALLERY_LOCATION_FIXTURE_EMAIL} is unavailable.`);
   // Cleanup always considers the optional duplicate id so omitting the creation flag cannot strand it.
   const plan = buildGalleryLocationFixturePlan(auth.scope.key, options.runId, options.mode === 'cleanup' || options.includeDuplicates);
-  const context = { organizationKey: auth.organization.key, scopeKey: auth.scope.key, membership: auth.membership };
+  const context = { teamKey: auth.team.key, scopeKey: auth.scope.key, membership: auth.membership };
   const repository = getDefaultGalleryRepository();
-  const ids = [plan.collection.key, plan.collection.memberKey, ...plan.images.flatMap((image) => [image.key, image.captionKey, image.placementKey])];
+  const ids = [plan.collection.key, ...plan.images.flatMap((image) => [image.key, image.captionKey, image.placementKey])];
 
   const manifest = {
     mode: options.mode,
@@ -46,15 +45,14 @@ async function main() {
 
   const fixtureRows = async () => (await db.query(`
     LET collection = DOCUMENT(collections, @collectionKey)
-    LET member = DOCUMENT(collectionMembers, @memberKey)
     LET images = (FOR imageKey IN @imageKeys LET image = DOCUMENT(images, imageKey) LET caption = image == null ? null : DOCUMENT(imageCaptions, image.imageCaptionKey) LET placement = FIRST(FOR relation IN collectionImages FILTER relation._key IN @placementKeys && relation.imageKey == imageKey RETURN relation) RETURN { image, caption, placement })
-    RETURN { collection, member, images }
-  `, { collectionKey: plan.collection.key, memberKey: plan.collection.memberKey, imageKeys: plan.images.map(({ key }) => key), placementKeys: plan.images.map(({ placementKey }) => placementKey) })).next() as Promise<{ collection: Record<string, unknown> | null; member: Record<string, unknown> | null; images: Array<{ image: Record<string, unknown> | null; caption: Record<string, unknown> | null; placement: Record<string, unknown> | null }> }>;
+    RETURN { collection, images }
+  `, { collectionKey: plan.collection.key, imageKeys: plan.images.map(({ key }) => key), placementKeys: plan.images.map(({ placementKey }) => placementKey) })).next() as Promise<{ collection: Record<string, unknown> | null; images: Array<{ image: Record<string, unknown> | null; caption: Record<string, unknown> | null; placement: Record<string, unknown> | null }> }>;
 
   const verify = async () => {
     const rows = await fixtureRows();
     if (!rows.collection || rows.collection._key !== plan.collection.key || rows.collection.scopeKey !== auth.scope.key || rows.collection.description !== plan.collection.description) throw new Error('Fixture collection is missing or does not exactly match the manifest.');
-    if (!rows.member || rows.member._key !== plan.collection.memberKey || rows.member.memberKey !== auth.membership.key || rows.member.role !== 'owner') throw new Error('Fixture collection owner membership is missing or invalid.');
+    if (rows.collection.ownerKey !== auth.membership.key) throw new Error('Fixture collection owner is missing or invalid.');
     for (const [index, expected] of plan.images.entries()) {
       const row = rows.images[index]!;
       if (!row.image || row.image._key !== expected.key || row.image.scopeKey !== auth.scope.key || row.image.createdByKey !== auth.membership.key || row.image.imageCaptionKey !== expected.captionKey || row.image.filename !== expected.filename || row.image.city !== expected.city || row.image.country !== expected.country || row.image.countryCode !== expected.countryCode) throw new Error(`Fixture image ${expected.key} is missing or invalid.`);
@@ -82,7 +80,7 @@ async function main() {
   }
 
   const collisions = await (await db.query(`
-    FOR collectionName IN ['collections', 'collectionMembers', 'collectionImages', 'images', 'imageCaptions']
+    FOR collectionName IN ['collections', 'collectionImages', 'images', 'imageCaptions']
       FOR id IN @ids
         LET document = DOCUMENT(collectionName, id)
         FILTER document != null
@@ -113,9 +111,8 @@ async function main() {
   let collectionCreated = false;
   try {
     const now = new Date().toISOString();
-    const collection = collectionSchema.parse({ key: plan.collection.key, scopeKey: auth.scope.key, name: plan.collection.name, description: plan.collection.description, embedding: collectionEmbedding, isFavorite: false, createdAt: now, updatedAt: now });
-    const member = collectionMemberSchema.parse({ key: plan.collection.memberKey, scopeKey: auth.scope.key, collectionKey: collection.key, memberKey: auth.membership.key, role: 'owner', createdAt: now });
-    if (!await repository.createCollection(collection, member)) throw new Error('Canonical Gallery collection creation was denied.');
+    const collection = collectionSchema.parse({ key: plan.collection.key, scopeKey: auth.scope.key, ownerKey: auth.membership.key, name: plan.collection.name, description: plan.collection.description, embedding: collectionEmbedding, isFavorite: false, createdAt: now, updatedAt: now });
+    if (!await repository.createCollection(collection)) throw new Error('Canonical Gallery collection creation was denied.');
     collectionCreated = true;
 
     for (const [index, fixture] of plan.images.entries()) {

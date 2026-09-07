@@ -82,7 +82,7 @@ test("provides Archive-rhythm header menus and complete chats/edit/delete sheets
   expect(ui).toContain("readConversationSelection(capturedContext)");
   expect(ui).toContain("rememberConversation(conversation)");
   expect(selectionVault).toContain("WHEN_UNLOCKED_THIS_DEVICE_ONLY");
-  expect(selectionVault).toContain("context.userKey}.${context.organizationKey}.${context.scopeKey}");
+  expect(selectionVault).toContain("context.userKey}.${context.teamKey}.${context.scopeKey}");
   expect(ui).toContain('onOpenActions={openMessageActions}');
   expect(ui).toContain('open={sheet === "messageActions"}');
   expect(ui).toContain('>Delete message</BottomSheetItem>');
@@ -258,7 +258,7 @@ test("keeps Chats beneath the bottom-opening filter and preserves a compact sear
 test("shows the branded Core watermark after messages load without flashing skeletons for a new chat", () => {
   expect(ui).toContain("function ConversationWatermark()");
   expect(ui).toContain(">Core</Text>");
-  expect(ui).toContain(">Your personal AI agent connecting Vorinthex AI</Text>");
+  expect(ui).toContain(">Your personal AI for finding answers, natural conversation, and image creation across Vorinthex AI</Text>");
   expect(ui).toContain('glow={0.5} size={104}');
   expect(ui).toContain('<Text style={styles.coreWatermarkText}>Core</Text>');
   expect(ui).toContain('<View style={styles.coreWatermarkMark}><ChromeIcon');

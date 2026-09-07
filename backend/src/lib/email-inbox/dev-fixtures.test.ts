@@ -12,7 +12,7 @@ describe('mail development fixture manifest', () => {
     const fixtures = mailDevFixtures(scopeKey, accountKeys);
     expect(MAIL_DEV_SEED_EMAIL).toBe('oscar.burman005@gmail.com');
     expect(fixtures.accounts).toHaveLength(3);
-    expect(fixtures.threads).toHaveLength(27);
+    expect(fixtures.threads).toHaveLength(30);
     expect(fixtures.threads.reduce((count, thread) => count + thread.messages.length, 0)).toBeGreaterThanOrEqual(40);
     expect(new Set(fixtures.threads.map(({ thread }) => thread.category))).toEqual(new Set(['primary', 'updates', 'promotions', 'social', 'forums', 'other']));
     expect(fixtures.threads.some(({ thread }) => thread.labels.includes('SPAM'))).toBe(true);
@@ -28,6 +28,7 @@ describe('mail development fixture manifest', () => {
       const threads = fixtures.threads.filter(({ thread }) => thread.accountKey === account.accountKey).map(({ thread }) => thread);
       expect(threads.some((thread) => thread.unread && thread.inboxCategory === 'Urgent')).toBe(true);
       expect(threads.some((thread) => thread.unread && thread.inboxCategory === 'Important')).toBe(true);
+      expect(threads.some((thread) => thread.unread && thread.inboxCategory === 'Purchases')).toBe(true);
       expect(threads.some((thread) => !thread.unread && thread.inboxCategory === 'Urgent')).toBe(true);
       expect(threads.some((thread) => !thread.unread && thread.inboxCategory === 'Important')).toBe(true);
       expect(threads.some((thread) => thread.inboxCategory === 'Filtered')).toBe(true);

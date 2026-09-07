@@ -24,7 +24,7 @@ export interface GalleryUploadProcessingDependencies {
   repository?: GalleryRepository;
   storage?: DocumentObjectStorage;
   processBatch?: typeof processImages;
-  captionBatch?: (organizationKey: string, imageUrls: string[]) => Promise<GeneratedImageCaption[]>;
+  captionBatch?: (teamKey: string, imageUrls: string[]) => Promise<GeneratedImageCaption[]>;
   resolveImageReference?: (bytes: Uint8Array) => Promise<string>;
   sanitizeImage?: typeof sanitizeGalleryImage;
   reverseGeocode?: (coordinates: ImageCoordinates) => Promise<ImageLocation | undefined>;
@@ -78,7 +78,7 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
   try {
     const actorUsers = new Map<string, string>();
     await Promise.all(uploads.map(async (upload) => {
-      const userKey = await repository.getUserKeyByMemberKey(upload.actorKey).catch(() => null);
+      const userKey = await repository.getUserKeyByMembershipKey(upload.actorKey).catch(() => null);
       if (userKey) actorUsers.set(upload.actorKey, userKey);
     }));
     await publish(dependencies, 'uploadProcessing', { users: uploads.flatMap((upload) => actorUsers.get(upload.actorKey) ?? []) });
@@ -105,9 +105,9 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
     const downloadDurationMs = performance.now() - downloadStartedAt;
     const bytesHash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
     const captionableBytes = new Set(uploads.flatMap((upload, index) => upload.processingMode === 'library' ? [bytesHash(stored[index]!.bytes)] : []));
-    const organizationKey = uploads[0]!.organizationKey;
-    if (uploads.some((upload) => upload.organizationKey !== organizationKey)) throw new Error('Gallery upload batches must belong to one organization.');
-    const captionBatch = dependencies.captionBatch ?? (async (organization, imageUrls) => (await imageCaptionTool.execute({ imageUrls }, { organizationKey: organization })).results);
+    const teamKey = uploads[0]!.teamKey;
+    if (uploads.some((upload) => upload.teamKey !== teamKey)) throw new Error('Gallery upload batches must belong to one team.');
+    const captionBatch = dependencies.captionBatch ?? (async (team, imageUrls) => (await imageCaptionTool.execute({ imageUrls }, { teamKey: team })).results);
     await renewLease();
     const images = await processBatch(uploads.map((upload, index) => ({
       scopeKey: upload.scopeKey,
@@ -124,7 +124,7 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
         const results: Array<GeneratedImageCaption | undefined> = Array(values.length);
         const libraryIndices = values.map((value, index) => captionableBytes.has(bytesHash(value.bytes)) ? index : -1).filter((index) => index >= 0);
         if (libraryIndices.length > 0) {
-          const generated = await captionBatch(organizationKey, await Promise.all(libraryIndices.map((index) => resolveImageReference(values[index]!.bytes))));
+          const generated = await captionBatch(teamKey, await Promise.all(libraryIndices.map((index) => resolveImageReference(values[index]!.bytes))));
           if (generated.length !== libraryIndices.length) throw new Error('Gallery caption count did not match the unmatched image count.');
           libraryIndices.forEach((index, position) => { results[index] = generated[position]; });
         }
@@ -181,10 +181,10 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
       const compensation = immediate ?? await repository.compensateUpload(upload.key, upload.scopeKey, leaseId, errorCode, failureStatus, now().toISOString());
       return { cleanup: compensation && failureStatus === 'failed' ? [upload.storageKey] : [], upload, compensation, changed: compensation !== null };
     }).map((update, index) => update.catch(() => ({ cleanup: [] as string[], upload: uploads[index]!, compensation: null, changed: false }))));
-    const failedUsers = (await Promise.all(failedTransitions.filter(({ changed }) => changed).map(({ upload }) => repository.getUserKeyByMemberKey(upload.actorKey).catch(() => null)))).filter((key): key is string => Boolean(key));
+    const failedUsers = (await Promise.all(failedTransitions.filter(({ changed }) => changed).map(({ upload }) => repository.getUserKeyByMembershipKey(upload.actorKey).catch(() => null)))).filter((key): key is string => Boolean(key));
     await publish(dependencies, 'uploadFailed', { users: failedUsers });
     const compensatedCollections = failedTransitions.flatMap(({ compensation }) => compensation?.collectionKeys ?? []);
-    const unfiledCompensatedUsers = (await Promise.all(failedTransitions.filter(({ compensation }) => compensation?.imageChanged && compensation.collectionKeys.length === 0).map(({ upload }) => repository.getUserKeyByMemberKey(upload.actorKey).catch(() => null)))).filter((key): key is string => Boolean(key));
+    const unfiledCompensatedUsers = (await Promise.all(failedTransitions.filter(({ compensation }) => compensation?.imageChanged && compensation.collectionKeys.length === 0).map(({ upload }) => repository.getUserKeyByMembershipKey(upload.actorKey).catch(() => null)))).filter((key): key is string => Boolean(key));
     await publish(dependencies, 'uploadCompensated', { collections: compensatedCollections, users: unfiledCompensatedUsers });
     const compensatedScopes = new Set(failedTransitions.filter(({ compensation }) => compensation?.subjectChanged).map(({ upload }) => upload.scopeKey));
     const compensatedSubjectUsers = (await Promise.all([...compensatedScopes].map((scopeKey) => repository.listScopeManagerUserKeys(scopeKey).catch(() => [])))).flat();

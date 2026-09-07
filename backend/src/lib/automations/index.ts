@@ -1,25 +1,32 @@
 import { closeStorageChargerQueue, startStorageCharger, type StorageChargerDependencies } from './storage-charger-queue';
 import { closeStorageRetentionQueue, startStorageRetention } from './storage-retention-queue';
 import { closeStorageDeletionQueue, startStorageDeletion } from './storage-deletion-queue';
-import { closeInboxChargerQueue, startInboxCharger, type InboxChargerDependencies } from './inbox-charger-queue';
+import { closeCommerceReconciliationQueue, startCommerceReconciliation, type CommerceReconciliationDependencies } from './commerce-reconciliation-queue';
+import { closePolarWebhookQueue, startPolarWebhookWorker, type PolarWebhookWorkerDependencies } from './polar-webhook-queue';
 
 type AutomationHandle = { close(): Promise<void> };
-export interface AutomationDependencies { storage?: StorageChargerDependencies; inbox?: InboxChargerDependencies }
+export interface AutomationDependencies { storage?: StorageChargerDependencies; commerce?: CommerceReconciliationDependencies; polarWebhook?: PolarWebhookWorkerDependencies }
 async function startAllAutomations(dependencies: AutomationDependencies = {}): Promise<AutomationHandle> {
   const charger = await startStorageCharger(dependencies.storage);
   try {
-    const inboxCharger = await startInboxCharger(dependencies.inbox);
+    const retention = await startStorageRetention();
     try {
-      const retention = await startStorageRetention();
+      const deletion = await startStorageDeletion();
       try {
-        const deletion = await startStorageDeletion();
-        return { async close() { const results = await Promise.allSettled([deletion.close(), retention.close(), inboxCharger.close(), charger.close()]); const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected'); if (failed) throw failed.reason; } };
+        const polarWebhook = await startPolarWebhookWorker(dependencies.polarWebhook);
+        try {
+          const commerce = await startCommerceReconciliation(dependencies.commerce);
+          return { async close() { const results = await Promise.allSettled([commerce.close(), polarWebhook.close(), deletion.close(), retention.close(), charger.close()]); const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected'); if (failed) throw failed.reason; } };
+        } catch (error) {
+          await Promise.allSettled([polarWebhook.close(), closePolarWebhookQueue(), deletion.close(), retention.close(), charger.close()]);
+          throw error;
+        }
       } catch (error) {
-        await Promise.allSettled([retention.close(), inboxCharger.close(), charger.close()]);
+        await Promise.allSettled([closeCommerceReconciliationQueue(), deletion.close(), retention.close(), charger.close()]);
         throw error;
       }
     } catch (error) {
-      await Promise.allSettled([inboxCharger.close(), charger.close()]);
+      await Promise.allSettled([closeStorageDeletionQueue(), retention.close(), charger.close()]);
       throw error;
     }
   } catch (error) {
@@ -28,7 +35,7 @@ async function startAllAutomations(dependencies: AutomationDependencies = {}): P
   }
 }
 async function closeAllQueues() {
-  const results = await Promise.allSettled([closeStorageDeletionQueue(), closeStorageRetentionQueue(), closeInboxChargerQueue(), closeStorageChargerQueue()]);
+  const results = await Promise.allSettled([closeCommerceReconciliationQueue(), closePolarWebhookQueue(), closeStorageDeletionQueue(), closeStorageRetentionQueue(), closeStorageChargerQueue()]);
   const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
   if (failed) throw failed.reason;
 }
@@ -68,6 +75,7 @@ export * from './storage-charger-repository';
 export * from './storage-retention-queue';
 export * from './storage-retention-repository';
 export * from './storage-deletion-queue';
-export * from './inbox-charger';
-export * from './inbox-charger-queue';
-export * from './inbox-charger-repository';
+export * from './commerce-reconciliation';
+export * from './commerce-reconciliation-queue';
+export * from './commerce-reconciliation-repository';
+export * from './polar-webhook-queue';

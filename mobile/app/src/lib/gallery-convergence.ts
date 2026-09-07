@@ -1,9 +1,6 @@
 export const GALLERY_EVENT_SLUGS = [
   "collection.index.changed",
   "collection.content.changed",
-  "collection.access.changed",
-  "collection.invites.changed",
-  "collection.shares.changed",
   "image.changed",
   "upload.changed",
   "subject.changed",
@@ -13,7 +10,7 @@ export const GALLERY_EVENT_SLUGS = [
 ] as const;
 
 export type GalleryEventSlug = typeof GALLERY_EVENT_SLUGS[number];
-export type GalleryRefreshFamily = "root" | "current" | "access" | "members" | "collectionInvites" | "incomingInvites" | "shares" | "subjects" | "search" | "duplicates" | "cleanup" | "upload" | "highlights" | "memories";
+export type GalleryRefreshFamily = "root" | "current" | "subjects" | "search" | "duplicates" | "cleanup" | "upload" | "highlights" | "memories";
 export type GalleryRefreshPlan = ReadonlySet<GalleryRefreshFamily>;
 
 export function isCurrentContextGeneration(expected: number, current: number) {
@@ -21,11 +18,8 @@ export function isCurrentContextGeneration(expected: number, current: number) {
 }
 
 const plans: Record<GalleryEventSlug, readonly GalleryRefreshFamily[]> = {
-  "collection.index.changed": ["root", "access"],
+  "collection.index.changed": ["root"],
   "collection.content.changed": ["current", "search", "duplicates", "cleanup", "highlights", "memories"],
-  "collection.access.changed": ["root", "access", "members", "cleanup"],
-  "collection.invites.changed": ["collectionInvites", "incomingInvites"],
-  "collection.shares.changed": ["shares"],
   "image.changed": ["current", "search", "duplicates", "cleanup", "subjects", "upload", "highlights", "memories"],
   "upload.changed": ["current", "search", "duplicates", "cleanup", "upload", "subjects"],
   "subject.changed": ["subjects", "search"],
@@ -34,7 +28,7 @@ const plans: Record<GalleryEventSlug, readonly GalleryRefreshFamily[]> = {
   "memory.deleted": ["memories"],
 };
 
-const recoveryPlan: readonly GalleryRefreshFamily[] = ["root", "current", "access", "members", "collectionInvites", "incomingInvites", "shares", "subjects", "search", "duplicates", "cleanup", "upload", "highlights", "memories"];
+const recoveryPlan: readonly GalleryRefreshFamily[] = ["root", "current", "subjects", "search", "duplicates", "cleanup", "upload", "highlights", "memories"];
 
 export function isGalleryEventSlug(value: string): value is GalleryEventSlug {
   return (GALLERY_EVENT_SLUGS as readonly string[]).includes(value);
@@ -67,12 +61,12 @@ export function reconcilePaginatedSelected<T extends { key: string }>(selected: 
   return records.find(({ key }) => key === selected.key) ?? (complete ? undefined : selected);
 }
 
-export function reconcileDestination(destinationKey: string | undefined, collections: Array<{ key: string; access?: { canContribute?: boolean }; role?: string }>, excludedKey?: string) {
+export function reconcileDestination(destinationKey: string | undefined, collections: { key: string; access?: { canContribute?: boolean } }[], excludedKey?: string) {
   if (!destinationKey) return undefined;
-  return collections.some(({ key, access, role }) => key === destinationKey && key !== excludedKey && access?.canContribute === true && role !== "viewer") ? destinationKey : undefined;
+  return collections.some(({ key, access }) => key === destinationKey && key !== excludedKey && access?.canContribute === true) ? destinationKey : undefined;
 }
 
-export function reconcileGalleryState<TMode, TCollection extends { key: string; access?: { canRead?: boolean; canContribute?: boolean }; role?: string }>(input: {
+export function reconcileGalleryState<TMode, TCollection extends { key: string; access?: { canRead?: boolean; canContribute?: boolean } }>(input: {
   mode: TMode;
   activeCollectionKey?: string;
   selectedImageKeys: string[];
@@ -95,7 +89,7 @@ export const MUTATION_GALLERY_SHEETS = new Set(["imageEdit", "confirmDeleteImage
 export const CONTRIBUTOR_GALLERY_SHEETS = new Set(["actions", "destination"]);
 
 export function reconcileGalleryPermissions(input: {
-  role: string | undefined;
+  hasCollection: boolean;
   activeSheet: string | undefined;
   selectedImageKeys: string[];
   mutableImageKeys: Iterable<string>;
@@ -103,16 +97,16 @@ export function reconcileGalleryPermissions(input: {
   ownerCapability?: boolean;
   detailMutable?: boolean;
   canContribute?: boolean;
+  canManage?: boolean;
 }) {
-  const owner = input.role === "owner";
-  const canContribute = (owner || input.role === "collaborator") && input.canContribute !== false;
+  const canContribute = input.hasCollection && input.canContribute !== false;
   const mutable = new Set(input.mutableImageKeys);
   const selectedImageKeys = canContribute ? input.selectedImageKeys.filter((key) => mutable.has(key)) : [];
-  const restrictedOwnerSheet = Boolean(input.activeSheet && OWNER_ONLY_GALLERY_SHEETS.has(input.activeSheet) && !owner && !input.ownerCapability);
+  const restrictedOwnerSheet = Boolean(input.activeSheet && OWNER_ONLY_GALLERY_SHEETS.has(input.activeSheet) && input.canManage === false && !input.ownerCapability);
   const detailMutation = input.activeSheet === "imageEdit" || input.activeSheet === "confirmDeleteImage";
   const selectionMutation = Boolean(input.activeSheet?.startsWith("bulk") || input.activeSheet === "transferDestination");
   const restrictedMutationSheet = Boolean(input.activeSheet && MUTATION_GALLERY_SHEETS.has(input.activeSheet) && (!canContribute || detailMutation && input.detailMutable === false || selectionMutation && selectedImageKeys.length === 0));
-  const restrictedContributorSheet = Boolean(input.activeSheet && CONTRIBUTOR_GALLERY_SHEETS.has(input.activeSheet) && input.role !== undefined && !canContribute);
+  const restrictedContributorSheet = Boolean(input.activeSheet && CONTRIBUTOR_GALLERY_SHEETS.has(input.activeSheet) && input.hasCollection && !canContribute);
   return {
     activeSheet: restrictedOwnerSheet || restrictedMutationSheet || restrictedContributorSheet ? undefined : input.activeSheet,
     selectedImageKeys,
@@ -125,7 +119,7 @@ export function recoverAssistantSearchMode(source: string | undefined) {
   return source?.trim() ? { action: "rerun" as const, query: source.trim() } : { action: "exit" as const };
 }
 
-export function shouldRunGalleryAssistantTextSearch(result: { type: string; changes?: Array<{ workspace: string }> }) {
+export function shouldRunGalleryAssistantTextSearch(result: { type: string; changes?: { workspace: string }[] }) {
   return result.type !== "unsupported" && !result.changes?.some(({ workspace }) => workspace === "gallery");
 }
 
@@ -174,8 +168,8 @@ export function reconcileOptimisticUploads<TOptimistic extends { clientKey: stri
 
 export function reconcileUploadJobRegistry<TJob extends { uploadKey: string }, TStatus extends { key: string; status: string }>(jobs: TJob[], statuses: TStatus[]) {
   const byKey = new Map(statuses.map((status) => [status.key, status]));
-  const completed: Array<{ job: TJob; status: TStatus }> = [];
-  const failed: Array<{ job: TJob; status: TStatus }> = [];
+  const completed: { job: TJob; status: TStatus }[] = [];
+  const failed: { job: TJob; status: TStatus }[] = [];
   const unresolved: TJob[] = [];
   for (const job of jobs) {
     const status = byKey.get(job.uploadKey);

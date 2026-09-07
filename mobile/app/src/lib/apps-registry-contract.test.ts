@@ -5,9 +5,10 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 const registry = read("./apps-registry.ts");
 const headers = read("./app-request-headers.ts");
 const authenticated = read("./api-client.ts");
-const publicClient = read("./public-api-client.ts");
-const publicStream = read("./public-book-share-stream.ts");
 const root = read("../app/_layout.tsx");
+const products = read("./product-client.ts");
+const costs = read("./cost-client.ts");
+const appsState = read("../state/apps.ts");
 const capabilityLayout = read("../app/capability/_layout.tsx");
 const switcher = read("../components/capability/WorkspaceAppSwitcher.tsx");
 
@@ -18,14 +19,29 @@ test("the registry bootstrap is direct and omits the selected app header", () =>
   expect(registry).not.toContain("X-Vorinthex-App-Key");
 });
 
+test("the mobile registry requires a strict server-hosted app logo URL", () => {
+  expect(registry).toContain("logoUrl: z.url()");
+  expect(registry).toContain("z.strictObject({");
+});
+
+test("health and products use a direct concurrent public bootstrap", () => {
+  expect(products).toContain('Promise.all([fetchPublic("health"), fetchProducts()])');
+  expect(products).toContain('fetchPublic("products")');
+  expect(products).toContain("headers: appsBootstrapHeaders()");
+  expect(products).not.toContain("selectedAppKeyHeaders");
+});
+
+test("plans and Spark costs begin loading during app bootstrap", () => {
+  expect(costs).toContain('fetchPublic("costs")');
+  expect(appsState).toContain("Promise.allSettled([fetchPublicBootstrap(), fetchSparkCosts()])");
+  expect(appsState).toContain('sparkCostsStatus: "loading"');
+});
+
 test("every normal native transport injects the exact selected app key header", () => {
   expect(headers).toContain('VORINTHEX_APP_KEY_HEADER = "X-Vorinthex-App-Key"');
   expect(authenticated.match(/selectedAppKeyHeaders\(\)/g)).toHaveLength(2);
   expect(authenticated).toContain("await ensureAppsReady()");
-  expect(publicClient.match(/selectedAppKeyHeaders\(\)/g)).toHaveLength(2);
-  expect(publicClient).toContain("await ensureAppsReady()");
-  expect(publicStream).toContain("Object.entries(publicApiHeaders())");
-  for (const source of [headers, authenticated, publicClient, publicStream]) expect(source).not.toContain("X-Vorinthex-Domain");
+  for (const source of [headers, authenticated]) expect(source).not.toContain("X-Vorinthex-Domain");
 });
 
 test("root splash gating includes registry readiness and retries failures without onboarding hydration", () => {

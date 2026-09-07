@@ -1,16 +1,22 @@
 const APPLE_TEAM_ID = "3RMYX67679";
 const APP_IDENTIFIER = "app.vorinthex.com";
 
+export const APP_LINK_ROUTES = [
+  { associationPath: "/public/auth/token", comment: "Mobile magic-link sign in", fallback: "magic" },
+  { associationPath: "/auth/mfa", comment: "Team MFA recovery", fallback: "mfa" },
+  { associationPath: "/capability/signal", comment: "Signal capability OAuth return", fallback: "signal" },
+  { associationPath: "/referral/*", comment: "Referral acquisition", fallback: "referral" },
+] as const;
+
+export const appLinkComponents = () => APP_LINK_ROUTES.map(({ associationPath, comment }) => ({ "/": associationPath, comment }));
+export const appLinkHeaderSources = () => APP_LINK_ROUTES.map(({ associationPath }) => associationPath.endsWith("/*") ? associationPath.replace("/*", "/:path*") : associationPath);
+
 export function buildAppleAppSiteAssociation() {
   return {
     applinks: {
       details: [{
         appIDs: [`${APPLE_TEAM_ID}.${APP_IDENTIFIER}`],
-        components: [
-          { "/": "/public/auth/token", comment: "Mobile magic-link sign in" },
-          { "/": "/capability/signal", comment: "Signal Gmail connection return" },
-          { "/": "/share/books/*", comment: "Shared books" },
-        ],
+        components: appLinkComponents(),
       }],
     },
   };
@@ -28,6 +34,11 @@ export function buildAndroidAssetLinks(certificateFingerprints: string | undefin
       namespace: "android_app",
       package_name: APP_IDENTIFIER,
       sha256_cert_fingerprints: fingerprints,
+    },
+    relation_extensions: {
+      "delegate_permission/common.handle_all_urls": {
+        dynamic_app_link_components: appLinkComponents(),
+      },
     },
   }];
 }

@@ -9,8 +9,9 @@ import { sparkErrorResponse } from './errors';
 import { lookupToolCostPolicy } from '@/lib/costs';
 import { toolEventService } from '@/lib/ai/events/service';
 import { createHash } from 'node:crypto';
+import { authenticatedTeamContext } from './auth';
 
-const bodySchema = strictObject({ organizationKey: z.string().trim().min(1), scopeKey: z.string().cuid(), input: z.unknown() });
+const bodySchema = strictObject({ teamKey: z.string().trim().min(1), scopeKey: z.string().cuid(), input: z.unknown() });
 const delayedDevTools = new Set(['folder.list', 'document.list', 'content.search-history.list']);
 const internalOnlyTools = new Set(['document.enhance', 'document.translate']);
 type ContentToolRunner = (input: Parameters<typeof runAuthenticatedContentTool>[0], options: RunAuthenticatedContentToolOptions) => Promise<unknown>;
@@ -115,7 +116,7 @@ export function createContentToolHandler(dependencies: ContentToolHandlerDepende
         ? Number(process.env.CONTENT_DEV_READ_DELAY_MS ?? 0)
         : 0;
       if (Number.isFinite(devDelayMs) && devDelayMs > 0) await Bun.sleep(Math.min(devDelayMs, 5_000));
-      const output = await (dependencies.run ?? runAuthenticatedContentTool)({ organizationKey: body.organizationKey, scopeKey: body.scopeKey, tool, input }, { ...dependencies.serviceOptions, authenticatedUserKey: identity.key, recordEvent: dependencies.serviceOptions?.recordEvent ?? toolEventService.record, ...(idempotencyKey ? { requestKey: idempotencyKey } : {}), contentDependencies: { ...dependencies.serviceOptions?.contentDependencies, signal: c.req.raw.signal } });
+      const output = await (dependencies.run ?? runAuthenticatedContentTool)({ teamKey: body.teamKey, scopeKey: body.scopeKey, tool, input }, { ...dependencies.serviceOptions, ...authenticatedTeamContext(identity), recordEvent: dependencies.serviceOptions?.recordEvent ?? toolEventService.record, ...(idempotencyKey ? { requestKey: idempotencyKey } : {}), contentDependencies: { ...dependencies.serviceOptions?.contentDependencies, signal: c.req.raw.signal } });
       return c.json({ success: true, data: output });
     } catch (error) {
       const billing = sparkErrorResponse(c, error); if (billing) return billing;

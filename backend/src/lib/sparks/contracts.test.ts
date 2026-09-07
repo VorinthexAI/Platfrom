@@ -44,7 +44,7 @@ describe('Spark contracts', () => {
     expect(() => sparkTransactionInputSchema.parse({ ...input, actionSlug: 'Bad.action' })).toThrow('canonical action slug');
   });
 
-  test('accepts the product-neutral recurring service transaction kind', () => {
+  test('continues to read historical recurring service transactions', () => {
     expect(sparkTransactionSchema.parse({ ...base, kind: 'recurring-service', toolSlug: undefined }).kind).toBe('recurring-service');
   });
 });

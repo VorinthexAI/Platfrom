@@ -13,14 +13,14 @@ import { contentBatchOutputSchema } from './content-schemas';
 
 const expectedNames = [
   'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.delete',
-  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-summaries', 'document.find-summary', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.topics', 'document.enhance', 'document.translate', 'document.rewrite',
+  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-summaries', 'document.find-summary', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.delete', 'document.download', 'document.export', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.topics', 'document.enhance', 'document.translate', 'document.rewrite',
   'document.search', 'content.search', 'content.search-history.list', 'content.search-history.delete', 'content.neighbors', 'document.search-all',
 ] as const;
 
 describe('Content tool registry', () => {
   test('contains exactly the registered dotted names and no action-style kebab names', () => {
     expect([...CONTENT_TOOL_NAMES]).toEqual([...expectedNames]);
-    expect(CONTENT_TOOL_NAMES).toHaveLength(45);
+    expect(CONTENT_TOOL_NAMES).toHaveLength(42);
     for (const name of CONTENT_TOOL_NAMES) {
       expect(name).toMatch(/^[a-z]+(?:[.-][a-z]+)*$/);
       expect(name).toContain('.');
@@ -39,20 +39,20 @@ describe('Content tool registry', () => {
 
   test('keeps trusted selectors canonical while omitting them from model inputs', () => {
     const scopeKey = newId();
-    const organizationKey = newId();
+    const teamKey = newId();
     expect(contentToolInputSchemas['folder.list'].parse({ scopeKey })).toMatchObject({ scopeKey });
     expect(contentToolInputSchemas['folder.create'].parse({ folders: [{ scopeKey, name: 'Folder' }] })).toMatchObject({ folders: [{ scopeKey }] });
-    expect(contentToolInputSchemas['document.search-all'].parse({ organizationKey, query: 'roadmap' })).toMatchObject({ organizationKey });
+    expect(contentToolInputSchemas['document.search-all'].parse({ teamKey, query: 'roadmap' })).toMatchObject({ teamKey });
     for (const name of ['folder.list', 'document.parse', 'document.scan', 'document.create', 'document.list', 'document.search', 'content.search', 'content.search-history.list', 'content.search-history.delete'] as const) {
       expect(contentToolModelInputSchemas[name].safeParse({ scopeKey }).error?.issues.some((issue) => issue.code === 'unrecognized_keys')).toBe(true);
     }
     expect(() => contentToolModelInputSchemas['folder.create'].parse({ folders: [{ scopeKey, name: 'Folder' }] })).toThrow('Unrecognized key');
-    expect(() => contentToolModelInputSchemas['document.search-all'].parse({ organizationKey, query: 'roadmap' })).toThrow('Unrecognized key');
+    expect(() => contentToolModelInputSchemas['document.search-all'].parse({ teamKey, query: 'roadmap' })).toThrow('Unrecognized key');
 
     const definitions = Object.fromEntries(CONTENT_TOOL_DEFINITIONS.map((definition) => [definition.name, definition.inputSchema])) as Record<string, any>;
     expect(definitions['folder.list'].properties).not.toHaveProperty('scopeKey');
     expect(definitions['folder.create'].properties.folders.items.properties).not.toHaveProperty('scopeKey');
-    expect(definitions['document.search-all'].properties).not.toHaveProperty('organizationKey');
+    expect(definitions['document.search-all'].properties).not.toHaveProperty('teamKey');
     expect(definitions['document.move'].properties.moves.items.properties).toHaveProperty('targetScopeKey');
     expect(definitions['document.search'].properties.sources.items).toBeDefined();
   });
@@ -77,7 +77,7 @@ describe('Content input contracts', () => {
     expect(contentToolInputSchemas['document.enhance'].parse({ documentKeys: [key] })).toMatchObject({ mode: 'preview', atomic: false });
     expect(contentToolInputSchemas['document.rewrite'].parse({ rewrites: [{ documentKey: key, instruction: 'Clarify' }] })).toMatchObject({ atomic: false, rewrites: [{ mode: 'preview' }] });
     expect(contentToolInputSchemas['document.restore-version'].parse({ restores: [{ documentKey: key, versionKey: newId() }] })).toMatchObject({ atomic: false, restores: [{ createBackupVersion: true }] });
-    expect(contentToolInputSchemas['document.copy'].parse({ copies: [{ documentKey: key, targetScopeKey: newId(), targetFolderKey: newId() }] })).toMatchObject({ atomic: false, copies: [{ includeVersions: false, includeShares: false }] });
+    expect(contentToolInputSchemas['document.copy'].parse({ copies: [{ documentKey: key, targetScopeKey: newId(), targetFolderKey: newId() }] })).toMatchObject({ atomic: false, copies: [{ includeVersions: false }] });
     expect(contentToolInputSchemas['folder.copy'].parse({ copies: [{ folderKey: key, targetScopeKey: newId() }] })).toMatchObject({ atomic: false });
   });
 
@@ -123,17 +123,15 @@ describe('Content input contracts', () => {
       ['folder.delete', { folderKeys: [] }],
       ['document.find', { documentKeys: [] }], ['document.read', { documentKeys: [] }], ['document.update', { updates: [] }], ['document.rename', { renames: [] }],
       ['document.move', { moves: [] }], ['document.copy', { copies: [] }],
-      ['document.delete', { documentKeys: [] }], ['document.download', { documentKeys: [] }], ['document.export', { exports: [] }], ['document.share', { shares: [] }],
-      ['document.list-shares', { documentKeys: [] }], ['document.create-version', { documentKeys: [] }], ['document.find-version', { versionKeys: [] }],
+      ['document.delete', { documentKeys: [] }], ['document.download', { documentKeys: [] }], ['document.export', { exports: [] }],
+      ['document.create-version', { documentKeys: [] }], ['document.find-version', { versionKeys: [] }],
       ['document.list-versions', { documentKeys: [] }], ['document.list-summaries', { documentKeys: [] }], ['document.find-summary', { summaryKeys: [] }], ['document.restore-version', { restores: [] }], ['document.delete-version', { versionKeys: [] }],
       ['document.summarize', { documentKeys: [] }], ['document.enhance', { documentKeys: [] }], ['document.translate', { documentKeys: [], targetLanguage: 'French' }], ['document.rewrite', { rewrites: [] }],
     ];
     for (const [name, input] of invalid) expect(contentToolInputSchemas[name].safeParse(input).success, name).toBe(false);
   });
 
-  test('requires unshare selectors and rejects conflicting update representations', () => {
-    expect(() => contentToolInputSchemas['document.unshare'].parse({})).toThrow();
-    expect(() => contentToolInputSchemas['document.unshare'].parse({ shareKeys: [key], documentKeys: [newId()] })).toThrow();
+  test('rejects conflicting update representations', () => {
     expect(() => contentToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, html: '<p>x</p>', content: 'x' }] })).toThrow();
     expect(() => contentToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, createVersion: true }] })).toThrow();
     expect(contentToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, isFavorite: true }] }).updates[0]).toMatchObject({ isFavorite: true });
@@ -164,8 +162,7 @@ describe('Content input contracts', () => {
       ['document.move', { moves: [{ documentKey: key, targetScopeKey: newId(), targetFolderKey: newId() }] }],
       ['document.copy', { copies: [{ documentKey: key, targetScopeKey: newId(), targetFolderKey: newId() }] }],
       ['document.delete', { documentKeys: [key] }],
-      ['document.share', { shares: [{ documentKey: key, permission: 'read' }] }],
-      ['document.unshare', { shareKeys: [key] }], ['document.create-version', { documentKeys: [key] }],
+      ['document.create-version', { documentKeys: [key] }],
       ['document.restore-version', { restores: [{ documentKey: key, versionKey: newId() }] }],
       ['document.delete-version', { versionKeys: [key] }], ['document.summarize', { documentKeys: [key] }],
       ['document.enhance', { documentKeys: [key] }], ['document.translate', { documentKeys: [key], targetLanguage: 'French' }],
@@ -180,7 +177,6 @@ describe('Content input contracts', () => {
   test('publishes provider-visible parity for file and cross-field constraints', () => {
     const definitions = Object.fromEntries(CONTENT_TOOL_DEFINITIONS.map((definition) => [definition.name, definition.inputSchema])) as Record<string, any>;
     expect(definitions['document.parse'].properties.file).toMatchObject({ type: 'object' });
-    expect(definitions['document.unshare'].oneOf).toHaveLength(2);
     expect(definitions['document.update'].properties.updates.items.oneOf).toHaveLength(2);
     expect(definitions['document.read'].description).toContain('endOffset');
   });
@@ -216,7 +212,7 @@ describe('Content output contracts', () => {
     expect(CONTENT_ERROR_CODES).toEqual([
       'CONTENT_UNAUTHORIZED', 'CONTENT_FORBIDDEN', 'CONTENT_NOT_FOUND', 'CONTENT_CONFLICT', 'CONTENT_IDEMPOTENCY_CONFLICT', 'CONTENT_IDEMPOTENCY_PENDING', 'CONTENT_IDEMPOTENCY_INDETERMINATE', 'CONTENT_IDEMPOTENCY_FAILED', 'CONTENT_INVALID_INPUT', 'CONTENT_BATCH_PARTIAL_FAILURE',
       'FOLDER_CYCLE_DETECTED', 'FOLDER_NOT_EMPTY', 'FOLDER_ARCHIVED', 'FOLDER_MOVE_FORBIDDEN',
-      'DOCUMENT_UNSUPPORTED_TYPE', 'DOCUMENT_INVALID_MIME_TYPE', 'DOCUMENT_TOO_LARGE', 'DOCUMENT_PROCESSING_FAILED', 'DOCUMENT_EXTRACTION_FAILED', 'DOCUMENT_EMBEDDING_FAILED', 'DOCUMENT_INSERT_FAILED', 'DOCUMENT_ARCHIVED', 'DOCUMENT_VERSION_CONFLICT', 'DOCUMENT_SHARE_INVALID', 'DOCUMENT_SPEECH_FAILED',
+      'DOCUMENT_UNSUPPORTED_TYPE', 'DOCUMENT_INVALID_MIME_TYPE', 'DOCUMENT_TOO_LARGE', 'DOCUMENT_PROCESSING_FAILED', 'DOCUMENT_EXTRACTION_FAILED', 'DOCUMENT_EMBEDDING_FAILED', 'DOCUMENT_INSERT_FAILED', 'DOCUMENT_ARCHIVED', 'DOCUMENT_VERSION_CONFLICT', 'DOCUMENT_SPEECH_FAILED',
       'CONTENT_SEARCH_INVALID_SOURCE', 'CONTENT_SEARCH_NO_ACCESSIBLE_SOURCES', 'CONTENT_SEARCH_EMBEDDING_FAILED',
     ]);
   });
@@ -234,11 +230,8 @@ describe('Content output contracts', () => {
     }
   });
 
-  test('rejects embeddings by default and sensitive share fields', () => {
+  test('rejects embeddings by default', () => {
     const now = '2026-07-22T00:00:00.000Z';
-    const share = { key: newId(), scopeKey: newId(), documentKey: newId(), permission: 'read', createdAt: now, updatedAt: now };
-    expect(contentToolOutputSchemas['document.list-shares'].safeParse({ results: [{ key: share.documentKey, success: true, data: { documentKey: share.documentKey, shares: [share] } }], summary: { requested: 1, succeeded: 1, failed: 0 } }).success).toBe(true);
-    expect(contentToolOutputSchemas['document.list-shares'].safeParse({ results: [{ key: share.documentKey, success: true, data: { documentKey: share.documentKey, shares: [{ ...share, tokenHash: 'secret' }] } }], summary: { requested: 1, succeeded: 1, failed: 0 } }).success).toBe(false);
     expect(contentToolOutputSchemas['folder.find'].safeParse({ results: [{ key: newId(), success: true, data: { folder: { key: newId(), scopeKey: newId(), name: 'Folder', embedding: [0.1], createdAt: now, updatedAt: now } } }], summary: { requested: 1, succeeded: 1, failed: 0 } }).success).toBe(false);
   });
 

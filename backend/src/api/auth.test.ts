@@ -12,11 +12,13 @@ import {
   STANDARD_REFRESH_MAX_AGE_SECONDS,
   createAccessToken,
   createChallengeTokenHash,
+  prepareChallenge,
   getAuthSessionPolicy,
   isChallengeUsableForPurpose,
   isRefreshTokenActive,
   loginIdentityTypeForMembership,
   resolveRefreshedIdentityType,
+  teamAssurance,
   verifyAccessToken,
   verifyAppleIdentityToken,
   verifyGoogleIdentityToken,
@@ -68,6 +70,18 @@ describe('auth helpers', () => {
     expect(url.searchParams.get('redirect_uri')).toBe('https://app.example.com/api/auth/oauth/google/callback');
     expect(url.searchParams.get('scope')).toBe('openid email profile');
     expect(url.searchParams.get('state')).toMatch(/^[A-Za-z0-9_-]+\.[a-f0-9]{64}$/);
+  });
+
+  test('carries referral acquisition through challenge documents and signed OAuth state', async () => {
+    process.env.ACCESS_TOKEN_SECRET = 'test-access-secret';
+    process.env.GOOGLE_OAUTH_CLIENT_ID = 'google-client';
+    const referralCode = '0123456789ab';
+    const challenge = await prepareChallenge('user-key', 'email', 60_000, 'user', { referralCode });
+    expect(challenge.document.referralCode).toBe(referralCode);
+
+    const url = new URL(await buildOAuthAuthorizationUrl('google', 'https://app.example.com/api/auth/oauth/google/callback', undefined, referralCode));
+    const [payload] = url.searchParams.get('state')!.split('.');
+    expect(JSON.parse(Buffer.from(payload!, 'base64url').toString('utf8'))).toMatchObject({ referralCode });
   });
 
   test('builds Apple OAuth authorization URLs with the callback URI', async () => {
@@ -239,6 +253,12 @@ describe('auth helpers', () => {
     expect(await verifyAccessToken(token)).toEqual({ key: 'root_member', identityType: 'member', founderAssured: true });
   });
 
+  test('normalizes canonical and persisted founder assurance to an exact team membership/version pair', () => {
+    expect(teamAssurance({ key: 'user', identityType: 'user', teamMembershipKey: 'membership', teamMfaVersion: 2 })).toEqual({ teamMembershipKey: 'membership', teamMfaVersion: 2 });
+    expect(teamAssurance({ key: 'user', identityType: 'member', teamMembershipKey: 'legacy', teamMfaVersion: 1 })).toEqual({ teamMembershipKey: 'legacy', teamMfaVersion: 1 });
+    expect(teamAssurance({ key: 'user', identityType: 'user' })).toBeUndefined();
+  });
+
   test('uses 15-minute access and one-year refresh for ordinary sessions', async () => {
     process.env.ACCESS_TOKEN_SECRET = 'test-access-secret';
     const sessionExpiresAt = new Date(Date.now() + STANDARD_REFRESH_MAX_AGE_SECONDS * 1000);
@@ -253,7 +273,7 @@ describe('auth helpers', () => {
     expect(getAuthSessionPolicy('superAdmin')).toEqual({ accessMaxAgeSeconds: FOUNDER_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: FOUNDER_REFRESH_MAX_AGE_SECONDS });
   });
 
-  test('preserves a durable user identity when refreshing after organization membership is created', () => {
+  test('preserves a durable user identity when refreshing after team membership is created', () => {
     expect(resolveRefreshedIdentityType('user', 'member', true, false)).toBe('user');
     expect(resolveRefreshedIdentityType(undefined, 'member', true, false)).toBe('user');
     expect(resolveRefreshedIdentityType('member', 'superAdmin', true, false)).toBe('member');

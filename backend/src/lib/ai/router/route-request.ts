@@ -2,9 +2,9 @@ import { z } from 'zod';
 import { actionIdSchema } from '@/lib/ai/actions/types';
 import { modelIdSchema } from '@/lib/ai/providers/registry';
 import { providerSlugSchema } from '@/lib/ai/providers/types';
-import { organizationKeySchema } from '@/lib/ai/shared/ids';
+import { teamKeySchema } from '@/lib/ai/shared/ids';
 
-const base = { organizationKey: organizationKeySchema, actionSlug: actionIdSchema };
+const base = { teamKey: teamKeySchema, actionSlug: actionIdSchema };
 export const autoRouteRequestSchema = z.object({ mode: z.literal('auto'), ...base }).strict();
 export const modelRouteRequestSchema = z.object({ mode: z.literal('model'), ...base, modelSlug: modelIdSchema }).strict();
 export const fixedRouteRequestSchema = z.object({ mode: z.literal('fixed'), ...base, modelSlug: modelIdSchema, providerSlug: providerSlugSchema }).strict();

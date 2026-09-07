@@ -18,10 +18,10 @@ export function GalleryIcon({ variant = "inherit", size = "md", strokeWidth = 1.
   const pixelSize = sizes[size];
   return (
     <svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" {...props}>
-      <rect x="3" y="4" width="18" height="16" rx="2" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="9" cy="10" r="1.6" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
-      <path d="m3 17 5.2-5.2a1.5 1.5 0 0 1 2.1 0L16 17.5" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
-      <path d="m14 15 2.3-2.3a1.5 1.5 0 0 1 2.1 0L21 15.3" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6 3h13a2 2 0 0 1 2 2v11" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="3" y="6" width="16" height="15" rx="2" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="8" cy="11" r="1.5" stroke={colors[variant]} strokeWidth={strokeWidth} />
+      <path d="m4 18 4-4a1.4 1.4 0 0 1 2 0l2 2 1.5-1.5a1.4 1.4 0 0 1 2 0L19 18" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

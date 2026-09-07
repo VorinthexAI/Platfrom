@@ -17,7 +17,16 @@ describe('personal context provisioning', () => {
   });
 
   test('stores the personal Main scope as the user current scope in the provisioning transaction', () => {
-    expect(provisioningSource).toContain("['users', 'organizations', 'userOrganizations', 'scopes', 'scopeMembers']");
+    expect(provisioningSource).toContain("['users', 'teams', 'userTeams', 'scopes', 'scopeMembers']");
     expect(provisioningSource).toContain('UPDATE ${user.key} WITH { currentScopeKey: scope._key');
+  });
+
+  test('resolves an active selected scope and repairs invalid selections to personal Main', () => {
+    expect(provisioningSource.indexOf('reconcileTeamScopeMemberships(selected.teamKey')).toBeLessThan(provisioningSource.indexOf('LET selectedScope = IS_STRING(user.currentScopeKey)'));
+    expect(provisioningSource).toContain('LET selectedScope = IS_STRING(user.currentScopeKey) ? DOCUMENT(scopes, user.currentScopeKey) : null');
+    expect(provisioningSource).toContain('selectedTeam.isActive == true && selectedMembership != null && selectedScopeMembership != null');
+    expect(provisioningSource).toContain('LET scope = selectedIsAuthorized ? selectedScope : mainScope');
+    expect(provisioningSource).toContain('LET repair = user.currentScopeKey != scope._key');
+    expect(provisioningSource).toContain('currentScopeKey: scope._key');
   });
 });

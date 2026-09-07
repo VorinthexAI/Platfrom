@@ -32,11 +32,12 @@ export interface SparkRepository {
   completeExecution?(userKey: string, executionIdentity: string, owner: string, completedAt: string): Promise<boolean>;
   renewExecution?(userKey: string, executionIdentity: string, owner: string, now: string, expiresAt: string): Promise<boolean>;
   getBalance(userKey: string): Promise<number | null>;
+  getDebt?(userKey: string): Promise<number | null>;
   listHistory(userKey: string, input?: SparkHistoryInput): Promise<SparkTransaction[]>;
 }
 
 export class SparkRepositoryError extends Error {
-  constructor(public readonly code: 'USER_NOT_FOUND' | 'INSUFFICIENT_BALANCE' | 'INVALID_BALANCE' | 'BALANCE_OVERFLOW' | 'INVALID_REFUND', message: string) {
+  constructor(public readonly code: 'USER_NOT_FOUND' | 'INSUFFICIENT_BALANCE' | 'OUTSTANDING_DEBT' | 'INVALID_BALANCE' | 'BALANCE_OVERFLOW' | 'INVALID_REFUND', message: string) {
     super(message);
     this.name = 'SparkRepositoryError';
   }
@@ -97,9 +98,12 @@ export function createArangoSparkRepository(
           LET user = DOCUMENT(users, @userKey)
           FILTER user != null
           LET previousBalance = IS_NUMBER(user.microSparkBalance) ? user.microSparkBalance : 0
-          LET nextBalance = previousBalance + @deltaMicroSparks
+          LET debt = IS_NUMBER(user.microSparkDebt) ? user.microSparkDebt : 0
+          FILTER @deltaMicroSparks > 0 || debt == 0
+          LET debtPayment = @deltaMicroSparks > 0 ? MIN([debt, @deltaMicroSparks]) : 0
+          LET nextBalance = previousBalance + @deltaMicroSparks - debtPayment
           FILTER nextBalance >= 0 && nextBalance <= @maxSafeInteger
-          UPDATE user WITH { microSparkBalance: nextBalance } IN users
+          UPDATE user WITH { microSparkBalance: nextBalance, microSparkDebt: debt - debtPayment } IN users
           LET ledgerRecord = MERGE(@record, { balanceAfterMicroSparks: nextBalance })
           INSERT ledgerRecord INTO sparkTransactions
           RETURN ledgerRecord
@@ -111,10 +115,12 @@ export function createArangoSparkRepository(
         });
         const saved = await cursor.next();
         if (!saved) {
-          const userCursor = await transaction.query('LET user = DOCUMENT(users, @userKey) RETURN user == null ? null : (IS_NUMBER(user.microSparkBalance) ? user.microSparkBalance : 0)', { userKey: transactionInput.userKey });
-          const currentBalance = await userCursor.next();
-          if (currentBalance === null || currentBalance === undefined) throw new SparkRepositoryError('USER_NOT_FOUND', 'Spark account user was not found.');
+          const userCursor = await transaction.query('LET user = DOCUMENT(users, @userKey) RETURN user == null ? null : { balance: IS_NUMBER(user.microSparkBalance) ? user.microSparkBalance : 0, debt: IS_NUMBER(user.microSparkDebt) ? user.microSparkDebt : 0 }', { userKey: transactionInput.userKey });
+          const state = await userCursor.next() as { balance: number; debt: number } | null | undefined;
+          if (!state) throw new SparkRepositoryError('USER_NOT_FOUND', 'Spark account user was not found.');
+          const currentBalance = state.balance;
           if (typeof currentBalance !== 'number' || !Number.isSafeInteger(currentBalance) || currentBalance < 0) throw new SparkRepositoryError('INVALID_BALANCE', 'Stored Spark balance must be a nonnegative safe integer.');
+          if (transactionInput.deltaMicroSparks < 0 && state.debt > 0) throw new SparkRepositoryError('OUTSTANDING_DEBT', 'Spark spending is blocked until refund debt is resolved.');
           if (currentBalance + transactionInput.deltaMicroSparks < 0) throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'Spark balance is insufficient for this transaction.');
           throw new SparkRepositoryError('BALANCE_OVERFLOW', 'Spark balance would exceed the safe integer range.');
         }
@@ -162,6 +168,8 @@ export function createArangoSparkRepository(
           LET user = DOCUMENT(users, @userKey)
           FILTER user != null
           LET previousBalance = IS_NUMBER(user.microSparkBalance) ? user.microSparkBalance : 0
+          LET debt = IS_NUMBER(user.microSparkDebt) ? user.microSparkDebt : 0
+          FILTER debt == 0
           LET nextBalance = previousBalance + @deltaMicroSparks
           FILTER nextBalance >= 0 && nextBalance <= @maxSafeInteger
           UPDATE user WITH { microSparkBalance: nextBalance } IN users
@@ -171,10 +179,12 @@ export function createArangoSparkRepository(
         `, { userKey: transactionInput.userKey, deltaMicroSparks: transactionInput.deltaMicroSparks, maxSafeInteger: Number.MAX_SAFE_INTEGER, record: toArangoDoc(attempted) });
         const saved = await cursor.next();
         if (!saved) {
-          const userCursor = await transaction.query('LET user = DOCUMENT(users, @userKey) RETURN user == null ? null : (IS_NUMBER(user.microSparkBalance) ? user.microSparkBalance : 0)', { userKey: transactionInput.userKey });
-          const currentBalance = await userCursor.next();
-          if (currentBalance === null || currentBalance === undefined) throw new SparkRepositoryError('USER_NOT_FOUND', 'Spark account user was not found.');
+          const userCursor = await transaction.query('LET user = DOCUMENT(users, @userKey) RETURN user == null ? null : { balance: IS_NUMBER(user.microSparkBalance) ? user.microSparkBalance : 0, debt: IS_NUMBER(user.microSparkDebt) ? user.microSparkDebt : 0 }', { userKey: transactionInput.userKey });
+          const state = await userCursor.next() as { balance: number; debt: number } | null | undefined;
+          if (!state) throw new SparkRepositoryError('USER_NOT_FOUND', 'Spark account user was not found.');
+          const currentBalance = state.balance;
           if (typeof currentBalance !== 'number' || !Number.isSafeInteger(currentBalance) || currentBalance < 0) throw new SparkRepositoryError('INVALID_BALANCE', 'Stored Spark balance must be a nonnegative safe integer.');
+          if (state.debt > 0) throw new SparkRepositoryError('OUTSTANDING_DEBT', 'Spark spending is blocked until refund debt is resolved.');
           if (currentBalance + transactionInput.deltaMicroSparks < 0) throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'Spark balance is insufficient for this transaction.');
           throw new SparkRepositoryError('BALANCE_OVERFLOW', 'Spark balance would exceed the safe integer range.');
         }
@@ -225,6 +235,14 @@ export function createArangoSparkRepository(
       if (value === null || value === undefined) return null;
       if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new SparkRepositoryError('INVALID_BALANCE', 'Stored Spark balance must be a nonnegative safe integer.');
       return value as number;
+    },
+
+    async getDebt(userKey) {
+      const cursor = await database.query('LET user = DOCUMENT(users, @userKey) RETURN user == null ? null : (IS_NUMBER(user.microSparkDebt) ? user.microSparkDebt : 0)', { userKey });
+      const value = await cursor.next();
+      if (value === null || value === undefined) return null;
+      if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new SparkRepositoryError('INVALID_BALANCE', 'Stored Spark debt must be a nonnegative safe integer.');
+      return value;
     },
 
     async listHistory(userKey, input = { limit: 50 }) {

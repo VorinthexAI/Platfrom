@@ -1,6 +1,8 @@
 import { expect, mock, test } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 
+import type { ContentContext } from "./content-client";
+
 mock.module("./content-client", () => ({
   getContentDocumentTopics: () => undefined,
   listContentDocumentAudioVersions: () => undefined,
@@ -38,17 +40,16 @@ const {
   seedCachedContentFolderLocation,
   updateCachedContentDocumentAudioPlayback,
 } = await import("./content-query-cache");
-import type { ContentContext } from "./content-client";
 
 const context: ContentContext = {
   userKey: "user-a",
-  organizationKey: "organization-a",
+  teamKey: "team-a",
   scopeKey: "scope-a",
 };
 
 const otherContext: ContentContext = {
   userKey: "user-b",
-  organizationKey: "organization-b",
+  teamKey: "team-b",
   scopeKey: "scope-b",
 };
 

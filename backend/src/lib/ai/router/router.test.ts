@@ -5,31 +5,31 @@ import { selectRoute } from './select-route';
 import { executeAsk, executeWebSearch } from './execute-route';
 import { NoEligibleRouteError, RouteValidationError } from './errors';
 
-const organizationKey = newId();
+const teamKey = newId();
 const unavailableAdapter: ProviderAdapter = { id: 'openrouter', name: 'OpenRouter', async execute() { throw new Error('not executed'); } };
 const adapters = { openrouter: unavailableAdapter };
 
 describe('action-definition router', () => {
   test('selects the only declared OpenRouter text route deterministically', async () => {
-    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'text' }, { adapters })).resolves.toMatchObject({
+    await expect(selectRoute({ mode: 'auto', teamKey, actionSlug: 'text' }, { adapters })).resolves.toMatchObject({
       modelSlug: 'google.gemini-3.1-flash-lite', providerSlug: 'openrouter', providerModelId: 'google/gemini-3.1-flash-lite',
     });
   });
 
   test('filters model and fixed modes to exact declared registry bindings', async () => {
-    await expect(selectRoute({ mode: 'model', organizationKey, actionSlug: 'text', modelSlug: 'google.gemini-3.1-flash-lite' }, { adapters })).resolves.toMatchObject({ providerSlug: 'openrouter' });
-    await expect(selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'text', modelSlug: 'google.gemini-3.1-flash-lite-image', providerSlug: 'openrouter' }, { adapters })).rejects.toBeInstanceOf(NoEligibleRouteError);
+    await expect(selectRoute({ mode: 'model', teamKey, actionSlug: 'text', modelSlug: 'google.gemini-3.1-flash-lite' }, { adapters })).resolves.toMatchObject({ providerSlug: 'openrouter' });
+    await expect(selectRoute({ mode: 'fixed', teamKey, actionSlug: 'text', modelSlug: 'google.gemini-3.1-flash-lite-image', providerSlug: 'openrouter' }, { adapters })).rejects.toBeInstanceOf(NoEligibleRouteError);
   });
 
   test('makes malformed or missing environment configuration unavailable', async () => {
-    const request = { mode: 'fixed' as const, organizationKey, actionSlug: 'text' as const, modelSlug: 'google.gemini-3.1-flash-lite' as const, providerSlug: 'openrouter' as const };
+    const request = { mode: 'fixed' as const, teamKey, actionSlug: 'text' as const, modelSlug: 'google.gemini-3.1-flash-lite' as const, providerSlug: 'openrouter' as const };
     await expect(selectRoute(request, { env: {} })).rejects.toBeInstanceOf(NoEligibleRouteError);
     await expect(selectRoute(request, { env: { OPENROUTER_API_KEY: '' } })).rejects.toBeInstanceOf(NoEligibleRouteError);
     await expect(selectRoute(request, { env: { OPENROUTER_API_KEY: 'key' } })).resolves.toMatchObject({ providerSlug: 'openrouter' });
   });
 
-  test('rejects retired organization provider selectors as unknown fields', async () => {
-    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'text', organizationProviderKey: 'retired' } as never, { adapters })).rejects.toBeInstanceOf(RouteValidationError);
+  test('rejects retired team provider selectors as unknown fields', async () => {
+    await expect(selectRoute({ mode: 'auto', teamKey, actionSlug: 'text', teamProviderKey: 'retired' } as never, { adapters })).rejects.toBeInstanceOf(RouteValidationError);
   });
 
   test('executes text and web through OpenRouter without forwarding mode', async () => {
@@ -37,9 +37,9 @@ describe('action-definition router', () => {
     const openrouter: ProviderAdapter = { id: 'openrouter', name: 'OpenRouter', async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) { calls.push({ model: request.modelId, input: request.input }); return { output: { text: 'ok', toolCalls: [], stopReason: 'stop' } as TOutput, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, providerId: 'openrouter', modelId: request.modelId, externalModelId: request.externalModelId }; } };
     const options = { adapters: { openrouter } };
     const input = { messages: [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'Hello' }] }] };
-    await executeAsk(organizationKey, input, options);
-    await executeAsk(organizationKey, { ...input, mode: 'deep' }, options);
-    await executeWebSearch(organizationKey, { prompt: 'Current facts' }, options);
+    await executeAsk(teamKey, input, options);
+    await executeAsk(teamKey, { ...input, mode: 'deep' }, options);
+    await executeWebSearch(teamKey, { prompt: 'Current facts' }, options);
     expect(calls.map(({ model }) => model)).toEqual([
       'google.gemini-3.1-flash-lite',
       'google.gemini-3.1-flash-lite',

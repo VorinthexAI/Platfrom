@@ -6,7 +6,7 @@ export const CHANNELS_COLLECTION = 'channels';
 
 export const channelSchema = z.object({
   key: communicationChannelKeySchema,
-  organizationKey: z.string().trim().min(1).max(160),
+  teamKey: z.string().trim().min(1).max(160),
   scopeKey: z.string().cuid(),
   kind: z.literal('group').default('group'),
   name: z.string().trim().min(1),

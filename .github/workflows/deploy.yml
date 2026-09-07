@@ -75,6 +75,7 @@ jobs:
 
           map_file() {
             case "$1" in
+              web/app/public/logos/*) web=true; backend=true ;;
               web/app/*) web=true ;;
               backend/*) backend=true ;;
               mobile/*) mobile=true ;;
@@ -475,6 +476,38 @@ jobs:
           cache-to: type=gha,mode=max,scope=backend,ignore-error=true
           provenance: false
 
+  backend-system-assets:
+    name: Upload backend system assets
+    runs-on: ubuntu-latest
+    needs: [changes, ci-verify]
+    if: needs.changes.outputs.backend == 'true' && (github.event.pull_request.merged == true || inputs.deploy)
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+      - name: Extract config
+        run: |
+          {
+            echo "AWS_DEPLOY_ROLE_ARN=$(jq -re '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)"
+            echo "S3_BUCKET=$(jq -re '.vars.PROD_S3_BUCKET_NAME' .github/environments.json)"
+          } >> "$GITHUB_ENV"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --linker=hoisted
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Upload canonical app logos
+        run: bun run --cwd backend assets:seed:ci
+
   # NOTE (seed/backfill): ArangoDB lives on its own PRIVATE EC2 and is reached
   # through an SSH tunnel. It could not be safely moved to `aws ecs run-task`
   # because the runtime image only ships backend/src (not backend/scripts), so seed:secrets is
@@ -636,6 +669,18 @@ jobs:
           ARANGO_URL: http://127.0.0.1:8529
           ARANGO_USERNAME: root
         run: bun run --cwd backend db:seed:ci
+      - name: Sync Polar product catalog
+        env:
+          ARANGO_URL: http://127.0.0.1:8529
+          ARANGO_USERNAME: root
+        run: |
+          creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
+          polar_env=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/POLAR_ENV")) | .v' | head -n1)
+          polar_token=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/POLAR_ACCESS_TOKEN")) | .v' | head -n1)
+          test "$polar_env" = "production" || { echo "::error::POLAR_ENV must be production for a production deployment."; exit 1; }
+          test -n "$polar_token" || { echo "::error::POLAR_ACCESS_TOKEN is required for a production deployment."; exit 1; }
+          echo "::add-mask::$polar_token"
+          POLAR_ENV="$polar_env" POLAR_ACCESS_TOKEN="$polar_token" bun run --cwd backend commerce:sync:ci
       - name: Backfill semantic embeddings
         env:
           ARANGO_URL: http://127.0.0.1:8529
@@ -657,12 +702,13 @@ jobs:
     # Images may be published first, but neither active runtime may roll until
     # this required migration succeeds. Keeping this independent of deployment
     # jobs also avoids a migration <-> activation dependency cycle.
-    needs: [changes, backend-image, backend-secrets]
+    needs: [changes, backend-image, backend-secrets, backend-system-assets]
     if: >-
       always()
       && needs.changes.outputs.backend == 'true'
       && needs.backend-image.result == 'success'
       && needs.backend-secrets.result == 'success'
+      && needs.backend-system-assets.result == 'success'
       && (github.event.pull_request.merged == true || inputs.deploy)
     defaults:
       run:
@@ -912,7 +958,7 @@ jobs:
           ARANGO_URL: http://127.0.0.1:8529
           ARANGO_USERNAME: root
           SEEDS_FILE: ${{ github.workspace }}/db-seeds.secrets.json
-          SYNC_SEEDED_ORGANIZATION_ROSTER: "true"
+          SYNC_SEEDED_TEAM_ROSTER: "true"
         run: |
           jq -c '.secrets.prod.db_seeds' .github/environments.json > "$SEEDS_FILE"
           python3 -m json.tool "$SEEDS_FILE" > /dev/null

@@ -16,9 +16,26 @@ describe('Gallery HTTP transport', () => {
   });
 
   test('strictly validates highlight list query selectors', () => {
-    const input = { organizationKey: 'organization', scopeKey: newId(), collectionKey: newId() };
+    const input = { teamKey: 'team', scopeKey: newId(), collectionKey: newId() };
     expect(galleryHighlightListQuerySchema.parse(input)).toEqual(input);
     expect(() => galleryHighlightListQuerySchema.parse({ ...input, unexpected: true })).toThrow();
+  });
+
+  test('injects exact team MFA assurance into canonical authorization', async () => {
+    const teamKey = newId(), scopeKey = newId(), userKey = newId();
+    const assurance = { teamMembershipKey: newId(), teamMfaVersion: 5 };
+    let options: unknown;
+    const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: assurance.teamMembershipKey, teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const app = new Hono().post('/', createGalleryOperationHandler('overview', 200, (value) => value, undefined, {
+      getIdentity: async () => ({ key: userKey, identityType: 'user', ...assurance }),
+      authorize: async (_input, received) => { options = received; return { context }; },
+      operations: { overview: async () => ({ collections: [] }) },
+    }));
+
+    const response = await app.request('/', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey }) });
+
+    expect(response.status).toBe(200);
+    expect(options).toEqual({ authenticatedUserKey: userKey, teamAssurance: assurance });
   });
 
   test('lists and creates highlights on the same resource with distinct verbs', () => {
@@ -34,7 +51,7 @@ describe('Gallery HTTP transport', () => {
   });
 
   test('exposes strict memory CRUD routes', () => {
-    const query = { organizationKey: 'organization', scopeKey: newId(), collectionKey: newId() };
+    const query = { teamKey: 'team', scopeKey: newId(), collectionKey: newId() };
     expect(galleryMemoryListQuerySchema.parse(query)).toEqual(query);
     expect(() => galleryMemoryListQuerySchema.parse({ ...query, unexpected: true })).toThrow();
     const app = new Hono();
@@ -51,8 +68,8 @@ describe('Gallery HTTP transport', () => {
   });
 
   test('coordinates fixed subject, highlight, and memory HTTP debits, refunds, and 402 responses', async () => {
-    const organizationKey = 'organization', scopeKey = newId(), userKey = newId();
-    const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const teamKey = 'team', scopeKey = newId(), userKey = newId();
+    const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const cases = [
       ['createSubject', 'subject.create', 15_000_000, { name: 'Alex', imageKeys: [newId()] }],
       ['createHighlight', 'highlight.create', 20_000_000, { collectionKey: newId() }],
@@ -61,7 +78,7 @@ describe('Gallery HTTP transport', () => {
     for (const [operation, slug, amount, input] of cases) {
       const charges: Record<string, unknown>[] = [], refunds: Record<string, unknown>[] = [];
       const dependencies = {
-        getIdentity: async () => ({ key: userKey, identityType: 'user' as const }), authorize: async () => ({ context }), recordEvent: async () => {},
+        getIdentity: async () => ({ key: userKey, identityType: 'user' as const }), authorize: async () => ({ context }), recordEvent: async () => {}, appScopeKey: newId(),
         operations: { [operation]: async () => ({ ok: true }) },
         billing: {
           charge: async (_key: string, charge: Record<string, unknown>) => { charges.push(charge); return { status: 'applied', transaction: { key: newId(), eventKey: charge.eventKey } } as never; },
@@ -69,17 +86,17 @@ describe('Gallery HTTP transport', () => {
         },
       };
       const app = new Hono().post('/', createGalleryOperationHandler(operation, 201, (value) => value, slug, dependencies));
-      const response = await app.request('/', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': `${slug}-request` }, body: JSON.stringify({ organizationKey, scopeKey, ...input }) });
+      const response = await app.request('/', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': `${slug}-request` }, body: JSON.stringify({ teamKey, scopeKey, ...input }) });
       expect(response.status).toBe(201);
       expect(charges[0]).toMatchObject({ kind: 'tool', toolSlug: slug, microSparks: amount });
       expect(refunds).toEqual([]);
 
       const failed = new Hono().post('/', createGalleryOperationHandler(operation, 201, (value) => value, slug, { ...dependencies, operations: { [operation]: async () => { throw new Error('operation failed'); } } }));
-      expect((await failed.request('/', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': `${slug}-failed` }, body: JSON.stringify({ organizationKey, scopeKey, ...input }) })).status).toBe(500);
+      expect((await failed.request('/', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': `${slug}-failed` }, body: JSON.stringify({ teamKey, scopeKey, ...input }) })).status).toBe(500);
       expect(refunds).toHaveLength(1);
 
       const insufficient = new Hono().post('/', createGalleryOperationHandler(operation, 201, (value) => value, slug, { ...dependencies, billing: { charge: async () => { throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'private'); } } }));
-      expect((await insufficient.request('/', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': `${slug}-insufficient` }, body: JSON.stringify({ organizationKey, scopeKey, ...input }) })).status).toBe(402);
+      expect((await insufficient.request('/', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': `${slug}-insufficient` }, body: JSON.stringify({ teamKey, scopeKey, ...input }) })).status).toBe(402);
     }
   });
 });

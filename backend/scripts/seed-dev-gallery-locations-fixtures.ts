@@ -79,7 +79,6 @@ export function buildGalleryLocationFixturePlan(scopeKey: string, runId: string,
     marker,
     collection: {
       key: collectionKey,
-      memberKey: galleryLocationFixtureKey(scopeKey, runId, 'collection-member', 'owner'),
       name: `Location QA [${runId}]`,
       description: `${marker}. Deterministic local-only Gallery UI data.`,
     },

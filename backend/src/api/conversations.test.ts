@@ -36,44 +36,44 @@ describe('conversation HTTP contract', () => {
   });
 
   test('enforces HTTP authentication, strict transport input, and canonical service parity', async () => {
-    const organizationKey = 'organization', scopeKey = newId(), userKey = newId();
-    const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const teamKey = 'team', scopeKey = newId(), userKey = newId();
+    const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const unauthorized = new Hono(); unauthorized.post('/conversations', createConversationHandlers({ getIdentity: async () => null }).create);
-    expect((await unauthorized.request('/conversations', { method: 'POST', body: JSON.stringify({ organizationKey, scopeKey }) })).status).toBe(401);
+    expect((await unauthorized.request('/conversations', { method: 'POST', body: JSON.stringify({ teamKey, scopeKey }) })).status).toBe(401);
 
     const calls: unknown[] = []; const published: unknown[] = [];
     const handlers = createConversationHandlers({
       getIdentity: async () => ({ identityType: 'user', key: userKey }) as never,
-      authorize: async () => ({ input: { organizationKey, scopeKey }, context }),
+      authorize: async () => ({ input: { teamKey, scopeKey }, context }),
       service: { create: async (input: unknown, selected: ToolContext) => { calls.push({ input, selected }); return { key: newId() }; }, list: async (input: unknown, selected: ToolContext) => { calls.push({ input, selected }); return { items: [], nextCursor: null }; } } as any,
       publishChanged: async (...args: unknown[]) => { published.push(args); },
     });
     const app = new Hono(); app.post('/conversations', handlers.create); app.post('/conversations/list', handlers.list);
-    const invalid = await app.request('/conversations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, unexpected: true }) });
+    const invalid = await app.request('/conversations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, unexpected: true }) });
     expect(invalid.status).toBe(400); expect(calls).toHaveLength(0);
-    const response = await app.request('/conversations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, name: 'Private' }) });
+    const response = await app.request('/conversations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, name: 'Private' }) });
     expect(response.status).toBe(200); expect(calls).toEqual([{ input: { name: 'Private' }, selected: context }]); expect(published).toEqual([[userKey, 'conversation.changed']]);
-    const list = await app.request('/conversations/list', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, favoriteOnly: true, limit: 10 }) });
+    const list = await app.request('/conversations/list', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, favoriteOnly: true, limit: 10 }) });
     expect(list.status).toBe(200); expect(calls.at(-1)).toEqual({ input: { favoriteOnly: true, limit: 10 }, selected: context });
   });
 
   test('deletes a message turn through the canonical service and publishes invalidation', async () => {
-    const organizationKey = 'organization', scopeKey = newId(), userKey = newId(), conversationKey = newId(), messageKey = newId(); const calls: unknown[] = []; const published: unknown[] = [];
-    const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const teamKey = 'team', scopeKey = newId(), userKey = newId(), conversationKey = newId(), messageKey = newId(); const calls: unknown[] = []; const published: unknown[] = [];
+    const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const handlers = createConversationHandlers({ getIdentity: async () => ({ identityType: 'user', key: userKey }) as never, authorize: async () => ({ context }), service: { deleteMessage: async (...args: unknown[]) => { calls.push(args); return { deletedKeys: [messageKey] }; } } as any, publishChanged: async (...args: unknown[]) => { published.push(args); } });
     const app = new Hono(); app.delete('/conversations/:conversationKey/messages/:messageKey', handlers.deleteMessage);
-    const response = await app.request(`/conversations/${conversationKey}/messages/${messageKey}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey }) });
+    const response = await app.request(`/conversations/${conversationKey}/messages/${messageKey}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey }) });
     expect(response.status).toBe(200); expect(await response.json()).toEqual({ success: true, data: { deletedKeys: [messageKey] } });
     expect(calls).toEqual([[{ conversationKey, messageKey }, context]]); expect(published).toEqual([[userKey, 'conversation.changed']]);
-    expect((await app.request(`/conversations/${conversationKey}/messages/${messageKey}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, userKey }) })).status).toBe(400);
+    expect((await app.request(`/conversations/${conversationKey}/messages/${messageKey}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, userKey }) })).status).toBe(400);
   });
 
   test('strictly enqueues an image turn through the canonical service and returns accepted', async () => {
-    const organizationKey = 'organization', scopeKey = newId(), userKey = newId(), conversationKey = newId(); const calls: unknown[] = []; const published: unknown[] = [];
-    const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const teamKey = 'team', scopeKey = newId(), userKey = newId(), conversationKey = newId(); const calls: unknown[] = []; const published: unknown[] = [];
+    const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const handlers = createConversationHandlers({ getIdentity: async () => ({ identityType: 'user', key: userKey }) as never, authorize: async () => ({ context }), service: { enqueueImageTurn: async (...args: unknown[]) => { calls.push(args); return { queued: true }; } } as any, publishChanged: async (...args: unknown[]) => { published.push(args); } });
     const app = new Hono(); app.post('/conversations/:conversationKey/image-turns', handlers.imageTurn);
-    const body = { organizationKey, scopeKey, prompt: 'A moonlit harbor', requestKey: 'image-request' };
+    const body = { teamKey, scopeKey, prompt: 'A moonlit harbor', requestKey: 'image-request' };
     const response = await app.request(`/conversations/${conversationKey}/image-turns`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     expect(response.status).toBe(202);
     expect(calls).toEqual([[{ conversationKey, prompt: body.prompt, requestKey: body.requestKey, referenceImageKeys: [], size: '1024x1024', quality: 'medium', mode: 'default' }, context]]);
@@ -82,24 +82,24 @@ describe('conversation HTTP contract', () => {
   });
 
   test('does not emit a second terminal SSE event when change publication fails after done', async () => {
-    const organizationKey = 'organization', scopeKey = newId(), userKey = newId(), conversationKey = newId(), correlationKey = newId();
-    const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const teamKey = 'team', scopeKey = newId(), userKey = newId(), conversationKey = newId(), correlationKey = newId();
+    const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const handlers = createConversationHandlers({
       getIdentity: async () => ({ identityType: 'user', key: userKey }) as never,
-      authorize: async () => ({ input: { organizationKey, scopeKey }, context }),
+      authorize: async () => ({ input: { teamKey, scopeKey }, context }),
       createTurnService: () => ({ turn: async (_input: unknown, _context: ToolContext, onEvent: (event: unknown) => Promise<void>) => onEvent({ type: 'done', correlationKey, conversationKey, message: { key: newId(), conversationKey, turnKey: 'request', role: 'ASSISTANT', status: 'COMPLETED', content: 'answer', retrievals: [], createdAt: '2026-09-01T00:00:00.000Z', completedAt: '2026-09-01T00:00:01.000Z' }, replayed: false }) }) as never,
       publishChanged: async () => { throw new Error('unavailable'); },
     });
     const app = new Hono(); app.post('/conversations/:conversationKey/turn/stream', handlers.turn);
-    const response = await app.request(`/conversations/${conversationKey}/turn/stream`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, message: 'Find it', requestKey: 'request' }) });
+    const response = await app.request(`/conversations/${conversationKey}/turn/stream`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, message: 'Find it', requestKey: 'request' }) });
     const stream = await response.text();
     expect(stream).toContain('event: done');
     expect(stream).not.toContain('event: error');
   });
 
   test('preserves insufficient balance in JSON and turn SSE boundaries', async () => {
-    const organizationKey = 'organization', scopeKey = newId(), userKey = newId(), conversationKey = newId();
-    const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: newId(), organizationId: organizationKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const teamKey = 'team', scopeKey = newId(), userKey = newId(), conversationKey = newId();
+    const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const insufficient = () => { throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'private'); };
     const handlers = createConversationHandlers({
       getIdentity: async () => ({ identityType: 'user', key: userKey }) as never,
@@ -110,10 +110,10 @@ describe('conversation HTTP contract', () => {
     const app = new Hono();
     app.post('/conversations/list', handlers.list);
     app.post('/conversations/:conversationKey/turn/stream', handlers.turn);
-    const json = await app.request('/conversations/list', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey }) });
+    const json = await app.request('/conversations/list', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey }) });
     expect(json.status).toBe(402);
     expect(await json.json()).toEqual({ success: false, error: { code: 'INSUFFICIENT_BALANCE', message: 'billing.insufficientBalance', details: null } });
-    const stream = await app.request(`/conversations/${conversationKey}/turn/stream`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, scopeKey, message: 'hello', requestKey: 'request' }) });
+    const stream = await app.request(`/conversations/${conversationKey}/turn/stream`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, message: 'hello', requestKey: 'request' }) });
     expect(await stream.text()).toContain(JSON.stringify({ type: 'error', correlationKey: 'request', code: 'INSUFFICIENT_BALANCE', message: 'billing.insufficientBalance' }));
   });
 });

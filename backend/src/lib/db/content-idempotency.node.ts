@@ -9,7 +9,7 @@ const DEFAULT_LEASE_MS = 5 * 60_000;
 const DEFAULT_COMPLETED_TTL_MS = 24 * 60 * 60_000;
 
 export interface ContentIdempotencyIdentity {
-  organizationKey: string;
+  teamKey: string;
   actorKey: string;
   tool: string;
   idempotencyKey: string;
@@ -32,7 +32,7 @@ export type ContentIdempotencyClaim =
 
 function ledgerKey(identity: ContentIdempotencyIdentity): string {
   return `c${createHash('sha256')
-    .update(identity.organizationKey).update('\0')
+    .update(identity.teamKey).update('\0')
     .update(identity.actorKey).update('\0')
     .update(identity.tool).update('\0')
     .update(identity.idempotencyKey)

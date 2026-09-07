@@ -1,6 +1,6 @@
 import { beforeEach, expect, mock, test } from "bun:test";
 
-const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+const calls: { url: string; body: Record<string, unknown> }[] = [];
 const runtime = globalThis as typeof globalThis & { __tagPost?: (url: string, body: Record<string, unknown>) => Promise<unknown>; __tagUUID?: string };
 
 mock.module("@/lib/api-client", () => ({ apiClient: { post: (url: string, body: Record<string, unknown>) => runtime.__tagPost?.(url, body) } }));
@@ -9,7 +9,7 @@ mock.module("expo-crypto", () => ({ randomUUID: () => runtime.__tagUUID ?? "1234
 const scopeKey = "cmrnlzf640001qc7kazsr96k5";
 const firstTagKey = "cmrnlzf650002qc7k4p5zem0w";
 const secondTagKey = "cmrnlzf650002qc7k4p5zem1x";
-const context = { userKey: "user", organizationKey: "organization", scopeKey };
+const context = { userKey: "user", teamKey: "team", scopeKey };
 
 beforeEach(() => { calls.length = 0; runtime.__tagUUID = "12345678-1234-4123-8123-123456789abc"; });
 
@@ -22,7 +22,7 @@ test("creates a final resource tag key and sends the strict create payload", asy
   const key = createResourceTagKey();
   expect(key).toBe("c12345678123441238123123456789abc");
   await expect(createScopeTag(context, { key, name: "Work" })).resolves.toMatchObject({ key, name: "Work" });
-  expect(calls).toEqual([{ url: "/tags", body: { organizationKey: "organization", scopeKey, key, name: "Work" } }]);
+  expect(calls).toEqual([{ url: "/tags", body: { teamKey: "team", scopeKey, key, name: "Work" } }]);
 });
 
 test("rejects malformed create envelopes", async () => {
@@ -53,10 +53,10 @@ test("loads every private scope tag page with strict context", async () => {
   const { listScopeTags, tagFilterContextKey } = await import("./tag-client");
   await expect(listScopeTags(context)).resolves.toMatchObject([{ key: firstTagKey, name: "Work" }, { key: secondTagKey, name: "Priority" }]);
   expect(calls).toEqual([
-    { url: "/tags/list", body: { organizationKey: "organization", scopeKey, limit: 100 } },
-    { url: "/tags/list", body: { organizationKey: "organization", scopeKey, limit: 100, cursor: "next" } },
+    { url: "/tags/list", body: { teamKey: "team", scopeKey, limit: 100 } },
+    { url: "/tags/list", body: { teamKey: "team", scopeKey, limit: 100, cursor: "next" } },
   ]);
-  expect(tagFilterContextKey(context)).toBe(`user:organization:${scopeKey}`);
+  expect(tagFilterContextKey(context)).toBe(`user:team:${scopeKey}`);
 });
 
 test("keeps selected filters in session memory and isolates contexts", async () => {
@@ -113,7 +113,7 @@ test("loads assignment slices for every tag page and combines complete target st
     tags: [{ key: "clzzzzzzzzzzzzzzzzzzzzzt1" }, { key: "clzzzzzzzzzzzzzzzzzzzzzt2" }],
     tagKeysByTarget: { "document:clzzzzzzzzzzzzzzzzzzzzzd1": ["clzzzzzzzzzzzzzzzzzzzzzt1", "clzzzzzzzzzzzzzzzzzzzzzt2"] },
   });
-  expect(calls[0]?.body).toMatchObject({ organizationKey: "organization", scopeKey, targets: [{ type: "document", key: "clzzzzzzzzzzzzzzzzzzzzzd1" }] });
+  expect(calls[0]?.body).toMatchObject({ teamKey: "team", scopeKey, targets: [{ type: "document", key: "clzzzzzzzzzzzzzzzzzzzzzd1" }] });
 });
 
 test("rejects assignment responses that omit the requested target overlay", async () => {
@@ -138,9 +138,9 @@ test("uses a stable exact batch key and persists canonical assignment payloads",
   const first = { type: "document" as const, key: "clzzzzzzzzzzzzzzzzzzzzzd1" };
   const second = { type: "image" as const, key: "clzzzzzzzzzzzzzzzzzzzzzi1" };
   expect(resourceTagAssignmentsQueryKey(context, [second, first, second])).toEqual(resourceTagAssignmentsQueryKey(context, [first, second]));
-  expect(resourceTagAssignmentsQueryKey(context, [first])).toEqual(["resource-tag-assignments", "user", "organization", scopeKey, [`document:${first.key}`]]);
+  expect(resourceTagAssignmentsQueryKey(context, [first])).toEqual(["resource-tag-assignments", "user", "team", scopeKey, [`document:${first.key}`]]);
   await persistResourceTagAssignments(context, [{ action: "tag", targets: [first], tagKeys: ["clzzzzzzzzzzzzzzzzzzzzzt1"] }]);
-  expect(calls).toEqual([{ url: "/tags/assignments?action=tag", body: { organizationKey: "organization", scopeKey, targets: [first], tagKeys: ["clzzzzzzzzzzzzzzzzzzzzzt1"] } }]);
+  expect(calls).toEqual([{ url: "/tags/assignments?action=tag", body: { teamKey: "team", scopeKey, targets: [first], tagKeys: ["clzzzzzzzzzzzzzzzzzzzzzt1"] } }]);
 });
 
 test("waits for every assignment chunk before reporting a partial failure", async () => {

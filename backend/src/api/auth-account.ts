@@ -10,13 +10,23 @@ import { camelSessionTokenPayload, clearSessionCookies, getSelectedRefreshToken,
 import { parseJson, strictObject } from './validation';
 import { z } from 'zod';
 import { signProfileAvatarUrl, trySignProfileAvatarUrl } from '@/lib/account-profile/avatar-url';
+import { accountDeleteInputSchema, accountDeletionService, type AccountDeletionService } from '@/lib/account-deletion/service';
+import { hasActiveEnvironmentSeededMembership } from '@/lib/db/user-team.node';
 
 export async function buildAuthAccountResponse(
   user: NonNullable<Awaited<ReturnType<typeof getUserById>>>,
   context: NonNullable<Awaited<ReturnType<typeof getPersonalAuthContext>>>,
   signAvatar: typeof signProfileAvatarUrl = signProfileAvatarUrl,
+  teamSelectionEnabled = false,
 ) {
   const avatarUrl = user.profileStorageKey ? await trySignProfileAvatarUrl(user.profileStorageKey, signAvatar) : null;
+  const selectedScope = {
+    key: context.scope.key,
+    name: context.scope.name,
+    slug: context.scope.slug,
+    role: context.scopeMembership.role,
+    membership_key: context.scopeMembership.key,
+  };
   return {
     user: {
       key: user.key,
@@ -28,20 +38,18 @@ export async function buildAuthAccountResponse(
       country_code: user.countryCode,
       is_onboarded: user.isOnboarded,
     },
-    organization: {
-      key: context.organization.key,
-      name: context.organization.name,
-      slug: context.organization.slug,
-      role: context.membership.orgRole,
-      membership_key: context.membership.key,
+    team: {
+      key: context.team.key,
+      name: context.team.name,
+      slug: context.team.slug,
     },
-    main_scope: {
-      key: context.scope.key,
-      name: context.scope.name,
-      slug: context.scope.slug,
-      role: context.scopeMembership.role,
-      membership_key: context.scopeMembership.key,
+    teamMembership: {
+      key: context.membership.key,
+      role: context.membership.teamRole,
+      title: context.membership.teamTitle,
     },
+    scope: selectedScope,
+    teamSelectionEnabled,
   };
 }
 
@@ -87,7 +95,7 @@ export async function patchAuthAccount(c: Context) {
     isOnboarded: body.isOnboarded,
     updatedAt: new Date().toISOString(),
   });
-  return c.json(await buildAuthAccountResponse(user, context));
+  return c.json(await buildAuthAccountResponse(user, context, signProfileAvatarUrl, await hasActiveEnvironmentSeededMembership(user.key)));
 }
 
 export const patchAuthAccountSchema = strictObject({ isOnboarded: z.literal(true) });
@@ -98,7 +106,7 @@ export async function getAuthAccount(c: Context) {
   const user = await getUserById(identity.key);
   if (!user?.isVerified) return c.json({ error: 'verified authentication required' }, 403);
   const context = await getPersonalAuthContext(user.key) ?? await provisionPersonalAuthContext(user);
-  return c.json(await buildAuthAccountResponse(user, context));
+  return c.json(await buildAuthAccountResponse(user, context, signProfileAvatarUrl, await hasActiveEnvironmentSeededMembership(user.key)));
 }
 
 export async function logoutAuthAccount(c: Context) {
@@ -109,3 +117,16 @@ export async function logoutAuthAccount(c: Context) {
   clearSessionCookies(c);
   return c.json({ ok: true });
 }
+
+export function createDeleteAuthAccountHandler(dependencies: { service?: AccountDeletionService; getIdentity?: typeof getAuthIdentity } = {}) {
+  return async function deleteAuthAccount(c: Context) {
+    const identity = await (dependencies.getIdentity ?? getAuthIdentity)(c);
+    if (!identity || identity.identityType !== 'user') return c.json({ error: 'user authentication required' }, 401);
+    const body = await parseJson(c, accountDeleteInputSchema);
+    const result = await (dependencies.service ?? accountDeletionService).delete(body, identity.key);
+    clearSessionCookies(c);
+    return c.json(result);
+  };
+}
+
+export const deleteAuthAccount = createDeleteAuthAccountHandler();

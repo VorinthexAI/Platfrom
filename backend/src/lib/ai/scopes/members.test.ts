@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
-import { createScopeMemberRepository, DuplicateScopeMemberError, ScopeMemberOrganizationMismatchError } from './members';
+import { createScopeMemberRepository, DuplicateScopeMemberError, ScopeMemberTeamMismatchError } from './members';
 import { SCOPE_MEMBERS_COLLECTION, SCOPES_COLLECTION, SCOPE_MEMBER_ROLES, scopeMemberSchema } from './schema';
 import type { ScopesDatabase } from './types';
 
@@ -19,11 +19,11 @@ function createFakeDb() {
     async query(query, bindVars = {}) {
       const members = [...store(SCOPE_MEMBERS_COLLECTION).values()].filter(
         (member) => member.scopeKey === bindVars.scopeKey
-          && (!bindVars.userOrganizationKey || member.userOrganizationKey === bindVars.userOrganizationKey),
+          && (!bindVars.userTeamKey || member.userTeamKey === bindVars.userTeamKey),
       );
       if (query.includes('RETURN { member, user }')) {
         const rows = members.flatMap((member) => {
-          const membership = store('userOrganizations').get(String(member.userOrganizationKey));
+          const membership = store('userTeams').get(String(member.userTeamKey));
           const user = membership ? store('users').get(String(membership.userId)) : undefined;
           return user ? [{ member, user }] : [];
         });
@@ -37,7 +37,7 @@ function createFakeDb() {
         async save(doc) {
           const duplicate = name === SCOPE_MEMBERS_COLLECTION && [...docs.values()].some(
             (existing) => existing.scopeKey === doc.scopeKey
-              && existing.userOrganizationKey === doc.userOrganizationKey,
+              && existing.userTeamKey === doc.userTeamKey,
           );
           if (duplicate) throw Object.assign(new Error('unique constraint violated'), { errorNum: 1210 });
           docs.set(String(doc._key), doc);
@@ -66,13 +66,13 @@ function createFakeDb() {
   return { fake, stores };
 }
 
-function userOrganizationDoc(key: string, organizationId: string, userId: string) {
+function userTeamDoc(key: string, teamKey: string, userId: string) {
   return {
     _key: key,
-    organizationId,
+    teamKey,
     userId,
-    orgRole: 'member',
-    orgTitle: null,
+    teamRole: 'member',
+    teamTitle: null,
     status: 'active',
     joinedAt: '2026-07-16T00:00:00.000Z',
     isMfaEnabled: false,
@@ -84,10 +84,10 @@ function userOrganizationDoc(key: string, organizationId: string, userId: string
   };
 }
 
-function userDoc(key: string, organizationId: string) {
+function userDoc(key: string, teamKey: string) {
   return {
     _key: key,
-    organizationId,
+    teamKey,
     currentScopeKey: newId(),
     email: 'oscar@example.com',
     emailHash: 'hash',
@@ -101,6 +101,7 @@ function userDoc(key: string, organizationId: string) {
     is_subscribed_to_updates_unsubscribe_requested_at: null,
     refreshTokenHash: null,
     lastLoginAt: null,
+    lastSeenAt: null,
     createdAt: '2026-07-16T00:00:00.000Z',
     updatedAt: '2026-07-16T00:00:00.000Z',
     embedding: [],
@@ -112,14 +113,14 @@ describe('scope member schema', () => {
     const member = scopeMemberSchema.parse({
       key: newId(),
       scopeKey: newId(),
-      userOrganizationKey: newId(),
+      userTeamKey: newId(),
       role: 'moderator',
       position: 1,
     });
     expect(member).toEqual({
       key: member.key,
       scopeKey: member.scopeKey,
-      userOrganizationKey: member.userOrganizationKey,
+      userTeamKey: member.userTeamKey,
       role: 'moderator',
       status: 'active',
       source: 'explicit',
@@ -130,16 +131,16 @@ describe('scope member schema', () => {
 });
 
 describe('scope member repository', () => {
-  test('enforces organization ownership and unique membership', async () => {
+  test('enforces team ownership and unique membership', async () => {
     const { fake, stores } = createFakeDb();
     const repository = createScopeMemberRepository(fake);
-    const organizationKey = newId();
+    const teamKey = newId();
     const scopeKey = newId();
-    const membershipKey = newId();
+    const teamMembershipKey = newId();
     const userKey = newId();
     stores.set(SCOPES_COLLECTION, new Map([[scopeKey, {
       _key: scopeKey,
-      organizationKey,
+      teamKey,
       slug: 'command',
       name: 'Command',
       summary: 'Command scope.',
@@ -147,20 +148,20 @@ describe('scope member repository', () => {
       position: 2,
       embedding: [],
     }]]));
-    stores.set('userOrganizations', new Map([[membershipKey, userOrganizationDoc(membershipKey, organizationKey, userKey)]]));
-    stores.set('users', new Map([[userKey, userDoc(userKey, organizationKey)]]));
+    stores.set('userTeams', new Map([[teamMembershipKey, userTeamDoc(teamMembershipKey, teamKey, userKey)]]));
+    stores.set('users', new Map([[userKey, userDoc(userKey, teamKey)]]));
 
-    const member = await repository.addMember(scopeKey, membershipKey, 'owner');
+    const member = await repository.addMember(scopeKey, teamMembershipKey, 'owner');
     expect(member.role).toBe('owner');
-    await expect(repository.addMember(scopeKey, membershipKey, 'viewer')).rejects.toBeInstanceOf(DuplicateScopeMemberError);
+    await expect(repository.addMember(scopeKey, teamMembershipKey, 'viewer')).rejects.toBeInstanceOf(DuplicateScopeMemberError);
 
-    const foreignMembershipKey = newId();
-    stores.get('userOrganizations')!.set(
-      foreignMembershipKey,
-      userOrganizationDoc(foreignMembershipKey, newId(), userKey),
+    const foreignTeamMembershipKey = newId();
+    stores.get('userTeams')!.set(
+      foreignTeamMembershipKey,
+      userTeamDoc(foreignTeamMembershipKey, newId(), userKey),
     );
-    await expect(repository.addMember(scopeKey, foreignMembershipKey, 'viewer')).rejects.toBeInstanceOf(
-      ScopeMemberOrganizationMismatchError,
+    await expect(repository.addMember(scopeKey, foreignTeamMembershipKey, 'viewer')).rejects.toBeInstanceOf(
+      ScopeMemberTeamMismatchError,
     );
 
     expect(await repository.listMemberViews(scopeKey)).toEqual([{
@@ -173,7 +174,7 @@ describe('scope member repository', () => {
       },
     }]);
 
-    await repository.removeMember(scopeKey, membershipKey);
+    await repository.removeMember(scopeKey, teamMembershipKey);
     expect(await repository.listMembers(scopeKey)).toEqual([]);
   });
 });

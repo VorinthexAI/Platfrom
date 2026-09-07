@@ -9,14 +9,14 @@ test('country seeds embed only missing or stale semantic content', async () => {
 
 test('runtime seeds avoid re-embedding unchanged semantic records', async () => {
   const source = await Bun.file(new URL('./seed.ts', import.meta.url)).text();
-  expect(source.indexOf('isDeepStrictEqual(existing.metadata, seed.metadata)')).toBeLessThan(source.indexOf("updateSemanticSeed('organizations', existing.key"));
+  expect(source.indexOf('isDeepStrictEqual(existing.metadata, seed.metadata)')).toBeLessThan(source.indexOf("updateSemanticSeed('teams', existing.key"));
   expect(source.indexOf('isDeepStrictEqual(existing.skill, seed.skill)')).toBeLessThan(source.indexOf("updateSemanticSeed('orchestrators', existing.key"));
 });
 
 test('runtime seeds defer only retryable refreshes of existing semantic records', async () => {
   const source = await Bun.file(new URL('./seed.ts', import.meta.url)).text();
   expect(source).toContain('if (!isProviderError(error) || !error.retryable) throw error;');
-  expect(source).toContain("updateSemanticSeed('organizations', existing.key");
+  expect(source).toContain("updateSemanticSeed('teams', existing.key");
   expect(source).toContain("updateSemanticSeed('orchestrators', existing.key");
   expect(source).toContain('semantic seed refresh for ${country.countryCode} deferred');
 });
@@ -31,13 +31,18 @@ test('seed command defers only normalized retryable provider outages', async () 
 import { scopeSchema, scopeScopeSchema } from '@/lib/ai/scopes';
 import { newId } from '@/lib/ids';
 import { join } from 'node:path';
-import { NEXUS_SCOPE_KEY, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_SCOPES } from './seed';
+import { MOTHER_SCOPE_KEY, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_TEAM, SEEDED_SCOPES } from './seed';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
+import { CANONICAL_APP_BY_SLUG } from '@/lib/apps/registry';
 
 describe('scope seeds', () => {
-  test('place products and their Core capability and Command orchestrator children in the Nexus hierarchy', () => {
-    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === null).map(({ slug }) => slug)).toEqual(['nexus']);
-    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === NEXUS_SCOPE_KEY).sort((left, right) => left.position - right.position).map(({ slug }) => slug)).toEqual([
+  test('defines the seeded root team with MFA enforcement', () => {
+    expect(SEEDED_TEAM).toMatchObject({ name: 'Founders', slug: 'founders', is_root: true, mfa_enabled: true });
+  });
+
+  test('places products and their Core capability and Command orchestrator children in the Vorinthex AI hierarchy', () => {
+    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === null).map(({ slug }) => slug)).toEqual(['vorinthex-ai']);
+    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === MOTHER_SCOPE_KEY).sort((left, right) => left.position - right.position).map(({ slug }) => slug)).toEqual([
       'core',
       'command',
       'hq',
@@ -46,38 +51,49 @@ describe('scope seeds', () => {
       'launch',
       'replica',
     ]);
-    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.key).toBe(NEXUS_SCOPE_KEY);
+    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'vorinthex-ai')?.key).toBe(MOTHER_SCOPE_KEY);
     expect(new Set(SEEDED_SCOPES.map(({ key }) => key)).size).toBe(SEEDED_SCOPES.length);
     const seededKeys = new Set(SEEDED_SCOPES.map(({ key }) => key));
     for (const scope of SEEDED_SCOPES) {
-      scopeSchema.parse({ ...scope, organizationKey: newId() });
+      scopeSchema.parse({ ...scope, teamKey: newId() });
       if (scope.parentKey) {
         expect(seededKeys.has(scope.parentKey)).toBe(true);
         scopeScopeSchema.parse({ key: newId(), parentKey: scope.parentKey, childKey: scope.key, level: scope.level });
       }
     }
-    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.position).toBe(1);
-    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.level).toBe(1);
-    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.summary).toBe('Vorinthex is an AI native platform that unifies intelligence, knowledge and execution into a single system that helps people and organizations think, build and achieve more with artificial intelligence.');
-    expect(Object.fromEntries(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === NEXUS_SCOPE_KEY).map(({ slug, position }) => [slug, position]))).toEqual({ core: 1, command: 2, hq: 3, pilot: 4, studio: 5, launch: 6, replica: 7 });
-    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === NEXUS_SCOPE_KEY).every(({ level }) => level === 2)).toBe(true);
+    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'vorinthex-ai')?.position).toBe(1);
+    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'vorinthex-ai')?.level).toBe(1);
+    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'vorinthex-ai')?.summary).toBe(CANONICAL_APP_BY_SLUG.get('vorinthex-ai')!.description);
+    expect(Object.fromEntries(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === MOTHER_SCOPE_KEY).map(({ slug, position }) => [slug, position]))).toEqual({ core: 1, command: 2, hq: 3, pilot: 4, studio: 5, launch: 6, replica: 7 });
+    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === MOTHER_SCOPE_KEY).every(({ level }) => level === 2)).toBe(true);
     const core = SEEDED_SCOPES.find(({ slug }) => slug === 'core')!;
     const command = SEEDED_SCOPES.find(({ slug }) => slug === 'command')!;
     expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === core.key).sort((left, right) => left.position - right.position).map(({ slug }) => slug)).toEqual(['archive', 'gallery', 'signal', 'compass', 'ascend', 'chorus', 'cadence', 'prism']);
-    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'compass')).toMatchObject({ summary: expect.stringContaining('viewing available cities'), description: expect.stringContaining('available destination cities') });
+    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'compass')).toMatchObject({ summary: CANONICAL_APP_BY_SLUG.get('compass')!.description, description: CANONICAL_APP_BY_SLUG.get('compass')!.detailedDescription });
     expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === command.key).sort((left, right) => left.position - right.position).map(({ slug }) => slug)).toEqual(['atlas', 'hermes', 'metis', 'phoenix', 'apollo', 'iris', 'echo', 'matrix', 'harmony', 'ledger', 'orbit', 'mercury', 'sentinel', 'athena', 'forge', 'aura', 'pillar', 'helios', 'vulcan', 'themis']);
     expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === core.key || parentKey === command.key).every(({ level }) => level === 3)).toBe(true);
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'hq')).toMatchObject({ name: 'HQ', key: 'cmrnlzf640005qc7kefvra0bn' });
-    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'archive')).toMatchObject({ summary: 'Capture notes, ideas, research, labels, folders, semantic search, and knowledge graph connections.', description: 'Archive lets you capture, organize, semantically search, and connect your notes through folders, labels, backlinks, and graph traversal.' });
+    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'archive')).toMatchObject({ summary: CANONICAL_APP_BY_SLUG.get('archive')!.description, description: CANONICAL_APP_BY_SLUG.get('archive')!.detailedDescription });
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'atlas')).toMatchObject({ summary: 'Vision, leadership, direction, executive strategy, and company wide decisions.', description: 'Vision, leadership, direction, executive strategy, and company wide decisions.' });
   });
 
   test('reconciles memberships only after scopes and hierarchy relations exist', async () => {
     const source = await Bun.file(join(import.meta.dir, 'seed.ts')).text();
     const relationCreation = source.indexOf('scopes.addScopeRelation(parent.key, child.key)');
-    const membershipReconciliation = source.indexOf('reconcileOrganizationScopeMemberships(rootOrganization.key)');
+    const membershipReconciliation = source.indexOf('reconcileTeamScopeMemberships(rootTeam.key)');
     expect(relationCreation).toBeGreaterThan(-1);
     expect(membershipReconciliation).toBeGreaterThan(relationCreation);
+  });
+
+  test('reconciles the managed directory after live product scopes resolve and before memberships', async () => {
+    const source = await Bun.file(join(import.meta.dir, 'seed.ts')).text();
+    const scopeResolution = source.indexOf('const productScopeKeys = Object.fromEntries');
+    const directory = source.indexOf('await reconcileManagedScopeDirectory');
+    const memberships = source.indexOf('reconcileTeamScopeMemberships(rootTeam.key)');
+    expect(scopeResolution).toBeGreaterThan(source.indexOf('scopes.addScopeRelation(parent.key, child.key)'));
+    expect(directory).toBeGreaterThan(scopeResolution);
+    expect(memberships).toBeGreaterThan(directory);
+    expect(source).toContain('return [product.slug, scope.key]');
   });
 });
 

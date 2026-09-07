@@ -63,55 +63,45 @@ export async function hasScopeEventAccess(userKey: string, scopeKey: string) {
     RETURN LENGTH(
       FOR scope IN scopes
         FILTER scope._key == ${scopeKey}
-        FOR membership IN userOrganizations
+        FOR membership IN userTeams
           FILTER membership.userId == ${userKey} AND membership.status == "active"
-            AND membership.organizationId == scope.organizationKey
+            AND membership.teamKey == scope.teamKey
           LET scopeRole = FIRST(
             FOR member IN scopeMembers
               FILTER member.scopeKey == scope._key
-                AND member.userOrganizationKey == membership._key
+                AND member.userTeamKey == membership._key
                 AND member.status == "active"
               LIMIT 1
               RETURN member.role
           )
-          FILTER membership.orgRole IN ["owner", "admin"] OR scopeRole != null
+          FILTER membership.teamRole IN ["owner", "admin"] OR scopeRole != null
           RETURN 1
     ) > 0
   `);
   return Boolean(await cursor.next());
 }
 
-export async function hasCollectionEventAccess(userKey: string, collectionKey: string, event: AppEventSlug) {
-  const ownerOnly = event === 'collection.invites.changed' || event === 'collection.shares.changed';
+export async function hasCollectionEventAccess(userKey: string, collectionKey: string, _event: AppEventSlug) {
   const cursor = await db.query(aql`
     RETURN LENGTH(
       FOR collection IN collections
         FILTER collection._key == ${collectionKey}
         LET scope = DOCUMENT(scopes, collection.scopeKey)
         FILTER scope != null AND collection.scopeKey == scope._key
-      FOR membership IN userOrganizations
+      FOR membership IN userTeams
         FILTER membership.userId == ${userKey} AND membership.status == "active"
-          AND membership.organizationId == scope.organizationKey
+          AND membership.teamKey == scope.teamKey
         LET scopeRole = FIRST(
           FOR member IN scopeMembers
             FILTER member.scopeKey == collection.scopeKey
-              AND member.userOrganizationKey == membership._key
+              AND member.userTeamKey == membership._key
               AND member.status == "active"
             LIMIT 1
             RETURN member.role
         )
-        LET collectionMembership = FIRST(
-          FOR member IN collectionMembers
-            FILTER member.memberKey == membership._key
-              AND member.collectionKey == ${collectionKey}
-              AND member.scopeKey == collection.scopeKey
-            LIMIT 1
-            RETURN member
-        )
-        LET manager = membership.orgRole IN ["owner", "admin"]
+        LET manager = membership.teamRole IN ["owner", "admin"]
           OR scopeRole IN ["owner", "admin", "moderator"]
-          OR collectionMembership.role == "owner"
-        FILTER ${ownerOnly} ? manager : (manager OR collectionMembership != null)
+        FILTER manager OR collection.ownerKey == membership._key
         RETURN 1
     ) > 0
   `);

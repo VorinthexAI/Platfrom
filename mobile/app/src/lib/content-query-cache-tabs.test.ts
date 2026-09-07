@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { populatedContentTab, type ContentLocation, type FolderContentTab } from "./content-query-cache";
 
-const location = (folders: number, documents: Array<{ extension?: string }>): ContentLocation => ({
+const location = (folders: number, documents: { extension?: string }[]): ContentLocation => ({
   folders: Array.from({ length: folders }, (_, index) => ({ key: `folder-${index}`, name: `Folder ${index}` })) as ContentLocation["folders"],
   documents: documents.map((document, index) => ({ key: `document-${index}`, name: `Document ${index}`, isFavorite: false, updatedAt: "2026-08-31T00:00:00.000Z", ...document })) as ContentLocation["documents"],
 });

@@ -10,7 +10,7 @@ export interface NodeRetrievalMetadata {
   collectionName: string;
   fields: readonly string[];
   schemaFields: readonly string[];
-  access: 'channel' | 'scope' | 'organization' | 'user' | 'organization-self' | 'channel-self' | 'global' | 'none';
+  access: 'channel' | 'scope' | 'team' | 'user' | 'team-self' | 'channel-self' | 'global' | 'none';
 }
 
 const nodeRetrievalMetadata = new Map<string, NodeRetrievalMetadata>();
@@ -27,8 +27,8 @@ function buildNodeRetrievalMetadata(collectionName: string, schema: z.ZodTypeAny
   const access: NodeRetrievalMetadata['access'] = schemaFields.includes('channelKey') ? 'channel'
     : collectionName === 'channels' ? 'channel-self'
     : schemaFields.includes('scopeKey') ? 'scope'
-    : collectionName === 'organizations' ? 'organization-self'
-    : schemaFields.includes('organizationKey') || schemaFields.includes('organizationId') ? 'organization'
+    : collectionName === 'teams' ? 'team-self'
+    : schemaFields.includes('teamKey') ? 'team'
     : schemaFields.includes('userKey') || schemaFields.includes('userId') ? 'user'
     : globallyRetrievableCollections.has(collectionName) ? 'global'
     : 'none';

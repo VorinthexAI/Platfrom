@@ -12,7 +12,7 @@ import { documentExtract } from '@/lib/ai/document-processing';
 
 const userKey = 'cmrnlzf650002qc7k4p5zem5w';
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
-const actor = { userKey, organizationKey: 'org-1', scopeKey };
+const actor = { userKey, teamKey: 'team-1', scopeKey };
 
 test('rejects decoded attachments whose composed MIME message exceeds Gmail size', async () => {
   await expect(rawEmail({ from: 'from@example.com', to: ['to@example.com'], subject: 'Large', messageId: '<large@example.com>', body: 'Body', attachments: [{ name: 'large.pdf', mimeType: 'application/pdf', bytes: new Uint8Array(19 * 1024 * 1024) }] })).rejects.toThrow("Gmail's 25 MB message limit");
@@ -28,7 +28,7 @@ test('allows arbitrary names in email content and signatures while rejecting unr
 const now = '2026-08-11T12:00:00.000Z';
 const sendLeaseToken = '11111111-1111-4111-8111-111111111111';
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0);
-const connector = { key: userKey, organizationKey: 'org-1', scopeKey, provider: 'gmail', providerAccountId: 'google-1', email: 'me@example.com', encryptedCredentials: 'cipher', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByMembershipKey: scopeKey, status: 'active', initialSyncCompleted: false, createdAt: now, updatedAt: now } as const;
+const connector = { key: userKey, teamKey: 'team-1', scopeKey, provider: 'gmail', providerAccountId: 'google-1', email: 'me@example.com', encryptedCredentials: 'cipher', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), initialSyncChargeKey: scopeKey, scopes: ['email'], createdByTeamMembershipKey: scopeKey, billingUserKey: userKey, status: 'active', initialSyncCompleted: false, createdAt: now, updatedAt: now } as const;
 const thread = { key: userKey, scopeKey, accountKey: userKey, providerThreadId: 'thread-1', subject: 'Project', summary: 'Summary', intent: 'Review', priority: 'normal', state: 'needs_action', unread: true, lastMessageAt: now, embedding, isFavorite: false, createdAt: now, updatedAt: now } as const;
 
 test('attachment deletion refreshes Content, images, and the affected managed collection', async () => {
@@ -80,6 +80,7 @@ function createEmailService(options: Parameters<typeof createEmailServiceImpleme
     completeWatchRepair: async () => undefined,
     enqueueClearTrash: async () => ({ jobId: 'test-clear-trash' }),
     completeClearTrash: async () => undefined,
+    sparkBilling: { chargeExecution: async () => ({ status: 'applied', claimOwner: 'spark-owner', transaction: { key: 'spark-charge' } }) as never, completeExecution: async () => true },
     ...options,
   });
 }
@@ -100,7 +101,7 @@ function serviceFor(sendRaw: () => Promise<{ id: string; threadId: string }>, ex
     renewDraftLease: async () => true,
   };
   const connectors = {
-    getExact: async (_organizationKey: string, _scopeKey: string, key: string) => { connectorSelections.push(key); return connector; },
+    getExact: async (_teamKey: string, _scopeKey: string, key: string) => { connectorSelections.push(key); return connector; },
     credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }),
     claimSend: async () => { connectorLeaseCalls.push('claim'); return true; },
     renewSend: async () => { connectorLeaseCalls.push('renew'); return true; },
@@ -108,7 +109,7 @@ function serviceFor(sendRaw: () => Promise<{ id: string; threadId: string }>, ex
   };
   const gmail = { sendRaw, findMessageByRfc822Id: async () => existing, profile: async () => ({}), listThreads: async () => ({}), history: async () => ({}), thread: async () => ({}), modifyThread: async () => ({}), revoke: async () => undefined };
   const storage = { download: async () => ({ bytes: new TextEncoder().encode('attachment bytes') }) };
-  return { finishes, completedRepairs, synchronized, connectorSelections, connectorLeaseCalls, service: createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role }), client: () => gmail as never, embed: async () => embedding, storage: storage as never, enqueueRepair: async () => ({ jobId: 'test-repair' }), completeRepair: async (jobId) => { completedRepairs.push(jobId); } }) };
+  return { finishes, completedRepairs, synchronized, connectorSelections, connectorLeaseCalls, service: createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role }), client: () => gmail as never, embed: async () => embedding, storage: storage as never, enqueueRepair: async () => ({ jobId: 'test-repair' }), completeRepair: async (jobId) => { completedRepairs.push(jobId); } }) };
 }
 
 describe('email reply sending', () => {
@@ -239,7 +240,7 @@ describe('email reply sending', () => {
     const synchronized: any[] = [];
     const repository = { getDraft: async () => draft, claimDraft: async () => draft, thread: async () => ({ thread: unreadThread, messages: [message] }), renewDraftLease: async () => true, finishDraft: async () => draft, syncThread: async (input: any) => { synchronized.push(input); return unreadThread; }, attachmentResources: async () => [] };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSend: async () => true, renewSend: async () => true, releaseSend: async () => undefined };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ findMessageByRfc822Id: async () => null, sendRaw: async () => ({ id: 'sent', threadId: 'thread-1' }) }) as never, embed: async () => embedding, enqueueRepair: async () => ({ jobId: 'send' }), completeRepair: async () => undefined, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ findMessageByRfc822Id: async () => null, sendRaw: async () => ({ id: 'sent', threadId: 'thread-1' }) }) as never, embed: async () => embedding, enqueueRepair: async () => ({ jobId: 'send' }), completeRepair: async () => undefined, publishInboxChanged: async () => undefined });
     await service.sendDraft(actor, draft.key);
     expect(synchronized[0].thread).toMatchObject({ unread: true, labels: ['INBOX', 'UNREAD'] });
     expect(synchronized[0].messages[0]).toMatchObject({ unread: false, labels: ['SENT'] });
@@ -263,9 +264,9 @@ describe('email reply sending', () => {
     const repository = { getDraft: async () => draft, claimDraft: async () => draft, thread: async () => ({ thread, messages: [message] }), renewDraftLease: async () => true, finishDraft: async () => { throw new Error('draft write failed'); }, syncThread: async () => { throw new Error('message write failed'); }, attachmentResources: async () => [] };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSend: async () => true, renewSend: async () => true, releaseSend: async () => undefined };
     const gmail = { findMessageByRfc822Id: async () => null, sendRaw: async () => ({ id: 'sent', threadId: 'thread-1' }) };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, embed: async () => embedding, enqueueRepair: async (input) => { repairs.push(input); }, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, embed: async () => embedding, enqueueRepair: async (input) => { repairs.push(input); }, publishInboxChanged: async () => undefined });
     await expect(service.sendDraft(actor, draft.key)).resolves.toMatchObject({ sent: true, providerMessageId: 'sent' });
-    expect(repairs).toEqual([expect.objectContaining({ organizationKey: actor.organizationKey, scopeKey, connectorKey: connector.key, reason: 'send', sendDraftKey: draft.key, operationKey: expect.any(String) })]);
+    expect(repairs).toEqual([expect.objectContaining({ teamKey: actor.teamKey, scopeKey, connectorKey: connector.key, reason: 'send', sendDraftKey: draft.key, operationKey: expect.any(String) })]);
   });
 
   test('leaves a runnable pre-provider send intent after ambiguous provider acceptance', async () => {
@@ -273,12 +274,12 @@ describe('email reply sending', () => {
     let intent: any;
     const repository = { getDraft: async () => draft, claimDraft: async () => draft, thread: async () => ({ thread, messages: [message] }), renewDraftLease: async () => true, finishDraft: async () => draft, attachmentResources: async () => [] };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSend: async () => true, renewSend: async () => true, releaseSend: async () => undefined };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ findMessageByRfc822Id: async () => null, sendRaw: async () => { events.push('provider-accepted'); throw new Error('connection lost after acceptance'); } }) as never, enqueueRepair: async (input) => { events.push('intent-enqueued'); intent = input; return { jobId: 'send-intent' }; } });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ findMessageByRfc822Id: async () => null, sendRaw: async () => { events.push('provider-accepted'); throw new Error('connection lost after acceptance'); } }) as never, enqueueRepair: async (input) => { events.push('intent-enqueued'); intent = input; return { jobId: 'send-intent' }; } });
     await expect(service.sendDraft(actor, draft.key)).rejects.toThrow('connection lost after acceptance');
     expect(events).toEqual(['intent-enqueued', 'provider-accepted']);
     const syncCalls: unknown[] = [];
     await processEmailSyncJob({ schemaVersion: 1, kind: 'connector-reconciliation', ...intent, requestedAt: now }, { connectors: {} as never, service: { reconcileSends: async (...args: unknown[]) => { syncCalls.push(args); return { recovered: 1, pending: 0, busy: false }; } } as never });
-    expect(syncCalls).toEqual([[{ userKey: 'system', organizationKey: actor.organizationKey, scopeKey }, connector.key, draft.key]]);
+    expect(syncCalls).toEqual([[{ userKey: 'system', teamKey: actor.teamKey, scopeKey }, connector.key, draft.key]]);
   });
 
   test('reconciles an ambiguously accepted send from the provider Sent folder', async () => {
@@ -290,7 +291,7 @@ describe('email reply sending', () => {
     const repository = { getDraft: async () => draft, thread: async () => ({ thread, messages: [message] }), outboundDraftAttachments: async () => [], syncThread: async (input: unknown) => { synchronized.push(input); return thread; } };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined };
     const gmail = { findMessageByRfc822Id: async () => ({ id: providerMessage.id, threadId: providerMessage.threadId }), threadMetadata: async () => ({ id: providerMessage.threadId, messages: [{ id: providerMessage.id, threadId: providerMessage.threadId }] }), message: async () => providerMessage };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'waiting', category: 'other', intent: 'Sent' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'waiting', category: 'other', isPurchase: false, intent: 'Sent' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
 
     expect(await service.reconcileSends(actor, connector.key, draft.key)).toEqual({ recovered: 1, pending: 0, busy: false });
     expect(synchronized).toHaveLength(1);
@@ -316,7 +317,7 @@ describe('email reply sending', () => {
     };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined };
     const gmail = { findMessageByRfc822Id: async () => ({ id: providerMessage.id, threadId: providerMessage.threadId }), threadMetadata: async () => ({ id: providerMessage.threadId, messages: [{ id: providerMessage.id, threadId: providerMessage.threadId }] }), message: async () => providerMessage, attachment: async () => { downloads += 1; return new Uint8Array(); } };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, attachmentIngestion: { ingestMessage: async () => { ingestions += 1; return []; } } as never, classify: async () => ({ priority: 'normal', state: 'waiting', category: 'other', intent: 'Sent' }), embed: async () => embedding });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, attachmentIngestion: { ingestMessage: async () => { ingestions += 1; return []; } } as never, classify: async () => ({ priority: 'normal', state: 'waiting', category: 'other', isPurchase: false, intent: 'Sent' }), embed: async () => embedding });
     await service.reconcileSends(actor, connector.key, draft.key);
     await service.reconcileSends(actor, connector.key, draft.key);
     expect(lookups).toBe(2);
@@ -336,7 +337,7 @@ describe('email reply sending', () => {
     const repository = { getDraft: async () => draft, thread: async () => ({ thread, messages: [message] }), outboundDraftAttachments: async () => null, syncThread: async (input: unknown) => { synchronized = input; return thread; } };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined };
     const gmail = { findMessageByRfc822Id: async () => ({ id: providerMessage.id, threadId: providerMessage.threadId }), threadMetadata: async () => ({ id: providerMessage.threadId, messages: [{ id: providerMessage.id, threadId: providerMessage.threadId }] }), message: async () => providerMessage };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, attachmentIngestion: { ingestMessage: async () => { ingestions += 1; return managed; } } as never, classify: async () => ({ priority: 'normal', state: 'waiting', category: 'other', intent: 'Sent' }), embed: async () => embedding });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, attachmentIngestion: { ingestMessage: async () => { ingestions += 1; return managed; } } as never, classify: async () => ({ priority: 'normal', state: 'waiting', category: 'other', isPurchase: false, intent: 'Sent' }), embed: async () => embedding });
     await service.reconcileSends(actor, connector.key, draft.key);
     expect(ingestions).toBe(1);
     expect(synchronized.messages[0].attachments).toEqual(managed);
@@ -354,7 +355,7 @@ describe('email reply sending', () => {
       claimSend: async () => false,
       getExact: async () => { providerAccess = true; return connector; },
     };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }) });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }) });
     await expect(service.sendDraft(actor, draft.key)).rejects.toThrow('another send is in progress');
     expect(providerAccess).toBe(false);
   });
@@ -395,14 +396,14 @@ describe('email thread read state', () => {
       mutateThreadState: async () => { calls.push('repository.mutateThreadState'); unread = false; return { ...thread, unread }; },
     };
     const connectors = {
-      getExact: async (_organizationKey: string, _scopeKey: string, key: string) => { connectorSelections.push(key); return connector; },
+      getExact: async (_teamKey: string, _scopeKey: string, key: string) => { connectorSelections.push(key); return connector; },
       credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }),
       claimSync: async () => true,
       renewSync: async () => true,
       releaseSync: async () => undefined,
     };
     const gmail = { modifyThread: async () => { calls.push('gmail.modifyThread'); } };
-    return { calls, connectorSelections, service: createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role }), client: () => gmail as never, enqueueRepair: async () => ({ jobId: 'read-job' }), completeRepair: async () => undefined, publishInboxChanged: async () => { calls.push('inbox.changed'); } }) };
+    return { calls, connectorSelections, service: createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role }), client: () => gmail as never, enqueueRepair: async () => ({ jobId: 'read-job' }), completeRepair: async () => undefined, publishInboxChanged: async () => { calls.push('inbox.changed'); } }) };
   }
 
   test('explicitly marks an owner thread read and returns the bounded tool projection', async () => {
@@ -426,7 +427,7 @@ describe('email thread read state', () => {
     };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined };
     const gmail = { modifyThread: async (...input: unknown[]) => { modifications.push(input); } };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, enqueueRepair: async () => ({ jobId: 'read-job' }) });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, enqueueRepair: async () => ({ jobId: 'read-job' }) });
     expect(await service.setReadState(actor, { threadKey: userKey, isRead: true })).toMatchObject({ repairPending: 1, items: [{ status: 'repairPending', error: 'database unavailable' }] });
     expect(modifications).toEqual([['thread-1', [], ['UNREAD']]]);
   });
@@ -464,7 +465,7 @@ describe('email synchronization', () => {
       releaseSync: async () => undefined,
       setSyncState: async (_key: string, state: string) => { states.push(state); return true; },
     };
-    const service = createEmailService({ repository: { reconcileInbox: async () => undefined } as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ profile: async () => ({ historyId: 'history-2' }), listThreads: async () => ({ threads: [] }) }) as never, refreshCredentials: async (credentials) => { refreshes += 1; return credentials; }, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: { reconcileInbox: async () => undefined } as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ profile: async () => ({ historyId: 'history-2' }), listThreads: async () => ({ threads: [] }) }) as never, refreshCredentials: async (credentials) => { refreshes += 1; return credentials; }, publishInboxChanged: async () => undefined });
     expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 0 });
     expect(states).toEqual(['syncing', 'idle']);
     expect(refreshes).toBe(0);
@@ -480,14 +481,34 @@ describe('email synchronization', () => {
       claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined,
       setSyncState: async (_key: string, state: string, input: Record<string, unknown>) => { states.push({ state, input }); events.push(`state:${state}`); if (input.completeInitialSync) current = { ...current, initialSyncCompleted: true }; return true; },
     };
-    const service = createEmailService({ repository: { reconcileInbox: async () => undefined } as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ profile: async () => ({ historyId: 'history-2' }), listThreads: async () => ({ threads: [] }) }) as never, publishInboxChanged: async () => { events.push('inbox.changed'); } });
+    const charges: unknown[] = [];
+    let completions = 0;
+    const service = createEmailService({ repository: { reconcileInbox: async () => undefined } as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ profile: async () => ({ historyId: 'history-2' }), listThreads: async () => ({ threads: [] }) }) as never, sparkBilling: { chargeExecution: async (...input: unknown[]) => { charges.push(input); return { status: 'applied', claimOwner: 'owner', transaction: { key: 'charge' } } as never; }, completeExecution: async () => { completions += 1; return true; } }, publishInboxChanged: async () => { events.push('inbox.changed'); } });
     await expect(service.initialSync(actor, connector.key)).rejects.toThrow('system-only');
     expect(await service.initialSync({ ...actor, userKey: 'system' }, connector.key)).toMatchObject({ synced: 0, initialSyncCompleted: true });
     expect(states.at(-1)).toMatchObject({ state: 'idle', input: { pendingHistoryId: null, pendingThreadIds: null, completeInitialSync: true } });
     expect(events.at(-1)).toBe('inbox.changed');
+    expect(charges).toHaveLength(1);
+    expect(charges[0]).toMatchObject([userKey, { toolSlug: 'inbox.sync', microSparks: 100_000_000, metadata: { category: 'inbox-initial-sync', connectorKey: connector.key } }]);
+    expect(charges[0]).toMatchObject([userKey, { executionIdentity: createHash('sha256').update(`inbox.sync\0${connector.key}\0${connector.initialSyncChargeKey}`).digest('hex') }]);
+    expect(completions).toBe(1);
     const stateCount = states.length;
     expect(await service.initialSync({ ...actor, userKey: 'system' }, connector.key)).toEqual({ synced: 0, alreadyCompleted: true });
     expect(states).toHaveLength(stateCount);
+    expect(charges).toHaveLength(1);
+  });
+
+  test('rejects an unfunded initial import before provider access or persistence', async () => {
+    let profileCalls = 0, stateWrites = 0;
+    const service = createEmailService({
+      repository: { syncThread: async () => { throw new Error('must not persist'); } } as never,
+      connectors: { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => { stateWrites += 1; return true; } } as never,
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
+      client: () => ({ profile: async () => { profileCalls += 1; return { historyId: '2' }; } }) as never,
+      sparkBilling: { chargeExecution: async () => { throw new Error('Spark balance is insufficient'); }, completeExecution: async () => true },
+    });
+    await expect(service.initialSync({ ...actor, userKey: 'system' }, connector.key)).rejects.toThrow('Spark balance is insufficient');
+    expect({ profileCalls, stateWrites }).toEqual({ profileCalls: 0, stateWrites: 1 });
   });
 
   test('leaves initial completion false on failure and publishes only after the error transition', async () => {
@@ -497,7 +518,7 @@ describe('email synchronization', () => {
       claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined,
       setSyncState: async (_key: string, state: string, input: Record<string, unknown>) => { expect(input.completeInitialSync).not.toBe(true); events.push(`state:${state}`); return true; },
     };
-    const service = createEmailService({ repository: {} as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ profile: async () => { throw new Error('provider unavailable'); } }) as never, publishInboxChanged: async () => { events.push('inbox.changed'); } });
+    const service = createEmailService({ repository: {} as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ profile: async () => { throw new Error('provider unavailable'); } }) as never, publishInboxChanged: async () => { events.push('inbox.changed'); } });
     await expect(service.initialSync({ ...actor, userKey: 'system' }, connector.key)).rejects.toThrow('provider unavailable');
     expect(events.slice(-2)).toEqual(['state:error', 'inbox.changed']);
   });
@@ -508,7 +529,7 @@ describe('email synchronization', () => {
       const service = createEmailService({
         repository: {} as never,
         connectors: { getExact: async () => unavailable, claimSync: async () => { claimed = true; return true; } } as never,
-        authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+        authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       });
       await expect(service.sync(actor, connector.key)).rejects.toThrow('No connected email account');
       expect(claimed).toBe(false);
@@ -520,7 +541,7 @@ describe('email synchronization', () => {
     const service = createEmailService({
       repository: {} as never,
       connectors: { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => false } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       client: () => ({ profile: async () => { profileCalls += 1; return { historyId: 'history-2' }; } }) as never,
     });
     expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 0, busy: true });
@@ -532,7 +553,7 @@ describe('email synchronization', () => {
     const service = createEmailService({
       repository: {} as never,
       connectors: { getExact: async () => ({ ...connector, lastSyncedAt: now, syncPendingSubscriptionMessages: [{ id: 'message', threadId: 'thread' }] }), credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => { claims += 1; return true; } } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
     });
     await expect(service.sync(actor, connector.key)).resolves.toMatchObject({ synced: 0, busy: true });
     expect(claims).toBe(0);
@@ -566,9 +587,9 @@ describe('email synchronization', () => {
     const service = createEmailService({
       repository: { syncThread: async () => { writes += 1; return thread; }, thread: async () => ({ thread, messages: [{ ...message, providerMessageId: raw.id }] }), deleteProviderThread: async () => undefined, subscriptionDraftForMessage: async () => ({ ...draft, creationSource: 'subscription' }) } as never,
       connectors: connectors as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       client: () => gmail as never,
-      classify: async () => { classifications += 1; return { priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }; },
+      classify: async () => { classifications += 1; return { priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }; },
       embed: async () => embedding,
       publishInboxChanged: async () => undefined,
     });
@@ -593,7 +614,7 @@ describe('email synchronization', () => {
     const service = createEmailService({
       repository: {} as never,
       connectors: connectors as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       client: () => ({ profile: async () => ({ historyId: '101' }), history: async () => ({ historyId: '101', history: [] }) }) as never,
       publishInboxChanged: async () => { throw new Error('event transport unavailable'); },
     });
@@ -634,7 +655,7 @@ describe('email synchronization', () => {
       threadMetadata: async () => ({ id: raw.threadId, messages: [raw] }),
       message: async () => raw,
     };
-    const service = createEmailService({ repository: { syncThread: async () => thread, thread: async () => ({ thread, messages: [{ ...message, providerMessageId: raw.id }] }), deleteProviderThread: async () => undefined } as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: { syncThread: async () => thread, thread: async () => ({ thread, messages: [{ ...message, providerMessageId: raw.id }] }), deleteProviderThread: async () => undefined } as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
     const system = { ...actor, userKey: 'system' };
     await expect(service.ingestSubscriptionNotification(system, connector.key, '300')).rejects.toThrow('pending continuation');
     expect({ pendingNotificationHistoryId, historyId: account.historyId, historyStarts }).toEqual({ pendingNotificationHistoryId: '300', historyId: '200', historyStarts: [] });
@@ -653,9 +674,9 @@ describe('email synchronization', () => {
         credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined,
         setSyncState: async (_key: string, state: string, input: any) => { if (state === 'idle') cursor = account.historyId = input.historyId; return true; },
       } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       client: () => ({ profile: async () => ({ historyId: '101' }), history: async () => ({ historyId: '101', history: [{ messagesAdded: [{ message: { id: raw.id, threadId: raw.threadId } }] }] }), threadMetadata: async () => ({ id: raw.threadId, messages: [raw] }), message: async () => raw }) as never,
-      classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined,
+      classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined,
     });
     await expect(service.ingestSubscriptionNotification({ ...actor, userKey: 'system' }, connector.key, '101')).resolves.toMatchObject({ synced: 1 });
     expect(cursor).toBe('101');
@@ -671,14 +692,16 @@ describe('email synchronization', () => {
       const service = createEmailService({
         repository: { syncThread: async (input: unknown) => { saved = input; return thread; }, thread: async () => ({ thread, messages: [{ ...message, providerMessageId: raw.id }] }), deleteProviderThread: async () => undefined, subscriptionDraftForMessage: async () => { automaticDraftChecks += 1; return { ...draft, creationSource: 'subscription' }; } } as never,
         connectors: { getExact: async () => account, markNotificationPending: async () => true, clearPendingNotification: async () => true, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true } as never,
-        authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+        authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
         client: () => ({ profile: async () => ({ historyId: '125' }), history: async () => ({ historyId: '125', history: [{ messagesAdded: [{ message: { id: raw.id, threadId: raw.threadId } }] }] }), threadMetadata: async () => ({ id: raw.threadId, messages: [raw] }), message: async () => raw }) as never,
-        classify: async () => ({ priority: 'urgent', state: 'needs_action', category: 'primary', intent: 'Review' }),
+        classify: async () => ({ priority: 'urgent', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }),
         embed: async () => embedding,
       });
       if (source === 'sync') await service.sync(actor, connector.key);
       else await service.ingestSubscriptionNotification({ ...actor, userKey: 'system' }, connector.key, '999');
-      persisted.push({ ...(saved as Record<string, unknown>), lease: { ...((saved as { lease: Record<string, unknown> }).lease), token: 'normalized' } });
+      const { subscriptionBilling, ...canonical } = saved as Record<string, unknown>;
+      persisted.push({ ...canonical, lease: { ...((saved as { lease: Record<string, unknown> }).lease), token: 'normalized' } });
+      if (source === 'subscription') expect(subscriptionBilling).toEqual({ userKey, providerMessageIds: [raw.id] });
     }
     expect(persisted[0]).toEqual(persisted[1]);
     expect(automaticDraftChecks).toBe(1);
@@ -693,7 +716,7 @@ describe('email synchronization', () => {
     const service = createEmailService({
       repository: {} as never,
       connectors: { getExact: async () => { connectorReads += 1; return connector; } } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
     });
     await expect(service.ingestSubscriptionNotification(actor, connector.key, '101')).rejects.toThrow('system-only');
     expect(connectorReads).toBe(0);
@@ -704,9 +727,9 @@ describe('email synchronization', () => {
     const service = createEmailService({
       repository: { mailbox: async () => ({ threads: [thread], messages: [message] }), syncThread: async (input: unknown) => { saved = input; return thread; } } as never,
       connectors: { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       client: () => ({}) as never,
-      classify: async () => ({ priority: 'low', state: 'filtered', category: 'other', intent: 'Filtered' }),
+      classify: async () => ({ priority: 'low', state: 'filtered', category: 'other', isPurchase: false, intent: 'Filtered' }),
       embed: async () => embedding,
     });
     await expect(service.sort(actor, { connectorKey: connector.key })).resolves.toEqual({ connectorKey: connector.key, threadsProcessed: 1, messagesProcessed: 1, busy: false });
@@ -736,8 +759,8 @@ describe('email synchronization', () => {
     };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }), markError: async () => undefined, markActive: async () => undefined, claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
     const service = createEmailService({
-      repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never,
-      classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review message' }),
+      repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never,
+      classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review message' }),
       embed: async ({ text }) => { embeddedTexts.push(text); return embedding; },
     });
     expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 1 });
@@ -762,7 +785,7 @@ describe('email synchronization', () => {
     };
     const repository = { syncThread: async (input: any) => { saved.push(input); return thread; }, reconcileInbox: async () => undefined, deleteProviderThread: async () => undefined };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-08-11T12:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async (_organization, input) => input.labels.includes('SENT') ? { priority: 'normal', state: 'waiting', category: 'other', intent: 'Sent' } : { priority: 'low', state: 'filtered', category: 'other', intent: 'Filtered' }, embed: async () => embedding, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async (_team, input) => input.labels.includes('SENT') ? { priority: 'normal', state: 'waiting', category: 'other', isPurchase: false, intent: 'Sent' } : { priority: 'low', state: 'filtered', category: 'other', isPurchase: false, intent: 'Filtered' }, embed: async () => embedding, publishInboxChanged: async () => undefined });
     await service.sync(actor, connector.key);
     expect(saved.map(({ thread: value }) => ({ providerThreadId: value.providerThreadId, inInbox: value.inInbox, inboxCategory: value.inboxCategory }))).toEqual([
       { providerThreadId: 'spam-thread', inInbox: true, inboxCategory: 'Filtered' },
@@ -799,7 +822,7 @@ describe('email synchronization', () => {
     };
     const repository = { syncThread: async (input: unknown) => { saved.push(input); return thread; }, reconcileInbox: async (_scopeKey: string, _connectorKey: string, snapshotIds: string[]) => { reconciled.push(snapshotIds); publications.push('reconciled'); return [...stale]; }, deleteProviderThread: async (...input: unknown[]) => { deleted.push(input); stale.clear(); return { documentsDeleted: 3, attachmentMutation: { documentKeys: ['document-1'], imageKeys: ['image-1'], collectionKeys: ['collection-1'] } }; } };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => { embedded += 1; return embedding; }, publishInboxChanged: async () => { publications.push('published'); }, publishAttachmentChanged: async (_scopeKey, mutation) => { attachmentPublications.push(mutation); } });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => { embedded += 1; return embedding; }, publishInboxChanged: async () => { publications.push('published'); }, publishAttachmentChanged: async (_scopeKey, mutation) => { attachmentPublications.push(mutation); } });
     expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 125 });
     expect(saved).toHaveLength(125);
     expect(maximum).toBe(8);
@@ -819,7 +842,7 @@ describe('email synchronization', () => {
     const service = createEmailService({
       repository: { reconcileInbox: async () => { order.push('reconciled'); } } as never,
       connectors: { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       client: () => ({ profile: async () => ({ historyId: 'history-2' }), listThreads: async () => ({ threads: [] }) }) as never,
       publishInboxChanged: async () => { order.push('published'); },
       publishAttachmentChanged: async () => { attachmentPublications += 1; },
@@ -845,7 +868,7 @@ describe('email synchronization', () => {
     };
     const repository = { syncThread: async () => thread, reconcileInbox: async () => undefined, deleteProviderThread: async () => undefined };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => run({ priority: 'normal' as const, state: 'needs_action' as const, category: 'primary' as const, intent: 'Review' }), embed: async () => run(embedding), publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => run({ priority: 'normal' as const, state: 'needs_action' as const, category: 'primary' as const, isPurchase: false, intent: 'Review' }), embed: async () => run(embedding), publishInboxChanged: async () => undefined });
     expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 12 });
     expect(maximum).toBeLessThanOrEqual(8);
     expect(maximum).toBeGreaterThan(1);
@@ -859,7 +882,7 @@ describe('email synchronization', () => {
     };
     const repository = { reconcileInbox: async () => { reconciliations += 1; } };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, publishInboxChanged: async () => undefined });
     await expect(service.sync(actor, connector.key)).rejects.toThrow('repeated a continuation token');
     expect(reconciliations).toBe(0);
   });
@@ -872,7 +895,7 @@ describe('email synchronization', () => {
     };
     const repository = { reconcileInbox: async () => { reconciliations += 1; } };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, publishInboxChanged: async () => undefined });
     await expect(service.sync(actor, connector.key)).rejects.toThrow('exceeds the 100000 thread safety limit');
     expect(reconciliations).toBe(0);
   });
@@ -901,7 +924,7 @@ describe('email synchronization', () => {
       setSyncState: async (_key: string, state: string) => { events.push(`state:${state}`); return true; },
       releaseSync: async () => { events.push('released'); },
     };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
     const releaseTimer = setTimeout(releaseSibling, 20);
     try {
       await expect(service.sync(actor, connector.key)).rejects.toThrow('Email synchronization batch failed');
@@ -949,7 +972,7 @@ describe('email synchronization', () => {
         return true;
       },
     };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, enqueueSyncContinuation: async () => { enqueues += 1; }, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, enqueueSyncContinuation: async () => { enqueues += 1; }, publishInboxChanged: async () => undefined });
     expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 100 });
     expect(idleStates[0]).toMatchObject({ historyId: 'history-1', pendingHistoryId: 'history-2', pendingThreadIds: ids.slice(0, 5).reverse() });
     expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 5 });
@@ -970,7 +993,7 @@ describe('email synchronization', () => {
     const repository = { syncThread: async (input: unknown) => { saved = input; return thread; }, reconcileInbox: async () => undefined, deleteProviderThread: async () => undefined };
     const gmail = { profile: async () => ({ historyId: 'history-2' }), listThreads: async () => ({ threads: [{ id: 'thread-nested' }] }), threadMetadata: async () => ({ id: 'thread-nested', messages }), message: async (id: string) => messages.find((message) => message.id === id)! };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
     await service.sync(actor, connector.key);
     expect(saved.messages.map(({ providerMessageId, parentMessageId, replyDepth }: any) => ({ providerMessageId, parentMessageId, replyDepth }))).toEqual([
       { providerMessageId: 'grandchild', parentMessageId: '<child@example.com>', replyDepth: 2 },
@@ -993,7 +1016,7 @@ describe('email synchronization', () => {
       threadMetadata: async () => { throw new GmailApiError(404); },
     };
     const connectors = { getExact: async () => ({ ...connector, historyId: 'history-1', lastSyncedAt: now }), credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }), markError: async () => undefined, markActive: async () => undefined, claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never });
     expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 0 });
     expect(deleted).toEqual([[scopeKey, userKey, 'gone-thread', { connectorKey: userKey, token: expect.any(String) }]]);
   });
@@ -1010,7 +1033,7 @@ describe('email synchronization', () => {
       message: async () => raw,
     };
     const connectors = { getExact: async () => ({ ...connector, historyId: 'history-1', lastSyncedAt: now }), credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
     await service.sync(actor, connector.key);
     expect({ historyCalls, threadFetches, writes }).toEqual({ historyCalls: 2, threadFetches: 1, writes: 1 });
   });
@@ -1029,7 +1052,7 @@ describe('email synchronization', () => {
     };
     const repository = { syncThread: async () => { writes += 1; return thread; }, deleteProviderThread: async () => undefined };
     const connectors = { getExact: async () => ({ ...connector, historyId: 'history-1', lastSyncedAt: now }), credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
     expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 1 });
     expect({ historyCalls, writes }).toEqual({ historyCalls: 101, writes: 1 });
   });
@@ -1052,7 +1075,7 @@ describe('email synchronization', () => {
       claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined,
       setSyncState: async (_key: string, state: string, input: any) => { if (state === 'idle') idleStates.push(input); return true; },
     };
-    const service = createEmailService({ repository: { deleteProviderThread: async () => undefined } as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: { deleteProviderThread: async () => undefined } as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, publishInboxChanged: async () => undefined });
     expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 0 });
     expect(tokens).toEqual([undefined, ...Array.from({ length: 101 }, (_, index) => `page-${index + 1}`)]);
     expect(idleStates).toHaveLength(1);
@@ -1077,7 +1100,7 @@ describe('email synchronization', () => {
         claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined,
         setSyncState: async (_key: string, state: string, input: any) => { if (state === 'idle') idleStates.push(input); return true; },
       };
-      const service = createEmailService({ repository: {} as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, publishInboxChanged: async () => undefined });
+      const service = createEmailService({ repository: {} as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, publishInboxChanged: async () => undefined });
       await expect(service.sync(actor, connector.key)).rejects.toThrow(scenario === 'repeated' ? 'repeated a page token' : 'page 101 unavailable');
       expect(idleStates).toEqual([]);
       expect(calls).toBe(scenario === 'repeated' ? 2 : 101);
@@ -1107,7 +1130,7 @@ describe('email synchronization', () => {
       getExact: async () => account, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined,
       setSyncState: async (_key: string, state: string, input: any) => { if (state === 'idle') { idleStates.push(input); account.historyId = input.historyId; } return true; },
     };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => { publications += 1; }, publishAttachmentChanged: async () => { attachmentPublications += 1; } });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => { publications += 1; }, publishAttachmentChanged: async () => { attachmentPublications += 1; } });
     await expect(service.sync(actor, connector.key)).rejects.toThrow('Email synchronization batch failed');
     expect(account.historyId).toBe('history-1');
     expect(persisted.size).toBe(10);
@@ -1143,7 +1166,7 @@ describe('email synchronization', () => {
         return true;
       },
     };
-    const service = createEmailService({ repository: { syncThread: async () => thread, deleteProviderThread: async () => undefined } as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, enqueueSyncContinuation: async () => { enqueueCalls += 1; if (enqueueCalls === 1) throw new Error('queue unavailable'); }, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: { syncThread: async () => thread, deleteProviderThread: async () => undefined } as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, enqueueSyncContinuation: async () => { enqueueCalls += 1; if (enqueueCalls === 1) throw new Error('queue unavailable'); }, publishInboxChanged: async () => undefined });
     await expect(service.sync(actor, connector.key)).rejects.toThrow('queue unavailable');
     expect(account).toMatchObject({ historyId: 'history-1', syncPendingHistoryId: 'history-2' });
     expect(Array.isArray(account.syncPendingThreadIds)).toBe(true);
@@ -1168,7 +1191,7 @@ describe('email synchronization', () => {
       getExact: async () => ({ ...connector, historyId: 'history-1', lastSyncedAt: now }), credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined,
       setSyncState: async (_key: string, state: string) => state !== 'idle',
     };
-    const service = createEmailService({ repository: { syncThread: async () => thread, deleteProviderThread: async () => undefined } as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, enqueueSyncContinuation: async () => { enqueues += 1; }, publishInboxChanged: async () => { publications += 1; } });
+    const service = createEmailService({ repository: { syncThread: async () => thread, deleteProviderThread: async () => undefined } as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, enqueueSyncContinuation: async () => { enqueues += 1; }, publishInboxChanged: async () => { publications += 1; } });
     await expect(service.sync(actor, connector.key)).rejects.toThrow('lease was lost');
     expect({ enqueues, publications }).toEqual({ enqueues: 0, publications: 101 });
   });
@@ -1192,7 +1215,7 @@ describe('email synchronization', () => {
       };
       const connectors = { getExact: async () => ({ ...connector, historyId: 'history-1', lastSyncedAt: now }), credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
       const filtered = scenario.labels.includes('SPAM') || scenario.labels.includes('TRASH');
-      const service = createEmailService({ repository: { syncThread: async (input: any) => { writes.push(input); return thread; }, deleteProviderThread: async () => undefined } as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: filtered ? 'low' : 'normal', state: filtered ? 'filtered' : 'needs_action', category: 'other', intent: filtered ? 'Filtered' : 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
+      const service = createEmailService({ repository: { syncThread: async (input: any) => { writes.push(input); return thread; }, deleteProviderThread: async () => undefined } as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: filtered ? 'low' : 'normal', state: filtered ? 'filtered' : 'needs_action', category: 'other', isPurchase: false, intent: filtered ? 'Filtered' : 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
       await service.sync(actor, connector.key);
       expect({ historyCalls, metadataCalls, writes: writes.length }).toEqual({ historyCalls: 2, metadataCalls: 1, writes: 1 });
       expect(writes[0].messages[0]).toMatchObject({ labels: scenario.labels, unread: scenario.unread });
@@ -1214,7 +1237,7 @@ describe('email synchronization', () => {
     };
     const repository = { syncThread: async () => thread, reconcileInbox: async (_scopeKey: string, _connectorKey: string, ids: string[]) => { reconciled.push(ids); }, deleteProviderThread: async () => undefined };
     const connectors = { getExact: async () => ({ ...connector, historyId: 'history-1', lastSyncedAt: now }), credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async (_key: string, state: string, input: any) => { if (state === 'idle') idleStates.push(input); return true; } };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
     expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 101 });
     expect(idleStates[0]).toMatchObject({ historyId: 'history-2', pendingHistoryId: null, pendingThreadIds: null });
     expect(reconciled).toEqual([snapshotIds]);
@@ -1231,7 +1254,7 @@ describe('email synchronization', () => {
     };
     const repository = { syncThread: async () => thread, reconcileInbox: async () => undefined, deleteProviderThread: async () => undefined };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
     await service.sync(actor, connector.key);
     expect(maximum).toBeLessThanOrEqual(8);
     expect(maximum).toBeGreaterThan(1);
@@ -1245,10 +1268,10 @@ describe('email synchronization', () => {
     const service = createEmailService({
       repository: { syncThread: async (input: any) => { saved = input; return thread; }, reconcileInbox: async () => undefined, deleteProviderThread: async () => undefined } as never,
       connectors: { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       client: () => ({ profile: async () => ({ historyId: 'history-2' }), listThreads: async () => ({ threads: [{ id: 'selected-thread' }] }), threadMetadata: async () => ({ id: 'selected-thread', messages: [recent, olderSent] }), message: async (id: string) => id === recent.id ? recent : olderSent }) as never,
       attachmentIngestion: { ingest: async () => ({ type: 'document', key: scopeKey }), ingestMessage: async ({ message }: any) => { ingested.push(message.id); return message.id === olderSent.id ? [{ type: 'document', key: scopeKey }] : []; } },
-      classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined,
+      classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined,
     });
     await service.sync(actor, connector.key);
     expect(ingested).toEqual(['recent-inbox', 'older-sent']);
@@ -1260,17 +1283,17 @@ describe('email synchronization', () => {
 
   test('passes newly staged attachment bindings into mail persistence and compensates when it fails', async () => {
     const raw = gmailMessage('staged-message', 'staged-thread');
-    const staged = { bindingKey: newId(), leaseToken: '11111111-1111-4111-8111-111111111111', targetType: 'document' as const, targetKey: newId(), membershipKey: connector.createdByMembershipKey };
+    const staged = { bindingKey: newId(), leaseToken: '11111111-1111-4111-8111-111111111111', targetType: 'document' as const, targetKey: newId(), teamMembershipKey: connector.createdByTeamMembershipKey };
     const commits: unknown[] = [], compensated: unknown[] = [];
     let stagedInput: any;
     const billedConnector = { ...connector, billingUserKey: userKey };
     const service = createEmailService({
       repository: { syncThread: async (input: any) => { commits.push(...input.attachmentCommits); throw new Error('mail transaction failed'); }, deleteProviderThread: async () => undefined } as never,
       connectors: { getExact: async () => billedConnector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       client: () => ({ profile: async () => ({ historyId: 'history-2' }), listThreads: async () => ({ threads: [{ id: raw.threadId }] }), threadMetadata: async () => ({ id: raw.threadId, messages: [raw] }), message: async () => raw }) as never,
       attachmentIngestion: { ingest: async () => ({ type: 'document', key: staged.targetKey }), ingestMessage: async () => [], stageMessage: async (input) => { stagedInput = input; return { refs: [{ type: 'document', key: staged.targetKey }], staged: [staged] }; }, renew: async () => undefined, compensate: async (items) => { compensated.push(...items); } },
-      classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined,
+      classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined,
     });
     await expect(service.sync(actor, connector.key)).rejects.toThrow('Email synchronization batch failed');
     expect(commits).toEqual([staged]);
@@ -1288,7 +1311,7 @@ describe('email synchronization', () => {
       repository: {
         activeMembership: async () => scopeKey,
         completed: async () => null,
-        claim: async (input: any, _membershipKey: string, leaseToken: string, createdAt: string, leaseExpiresAt: string) => ({ status: 'claimed', binding: { ...input, status: 'processing', leaseToken, leaseExpiresAt, createdAt, updatedAt: createdAt } }),
+        claim: async (input: any, _teamMembershipKey: string, leaseToken: string, createdAt: string, leaseExpiresAt: string) => ({ status: 'claimed', binding: { ...input, status: 'processing', leaseToken, leaseExpiresAt, createdAt, updatedAt: createdAt } }),
         ensureImageCollection: async () => scopeKey,
         release: async () => undefined,
       } as never,
@@ -1299,7 +1322,7 @@ describe('email synchronization', () => {
     const service = createEmailService({
       repository: { syncThread: async () => { throw new Error('message must not persist'); }, deleteProviderThread: async () => undefined } as never,
       connectors: { getExact: async () => ({ ...connector, historyId: 'history-1', lastSyncedAt: now }), credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async (_key: string, state: string, input: any) => { states.push({ state, input }); return true; } } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       client: () => ({ profile: async () => ({ historyId: 'history-2' }), history: async () => ({ historyId: 'history-2', history: [{ messagesAdded: [{ message: { id: raw.id, threadId: raw.threadId } }] }] }), threadMetadata: async () => ({ id: raw.threadId, messages: [raw] }), message: async () => raw, attachment: async () => imageBytes }) as never,
       attachmentIngestion,
       publishInboxChanged: async () => undefined,
@@ -1320,7 +1343,7 @@ describe('email synchronization', () => {
       repository: {
         activeMembership: async () => scopeKey,
         completed: async () => null,
-        claim: async (input: any, _membershipKey: string, leaseToken: string, createdAt: string, leaseExpiresAt: string) => ({ status: 'claimed', binding: { ...input, status: 'processing', leaseToken, leaseExpiresAt, createdAt, updatedAt: createdAt } }),
+        claim: async (input: any, _teamMembershipKey: string, leaseToken: string, createdAt: string, leaseExpiresAt: string) => ({ status: 'claimed', binding: { ...input, status: 'processing', leaseToken, leaseExpiresAt, createdAt, updatedAt: createdAt } }),
         ensureDocumentFolder: async () => attachmentFolderKey,
         recoverDocumentTarget: async () => null,
         documentTarget: async () => null,
@@ -1338,7 +1361,7 @@ describe('email synchronization', () => {
     const service = createEmailService({
       repository: { syncThread: async () => { throw new Error('message must not persist'); }, deleteProviderThread: async () => undefined } as never,
       connectors: { getExact: async () => ({ ...connector, historyId: 'history-1', lastSyncedAt: now }), credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async (_key: string, state: string, input: any) => { states.push({ state, input }); return true; } } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       client: () => ({ profile: async () => ({ historyId: 'history-2' }), history: async () => ({ historyId: 'history-2', history: [{ messagesAdded: [{ message: { id: raw.id, threadId: raw.threadId } }] }] }), threadMetadata: async () => ({ id: raw.threadId, messages: [raw] }), message: async () => raw, attachment: async () => docx }) as never,
       attachmentIngestion,
       publishInboxChanged: async () => undefined,
@@ -1355,10 +1378,10 @@ describe('email synchronization', () => {
     const service = createEmailService({
       repository: { syncThread: async (input: any) => { saved = input; return thread; }, deleteProviderThread: async () => undefined } as never,
       connectors: { getExact: async () => ({ ...connector, historyId: 'history-1', lastSyncedAt: now }), credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async (_key: string, state: string, input: any) => { states.push({ state, input }); return true; } } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       client: () => ({ profile: async () => ({ historyId: 'history-2' }), history: async () => ({ historyId: 'history-2', history: [{ messagesAdded: [{ message: { id: raw.id, threadId: raw.threadId } }] }] }), threadMetadata: async () => ({ id: raw.threadId, messages: [raw] }), message: async () => raw }) as never,
       attachmentIngestion: { ingest: async () => ({ type: 'document', key: scopeKey }), ingestMessage: async () => [] },
-      classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined,
+      classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined,
     });
     await expect(service.sync(actor, connector.key)).resolves.toMatchObject({ synced: 1 });
     expect(saved.messages[0]).toMatchObject({ providerMessageId: raw.id, body: 'Please review this.' });
@@ -1373,7 +1396,7 @@ describe('canonical inbox intelligence operations', () => {
     const raw = { id: 'message', threadId: 'thread', labelIds: ['INBOX'], internalDate: String(Date.parse(now)), payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'sender@example.com' }, { name: 'To', value: connector.email }, { name: 'Subject', value: 'Subject' }], body: { data: Buffer.from('Body').toString('base64url') } } };
     const repository = { syncThread: async () => { writes += 1; }, reconcileInbox: async () => undefined, deleteProviderThread: async () => undefined };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => !takenOver, releaseSync: async () => undefined, setSyncState: async () => true };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ profile: async () => ({ historyId: '2' }), listThreads: async () => ({ threads: [{ id: 'thread' }] }), threadMetadata: async () => ({ id: 'thread', messages: [raw] }), message: async () => raw }) as never, classify: async () => { await Bun.sleep(1); takenOver = true; return { priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }; }, embed: async () => embedding, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ profile: async () => ({ historyId: '2' }), listThreads: async () => ({ threads: [{ id: 'thread' }] }), threadMetadata: async () => ({ id: 'thread', messages: [raw] }), message: async () => raw }) as never, classify: async () => { await Bun.sleep(1); takenOver = true; return { priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }; }, embed: async () => embedding, publishInboxChanged: async () => undefined });
     await expect(service.sync(actor, connector.key)).rejects.toThrow('Email synchronization batch failed');
     expect(writes).toBe(0);
   });
@@ -1386,7 +1409,7 @@ describe('canonical inbox intelligence operations', () => {
     };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined };
     const gmail = { modifyThread: async (...input: unknown[]) => { calls.push(['provider', ...input]); } };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, enqueueRepair: async () => { calls.push(['intent']); return { jobId: `job-${calls.length}` }; }, completeRepair: async () => undefined, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, enqueueRepair: async () => { calls.push(['intent']); return { jobId: `job-${calls.length}` }; }, completeRepair: async () => undefined, publishInboxChanged: async () => undefined });
     await service.setFavorite(actor, { threadKey: thread.key, isFavorite: true });
     await service.setFavorite(actor, { threadKey: thread.key, isFavorite: true });
     await service.setFavorite(actor, { threadKey: thread.key, isFavorite: false });
@@ -1399,15 +1422,15 @@ describe('canonical inbox intelligence operations', () => {
     const repairs: unknown[] = [];
     const repository = { thread: async () => ({ thread: { ...thread, labels: ['INBOX'] }, messages: [message] }), mutateThreadState: async () => { throw new Error('database unavailable'); } };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ modifyThread: async () => undefined }) as never, enqueueRepair: async (input) => { repairs.push(input); } });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ modifyThread: async () => undefined }) as never, enqueueRepair: async (input) => { repairs.push(input); } });
     expect(await service.setFavorite(actor, { threadKey: thread.key, isFavorite: true })).toMatchObject({ repairPending: 1, items: [{ status: 'repairPending', error: 'database unavailable' }] });
-    expect(repairs).toEqual([expect.objectContaining({ organizationKey: actor.organizationKey, scopeKey, connectorKey: connector.key, reason: 'favorite', operationKey: expect.any(String), operation: { kind: 'favorite', threadKeys: [thread.key], isFavorite: true } })]);
+    expect(repairs).toEqual([expect.objectContaining({ teamKey: actor.teamKey, scopeKey, connectorKey: connector.key, reason: 'favorite', operationKey: expect.any(String), operation: { kind: 'favorite', threadKeys: [thread.key], isFavorite: true } })]);
   });
 
   test('classifies transient Gmail mutation failures as repair-pending and definitive failures as failed', async () => {
     const repository = { thread: async () => ({ thread, messages: [message] }), mutateThreadState: async () => thread };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined };
-    const make = (error: GmailApiError) => createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ modifyThread: async () => { throw error; } }) as never, enqueueRepair: async () => ({ jobId: 'repair' }) });
+    const make = (error: GmailApiError) => createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ modifyThread: async () => { throw error; } }) as never, enqueueRepair: async () => ({ jobId: 'repair' }) });
     await expect(make(new GmailApiError(403, ['rateLimitExceeded'])).setFavorite(actor, { threadKey: thread.key, isFavorite: true })).resolves.toMatchObject({ repairPending: 1, failed: 0 });
     await expect(make(new GmailApiError(429)).setFavorite(actor, { threadKey: thread.key, isFavorite: true })).resolves.toMatchObject({ repairPending: 1, failed: 0 });
     await expect(make(new GmailApiError(400)).setFavorite(actor, { threadKey: thread.key, isFavorite: true })).resolves.toMatchObject({ repairPending: 0, failed: 1 });
@@ -1417,7 +1440,7 @@ describe('canonical inbox intelligence operations', () => {
     let mutations = 0, deletions = 0, repairs = 0;
     const repository = { thread: async () => ({ thread, messages: [message] }), mutateThreadState: async () => { mutations += 1; return thread; }, deleteProviderThread: async () => { deletions += 1; } };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ modifyThread: async () => { throw new GmailApiError(404); } }) as never, enqueueRepair: async () => ({ jobId: 'repair' }), completeRepair: async () => { repairs += 1; }, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ modifyThread: async () => { throw new GmailApiError(404); } }) as never, enqueueRepair: async () => ({ jobId: 'repair' }), completeRepair: async () => { repairs += 1; }, publishInboxChanged: async () => undefined });
     await expect(service.setFavorite(actor, { threadKey: thread.key, isFavorite: true })).resolves.toMatchObject({ succeeded: 1, failed: 0, repairPending: 0, items: [{ threadKey: thread.key, status: 'deleted', error: expect.stringContaining('deleted locally') }] });
     expect({ mutations, deletions, repairs }).toEqual({ mutations: 0, deletions: 1, repairs: 1 });
   });
@@ -1433,7 +1456,7 @@ describe('canonical inbox intelligence operations', () => {
     };
     const repository = { thread: async () => ({ thread, messages: [message] }), mutateThreadState: async () => ({ ...thread, isFavorite: true }) };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ modifyThread: async () => { providerCalls += 1; } }) as never, enqueueRepair: async () => ({ jobId: 'repair' }), completeRepair: async () => undefined, idempotency: idempotency as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ modifyThread: async () => { providerCalls += 1; } }) as never, enqueueRepair: async () => ({ jobId: 'repair' }), completeRepair: async () => undefined, idempotency: idempotency as never, publishInboxChanged: async () => undefined });
     const first = await service.setFavorite(actor, { threadKey: thread.key, isFavorite: true }, false, 'request-1');
     expect(await service.setFavorite(actor, { threadKey: thread.key, isFavorite: true }, false, 'request-1')).toEqual(first);
     expect(providerCalls).toBe(1);
@@ -1450,7 +1473,7 @@ describe('canonical inbox intelligence operations', () => {
     };
     const tone = { key: userKey, scopeKey, identifier: userKey, name: 'Calm', instruction: 'Write calmly.', isFavorite: false, embedding, createdAt: now, updatedAt: now };
     const repository = { createTone: async () => { creates += 1; return tone; } };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, idempotency: idempotency as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, idempotency: idempotency as never, publishInboxChanged: async () => undefined });
     const first = await service.createTone(actor, { name: 'Calm', instruction: 'Write calmly.' }, 'tone-request');
     expect(await service.createTone(actor, { name: 'Calm', instruction: 'Write calmly.', isFavorite: false }, 'tone-request')).toEqual(first);
     await expect(service.createTone(actor, { name: 'Calm', instruction: 'Write differently.' }, 'tone-request')).rejects.toThrow('different email request');
@@ -1472,7 +1495,7 @@ describe('canonical inbox intelligence operations', () => {
     };
     const tone = { key: userKey, scopeKey, identifier: userKey, name: 'Calm', instruction: 'Write calmly.', isFavorite: false, embedding, createdAt: now, updatedAt: now };
     const repository = { createTone: async () => { creates += 1; await gate; return tone; } };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, idempotency: idempotency as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, idempotency: idempotency as never, publishInboxChanged: async () => undefined });
     try {
       const first = service.createTone(actor, { name: 'Calm', instruction: 'Write calmly.' }, 'long-create');
       await Bun.sleep(25);
@@ -1493,7 +1516,7 @@ describe('canonical inbox intelligence operations', () => {
       claim: async () => ({ status: 'claimed' as const }), start: async () => false, renew: async () => true, complete: async () => {},
       fail: async () => { failures += 1; }, release: async () => { releases += 1; },
     };
-    const service = createEmailService({ repository: {} as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => { executions += 1; return embedding; }, idempotency: idempotency as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: {} as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => { executions += 1; return embedding; }, idempotency: idempotency as never, publishInboxChanged: async () => undefined });
     await expect(service.createTone(actor, { name: 'Calm', instruction: 'Write calmly.' }, 'start-lost')).rejects.toMatchObject({ code: 'EMAIL_IDEMPOTENCY_PENDING', retryable: true });
     expect({ releases, failures, executions }).toEqual({ releases: 1, failures: 0, executions: 0 });
   });
@@ -1508,7 +1531,7 @@ describe('canonical inbox intelligence operations', () => {
     };
     const tone = { key: userKey, scopeKey, identifier: userKey, name: 'Calm', instruction: 'Write calmly.', isFavorite: false, embedding, createdAt: now, updatedAt: now };
     const repository = { createTone: async () => { creates += 1; return tone; } };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, idempotency: idempotency as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, idempotency: idempotency as never, publishInboxChanged: async () => undefined });
     await expect(service.createTone(actor, { name: 'Calm', instruction: 'Write calmly.' }, 'completion-retry')).resolves.toMatchObject({ key: userKey });
     expect({ completions, releases, creates }).toEqual({ completions: 3, releases: 0, creates: 1 });
   });
@@ -1524,7 +1547,7 @@ describe('canonical inbox intelligence operations', () => {
     };
     const tone = { key: userKey, scopeKey, identifier: userKey, name: 'Calm', instruction: 'Write calmly.', isFavorite: false, embedding, createdAt: now, updatedAt: now };
     const repository = { createTone: async () => { creates += 1; return tone; } };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, idempotency: idempotency as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, idempotency: idempotency as never, publishInboxChanged: async () => undefined });
     await expect(service.createTone(actor, { name: 'Calm', instruction: 'Write calmly.' }, 'crash-after-create')).rejects.toThrow('ledger unavailable');
     beyondLease = true;
     await expect(service.createTone(actor, { name: 'Calm', instruction: 'Write calmly.' }, 'crash-after-create')).rejects.toThrow('still active');
@@ -1541,7 +1564,7 @@ describe('canonical inbox intelligence operations', () => {
       start: async () => { state = 'started'; return true; }, renew: async () => true, complete: async () => {}, release: async () => {},
       fail: async (_identity: unknown, _hash: string, _owner: string, value: typeof failure) => { failure = value; state = 'failed'; },
     };
-    const service = createEmailService({ repository: {} as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => { executions += 1; throw new Error('provider token=secret stack'); }, idempotency: idempotency as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: {} as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => { executions += 1; throw new Error('provider token=secret stack'); }, idempotency: idempotency as never, publishInboxChanged: async () => undefined });
     await expect(service.createTone(actor, { name: 'Calm', instruction: 'Write calmly.' }, 'failed-tone')).rejects.toMatchObject({ code: 'EMAIL_IDEMPOTENCY_FAILED', retryable: false });
     await expect(service.createTone(actor, { name: 'Calm', instruction: 'Write calmly.' }, 'failed-tone')).rejects.toMatchObject({ code: 'EMAIL_IDEMPOTENCY_FAILED', retryable: false });
     expect(executions).toBe(1);
@@ -1555,7 +1578,7 @@ describe('canonical inbox intelligence operations', () => {
       claim: async () => state === 'started' ? { status: 'indeterminate' as const } : { status: 'claimed' as const },
       start: async () => { state = 'started'; return true; }, renew: async () => true, complete: async () => {}, release: async () => {}, fail: async () => { throw new Error('ledger unavailable'); },
     };
-    const service = createEmailService({ repository: {} as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => { executions += 1; throw new Error('business failed'); }, idempotency: idempotency as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: {} as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => { executions += 1; throw new Error('business failed'); }, idempotency: idempotency as never, publishInboxChanged: async () => undefined });
     await expect(service.createTone(actor, { name: 'Calm', instruction: 'Write calmly.' }, 'failed-write')).rejects.toThrow('business failed');
     await expect(service.createTone(actor, { name: 'Calm', instruction: 'Write calmly.' }, 'failed-write')).rejects.toMatchObject({ code: 'EMAIL_IDEMPOTENCY_INDETERMINATE', retryable: false });
     expect(executions).toBe(1);
@@ -1566,7 +1589,7 @@ describe('canonical inbox intelligence operations', () => {
     const idempotency = { claim: async () => ({ status: 'claimed' as const }), start: async () => true, renew: async () => true, complete: async () => { completions += 1; }, release: async () => { releases += 1; } };
     const service = createEmailService({
       repository: { deleteDraft: async () => { deletes += 1; return { deletedKey: userKey, storageKeys: ['tone-owned-object'] }; } } as never,
-      connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       storage: { delete: async () => { throw new Error('storage unavailable'); } } as never,
       publishInboxChanged: async () => { throw new Error('event unavailable'); }, idempotency: idempotency as never,
     });
@@ -1587,11 +1610,11 @@ describe('canonical inbox intelligence operations', () => {
       mutateThreadState: async (input: any) => ({ ...details.get(input.threadKey)!.thread, unread: !input.mutation.isRead }),
     };
     const connectors = {
-      getExact: async (_organization: string, _scope: string, key: string) => key === connector.key ? connector : key === secondConnector.key ? secondConnector : null,
+      getExact: async (_team: string, _scope: string, key: string) => key === connector.key ? connector : key === secondConnector.key ? secondConnector : null,
       credentials: (value: any) => ({ accessToken: value.key, expiresAt: '2027-01-01T00:00:00.000Z' }),
       claimSync: async (key: string) => { order.push(`claim:${key}`); return true; }, renewSync: async () => true, releaseSync: async () => undefined,
     };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: (token) => ({ modifyThread: async (providerThreadId: string) => { order.push(`provider:${token}:${providerThreadId}`); } }) as never, enqueueRepair: async ({ connectorKey }) => { order.push(`intent:${connectorKey}`); return { jobId: `job:${connectorKey}` }; }, completeRepair: async () => undefined, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: (token) => ({ modifyThread: async (providerThreadId: string) => { order.push(`provider:${token}:${providerThreadId}`); } }) as never, enqueueRepair: async ({ connectorKey }) => { order.push(`intent:${connectorKey}`); return { jobId: `job:${connectorKey}` }; }, completeRepair: async () => undefined, publishInboxChanged: async () => undefined });
     const result = await service.setReadState(actor, { threadKeys: [thread.key, missingKey, secondThreadKey], isRead: true });
     expect(result).toMatchObject({ requested: 3, succeeded: 2, failed: 1, repairPending: 0, items: [{ threadKey: thread.key, status: 'succeeded' }, { threadKey: missingKey, status: 'failed' }, { threadKey: secondThreadKey, status: 'succeeded' }] });
     expect(order.filter((item) => item.startsWith('claim:'))).toEqual([`claim:${secondConnector.key}`, `claim:${connector.key}`].sort());
@@ -1603,7 +1626,7 @@ describe('canonical inbox intelligence operations', () => {
     const repository = { thread: async () => ({ thread: { ...thread, labels: ['INBOX'] }, messages: [message] }), mutateThreadState: async () => { calls.push('persist'); throw new Error('database'); } };
     const connectors = { getExact: async () => ({ ...connector, lastSyncedAt: now, historyId: 'history-1' }), credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
     const gmail = { trashThread: async (...args: unknown[]) => { calls.push(['trash', ...args]); } };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, enqueueRepair: async (input) => { repairs.push(input); return { jobId: 'trash-job' }; } });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, enqueueRepair: async (input) => { repairs.push(input); return { jobId: 'trash-job' }; } });
     expect(await service.trashThread(actor, { threadKey: thread.key })).toMatchObject({ repairPending: 1, items: [{ status: 'repairPending' }] });
     expect(calls).toEqual([['trash', 'thread-1'], 'persist']);
     expect(repairs).toEqual([expect.objectContaining({ reason: 'trash', operationKey: expect.any(String) })]);
@@ -1611,7 +1634,7 @@ describe('canonical inbox intelligence operations', () => {
 
   test('does not enqueue or call Gmail trash while sync/send owns the connector lease', async () => {
     let providerCalls = 0, intents = 0;
-    const service = createEmailService({ repository: { thread: async () => ({ thread, messages: [message] }) } as never, connectors: { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => false } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ trashThread: async () => { providerCalls += 1; } }) as never, enqueueRepair: async () => { intents += 1; } });
+    const service = createEmailService({ repository: { thread: async () => ({ thread, messages: [message] }) } as never, connectors: { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => false } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ trashThread: async () => { providerCalls += 1; } }) as never, enqueueRepair: async () => { intents += 1; } });
     expect(await service.trashThread(actor, { threadKey: thread.key })).toMatchObject({ failed: 1, items: [{ status: 'failed', error: expect.stringContaining('already running') }] });
     expect({ providerCalls, intents }).toEqual({ providerCalls: 0, intents: 0 });
   });
@@ -1621,7 +1644,7 @@ describe('canonical inbox intelligence operations', () => {
     const service = createEmailService({
       repository: { thread: async () => ({ thread, messages: [message] }), mutateThreadState: async () => { localWrites += 1; return thread; } } as never,
       connectors: { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => false } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       client: () => ({ modifyThread: async () => { providerCalls += 1; } }) as never,
     });
     await expect(service.setReadState(actor, { threadKey: thread.key, isRead: true }, true)).resolves.toMatchObject({
@@ -1637,11 +1660,11 @@ describe('canonical inbox intelligence operations', () => {
     let persisted = 0;
     const repository = { thread: async () => ({ thread: { ...thread, labels: ['INBOX'] }, messages: [message] }), mutateThreadState: async () => { persisted += 1; throw new Error('database'); } };
     const baseConnectors = { getExact: async () => ({ ...connector, lastSyncedAt: now, historyId: 'history-1' }), credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined };
-    const providerFailure = createEmailService({ repository: repository as never, connectors: baseConnectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ trashThread: async () => { throw new Error('provider'); } }) as never, enqueueRepair: async () => ({ jobId: 'provider-failure' }) });
+    const providerFailure = createEmailService({ repository: repository as never, connectors: baseConnectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ trashThread: async () => { throw new Error('provider'); } }) as never, enqueueRepair: async () => ({ jobId: 'provider-failure' }) });
     expect(await providerFailure.trashThread(actor, { threadKey: thread.key })).toMatchObject({ repairPending: 1, items: [{ status: 'repairPending', error: 'provider' }] });
     expect(persisted).toBe(0);
 
-    const recoveryFailure = createEmailService({ repository: repository as never, connectors: baseConnectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ trashThread: async () => undefined }) as never, enqueueRepair: async () => ({ jobId: 'recovery' }) });
+    const recoveryFailure = createEmailService({ repository: repository as never, connectors: baseConnectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ trashThread: async () => undefined }) as never, enqueueRepair: async () => ({ jobId: 'recovery' }) });
     expect(await recoveryFailure.trashThread(actor, { threadKey: thread.key })).toMatchObject({ repairPending: 1, items: [{ status: 'repairPending' }] });
     expect(persisted).toBe(1);
   });
@@ -1653,7 +1676,7 @@ describe('canonical inbox intelligence operations', () => {
     const connectors = { getExact: async () => scoped, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined };
     const repository = { clearTrash: async (input: unknown) => { events.push(['local', input]); return { threadsDeleted: 2, documentsDeleted: 5 }; }, deleteProviderThread: async (...input: unknown[]) => { events.push(['remove-thread', ...input]); } };
     const gmail = { listTrashMessages: async () => pages.shift()!, batchDeleteMessages: async (ids: string[]) => { events.push(['delete', ids]); }, threadMetadata: async () => { throw new GmailApiError(404); } };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, enqueueClearTrash: async () => { events.push('intent'); return { jobId: 'clear-job' }; }, completeClearTrash: async () => { events.push('complete'); }, publishInboxChanged: async () => { events.push('publish'); } });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, enqueueClearTrash: async () => { events.push('intent'); return { jobId: 'clear-job' }; }, completeClearTrash: async () => { events.push('complete'); }, publishInboxChanged: async () => { events.push('publish'); } });
     expect(await service.clearTrash(actor, { connectorKey: connector.key })).toEqual({ connectorKey: connector.key, providerMessagesDeleted: 3, threadsDeleted: 2, documentsDeleted: 5 });
     expect(events).toEqual(['intent', ['delete', ['a', 'b', 'c']], ['remove-thread', scopeKey, connector.key, 't', { connectorKey: connector.key, token: expect.any(String) }], ['local', { scopeKey, accountKey: connector.key, providerMessageIds: ['b', 'a', 'c'], trashSnapshotAt: expect.any(String), lease: { connectorKey: connector.key, token: expect.any(String) } }], 'publish', 'complete']);
   });
@@ -1662,7 +1685,7 @@ describe('canonical inbox intelligence operations', () => {
     const scoped = { ...connector, scopes: ['https://mail.google.com/'] };
     const connectors = { getExact: async () => scoped, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined };
     let completions = 0;
-    const crashed = createEmailService({ repository: { clearTrash: async () => { throw new Error('database unavailable'); } } as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ listTrashMessages: async () => ({ messages: [] }), batchDeleteMessages: async () => undefined }) as never, enqueueClearTrash: async () => ({ jobId: 'clear-job' }), completeClearTrash: async () => { completions += 1; } });
+    const crashed = createEmailService({ repository: { clearTrash: async () => { throw new Error('database unavailable'); } } as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ listTrashMessages: async () => ({ messages: [] }), batchDeleteMessages: async () => undefined }) as never, enqueueClearTrash: async () => ({ jobId: 'clear-job' }), completeClearTrash: async () => { completions += 1; } });
     await expect(crashed.clearTrash(actor, { connectorKey: connector.key })).rejects.toThrow('local cleanup is pending');
     expect(completions).toBe(0);
 
@@ -1671,7 +1694,7 @@ describe('canonical inbox intelligence operations', () => {
   test('idempotently clears local Trash when Gmail Trash is already empty', async () => {
     const scoped = { ...connector, scopes: ['https://mail.google.com/'] };
     let batches = 0;
-    const service = createEmailService({ repository: { clearTrash: async () => ({ threadsDeleted: 1, documentsDeleted: 3 }) } as never, connectors: { getExact: async () => scoped, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'admin' }), client: () => ({ listTrashMessages: async () => ({ messages: [] }), batchDeleteMessages: async () => { batches += 1; } }) as never, enqueueClearTrash: async () => ({ jobId: 'empty' }), completeClearTrash: async () => undefined, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: { clearTrash: async () => ({ threadsDeleted: 1, documentsDeleted: 3 }) } as never, connectors: { getExact: async () => scoped, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'admin' }), client: () => ({ listTrashMessages: async () => ({ messages: [] }), batchDeleteMessages: async () => { batches += 1; } }) as never, enqueueClearTrash: async () => ({ jobId: 'empty' }), completeClearTrash: async () => undefined, publishInboxChanged: async () => undefined });
     expect(await service.clearTrash(actor, { connectorKey: connector.key })).toMatchObject({ providerMessagesDeleted: 0, threadsDeleted: 1, documentsDeleted: 3 });
     expect(batches).toBe(0);
   });
@@ -1682,7 +1705,7 @@ describe('canonical inbox intelligence operations', () => {
     const service = createEmailService({
       repository: { clearTrash: async (input: unknown) => { localCalls.push(input); return { threadsDeleted: 1, documentsDeleted: 2 }; }, deleteProviderThread: async () => undefined } as never,
       connectors: { getExact: async () => scoped, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       client: () => ({ batchDeleteMessages: async () => { throw new GmailApiError(404, ['notFound']); }, threadMetadata: async () => { throw new GmailApiError(404, ['notFound']); } }) as never,
       publishInboxChanged: async () => undefined,
     });
@@ -1698,7 +1721,7 @@ describe('canonical inbox intelligence operations', () => {
     const repository = { syncThread: async (input: any) => { writes.push(input); return thread; }, deleteProviderThread: async (...input: unknown[]) => { removals.push(input); }, clearTrash: async (input: any) => { cleanups.push(input); return { threadsDeleted: 0, documentsDeleted: 1 }; } };
     const connectors = { getExact: async () => scoped, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined };
     const gmail = { listTrashMessages: async () => ({ messages: [{ id: 'trashed', threadId: 'mixed-thread' }] }), batchDeleteMessages: async () => undefined, threadMetadata: async () => ({ id: 'mixed-thread', messages: [{ id: survivor.id, threadId: survivor.threadId }] }), message: async () => survivor };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding, enqueueClearTrash: async () => ({ jobId: 'clear' }), completeClearTrash: async () => undefined, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, enqueueClearTrash: async () => ({ jobId: 'clear' }), completeClearTrash: async () => undefined, publishInboxChanged: async () => undefined });
     await service.clearTrash(actor, { connectorKey: connector.key });
     expect(removals).toEqual([]);
     expect(writes[0]).toMatchObject({ reconcileMessages: true, thread: { providerThreadId: 'mixed-thread', unread: true, labels: ['INBOX', 'UNREAD'] }, messages: [{ providerMessageId: 'survivor', unread: true }] });
@@ -1727,8 +1750,8 @@ describe('canonical inbox intelligence operations', () => {
     const service = createEmailService({
       repository: repository as never,
       connectors: { getExact: async () => scoped, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never,
-      classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding,
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never,
+      classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding,
       enqueueClearTrash: async () => ({ jobId: 'merged' }), completeClearTrash: async () => undefined,
       publishAttachmentChanged: async (key, mutation) => publishEmailAttachmentDeletionEvents(key, mutation, {
         scope: async (_scope, event) => { events.push(event); },
@@ -1764,8 +1787,8 @@ describe('canonical inbox intelligence operations', () => {
     const service = createEmailService({
       repository: repository as never,
       connectors: { getExact: async () => scoped, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never,
-      classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', intent: 'Review' }), embed: async () => embedding,
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never,
+      classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding,
       enqueueClearTrash: async () => ({ jobId: 'partial' }),
       publishAttachmentChanged: async (key, mutation) => publishEmailAttachmentDeletionEvents(key, mutation, {
         scope: async (_scope, event) => { events.push(event); },
@@ -1780,9 +1803,9 @@ describe('canonical inbox intelligence operations', () => {
   test('checks owner/admin role and persisted Gmail scope before clear-Trash intent or provider access', async () => {
     let intents = 0, providers = 0;
     const options = { repository: {} as never, connectors: { getExact: async () => connector } as never, client: () => { providers += 1; return {} as never; }, enqueueClearTrash: async () => { intents += 1; return { jobId: 'job' }; } };
-    const missingScope = createEmailService({ ...options, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }) });
+    const missingScope = createEmailService({ ...options, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }) });
     await expect(missingScope.clearTrash(actor, { connectorKey: connector.key })).rejects.toThrow('requires reconnecting');
-    const moderator = createEmailService({ ...options, authorize: async () => ({ membershipKey: scopeKey, role: 'moderator' }) });
+    const moderator = createEmailService({ ...options, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'moderator' }) });
     await expect(moderator.clearTrash(actor, { connectorKey: connector.key })).rejects.toThrow('may not perform');
     expect({ intents, providers }).toEqual({ intents: 0, providers: 0 });
   });
@@ -1798,8 +1821,8 @@ describe('canonical inbox intelligence operations', () => {
       listMessageTranslations: async () => [translation],
       listMessageSummaries: async () => [summaryRecord],
     };
-    const ask = (async (_organization: string, input: any) => ({ output: { text: input.systemPrompt.startsWith('Translate') ? 'Bonjour.' : JSON.stringify({ sections: [{ heading: 'Request', body: 'A review is requested.' }, { heading: 'Next step', body: 'Respond after review.' }] }) } })) as never;
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), ask, embed: async () => embedding, publishInboxChanged: async () => undefined });
+    const ask = (async (_team: string, input: any) => ({ output: { text: input.systemPrompt.startsWith('Translate') ? 'Bonjour.' : JSON.stringify({ sections: [{ heading: 'Request', body: 'A review is requested.' }, { heading: 'Next step', body: 'Respond after review.' }] }) } })) as never;
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), ask, embed: async () => embedding, publishInboxChanged: async () => undefined });
     const translated = await service.translateMessage(actor, { messageKey: message.key, targetLanguage: 'French' });
     const summarized = await service.summarizeMessage(actor, { messageKey: message.key });
     expect(translated).toMatchObject({ language: 'French', version: { type: 'translation', language: 'French', content: 'Bonjour.' } });
@@ -1827,7 +1850,7 @@ describe('canonical inbox intelligence operations', () => {
     };
     const service = createEmailService({
       repository: repository as never, connectors: {} as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'moderator' }), idempotency: idempotency as never,
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'moderator' }), idempotency: idempotency as never,
       storage: { delete: async () => { order.push('storage'); throw new Error('deferred cleanup'); } } as never,
       publishInboxChanged: async () => { order.push('publish'); },
     });
@@ -1846,7 +1869,7 @@ describe('inbox watch subscription', () => {
       const writes: unknown[] = [];
       const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'secret-access', refreshToken: 'secret-refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }), updateWatch: async (...args: unknown[]) => { writes.push(args); return 'revision'; } };
       const gmail = { watch: async (topic: string) => { expect(topic).toBe('projects/example/topics/inbox'); return { historyId: '123', expiration: String(Date.parse('2026-08-24T12:00:00.000Z')) }; } };
-      const service = createEmailService({ connectors: connectors as never, repository: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, enqueueWatchRepair: async () => ({ jobId: 'watch-intent' }), completeWatchRepair: async () => undefined });
+      const service = createEmailService({ connectors: connectors as never, repository: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, enqueueWatchRepair: async () => ({ jobId: 'watch-intent' }), completeWatchRepair: async () => undefined });
       const result = await service.registerWatch(actor, connector.key);
       expect(result).toEqual({ watchExpiresAt: '2026-08-24T12:00:00.000Z', connectorRevision: 'revision' });
       expect(JSON.stringify(result)).not.toContain('secret');
@@ -1862,7 +1885,7 @@ describe('inbox watch subscription', () => {
     try {
       const events: string[] = [];
       const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), updateWatch: async () => { events.push('persist'); return 'revision'; } };
-      const service = createEmailService({ connectors: connectors as never, repository: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ watch: async () => { events.push('provider'); return { historyId: '1', expiration: String(Date.now() + 60_000) }; } }) as never, enqueueWatchRepair: async () => { events.push('intent'); return { jobId: 'watch' }; }, completeWatchRepair: async () => { events.push('complete'); } });
+      const service = createEmailService({ connectors: connectors as never, repository: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ watch: async () => { events.push('provider'); return { historyId: '1', expiration: String(Date.now() + 60_000) }; } }) as never, enqueueWatchRepair: async () => { events.push('intent'); return { jobId: 'watch' }; }, completeWatchRepair: async () => { events.push('complete'); } });
       await service.registerWatch(actor, connector.key);
       expect(events).toEqual(['intent', 'provider', 'persist', 'complete']);
     } finally { if (previous === undefined) delete process.env.GMAIL_PUBSUB_TOPIC; else process.env.GMAIL_PUBSUB_TOPIC = previous; }
@@ -1874,14 +1897,14 @@ describe('inbox watch subscription', () => {
     try {
       const repairs: unknown[] = [];
       const base = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }) };
-      const failed = createEmailService({ connectors: { ...base, updateWatch: async () => 'revision' } as never, repository: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ watch: async () => { throw new Error('provider unavailable'); } }) as never, enqueueWatchRepair: async (input) => { repairs.push(input); } });
+      const failed = createEmailService({ connectors: { ...base, updateWatch: async () => 'revision' } as never, repository: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ watch: async () => { throw new Error('provider unavailable'); } }) as never, enqueueWatchRepair: async (input) => { repairs.push(input); } });
       await expect(failed.registerWatch(actor, connector.key)).rejects.toThrow('provider unavailable');
-      expect(repairs).toEqual([expect.objectContaining({ organizationKey: actor.organizationKey, scopeKey, connectorKey: connector.key, operationKey: expect.any(String) })]);
-      const stale = createEmailService({ connectors: { ...base, updateWatch: async () => null } as never, repository: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ watch: async () => ({ historyId: '1', expiration: String(Date.now() + 60_000) }) }) as never, enqueueWatchRepair: async (input) => { repairs.push(input); } });
+      expect(repairs).toEqual([expect.objectContaining({ teamKey: actor.teamKey, scopeKey, connectorKey: connector.key, operationKey: expect.any(String) })]);
+      const stale = createEmailService({ connectors: { ...base, updateWatch: async () => null } as never, repository: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ watch: async () => ({ historyId: '1', expiration: String(Date.now() + 60_000) }) }) as never, enqueueWatchRepair: async (input) => { repairs.push(input); } });
       await expect(stale.registerWatch(actor, connector.key)).rejects.toThrow('changed while initializing');
       expect(repairs).toHaveLength(2);
       let lookups = 0;
-      const revoked = createEmailService({ connectors: { ...base, getExact: async () => lookups++ === 0 ? connector : { ...connector, status: 'revoked' }, updateWatch: async () => null } as never, repository: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ watch: async () => ({ historyId: '1', expiration: String(Date.now() + 60_000) }) }) as never, enqueueWatchRepair: async (input) => { repairs.push(input); } });
+      const revoked = createEmailService({ connectors: { ...base, getExact: async () => lookups++ === 0 ? connector : { ...connector, status: 'revoked' }, updateWatch: async () => null } as never, repository: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ watch: async () => ({ historyId: '1', expiration: String(Date.now() + 60_000) }) }) as never, enqueueWatchRepair: async (input) => { repairs.push(input); } });
       await expect(revoked.registerWatch(actor, connector.key)).rejects.toThrow('changed while initializing');
       expect(repairs).toHaveLength(3);
     } finally { if (previous === undefined) delete process.env.GMAIL_PUBSUB_TOPIC; else process.env.GMAIL_PUBSUB_TOPIC = previous; }
@@ -1912,7 +1935,7 @@ describe('new email drafting', () => {
       attachmentResources: async () => [{ type: 'document', key: userKey, name: 'attachment.txt', content: 'attachment' }],
       createDraft: async (input: any) => { calls.push('persist'); created.push(input); return { key: userKey, createdAt: now, updatedAt: now, ...input }; },
     };
-    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector] } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => { calls.push('embed'); return semanticEmbedding; }, ask: (async () => { calls.push('ask'); throw new Error('must not ask'); }) as never });
+    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector] } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => { calls.push('embed'); return semanticEmbedding; }, ask: (async () => { calls.push('ask'); throw new Error('must not ask'); }) as never });
     const result = await service.draftNew(actor, { to: ['person@example.com'], subject: '', authoredBody: '', generationMode: 'preserve', attachments: [{ type: 'document', key: userKey }] });
     expect(calls).toEqual(['attachments', 'embed', 'persist']);
     expect(result).toMatchObject({ subject: '', finalContent: '', status: 'edited' });
@@ -1930,7 +1953,7 @@ describe('new email drafting', () => {
         return { key: userKey, scopeKey, variant: 'new', accountKey: connector.key, to: ['person@example.com'], subject: '', generatedContent: 'Generated', finalContent, status: 'edited', embedding: nextEmbedding, createdAt: now, updatedAt: now };
       },
     };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => semanticEmbedding });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => semanticEmbedding });
     const result = await service.updateDraft(actor, { draftKey: userKey, finalContent: '   ' });
     expect(result.finalContent).toBe('   ');
     expect(updated.finalContent).toBe('   ');
@@ -1953,7 +1976,7 @@ describe('new email drafting', () => {
       resolveAttachments: async () => { calls.push('authorize attachments'); throw new Error('cross-scope attachment'); },
       updateDraft: async () => { calls.push('update'); return {}; },
     };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => { calls.push('embed'); return embedding; } });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => { calls.push('embed'); return embedding; } });
     await expect(service.updateDraft(actor, { draftKey: userKey, finalContent: 'Changed', attachments: [{ type: 'document', key: scopeKey }] })).rejects.toThrow('cross-scope attachment');
     expect(calls).toEqual(['authorize attachments']);
   });
@@ -1971,7 +1994,7 @@ describe('new email drafting', () => {
     const service = createEmailService({
       repository: repository as never,
       connectors: { listAuthorizedScope: async () => [connector] } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       storage: { download: async () => { downloads += 1; return { bytes: new Uint8Array(25 * 1024 * 1024 + 1) }; } } as never,
       embed: async () => embedding,
     });
@@ -1989,7 +2012,7 @@ describe('new email drafting', () => {
       attachmentResources: async () => { attachmentCalls += 1; return []; },
       updateDraft: async (_scopeKey: string, input: any) => ({ key: userKey, scopeKey, variant: 'new', accountKey: connector.key, to: ['person@example.com'], subject: '', generatedContent: 'Generated', status: 'edited', embedding: input.embedding, createdAt: now, updatedAt: now, ...input }),
     };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding });
     await service.updateDraft(actor, { draftKey: userKey, finalContent: 'Changed body' });
     expect(attachmentCalls).toBe(0);
   });
@@ -2007,9 +2030,9 @@ describe('new email drafting', () => {
     const service = createEmailService({
       repository: repository as never,
       connectors: { getExact: async () => connector } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       embed: async () => embedding,
-      ask: (async (_organizationKey: string, input: any) => { requests.push(input); return { output: { text: JSON.stringify({ decision: 'draft', body: 'I can review this on a weekday.' }) } }; }) as never,
+      ask: (async (_teamKey: string, input: any) => { requests.push(input); return { output: { text: JSON.stringify({ decision: 'draft', body: 'I can review this on a weekday.' }) } }; }) as never,
       publishInboxChanged: async () => undefined,
     });
 
@@ -2035,7 +2058,7 @@ describe('new email drafting', () => {
     const make = (text: string) => createEmailService({
       repository: repository as never,
       connectors: { getExact: async () => connector } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       embed: async () => { generated += 1; return embedding; },
       ask: (async () => ({ output: { text } })) as never,
     });
@@ -2050,7 +2073,7 @@ describe('new email drafting', () => {
     const service = createEmailService({
       repository: { subscriptionDraftForMessage: async () => existing } as never,
       connectors: {} as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       ask: (async () => { asks += 1; return { output: { text: '' } }; }) as never,
     });
     await expect(service.createDraftIfNeeded(actor, { connectorKey: connector.key, threadKey: thread.key, messageKey: message.key })).resolves.toMatchObject({ decision: 'draft', existing: true, draft: { key: existing.key } });
@@ -2065,7 +2088,7 @@ describe('new email drafting', () => {
       attachmentResources: async () => [{ type: 'document', key: scopeKey, name: 'attachment.txt', content: 'attachment' }],
       updateDraft: async (_scopeKey: string, input: any) => { update = input; return { key: userKey, scopeKey, variant: 'new', accountKey: connector.key, to: ['person@example.com'], subject: '', generatedContent: 'Generated', status: 'edited', embedding: input.embedding, createdAt: now, updatedAt: now, ...input }; },
     };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding });
     const result = await service.updateDraft(actor, { draftKey: userKey, finalContent: 'Changed', attachments: refs });
     expect(update).toMatchObject({ draftKey: userKey, finalContent: 'Changed', attachments: refs, embedding });
     expect(result).toMatchObject({ finalContent: 'Changed', attachments: refs });
@@ -2074,7 +2097,7 @@ describe('new email drafting', () => {
   test('grounds generated content in untrusted authored source fields', async () => {
     let request: any;
     const repository = { writingProfile: async () => ({ key: userKey, name: 'Direct', tone: 'Be direct.', style: '', structure: '', vocabulary: '', conventions: '' }), resolveAttachments: async () => [], createDraft: async (input: any) => ({ key: userKey, createdAt: now, updatedAt: now, ...input }) };
-    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector] } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async (_organizationKey: string, input: unknown) => { request = input; return { output: { text: 'Grounded body.' } }; }) as never });
+    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector] } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async (_teamKey: string, input: unknown) => { request = input; return { output: { text: 'Grounded body.' } }; }) as never });
     await service.draftNew(actor, { to: ['person@example.com', 'team@example.com'], cc: ['copy@example.com'], bcc: ['hidden@example.com'], subject: 'Source subject', authoredBody: 'Source body', tone: 'direct' });
     expect(request.systemPrompt).toContain('Ground the generated subject and body in the authored source');
     const prompt = JSON.parse(request.messages[0].content[0].text);
@@ -2090,7 +2113,7 @@ describe('new email drafting', () => {
   test('parses fenced structured output, develops sparse input, and persists refined fields', async () => {
     let request: any;
     const repository = { writingProfile: async () => ({ key: userKey, name: 'Direct', tone: 'Be direct.', style: '', structure: '', vocabulary: '', conventions: '' }), resolveAttachments: async () => [], createDraft: async (input: any) => ({ key: userKey, createdAt: now, updatedAt: now, ...input }) };
-    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector] } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async (_organizationKey: string, input: unknown) => { request = input; return { output: { text: `Here is the draft:\n\`\`\`json\n${JSON.stringify({ subject: 'Meeting Follow-Up', body: 'Dear John,\n\nI wanted to follow up about the meeting.\n\nBest,\nAlice Example' })}\n\`\`\`` } }; }) as never });
+    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector] } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async (_teamKey: string, input: unknown) => { request = input; return { output: { text: `Here is the draft:\n\`\`\`json\n${JSON.stringify({ subject: 'Meeting Follow-Up', body: 'Dear John,\n\nI wanted to follow up about the meeting.\n\nBest,\nAlice Example' })}\n\`\`\`` } }; }) as never });
     const result = await service.draftNew(actor, { to: ['john@example.com'], subject: 'meting', tone: 'direct' });
     expect(result).toMatchObject({ subject: 'Meeting Follow-Up' });
     expect(result.generatedContent).toStartWith('Dear John,');
@@ -2124,9 +2147,9 @@ describe('new email drafting', () => {
     const service = createEmailService({
       repository: repository as never,
       connectors: { listAuthorizedScope: async () => [connector] } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       embed: async () => embedding,
-      ask: (async (_organizationKey: string, input: any) => {
+      ask: (async (_teamKey: string, input: any) => {
         requests.push(input);
         const prompt = JSON.parse(input.messages[0].content[0].text);
         const tone = Object.keys(profiles).find((key) => profiles[key as keyof typeof profiles].name === prompt.toneProfile.name) as keyof typeof profiles;
@@ -2155,7 +2178,7 @@ describe('new email drafting', () => {
   test('rejects malformed JSON-like generation instead of displaying it as the body', async () => {
     let persisted = 0;
     const repository = { writingProfile: async () => ({ key: userKey, name: 'Direct', tone: 'Be direct.', style: '', structure: '', vocabulary: '', conventions: '' }), resolveAttachments: async () => [], createDraft: async () => { persisted += 1; return {}; } };
-    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector] } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => ({ output: { text: '{"subject":"Plan","body":}' } })) as never });
+    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector] } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => ({ output: { text: '{"subject":"Plan","body":}' } })) as never });
     await expect(service.draftNew(actor, { to: ['person@example.com'], subject: 'Plan', tone: 'direct' })).rejects.toThrow('invalid structured draft');
     expect(persisted).toBe(0);
   });
@@ -2163,7 +2186,7 @@ describe('new email drafting', () => {
   test('allows an individual greeting only for one primary recipient without inventing a name', async () => {
     let request: any;
     const repository = { writingProfile: async () => ({ key: userKey, name: 'Direct', tone: 'Be direct.', style: '', structure: '', vocabulary: '', conventions: '' }), resolveAttachments: async () => [], createDraft: async (input: any) => ({ key: userKey, createdAt: now, updatedAt: now, ...input }) };
-    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [] } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async (_organizationKey: string, input: unknown) => { request = input; return { output: { text: 'Hello John,\n\nBody.\n\nBest,' } }; }) as never });
+    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [] } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async (_teamKey: string, input: unknown) => { request = input; return { output: { text: 'Hello John,\n\nBody.\n\nBest,' } }; }) as never });
     await service.draftNew(actor, { to: ['john@example.com'], subject: 'Plan', tone: 'direct' });
     const prompt = JSON.parse(request.messages[0].content[0].text);
     expect(prompt.recipientContext).toEqual({ primaryRecipientCount: 1, ccRecipientCount: 0, totalRecipientCount: 1, salutationMode: 'individual-if-name-is-clear' });
@@ -2179,7 +2202,7 @@ describe('new email drafting', () => {
       ['cmsp3gwac0009r07kdlin5eoi', { name: null, alias: 'Alias Bob' }],
       ['cmsp3gwac0009r07kdlin5eoj', { name: null, alias: null }],
     ]);
-    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [] } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), getUser: async (key) => names.get(key) ?? null, embed: async () => embedding, ask: (async (_organizationKey: string, input: any) => { prompts.push(JSON.parse(input.messages[0].content[0].text)); return { output: { text: 'Ready.' } }; }) as never });
+    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [] } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), getUser: async (key) => names.get(key) ?? null, embed: async () => embedding, ask: (async (_teamKey: string, input: any) => { prompts.push(JSON.parse(input.messages[0].content[0].text)); return { output: { text: 'Ready.' } }; }) as never });
     for (const key of names.keys()) await service.draftNew({ ...actor, userKey: key }, { to: ['person@example.com'], subject: 'Plan', tone: 'direct' });
     expect(prompts.map(({ senderIdentity }) => senderIdentity.displayName)).toEqual(['Authenticated Alice', 'Alias Bob', null]);
   });
@@ -2188,7 +2211,7 @@ describe('new email drafting', () => {
     let persisted = 0;
     let output = '';
     const repository = { writingProfile: async () => ({ key: userKey, name: 'Direct', tone: 'Direct', style: '', structure: '', vocabulary: '', conventions: '' }), resolveAttachments: async () => [], createDraft: async () => { persisted += 1; return {}; } };
-    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [] } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => ({ output: { text: output } })) as never });
+    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [] } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => ({ output: { text: output } })) as never });
     for (const token of ['[Your Name]', '[First Name Here]', '{{ user.name }}', '<name>', '${name}', '%SENDER_NAME%']) {
       output = `Best,\n${token}`;
       await expect(service.draftNew(actor, { to: ['person@example.com'], subject: 'Plan', tone: 'direct' })).rejects.toThrow('unresolved sender identity placeholder');
@@ -2199,7 +2222,7 @@ describe('new email drafting', () => {
   test('allows generated signatures without comparing names to the authenticated profile', async () => {
     let output = 'Alice from Finance approved the plan.';
     const repository = { writingProfile: async () => ({ key: userKey, name: 'Direct', tone: 'Direct', style: '', structure: '', vocabulary: '', conventions: '' }), resolveAttachments: async () => [], createDraft: async (input: any) => ({ ...input, key: userKey, createdAt: now, updatedAt: now }) };
-    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [] } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => ({ output: { text: output } })) as never });
+    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [] } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => ({ output: { text: output } })) as never });
     await expect(service.draftNew(actor, { to: ['person@example.com'], subject: 'Plan', tone: 'direct' })).resolves.toMatchObject({ generatedContent: output });
     output = 'Body.\n\nBest,\nMallory Example';
     await expect(service.draftNew(actor, { to: ['person@example.com'], subject: 'Plan', tone: 'direct' })).resolves.toMatchObject({ generatedContent: output });
@@ -2213,7 +2236,7 @@ describe('new email drafting', () => {
       createDraft: async (input: any) => ({ ...input, key: userKey, createdAt: now, updatedAt: now }),
       updateDraft: async (_scopeKey: string, input: any) => ({ key: userKey, scopeKey, accountKey: connector.key, variant: 'new', to: ['person@example.com'], subject: 'Plan', generatedContent: 'Body', status: 'edited', embedding, createdAt: now, updatedAt: now, ...input }),
     };
-    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [] } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding });
+    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [] } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding });
     await expect(service.draftNew(actor, { to: ['person@example.com'], subject: 'Plan', authoredBody: 'Unsigned authored text.', generationMode: 'preserve' })).resolves.toMatchObject({ finalContent: 'Unsigned authored text.' });
     await expect(service.draftNew(actor, { to: ['person@example.com'], subject: 'Plan', authoredBody: 'Best,\nMallory', generationMode: 'preserve' })).resolves.toMatchObject({ finalContent: 'Best,\nMallory' });
     await expect(service.updateDraft(actor, { draftKey: userKey, finalContent: 'Regards,\nMallory' })).resolves.toMatchObject({ finalContent: 'Regards,\nMallory' });
@@ -2232,7 +2255,7 @@ describe('new email drafting', () => {
       semanticReplyContext: async () => [],
       createDraft: async (input: any) => ({ key: userKey, createdAt: now, updatedAt: now, ...input }),
     };
-    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector], getExact: async () => connector } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async (_organizationKey: string, input: { systemPrompt: string }) => { prompts.push(input.systemPrompt); return { output: { text: 'Draft body.' } }; }) as never });
+    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector], getExact: async () => connector } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async (_teamKey: string, input: { systemPrompt: string }) => { prompts.push(input.systemPrompt); return { output: { text: 'Draft body.' } }; }) as never });
     const customToneKey = newId();
     await service.draft(actor, { threadKey: userKey, tone: customToneKey });
     await service.draftNew(actor, { to: ['person@example.com'], subject: 'Plan', tone: customToneKey });
@@ -2249,7 +2272,7 @@ describe('new email drafting', () => {
       writingProfile: async () => ({ key: userKey, name: 'Direct', tone: 'Be direct.', style: '', structure: '', vocabulary: '', conventions: '' }),
       createDraft: async (input: any) => { created = input; return { key: userKey, createdAt: now, updatedAt: now, ...input }; },
     };
-    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [] } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => ({ output: { text: 'A provider-independent draft.' } })) as never });
+    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [] } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => ({ output: { text: 'A provider-independent draft.' } })) as never });
     const result = await service.draftNew(actor, { to: ['person@example.com'], subject: 'Plan', tone: 'direct' });
     expect(result).toMatchObject({ generatedContent: 'A provider-independent draft.' });
     expect(result).not.toHaveProperty('connectorKey');
@@ -2265,7 +2288,7 @@ describe('new email drafting', () => {
       createDraft: async (input: any) => { created.push(input); return { key: userKey, createdAt: now, updatedAt: now, ...input }; },
     };
     const connectors = { listAuthorizedScope: async () => [connector], credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }) };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({}) as never, embed: async () => embedding, ask: (async () => ({ output: { text: 'Please review the plan.' } })) as never });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({}) as never, embed: async () => embedding, ask: (async () => ({ output: { text: 'Please review the plan.' } })) as never });
     const result = await service.draftNew(actor, { to: ['person@example.com'], subject: 'Plan', tone: 'direct', attachments: [{ type: 'document', key: userKey }] });
     expect(result).toMatchObject({ variant: 'new', subject: 'Plan', generatedContent: 'Please review the plan.', attachments: [{ type: 'document', key: userKey }] });
     expect(created[0]).toMatchObject({ scopeKey, accountKey: connector.key, variant: 'new', status: 'generated' });
@@ -2274,7 +2297,7 @@ describe('new email drafting', () => {
   test('rejects viewers before attachment resolution or generation', async () => {
     let called = false;
     const repository = { resolveAttachments: async () => { called = true; return []; } };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'viewer' }) });
     await expect(service.draftNew(actor, { to: ['person@example.com'], subject: 'Plan', tone: 'direct' })).rejects.toThrow('may not perform');
     expect(called).toBe(false);
   });
@@ -2282,7 +2305,7 @@ describe('new email drafting', () => {
   test('keeps a new draft unassigned when multiple inboxes are active and none is selected', async () => {
     const other = { ...connector, key: 'cmsp3gwac0009r07kdlin5eoi', providerAccountId: 'google-2', email: 'other@example.com' };
     const repository = { writingProfile: async () => ({ key: userKey, name: 'Direct', tone: 'Be direct.', style: '', structure: '', vocabulary: '', conventions: '' }), resolveAttachments: async () => [], createDraft: async (input: any) => ({ key: userKey, createdAt: now, updatedAt: now, ...input }) };
-    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector, other] } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => ({ output: { text: 'Draft.' } })) as never });
+    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector, other] } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => ({ output: { text: 'Draft.' } })) as never });
     await expect(service.draftNew(actor, { to: ['person@example.com'], subject: 'Plan', tone: 'direct' })).resolves.not.toHaveProperty('connectorKey');
   });
 });
@@ -2294,7 +2317,7 @@ describe('reply context', () => {
     const lower = { ...message, key: newId(), providerMessageId: 'message-a', sentAt: now, from: 'a@example.com' };
     const higher = { ...message, key: newId(), providerMessageId: 'message-z', sentAt: now, from: 'z@example.com' };
     const repository = { thread: async () => ({ thread, messages: [higher, lower] }), writingProfile: async () => ({ key: userKey, name: 'Calm', tone: 'Calm', style: '', structure: '', vocabulary: '', conventions: '' }), resolveAttachments: async () => [], listReplyContext: async () => [], semanticReplyContext: async () => [], createDraft: async (input: any) => { created.push(input); return { ...input, key: newId(), createdAt: now, updatedAt: now }; } };
-    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => connector } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async (_organizationKey: string, request: unknown) => { requests.push(request); return { output: { text: 'Reply.' } }; }) as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => connector } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async (_teamKey: string, request: unknown) => { requests.push(request); return { output: { text: 'Reply.' } }; }) as never, publishInboxChanged: async () => undefined });
     await service.draft(actor, { threadKey: thread.key, tone: 'calm' });
     expect(created[0]).toMatchObject({ messageKey: higher.key, to: ['replies@example.com'] });
     expect(requests[0]?.systemPrompt).toContain('same language as the latest email');
@@ -2302,7 +2325,7 @@ describe('reply context', () => {
   test('drafts from persisted messages while provider synchronization is disabled', async () => {
     const repository = { thread: async () => ({ thread, messages: [message] }), writingProfile: async () => ({ key: userKey, name: 'Direct', tone: 'Direct', style: '', structure: '', vocabulary: '', conventions: '' }), resolveAttachments: async () => [], listReplyContext: async () => [], semanticReplyContext: async () => [], createDraft: async (input: any) => ({ ...input, key: newId(), createdAt: now, updatedAt: now }) };
     const unavailable = { ...connector, status: 'error' as const, syncEnabled: false };
-    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => unavailable } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => ({ output: { text: 'Reply.\n\nBest,\nOscar' } })) as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => unavailable } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => ({ output: { text: 'Reply.\n\nBest,\nOscar' } })) as never, publishInboxChanged: async () => undefined });
     await expect(service.draft(actor, { threadKey: thread.key, tone: 'direct' })).resolves.toMatchObject({ variant: 'reply', generatedContent: 'Reply.\n\nBest,\nOscar' });
   });
   test('resolves and persists inbound and outbound reply-all recipients without Bcc, owners, or duplicates', async () => {
@@ -2313,7 +2336,7 @@ describe('reply context', () => {
       thread: async () => ({ thread, messages: [source] }), writingProfile: async () => ({ key: userKey, name: 'Calm', tone: 'Calm', style: '', structure: '', vocabulary: '', conventions: '' }), resolveAttachments: async () => [], listReplyContext: async () => [], semanticReplyContext: async () => [],
       createDraft: async (input: any) => { created.push(input); return { key: newId(), createdAt: now, updatedAt: now, ...input }; },
     };
-    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => connector } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async (_organizationKey: string, request: any) => { prompts.push(JSON.parse(request.messages[0].content[0].text)); return { output: { text: 'Reply.' } }; }) as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => connector } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async (_teamKey: string, request: any) => { prompts.push(JSON.parse(request.messages[0].content[0].text)); return { output: { text: 'Reply.' } }; }) as never, publishInboxChanged: async () => undefined });
     await service.draft(actor, { threadKey: thread.key, tone: 'calm', replyMode: 'reply_all' });
     expect(created[0]).toMatchObject({ replyMode: 'reply_all', to: ['reply@example.com', 'other@example.com'], cc: ['copy@example.com'] });
     expect(created[0]).not.toHaveProperty('bcc');
@@ -2328,7 +2351,7 @@ describe('reply context', () => {
   test('rejects placeholder-bearing replies before persistence', async () => {
     let persisted = false;
     const repository = { thread: async () => ({ thread, messages: [message] }), writingProfile: async () => ({ key: userKey, name: 'Calm', tone: 'Calm', style: '', structure: '', vocabulary: '', conventions: '' }), resolveAttachments: async () => [], listReplyContext: async () => [], semanticReplyContext: async () => [], createDraft: async () => { persisted = true; return {}; } };
-    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => connector } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => ({ output: { text: 'Regards,\n[Your Name]' } })) as never });
+    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => connector } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => ({ output: { text: 'Regards,\n[Your Name]' } })) as never });
     await expect(service.draft(actor, { threadKey: thread.key, tone: 'calm' })).rejects.toThrow('unresolved sender identity placeholder');
     expect(persisted).toBe(false);
   });
@@ -2336,13 +2359,13 @@ describe('reply context', () => {
   test('rejects replies whose primary recipient is missing or the mailbox owner', async () => {
     const base = { ...message, direction: 'outbound' as const, from: connector.email, to: [connector.email], replyTo: undefined };
     const repository = { thread: async () => ({ thread, messages: [base] }) };
-    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => connector } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }) });
+    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => connector } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }) });
     await expect(service.draft(actor, { threadKey: thread.key, tone: 'calm' })).rejects.toThrow('non-owner primary recipient');
   });
   test('allows viewers to list exact public DTOs and restricts every mutation to workspace mutators', async () => {
     const note = { key: userKey, scopeKey, name: 'Availability', text: 'No Friday meetings.', embedding, createdAt: now, updatedAt: now };
     const repository = { listReplyContext: async () => [note] };
-    const viewer = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
+    const viewer = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'viewer' }) });
     expect(await viewer.listReplyContext(actor)).toEqual([{ key: userKey, name: note.name, text: note.text, createdAt: now, updatedAt: now }]);
     await expect(viewer.createReplyContext(actor, { name: 'x', text: 'y' })).rejects.toThrow('may not perform');
     await expect(viewer.updateReplyContext(actor, { noteKey: userKey, text: 'y' })).rejects.toThrow('may not perform');
@@ -2363,7 +2386,7 @@ describe('reply context', () => {
       },
       deleteReplyContext: async (_scopeKey: string, noteKeys: string[]) => ({ deletedKeys: noteKeys }),
     };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'moderator' }), embed: async ({ text }) => { embedded.push(text); return embedding; }, publishInboxChanged: async (key) => { publications.push(key); } });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'moderator' }), embed: async ({ text }) => { embedded.push(text); return embedding; }, publishInboxChanged: async (key) => { publications.push(key); } });
     const created = await service.createReplyContext(actor, { name: 'Availability', text: 'No Fridays.' });
     const updated = await service.updateReplyContext(actor, { noteKey: userKey, text: 'No Mondays.' });
     await service.deleteReplyContext(actor, { noteKeys: [userKey] });
@@ -2390,7 +2413,7 @@ describe('reply context', () => {
       semanticReplyContext: async (...args: unknown[]) => { semanticArgs = args; return semantic; },
       createDraft: async (input: any) => { persisted = input; return { key: userKey, createdAt: now, updatedAt: now, ...input }; },
     };
-    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => connector } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async ({ text }) => { embedded.push(text); return embedding; }, ask: (async (_organizationKey: string, input: any) => { request = input; return { output: { text: 'Safe reply.' } }; }) as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => connector } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async ({ text }) => { embedded.push(text); return embedding; }, ask: (async (_teamKey: string, input: any) => { request = input; return { output: { text: 'Safe reply.' } }; }) as never, publishInboxChanged: async () => undefined });
     await service.draft(actor, { threadKey: userKey, tone: userKey });
     const data = JSON.parse(request.messages[0].content[0].text);
     expect(request.systemPrompt).not.toContain('Calm');
@@ -2425,7 +2448,7 @@ describe('reply context', () => {
       semanticReplyContext: async () => { throw new Error('context unavailable'); },
       createDraft: async () => { persisted = true; return {}; },
     };
-    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => connector } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => { asked = true; throw new Error('generation'); }) as never });
+    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => connector } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => { asked = true; throw new Error('generation'); }) as never });
     await expect(service.draft(actor, { threadKey: userKey, tone: 'calm' })).rejects.toThrow('context unavailable');
     expect(asked).toBe(false);
     expect(persisted).toBe(false);
@@ -2443,7 +2466,7 @@ describe('reply context', () => {
       semanticReplyContext: async () => [],
       createDraft: async (input: any) => ({ key: newId(), createdAt: now, updatedAt: now, ...input }),
     };
-    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => connector } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async (_organizationKey: string, input: any) => { request = input; return { output: { text: 'Reply.' } }; }) as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => connector } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async (_teamKey: string, input: any) => { request = input; return { output: { text: 'Reply.' } }; }) as never, publishInboxChanged: async () => undefined });
     await service.draft(actor, { threadKey: thread.key, tone: 'calm' });
     const current = JSON.parse(request.messages[0].content[0].text).currentThread;
     expect(current.messages[0].body).toHaveLength(34_000);
@@ -2463,7 +2486,7 @@ describe('reply context', () => {
       resolveAttachments: async () => [], listReplyContext: async () => [], semanticReplyContext: async () => [],
       createDraft: async (input: any) => ({ key: newId(), createdAt: now, updatedAt: now, ...input }),
     };
-    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => connector } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async ({ text }) => { embedded.push(text); return embedding; }, ask: (async (_organizationKey: string, input: any) => { request = input; return { output: { text: 'Reply.' } }; }) as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: { getExact: async () => connector } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async ({ text }) => { embedded.push(text); return embedding; }, ask: (async (_teamKey: string, input: any) => { request = input; return { output: { text: 'Reply.' } }; }) as never, publishInboxChanged: async () => undefined });
     await service.draft(actor, { threadKey: thread.key, tone: 'calm' });
     const current = JSON.parse(request.messages[0].content[0].text).currentThread;
     expect(current.messages.map(({ body }: any) => body[0])).toEqual(['1', '2', '3', '4']);
@@ -2485,13 +2508,13 @@ describe('reply context', () => {
       createDraft: async (input: any) => { created.push(input); return { key: newId(), createdAt: now, updatedAt: now, ...input }; },
     };
     const providerFailure = new ProviderExecutionError('ask', [{ modelId: 'model', providerId: 'provider', externalModelId: 'external', code: 'provider_unavailable', message: 'down' }]);
-    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector], getExact: async () => connector } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => { throw providerFailure; }) as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector], getExact: async () => connector } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => { throw providerFailure; }) as never, publishInboxChanged: async () => undefined });
     await expect(service.draft(actor, { threadKey: thread.key, tone: 'formal' })).rejects.toBe(providerFailure);
     await expect(service.draftNew(actor, { to: ['person@example.com'], subject: 'möte', tone: 'formal' })).rejects.toBe(providerFailure);
     expect(created).toHaveLength(0);
 
     const programmingFailure = new TypeError('bad adapter contract');
-    const strict = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector], getExact: async () => connector } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => { throw programmingFailure; }) as never });
+    const strict = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector], getExact: async () => connector } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, ask: (async () => { throw programmingFailure; }) as never });
     await expect(strict.draft(actor, { threadKey: thread.key, tone: 'formal' })).rejects.toBe(programmingFailure);
     await expect(strict.draftNew(actor, { to: ['person@example.com'], subject: 'Plan', tone: 'formal' })).rejects.toBe(programmingFailure);
   });
@@ -2499,39 +2522,39 @@ describe('reply context', () => {
 
 describe('inbox metadata', () => {
   test('re-embeds only semantic updates and projects no connector secrets or internal cover key', async () => {
-    const inbox = { key: newId(), organizationKey: actor.organizationKey, scopeKey, connectorKey: connector.key, name: 'Work', description: 'Primary', coverImageKey: newId(), isFavorite: false, embedding, createdAt: now, updatedAt: now };
+    const inbox = { key: newId(), teamKey: actor.teamKey, scopeKey, connectorKey: connector.key, name: 'Work', description: 'Primary', coverImageKey: newId(), isFavorite: false, embedding, createdAt: now, updatedAt: now };
     const embedded: string[] = [];
     const patches: unknown[] = [];
     const inboxes = {
       getByConnector: async () => inbox,
-      update: async (_organizationKey: string, _scopeKey: string, _connectorKey: string, _expectedUpdatedAt: string, patch: unknown) => { patches.push(patch); return { inbox: { ...inbox, ...(patch as object) }, coverStorageKey: 'media/cover.jpg' }; },
+      update: async (_teamKey: string, _scopeKey: string, _connectorKey: string, _expectedUpdatedAt: string, patch: unknown) => { patches.push(patch); return { inbox: { ...inbox, ...(patch as object) }, coverStorageKey: 'media/cover.jpg' }; },
       coverStorageKey: async () => 'media/cover.jpg',
     };
-    const service = createEmailService({ repository: {} as never, connectors: { getExact: async () => ({ ...connector, encryptedCredentials: 'do-not-return', syncLeaseToken: '11111111-1111-4111-8111-111111111111' }) } as never, inboxes: inboxes as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async ({ text }) => { embedded.push(text); return embedding; }, signImageUrl: async () => 'https://signed.test/cover' });
+    const service = createEmailService({ repository: {} as never, connectors: { getExact: async () => ({ ...connector, encryptedCredentials: 'do-not-return', syncLeaseToken: '11111111-1111-4111-8111-111111111111' }) } as never, inboxes: inboxes as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async ({ text }) => { embedded.push(text); return embedding; }, signImageUrl: async () => 'https://signed.test/cover' });
     await service.updateInbox(actor, { connectorKey: connector.key, isFavorite: true });
     expect(embedded).toEqual([]);
     const result = await service.updateInbox(actor, { connectorKey: connector.key, name: 'Leadership', description: null });
     expect(embedded).toEqual(['Leadership']);
     expect(patches[1]).toMatchObject({ name: 'Leadership', description: null, embedding });
     expect(result).toMatchObject({ key: inbox.key, connectorKey: connector.key, name: 'Leadership', coverUrl: 'https://signed.test/cover' });
-    expect(JSON.stringify(result)).not.toMatch(/encryptedCredentials|syncLeaseToken|coverImageKey|embedding|organizationKey|scopeKey/);
+    expect(JSON.stringify(result)).not.toMatch(/encryptedCredentials|syncLeaseToken|coverImageKey|embedding|teamKey|scopeKey/);
   });
 
   test('retries a semantic patch from the latest inbox revision', async () => {
-    const first = { key: newId(), organizationKey: actor.organizationKey, scopeKey, connectorKey: connector.key, name: 'Work', description: 'Primary', isFavorite: false, embedding, createdAt: now, updatedAt: now };
+    const first = { key: newId(), teamKey: actor.teamKey, scopeKey, connectorKey: connector.key, name: 'Work', description: 'Primary', isFavorite: false, embedding, createdAt: now, updatedAt: now };
     const latest = { ...first, isFavorite: true, updatedAt: '2026-08-23T00:00:01.000Z' };
     let current = first;
     const attempts: Array<{ expectedUpdatedAt: string; patch: any }> = [];
     const inboxes = {
       getByConnector: async () => current,
-      update: async (_organizationKey: string, _scopeKey: string, _connectorKey: string, expectedUpdatedAt: string, patch: any) => {
+      update: async (_teamKey: string, _scopeKey: string, _connectorKey: string, expectedUpdatedAt: string, patch: any) => {
         attempts.push({ expectedUpdatedAt, patch });
         if (attempts.length === 1) { current = latest; return null; }
         return { inbox: { ...current, ...patch, updatedAt: '2026-08-23T00:00:02.000Z' } };
       },
       coverStorageKey: async () => undefined,
     };
-    const service = createEmailService({ repository: {} as never, connectors: { getExact: async () => connector } as never, inboxes: inboxes as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: {} as never, connectors: { getExact: async () => connector } as never, inboxes: inboxes as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
     const result = await service.updateInbox(actor, { connectorKey: connector.key, name: 'Leadership' });
     expect(attempts.map(({ expectedUpdatedAt }) => expectedUpdatedAt)).toEqual([first.updatedAt, latest.updatedAt]);
     expect(result).toMatchObject({ name: 'Leadership', isFavorite: true });
@@ -2545,7 +2568,7 @@ describe('custom tone metadata', () => {
       repository: { initializeTones: async () => { initialized = true; return []; } } as never,
       inboxes: { ensure: async () => { initialized = true; return {}; } } as never,
       connectors: {} as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'moderator' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'moderator' }),
     });
     await expect(service.ensureInbox(actor, { ...connector, scopes: [...connector.scopes], syncEnabled: true, syncStatus: 'idle' }, { name: 'Work' })).rejects.toThrow('may not perform');
     expect(initialized).toBe(false);
@@ -2562,7 +2585,7 @@ describe('custom tone metadata', () => {
       createTone: async (_scopeKey: string, input: any) => ({ ...tone, ...input }),
       updateTone: async (_scopeKey: string, _toneKey: string, _expectedUpdatedAt: string, patch: unknown) => { updates.push(patch); return { ...tone, ...(patch as object) }; },
     };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async ({ text }) => { embedded.push(text); return embedding; }, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async ({ text }) => { embedded.push(text); return embedding; }, publishInboxChanged: async () => undefined });
     const listed = await service.tones(actor);
     await service.createTone(actor, { name: 'Calm', instruction: 'Use calm language.' });
     const updated = await service.updateTone(actor, { toneKey, instruction: 'Use a measured voice.' });
@@ -2591,7 +2614,7 @@ describe('custom tone metadata', () => {
         return { ...current, ...patch, updatedAt: '2026-08-23T00:00:02.000Z' };
       },
     };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
     const result = await service.updateTone(actor, { toneKey, name: 'Measured' });
     expect(attempts.map(({ expectedUpdatedAt }) => expectedUpdatedAt)).toEqual([first.updatedAt, latest.updatedAt]);
     expect(attempts.every(({ patch }) => patch.embedding === embedding)).toBe(true);
@@ -2601,7 +2624,7 @@ describe('custom tone metadata', () => {
 
 describe('semantic root search', () => {
   test('authorizes before embedding and keeps inbox and tone searches on bounded repositories', async () => {
-    const inbox = { key: newId(), organizationKey: actor.organizationKey, scopeKey, connectorKey: connector.key, name: 'Leadership', description: 'Executive decisions', isFavorite: true, embedding, createdAt: now, updatedAt: now };
+    const inbox = { key: newId(), teamKey: actor.teamKey, scopeKey, connectorKey: connector.key, name: 'Leadership', description: 'Executive decisions', isFavorite: true, embedding, createdAt: now, updatedAt: now };
     const toneKey = newId();
     const tone = { key: toneKey, scopeKey, identifier: toneKey, name: 'Measured', instruction: 'Use a calm voice.', isFavorite: false, embedding, createdAt: now, updatedAt: now };
     const calls: unknown[] = [];
@@ -2611,14 +2634,14 @@ describe('semantic root search', () => {
       repository: { searchTones: async (...input: unknown[]) => { calls.push(['tones', ...input]); return [{ tone, score: 0.82 }]; } } as never,
       connectors: { listAuthorizedScope: async () => [connector] } as never,
       inboxes: { search: async (...input: unknown[]) => { calls.push(['inboxes', ...input]); return [{ inbox, score: 0.91 }]; }, coverStorageKey: async () => undefined } as never,
-      authorize: async () => { calls.push('authorized'); return { membershipKey: scopeKey, role: 'viewer' }; },
+      authorize: async () => { calls.push('authorized'); return { teamMembershipKey: scopeKey, role: 'viewer' }; },
       embed: async (input) => { calls.push(['embed', input]); return embedding; },
       userSearches: { record: async (_userKey: string, query: string) => { history.push(query); return {} as never; } } as never,
     });
     expect(await service.searchInboxes(actor, { query: 'leadership', recordHistory: false, createdFrom: now, createdTo: now }, { signal, timeoutMs: 321 })).toMatchObject({ inboxes: [{ key: inbox.key, connectorKey: connector.key, score: 0.91 }] });
     expect(await service.searchTones(actor, { query: 'measured', createdFrom: now, createdTo: now })).toEqual({ tones: [{ key: tone.key, name: tone.name, instruction: tone.instruction, isFavorite: false, createdAt: now, updatedAt: now, score: 0.82 }] });
     expect(calls[0]).toBe('authorized');
-    expect(calls).toContainEqual(['inboxes', actor.organizationKey, scopeKey, [connector.key], embedding, 'leadership', 0.55, 50, { createdFrom: now, createdTo: now }]);
+    expect(calls).toContainEqual(['inboxes', actor.teamKey, scopeKey, [connector.key], embedding, 'leadership', 0.55, 50, { createdFrom: now, createdTo: now }]);
     expect(calls).toContainEqual(['tones', scopeKey, embedding, 'measured', 0.55, 50, { createdFrom: now, createdTo: now }]);
     expect(calls).toContainEqual(['embed', { text: 'leadership', purpose: 'query', signal, timeoutMs: 321 }]);
     expect(history).toEqual(['measured']);
@@ -2639,7 +2662,7 @@ describe('semantic root search', () => {
     const service = createEmailService({
       repository: { searchDrafts: async (...input: unknown[]) => { calls.push(input); return [{ draft, score: 0.88 }]; } } as never,
       connectors: { getExact: async () => connector } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'viewer' }),
       embed: async () => embedding,
     });
     const result = await service.searchDrafts(actor, { connectorKey: connector.key, query: 'roadmap', recordHistory: false, createdFrom: now, createdTo: now });
@@ -2659,7 +2682,7 @@ describe('semantic root search', () => {
         searchDrafts: async () => [{ draft, score: 0.88 }],
       } as never,
       connectors: { getExact: async () => disabled } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'viewer' }),
       embed: async () => embedding,
     });
     await expect(service.searchMessages(actor, { connectorKey: connector.key, query: 'project', recordHistory: false })).resolves.toMatchObject({ threads: [{ key: thread.key, score: 0.91 }] });
@@ -2668,7 +2691,7 @@ describe('semantic root search', () => {
 
   test('rejects reversed semantic creation ranges before embedding', async () => {
     let embedded = false;
-    const service = createEmailService({ repository: {} as never, connectors: {} as never, inboxes: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }), embed: async () => { embedded = true; return embedding; } });
+    const service = createEmailService({ repository: {} as never, connectors: {} as never, inboxes: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'viewer' }), embed: async () => { embedded = true; return embedding; } });
     await expect(service.searchInboxes(actor, { query: 'private', createdFrom: '2026-08-12T00:00:00Z', createdTo: '2026-08-11T00:00:00Z' })).rejects.toThrow('createdTo must be on or after createdFrom');
     await expect(service.searchTones(actor, { query: 'private', createdFrom: '2026-08-12T00:00:00Z', createdTo: '2026-08-11T00:00:00Z' })).rejects.toThrow('createdTo must be on or after createdFrom');
     await expect(service.searchMessages(actor, { connectorKey: connector.key, query: 'private', createdFrom: '2026-08-12T00:00:00Z', createdTo: '2026-08-11T00:00:00Z' })).rejects.toThrow('createdTo must be on or after createdFrom');
@@ -2682,7 +2705,7 @@ describe('semantic root search', () => {
     const service = createEmailService({
       repository: { listDraftPage: async (...input: unknown[]) => { calls.push(input); return { drafts: [activeDraft], total: 73 }; } } as never,
       connectors: { getExact: async () => connector } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'viewer' }),
     });
     const result = await service.listDrafts(actor, { connectorKey: connector.key, createdFrom: now, createdTo: now, offset: 50, limit: 25 });
     expect(calls).toEqual([[scopeKey, connector.key, { connectorKey: connector.key, createdFrom: now, createdTo: now, offset: 50, limit: 25 }]]);
@@ -2694,12 +2717,12 @@ describe('semantic root search', () => {
 describe('multi-inbox account authorization', () => {
   test('strictly validates and normalizes composite overview input before one repository query', async () => {
     const queries: unknown[] = [];
-    const inbox = { key: newId(), organizationKey: connector.organizationKey, scopeKey, connectorKey: connector.key, name: 'Work', isFavorite: false, embedding, createdAt: now, updatedAt: now };
-    const repository = { overview: async (...input: unknown[]) => { queries.push(input); return { threads: [], nextCursor: null, counts: { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 0 }, repositorySecret: true }; }, listDrafts: async () => [] };
-    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector] } as never, inboxes: { getByConnector: async () => inbox, coverStorageKey: async () => undefined } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
-    const output = await service.overview(actor, { connectorKey: connector.key, readState: 'unread', facets: ['favorite', 'urgent', 'important', 'urgent', 'filtered'], search: ' plan ', limit: 20, createdFrom: now, createdTo: now });
+    const inbox = { key: newId(), teamKey: connector.teamKey, scopeKey, connectorKey: connector.key, name: 'Work', isFavorite: false, embedding, createdAt: now, updatedAt: now };
+    const repository = { overview: async (...input: unknown[]) => { queries.push(input); return { threads: [], nextCursor: null, counts: { all: 0, important: 0, urgent: 0, purchases: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0, trash: 0 }, repositorySecret: true }; }, listDrafts: async () => [] };
+    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [connector] } as never, inboxes: { getByConnector: async () => inbox, coverStorageKey: async () => undefined } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'viewer' }) });
+    const output = await service.overview(actor, { connectorKey: connector.key, readState: 'unread', facets: ['favorite', 'urgent', 'important', 'purchases', 'urgent', 'filtered'], search: ' plan ', limit: 20, createdFrom: now, createdTo: now });
     expect(output).not.toHaveProperty('repositorySecret');
-    expect(queries).toEqual([[scopeKey, connector.key, { readState: 'unread', facets: ['urgent', 'important', 'filtered', 'favorite'], search: 'plan', cursor: undefined, limit: 20, createdFrom: now, createdTo: now }]]);
+    expect(queries).toEqual([[scopeKey, connector.key, { readState: 'unread', facets: ['urgent', 'important', 'purchases', 'filtered', 'favorite'], search: 'plan', cursor: undefined, limit: 20, createdFrom: now, createdTo: now }]]);
     expect(() => emailOverviewInputSchema.parse({ connectorKey: connector.key, filter: 'all', readState: 'read', facets: ['urgent'] })).toThrow();
     expect(() => emailOverviewInputSchema.parse({ connectorKey: connector.key, readState: 'read' })).toThrow();
     expect(() => emailOverviewInputSchema.parse({ connectorKey: connector.key, facets: ['urgent'] })).toThrow();
@@ -2715,19 +2738,19 @@ describe('multi-inbox account authorization', () => {
     const unassigned = { key: userKey, scopeKey, variant: 'new', accountKey: scopeKey, to: ['person@example.com'], subject: 'Legacy', generatedContent: 'Body', status: 'generated', embedding, createdAt: now, updatedAt: now };
     const tone = { key: newId(), scopeKey, identifier: newId(), name: 'Measured', instruction: 'Use a calm voice.', isFavorite: false, embedding, createdAt: now, updatedAt: now };
     const repository = { overview: async () => { queried = true; return {}; }, listDrafts: async () => [], listUnassignedDrafts: async () => [unassigned], listTones: async () => [tone] };
-    const inbox = { key: newId(), organizationKey: connector.organizationKey, scopeKey, connectorKey: connector.key, name: 'Work', isFavorite: false, embedding, createdAt: now, updatedAt: now };
-    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [account] } as never, inboxes: { getByConnector: async () => inbox, coverStorageKey: async () => undefined } as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
+    const inbox = { key: newId(), teamKey: connector.teamKey, scopeKey, connectorKey: connector.key, name: 'Work', isFavorite: false, embedding, createdAt: now, updatedAt: now };
+    const service = createEmailService({ repository: repository as never, connectors: { listAuthorizedScope: async () => [account] } as never, inboxes: { getByConnector: async () => inbox, coverStorageKey: async () => undefined } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'viewer' }) });
     const result = await service.overview(actor, {});
     expect(result).toMatchObject({ selectedAccount: null, threads: [], drafts: [], tones: [{ key: tone.key, name: tone.name }], unassignedDrafts: [{ key: unassigned.key }], accounts: [{ key: inbox.key, connectorKey: connector.key, name: 'Work', email: connector.email }] });
     expect(result.unassignedDrafts[0]).not.toHaveProperty('connectorKey');
     expect(queried).toBe(false);
-    expect(JSON.stringify(result)).not.toMatch(/encryptedCredentials|createdByMembershipKey|syncLease|syncPending/);
+    expect(JSON.stringify(result)).not.toMatch(/encryptedCredentials|createdByTeamMembershipKey|syncLease|syncPending/);
   });
 
   test('rejects cross-scope connector selectors before provider access', async () => {
     let providerAccess = false;
     const connectors = { getExact: async () => null, credentials: () => { providerAccess = true; throw new Error('must not decrypt'); } };
-    const service = createEmailService({ repository: {} as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }) });
+    const service = createEmailService({ repository: {} as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }) });
     await expect(service.sync(actor, connector.key)).rejects.toThrow('No connected email account');
     expect(providerAccess).toBe(false);
   });
@@ -2740,7 +2763,7 @@ describe('multi-inbox account authorization', () => {
       updateCredentials: async () => null,
     };
     const service = createEmailService({
-      repository: {} as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      repository: {} as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       refreshCredentials: async () => ({ accessToken: 'fresh', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-01-01T00:00:00.000Z' }),
       client: () => { providerClientCreated = true; return {} as never; },
     });
@@ -2751,7 +2774,7 @@ describe('multi-inbox account authorization', () => {
   test('treats an exact cross-scope disconnect as absent', async () => {
     const service = createEmailService({
       repository: {} as never, connectors: { getExact: async () => null } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), publishInboxChanged: async () => undefined,
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), publishInboxChanged: async () => undefined,
     });
     await expect(service.disconnect(actor, connector.key)).resolves.toEqual({ disconnected: true });
   });
@@ -2778,7 +2801,7 @@ describe('multi-inbox account authorization', () => {
       releaseSend: async () => undefined,
     };
     const gmail = { findMessageByRfc822Id: async () => null, sendRaw: async () => ({ id: 'sent', threadId: 'sent-thread' }) };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, embed: async () => embedding, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, embed: async () => embedding, publishInboxChanged: async () => undefined });
     await expect(service.sendDraft(actor, legacyDraft.key)).resolves.toMatchObject({ sent: true });
     expect(assigned).toEqual([[scopeKey, legacyDraft.key, connector.key]]);
   });
@@ -2788,7 +2811,7 @@ describe('multi-inbox account authorization', () => {
     const service = createEmailService({
       repository: { getDraft: async () => draft } as never,
       connectors: { listAuthorizedScope: async () => [] } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
     });
     await expect(service.sendDraft(actor, draft.key)).rejects.toThrow('No connected email account');
   });
@@ -2799,7 +2822,7 @@ describe('multi-inbox account authorization', () => {
     const repository = { assignDraftConnector: async (...args: unknown[]) => { calls.push(args); return assigned; } };
     const service = createEmailService({
       repository: repository as never, connectors: { listAuthorizedScope: async () => [connector] } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), publishInboxChanged: async (key) => { calls.push(['publish', key]); },
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), publishInboxChanged: async (key) => { calls.push(['publish', key]); },
     });
     await expect(service.assignDraft(actor, { draftKey: userKey, connectorKey: connector.key })).resolves.toMatchObject({ connectorKey: connector.key });
     expect(calls).toEqual([[scopeKey, userKey, connector.key], ['publish', scopeKey]]);
@@ -2813,7 +2836,7 @@ describe('multi-inbox account authorization', () => {
       claimDisconnect: async (key: string) => { calls.push(`claim:${key}`); return disconnecting; },
       revoke: async (key: string) => { calls.push(`revoke:${key}`); return true; },
     };
-    const service = createEmailService({ repository: {} as never, connectors: connectors as never, authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }), client: () => ({ stop: async () => { calls.push('stop'); }, revoke: async (token: string) => { calls.push(`provider-revoke:${token}`); } }) as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({ repository: {} as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ stop: async () => { calls.push('stop'); }, revoke: async (token: string) => { calls.push(`provider-revoke:${token}`); } }) as never, publishInboxChanged: async () => undefined });
     await expect(service.disconnect(actor, connector.key)).resolves.toEqual({ disconnected: true });
     expect(calls).toEqual([`claim:${connector.key}`, `revoke:${connector.key}`]);
   });
@@ -2827,7 +2850,7 @@ describe('multi-inbox account authorization', () => {
         claimDisconnect: async () => disconnecting,
         revoke: async () => false,
       } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
     });
     await expect(service.disconnect(actor, connector.key)).rejects.toThrow('changed while finalizing disconnect');
   });
@@ -2836,7 +2859,7 @@ describe('multi-inbox account authorization', () => {
     const service = createEmailService({
       repository: {} as never,
       connectors: { getExact: async () => connector, claimDisconnect: async () => null } as never,
-      authorize: async () => ({ membershipKey: scopeKey, role: 'owner' }),
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
     });
     await expect(service.disconnect(actor, connector.key)).rejects.toThrow('changed while disconnecting');
   });
@@ -2847,7 +2870,7 @@ describe('model-safe email thread reads', () => {
     const child = { ...message, key: 'cmsp3gwac0009r07kdlin5eoi', providerMessageId: 'message-2', messageIdHeader: '<child@example.com>', inReplyTo: '<source@example.com>', parentMessageId: '<source@example.com>', replyDepth: 1, body: 'x'.repeat(9_000), developmentFixtureIdentifier: 'internal-fixture' };
     let received: unknown[] = [];
     const repository = { readThreadPage: async (...input: unknown[]) => { received = input; return { thread, messages: [message, child], nextCursor: 'next' }; } };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'viewer' }) });
     const output = await service.threadForTool(actor, userKey, 'cursor-1');
     expect(received).toEqual([scopeKey, userKey, 50, 'cursor-1']);
     expect(output.thread).toMatchObject({ unread: true, isRead: false });
@@ -2864,7 +2887,7 @@ describe('model-safe email thread reads', () => {
   test('includes exact 8k bodies without per-message truncation', async () => {
     const exact = { ...message, body: 'x'.repeat(8_000) };
     const repository = { readThreadPage: async () => ({ thread, messages: [exact], nextCursor: null }) };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'viewer' }) });
     const output = await service.threadForTool(actor, userKey);
     expect(output.messages[0]).toMatchObject({ body: exact.body, bodyTruncated: false });
     expect(output.nextCursor).toBeNull();
@@ -2878,7 +2901,7 @@ describe('model-safe email thread reads', () => {
       const start = afterKey ? messages.findIndex(({ key }) => key === afterKey) + 1 : 0;
       return { thread, messages: messages.slice(start), nextCursor: null };
     } };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'viewer' }) });
     const output = await service.threadForTool(actor, userKey);
     expect(output.messages).toHaveLength(8);
     expect(output.messages.reduce((total, item) => total + item.body.length, 0)).toBe(64_000);
@@ -2892,7 +2915,7 @@ describe('model-safe email thread reads', () => {
   test('does not partially emit or skip a message when multiple bodies exceed 64k', async () => {
     const messages = Array.from({ length: 10 }, (_, index) => ({ ...message, key: newId(), providerMessageId: `message-${index}`, body: 'x'.repeat(7_500) }));
     const repository = { readThreadPage: async () => ({ thread, messages, nextCursor: 'repository-next' }) };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'viewer' }) });
     const output = await service.threadForTool(actor, userKey);
     expect(output.messages).toHaveLength(8);
     expect(output.messages.every(({ body }) => body.length === 7_500)).toBe(true);
@@ -2903,7 +2926,7 @@ describe('model-safe email thread reads', () => {
     const messages = Array.from({ length: 50 }, (_, index) => ({ ...message, key: newId(), providerMessageId: `message-${index}`, body: 'x' }));
     let received: unknown[] = [];
     const repository = { readThreadPage: async (...input: unknown[]) => { received = input; return { thread, messages, nextCursor: 'page-2' }; } };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'viewer' }) });
     const output = await service.threadForTool(actor, userKey, 'page-1');
     expect(received).toEqual([scopeKey, userKey, 50, 'page-1']);
     expect(output.messages).toHaveLength(50);
@@ -2916,7 +2939,7 @@ describe('model-safe email thread reads', () => {
     const repository = { readThreadPage: async () => ++page === 1
       ? { thread, messages: [oversized], nextCursor: null }
       : { thread, messages: [], nextCursor: 'repeated-cursor' } };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'viewer' }) });
     const first = await service.threadForTool(actor, userKey);
     expect(first.messages).toHaveLength(1);
     expect(first.messages[0]).toMatchObject({ body: 'x'.repeat(8_000), bodyTruncated: true });
@@ -2931,7 +2954,7 @@ describe('model-safe email thread reads', () => {
     const repository = {
       readThreadPage: async () => { calls.push('repository.readThreadPage'); return { thread: { ...thread, unread: true }, messages: [message], nextCursor: null }; },
     };
-    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ membershipKey: scopeKey, role: 'viewer' }) });
+    const service = createEmailService({ repository: repository as never, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'viewer' }) });
     expect(await service.threadForTool(actor, userKey)).toMatchObject({ thread: { unread: true } });
     expect(calls).toEqual(['repository.readThreadPage']);
   });

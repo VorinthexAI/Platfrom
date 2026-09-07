@@ -16,7 +16,7 @@ test("the authenticated unified stream converges Signal and Archive caches", () 
   expect(bridge).toContain('publishAppEvent({ type: "inbox.changed" })');
   expect(bridge).toContain("contentQueryKeys.all(contentContext)");
   expect(bridge).toMatch(/if \(event\.event === "inbox\.changed"\) \{[\s\S]*?invalidateArchive\(\)[\s\S]*?\}/);
-  expect(bridge).not.toContain('["archive", organizationKey, scopeKey]');
+  expect(bridge).not.toContain('["archive", teamKey, scopeKey]');
 });
 
 test("content changes invalidate Signal metadata in the current workspace", () => {
@@ -37,4 +37,13 @@ test("workspace events and reconnects refresh active canonical search retrievals
   expect(bridge).toContain("queryKey: appSearchQueryRoot");
   expect(bridge.match(/invalidateAppSearch\(\)/g)?.length).toBeGreaterThanOrEqual(3);
   expect(bridge).toContain('refetchType: "active"');
+});
+
+test("referral rewards and no-replay recovery refresh the authenticated user's billing summary", () => {
+  expect(bridge).toContain('import { billingSummaryQueryKey } from "./billing-client"');
+  expect(bridge).toContain('queryKey: billingSummaryQueryKey(userKey), exact: true, refetchType: "active"');
+  expect(bridge).toContain('if (event.event === "referral.reward.created") invalidateBilling()');
+  expect(bridge.match(/invalidateBilling\(\)/g)?.length).toBe(3);
+  expect(bridge).toMatch(/}, currentController\.signal, \(\) => \{[\s\S]*?invalidateBilling\(\)[\s\S]*?publishAppEvent\(\{ type: "event-stream\.connected" \}\)/);
+  expect(bridge).toMatch(/if \(!wasActive\) \{[\s\S]*?invalidateBilling\(\)[\s\S]*?connect\(\)/);
 });

@@ -64,7 +64,7 @@ export async function prepareAndPersistEmailThread(input: {
 }
 
 export async function sortAndPersistInboxThread(input: {
-  organizationKey: string;
+  teamKey: string;
   thread: PreparedThreadInput;
   messages: PreparedMessageInput[];
   reconcileMessages?: boolean;
@@ -74,11 +74,12 @@ export async function sortAndPersistInboxThread(input: {
   lease: { kind: 'sync'; connectorKey: string; token: string };
   beforePersist: () => Promise<void>;
   attachmentCommits?: StagedEmailAttachment[];
+  subscriptionBilling?: Parameters<EmailRepository['syncThread']>[0]['subscriptionBilling'];
 }) {
   if (!input.messages.length) throw new Error('Email thread has no messages');
   if (new Set(input.messages.map(({ providerMessageId }) => providerMessageId)).size !== input.messages.length) throw new Error('Email provider thread contains duplicate message IDs');
   const classified = await mapConcurrent(input.messages, PREPARATION_CONCURRENCY, async (message) => {
-    const classification = await input.classify(input.organizationKey, {
+    const classification = await input.classify(input.teamKey, {
       labels: message.labels ?? [], subject: message.subject, from: message.from, body: message.body, direction: message.direction,
     });
     return { message, classification };
@@ -90,6 +91,7 @@ export async function sortAndPersistInboxThread(input: {
   const labels = [...new Set(relevant.flatMap(({ message }) => message.labels ?? []))];
   const inboxCategory: InboxCategory = relevant.some(({ message, classification }) => inboxCategoryFor(message.labels ?? [], classification) === 'Filtered')
     ? 'Filtered'
+    : relevant.some(({ message, classification }) => inboxCategoryFor(message.labels ?? [], classification) === 'Purchases') ? 'Purchases'
     : relevant.some(({ message, classification }) => inboxCategoryFor(message.labels ?? [], classification) === 'Urgent') ? 'Urgent' : 'Important';
   const starred = labels.includes('STARRED');
   const threadKey = emailThreadKey(input.thread.scopeKey, input.thread.accountKey, input.thread.providerThreadId);
@@ -139,5 +141,6 @@ export async function sortAndPersistInboxThread(input: {
     reconcileMessages: input.reconcileMessages,
     lease: input.lease,
     attachmentCommits: input.attachmentCommits,
+    subscriptionBilling: input.subscriptionBilling,
   });
 }
