@@ -28,6 +28,7 @@ test('migrates before activating backend code and running data changes', async (
   expect(migrationJob).not.toContain('needs.early-deploy.result');
   expect(migrationJob).toContain('- name: Apply graph migrations');
   expect(migrationJob).toContain('run: bun run --cwd backend db:migrate:ci');
+  expect(migrationJob).toContain("S3_BUCKET=\"$(jq -re '.vars.PROD_S3_BUCKET_NAME' .github/environments.json)\"");
   const seedSecrets = workflow.indexOf('\n  seed-db-secrets:');
   const seedSecretsJob = workflow.slice(seedSecrets, workflow.indexOf('\n  backend-deploy:', seedSecrets));
   expect(seedSecretsJob).toContain('OPENROUTER_API_KEY');
@@ -53,6 +54,11 @@ test('uploads canonical app logos before graph migration and deployment', async 
   expect(assetJob).toContain(".vars.PROD_S3_BUCKET_NAME");
   expect(assetJob).toContain('aws-actions/configure-aws-credentials@v4');
   expect(assetJob).toContain('bun run --cwd backend assets:seed:ci');
+  const deployPolicy = await Bun.file(new URL('../../terraform/environments/production/deploy_iam.tf', import.meta.url)).text();
+  expect(deployPolicy).toContain('Action   = ["s3:GetObject", "s3:PutObject"]');
+  expect(deployPolicy).toContain('/apps/logos/v1/*');
+  expect(deployPolicy).toContain('Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]');
+  expect(deployPolicy).toContain('/managed/scope-directory/v1/*');
   expect(workflow).toContain('web/app/public/logos/*) web=true; backend=true');
   const migrationSource = await Bun.file(new URL('./db/arango-migrate.ts', import.meta.url)).text();
   expect(migrationSource.indexOf('const productScopeKeysBySlug')).toBeLessThan(migrationSource.indexOf('await reconcileManagedScopeDirectory'));
