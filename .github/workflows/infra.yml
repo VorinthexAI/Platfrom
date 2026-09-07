@@ -170,7 +170,7 @@ jobs:
         run: |
           target_args=()
           if [ -n "$TF_TARGET" ]; then
-            target_pattern='^[a-zA-Z0-9_.\[\]"-]+$'
+            target_pattern='^[a-zA-Z0-9_.]+$'
             [[ "$TF_TARGET" =~ $target_pattern ]] || { echo "::error::Invalid Terraform target address"; exit 1; }
             target_args+=("-target=$TF_TARGET")
           fi
