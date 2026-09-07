@@ -409,8 +409,10 @@ const legacyPlaceSchema = z.object({
 async function migrateMinimalPlaces(targetDb: Database): Promise<void> {
   const places = targetDb.collection('places');
   if (!await places.exists()) return;
-  const placeImages = targetDb.collection('placeImages');
-  if (!await placeImages.exists()) await placeImages.create();
+  for (const name of ['placeImages', 'images', 'userTeams']) {
+    const dependency = targetDb.collection(name);
+    if (!await dependency.exists()) await dependency.create();
+  }
   const obsoleteCountryCursor = await targetDb.query<string>('FOR place IN places FILTER place.kind == "country" && (!HAS(place, "userKey") || !HAS(place, "saved")) RETURN place._key');
   const obsoleteCountryKeys = await obsoleteCountryCursor.all();
   if (obsoleteCountryKeys.length > 0) {

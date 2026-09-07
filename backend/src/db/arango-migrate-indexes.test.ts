@@ -749,7 +749,7 @@ describe('Arango migration indexes', () => {
     expect(source).toContain('trip.userKey != place.userKey || place.saved != true');
     expect(source).toContain('resource.sourceType == "trip"');
   });
-  test('creates placeImages before first-deployment place migration queries it', async () => {
+  test('creates place migration dependencies before first-deployment queries', async () => {
     const existing = new Set(['places']);
     const events: string[] = [];
     const database = {
@@ -761,14 +761,16 @@ describe('Arango migration indexes', () => {
         };
       },
       async query(query: string) {
-        if (query.includes('placeImages') && !existing.has('placeImages')) throw new Error('collection not found: placeImages');
+        for (const name of ['placeImages', 'images', 'userTeams']) {
+          if (query.includes(name) && !existing.has(name)) throw new Error(`collection not found: ${name}`);
+        }
         events.push(query.includes('placeImages') ? 'query:placeImages' : 'query:other');
         if (query.includes('FILTER LENGTH(userKeys) != 1')) return { async all() { return ['legacy-place']; } };
         return { async all() { return []; }, async next() { return 0; } };
       },
     };
     await expect(migrateMinimalPlacesAndRetireTrips(database as never)).rejects.toThrow('cannot safely derive user ownership');
-    expect(events.slice(0, 3)).toEqual(['create:placeImages', 'query:other', 'query:placeImages']);
+    expect(events.slice(0, 5)).toEqual(['create:placeImages', 'create:images', 'create:userTeams', 'query:other', 'query:placeImages']);
   });
   test('force-projects legacy places once while preserving keys and regenerating name-only embeddings', async () => {
     const previous = process.env.CONTENT_E2E;
