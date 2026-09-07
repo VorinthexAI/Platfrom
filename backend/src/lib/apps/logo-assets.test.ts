@@ -31,10 +31,14 @@ describe('app logo system asset seeder', () => {
 
     const first = await seedAppLogoAssets({ client: client as never, bucket: 'logos', repositoryRoot });
     const second = await seedAppLogoAssets({ client: client as never, bucket: 'logos', repositoryRoot });
+    const headCount = commands.filter((command) => command instanceof HeadObjectCommand).length;
+    const forced = await seedAppLogoAssets({ client: client as never, bucket: 'logos', repositoryRoot, forceUpload: true });
 
     expect(first.every(({ status }) => status === 'uploaded')).toBe(true);
     expect(second.every(({ status }) => status === 'unchanged')).toBe(true);
-    expect(commands.filter((command) => command instanceof PutObjectCommand)).toHaveLength(Object.keys(APP_LOGO_MANIFEST).length);
+    expect(forced.every(({ status }) => status === 'uploaded')).toBe(true);
+    expect(commands.filter((command) => command instanceof HeadObjectCommand)).toHaveLength(headCount);
+    expect(commands.filter((command) => command instanceof PutObjectCommand)).toHaveLength(Object.keys(APP_LOGO_MANIFEST).length * 2);
     expect(stored.values().next().value).toMatchObject({ ContentType: 'image/png', CacheControl: APP_LOGO_CACHE_CONTROL });
   });
 });
