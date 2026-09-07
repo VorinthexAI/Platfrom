@@ -45,6 +45,10 @@ on:
         required: false
         type: boolean
         default: false
+      terraform_target:
+        description: 'Optional single Terraform resource address for an isolated plan/apply'
+        required: false
+        type: string
       run_dns_sync:
         description: 'Sync the Cloudflare apex CNAME and prune known retired Vorinthex web hostnames'
         required: false
@@ -161,7 +165,16 @@ jobs:
 
       - name: Terraform plan
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform plan -out=tfplan
+        env:
+          TF_TARGET: ${{ inputs.terraform_target }}
+        run: |
+          target_args=()
+          if [ -n "$TF_TARGET" ]; then
+            target_pattern='^[a-zA-Z0-9_.]+$'
+            [[ "$TF_TARGET" =~ $target_pattern ]] || { echo "::error::Invalid Terraform target address"; exit 1; }
+            target_args+=("-target=$TF_TARGET")
+          fi
+          terraform plan "${target_args[@]}" -out=tfplan
 
       - name: Terraform apply
         if: inputs.action == 'apply'
