@@ -547,6 +547,7 @@ jobs:
           {
             echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)"
             echo "GRAPH_DB_SSH_SG_ID=$(jq -r '.vars.GRAPH_DB_SSH_SG_ID' .github/environments.json)"
+            echo "S3_BUCKET=$(jq -re '.vars.PROD_S3_BUCKET_NAME' .github/environments.json)"
           } >> "$GITHUB_ENV"
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4

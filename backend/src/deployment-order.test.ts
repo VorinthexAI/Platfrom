@@ -17,6 +17,7 @@ test('migrates before activating backend code and running data changes', async (
   expect(backfill).toBeGreaterThan(seed);
   expect(databaseJob).toContain('run: bun run --cwd backend db:seed:ci');
   expect(databaseJob).toContain('run: bun run --cwd backend db:backfill-semantic-embeddings:ci');
+  expect(databaseJob).toContain("S3_BUCKET=$(jq -re '.vars.PROD_S3_BUCKET_NAME' .github/environments.json)");
   expect(databaseJob).not.toContain('BEDROCK_AWS_ACCESS_KEY_ID');
   expect(databaseJob).not.toContain('BEDROCK_AWS_SECRET_ACCESS_KEY');
   expect(databaseJob).toContain('OPENROUTER_API_KEY');
