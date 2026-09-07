@@ -738,9 +738,11 @@ jobs:
           set -euo pipefail
           AWS_DEPLOY_ROLE_ARN="$(jq -re '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)"
           GRAPH_DB_SSH_SG_ID="$(jq -re '.vars.GRAPH_DB_SSH_SG_ID' .github/environments.json)"
+          S3_BUCKET="$(jq -re '.vars.PROD_S3_BUCKET_NAME' .github/environments.json)"
           {
             echo "AWS_DEPLOY_ROLE_ARN=$AWS_DEPLOY_ROLE_ARN"
             echo "GRAPH_DB_SSH_SG_ID=$GRAPH_DB_SSH_SG_ID"
+            echo "S3_BUCKET=$S3_BUCKET"
           } >> "$GITHUB_ENV"
       - uses: oven-sh/setup-bun@v2
       - name: Install dependencies
