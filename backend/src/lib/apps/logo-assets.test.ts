@@ -12,6 +12,7 @@ describe('app logo system asset seeder', () => {
       send: async (command: HeadObjectCommand | PutObjectCommand) => {
         commands.push(command);
         if (command instanceof HeadObjectCommand) {
+          expect(command.input.ChecksumMode).toBeUndefined();
           const value = stored.get(command.input.Key!);
           if (!value) throw Object.assign(new Error('missing'), { name: 'NotFound', $metadata: { httpStatusCode: 404 } });
           return value;
