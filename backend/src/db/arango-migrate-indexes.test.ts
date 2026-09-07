@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER } from './arango-migrate-indexes';
-import { collections, migrateCollectionOwnership, migrateContainerPresentations, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateManagedGeneratedMedia, migrateMinimalPlacesAndRetireTrips, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTicketTypes, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireMomentumScope, retireUserSettings } from './arango-migrate';
+import { collections, deduplicateScopeSlugs, migrateCollectionOwnership, migrateContainerPresentations, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateManagedGeneratedMedia, migrateMinimalPlacesAndRetireTrips, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTicketTypes, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireMomentumScope, retireUserSettings } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, LEGACY_EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 import { emailArchiveRootFolderKey, emailMediaCollectionKey } from '../lib/email-inbox/export-container-keys';
@@ -771,6 +771,21 @@ describe('Arango migration indexes', () => {
     };
     await expect(migrateMinimalPlacesAndRetireTrips(database as never)).rejects.toThrow('cannot safely derive user ownership');
     expect(events.slice(0, 5)).toEqual(['create:placeImages', 'create:images', 'create:userTeams', 'query:other', 'query:placeImages']);
+  });
+  test('preserves duplicate scopes while assigning non-canonical unique slugs', async () => {
+    const updates: Array<{ key: string; slug: string }> = [];
+    const database = {
+      async query(_query: string, bindVars: Record<string, unknown>) {
+        expect(bindVars.canonicalKeys).toContain('cmrnlzf640000qc7k4p5zem5w');
+        return { async all() { return ['cmrnlzf650002qc7k4p5zem5w']; } };
+      },
+      collection(name: string) {
+        expect(name).toBe('scopes');
+        return { async update(key: string, patch: { slug: string }) { updates.push({ key, slug: patch.slug }); } };
+      },
+    };
+    await deduplicateScopeSlugs(database as never);
+    expect(updates).toEqual([{ key: 'cmrnlzf650002qc7k4p5zem5w', slug: 'cmrnlzf650002qc7k4p5zem5w' }]);
   });
   test('force-projects legacy places once while preserving keys and regenerating name-only embeddings', async () => {
     const previous = process.env.CONTENT_E2E;

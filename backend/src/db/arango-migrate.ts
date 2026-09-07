@@ -285,6 +285,26 @@ export async function retireUserSettings(targetDb: Database): Promise<void> {
   await targetDb.query('FOR user IN users FILTER HAS(user, "settings") UPDATE user WITH { settings: null } IN users OPTIONS { keepNull: false }');
 }
 
+export async function deduplicateScopeSlugs(targetDb: Database): Promise<void> {
+  const canonicalKeys = SEEDED_SCOPES.map(({ key }) => key);
+  const cursor = await targetDb.query<string>(`
+    FOR scope IN scopes
+      COLLECT teamKey = scope.teamKey, slug = scope.slug INTO grouped = scope
+      FILTER LENGTH(grouped) > 1
+      LET ordered = (
+        FOR duplicate IN grouped
+          SORT duplicate._key IN @canonicalKeys DESC, duplicate.createdAt ASC, duplicate._key ASC
+          RETURN duplicate._key
+      )
+      FOR duplicateKey IN SLICE(ordered, 1)
+        RETURN duplicateKey
+  `, { canonicalKeys });
+  for (const key of await cursor.all()) {
+    await targetDb.collection('scopes').update(key, { slug: key });
+    console.log(`Renamed duplicate scope slug for ${key}`);
+  }
+}
+
 function buildNodeEmbedText(_collectionName: string, _key: string, embedKeys: readonly string[], doc: Record<string, unknown>): string | null {
   return buildEmbeddingText(embedKeys, doc);
 }
@@ -2028,6 +2048,7 @@ async function main() {
   if (!(await scopesCollection.exists())) {
     await scopesCollection.create();
   }
+  await deduplicateScopeSlugs(targetDb);
   await ensureScopesCollection(targetDb);
   const scopeScopesCollection = targetDb.collection('scopeScopes');
   if (!(await scopeScopesCollection.exists())) await scopeScopesCollection.create();
