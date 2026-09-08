@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "240760796283",
+    "project_id": "vorinthex-ai-6df8e",
+    "storage_bucket": "vorinthex-ai-6df8e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:240760796283:android:b5bd0884b93ee04a8b1ede",
+        "android_client_info": {
+          "package_name": "app.vorinthex.com"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBrmuN4HdHp7FvjI2Ulh2pjMZofuR3ZLK4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
