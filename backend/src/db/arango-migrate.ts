@@ -305,6 +305,18 @@ export async function deduplicateScopeSlugs(targetDb: Database): Promise<void> {
   }
 }
 
+export async function retireLegacyScopeIndexes(targetDb: Database): Promise<void> {
+  const collection = targetDb.collection('scopes');
+  if (!await collection.exists()) return;
+  for (const index of await collection.indexes()) {
+    const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
+    if (fields.includes('organizationKey')) {
+      await collection.dropIndex(index.id);
+      console.log(`Dropped legacy scopes index ${index.id}(${fields.join(', ')})`);
+    }
+  }
+}
+
 export async function deduplicateScopeMembers(targetDb: Database): Promise<void> {
   const cursor = await targetDb.query<Array<{ _key: string; role?: string; source?: string; status?: string }>>(`
     FOR member IN scopeMembers
@@ -2071,6 +2083,7 @@ async function main() {
   if (!(await scopesCollection.exists())) {
     await scopesCollection.create();
   }
+  await retireLegacyScopeIndexes(targetDb);
   await deduplicateScopeSlugs(targetDb);
   await ensureScopesCollection(targetDb);
   const scopeScopesCollection = targetDb.collection('scopeScopes');
