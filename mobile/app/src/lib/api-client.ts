@@ -171,3 +171,38 @@ export async function revokeRemoteSession(session: { accessToken: string; refres
     "X-Refresh-Token": session.refreshToken,
   } });
 }
+
+export async function cleanupRemoteSession(session: { accessToken: string; refreshToken: string }) {
+  const eventIdentifier = await getInstallationEventIdentifier();
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Vorinthex-Session-Transport": "header",
+    [INSTALLATION_EVENT_IDENTIFIER_HEADER]: eventIdentifier,
+    ...selectedAppKeyHeaders(),
+    ...(BACKEND_API_KEY ? { "X-Vorinthex-API-Key": BACKEND_API_KEY } : {}),
+    Authorization: `Bearer ${session.accessToken}`,
+    "X-Refresh-Token": session.refreshToken,
+  };
+  const request = async (path: string, init: RequestInit) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2_000);
+    try {
+      const response = await fetch(`${API_BASE_URL.replace(/\/$/, "")}/api/v1${path}`, { ...init, headers, signal: controller.signal });
+      if (!response.ok) throw new Error(`Session cleanup failed with HTTP ${response.status}.`);
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+  let failure: unknown;
+  try {
+    await request("/auth/me/push-subscription", { method: "DELETE", body: "{}" });
+  } catch (error) {
+    failure = error;
+  }
+  try {
+    await request("/auth/logout", { method: "POST", body: "{}" });
+  } catch (error) {
+    failure ??= error;
+  }
+  if (failure) throw failure;
+}

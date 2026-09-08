@@ -803,7 +803,6 @@ export function createGalleryRepository(
           read: [
             "images",
             "collections",
-            "scopes",
             "scopeMembers",
             "userTeams",
           ],
@@ -887,7 +886,6 @@ export function createGalleryRepository(
           read: [
             "images",
             "collections",
-            "scopes",
             "scopeMembers",
             "scopeScopes",
             "userTeams",
@@ -1142,6 +1140,7 @@ export function createGalleryRepository(
             "userHiddens",
             "storageDeletionJobs",
             "documents",
+            "scopes",
           ],
         },
         async (tx) => {
@@ -1247,6 +1246,10 @@ export function createGalleryRepository(
             { scopeKey, imageKeys: deletedImageKeys, now },
           );
           await tx.query(
+            "FOR scope IN scopes FILTER scope._key == @scopeKey && scope.coverImageKey IN @imageKeys UPDATE scope WITH { coverImageKey: null } IN scopes OPTIONS { keepNull: false }",
+            { scopeKey, imageKeys: deletedImageKeys },
+          );
+          await tx.query(
             "FOR image IN images FILTER image._key IN @imageKeys && image.scopeKey == @scopeKey REMOVE image IN images",
             { imageKeys: deletedImageKeys, scopeKey },
           );
@@ -1307,6 +1310,7 @@ export function createGalleryRepository(
             "userHiddens",
             "storageDeletionJobs",
             "documents",
+            "scopes",
           ],
         },
         async (tx) => {
@@ -1401,6 +1405,10 @@ export function createGalleryRepository(
           await tx.query(
             "FOR document IN documents FILTER document.scopeKey == @scopeKey && document.coverImageKey IN @imageKeys UPDATE document WITH { coverImageKey: null, updatedAt: @now } IN documents OPTIONS { keepNull: false }",
             { scopeKey, imageKeys: deletedImageKeys, now },
+          );
+          await tx.query(
+            "FOR scope IN scopes FILTER scope._key == @scopeKey && scope.coverImageKey IN @imageKeys UPDATE scope WITH { coverImageKey: null } IN scopes OPTIONS { keepNull: false }",
+            { scopeKey, imageKeys: deletedImageKeys },
           );
           await tx.query(
             "FOR relation IN imageIdentities FILTER relation.scopeKey == @scopeKey && relation.imageKey IN @imageKeys REMOVE relation IN imageIdentities",

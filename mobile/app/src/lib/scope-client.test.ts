@@ -3,10 +3,17 @@ import { expect, test } from "bun:test";
 import { scheduleScopeOperation, scopeListQueryKey, scopeSummarySchema } from "./scope-client";
 
 test("scope summaries are strict, safe projections and keys are team-aware", () => {
-  const scope = { key: "scope", slug: "main", name: "Main", summary: "Main workspace", description: null, position: 1, level: 1, role: "owner", isCurrent: true };
+  const scope = { key: "scope", slug: "main", name: "Main", summary: "Main workspace", description: null, coverImageKey: null, coverUrl: null, position: 1, level: 1, role: "owner", isCurrent: true };
   expect(scopeSummarySchema.parse(scope)).toEqual(scope);
   expect(scopeSummarySchema.safeParse({ ...scope, embedding: [1, 2] }).success).toBe(false);
   expect(scopeListQueryKey("user", "team")).toEqual(["scope-list", "user", "team"]);
+});
+
+test("scope requests explicitly opt into the rich projection", async () => {
+  const source = await Bun.file(new URL("./scope-client.ts", import.meta.url)).text();
+  expect(source).toContain('const richScopeProjection = { "X-Vorinthex-Scope-Projection": "2" }');
+  for (const operation of ["/scopes/list", "/scopes\"", "/scopes/select", "/prioritize", "apiClient.patch"]) expect(source).toContain(operation);
+  expect((source.match(/headers: richScopeProjection/g) ?? []).length).toBeGreaterThanOrEqual(3);
 });
 
 test("scope mutations are serialized and only the latest remains current", async () => {

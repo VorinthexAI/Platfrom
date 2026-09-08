@@ -23,4 +23,15 @@ describe('Gallery repository collection access', () => {
     expect(query).not.toContain('collectionMembers');
     expect(query).not.toContain('collaborator');
   });
+
+  test('clears scope cover references inside both image deletion transactions', async () => {
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    const duplicateDeletion = source.slice(source.indexOf('    deleteDuplicateImages(scopeKey'), source.indexOf('    deleteImages(scopeKey'));
+    const directDeletion = source.slice(source.indexOf('    deleteImages(scopeKey'), source.indexOf('    transferCollectionImages(input'));
+    for (const deletion of [duplicateDeletion, directDeletion]) {
+      expect(deletion).toContain('"scopes"');
+      expect(deletion).toContain('scope.coverImageKey IN @imageKeys');
+      expect(deletion.indexOf('scope.coverImageKey IN @imageKeys')).toBeLessThan(deletion.lastIndexOf('REMOVE image IN images'));
+    }
+  });
 });

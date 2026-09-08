@@ -18,6 +18,7 @@ export interface ScopeRepository {
   updateScope(scopeKey: string, input: Partial<Pick<CreateScopeInput, 'slug' | 'name' | 'summary' | 'description' | 'position' | 'level'>>): Promise<Scope>;
   getScopeByKey(scopeKey: string): Promise<Scope | null>;
   listScopes(teamKey: string): Promise<readonly Scope[]>;
+  coverStorageKey(scopeKey: string, coverImageKey?: string | null): Promise<string | undefined>;
   removeScope(scopeKey: string, exclusiveOwnerUserKey?: string): Promise<void>;
 
   addScopeRelation(parentKey: string, childKey: string): Promise<ScopeScope>;

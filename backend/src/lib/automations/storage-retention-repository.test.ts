@@ -4,7 +4,7 @@ import { STORAGE_RETENTION_SCAN_BATCH_SIZE, STORAGE_WIPE_BATCH_SIZE, STORAGE_WIP
 describe('storage retention repository', () => {
   test('models an explicit durable lifecycle and declares the complete wipe transaction', () => {
     expect(storageRetentionStateSchema.parse({ key: 'state', userKey: 'user', paymentPastDueAt: '2026-01-01T00:00:00.000Z', wipeDueAt: '2026-04-01T00:00:00.000Z', minimumBalanceMicroSparks: 10 })).toMatchObject({ userKey: 'user' });
-    for (const collection of ['storageRetentionStates', 'storageObjects', 'storageDeletionJobs', 'users', 'documents', 'images', 'galleryUploads']) expect(STORAGE_WIPE_COLLECTIONS).toContain(collection as never);
+    for (const collection of ['storageRetentionStates', 'storageObjects', 'storageDeletionJobs', 'users', 'documents', 'images', 'scopes', 'galleryUploads']) expect(STORAGE_WIPE_COLLECTIONS).toContain(collection as never);
   });
 
   test('fences stale wipe jobs before touching storage references', async () => {
@@ -59,6 +59,8 @@ describe('storage retention repository', () => {
     expect(source).toContain('REMOVE_VALUES(document.sourceStorageKeys, @storageKeys)');
     expect(source).toContain('UPSERT { storageKey }');
     expect(source).toContain('object.userKey == @userKey && object.deletedAt == null');
+    expect(source).toContain('FOR scope IN scopes FILTER scope.coverImageKey IN @imageKeys');
+    expect(source.indexOf('scope.coverImageKey IN @imageKeys')).toBeLessThan(source.indexOf('REMOVE image IN images'));
     expect(source).toContain('state.wipeDueAt == @expectedWipeDueAt');
     expect(source).toContain('state.wipedAt == null');
   });

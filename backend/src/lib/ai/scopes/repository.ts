@@ -28,10 +28,10 @@ import {
 } from './types';
 
 export const SCOPE_REMOVAL_WRITE_COLLECTIONS = [
-  'users', 'scopes', 'scopeScopes', 'scopeMembers', 'userTeams', 'conversations', 'conversationMessages', 'teamConnectors', 'folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'generatedDocumentBindings', 'emailAttachmentBindings', 'emailAttachments', 'emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'images', 'imageCaptions', 'visualIdentities', 'galleryUploads', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'placeImages', 'collections', 'places', 'trips', 'tripPlaces', 'tripAttachments', 'tripCreationReceipts', 'tripGuides', 'placeReferences', 'placeHeroMedia', 'books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'bookExtensions', 'bookRefundIntents', 'tags', 'tagAssignments', 'userHiddens', 'events', 'contentSearchQueries', 'channels', 'channelParticipants', 'threads', 'messages', 'messageMentions', 'messageReactions', 'polls', 'pollOptions', 'pollVotes', 'storageDeletionJobs', 'ticketVotes', 'tickets',
+  'users', 'scopes', 'scopeScopes', 'scopeMembers', 'userTeams', 'conversations', 'conversationMessages', 'teamConnectors', 'folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'generatedDocumentBindings', 'emailAttachmentBindings', 'emailAttachments', 'emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'images', 'imageCaptions', 'visualIdentities', 'galleryUploads', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'placeImages', 'collections', 'places', 'trips', 'tripPlaces', 'tripAttachments', 'tripCreationReceipts', 'tripGuides', 'placeReferences', 'placeHeroMedia', 'books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'bookExtensions', 'bookRefundIntents', 'tags', 'tagAssignments', 'userHiddens', 'events', 'contentSearchQueries', 'appNotifications', 'appNotificationRecipients', 'pushDeliveries', 'channels', 'channelParticipants', 'threads', 'messages', 'messageMentions', 'messageReactions', 'polls', 'pollOptions', 'pollVotes', 'storageDeletionJobs', 'ticketVotes', 'tickets',
 ] as const;
 
-const SCOPE_REMOVAL_SPECIAL_COLLECTIONS = new Set<string>(['users', 'scopes', 'scopeScopes', 'userTeams', 'storageDeletionJobs', 'bookRefundIntents']);
+const SCOPE_REMOVAL_SPECIAL_COLLECTIONS = new Set<string>(['users', 'scopes', 'scopeScopes', 'userTeams', 'storageDeletionJobs', 'bookRefundIntents', 'appNotifications', 'appNotificationRecipients', 'pushDeliveries']);
 export const SCOPE_KEYED_REMOVAL_COLLECTIONS = SCOPE_REMOVAL_WRITE_COLLECTIONS.filter((collection) => !SCOPE_REMOVAL_SPECIAL_COLLECTIONS.has(collection));
 
 export function createScopeRepository(
@@ -141,13 +141,19 @@ export function createScopeRepository(
           FOR scope IN @@collection
             FILTER scope.teamKey == @teamKey
               && REGEX_TEST(scope._key, "^c[^\\\\s-]{8,}$", true)
-            SORT scope.name ASC, scope._key ASC
+            SORT scope.position ASC, scope._key ASC
             RETURN scope
         `,
         { '@collection': SCOPES_COLLECTION, teamKey: validTeamKey },
       );
       const docs = await cursor.all();
       return (docs as Record<string, unknown>[]).map((doc) => scopeSchema.parse(withArangoKey(doc)));
+    },
+
+    async coverStorageKey(scopeKey, coverImageKey) {
+      if (!coverImageKey) return undefined;
+      const cursor = await database.query('LET image = DOCUMENT(images, @coverImageKey) FILTER image != null && image.scopeKey == @scopeKey RETURN image.storageKey', { scopeKey, coverImageKey });
+      return await cursor.next() as string | undefined;
     },
 
     async removeScope(scopeKey, exclusiveOwnerUserKey) {
@@ -189,6 +195,11 @@ export function createScopeRepository(
         if (storageKeys.length) await executor.query('FOR storageKey IN @storageKeys UPSERT { storageKey } INSERT { storageKey, createdAt: @now, status: "pending" } UPDATE {} IN storageDeletionJobs', { storageKeys, scopeKey, now: new Date().toISOString() });
 
         await executor.query('FOR intent IN bookRefundIntents FILTER intent.bookKey IN (FOR book IN books FILTER book.scopeKey == @scopeKey RETURN book._key) REMOVE intent IN bookRefundIntents', { scopeKey });
+        const notificationCursor = await executor.query<string>('FOR notification IN appNotifications FILTER notification.scopeKey == @scopeKey RETURN notification._key', { scopeKey });
+        const notificationKeys = await notificationCursor.all();
+        await executor.query('FOR delivery IN pushDeliveries FILTER delivery.notificationKey IN @notificationKeys REMOVE delivery IN pushDeliveries', { notificationKeys, scopeKey });
+        await executor.query('FOR recipient IN appNotificationRecipients FILTER recipient.notificationKey IN @notificationKeys REMOVE recipient IN appNotificationRecipients', { notificationKeys, scopeKey });
+        await executor.query('FOR notification IN appNotifications FILTER notification._key IN @notificationKeys REMOVE notification IN appNotifications', { notificationKeys, scopeKey });
         for (const collection of SCOPE_KEYED_REMOVAL_COLLECTIONS) {
           await executor.query('FOR item IN @@collection FILTER item.scopeKey == @scopeKey REMOVE item IN @@collection', { '@collection': collection, scopeKey });
         }

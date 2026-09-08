@@ -18,10 +18,10 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(187);
-    expect(MODEL_TOOL_NAMES).toHaveLength(183);
-    expect(TOOL_DEFINITIONS).toHaveLength(183);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 141);
+    expect(TOOL_NAMES).toHaveLength(190);
+    expect(MODEL_TOOL_NAMES).toHaveLength(186);
+    expect(TOOL_DEFINITIONS).toHaveLength(186);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 144);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...MODEL_TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -160,7 +160,7 @@ describe('unified tool registry', () => {
     expect(TOOL_NAMES).not.toContain('user.settings.read');
     expect(TOOL_NAMES).not.toContain('user.settings.update');
     for (const name of ['access.agent.evaluate', 'agent.member.list', 'artifact.create', 'project.create', 'milestone.create', 'task.create', 'team.member.list']) expect(TOOL_NAMES).not.toContain(name);
-    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['scope.list', 'scope.create', 'scope.select']));
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['scope.list', 'scope.create', 'scope.select', 'scope.prioritize', 'scope.update', 'scope.delete']));
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['team.list', 'team.select']));
     expect(toolInputSchemas['team.list'].parse({})).toEqual({});
     expect(() => toolInputSchemas['team.list'].parse({ userKey: newId() })).toThrow('Unrecognized key');
@@ -168,7 +168,10 @@ describe('unified tool registry', () => {
     expect(toolInputSchemas['scope.list'].parse({})).toEqual({});
     expect(toolInputSchemas['scope.create'].parse({ name: 'Plans' })).toEqual({ name: 'Plans' });
     expect(toolInputSchemas['scope.select'].parse({ targetScopeKey: newId() })).toHaveProperty('targetScopeKey');
-    for (const name of ['scope.list', 'scope.create', 'scope.select']) for (const field of ['teamKey', 'scopeKey', 'userKey', 'teamMembershipKey', 'idempotencyKey']) expect(() => toolInputSchemas[name].parse({ ...(name === 'scope.create' ? { name: 'Plans' } : name === 'scope.select' ? { targetScopeKey: newId() } : {}), [field]: newId() })).toThrow('Unrecognized key');
+    expect(toolInputSchemas['scope.prioritize'].parse({ targetScopeKey: newId() })).toHaveProperty('targetScopeKey');
+    expect(toolInputSchemas['scope.update'].parse({ targetScopeKey: newId(), coverImageKey: null })).toHaveProperty('coverImageKey', null);
+    expect(toolInputSchemas['scope.delete'].parse({ targetScopeKey: newId() })).toHaveProperty('targetScopeKey');
+    for (const name of ['scope.list', 'scope.create', 'scope.select', 'scope.prioritize', 'scope.update', 'scope.delete']) for (const field of ['teamKey', 'scopeKey', 'userKey', 'teamMembershipKey', 'idempotencyKey']) expect(() => toolInputSchemas[name].parse({ ...(name === 'scope.create' ? { name: 'Plans' } : name === 'scope.list' ? {} : { targetScopeKey: newId() }), ...(name === 'scope.update' ? { coverImageKey: null } : {}), [field]: newId() })).toThrow('Unrecognized key');
     expect(TOOL_NAMES.every((name) => !name.includes('_'))).toBe(true);
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['conversation.create', 'conversation.list', 'conversation.search', 'conversation.rename', 'conversation.favorite', 'conversation.delete', 'conversation.message.list', 'conversation.message.delete', 'conversation.message.send', 'conversation.image.enqueue', 'agent.guide', 'agent.query', 'agents.core']));
     expect(TOOL_NAMES.filter((name) => name === 'agents.core')).toHaveLength(1);
@@ -218,6 +221,9 @@ describe('unified tool registry', () => {
     expect(isToolReadOnly('profile.update', { name: 'Ada' })).toBe(false);
     expect(isToolReadOnly('scope.create', { name: 'Plans' })).toBe(false);
     expect(isToolReadOnly('scope.select', { targetScopeKey: newId() })).toBe(false);
+    expect(isToolReadOnly('scope.prioritize', { targetScopeKey: newId() })).toBe(false);
+    expect(isToolReadOnly('scope.update', { targetScopeKey: newId(), coverImageKey: null })).toBe(false);
+    expect(isToolReadOnly('scope.delete', { targetScopeKey: newId() })).toBe(false);
     expect(isToolReadOnly('feedback.vote', { ticketKey: newId(), vote: 'up' })).toBe(false);
     expect(isToolReadOnly('tag.create', { name: 'Plan' })).toBe(false);
     expect(isToolReadOnly('tag.assignment.set', { changes: [{ tagKey: newId(), target: { type: 'document', key: newId() }, assigned: true }] })).toBe(false);
@@ -233,20 +239,32 @@ describe('unified tool registry', () => {
       list: async (...args: unknown[]) => { calls.push(['list', ...args]); return { scopes: [] }; },
       create: async (...args: unknown[]) => { calls.push(['create', ...args]); return { key: scopeKey }; },
       select: async (...args: unknown[]) => { calls.push(['select', ...args]); return { key: scopeKey }; },
+      prioritize: async (...args: unknown[]) => { calls.push(['prioritize', ...args]); return { key: scopeKey }; },
+      update: async (...args: unknown[]) => { calls.push(['update', ...args]); return { key: scopeKey }; },
+      delete: async (...args: unknown[]) => { calls.push(['delete', ...args]); return { deleted: true }; },
     } as any;
     await runTool('scope.list', '', {}, { contentContext, scopeService });
     await runTool('scope.create', '', { name: 'Plans' }, { contentContext, scopeService, requestKey: 'tool-request' });
     await runTool('scope.select', '', { targetScopeKey: scopeKey }, { contentContext, scopeService });
+    await runTool('scope.prioritize', '', { targetScopeKey: scopeKey }, { contentContext, scopeService });
+    await runTool('scope.update', '', { targetScopeKey: scopeKey, coverImageKey: null }, { contentContext, scopeService });
+    await runTool('scope.delete', '', { targetScopeKey: scopeKey }, { contentContext, scopeService });
     expect(calls).toEqual([
       ['list', {}, contentContext],
       ['create', { name: 'Plans' }, contentContext, 'tool-request'],
       ['select', { targetScopeKey: scopeKey }, contentContext],
+      ['prioritize', { targetScopeKey: scopeKey }, contentContext],
+      ['update', { targetScopeKey: scopeKey, coverImageKey: null }, contentContext],
+      ['delete', { targetScopeKey: scopeKey }, contentContext],
     ]);
     for (const surface of ['knowledge-workspace', 'media-workspace', 'book-workspace', 'travel-workspace', 'signal-workspace'] as const) {
       const names = defaultAssistantCapabilityRegistry.resolve(surface).map(({ definition }) => definition.name);
       expect(names).toContain('scope.list');
       expect(names).not.toContain('scope.create');
       expect(names).not.toContain('scope.select');
+      expect(names).not.toContain('scope.prioritize');
+      expect(names).not.toContain('scope.update');
+      expect(names).not.toContain('scope.delete');
     }
   });
 
@@ -368,9 +386,9 @@ describe('unified tool registry', () => {
       'milestone.archive', 'milestone.change-status', 'milestone.complete', 'milestone.create', 'milestone.delete', 'milestone.find', 'milestone.list', 'milestone.move', 'milestone.rename', 'milestone.reopen', 'milestone.restore', 'milestone.schedule', 'milestone.update',
       'task.archive', 'task.change-status', 'task.complete', 'task.create', 'task.delete', 'task.find', 'task.list', 'task.move', 'task.reopen', 'task.reorder', 'task.rename', 'task.restore', 'task.rewrite', 'task.summarize', 'task.translate', 'task.update',
       'team.archive', 'team.member.activate', 'team.member.add', 'team.member.list', 'team.member.read', 'team.member.remove', 'team.member.role.update', 'team.member.suspend', 'team.project.search', 'team.provider.disable', 'team.provider.enable', 'team.provider.list', 'team.provider.read', 'team.provider.test', 'team.read', 'team.restore', 'team.update',
-      'scope.agent.access-threshold.update', 'scope.agent.add', 'scope.agent.archive', 'scope.agent.list', 'scope.agent.move', 'scope.agent.read', 'scope.agent.remove', 'scope.agent.restore', 'scope.archive', 'scope.member.activate', 'scope.member.add', 'scope.member.list', 'scope.member.read', 'scope.member.remove', 'scope.member.role.update', 'scope.member.suspend', 'scope.move', 'scope.project.search', 'scope.read', 'scope.remove', 'scope.restore', 'scope.update',
+      'scope.agent.access-threshold.update', 'scope.agent.add', 'scope.agent.archive', 'scope.agent.list', 'scope.agent.move', 'scope.agent.read', 'scope.agent.remove', 'scope.agent.restore', 'scope.archive', 'scope.member.activate', 'scope.member.add', 'scope.member.list', 'scope.member.read', 'scope.member.remove', 'scope.member.role.update', 'scope.member.suspend', 'scope.move', 'scope.project.search', 'scope.read', 'scope.remove', 'scope.restore',
     ];
-    expect(removed).toHaveLength(92);
+    expect(removed).toHaveLength(91);
     for (const name of removed) {
       expect(TOOL_NAMES).not.toContain(name);
       expect(toolInputSchemas).not.toHaveProperty(name);

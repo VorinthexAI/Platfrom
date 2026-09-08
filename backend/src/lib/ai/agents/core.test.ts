@@ -353,7 +353,7 @@ describe('internal agents', () => {
     for (const overlapping of APP_SEARCH_OVERLAPPING_TOOL_NAMES) expect(allowedSet.has(overlapping)).toBe(false);
     for (const capability of ['app.search', 'web.search', 'image.search', 'agent.guide', 'agent.query', 'conversation.image.enqueue']) expect(allowedSet.has(capability)).toBe(true);
     for (const capability of ['tag.list', 'tag.create', 'tag.update', 'tag.delete', 'tag.assignment.set']) expect(allowedSet.has(capability)).toBe(false);
-    for (const capability of ['scope.create', 'scope.select']) expect(allowedSet.has(capability)).toBe(false);
+    for (const capability of ['scope.create', 'scope.select', 'scope.prioritize', 'scope.update', 'scope.delete']) expect(allowedSet.has(capability)).toBe(false);
     for (const superseded of ['collection.list', 'document.read', 'document.find', 'document.list', 'folder.list', 'folder.find']) expect(allowedSet.has(superseded)).toBe(false);
     expect(coreAgent.excludedTools).toContain('collection.create');
     expect(coreAgent.excludedTools).toContain('document.update');

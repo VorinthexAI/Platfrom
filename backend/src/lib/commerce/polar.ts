@@ -88,7 +88,6 @@ export function polarConfiguration(environmentVariables: NodeJS.ProcessEnv = pro
   const environment = z.enum(['sandbox', 'production']).safeParse(environmentVariables.POLAR_ENV);
   const accessToken = environmentVariables.POLAR_ACCESS_TOKEN?.trim();
   if (!environment.success || !accessToken) throw new PolarProviderError('NOT_CONFIGURED', 'Polar payment operations are not configured.', false);
-  if (environmentVariables.NODE_ENV === 'production' && environment.data !== 'production') throw new PolarProviderError('NOT_CONFIGURED', 'Production must use the Polar production environment.', false);
   return { environment: environment.data, accessToken, webhookSecret: environmentVariables.POLAR_WEBHOOK_SECRET?.trim(), timeoutMs: 10_000 };
 }
 

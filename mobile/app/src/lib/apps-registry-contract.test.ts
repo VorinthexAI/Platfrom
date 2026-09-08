@@ -39,7 +39,7 @@ test("plans and Spark costs begin loading during app bootstrap", () => {
 
 test("every normal native transport injects the exact selected app key header", () => {
   expect(headers).toContain('VORINTHEX_APP_KEY_HEADER = "X-Vorinthex-App-Key"');
-  expect(authenticated.match(/selectedAppKeyHeaders\(\)/g)).toHaveLength(2);
+  expect(authenticated.match(/selectedAppKeyHeaders\(\)/g)).toHaveLength(3);
   expect(authenticated).toContain("await ensureAppsReady()");
   for (const source of [headers, authenticated]) expect(source).not.toContain("X-Vorinthex-Domain");
 });

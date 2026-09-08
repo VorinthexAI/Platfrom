@@ -414,6 +414,9 @@ export function registerRoutes(app: Hono) {
   app.post('/scopes/list', scopeHandlers.list);
   app.post('/scopes', scopeHandlers.create);
   app.post('/scopes/select', scopeHandlers.select);
+  app.post('/scopes/:scopeKey/prioritize', scopeHandlers.prioritize);
+  app.patch('/scopes/:scopeKey', scopeHandlers.update);
+  app.delete('/scopes/:scopeKey', scopeHandlers.delete);
   app.post('/teams/list', teamHandlers.list);
   app.post('/teams/select', teamHandlers.select);
   app.post('/tags/list', tagHandlers.list);

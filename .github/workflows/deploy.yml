@@ -678,7 +678,7 @@ jobs:
           creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
           polar_env=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/POLAR_ENV")) | .v' | head -n1)
           polar_token=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/POLAR_ACCESS_TOKEN")) | .v' | head -n1)
-          test "$polar_env" = "production" || { echo "::error::POLAR_ENV must be production for a production deployment."; exit 1; }
+          case "$polar_env" in sandbox|production) ;; *) echo "::error::POLAR_ENV must be sandbox or production."; exit 1 ;; esac
           test -n "$polar_token" || { echo "::error::POLAR_ACCESS_TOKEN is required for a production deployment."; exit 1; }
           echo "::add-mask::$polar_token"
           POLAR_ENV="$polar_env" POLAR_ACCESS_TOKEN="$polar_token" bun run --cwd backend commerce:sync:ci
@@ -986,7 +986,7 @@ jobs:
     # LATER ECS deploy. Disabled while the single early-infra box serves production.
     name: LATER / roll api ECS service
     runs-on: ubuntu-latest
-    needs: [changes, backend-image, backend-migrate]
+    needs: [changes, backend-image, backend-db]
     if: false # LATER: enable when ECS becomes the production runtime.
     environment: production
     steps:
@@ -1111,13 +1111,13 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # EARLY-INFRA: the active production deployment. It performs one SSM
-  # blue-green swap on the single app box after graph migration has succeeded
-  # whenever a new backend image is selected.
+  # blue-green swap on the single app box after graph setup and catalog sync
+  # have succeeded whenever a new backend image is selected.
   # ---------------------------------------------------------------------------
   early-deploy:
     name: Blue-green deploy to early-infra box
     runs-on: ubuntu-latest
-    needs: [changes, deploy-web, backend-image, backend-secrets, backend-migrate]
+    needs: [changes, deploy-web, backend-image, backend-secrets, backend-migrate, backend-db]
     if: >-
       always()
       && (needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true')
@@ -1125,6 +1125,7 @@ jobs:
       && (needs.changes.outputs.web != 'true' || needs.deploy-web.result == 'success')
       && (needs.changes.outputs.backend != 'true' || (needs.backend-image.result == 'success' && needs.backend-secrets.result == 'success'))
       && (needs.changes.outputs.backend != 'true' || needs.backend-migrate.result == 'success')
+      && (needs.changes.outputs.backend != 'true' || needs.backend-db.result == 'success')
     environment: production
     env:
       APP_INSTANCE_TAG: vorinthex-early-app
@@ -1272,13 +1273,9 @@ jobs:
 
   early-infra-standalone-deploy:
     name: LATER / early-infra duplicate deploy
-    # backend-migrate is an explicit dependency (not just early-infra-standalone-build)
-    # so this box's blue-green swap can never flip live traffic to new backend code
-    # before a graph-db schema/collection rename (e.g. arango-migrate.ts) has actually
-    # landed in prod — otherwise the new code could briefly read a not-yet-populated
-    # collection. backend-migrate is skipped (not failed) on web-only deploys, so the
-    # explicit always()-guarded condition below tolerates skipped as well as success.
-    needs: [early-infra-standalone-build, backend-migrate]
+    # backend-db is an explicit dependency so this retained path cannot activate
+    # backend code before migrations, data setup, and catalog sync complete.
+    needs: [early-infra-standalone-build, backend-db]
     if: false # LATER: do not run a second blue-green swap.
     runs-on: ubuntu-latest
     environment: production

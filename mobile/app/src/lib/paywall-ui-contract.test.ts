@@ -56,13 +56,13 @@ test("Sparks dialog reuses canonical billing and opens the offers shop", () => {
   expect(balance).not.toMatch(/Pressable|TouchableOpacity|Linking\.openURL/);
 });
 
-test("Profile routes to Settings while account actions live on the Settings screen", () => {
+test("Profile routes to Settings while account actions remain available", () => {
   expect(profile).toContain('router.push("/settings")');
   expect(profile).toContain(">Notifications</Button>");
   expect(profile).toContain(">Give feedback</Button>");
   expect(profile).toContain(">Report an issue</Button>");
   expect(profile).toContain(">FAQ</Button>");
-  expect(profile).toContain(">Log out</Button>");
+  expect(profile).toContain('accessibilityLabel="Log out"');
   expect(profile).not.toContain('focusKey="profile-settings"');
   for (const text of ["What are Sparks?", "How do plan grants work?", "Do top-ups expire?", "How do referral rewards work?", "Can I cancel or renew?", "How do I restore renewal?"]) expect(profile).toContain(text);
 });

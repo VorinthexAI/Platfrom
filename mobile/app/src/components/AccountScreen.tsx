@@ -1,5 +1,7 @@
 import { randomUUID } from "expo-crypto";
 import * as ImagePicker from "expo-image-picker";
+import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
@@ -8,22 +10,23 @@ import { ActionPill } from "@vorinthex/shared/ui/action-pill";
 import { Avatar } from "@vorinthex/shared/ui/avatar";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
-import { CheckIcon, ChevronDownIcon, ChevronUpIcon, FolderIcon, HelpIcon, PlusIcon, SettingsIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { CheckIcon, ChevronDownIcon, ChevronUpIcon, FolderIcon, HelpIcon, LogOutIcon, PlusIcon, SettingsIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
-import { SubtleButton } from "@vorinthex/shared/ui/subtle-button";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
 
 import { createFeedback, createSupportTicket, listFeedback, setFeedbackVote, updateProfileName, uploadProfileAvatar, type FeedbackItem } from "@/lib/profile-client";
 import { profileInitial } from "@/lib/auth-helpers";
-import { createScope, listScopes, scheduleScopeOperation, scopeListQueryKey, scopeOperationIsPending, selectScope, type ScopeSummary } from "@/lib/scope-client";
+import { createScope, deleteScope, listScopes, prioritizeScope, scheduleScopeOperation, scopeListQueryKey, scopeOperationIsPending, selectScope, updateScopeCover, type ScopeSummary } from "@/lib/scope-client";
 import { listTeams, queryBelongsToTeamScope, selectTeam, setPendingTeamMfa, teamListQueryKey } from "@/lib/team-client";
 import { useAuthStore } from "@/state/auth";
 import { extractDomainErrorMessage } from "@/lib/domain-error-observer";
 import { fonts, palette, radii, spacing } from "@/theme/tokens";
 import { AccountScreenShell } from "@/components/AccountScreenShell";
+import { normalizeCapturedPng } from "@/lib/captured-image";
+import { deleteGalleryImages, fetchGalleryUploadStatus, uploadGalleryImages, type GalleryContext } from "@/lib/gallery-client";
 
-type ProfileSheet = "name" | "faq" | "report" | "feedback" | "feedback-create" | "delete-account" | "scope-help" | "scopes" | "scope-create" | "teams";
+type ProfileSheet = "name" | "faq" | "report" | "feedback" | "feedback-create" | "delete-account" | "scope-help" | "scope-create" | "scope-actions" | "scope-delete" | "teams";
 
 const FAQ = [
   ["What are Sparks?", "Sparks power AI actions across Vorinthex. Your balance is shared across every capability."],
@@ -34,14 +37,18 @@ const FAQ = [
   ["How do I restore renewal?", "If you scheduled cancellation for a Polar subscription, Restore renewal keeps that subscription renewing at the end of its current period."],
 ] as const;
 
+const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const canManageScope = (scope?: ScopeSummary) => scope?.role === "owner" || scope?.role === "admin";
+
 function displayName(name?: string, email?: string) {
   return name?.trim() || email?.split("@")[0] || "Profile";
 }
 
-function ScopeCard({ onPress, scope, size }: { onPress: () => void; scope?: ScopeSummary; size: number }) {
+function ScopeCard({ onLongPress, onPress, scope, size }: { onLongPress?: () => void; onPress: () => void; scope?: ScopeSummary; size: number }) {
   return <View style={[styles.scopeCard, scope?.isCurrent && styles.scopeCardSelected, { height: size, width: size }]}>
-    <Button accessibilityLabel={scope ? `${scope.isCurrent ? "Current scope" : "Select scope"}: ${scope.name}` : "Create scope"} contentMode="raw" onPress={onPress} shape="rounded" size="md" style={styles.scopeCardButton} variant="ghost">
-      {scope ? <><FolderIcon size="lg" /><Text numberOfLines={2} style={styles.scopeCardLabel}>{scope.name}</Text></> : <PlusIcon size="lg" />}
+    {scope?.coverUrl ? <Image contentFit="cover" source={scope.coverUrl} style={styles.scopeCover} /> : null}
+    <Button accessibilityHint={onLongPress ? "Long press for scope actions" : undefined} accessibilityLabel={scope ? `${scope.isCurrent ? "Current scope" : "Select scope"}: ${scope.name}` : "Create scope"} contentMode="raw" delayLongPress={350} onLongPress={onLongPress} onPress={onPress} shape="rounded" size="md" style={[styles.scopeCardButton, scope?.coverUrl && styles.scopeCardButtonCovered]} variant="ghost">
+      {scope ? <>{scope.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={2} style={[styles.scopeCardLabel, scope.coverUrl && styles.scopeCardLabelCovered]}>{scope.name}</Text></> : <PlusIcon size="lg" />}
     </Button>
     {scope?.isCurrent ? <View pointerEvents="none" style={styles.scopeSelectedBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}
   </View>;
@@ -72,21 +79,24 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
   const [scopeDescription, setScopeDescription] = useState("");
   const [votingKey, setVotingKey] = useState<string>();
   const [selectingTeam, setSelectingTeam] = useState(false);
+  const [selectedScope, setSelectedScope] = useState<ScopeSummary>();
+  const [deletingScope, setDeletingScope] = useState(false);
   const reportRequestKey = useRef<string | undefined>(undefined);
   const feedbackRequestKey = useRef<string | undefined>(undefined);
   const feedbackScrollRef = useRef<ScrollView>(null);
   const feedbackSyncKeys = useRef(new Set<string>());
-  const scopeCreateReturn = useRef<"scopes" | undefined>(undefined);
   const scrollToNewFeedback = useRef(false);
+  const longPressedScopeKey = useRef<string | undefined>(undefined);
+  const scopeListMutation = useRef(0);
+  const scopeManagementPending = useRef(false);
   const name = displayName(user?.name, user?.email);
   const feedbackQueryKey = ["profile-feedback", teamKey, scopeKey] as const;
   const scopeQueryKey = scopeListQueryKey(String(user?.key ?? ""), teamKey);
-  const scopeCardSize = Math.floor((width - 60) / 3);
-  const profileScopeCardSize = Math.floor((width - 108) / 3);
+  const scopeCardSize = Math.floor((width - spacing.md * 2 - 20) / 3);
   const scopesQuery = useQuery({ queryKey: scopeQueryKey, queryFn: ({ signal }) => listScopes(teamKey, signal), enabled: Boolean(user?.key && teamKey), refetchOnMount: "always" });
   const teamsQuery = useQuery({ queryKey: teamListQueryKey(String(user?.key ?? "")), queryFn: ({ signal }) => listTeams(signal), enabled: teamSelectionEnabled && sheet === "teams" });
   const scopes = scopesQuery.data ?? [];
-  const featuredScopes = [...scopes].sort((left, right) => Number(right.isCurrent) - Number(left.isCurrent) || left.position - right.position).slice(0, 2);
+  const sortedScopes = [...scopes].sort((left, right) => left.position - right.position);
   const feedbackQuery = useQuery({
     queryKey: feedbackQueryKey,
     queryFn: async () => {
@@ -106,7 +116,7 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
   }, [teamKey, queryClient, refetchFeedback, scopeKey, sheet]);
 
   useEffect(() => {
-    if ((sheet === "scopes" || sheet === "scope-create") && !scopeOperationIsPending()) void queryClient.invalidateQueries({ queryKey: scopeListQueryKey(String(user?.key ?? ""), teamKey) });
+    if (sheet === "scope-create" && !scopeOperationIsPending()) void queryClient.invalidateQueries({ queryKey: scopeListQueryKey(String(user?.key ?? ""), teamKey) });
   }, [teamKey, queryClient, sheet, user?.key]);
 
   const pickAvatar = async () => {
@@ -220,29 +230,24 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
     }
   };
 
-  const logOut = () => {
+  const logOut = async () => {
     setSheet(undefined);
-    const completion = signOut();
+    await signOut();
     queryClient.clear();
     router.replace("/auth");
-    void completion;
   };
 
-  const openScopeCreate = (returnTo?: "scopes") => {
-    scopeCreateReturn.current = returnTo;
+  const openScopeCreate = () => {
     setScopeName("");
     setScopeDescription("");
     setSheet("scope-create");
   };
 
-  const showSelectedFirst = (items: ScopeSummary[], selected: ScopeSummary) => [
-    { ...selected, isCurrent: true },
-    ...items.filter(({ key }) => key !== selected.key).map((item) => ({ ...item, isCurrent: false })),
-  ];
+  const markSelected = (items: ScopeSummary[], selected: ScopeSummary) => items.map((item) => item.key === selected.key
+    ? { ...selected, isCurrent: true }
+    : { ...item, isCurrent: false });
 
-  const showCurrentKeyFirst = (items: ScopeSummary[], currentKey: string) => [...items]
-    .map((item) => ({ ...item, isCurrent: item.key === currentKey }))
-    .sort((left, right) => Number(right.isCurrent) - Number(left.isCurrent) || left.position - right.position);
+  const markCurrentKey = (items: ScopeSummary[], currentKey: string) => items.map((item) => ({ ...item, isCurrent: item.key === currentKey }));
 
   const resetScopeQueries = () => {
     void queryClient.cancelQueries({ predicate: ({ queryKey }) => queryKey[0] !== "scope-list" });
@@ -250,13 +255,13 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
   };
 
   const chooseScope = (scope: ScopeSummary) => {
-    if (scopeOperationIsPending() || scope.key.startsWith("optimistic:")) return;
+    if (scope.key.startsWith("optimistic:")) return;
     setSheet(undefined);
     if (scope.key === scopeKey) return;
     const previous = queryClient.getQueryData<ScopeSummary[]>(scopeQueryKey) ?? scopes;
     const update = optimisticScope({ ...scope, isCurrent: true });
-    const optimisticList = showSelectedFirst(previous, scope);
-    void queryClient.cancelQueries({ queryKey: scopeQueryKey });
+    const optimisticList = markSelected(previous, scope);
+    void queryClient.cancelQueries({ queryKey: scopeQueryKey }, { revert: false });
     queryClient.setQueryData(scopeQueryKey, optimisticList);
     resetScopeQueries();
     const operation = scheduleScopeOperation(() => selectScope(teamKey, scope.key));
@@ -265,7 +270,7 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
       await queryClient.cancelQueries({ queryKey: scopeQueryKey });
       if (!operation.isCurrent()) return;
       update.reconcile(selected);
-      queryClient.setQueryData(scopeQueryKey, showSelectedFirst(optimisticList, selected));
+      queryClient.setQueryData(scopeQueryKey, markSelected(optimisticList, selected));
     }).catch(async () => {
       if (!operation.isCurrent()) return;
       await queryClient.cancelQueries({ queryKey: scopeQueryKey });
@@ -274,7 +279,7 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
       await hydrate().catch(() => undefined);
       resetScopeQueries();
       const authoritativeKey = String(useAuthStore.getState().scope?.key ?? "");
-      queryClient.setQueryData(scopeQueryKey, showCurrentKeyFirst(previous, authoritativeKey));
+      queryClient.setQueryData(scopeQueryKey, markCurrentKey(previous, authoritativeKey));
       if (authoritativeKey !== scope.key) showToast({ title: "Scope could not be switched.", duration: 2_500 });
     });
   };
@@ -286,10 +291,11 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
     const requestKey = randomUUID();
     const previous = queryClient.getQueryData<ScopeSummary[]>(scopeQueryKey) ?? scopes;
     const optimisticKey = `optimistic:${requestKey}`;
-    const optimisticCreated: ScopeSummary = { key: optimisticKey, slug: "pending", name, summary: description || `${name} workspace`, description: description || null, position: 1, level: 1, role: "owner", isCurrent: true };
-    void queryClient.cancelQueries({ queryKey: scopeQueryKey });
+    const optimisticCreated: ScopeSummary = { key: optimisticKey, slug: "pending", name, summary: description || `${name} workspace`, description: description || null, coverImageKey: null, coverUrl: null, position: 1, level: 1, role: "owner", isCurrent: true };
+    void queryClient.cancelQueries({ queryKey: scopeQueryKey }, { revert: false });
     queryClient.setQueryData(scopeQueryKey, [optimisticCreated, ...previous.map((scope) => ({ ...scope, isCurrent: false }))]);
-    setSheet(scopeCreateReturn.current);
+    const scopeUpdate = optimisticScope(optimisticCreated);
+    setSheet(undefined);
     const operation = scheduleScopeOperation(async () => {
       const created = await createScope(teamKey, { name, ...(description ? { description } : {}) }, requestKey);
       if (!operation.isCurrent()) return { created };
@@ -306,24 +312,149 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
       if (!operation.isCurrent()) return;
       resetScopeQueries();
       if (selected) {
-        const update = optimisticScope(selected);
-        update.reconcile(selected);
-        queryClient.setQueryData(scopeQueryKey, showSelectedFirst(previous, selected));
+        scopeUpdate.reconcile(selected);
+        queryClient.setQueryData(scopeQueryKey, markSelected([selected, ...previous], selected));
       } else {
+        scopeUpdate.rollback();
         await hydrate().catch(() => undefined);
         const authoritativeKey = String(useAuthStore.getState().scope?.key ?? "");
-        queryClient.setQueryData(scopeQueryKey, showCurrentKeyFirst([created, ...previous], authoritativeKey));
+        queryClient.setQueryData(scopeQueryKey, markCurrentKey([created, ...previous], authoritativeKey));
         if (selectionFailed && authoritativeKey !== created.key) showToast({ title: "Scope was created, but could not be selected.", duration: 3_000 });
       }
     }).catch(async () => {
       if (!operation.isCurrent()) return;
       await queryClient.cancelQueries({ queryKey: scopeQueryKey });
       if (!operation.isCurrent()) return;
+      scopeUpdate.rollback();
       await hydrate().catch(() => undefined);
       resetScopeQueries();
       queryClient.setQueryData(scopeQueryKey, previous);
       void queryClient.invalidateQueries({ queryKey: scopeQueryKey });
       showToast({ title: "Scope could not be created.", duration: 2_500 });
+    });
+  };
+
+  const openScopeActions = (scope: ScopeSummary) => {
+    if (scope.key.startsWith("optimistic:") || !canManageScope(scope) || scopeManagementPending.current) return;
+    longPressedScopeKey.current = scope.key;
+    setSelectedScope(scope);
+    setSheet("scope-actions");
+    void Haptics.selectionAsync();
+  };
+
+  const pressScope = (scope: ScopeSummary) => {
+    if (longPressedScopeKey.current === scope.key) {
+      longPressedScopeKey.current = undefined;
+      return;
+    }
+    chooseScope(scope);
+  };
+
+  const prioritizeSelectedScope = () => {
+    if (!selectedScope || !canManageScope(selectedScope) || scopeManagementPending.current) return;
+    scopeManagementPending.current = true;
+    const target = selectedScope;
+    const previous = queryClient.getQueryData<ScopeSummary[]>(scopeQueryKey) ?? scopes;
+    const prioritized = [target, ...previous.filter(({ key }) => key !== target.key)].map((scope, index) => ({ ...scope, position: index + 1 }));
+    const mutation = ++scopeListMutation.current;
+    setSheet(undefined);
+    queryClient.setQueryData(scopeQueryKey, prioritized);
+    void prioritizeScope(teamKey, target.key).then((updated) => {
+      if (mutation !== scopeListMutation.current) return;
+      queryClient.setQueryData<ScopeSummary[]>(scopeQueryKey, (current = prioritized) => current.map((scope) => scope.key === updated.key ? { ...scope, ...updated, position: 1 } : scope));
+    }).catch((error) => {
+      if (mutation !== scopeListMutation.current) return;
+      queryClient.setQueryData(scopeQueryKey, previous);
+      showToast({ title: extractDomainErrorMessage(error) ?? "Scope could not be prioritized.", duration: 2_500 });
+    }).finally(() => { scopeManagementPending.current = false; });
+  };
+
+  const changeSelectedScopeCover = async () => {
+    if (!selectedScope || !canManageScope(selectedScope) || scopeManagementPending.current) return;
+    scopeManagementPending.current = true;
+    const target = selectedScope;
+    try {
+      setSheet(undefined);
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        showToast({ title: "Photo access is required to change the scope cover.", duration: 2_500 });
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, aspect: [1, 1], quality: 1 });
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      if (!asset?.uri || !asset.width || !asset.height) return;
+      const previous = queryClient.getQueryData<ScopeSummary[]>(scopeQueryKey) ?? scopes;
+      const mutation = ++scopeListMutation.current;
+      queryClient.setQueryData<ScopeSummary[]>(scopeQueryKey, (current = previous) => current.map((scope) => scope.key === target.key ? { ...scope, coverUrl: asset.uri } : scope));
+      const context: GalleryContext = { teamKey, scopeKey: target.key };
+      let uploadedImageKey: string | undefined;
+      let updateStarted = false;
+      try {
+        const normalized = await normalizeCapturedPng(asset, { maxSide: 2400, compress: 0.88 });
+        const uploadKey = randomUUID();
+        const upload = await uploadGalleryImages([{ clientKey: uploadKey, filename: `scope-cover-${uploadKey}.png`, uri: normalized.uri, sizeBytes: normalized.sizeBytes, processingMode: "cover" }], undefined, context);
+        const job = upload.jobs[0];
+        if (!job) throw new Error("The scope cover upload could not be started.");
+        uploadedImageKey = job.imageKey;
+        let status = job.status;
+        for (let attempt = 0; status !== "completed" && status !== "failed" && attempt < 40; attempt += 1) {
+          await wait(3_000);
+          status = (await fetchGalleryUploadStatus([job.key], 60_000, context)).jobs[0]?.status ?? status;
+        }
+        if (status !== "completed") throw new Error("The scope cover could not be processed.");
+        updateStarted = true;
+        const updated = await updateScopeCover(teamKey, target.key, job.imageKey);
+        if (mutation !== scopeListMutation.current) return;
+        queryClient.setQueryData<ScopeSummary[]>(scopeQueryKey, (current = previous) => current.map((scope) => scope.key === target.key ? updated : scope));
+        setSelectedScope(updated);
+      } catch (error) {
+        if (uploadedImageKey && !updateStarted) void deleteGalleryImages([uploadedImageKey], context).catch(() => undefined);
+        if (mutation !== scopeListMutation.current) return;
+        queryClient.setQueryData(scopeQueryKey, previous);
+        showToast({ title: extractDomainErrorMessage(error) ?? "Scope cover could not be changed.", duration: 2_500 });
+      }
+    } finally {
+      scopeManagementPending.current = false;
+    }
+  };
+
+  const deleteSelectedScope = () => {
+    if (!selectedScope || !canManageScope(selectedScope) || deletingScope || scopeManagementPending.current) return;
+    const target = selectedScope;
+    const previous = queryClient.getQueryData<ScopeSummary[]>(scopeQueryKey) ?? scopes;
+    const fallback = previous.find(({ key }) => key !== target.key);
+    if (!fallback) {
+      showToast({ title: "The last scope cannot be deleted.", duration: 2_500 });
+      return;
+    }
+    scopeManagementPending.current = true;
+    const mutation = ++scopeListMutation.current;
+    const scopeUpdate = target.isCurrent ? optimisticScope({ ...fallback, isCurrent: true }) : undefined;
+    const optimisticList = previous.filter(({ key }) => key !== target.key).map((scope) => ({ ...scope, isCurrent: target.isCurrent ? scope.key === fallback.key : scope.isCurrent }));
+    setDeletingScope(true);
+    setSheet(undefined);
+    queryClient.setQueryData(scopeQueryKey, optimisticList);
+    void (async () => {
+      const selected = target.isCurrent ? await selectScope(teamKey, fallback.key) : undefined;
+      await deleteScope(teamKey, target.key);
+      return selected;
+    })().then((selected) => {
+      if (mutation !== scopeListMutation.current) return;
+      if (selected) scopeUpdate?.reconcile(selected);
+      setSelectedScope(undefined);
+    }).catch(async (error) => {
+      if (mutation !== scopeListMutation.current) return;
+      scopeUpdate?.rollback();
+      if (target.isCurrent) await hydrate().catch(() => undefined);
+      const authoritativeKey = String(useAuthStore.getState().scope?.key ?? "");
+      queryClient.setQueryData(scopeQueryKey, target.isCurrent ? markCurrentKey(previous, authoritativeKey) : previous);
+      resetScopeQueries();
+      await queryClient.invalidateQueries({ queryKey: scopeQueryKey });
+      showToast({ title: extractDomainErrorMessage(error) ?? "Scope could not be deleted.", duration: 3_000 });
+    }).finally(() => {
+      scopeManagementPending.current = false;
+      setDeletingScope(false);
     });
   };
 
@@ -349,10 +480,13 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
     } finally { setSelectingTeam(false); }
   };
 
-  const settingsAction = page === "profile" ? <Button accessibilityLabel="Open settings" contentMode="raw" iconOnly onPress={() => router.push("/settings")} size="xs" variant="secondary"><SettingsIcon size="sm" /></Button> : undefined;
+  const headerActions = <>
+    <Button accessibilityLabel="Log out" contentMode="raw" iconOnly onPress={() => void logOut()} size="xs" variant="icon"><LogOutIcon size="sm" /></Button>
+    {page === "profile" ? <Button accessibilityLabel="Open settings" contentMode="raw" iconOnly onPress={() => router.push("/settings")} size="xs" variant="icon"><SettingsIcon size="sm" /></Button> : null}
+  </>;
 
   return <>
-    <AccountScreenShell rightAction={settingsAction} title={page === "profile" ? "Profile" : "Settings"}>
+    <AccountScreenShell rightAction={headerActions} title={page === "profile" ? "Profile" : "Settings"}>
       {page === "profile" ? <View style={styles.content}>
         <Button accessibilityLabel="Change profile image" contentMode="raw" iconOnly onPress={() => void pickAvatar().catch(() => showToast({ title: "The image picker could not be opened.", duration: 2_500 }))} size="xl" style={styles.avatarButton} variant="ghost">
           <Avatar fallback={profileInitial(user)} size={104} style={styles.avatar} uri={user?.avatarUrl} />
@@ -363,12 +497,11 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
           {user?.email ? <Text style={styles.email}>{user.email}</Text> : null}
         </View>
         <View style={styles.scopeSection}>
-          <View style={styles.scopeTitleRow}><Text style={styles.scopeTitle}>Scope</Text><Button accessibilityLabel="What is a scope?" contentMode="raw" iconOnly onPress={() => setSheet("scope-help")} size="xs" variant="ghost"><HelpIcon size="sm" variant="muted" /></Button></View>
+          <View style={styles.scopeTitleRow}><Text style={styles.scopeTitle}>Scopes</Text><Button accessibilityLabel="What are scopes?" contentMode="raw" iconOnly onPress={() => setSheet("scope-help")} size="xs" variant="icon"><HelpIcon size="sm" /></Button></View>
           <View style={styles.scopeGrid}>
-            <ScopeCard onPress={() => openScopeCreate()} size={profileScopeCardSize} />
-            {scopesQuery.isPending ? [0, 1].map((index) => <Skeleton key={index} style={[styles.scopeSkeleton, { height: profileScopeCardSize, width: profileScopeCardSize }]} />) : featuredScopes.map((scope) => <ScopeCard key={scope.key} onPress={() => chooseScope(scope)} scope={scope} size={profileScopeCardSize} />)}
+            <ScopeCard onPress={openScopeCreate} size={scopeCardSize} />
+            {scopesQuery.isPending ? [0, 1].map((index) => <Skeleton key={index} style={[styles.scopeSkeleton, { height: scopeCardSize, width: scopeCardSize }]} />) : scopesQuery.isError && !scopes.length ? <View style={styles.scopeState}><Text accessibilityRole="alert" style={styles.deleteError}>Scopes could not be loaded.</Text><Button onPress={() => void scopesQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : sortedScopes.map((scope) => <ScopeCard key={scope.key} onLongPress={canManageScope(scope) ? () => openScopeActions(scope) : undefined} onPress={() => pressScope(scope)} scope={scope} size={scopeCardSize} />)}
           </View>
-          <SubtleButton onPress={() => setSheet("scopes")} size="md">Show all</SubtleButton>
         </View>
       </View> : <View style={styles.settingsContent}>
         <View style={styles.settingsMenu}>
@@ -377,23 +510,28 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
           <Button onPress={() => setSheet("feedback")} size="md" variant="secondary">Give feedback</Button>
           <Button onPress={() => setSheet("report")} size="md" variant="secondary">Report an issue</Button>
           <Button onPress={() => setSheet("faq")} size="md" variant="secondary">FAQ</Button>
-          <Button onPress={logOut} size="md" variant="secondary">Log out</Button>
           <Button onPress={() => { setDeleteError(""); setSheet("delete-account"); }} size="md" variant="danger">Delete account</Button>
         </View>
       </View>}
     </AccountScreenShell>
 
-    <BottomSheet onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "scope-help"} title="Scope">
+    <BottomSheet footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "scope-help"} title="Scopes">
       <Text style={styles.scopeHelp}>Scopes are separate workspaces for different parts of your life. For example, you can create one for work and another for personal use, keeping their content, conversations, and tools organized independently.</Text>
     </BottomSheet>
 
-    <BottomSheet description="Switch between scopes to keep your work organized and separate." focusKey="profile-scopes" footer={<><Button onPress={() => openScopeCreate("scopes")} size="md" variant="primary">Create new</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "scopes"} title="Scopes">
-      <ScrollView contentContainerStyle={styles.scopeGrid}>
-        {scopesQuery.isFetching && !scopes.length ? [0, 1, 2].map((index) => <Skeleton key={index} style={[styles.scopeSkeleton, { height: scopeCardSize, width: scopeCardSize }]} />) : scopesQuery.isError && !scopes.length ? <View style={styles.scopeState}><Text accessibilityRole="alert" style={styles.deleteError}>Scopes could not be loaded.</Text><Button onPress={() => void scopesQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : [...scopes].sort((left, right) => Number(right.isCurrent) - Number(left.isCurrent) || left.position - right.position).map((scope) => <ScopeCard key={scope.key} onPress={() => chooseScope(scope)} scope={scope} size={scopeCardSize} />)}
-      </ScrollView>
+    <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "scope-actions" && canManageScope(selectedScope)} title="Scope actions">
+      <BottomSheetMenu>
+        <BottomSheetItem onPress={prioritizeSelectedScope}>Prioritize</BottomSheetItem>
+        <BottomSheetItem onPress={() => void changeSelectedScopeCover()}>Change cover</BottomSheetItem>
+        <BottomSheetItem onPress={() => setSheet("scope-delete")}>Delete</BottomSheetItem>
+      </BottomSheetMenu>
     </BottomSheet>
 
-    <BottomSheet focusKey="profile-scope-create" footer={<><Button disabled={!scopeName.trim()} onPress={submitScope} size="md" variant="primary">Create scope</Button><Button onPress={() => setSheet(scopeCreateReturn.current)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet(scopeCreateReturn.current); }} open={sheet === "scope-create"} title="Create scope">
+    <BottomSheet dismissible={!deletingScope} footer={<><Button disabled={deletingScope} loading={deletingScope} onPress={deleteSelectedScope} size="md" variant="primary">Delete</Button><Button disabled={deletingScope} onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open && !deletingScope) setSheet(undefined); }} open={sheet === "scope-delete" && Boolean(selectedScope)} title="Delete scope">
+      <Text style={styles.scopeHelp}>All data connected to this scope will be deleted. This action can&apos;t be undone.</Text>
+    </BottomSheet>
+
+    <BottomSheet focusKey="profile-scope-create" footer={<><Button disabled={!scopeName.trim()} onPress={submitScope} size="md" variant="primary">Create scope</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "scope-create"} title="Create scope">
       <View style={styles.form}>
         <Text style={styles.inputLabel}>Scope name</Text>
         <TextInput accessibilityLabel="New scope name" maxLength={160} onChangeText={setScopeName} placeholder="Scope name" value={scopeName} />
@@ -453,11 +591,11 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
 }
 
 const styles = StyleSheet.create({
-  content: { alignItems: "center", flexGrow: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.xl },
+  content: { alignItems: "center", flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.xl },
   settingsContent: { flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
   settingsMenu: { gap: spacing.sm },
   avatarButton: { height: 112, width: 112 },
-  avatar: { borderColor: palette.hairlineBright, borderWidth: 1 },
+  avatar: { backgroundColor: palette.voidBlack, borderColor: palette.hairlineBright, borderWidth: 1 },
   avatarHint: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 12, marginTop: spacing.xs },
   identity: { alignItems: "center", gap: spacing.xs, marginTop: spacing.md },
   nameButton: { maxWidth: "100%", paddingHorizontal: spacing.sm },
@@ -487,7 +625,10 @@ const styles = StyleSheet.create({
   scopeCard: { backgroundColor: palette.panelRaised, borderColor: palette.hairline, borderRadius: radii.md, borderWidth: 1, overflow: "hidden", position: "relative" },
   scopeCardSelected: { borderColor: palette.silver50, elevation: 4, shadowColor: palette.silver50, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.62, shadowRadius: 5 },
   scopeCardButton: { flexDirection: "column", gap: 10, height: "100%", paddingHorizontal: 8, width: "100%" },
+  scopeCardButtonCovered: { backgroundColor: "rgba(0, 0, 0, 0.28)" },
   scopeCardLabel: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "center", width: "100%" },
+  scopeCardLabelCovered: { color: palette.chromeWhite, textShadowColor: "rgba(0, 0, 0, 0.9)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
+  scopeCover: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   scopeSelectedBadge: { alignItems: "center", backgroundColor: palette.silver50, borderRadius: 10, height: 20, justifyContent: "center", position: "absolute", right: 4, top: 4, width: 20 },
   scopeSkeleton: { backgroundColor: palette.hairlineBright, borderRadius: radii.md, opacity: 0.72 },
   scopeState: { alignItems: "center", gap: spacing.md, paddingVertical: spacing.xl, width: "100%" },

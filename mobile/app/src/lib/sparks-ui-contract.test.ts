@@ -14,14 +14,15 @@ const [header, sheet, layout, hook, api, conversation, sharedButton, sharedBadge
   read("../../../../shared/package.json"),
 ]);
 
-test("orders the shared compact Sparks badge immediately before the profile control", () => {
-  const badge = header.indexOf("<Badge style={styles.balanceBadge}");
-  const profile = header.indexOf("<ProfileAvatarButton", badge);
-  expect(badge).toBeGreaterThan(0);
-  expect(profile).toBeGreaterThan(badge);
-  expect(header.slice(badge, profile)).not.toContain("<Button");
-  expect(header).toContain('size="xs"');
-  expect(header).toContain('variant="ghost"');
+test("orders the shared compact secondary Sparks button immediately before the profile control", () => {
+  const headerRight = header.indexOf("export function ProfileHeaderRight");
+  const sparks = header.indexOf("<SparksBalanceButton", headerRight);
+  const profile = header.indexOf("<ProfileAvatarButton", sparks);
+  const balanceButton = header.slice(header.indexOf("export function SparksBalanceButton"), headerRight);
+  expect(sparks).toBeGreaterThan(headerRight);
+  expect(profile).toBeGreaterThan(sparks);
+  expect(balanceButton).toContain('size="xs"');
+  expect(balanceButton).toContain('variant="secondary"');
   expect(header).toContain("formatWholeSparks(balance ?? 0)");
   expect(header).not.toContain('"--"');
   expect(header).toContain("Sparks balance:");
