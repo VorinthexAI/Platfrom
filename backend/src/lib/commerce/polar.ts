@@ -27,7 +27,8 @@ const productResponseSchema = z.object({
   is_archived: z.boolean(),
   prices: z.array(z.object({ id: polarId, amount_type: z.string() }).passthrough()),
 }).passthrough();
-const productListResponseSchema = z.object({ items: z.array(productResponseSchema), pagination: z.object({ max_page: z.number().int().positive() }).passthrough() }).passthrough();
+const polarPaginationSchema = z.object({ max_page: z.number().int().nonnegative() }).passthrough();
+const productListResponseSchema = z.object({ items: z.array(productResponseSchema), pagination: polarPaginationSchema }).passthrough();
 
 export const polarOrderSchema = z.object({
   id: polarId,
@@ -72,8 +73,8 @@ export const polarSubscriptionSchema = z.object({
   metadata: polarMetadata,
 }).passthrough();
 
-const orderListResponseSchema = z.object({ items: z.array(polarOrderSchema), pagination: z.object({ max_page: z.number().int().positive() }).passthrough() }).passthrough();
-const subscriptionListResponseSchema = z.object({ items: z.array(polarSubscriptionSchema), pagination: z.object({ max_page: z.number().int().positive() }).passthrough() }).passthrough();
+const orderListResponseSchema = z.object({ items: z.array(polarOrderSchema), pagination: polarPaginationSchema }).passthrough();
+const subscriptionListResponseSchema = z.object({ items: z.array(polarSubscriptionSchema), pagination: polarPaginationSchema }).passthrough();
 
 export class PolarProviderError extends Error {
   constructor(public readonly code: 'NOT_CONFIGURED' | 'TIMEOUT' | 'REJECTED' | 'INVALID_RESPONSE', message: string, public readonly retryable: boolean, public readonly status?: number) {
