@@ -97,9 +97,9 @@ test("auth uses an unboxed action layout and includes the AI disclosure", () => 
   expect(auth).toContain("Vorinthex AI uses artificial intelligence to generate and process text, images, audio and video.");
 });
 
-test("referral leads through reward, notification, Gallery, and camera access", () => {
-  expect(onboarding).toContain('<OnboardingReward onFinished={() => setPhase("permissions")}');
-  expect(onboarding).toContain("<OnboardingPermissions");
+test("onboarding starts with full photos, camera, and notification access", () => {
+  expect(onboarding).toContain('<OnboardingPermissions onFinished={() => setPhase("intro")}');
+  expect(onboarding).toContain('<OnboardingReward onFinished={handleComplete}');
   expect(onboarding).toContain('onComplete={() => setPhase("reward")}');
   expect(reward).toContain('title="Free sparks"');
   expect(reward).toContain("Your first 100 Sparks are ready. Use them anywhere in Vorinthex AI.");
@@ -116,7 +116,9 @@ test("referral leads through reward, notification, Gallery, and camera access", 
   expect(permissions).toContain("CameraIcon");
   expect(permissions).toContain("ImagePicker.requestCameraPermissionsAsync");
   expect(permissions).toContain('title: "Allow notifications"');
-  expect(permissions).toContain('title: "Allow Gallery"');
+  expect(permissions).toContain('const STEPS: readonly PermissionStep[] = ["photos", "camera", "notifications"]');
+  expect(permissions).toContain('title: "Allow full photo access"');
+  expect(permissions).toContain("permission.granted && permission.accessPrivileges === \"all\"");
   expect(permissions).toContain('title: "Allow camera"');
   expect(permissions).toContain("Stay up to date with updates and never miss anything.");
   expect(permissions).not.toContain("Directory.pickDirectoryAsync()");

@@ -89,7 +89,7 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Vorinthex to read your photo library for Gallery.",
+          "photosPermission": "Allow Vorinthex full access to your photo library so Gallery can organize, search, and enrich it.",
           "cameraPermission": "Allow Vorinthex to scan documents and take photos for Gallery."
         }
       ],

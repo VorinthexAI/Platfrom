@@ -18,7 +18,7 @@ export default function OnboardingRoute() {
   const completeOnboarding = useAuthStore((state) => state.completeOnboarding);
   const authStatus = useAuthStore((state) => state.status);
   const [initialPage] = useState<"plans" | "referral">(() => useUiStore.getState().consumeOnboardingReferralEntry() ? "referral" : "plans");
-  const [phase, setPhase] = useState<"intro" | "sandbox" | "paywall" | "reward" | "permissions">(initialPage === "referral" || authStatus === "authenticated" ? "paywall" : "intro");
+  const [phase, setPhase] = useState<"intro" | "sandbox" | "paywall" | "reward" | "permissions">(initialPage === "referral" || authStatus === "authenticated" ? "paywall" : "permissions");
   const apps = useAppsStore((state) => state.apps);
   const alreadyOnboarded = useRef(useAuthStore.getState().user?.isOnboarded === true);
   useEffect(() => {
@@ -35,9 +35,9 @@ export default function OnboardingRoute() {
   }, [router]);
 
   return <View style={styles.root}>{phase === "permissions"
-    ? <OnboardingPermissions onFinished={handleComplete} />
+    ? <OnboardingPermissions onFinished={() => setPhase("intro")} />
     : phase === "reward"
-      ? <OnboardingReward onFinished={() => setPhase("permissions")} />
+      ? <OnboardingReward onFinished={handleComplete} />
       : phase === "paywall"
         ? <PaywallSheet initialPage={initialPage} mode="onboarding" onComplete={() => setPhase("reward")} />
     : phase === "sandbox"
