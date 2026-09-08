@@ -220,7 +220,7 @@ export function isGalleryMemoryExhaustion(error: unknown) {
   return error instanceof GalleryClientError && (error.status === 409 || error.code?.includes("EXHAUST") === true);
 }
 
-type GalleryContext = { teamKey: string; scopeKey: string };
+export type GalleryContext = { teamKey: string; scopeKey: string };
 
 function recordKey(value: Record<string, unknown> | null) {
   return typeof value?.key === "string" ? value.key : "";
@@ -236,9 +236,9 @@ export function getGalleryContext(): GalleryContext {
   return context;
 }
 
-async function postGallery<T>(path: string, input: Record<string, unknown>, timeout = 60_000, signal?: AbortSignal) {
+async function postGallery<T>(path: string, input: Record<string, unknown>, timeout = 60_000, signal?: AbortSignal, context?: GalleryContext) {
   try {
-    const response = await apiClient.post<ApiResponse<T>>(path, { ...getGalleryContext(), ...input }, { signal, timeout });
+    const response = await apiClient.post<ApiResponse<T>>(path, { ...(context ?? getGalleryContext()), ...input }, { signal, timeout });
     const payload = response.data as ApiResponse<T> | undefined;
     if (!payload || typeof payload !== "object" || payload.success !== true) throw galleryClientError(payload && "error" in payload ? payload.error : undefined);
     if (!("data" in payload)) throw galleryClientError(undefined);
@@ -389,14 +389,14 @@ export type PreparedGalleryUpload = {
   processingMode?: "library" | "cover";
 };
 
-export async function uploadGalleryImages(files: PreparedGalleryUpload[], collectionKey?: string) {
+export async function uploadGalleryImages(files: PreparedGalleryUpload[], collectionKey?: string, context?: GalleryContext) {
   if (files.some(({ filename }) => !/^[^/\\]+\.png$/i.test(filename))) throw new Error("Gallery images must be converted to PNG before upload.");
   const reservation = await postGallery<{
     uploads: { clientKey: string; uploadKey: string; imageKey: string; url: string; headers: Record<string, string> }[];
   }>("/gallery/uploads/presign", {
     collectionKey: collectionKey ?? null,
     files: files.map(({ clientKey, filename, sizeBytes, processingMode, latitude, longitude }) => ({ clientKey, filename, sizeBytes, ...(processingMode ? { processingMode } : {}), ...(latitude !== undefined && longitude !== undefined ? { latitude, longitude } : {}) })),
-  });
+  }, 60_000, undefined, context);
 
   for (let index = 0; index < reservation.uploads.length; index += 3) {
     await Promise.all(reservation.uploads.slice(index, index + 3).map(async (upload) => {
@@ -412,7 +412,7 @@ export async function uploadGalleryImages(files: PreparedGalleryUpload[], collec
 
   const completed = await postGallery<{ jobs: { key: string; imageKey: string; status: string }[] }>(
     "/gallery/uploads/complete",
-    { uploadKeys: reservation.uploads.map(({ uploadKey }) => uploadKey) },
+    { uploadKeys: reservation.uploads.map(({ uploadKey }) => uploadKey) }, 60_000, undefined, context,
   );
   return {
     jobs: completed.jobs.map((job) => {
@@ -423,11 +423,11 @@ export async function uploadGalleryImages(files: PreparedGalleryUpload[], collec
   };
 }
 
-export function fetchGalleryUploadStatus(uploadKeys: string[], timeout = 60_000) {
+export function fetchGalleryUploadStatus(uploadKeys: string[], timeout = 60_000, context?: GalleryContext) {
   return postGallery<{ jobs: { key: string; imageKey: string; status: string; errorCode: string | null }[] }>(
     "/gallery/uploads/status",
     { uploadKeys },
-    timeout,
+    timeout, undefined, context,
   );
 }
 
@@ -485,8 +485,8 @@ export function reconcileGalleryDuplicateDeletion(images: GalleryImage[], result
   };
 }
 
-export function deleteGalleryImages(imageKeys: string[]) {
-  return postGallery<GalleryImageDeleteResult>("/gallery/images/delete", { imageKeys });
+export function deleteGalleryImages(imageKeys: string[], context?: GalleryContext) {
+  return postGallery<GalleryImageDeleteResult>("/gallery/images/delete", { imageKeys }, 60_000, undefined, context);
 }
 
 export function findGalleryCollectionDuplicates(collectionKey: string) {

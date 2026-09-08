@@ -40,4 +40,4 @@ export {
   type ScopeMemberView,
 } from './members';
 export { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from './indexes';
-export { createScopeService, resolveScopeManagementContext, scopeCreateInputSchema, scopeListInputSchema, scopeSelectInputSchema, scopeService, ScopeServiceError, type PublicScope, type ScopeService } from './service';
+export { createScopeService, resolveScopeManagementContext, scopeCreateInputSchema, scopeDeleteInputSchema, scopeListInputSchema, scopePrioritizeInputSchema, scopeSelectInputSchema, scopeUpdateInputSchema, scopeService, ScopeServiceError, type PublicScope, type ScopeService } from './service';

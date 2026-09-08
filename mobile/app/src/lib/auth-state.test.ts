@@ -27,6 +27,9 @@ let getCalls = 0;
 let clearContextCalls = 0;
 let clearTokenCalls = 0;
 let revokeCalls = 0;
+let cleanupCalls = 0;
+let cleanupError: Error | undefined;
+let cleanupGate: Promise<void> | undefined;
 let tokenReadError: Error | undefined;
 let tokenReadGate: Promise<void> | undefined;
 const patchCalls: unknown[] = [];
@@ -61,6 +64,7 @@ mock.module("@/lib/api-client", () => ({
   patchJson: async (path: string, input: unknown) => { patchCalls.push({ path, input }); await patchGate; if (patchError) throw patchError; return patchResponse; },
   postJson: async (path: string, input: unknown) => { postCalls.push({ path, input }); return { deleted: true }; },
   revokeRemoteSession: async () => { revokeCalls += 1; },
+  cleanupRemoteSession: async () => { cleanupCalls += 1; await cleanupGate; if (cleanupError) throw cleanupError; },
 }));
 mock.module("@/lib/auth-context-vault", () => ({
   clearAuthContext: async () => { clearContextCalls += 1; },
@@ -92,6 +96,9 @@ beforeEach(() => {
   clearContextCalls = 0;
   clearTokenCalls = 0;
   revokeCalls = 0;
+  cleanupCalls = 0;
+  cleanupError = undefined;
+  cleanupGate = undefined;
   tokenReadError = undefined;
   tokenReadGate = undefined;
   patchCalls.length = 0;
@@ -270,7 +277,7 @@ test("signs out locally even when secure session reads fail", async () => {
   expect(useAuthStore.getState().user).toBeNull();
   expect(clearTokenCalls).toBe(1);
   expect(clearContextCalls).toBe(1);
-  expect(deleteCalls).toEqual([["/auth/me/push-subscription", { data: {}, timeout: 2_000 }]]);
+  expect(cleanupCalls).toBe(0);
 });
 
 test("signs out synchronously before secure storage and remote revocation finish", async () => {
@@ -283,10 +290,40 @@ test("signs out synchronously before secure storage and remote revocation finish
   expect(useAuthStore.getState().status).toBe("unauthenticated");
   expect(useAuthStore.getState().user).toBeNull();
   expect(clearTokenCalls).toBe(0);
-  expect(revokeCalls).toBe(0);
+  expect(clearContextCalls).toBe(0);
+  expect(cleanupCalls).toBe(0);
 
   releaseRead();
   await completion;
   expect(clearTokenCalls).toBe(1);
-  expect(revokeCalls).toBe(1);
+  expect(cleanupCalls).toBe(1);
+});
+
+test("awaits failed remote cleanup while still completing local cleanup", async () => {
+  useAuthStore.setState({ status: "authenticated", user: { ...realContext.user, isOnboarded: true }, team: realContext.team, scope: realContext.scope });
+  session = storedSession;
+  cleanupError = new Error("offline");
+  let releaseCleanup!: () => void;
+  cleanupGate = new Promise<void>((resolve) => { releaseCleanup = resolve; });
+
+  let completed = false;
+  const completion = useAuthStore.getState().signOut().then(() => { completed = true; });
+  await Bun.sleep(10);
+  expect(cleanupCalls).toBe(1);
+  expect(completed).toBe(false);
+  releaseCleanup();
+  await completion;
+  expect(clearTokenCalls).toBe(1);
+  expect(clearContextCalls).toBe(1);
+  expect(useAuthStore.getState().status).toBe("unauthenticated");
+});
+
+test("remote cleanup checks responses and bounds offline waits", async () => {
+  const source = await Bun.file(new URL("./api-client.ts", import.meta.url)).text();
+  expect(source).toContain("if (!response.ok) throw new Error");
+  expect(source).toContain("controller.abort(), 2_000");
+  expect(source).toContain('request("/auth/me/push-subscription", { method: "DELETE", body: "{}" })');
+  expect(source).toContain('request("/auth/logout", { method: "POST", body: "{}" })');
+  expect(source.indexOf('request("/auth/me/push-subscription"')).toBeLessThan(source.indexOf('request("/auth/logout"'));
+  expect(source).toContain("failure ??= error");
 });

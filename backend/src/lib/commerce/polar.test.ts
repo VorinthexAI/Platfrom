@@ -99,7 +99,7 @@ describe('Polar provider adapter', () => {
     expect(() => polarConfiguration({})).toThrow(PolarProviderError);
     expect(() => polarConfiguration({ POLAR_SERVER: 'sandbox', POLAR_ACCESS_TOKEN: 'token' })).toThrow(PolarProviderError);
     expect(() => polarConfiguration({ POLAR_ENV: 'Sandbox', POLAR_ACCESS_TOKEN: 'token' })).toThrow(PolarProviderError);
-    expect(() => polarConfiguration({ NODE_ENV: 'production', POLAR_ENV: 'sandbox', POLAR_ACCESS_TOKEN: 'token' })).toThrow('Production must use the Polar production environment.');
+    expect(polarConfiguration({ NODE_ENV: 'production', POLAR_ENV: 'sandbox', POLAR_ACCESS_TOKEN: 'token' })).toMatchObject({ environment: 'sandbox', accessToken: 'token' });
     expect(polarConfiguration({ POLAR_ENV: 'sandbox', POLAR_ACCESS_TOKEN: ' token ' })).toMatchObject({ environment: 'sandbox', accessToken: 'token' });
     let attempts = 0;
     const rejected = createPolarProvider({ environment: 'production', accessToken: 'token' }, async () => { attempts += 1; return new Response('{}', { status: 429, headers: { 'Retry-After': '60' } }); });

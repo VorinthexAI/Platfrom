@@ -11,12 +11,18 @@ test('migrates before activating backend code and running data changes', async (
   expect(databaseJob).toContain('needs: [changes, backend-secrets, backend-migrate]');
   expect(databaseJob).toContain("needs.backend-migrate.result == 'success'");
   const seed = databaseJob.indexOf('- name: Seed deterministic application data');
+  const catalogSync = databaseJob.indexOf('- name: Sync Polar product catalog');
   const backfill = databaseJob.indexOf('- name: Backfill semantic embeddings');
   expect(databaseJob).not.toContain('- name: Apply graph migrations');
   expect(seed).toBeGreaterThan(-1);
+  expect(catalogSync).toBeGreaterThan(seed);
+  expect(backfill).toBeGreaterThan(catalogSync);
   expect(backfill).toBeGreaterThan(seed);
   expect(databaseJob).toContain('run: bun run --cwd backend db:seed:ci');
+  expect(databaseJob).toContain('case "$polar_env" in sandbox|production)');
+  expect(databaseJob).not.toContain('POLAR_ENV must be production for a production deployment');
   expect(databaseJob).toContain('run: bun run --cwd backend db:backfill-semantic-embeddings:ci');
+  expect(databaseJob).toContain("S3_BUCKET=$(jq -re '.vars.PROD_S3_BUCKET_NAME' .github/environments.json)");
   expect(databaseJob).not.toContain('BEDROCK_AWS_ACCESS_KEY_ID');
   expect(databaseJob).not.toContain('BEDROCK_AWS_SECRET_ACCESS_KEY');
   expect(databaseJob).toContain('OPENROUTER_API_KEY');
@@ -34,12 +40,16 @@ test('migrates before activating backend code and running data changes', async (
   expect(seedSecretsJob).toContain('OPENROUTER_API_KEY');
   expect(seedSecretsJob).toContain('seeded roster embeddings cannot run');
   const earlyJob = workflow.slice(early, workflow.indexOf('\n  # LATER REFERENCE ONLY', early));
-  expect(earlyJob).toContain('needs: [changes, deploy-web, backend-image, backend-secrets, backend-migrate]');
+  expect(earlyJob).toContain('needs: [changes, deploy-web, backend-image, backend-secrets, backend-migrate, backend-db]');
   expect(earlyJob).toContain("needs.backend-migrate.result == 'success'");
+  expect(earlyJob).toContain("needs.backend-db.result == 'success'");
   expect(workflow).not.toContain('document-worker-deploy:');
   expect(workflow).not.toContain('Roll warm document worker');
   const ecsJob = workflow.slice(workflow.indexOf('backend-deploy:'), workflow.indexOf('\n  # Optional render worker'));
+  expect(ecsJob).toContain('needs: [changes, backend-image, backend-db]');
   expect(ecsJob).toContain('if: false # LATER: enable when ECS becomes the production runtime.');
+  const standaloneJob = workflow.slice(workflow.indexOf('\n  early-infra-standalone-deploy:'), workflow.indexOf('\n  deploy-summary:'));
+  expect(standaloneJob).toContain('needs: [early-infra-standalone-build, backend-db]');
 });
 
 test('uploads canonical app logos before graph migration and deployment', async () => {

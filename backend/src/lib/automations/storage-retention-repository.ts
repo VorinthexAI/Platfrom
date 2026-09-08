@@ -33,7 +33,7 @@ export const STORAGE_WIPE_COLLECTIONS = [
    'books', 'bookChapters', 'emailAttachments', 'emailAttachmentBindings', 'emailMessages', 'emailDrafts', 'placeHeroMedia', 'documents',
   'documentVersions', 'documentAudioVersions', 'documentSummaryAudio', 'images', 'imageCaptions',
   'collectionImages', 'placeImages', 'imageIdentities', 'visualIdentities', 'imageCollecitionHightlights',
-   'imageCollectionMemories', 'collections', 'folders', 'trips', 'galleryUploads', 'tagAssignments',
+    'imageCollectionMemories', 'collections', 'folders', 'trips', 'scopes', 'galleryUploads', 'tagAssignments',
    'userHiddens', 'conversationMessages',
 ] as const;
 
@@ -117,6 +117,7 @@ export function createStorageRetentionRepository(
         await transaction.query('FOR folder IN folders FILTER folder.coverImageKey IN @imageKeys UPDATE folder WITH { coverImageKey: null, updatedAt: @now } IN folders OPTIONS { keepNull: false }', imageBind);
         await transaction.query('FOR document IN documents FILTER document.coverImageKey IN @imageKeys UPDATE document WITH { coverImageKey: null, updatedAt: @now } IN documents OPTIONS { keepNull: false }', imageBind);
         await transaction.query('FOR trip IN trips FILTER trip.coverImageKey IN @imageKeys UPDATE trip WITH { coverImageKey: null, updatedAt: @now } IN trips OPTIONS { keepNull: false }', imageBind);
+        await transaction.query('FOR scope IN scopes FILTER scope.coverImageKey IN @imageKeys UPDATE scope WITH { coverImageKey: null } IN scopes OPTIONS { keepNull: false }', imageBind);
         await transaction.query('FOR image IN images FILTER image._key IN @imageKeys REMOVE image IN images', imageBind);
         await transaction.query('FOR caption IN imageCaptions FILTER caption._key IN @captionKeys && LENGTH(FOR image IN images FILTER image.imageCaptionKey == caption._key LIMIT 1 RETURN 1) == 0 REMOVE caption IN imageCaptions', { captionKeys });
         await transaction.query('FOR upload IN galleryUploads FILTER upload.storageKey IN @storageKeys REMOVE upload IN galleryUploads', bind);

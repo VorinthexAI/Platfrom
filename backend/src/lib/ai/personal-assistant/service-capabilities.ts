@@ -24,7 +24,7 @@ import { referralSummaryReadInputSchema, referralSummarySchema } from '@/lib/ref
 import { referralService } from '@/lib/referrals/service';
 import { checkoutCreateInputSchema, subscriptionMutationInputSchema } from '@/lib/commerce/contracts';
 import { commerceService } from '@/lib/commerce/service';
-import { scopeCreateInputSchema, scopeListInputSchema, scopeSelectInputSchema, scopeService } from '@/lib/ai/scopes';
+import { scopeCreateInputSchema, scopeDeleteInputSchema, scopeListInputSchema, scopePrioritizeInputSchema, scopeSelectInputSchema, scopeUpdateInputSchema, scopeService } from '@/lib/ai/scopes';
 import { appNotifyInputSchema, notificationListInputSchema } from '@/lib/app-notifications/contracts';
 import { appNotificationService } from '@/lib/app-notifications/service';
 import { teamListInputSchema, teamSelectInputSchema, teamService } from '@/lib/teams';
@@ -240,6 +240,9 @@ export const scopeMutationCapabilities = [
   capability('team.select', 'Select an authorized team and scope, requiring exact team MFA assurance when enabled.', teamSelectInputSchema, async (input, context) => teamService.select(input, context.domain), undefined, 'write'),
   capability('scope.create', 'Create a scope in the current team. Only team owners and admins may create scopes.', scopeCreateInputSchema, async (input, context) => (context.scopes ?? scopeService).create(input, context.domain, context.requestKey ?? newId()), undefined, 'write'),
   capability('scope.select', 'Select the authenticated user\'s current scope by its target scope key.', scopeSelectInputSchema, async (input, context) => (context.scopes ?? scopeService).select(input, context.domain), undefined, 'write'),
+  capability('scope.prioritize', 'Move a scope to the first position while preserving the relative order of its siblings.', scopePrioritizeInputSchema, async (input, context) => (context.scopes ?? scopeService).prioritize(input, context.domain), undefined, 'write'),
+  capability('scope.update', 'Set or clear a scope cover image using an image that belongs to that scope.', scopeUpdateInputSchema, async (input, context) => (context.scopes ?? scopeService).update(input, context.domain), undefined, 'write'),
+  capability('scope.delete', 'Permanently delete a non-current, non-protected scope when it is not the team\'s last scope.', scopeDeleteInputSchema, async (input, context) => (context.scopes ?? scopeService).delete(input, context.domain), undefined, 'write'),
 ] as const;
 
 const allTagWorkspaces = ['archive', 'gallery', 'compass', 'signal', 'ascend'] as const;

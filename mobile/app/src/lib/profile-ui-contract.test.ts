@@ -19,30 +19,42 @@ function expectBefore(source: string, first: string, second: string) {
 }
 
 test("profile and settings are routed screens over bottom-presented child sheets", () => {
-  expect(profile.match(/height="full"/g)?.length).toBe(8);
+  expect(profile.match(/height="full"/g)?.length).toBe(7);
   expect(profileRoute).toContain('<AccountScreen page="profile" />');
   expect(settingsRoute).toContain('<AccountScreen page="settings" />');
-  expect(profile).toContain('<AccountScreenShell rightAction={settingsAction} title={page === "profile" ? "Profile" : "Settings"}>');
+  expect(profile).toContain('<AccountScreenShell rightAction={headerActions} title={page === "profile" ? "Profile" : "Settings"}>');
   expect(profile).not.toContain('open title="Profile"');
   expect(profile).not.toContain('focusKey="profile-settings"');
   expect(shell).toContain('accessibilityLabel={`Back from ${title}`}');
   expect(shell).toContain('<PersistentCoreComposer');
+  expect(shell).toContain('<WorkspaceAppSwitcher active={active} onSelectActive={() => router.replace({ pathname: "/capability/[slug]", params: { slug: active } })} placeholder={{ icon: identityIcon, name: title }} />');
+  expect(shell).toContain('name: title');
+  expect(shell).toContain('const identityIcon = <ProfileAvatar avatarSize={36} />');
+  expect(shell).toContain('<SparksBalanceButton />');
+  expect(shell).not.toContain('<ProfileHeaderRight />');
   expect(shell).toContain('paddingTop: insets.top + 6');
+  expect(shell).toContain('backgroundColor: palette.voidBlack');
+  expect(shell).toContain('pageHeader: { alignItems: "center", flexDirection: "row", gap: spacing.sm, minHeight: 48, marginTop: spacing.md }');
   expect(layout).toContain('animation: "slide_from_right"');
   expect(profile).toContain('focusKey="profile-name"');
   expect(profile).toContain('focusKey="profile-faq"');
   expect(profile).toContain('focusKey="profile-report"');
   expect(profile).toContain('focusKey="profile-feedback"');
   expect(profile).toContain('focusKey="profile-feedback-create"');
-  expect(profile).toContain('focusKey="profile-scopes"');
   expect(profile).toContain('focusKey="profile-scope-create"');
   expect(profile).toContain('dismissible={!deletingAccount} focusKey="profile-delete-account"');
   expect(profile).toContain('title="Delete account?"');
   expect(profile).not.toContain('accessibilityLabel="Account deletion confirmation"');
-  expect(profile).toContain('title="Scope"');
   expect(profile).toContain('title="Scopes"');
   expect(profile).toContain('title="Create scope"');
-  expect(profile).toContain("Switch between scopes to keep your work organized and separate.");
+  expect(profile).toContain('<Text style={styles.scopeTitle}>Scopes</Text>');
+  expect(profile).toContain('accessibilityLabel="What are scopes?" contentMode="raw" iconOnly');
+  expect(profile).toContain('size="xs" variant="icon"><HelpIcon size="sm" /></Button>');
+  expect(profile).toContain('footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>}');
+  expect(profile).not.toContain("Show all");
+  expect(profile).not.toContain('sheet === "scopes"');
+  expect(profile).toContain("const scopeCardSize = Math.floor((width - spacing.md * 2 - 20) / 3)");
+  expect(profile).toContain('content: { alignItems: "center", flexGrow: 1, paddingHorizontal: spacing.md');
   expect(profile).toContain('placeholder="Scope name"');
   expect(profile).toContain('placeholder="What belongs in this scope?"');
   expect(profile).toContain("[0, 1, 2].map");
@@ -52,7 +64,7 @@ test("profile and settings are routed screens over bottom-presented child sheets
   expect(profile).toContain("setSheet(undefined);\n    const update = optimisticProfile({ name: nextName });");
   expect(profile).toContain("setSheet(undefined);\n    void createSupportTicket");
   expect(profile).toContain('reportRequestKey.current = undefined;\n      setReportDraft("");');
-  expect(profile.match(/loading=/g)).toHaveLength(1);
+  expect(profile.match(/loading=/g)).toHaveLength(2);
   expect(profile).toContain("loading={deletingAccount}");
   expect(profile).toContain("multiline");
   expect(profile).toContain("onSubmitEditing={saveName}");
@@ -77,6 +89,14 @@ test("team selection is backend-gated and clears the previous team and scope cac
 test("every profile API action changes the UI before asynchronous work", () => {
   expectBefore(profile, "optimisticProfile({ avatarUrl: asset.uri })", "uploadProfileAvatar({ filename");
   expectBefore(profile, "optimisticProfile({ name: nextName })", "updateProfileName(nextName)");
+  expectBefore(profile, "optimisticScope(optimisticCreated)", "createScope(teamKey");
+  expect(profile).toContain("scopeUpdate.reconcile(selected)");
+  expect(profile).toContain("scopeUpdate.rollback()");
+  expect(profile).toContain("const optimisticList = markSelected(previous, scope)");
+  expectBefore(profile, "queryClient.setQueryData(scopeQueryKey, optimisticList)", "selectScope(teamKey, scope.key)");
+  expect(profile.match(/cancelQueries\(\{ queryKey: scopeQueryKey \}, \{ revert: false \}\)/g)).toHaveLength(2);
+  expect(profile).toContain("const sortedScopes = [...scopes].sort((left, right) => left.position - right.position)");
+  expect(profile).not.toContain("showSelectedFirst");
   expectBefore(profile, "setSheet(undefined);", "createSupportTicket({ teamKey");
   expectBefore(auth.slice(auth.indexOf("signOut: async")), "set(signedOutState);", "tokenVault.read()");
   expectBefore(profile, "setDeletingAccount(true);", "await deleteAccount()");
@@ -89,23 +109,26 @@ test("avatar header integration is reusable, outlined, and visible in Core", () 
   expect(sharedPackage).toContain('"./ui/avatar"');
   expect(sharedPackage).toContain('"react-native": "./packages/ui/components/avatar/avatar.mobile.tsx"');
   expect(header).toContain('variant="ghost"');
-  expect(header).toContain('avatar: { borderColor: "#262D36", borderWidth: 1 }');
-  expect(profile).toContain('avatar: { borderColor: palette.hairlineBright, borderWidth: 1 }');
+  expect(header).toContain('avatar: { backgroundColor: palette.voidBlack, borderColor: "#262D36", borderWidth: 1 }');
+  expect(header).toContain('openSparksSheet("manual")} size="xs" textStyle={styles.balanceText} variant="secondary"');
+  expect(header).not.toContain("balanceBadge");
+  expect(header).toContain('borderColor: palette.voidBlack');
+  expect(profile).toContain('avatar: { backgroundColor: palette.voidBlack, borderColor: palette.hairlineBright, borderWidth: 1 }');
   expect(core).toContain("<ProfileHeaderRight />");
   for (const workspace of workspaces) expect(workspace).toContain("<ProfileHeaderRight />");
 });
 
-test("profile header opens the routed Settings screen and Settings owns account actions", () => {
+test("profile and settings headers expose account actions", () => {
   expect(profile).toContain('accessibilityLabel="Open settings"');
   expect(profile).toContain('router.push("/settings")');
   expect(profile).toContain('<SettingsIcon size="sm" />');
   expect(profile).toContain('<Button onPress={() => router.push("/notifications")} size="md" variant="secondary">Notifications</Button>');
-  expect(profile).toContain('<Button onPress={logOut} size="md" variant="secondary">Log out</Button>');
-  expectBefore(profile.slice(profile.indexOf("const logOut")), "const completion = signOut();", 'router.replace("/auth")');
-  expect(profile).toContain('queryClient.clear();\n    router.replace("/auth");\n    void completion;');
+  expect(profile).toContain('accessibilityLabel="Log out"');
+  expect(profile).toContain('<LogOutIcon size="sm" />');
+  expectBefore(profile.slice(profile.indexOf("const logOut")), "await signOut();", 'router.replace("/auth")');
+  expect(profile).toContain('await signOut();\n    queryClient.clear();\n    router.replace("/auth");');
   expect(profile).toContain('<Button onPress={() => setSheet("feedback")} size="md" variant="secondary">Give feedback</Button>');
   expect(profile).toContain('<Button onPress={() => setSheet("report")} size="md" variant="secondary">Report an issue</Button>');
-  expect(profile).not.toContain("LogOutIcon");
   expect(profile).not.toContain("WarningIcon");
   expect(profile).not.toContain("SendIcon");
 });
@@ -119,6 +142,38 @@ test("account deletion uses the compact confirmation pattern without secondary c
   expect(confirmation).not.toContain('height="full"');
   expect(confirmation).not.toContain("TextInput");
   expect(profile).not.toContain("DELETE_CONFIRMATION");
+});
+
+test("scope cards expose optimistic long-press management actions", () => {
+  expect(profile).toContain('delayLongPress={350} onLongPress={onLongPress}');
+  expect(profile).toContain("void Haptics.selectionAsync()");
+  expect(profile).toContain('<BottomSheet hideHeading');
+  for (const action of ["Prioritize", "Change cover", "Delete"]) expect(profile).toContain(`>${action}</BottomSheetItem>`);
+  expectBefore(profile, "queryClient.setQueryData(scopeQueryKey, prioritized)", "prioritizeScope(teamKey, target.key)");
+  expectBefore(profile, "coverUrl: asset.uri", "uploadGalleryImages([");
+  expect(profile).toContain('launchImageLibraryAsync({ mediaTypes: ["images"]');
+  expect(profile).toContain('title="Delete scope"');
+  expect(profile).toContain("All data connected to this scope will be deleted. This action can&apos;t be undone.");
+  expectBefore(profile, "previous.filter(({ key }) => key !== target.key)", "deleteScope(teamKey, target.key)");
+  const deleteFailure = profile.slice(profile.indexOf('}).catch(async (error)', profile.indexOf('const deleteSelectedScope')), profile.indexOf('}).finally(() => setDeletingScope(false))'));
+  expectBefore(deleteFailure, 'await hydrate().catch(() => undefined)', 'const authoritativeKey = String(useAuthStore.getState().scope?.key ?? "")');
+  expect(deleteFailure).toContain('markCurrentKey(previous, authoritativeKey)');
+  expect(deleteFailure).toContain('await queryClient.invalidateQueries({ queryKey: scopeQueryKey })');
+  expect(profile).toContain('onLongPress={canManageScope(scope) ? () => openScopeActions(scope) : undefined}');
+  expect(profile).toContain('onPress={() => pressScope(scope)} scope={scope}');
+  expect(profile).toContain('open={sheet === "scope-actions" && canManageScope(selectedScope)}');
+  expect(profile).toContain('if (scope.key.startsWith("optimistic:") || !canManageScope(scope) || scopeManagementPending.current) return;');
+  expect(profile).toContain('accessibilityHint={onLongPress ? "Long press for scope actions" : undefined}');
+  expect(profile).toContain('const canManageScope = (scope?: ScopeSummary) => scope?.role === "owner" || scope?.role === "admin";');
+});
+
+test("scope management optimistic mutations cannot overlap", () => {
+  expect(profile).toContain("const scopeManagementPending = useRef(false)");
+  expect(profile).toContain("if (!selectedScope || !canManageScope(selectedScope) || scopeManagementPending.current) return;");
+  expect((profile.match(/if \(!selectedScope \|\| !canManageScope\(selectedScope\) \|\| scopeManagementPending\.current\) return;/g) ?? []).length).toBe(2);
+  expect(profile).toContain("if (!selectedScope || !canManageScope(selectedScope) || deletingScope || scopeManagementPending.current) return;");
+  expect((profile.match(/scopeManagementPending\.current = true/g) ?? []).length).toBe(3);
+  expect((profile.match(/scopeManagementPending\.current = false/g) ?? []).length).toBe(3);
 });
 
 test("feedback uses refresh-on-open, three loading pills, and shared accessible vote actions", () => {

@@ -49,6 +49,10 @@ function createFakeDb() {
 
   const fake: ScopesDatabase = {
     async query(query: string, bindVars: Record<string, unknown> = {}) {
+      if (query.includes('LET image = DOCUMENT(images, @coverImageKey)')) {
+        const image = store('images').get(String(bindVars.coverImageKey));
+        return { all: async () => [], next: async () => image && image.scopeKey === bindVars.scopeKey ? image.storageKey : undefined };
+      }
       if (query.includes('RETURN DOCUMENT(scopes, @scopeKey)')) return { all: async () => [], next: async () => store(SCOPES_COLLECTION).has(String(bindVars.scopeKey)) ? 1 : 0 };
       if (query.includes('user.currentScopeKey')) return { all: async () => [], next: async () => 0 };
       if (query.includes('LET storageKeys =')) return { all: async () => [], next: async () => [] };
@@ -80,7 +84,7 @@ function createFakeDb() {
         if (query.includes('REGEX_TEST(scope._key')) {
           rows = rows.filter((doc) => scopeSchema.shape.key.safeParse(doc._key).success);
         }
-        rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        rows.sort((a, b) => Number(a.position) - Number(b.position) || String(a._key).localeCompare(String(b._key)));
       }
       if (query.includes('relation.parentKey == @parentKey')) {
         rows = rows.filter((doc) => doc.parentKey === bindVars.parentKey);
@@ -185,6 +189,10 @@ describe('scope repository', () => {
     expect(SCOPE_KEYED_REMOVAL_COLLECTIONS).not.toContain('userTeams');
     expect(SCOPE_KEYED_REMOVAL_COLLECTIONS).not.toContain('storageDeletionJobs');
     expect(SCOPE_KEYED_REMOVAL_COLLECTIONS).not.toContain('bookRefundIntents');
+    for (const collection of ['appNotifications', 'appNotificationRecipients', 'pushDeliveries']) {
+      expect(SCOPE_REMOVAL_WRITE_COLLECTIONS).toContain(collection as never);
+      expect(SCOPE_KEYED_REMOVAL_COLLECTIONS).not.toContain(collection);
+    }
   });
 
   test('uses separate statements for storage discovery and every collection modification across scopes', async () => {
@@ -197,8 +205,8 @@ describe('scope repository', () => {
         if (query.includes('RETURN DOCUMENT(scopes, @scopeKey)')) return { next: async () => 1 };
         if (query.includes('user.currentScopeKey')) return { next: async () => 0 };
         if (query.includes('LET storageKeys =')) return { next: async () => [`objects/${bindVars.scopeKey}`] };
-        if (query.includes('REMOVE scope IN scopes')) return { next: async () => bindVars.scopeKey };
-        return { next: async () => undefined };
+        if (query.includes('REMOVE scope IN scopes')) return { next: async () => bindVars.scopeKey, all: async () => [] };
+        return { next: async () => undefined, all: async () => query.includes('FOR notification IN appNotifications') && query.includes('RETURN notification._key') ? ['notification-1'] : [] };
       },
     } as never;
     const repository = createScopeRepository(database);
@@ -213,6 +221,14 @@ describe('scope repository', () => {
       expect(genericDeletes.filter(({ bindVars }) => bindVars['@collection'] === 'collectionImages')).toHaveLength(1);
       expect(scopeQueries.findIndex(({ query }) => query.includes('LET storageKeys ='))).toBeLessThan(scopeQueries.findIndex(({ query }) => query.includes('IN storageDeletionJobs')));
       expect(scopeQueries.findIndex(({ query }) => query.includes('IN storageDeletionJobs'))).toBeLessThan(scopeQueries.findIndex(({ query }) => query.includes('REMOVE item IN @@collection')));
+      const notificationQueries = scopeQueries.filter(({ query }) => query.includes('appNotifications') || query.includes('appNotificationRecipients') || query.includes('pushDeliveries'));
+      expect(notificationQueries.map(({ query }) => query)).toEqual([
+        'FOR notification IN appNotifications FILTER notification.scopeKey == @scopeKey RETURN notification._key',
+        'FOR delivery IN pushDeliveries FILTER delivery.notificationKey IN @notificationKeys REMOVE delivery IN pushDeliveries',
+        'FOR recipient IN appNotificationRecipients FILTER recipient.notificationKey IN @notificationKeys REMOVE recipient IN appNotificationRecipients',
+        'FOR notification IN appNotifications FILTER notification._key IN @notificationKeys REMOVE notification IN appNotifications',
+      ]);
+      expect(notificationQueries.slice(1).map(({ bindVars }) => bindVars.notificationKeys)).toEqual([['notification-1'], ['notification-1'], ['notification-1']]);
     }
     expect(queries.every(({ query }) => (query.match(/\bREMOVE\b/g) ?? []).length <= 1)).toBe(true);
     expect(queries.every(({ query }) => !query.includes('REMOVE') || (!query.includes('UPDATE') && !query.includes('UPSERT')))).toBe(true);
@@ -252,7 +268,7 @@ describe('scope repository', () => {
     expect(updated.embedding).toEqual(core.embedding);
     const resummarized = await repository.updateScope(core.key, { summary: 'A new semantic summary.' });
     expect(resummarized.embedding).not.toEqual(core.embedding);
-    await repository.createScope(input({ slug: 'command', name: 'Command' }));
+    await repository.createScope(input({ slug: 'command', name: 'Command', position: 1 }));
     await repository.createScope(input({ teamKey: newId() }));
     stores.get(SCOPES_COLLECTION)?.set('legacy_scope', {
       _key: 'legacy_scope',
@@ -267,6 +283,17 @@ describe('scope repository', () => {
     expect((await repository.listScopes(teamKey)).map((scope) => scope.slug)).toEqual(['command', 'core']);
     expect(await repository.getScopeByKey(core.key)).toEqual(resummarized);
     await expect(repository.createScope(input())).rejects.toBeInstanceOf(DuplicateScopeSlugError);
+  });
+
+  test('resolves cover storage only for an image owned by the target scope', async () => {
+    const { fake, stores } = createFakeDb();
+    const repository = createScopeRepository(fake, generateEmbedding);
+    const target = await repository.createScope(input());
+    const imageKey = newId();
+    stores.set('images', new Map([[imageKey, { _key: imageKey, scopeKey: target.key, storageKey: 'private/cover.jpg' }]]));
+    await expect(repository.coverStorageKey(target.key, imageKey)).resolves.toBe('private/cover.jpg');
+    await expect(repository.coverStorageKey(newId(), imageKey)).resolves.toBeUndefined();
+    await expect(repository.coverStorageKey(target.key, null)).resolves.toBeUndefined();
   });
 
   test('seeds exact default tones without provider work after scope persistence', async () => {
@@ -398,6 +425,10 @@ liveArangoSuite('scope removal live Arango', () => {
       for (const scopeKey of scopeKeys) {
         await temporary.collection('generatedDocumentBindings').save({ _key: newId(), scopeKey });
         await temporary.collection('collectionImages').save({ _key: newId(), scopeKey });
+        const notificationKey = newId();
+        await temporary.collection('appNotifications').save({ _key: notificationKey, scopeKey });
+        await temporary.collection('appNotificationRecipients').save({ _key: newId(), notificationKey });
+        await temporary.collection('pushDeliveries').save({ _key: newId(), notificationKey });
       }
 
       await withDatabaseTransaction(temporary, { read: ['teams'], write: [...SCOPE_REMOVAL_WRITE_COLLECTIONS] }, async (transaction) => {
@@ -408,6 +439,9 @@ liveArangoSuite('scope removal live Arango', () => {
       expect(await (await temporary.query<number>('RETURN LENGTH(scopes)')).next()).toBe(0);
       expect(await (await temporary.query<number>('RETURN LENGTH(generatedDocumentBindings)')).next()).toBe(0);
       expect(await (await temporary.query<number>('RETURN LENGTH(collectionImages)')).next()).toBe(0);
+      expect(await (await temporary.query<number>('RETURN LENGTH(appNotifications)')).next()).toBe(0);
+      expect(await (await temporary.query<number>('RETURN LENGTH(appNotificationRecipients)')).next()).toBe(0);
+      expect(await (await temporary.query<number>('RETURN LENGTH(pushDeliveries)')).next()).toBe(0);
     } finally {
       temporary.close();
       await root.dropDatabase(temporaryName);

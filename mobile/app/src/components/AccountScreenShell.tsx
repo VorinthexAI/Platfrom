@@ -7,6 +7,7 @@ import { ChevronLeftIcon, SendIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { PersistentCoreComposer } from "@/components/PersistentCoreComposer";
+import { ProfileAvatar, SparksBalanceButton } from "@/components/ProfileAvatarButton";
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import { assistantIconSource } from "@/data/capability-icons";
 import { useAppsStore } from "@/state/apps";
@@ -18,9 +19,14 @@ export function AccountScreenShell({ children, rightAction, title }: { children:
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const active = useAppsStore((state) => state.workspaceSelection) ?? "archive";
+  const identityIcon = <ProfileAvatar avatarSize={36} />;
 
   return <View style={styles.root}>
-    <View style={[styles.header, { paddingLeft: Math.max(insets.left, spacing.md), paddingRight: Math.max(insets.right, spacing.md), paddingTop: insets.top + 6 }]}>
+    <View style={[styles.globalHeader, { paddingLeft: Math.max(insets.left, spacing.md), paddingRight: Math.max(insets.right, spacing.md), paddingTop: insets.top + 6 }]}>
+      <WorkspaceAppSwitcher active={active} onSelectActive={() => router.replace({ pathname: "/capability/[slug]", params: { slug: active } })} placeholder={{ icon: identityIcon, name: title }} />
+      <SparksBalanceButton />
+    </View>
+    <View style={[styles.pageHeader, { paddingLeft: Math.max(insets.left, spacing.md), paddingRight: Math.max(insets.right, spacing.md) }]}>
       <Button accessibilityLabel={`Back from ${title}`} contentMode="raw" iconOnly onPress={() => router.back()} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
       <Text numberOfLines={1} style={styles.title}>{title}</Text>
       <View style={styles.headerAction}>{rightAction}</View>
@@ -41,10 +47,11 @@ export function AccountScreenShell({ children, rightAction, title }: { children:
 }
 
 const styles = StyleSheet.create({
-  root: { backgroundColor: palette.page, flex: 1 },
-  header: { alignItems: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1, flexDirection: "row", gap: spacing.sm, minHeight: 64, paddingBottom: 8 },
+  root: { backgroundColor: palette.voidBlack, flex: 1 },
+  globalHeader: { alignItems: "center", backgroundColor: palette.page, borderBottomColor: palette.hairline, borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between", minHeight: 64, paddingBottom: 8 },
+  pageHeader: { alignItems: "center", flexDirection: "row", gap: spacing.sm, minHeight: 48, marginTop: spacing.md },
   title: { color: palette.silver50, flex: 1, fontFamily: fonts.medium, fontSize: 24 },
-  headerAction: { alignItems: "flex-end", minWidth: 32 },
+  headerAction: { alignItems: "center", flexDirection: "row", gap: 4, justifyContent: "flex-end", minWidth: 32 },
   viewport: { flex: 1, minHeight: 0 },
   content: { flexGrow: 1 },
 });

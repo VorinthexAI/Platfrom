@@ -1,7 +1,7 @@
 import { isAxiosError } from "axios";
 import { create } from "zustand";
 
-import { apiClient, getJson, onUnauthorized, patchJson, postJson, revokeRemoteSession } from "@/lib/api-client";
+import { cleanupRemoteSession, getJson, onUnauthorized, patchJson, postJson, revokeRemoteSession } from "@/lib/api-client";
 import { clearAuthContext, readAuthContext, writeAuthContext } from "@/lib/auth-context-vault";
 import { hasCompleteAuthContext, normalizeAuthContext, type AuthUser } from "@/lib/auth-helpers";
 import { tokenVault } from "@/lib/token-vault";
@@ -236,10 +236,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     confirmedScope = null;
     resetOnboardingSession();
     set(signedOutState);
-    const pushCleanup = apiClient.delete("/auth/me/push-subscription", { data: {}, timeout: 2_000 }).catch(() => undefined);
     const session = await tokenVault.read().catch(() => null);
-    await Promise.allSettled([pushCleanup, tokenVault.clear(), clearAuthContext()]);
-    if (session) await revokeRemoteSession(session).catch(() => undefined);
+    await Promise.allSettled([
+      tokenVault.clear(),
+      clearAuthContext(),
+      ...(session ? [cleanupRemoteSession(session)] : []),
+    ]);
   },
 }));
 

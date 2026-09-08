@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
@@ -13,7 +13,7 @@ import { fonts, palette, tracking } from "@/theme/tokens";
 
 const AVAILABLE_APP_SLUGS = ["archive", "gallery", "compass", "signal", "ascend"] as const satisfies readonly CapabilitySlug[];
 
-export function WorkspaceAppSwitcher({ active, backSize = "xs", identity = "active", onBeforeSelect, onSelectActive, trigger = "identity" }: { active: CapabilitySlug; backSize?: "xs" | "sm"; identity?: "active" | "core"; onBeforeSelect?: (slug: CapabilitySlug) => boolean; onSelectActive?: () => void; trigger?: "identity" | "back" }) {
+export function WorkspaceAppSwitcher({ active, backSize = "xs", identity = "active", onBeforeSelect, onSelectActive, placeholder, trigger = "identity" }: { active: CapabilitySlug; backSize?: "xs" | "sm"; identity?: "active" | "core"; onBeforeSelect?: (slug: CapabilitySlug) => boolean; onSelectActive?: () => void; placeholder?: { icon: ReactNode; name: string }; trigger?: "identity" | "back" }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const registry = useAppsStore((state) => state.apps);
@@ -24,7 +24,7 @@ export function WorkspaceAppSwitcher({ active, backSize = "xs", identity = "acti
     return { slug, name: serverApp.name };
   });
   const selected = availableApps.find(({ slug }) => slug === active)!;
-  const displayedName = identity === "core" ? registry.find((app) => app.slug === "core")!.name : selected.name;
+  const displayedName = placeholder?.name ?? (identity === "core" ? registry.find((app) => app.slug === "core")!.name : selected.name);
   const displayedIcon = identity === "core" ? assistantIconSource : capabilityIconSource[selected.slug];
 
   function select(slug: CapabilitySlug) {
@@ -45,8 +45,8 @@ export function WorkspaceAppSwitcher({ active, backSize = "xs", identity = "acti
         ? <Button accessibilityLabel={`Open app selector. Current app: ${displayedName}`} contentMode="raw" onPress={() => setOpen(true)} size={backSize} variant="icon"><ChevronLeftIcon size="sm" /></Button>
         : <Button accessibilityLabel={`Open app selector. Current app: ${displayedName}`} contentMode="raw" onPress={() => setOpen(true)} size="md" style={styles.trigger} variant="ghost">
           <View style={styles.identity}>
-            <ChromeIcon glow={0.55} size={36} source={displayedIcon} />
-            <Text style={styles.title}>{displayedName.toUpperCase()}</Text>
+            {placeholder?.icon ?? <ChromeIcon glow={0.55} size={36} source={displayedIcon} />}
+            <Text style={styles.title}>{placeholder ? displayedName : displayedName.toUpperCase()}</Text>
             <ChevronRightIcon size="sm" variant="muted" />
           </View>
         </Button>}

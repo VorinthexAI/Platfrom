@@ -105,7 +105,7 @@ export const FREE_TOOL_SLUGS = Object.freeze([
   'inbox.refresh', 'inbox.search', 'inbox.update',
   'place.delete', 'place.list', 'place.open', 'place.reference.list', 'place.search', 'place.update',
   'profile.update', 'subject.delete', 'subject.image.list', 'subject.list',
-  'scope.create', 'scope.list', 'scope.select',
+  'scope.create', 'scope.delete', 'scope.list', 'scope.prioritize', 'scope.select', 'scope.update',
   'tag.assignment.set', 'tag.create', 'tag.delete', 'tag.list', 'tag.update', 'team.list', 'team.select', 'ticket.create',
   'trip.attachment.set', 'trip.delete', 'trip.guide.list', 'trip.list', 'trip.search', 'trip.update',
 ] as const);

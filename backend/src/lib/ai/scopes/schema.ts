@@ -24,6 +24,7 @@ export const scopeSchema = z.object({
   name: z.string().trim().min(1).max(160),
   summary: z.string().trim().min(1),
   description: z.string().trim().min(1).nullable(),
+  coverImageKey: z.string().cuid().nullable().optional(),
   position: z.number().int().positive(),
   level: z.number().int().positive().default(1),
   embedding: z.array(z.number().finite()).default([]),

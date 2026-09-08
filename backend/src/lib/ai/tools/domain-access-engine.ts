@@ -24,6 +24,25 @@ export interface ScopeRecord { key: string; teamKey: string; slug: string; name:
 export type TeamDecisionReason = 'ALLOWED' | 'UNAUTHENTICATED' | 'MEMBERSHIP_NOT_FOUND' | 'MEMBERSHIP_SUSPENDED' | 'TEAM_ARCHIVED' | 'MFA_REQUIRED' | 'INSUFFICIENT_ROLE' | 'ACTION_DENIED';
 export interface TeamAccessDecision { allowed: boolean; reason: TeamDecisionReason; effectiveRole: AccessRole | null; team: TeamRecord; membership: MembershipRecord | null }
 export interface ScopeAccessDecision { allowed: boolean; reason: string; effectiveRole: AccessRole | null; accessSources: Array<'team-role' | 'direct-scope-membership' | 'inherited-scope-membership'>; teamDecision: TeamAccessDecision; scope: ScopeRecord }
+export type ScopeMembershipAccess = Pick<ScopeAccessDecision, 'effectiveRole' | 'accessSources'> & { suspended: boolean };
+
+export function resolveScopeMembershipAccess(
+  scopeKey: string,
+  directMembership: { role: AccessRole; status: string } | null,
+  hierarchy: { members: Array<{ scopeKey: string; role: AccessRole }>; relations: Array<{ parentKey: string; childKey: string }> },
+): ScopeMembershipAccess {
+  if (directMembership?.status === 'suspended') return { suspended: true, effectiveRole: null, accessSources: ['direct-scope-membership'] };
+  const parentByChild = new Map(hierarchy.relations.map((relation) => [relation.childKey, relation.parentKey]));
+  const ancestors = new Set<string>([scopeKey]);
+  let parent = parentByChild.get(scopeKey);
+  while (parent && !ancestors.has(parent)) { ancestors.add(parent); parent = parentByChild.get(parent); }
+  const grants = hierarchy.members.filter((member) => ancestors.has(member.scopeKey)).map((member) => ({ role: member.role, direct: member.scopeKey === scopeKey }));
+  grants.sort((a, b) => rankAccessRole(b.role) - rankAccessRole(a.role));
+  const accessSources: ScopeAccessDecision['accessSources'] = [];
+  if (grants.some((grant) => grant.direct)) accessSources.push('direct-scope-membership');
+  if (grants.some((grant) => !grant.direct)) accessSources.push('inherited-scope-membership');
+  return { suspended: false, effectiveRole: grants[0]?.role ?? null, accessSources };
+}
 
 async function one<T>(query: string, bindVars: Record<string, unknown>): Promise<T | null> {
   const cursor = await db.query<T>(query, bindVars);
@@ -99,17 +118,9 @@ export async function evaluateScopeAccess(context: ToolContext, input: { scope: 
     return { allowed: scopeActionAllowed(role, input.action), reason: scopeActionAllowed(role, input.action) ? 'ALLOWED' : 'ACTION_DENIED', effectiveRole: role, accessSources: ['team-role'], teamDecision, scope };
   }
   const hierarchy = await one<{ members: Array<{ scopeKey: string; role: AccessRole }>; relations: Array<{ parentKey: string; childKey: string }> }>('RETURN { members: (FOR member IN scopeMembers FILTER member.userTeamKey == @teamMembershipKey && member.status == "active" RETURN { scopeKey: member.scopeKey, role: member.role }), relations: (FOR relation IN scopeScopes RETURN { parentKey: relation.parentKey, childKey: relation.childKey }) }', { teamMembershipKey: membership.key });
-  const parentByChild = new Map((hierarchy?.relations ?? []).map((relation) => [relation.childKey, relation.parentKey]));
-  const ancestors = new Set<string>([scope.key]);
-  let parent = parentByChild.get(scope.key);
-  while (parent && !ancestors.has(parent)) { ancestors.add(parent); parent = parentByChild.get(parent); }
-  const grants = (hierarchy?.members ?? []).filter((member) => ancestors.has(member.scopeKey)).map((member) => ({ role: member.role, direct: member.scopeKey === scope.key }));
-  grants.sort((a, b) => rankAccessRole(b.role) - rankAccessRole(a.role));
-  const effective = grants[0]?.role ?? null;
-  const sources: ScopeAccessDecision['accessSources'] = [];
-  if (grants.some((grant) => grant.direct)) sources.push('direct-scope-membership');
-  if (grants.some((grant) => !grant.direct)) sources.push('inherited-scope-membership');
-  if (!effective) return { allowed: false, reason: 'SCOPE_MEMBERSHIP_NOT_FOUND', effectiveRole: null, accessSources: sources, teamDecision, scope };
+  const membershipAccess = resolveScopeMembershipAccess(scope.key, directMembership, hierarchy ?? { members: [], relations: [] });
+  const effective = membershipAccess.effectiveRole;
+  if (!effective) return { allowed: false, reason: 'SCOPE_MEMBERSHIP_NOT_FOUND', effectiveRole: null, accessSources: membershipAccess.accessSources, teamDecision, scope };
   const allowed = scopeActionAllowed(effective, input.action);
-  return { allowed, reason: allowed ? 'ALLOWED' : 'ACTION_DENIED', effectiveRole: effective, accessSources: sources, teamDecision, scope };
+  return { allowed, reason: allowed ? 'ALLOWED' : 'ACTION_DENIED', effectiveRole: effective, accessSources: membershipAccess.accessSources, teamDecision, scope };
 }

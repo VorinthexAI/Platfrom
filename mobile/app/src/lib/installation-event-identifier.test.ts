@@ -38,10 +38,10 @@ test("the persistent vault serializes initialization and replaces invalid Secure
   expect(vault).not.toContain("deleteItemAsync");
 });
 
-test("global Axios and manual XHR SSE requests await the installation header", () => {
+test("global Axios, manual XHR SSE, and logout cleanup await the installation header", () => {
   const client = read("./api-client.ts");
 
-  expect(client.match(/await getInstallationEventIdentifier\(\)/g)).toHaveLength(2);
+  expect(client.match(/await getInstallationEventIdentifier\(\)/g)).toHaveLength(3);
   expect(client).toContain("headers.set(INSTALLATION_EVENT_IDENTIFIER_HEADER, eventIdentifier)");
   expect(client).toContain("[INSTALLATION_EVENT_IDENTIFIER_HEADER]: eventIdentifier");
   expect(client).toContain("request.setRequestHeader(name, value)");

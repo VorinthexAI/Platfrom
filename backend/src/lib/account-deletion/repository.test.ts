@@ -4,7 +4,10 @@ import { createAccountDeletionRepository } from './repository';
 
 const userKey = 'cmrnlzf650002qc7k4p5zem5w';
 const teamKey = 'cmrnlzf650002qc7k4p5zem5x';
-const cursor = (value: unknown) => ({ async next() { return value; } });
+const cursor = (value: unknown) => ({
+  async next() { return value; },
+  async all() { return Array.isArray(value) ? value : value == null ? [] : [value]; },
+});
 const plan = (overrides: Record<string, unknown> = {}) => ({ userKey, teamKeys: [teamKey], scopeKeys: [], presenceSessionKeys: ['session-1'], blocked: false, activeCheckout: false, recoverableCheckout: false, ...overrides });
 
 describe('account deletion repository', () => {
