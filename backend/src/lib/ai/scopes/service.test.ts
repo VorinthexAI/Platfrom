@@ -141,6 +141,8 @@ describe('canonical scope service', () => {
     expect(source).toContain('UPDATE user WITH { currentScopeKey: scope._key');
     expect(source).toContain('SORT scope.position ASC, scope._key ASC');
     expect(source).toContain('POSITION(prioritizedKeys, scopeKey, true) + 1');
+    expect(source).toContain('`, { teamKey: input.teamKey, targetScopeKey: input.targetScopeKey });');
+    expect(source).toContain('`, { targetScopeKey: input.targetScopeKey, coverImageKey: input.coverImageKey });');
     expect(source).toContain("state.directMembership?.status === 'suspended'");
     expect(source).toContain('actor.status == "active" && team != null && team.isActive == true && exactAssurance');
     expect(source).toContain('resolveScopeMembershipAccess(scopeKey, state.directMembership');

@@ -154,7 +154,7 @@ export function createBookRuntime(options: BookRuntimeDependencies = {}): BookGe
       const inputs = await Promise.all(batch.map(async (item) => {
         const object = await storage.download(item.sourceKey);
         const filename = `${item.filename.replace(/\.png$/i, '').replace(/[\\/]/g, '-').slice(0, 251) || 'image'}.png`;
-        return { scopeKey: context.scopeKey, ownerKey, origin: 'generated' as const, imageKey: `c${hash(`book-gallery-image\0${item.identity}\0${item.version}`).slice(0, 24)}`, idempotencyKey: `book-image-export:${hash(`${item.identity}\0${item.version}`)}`, mutationPolicy: 'user' as const, file: { filename, mimeType: object.mimeType ?? 'image/png', sizeBytes: object.bytes.byteLength, bytes: object.bytes }, signal: context.signal };
+        return { scopeKey: context.scopeKey, ownerKey, billingUserKey: context.userKey, origin: 'generated' as const, imageKey: `c${hash(`book-gallery-image\0${item.identity}\0${item.version}`).slice(0, 24)}`, idempotencyKey: `book-image-export:${hash(`${item.identity}\0${item.version}`)}`, mutationPolicy: 'user' as const, file: { filename, mimeType: object.mimeType ?? 'image/png', sizeBytes: object.bytes.byteLength, bytes: object.bytes }, signal: context.signal };
       }));
       const images = await processImageBatch(inputs, {
         storage,
@@ -286,7 +286,7 @@ export function createBookRuntime(options: BookRuntimeDependencies = {}): BookGe
           return { chapter, audioText, audioInputHash };
         }).filter(({ chapter, audioInputHash }) => !chapter.audioStorageKey || chapter.audioInputHash !== audioInputHash);
         const narrate = async ({ chapter, audioText, audioInputHash }: (typeof missingAudio)[number]) => {
-          await appSpeech.generateForTarget({ teamKey: context.teamKey, storageKey: `books/${input.scopeKey}/${bookKey}/chapter-${chapter.position}-${audioInputHash.slice(0, 12)}-${uploadAttempt}.mp3`, text: audioText, language: input.language, voice: input.narratorVoiceKey, pace: input.narrationPace }, { signal, afterSpeech: () => check(context, bookKey), persist: async (audio) => { const target = await repository.updateChapter(context, chapter.key, { audioStorageKey: audio.storageKey, audioInputHash, audioDurationSeconds: audio.durationSeconds, status: 'audio-ready', updatedAt: now() }); await notify(input.scopeKey).catch(() => undefined); return target; }, compensate: (storageKey) => repository.enqueueUnreferencedStorage(context, [storageKey], now()) });
+          await appSpeech.generateForTarget({ teamKey: context.teamKey, billingUserKey: context.userKey, storageKey: `books/${input.scopeKey}/${bookKey}/chapter-${chapter.position}-${audioInputHash.slice(0, 12)}-${uploadAttempt}.mp3`, text: audioText, language: input.language, voice: input.narratorVoiceKey, pace: input.narrationPace }, { signal, afterSpeech: () => check(context, bookKey), persist: async (audio) => { const target = await repository.updateChapter(context, chapter.key, { audioStorageKey: audio.storageKey, audioInputHash, audioDurationSeconds: audio.durationSeconds, status: 'audio-ready', updatedAt: now() }); await notify(input.scopeKey).catch(() => undefined); return target; }, compensate: (storageKey) => repository.enqueueUnreferencedStorage(context, [storageKey], now()) });
         };
         if (missingAudio.length) {
           await stage('audio', 'narrating');

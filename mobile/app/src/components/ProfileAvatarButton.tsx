@@ -38,9 +38,9 @@ export function ProfileAvatar({ avatarSize = 32 }: { avatarSize?: number }) {
 export function SparksBalanceButton() {
   const userKey = useAuthStore((state) => state.user?.key);
   const balance = useWholeSparkBalance(userKey).data;
-  const openSparksSheet = useUiStore((state) => state.openSparksSheet);
+  const openPaywall = useUiStore((state) => state.openPaywall);
   const displayBalance = formatWholeSparks(balance ?? 0);
-  return <Button accessibilityLabel={balance === undefined ? "Sparks balance unavailable. Showing 0 Sparks. Open Sparks information" : `Sparks balance: ${balance} Sparks. Open Sparks information`} hitSlop={8} onPress={() => openSparksSheet("manual")} size="xs" textStyle={styles.balanceText} variant="secondary">{displayBalance} Sparks</Button>;
+  return <Button accessibilityLabel={balance === undefined ? "Sparks balance unavailable. Showing 0 Sparks. Open Sparks" : `Sparks balance: ${balance} Sparks. Open Sparks`} hitSlop={8} onPress={openPaywall} size="xs" textStyle={styles.balanceText} variant="secondary">{displayBalance} Sparks</Button>;
 }
 
 export function ProfileHeaderRight() {

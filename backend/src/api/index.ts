@@ -100,6 +100,7 @@ if (import.meta.main) {
   void recoverAppNotificationQueue().catch((error) => console.error('app notification queue recovery failed', { error }));
   const renewalTimer = setInterval(() => { void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error })); }, 6 * 60 * 60_000);
   const emailRecoveryTimer = setInterval(() => { void recoverEmailSyncQueue().catch((error) => console.error('email synchronization queue recovery failed', { error })); }, 60_000);
+  const galleryRecoveryTimer = setInterval(() => { void recoverGalleryUploadQueue().catch((error) => console.error('gallery upload queue recovery failed', { error })); }, 60_000);
   const conversationImageRecoveryTimer = setInterval(() => { void recoverConversationImageTurnQueue().catch((error) => console.error('conversation image queue recovery failed', { error })); }, 60_000);
   const bookGenerationRecoveryTimer = setInterval(() => { void defaultBookService.recoverGenerations().catch((error) => console.error('book generation recovery failed', { error })); }, 60_000);
 
@@ -110,6 +111,7 @@ if (import.meta.main) {
     server.stop(false);
     clearInterval(renewalTimer);
     clearInterval(emailRecoveryTimer);
+    clearInterval(galleryRecoveryTimer);
     clearInterval(conversationImageRecoveryTimer);
     clearInterval(bookGenerationRecoveryTimer);
     await emailWorker.close();

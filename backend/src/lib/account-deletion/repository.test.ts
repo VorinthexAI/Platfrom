@@ -47,6 +47,27 @@ describe('account deletion repository', () => {
     expect(transactionQueries.some((query) => query.includes('REMOVE user IN users'))).toBe(true);
   });
 
+  test('deletes Gallery uploads by membership key while retaining the storage object fallback', async () => {
+    const transactionQueries: string[] = [];
+    const repository = createAccountDeletionRepository(
+      { async query() { return cursor(null); } },
+      async (_collections, operation) => operation({ async query(query: string) {
+        transactionQueries.push(query);
+        if (transactionQueries.length === 1) return cursor(plan());
+        if (query.includes('IS_STRING(user.deletionRequestedAt)')) return cursor(true);
+        if (query.includes('RETURN { authoredTicketKeys, votedTicketKeys }')) return cursor({ authoredTicketKeys: [], votedTicketKeys: [] });
+        if (query.includes('RETURN presenceSessionKeys')) return cursor(['session-1']);
+        return cursor(null);
+      } }),
+    );
+
+    await expect(repository.finalize(userKey)).resolves.toEqual({ status: 'deleted' });
+    const teardownQuery = transactionQueries.find((query) => query.includes('LET teamMembershipKeys')) ?? '';
+    expect(teardownQuery).toContain('upload.actorKey IN teamMembershipKeys');
+    expect(teardownQuery).toContain('item.actorKey IN teamMembershipKeys REMOVE item IN galleryUploads');
+    expect(teardownQuery).toContain('object.userKey == @userKey');
+  });
+
   test('tears down multiple scopes with one statement per scope-owned collection', async () => {
     const scopeKeys = ['scope-1', 'scope-2'];
     const transactionQueries: Array<{ query: string; bindVars: Record<string, unknown> }> = [];

@@ -1,5 +1,4 @@
 import {
-  DeleteObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
   type S3Client,
@@ -51,9 +50,7 @@ import { executeAsk } from "@/lib/ai/router/execute-route";
 import type { ChatOutput } from "@/lib/ai/providers";
 import { performance } from "node:perf_hooks";
 import {
-  assertStorageGrowthAllowed,
   recordStoredObject,
-  StorageUnfundedError,
 } from "@/lib/automations/storage-charger-repository";
 
 const creationDateRangeShape = {
@@ -838,15 +835,6 @@ async function reserveUploads(
       "GALLERY_FORBIDDEN",
       "Gallery upload denied.",
     );
-  if (!context.signUpload) {
-    try {
-      await assertStorageGrowthAllowed(membership.userId);
-    } catch (error) {
-      if (error instanceof StorageUnfundedError)
-        throw new GalleryOperationError(409, error.code, error.message);
-      throw error;
-    }
-  }
   const now = new Date();
   const locations = await Promise.all(
     input.files.map((file) =>
@@ -972,26 +960,23 @@ async function completeUploads(
           "GALLERY_UPLOAD_MISMATCH",
           "Uploaded image does not match its reservation.",
         );
-      try {
-        await (context.recordStoredObject ?? recordStoredObject)({
-          storageKey: upload.storageKey,
-          userKey: membership.userId,
-          sizeBytes: upload.sizeBytes,
-        });
-      } catch (error) {
-        if (!context.recordStoredObject)
-          await s3
-            .send(
-              new DeleteObjectCommand({
-                Bucket: S3_BUCKET,
-                Key: upload.storageKey,
-              }),
-            )
-            .catch(() => undefined);
-        throw error;
-      }
     }),
   );
+  const cleanupUploads = () => Promise.all(uploads.map(({ storageKey }) =>
+    (context.deleteStorageObject ?? documentStorage.delete)(storageKey).catch(() => undefined),
+  ));
+  try {
+    await Promise.all(uploads.map((upload) =>
+      (context.recordStoredObject ?? recordStoredObject)({
+        storageKey: upload.storageKey,
+        userKey: membership.userId,
+        sizeBytes: upload.sizeBytes,
+      }),
+    ));
+  } catch (error) {
+    await cleanupUploads();
+    throw error;
+  }
   const queued = await (context.queueUploads ?? repository.queueUploads)({
     uploadKeys: input.uploadKeys,
     teamKey: input.teamKey,
@@ -999,12 +984,14 @@ async function completeUploads(
     actorKey: membership.key,
     now: new Date().toISOString(),
   });
-  if (!queued)
+  if (!queued) {
+    await cleanupUploads();
     throw new GalleryOperationError(
       409,
       "GALLERY_UPLOAD_CHANGED",
       "One or more upload reservations changed before queueing.",
     );
+  }
   await publish(context, "uploadQueued", { users: [membership.userId] });
   try {
     await (context.enqueueUploadBatch ?? enqueueGalleryUploadBatch)(

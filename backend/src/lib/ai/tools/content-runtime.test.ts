@@ -929,7 +929,7 @@ describe('Content runtime', () => {
     source.storageKey = undefined;
     source.sourceStorageKeys = ['scans/page-01.png', 'scans/page-02.png'];
     source.speechStorageKeys = ['speech/current.mp3'];
-    const copiedObjects: Array<{ sourceKey: string; destinationKey: string }> = [];
+    const copiedObjects: Array<{ sourceKey: string; destinationKey: string; billingUserKey?: string }> = [];
     const copied = await runContentTool('document.copy', { copies: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: f.folderKey }] }, f.context, {
       repository: f.repository,
       embed: async () => embedding,
@@ -944,6 +944,7 @@ describe('Content runtime', () => {
     if (!copiedKey) throw new Error('Document copy did not return a key.');
     const copy = f.documents.get(copiedKey);
     expect(copiedObjects.map(({ sourceKey }) => sourceKey)).toEqual([...source.sourceStorageKeys, ...source.speechStorageKeys]);
+    expect(copiedObjects.every(({ billingUserKey }) => billingUserKey === f.context.principal.user.key)).toBe(true);
     expect(copy.sourceStorageKeys).toHaveLength(2);
     expect(copy.sourceStorageKeys).not.toEqual(source.sourceStorageKeys);
     expect(copy.speechStorageKeys).toHaveLength(1);

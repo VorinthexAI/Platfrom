@@ -216,7 +216,7 @@ async function defaultPrioritizeInTransaction(input: Parameters<NonNullable<Scop
       FOR scopeKey IN prioritizedKeys
         UPDATE scopeKey WITH { position: POSITION(prioritizedKeys, scopeKey, true) + 1 } IN scopes
         RETURN NEW
-    `, input);
+    `, { teamKey: input.teamKey, targetScopeKey: input.targetScopeKey });
     const scopes = await cursor.all() as Record<string, unknown>[];
     return scopeSchema.parse({ ...scopes[0], key: scopes[0]!._key });
   });
@@ -239,7 +239,7 @@ async function defaultUpdateInTransaction(input: Parameters<NonNullable<ScopeSer
       LET cover = @coverImageKey == null ? null : DOCUMENT(images, @coverImageKey)
       UPDATE scope WITH { coverImageKey: @coverImageKey } IN scopes
       RETURN { scope: NEW, coverStorageKey: cover.storageKey }
-    `, input);
+    `, { targetScopeKey: input.targetScopeKey, coverImageKey: input.coverImageKey });
     const row = await cursor.next() as { scope?: Record<string, unknown>; coverStorageKey?: string } | undefined;
     if (!row?.scope) throw new ScopeServiceError('CONFLICT', 'Scope changed while its cover was being updated; retry the operation.');
     return { scope: scopeSchema.parse({ ...row.scope, key: row.scope._key }), ...(row.coverStorageKey ? { coverStorageKey: row.coverStorageKey } : {}) };

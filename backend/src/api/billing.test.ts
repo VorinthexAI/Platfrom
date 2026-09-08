@@ -18,14 +18,14 @@ describe('billing summary boundaries', () => {
     const calls: Array<{ userKey: string; input: unknown }> = [];
     const getSummary = async (trustedUserKey: string, input = {}) => {
       calls.push({ userKey: trustedUserKey, input });
-      return { microSparkBalance: 50_000_000, microSparkDebt: 0, spendingBlocked: false, transactions: [transaction(trustedUserKey)] };
+      return { microSparkBalance: 50_000_000, microSparkDebt: 0, spendingBlocked: false, storage: { bytes: '123000000', estimatedMonthlyMicroSparks: '3690000' }, transactions: [transaction(trustedUserKey)] };
     };
     const app = new Hono();
     app.onError(errorHandler);
     app.get('/billing/summary', createBillingSummaryHandler({ getIdentity: async () => ({ key: userKey, identityType: 'user' }), getSummary }));
     const response = await app.request('/billing/summary?limit=10');
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ success: true, data: { microSparkBalance: 50_000_000 } });
+    expect(await response.json()).toMatchObject({ success: true, data: { microSparkBalance: 50_000_000, storage: { bytes: '123000000', estimatedMonthlyMicroSparks: '3690000' } } });
 
     const context = {
       teamKey, runtimeScopeKey: scopeKey,
@@ -43,12 +43,12 @@ describe('billing summary boundaries', () => {
 
     const authenticated = new Hono();
     authenticated.onError(errorHandler);
-    authenticated.get('/billing/summary', createBillingSummaryHandler({ getIdentity: async () => ({ key: newId(), identityType: 'user' }), getSummary: async () => ({ microSparkBalance: 0, microSparkDebt: 0, spendingBlocked: false, transactions: [] }) }));
+    authenticated.get('/billing/summary', createBillingSummaryHandler({ getIdentity: async () => ({ key: newId(), identityType: 'user' }), getSummary: async () => ({ microSparkBalance: 0, microSparkDebt: 0, spendingBlocked: false, storage: { bytes: '0', estimatedMonthlyMicroSparks: '0' }, transactions: [] }) }));
     expect((await authenticated.request('/billing/summary?userKey=forged')).status).toBe(400);
 
     const userKey = newId(), teamKey = newId();
     const context = { teamKey, runtimeScopeKey: newId(), principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'inactive' } } } as unknown as ToolContext;
-    await expect(createBillingSummaryReadTool(async () => ({ microSparkBalance: 0, microSparkDebt: 0, spendingBlocked: false, transactions: [] })).execute({}, { context })).rejects.toThrow('active authenticated user membership');
+    await expect(createBillingSummaryReadTool(async () => ({ microSparkBalance: 0, microSparkDebt: 0, spendingBlocked: false, storage: { bytes: '0', estimatedMonthlyMicroSparks: '0' }, transactions: [] })).execute({}, { context })).rejects.toThrow('active authenticated user membership');
   });
 
   test('rejects malformed pagination without invoking the canonical service', async () => {
@@ -57,7 +57,7 @@ describe('billing summary boundaries', () => {
     app.onError(errorHandler);
     app.get('/billing/summary', createBillingSummaryHandler({
       getIdentity: async () => ({ key: newId(), identityType: 'user' }),
-      getSummary: async () => { calls += 1; return { microSparkBalance: 0, microSparkDebt: 0, spendingBlocked: false, transactions: [] }; },
+      getSummary: async () => { calls += 1; return { microSparkBalance: 0, microSparkDebt: 0, spendingBlocked: false, storage: { bytes: '0', estimatedMonthlyMicroSparks: '0' }, transactions: [] }; },
     }));
     const invalidQueries = [
       'limit=0', 'limit=201', 'limit=1.5', 'limit=NaN', 'limit=%20',
@@ -75,7 +75,7 @@ describe('billing summary boundaries', () => {
     app.onError(errorHandler);
     app.get('/billing/summary', createBillingSummaryHandler({
       getIdentity: async () => ({ key: newId(), identityType: 'user' }),
-      getSummary: async (_userKey, input) => { received = input; return { microSparkBalance: 0, microSparkDebt: 0, spendingBlocked: false, transactions: [] }; },
+      getSummary: async (_userKey, input) => { received = input; return { microSparkBalance: 0, microSparkDebt: 0, spendingBlocked: false, storage: { bytes: '0', estimatedMonthlyMicroSparks: '0' }, transactions: [] }; },
     }));
     expect((await app.request(`/billing/summary?limit=1&beforeCreatedAt=${encodeURIComponent(beforeCreatedAt)}&beforeKey=${beforeKey}`)).status).toBe(200);
     expect(received).toEqual({ limit: 1, beforeCreatedAt, beforeKey });
@@ -85,5 +85,16 @@ describe('billing summary boundaries', () => {
     const response = await memberApp.request('/billing/summary');
     expect(response.status).toBe(401);
     expect(response.headers.get('www-authenticate')).toBe('Bearer');
+  });
+
+  test('defaults HTTP summaries to one transaction for lightweight balance polling', async () => {
+    let received: unknown;
+    const app = new Hono();
+    app.get('/billing/summary', createBillingSummaryHandler({
+      getIdentity: async () => ({ key: newId(), identityType: 'user' }),
+      getSummary: async (_userKey, input) => { received = input; return { microSparkBalance: 0, microSparkDebt: 0, spendingBlocked: false, storage: { bytes: '0', estimatedMonthlyMicroSparks: '0' }, transactions: [] }; },
+    }));
+    expect((await app.request('/billing/summary')).status).toBe(200);
+    expect(received).toEqual({ limit: 50 });
   });
 });

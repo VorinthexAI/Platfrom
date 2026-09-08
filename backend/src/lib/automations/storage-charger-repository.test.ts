@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { HOUR_MS } from './storage-charger';
-import { createStorageChargingRepository, markStoredObjectDeleted, recordStoredObject, storageChargingHourSchema, storageChargingMeterSchema, storageObjectSchema, storageUserHourId } from './storage-charger-repository';
+import { createStorageChargingRepository, markStoredObjectDeleted, recordStoredObject, storageChargingHourSchema, storageChargingMeterSchema, storageObjectSchema, storageUserHourId, storageWipeDueAt } from './storage-charger-repository';
 
 const start = '2026-09-04T11:00:00.000Z';
 const end = '2026-09-04T12:00:00.000Z';
@@ -28,18 +28,34 @@ describe('storage charging repository contract', () => {
     ]);
   });
 
+  test('sums current active storage exactly for one trusted user', async () => {
+    let bindVars: Record<string, unknown> | undefined;
+    let options: { batchSize?: number } | undefined;
+    const repository = createStorageChargingRepository({ async query(_query, values, queryOptions) {
+      bindVars = values;
+      options = queryOptions;
+      return { async all() { throw new Error('Expected streaming batches.'); }, batches: (async function* () { yield ['90071992547409930']; yield ['70']; })() };
+    } });
+    await expect(repository.getActiveStoredBytes('user-1')).resolves.toBe('90071992547410000');
+    expect(bindVars).toEqual({ '@objects': 'storageObjects', userKey: 'user-1' });
+    expect(options).toEqual({ batchSize: 500 });
+    await expect(repository.getActiveStoredBytes('')).rejects.toBeDefined();
+  });
+
   test('records object lifetimes transactionally and closes them after deletion', async () => {
     const transactionQueries: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const transact = async <T>(operation: (database: { query(query: string, bindVars?: Record<string, unknown>): Promise<{ all(): Promise<unknown[]> }> }) => Promise<T>) => operation({
-      async query(query, bindVars) { transactionQueries.push({ query, bindVars }); return { async all() { return query.includes('LET state = FIRST') ? [true] : []; } }; },
+      async query(query, bindVars) { transactionQueries.push({ query, bindVars }); return { async all() { return []; } }; },
     });
     const document = await recordStoredObject({ storageKey: 'objects/new', userKey: 'user-1', sizeBytes: 42, storedAt: start }, transact);
     expect(document).toMatchObject({ storageKey: 'objects/new', userKey: 'user-1', sizeBytes: '42', storedAt: start });
     expect(transactionQueries).toHaveLength(3);
-    expect(transactionQueries[0]!.query).toContain('LET state = FIRST');
-    expect(transactionQueries[1]!.query).toContain('deletedAt == null');
-    expect(transactionQueries[1]!.query).toContain('object.storedAt <= @storedAt');
-    expect(transactionQueries[2]!.query).toContain('INSERT @document');
+    expect(transactionQueries[0]!.query).toContain('deletedAt == null');
+    expect(transactionQueries[0]!.query).toContain('object.storedAt <= @storedAt');
+    expect(transactionQueries[1]!.query).toContain('INSERT @document');
+    expect(transactionQueries[2]!.query).toContain('state.wipedAt != null');
+    expect(transactionQueries[2]!.query).toContain('paymentPastDueAt: @storedAt');
+    expect(transactionQueries[2]!.bindVars).toMatchObject({ userKey: 'user-1', storedAt: start, wipeDueAt: storageWipeDueAt(start) });
 
     const deletionQueries: Array<Record<string, unknown> | undefined> = [];
     await markStoredObjectDeleted('objects/new', end, { async query(_query, bindVars) { deletionQueries.push(bindVars); return { async all() { return []; } }; } });

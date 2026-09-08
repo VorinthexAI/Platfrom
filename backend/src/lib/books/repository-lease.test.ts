@@ -59,6 +59,18 @@ describe('book repository generation leases', () => {
     expect(state.patches).toEqual([{ audioStorageKey: null }]);
   });
 
+  test('atomically queues a previous differing cover when replacing it', async () => {
+    let mutation = ''; let bindings: Record<string, unknown> = {};
+    const timestamp = '2026-08-25T12:00:00.000Z';
+    const raw = { _key: bookKey, scopeKey, title: 'Book', description: 'Description', goal: 'Learn', audience: 'Reader', outcome: 'Knowledge', language: 'English', generationStage: 'draft', generationCompletedUnits: 1, generationTotalUnits: 34, generationAttempt: 0, estimatedMinutes: 0, chapterCount: 10, status: 'writing', coverStorageKey: 'books/new.png', embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: timestamp, updatedAt: timestamp };
+    const database: BookDatabase = { async query(query, bind = {}) { if (query.includes('RETURN membership._key')) return { all: async () => ['membership'] }; mutation = query; bindings = bind; return { all: async () => [raw] }; } };
+    const repository = createBookRepository(database);
+    await expect(repository.updateBook({ ...baseContext, generationLeaseToken: 'owner' }, bookKey, { coverStorageKey: 'books/new.png', updatedAt: timestamp })).resolves.toMatchObject({ coverStorageKey: 'books/new.png' });
+    expect(mutation).toContain('book.coverStorageKey != @coverStorageKey');
+    expect(mutation).toContain('UPSERT { storageKey }');
+    expect(bindings).toMatchObject({ replacesCover: true, coverStorageKey: 'books/new.png', updatedAt: timestamp });
+  });
+
   test('blocks cancelled retries until the active lease expires', async () => {
     const expiry = '2026-08-25T12:02:00.000Z'; let retried = false;
     const generationInput = { topic: 'Thinking', goal: 'Decide well', currentKnowledge: 'Basics', writingTone: 'Clear', chapterCount: 10, language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1 };

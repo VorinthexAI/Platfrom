@@ -21,8 +21,8 @@ export const storageChargingHourSchema = z.object({
 });
 export const storageChargingMeterSchema = z.object({ key: z.string().min(1), userKey: z.string().min(1).max(160), remainder: z.string().regex(/^\d+$/), lastHourEnd: z.string().datetime(), updatedAt: z.string().datetime() });
 
-type QueryCursor = { all(): Promise<unknown[]> };
-export interface StorageChargingDatabase { query(query: string, bindVars?: Record<string, unknown>): Promise<QueryCursor> }
+type QueryCursor = { all(): Promise<unknown[]>; batches?: AsyncIterable<unknown[]> };
+export interface StorageChargingDatabase { query(query: string, bindVars?: Record<string, unknown>, options?: { batchSize?: number }): Promise<QueryCursor> }
 type TransactionRunner = <T>(operation: (transaction: StorageChargingDatabase) => Promise<T>) => Promise<T>;
 
 const stableKey = (kind: string, ...parts: string[]) => createHash('sha256').update([kind, ...parts].join('\0')).digest('hex');
@@ -35,8 +35,22 @@ const first = async (database: StorageChargingDatabase, query: string, bindVars?
 export function createStorageChargingRepository(
   database: StorageChargingDatabase = db as unknown as StorageChargingDatabase,
   transact: TransactionRunner = (operation) => withTransaction({ read: [STORAGE_OBJECTS_COLLECTION], write: [STORAGE_CHARGING_HOURS_COLLECTION, STORAGE_CHARGING_METERS_COLLECTION, STORAGE_RETENTION_STATES_COLLECTION] }, (transaction) => operation(transaction as unknown as StorageChargingDatabase)),
-): StorageUsageRepository & { listMissedClosedHours(now: Date): Promise<StorageHourWindow[]> } {
+): StorageUsageRepository & { getActiveStoredBytes(userKey: string): Promise<string>; listMissedClosedHours(now: Date): Promise<StorageHourWindow[]> } {
   return {
+    async getActiveStoredBytes(rawUserKey) {
+      const userKey = storageObjectSchema.shape.userKey.parse(rawUserKey);
+      const cursor = await database.query('FOR object IN @@objects FILTER object.userKey == @userKey && object.deletedAt == null RETURN object.sizeBytes', { '@objects': STORAGE_OBJECTS_COLLECTION, userKey }, { batchSize: 500 });
+      let total = 0n;
+      const add = (values: unknown[]) => {
+        for (const value of values) total += BigInt(storageObjectSchema.shape.sizeBytes.parse(value));
+      };
+      if (cursor.batches) {
+        for await (const batch of cursor.batches) add(batch);
+      } else {
+        add(await cursor.all());
+      }
+      return total.toString();
+    },
     async listUserByteUsage(rawWindow) {
       const window = storageHourWindowSchema.parse(rawWindow);
       const cursor = await database.query(`FOR object IN @@objects FILTER object.storedAt < @end && (object.deletedAt == null || object.deletedAt > @start) LET user = DOCUMENT(users, object.userKey) FILTER user != null LET retention = FIRST(FOR state IN @@retention FILTER state.userKey == object.userKey LIMIT 1 RETURN state) FILTER retention == null || (retention.fundedAt != null && retention.fundedAt <= @start) SORT object.userKey ASC RETURN object`, { '@objects': STORAGE_OBJECTS_COLLECTION, '@retention': STORAGE_RETENTION_STATES_COLLECTION, ...window });
@@ -105,28 +119,17 @@ export const getDefaultStorageChargingRepository = () => createStorageChargingRe
 
 export const storageRetentionStateId = (userKey: string) => stableKey('storage-retention', userKey);
 
-export class StorageUnfundedError extends Error {
-  readonly code = 'STORAGE_UNFUNDED';
-  constructor() { super('Storage growth is unavailable until the Spark balance is positive.'); this.name = 'StorageUnfundedError'; }
-}
-
-export async function assertStorageGrowthAllowed(userKey: string, database: StorageChargingDatabase = db as unknown as StorageChargingDatabase) {
-  const cursor = await database.query('LET state = FIRST(FOR value IN @@retention FILTER value.userKey == @userKey LIMIT 1 RETURN value) RETURN state == null || state.fundedAt != null', { '@retention': STORAGE_RETENTION_STATES_COLLECTION, userKey: z.string().min(1).max(160).parse(userKey) });
-  if ((await cursor.all())[0] !== true) throw new StorageUnfundedError();
-}
-
 export async function recordStoredObject(
   rawInput: { storageKey: string; userKey: string; sizeBytes: number; storedAt?: string },
-  transact: TransactionRunner = (operation) => withTransaction({ write: [STORAGE_RETENTION_STATES_COLLECTION, STORAGE_OBJECTS_COLLECTION] }, (transaction) => operation(transaction as unknown as StorageChargingDatabase)),
+  transact: TransactionRunner = (operation) => withTransaction({ read: ['users'], write: [STORAGE_OBJECTS_COLLECTION, STORAGE_RETENTION_STATES_COLLECTION] }, (transaction) => operation(transaction as unknown as StorageChargingDatabase)),
 ) {
   if (!Number.isSafeInteger(rawInput.sizeBytes) || rawInput.sizeBytes < 0) throw new RangeError('Stored object size must be a nonnegative safe integer.');
   const storedAt = rawInput.storedAt ?? new Date().toISOString();
   const document = storageObjectSchema.parse({ key: newId(), storageKey: rawInput.storageKey, userKey: rawInput.userKey, sizeBytes: String(rawInput.sizeBytes), storedAt });
   await transact(async (transaction) => {
-    const allowed = await first(transaction, 'LET state = FIRST(FOR value IN @@retention FILTER value.userKey == @userKey LIMIT 1 RETURN value) RETURN state == null || state.fundedAt != null', { '@retention': STORAGE_RETENTION_STATES_COLLECTION, userKey: document.userKey });
-    if (allowed !== true) throw new StorageUnfundedError();
     await transaction.query('FOR object IN @@objects FILTER object.storageKey == @storageKey && object.deletedAt == null && object.storedAt <= @storedAt UPDATE object WITH { deletedAt: @storedAt } IN @@objects', { '@objects': STORAGE_OBJECTS_COLLECTION, storageKey: document.storageKey, storedAt });
     await transaction.query('INSERT @document INTO @@objects', { '@objects': STORAGE_OBJECTS_COLLECTION, document: toArangoDoc(document) });
+    await transaction.query('FOR state IN @@retention FILTER state.userKey == @userKey && state.wipedAt != null LET user = DOCUMENT(users, @userKey) LET funded = user != null && IS_NUMBER(user.microSparkBalance) && user.microSparkBalance > 0 UPDATE state WITH MERGE({ wipeStartedAt: null, wipedAt: null, wipeBatch: 0, warningPaymentPastDueAt: null, warningWipeDueAt: null, warningSentAt: null }, funded ? { fundedAt: @storedAt, paymentPastDueAt: null, wipeDueAt: null, minimumBalanceMicroSparks: null } : { fundedAt: null, paymentPastDueAt: @storedAt, wipeDueAt: @wipeDueAt, minimumBalanceMicroSparks: 1 }) IN @@retention OPTIONS { keepNull: false }', { '@retention': STORAGE_RETENTION_STATES_COLLECTION, userKey: document.userKey, storedAt, wipeDueAt: storageWipeDueAt(storedAt) });
   });
   return document;
 }

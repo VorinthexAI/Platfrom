@@ -179,8 +179,10 @@ describe("legal policy copy", () => {
     for (const copy of [terms, privacy]) {
       expect(copy).toContain("prepaid Sparks");
       expect(copy).toContain("no debt or grace-period backcharges accrue");
+      expect(copy).toContain("uploads can continue");
       expect(copy).toContain("export, deletion, and recovery");
       expect(copy).toContain("90 consecutive days");
+      expect(copy).not.toContain("growth is blocked");
       expect(copy).not.toMatch(/notice/i);
     }
 

@@ -92,7 +92,7 @@ describe('personal assistant runtime', () => {
       'referral.summary.read', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote',
       'collection.create', 'collection.update', 'collection.delete',
       'image.search', 'image.favorite', 'image.update', 'image.delete',
-      'collection.duplicates.delete', 'collection.image.transfer', 'subject.list', 'subject.create',
+      'collection.duplicates.delete', 'collection.image.transfer', 'subject.list', 'visual-identity.create',
       'subject.image.list', 'subject.delete', 'highlight.create', 'highlight.list',
       'highlight.read', 'highlight.delete', 'image.create-memory', 'image.memory.list',
       'image.memory.read', 'image.memory.delete', 'collection.hide', 'collection.reveal',

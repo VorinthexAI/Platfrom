@@ -22,6 +22,7 @@ describe('canonical app audio service', () => {
     });
     const output = await service.generateDocument({ documentKey, voice: 'warm', pace: 1, includeTitle: true, includeCode: false }, context);
     expect(calls[0]?.[1]).toEqual({ text: 'Architecture.\n\nRead this.', language: 'English', voice: 'coral', pace: 1, format: 'mp3' });
+    expect(calls).toContainEqual(['upload', expect.objectContaining({ billingUserKey: userKey })]);
     expect(output).toMatchObject({ key: audioKey, documentKey, version: 1, mimeType: 'audio/mpeg', sizeBytes: 3, durationMs: 2_000, voice: 'warm', speakingRate: 1, includeTitle: true, includeCode: false, current: true, url: expect.stringContaining('https://audio.example/') });
     expect(JSON.stringify(output)).not.toMatch(/storageKey|createdByKey|scopeKey/);
     expect(calls).toContainEqual(['publish', scopeKey]);
@@ -33,7 +34,7 @@ describe('canonical app audio service', () => {
       storage: { upload: async ({ key }) => ({ storageKey: key }), delete: async (key) => { deleted.push(key); } },
       speech: async () => ({ bytes: new Uint8Array([1]), mimeType: 'audio/mpeg', durationSeconds: 9 }),
     });
-    await expect(service.generateForTarget({ teamKey, storageKey: 'audio/failure.mp3', text: 'Narrate this.', voice: 'clear', pace: 1 }, { persist: async () => { throw new Error('lease lost'); } })).rejects.toThrow('lease lost');
+    await expect(service.generateForTarget({ teamKey, billingUserKey: userKey, storageKey: 'audio/failure.mp3', text: 'Narrate this.', voice: 'clear', pace: 1 }, { persist: async () => { throw new Error('lease lost'); } })).rejects.toThrow('lease lost');
     expect(deleted).toEqual(['audio/failure.mp3']);
   });
 
@@ -42,16 +43,16 @@ describe('canonical app audio service', () => {
       speech: async () => ({ bytes: new Uint8Array([1]), mimeType: 'audio/mpeg' }),
       storage: { upload: async ({ key }) => ({ storageKey: key }), delete: async () => {} },
     });
-    const output = await service.generateForTarget({ teamKey, storageKey: 'audio/five-minutes.mp3', text: Array(810).fill('word').join(' '), voice: 'clear', pace: 1 }, { persist: async (audio) => audio });
+    const output = await service.generateForTarget({ teamKey, billingUserKey: userKey, storageKey: 'audio/five-minutes.mp3', text: Array(810).fill('word').join(' '), voice: 'clear', pace: 1 }, { persist: async (audio) => audio });
     expect(output).toMatchObject({ storageKey: 'audio/five-minutes.mp3', durationSeconds: 300 });
   });
 
   test('does not upload after provider failure or persist after storage failure', async () => {
     let uploads = 0, persists = 0;
     const providerFailure = createAppSpeechService({ speech: async () => { throw new Error('provider failed'); }, storage: { upload: async ({ key }) => { uploads += 1; return { storageKey: key }; }, delete: async () => {} } });
-    await expect(providerFailure.generateForTarget({ teamKey, storageKey: 'audio/provider.mp3', text: 'Narrate.', voice: 'clear', pace: 1 }, { persist: async () => { persists += 1; } })).rejects.toThrow('provider failed');
+    await expect(providerFailure.generateForTarget({ teamKey, billingUserKey: userKey, storageKey: 'audio/provider.mp3', text: 'Narrate.', voice: 'clear', pace: 1 }, { persist: async () => { persists += 1; } })).rejects.toThrow('provider failed');
     const storageFailure = createAppSpeechService({ speech: async () => ({ bytes: new Uint8Array([1]), mimeType: 'audio/mpeg' }), storage: { upload: async () => { uploads += 1; throw new Error('storage failed'); }, delete: async () => {} } });
-    await expect(storageFailure.generateForTarget({ teamKey, storageKey: 'audio/storage.mp3', text: 'Narrate.', voice: 'clear', pace: 1 }, { persist: async () => { persists += 1; } })).rejects.toThrow('storage failed');
+    await expect(storageFailure.generateForTarget({ teamKey, billingUserKey: userKey, storageKey: 'audio/storage.mp3', text: 'Narrate.', voice: 'clear', pace: 1 }, { persist: async () => { persists += 1; } })).rejects.toThrow('storage failed');
     expect({ uploads, persists }).toEqual({ uploads: 1, persists: 0 });
   });
 

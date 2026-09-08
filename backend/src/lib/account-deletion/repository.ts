@@ -131,7 +131,7 @@ export function createAccountDeletionRepository(
            ))
           LET storageKeys = UNIQUE(UNION(
             IS_STRING(user.profileStorageKey) ? [user.profileStorageKey] : [],
-            (FOR upload IN galleryUploads FILTER upload.actorKey == @userKey && IS_STRING(upload.storageKey) RETURN upload.storageKey),
+            (FOR upload IN galleryUploads FILTER upload.actorKey IN teamMembershipKeys && IS_STRING(upload.storageKey) RETURN upload.storageKey),
             (FOR object IN storageObjects FILTER object.userKey == @userKey && IS_STRING(object.storageKey) RETURN object.storageKey)
           ))
           LET queuedStorage = (FOR storageKey IN storageKeys UPSERT { storageKey } INSERT { storageKey, createdAt: @now, status: "pending" } UPDATE {} IN storageDeletionJobs RETURN 1)
@@ -139,7 +139,7 @@ export function createAccountDeletionRepository(
           LET cleanupStorageHours = (FOR item IN storageChargingHours FILTER item.userKey == @userKey REMOVE item IN storageChargingHours RETURN 1)
           LET cleanupStorageMeters = (FOR item IN storageChargingMeters FILTER item.userKey == @userKey REMOVE item IN storageChargingMeters RETURN 1)
           LET cleanupStorageRetention = (FOR item IN storageRetentionStates FILTER item.userKey == @userKey REMOVE item IN storageRetentionStates RETURN 1)
-          LET cleanupGalleryUploads = (FOR item IN galleryUploads FILTER item.actorKey == @userKey REMOVE item IN galleryUploads RETURN 1)
+          LET cleanupGalleryUploads = (FOR item IN galleryUploads FILTER item.actorKey IN teamMembershipKeys REMOVE item IN galleryUploads RETURN 1)
           LET cleanupAuthSessions = (FOR item IN authSessions FILTER item.userId == @userKey REMOVE item IN authSessions RETURN 1)
           LET cleanupAuthChallenges = (FOR item IN authChallenges FILTER item.identityKey == @userKey || item.userId == @userKey REMOVE item IN authChallenges RETURN 1)
            LET cleanupPresenceSessions = (FOR item IN userSessions FILTER item.userId == @userKey REMOVE item IN userSessions RETURN 1)

@@ -1,4 +1,5 @@
-import { calculateFixedCost, lookupCostRule, storageCostMicroSparks } from '@/lib/costs';
+import { calculateByteHours, calculateFixedCost, HOURS_PER_BILLING_MONTH, lookupCostRule, storageCostMicroSparks, storageCostMicroSparksExact } from '@/lib/costs';
+import { getDefaultStorageChargingRepository } from '@/lib/automations/storage-charger-repository';
 import { sparkHistoryInputSchema, sparkMetadataSchema, type SparkHistoryInput, type SparkMetadata, type SparkTransaction, type SparkTransactionKind } from './contracts';
 import type { ApplySparkResult, SparkRepository } from './repository';
 import { createArangoSparkRepository, SparkRepositoryError } from './repository';
@@ -13,6 +14,7 @@ export interface SparkServiceDependencies {
   repository: SparkRepository;
   createKey?: () => string;
   now?: () => Date;
+  getActiveStoredBytes?: (userKey: string) => Promise<string>;
 }
 
 function positiveSafeInteger(value: number): number {
@@ -20,7 +22,7 @@ function positiveSafeInteger(value: number): number {
   return value;
 }
 
-export function createSparkService({ repository, createKey = newId, now = () => new Date() }: SparkServiceDependencies) {
+export function createSparkService({ repository, createKey = newId, now = () => new Date(), getActiveStoredBytes = async () => '0' }: SparkServiceDependencies) {
   const apply = (
     trustedUserKey: string,
     kind: SparkTransactionKind,
@@ -100,15 +102,26 @@ export function createSparkService({ repository, createKey = newId, now = () => 
     },
     async getSummary(trustedUserKey: string, input?: SparkHistoryInput) {
       const valid = sparkHistoryInputSchema.parse(input ?? {});
-      const [microSparkBalance, microSparkDebt, transactions] = await Promise.all([
+      const [microSparkBalance, microSparkDebt, transactions, storageBytes] = await Promise.all([
         repository.getBalance(trustedUserKey),
         repository.getDebt?.(trustedUserKey) ?? Promise.resolve(0),
         repository.listHistory(trustedUserKey, valid),
+        getActiveStoredBytes(trustedUserKey),
       ]);
       if (microSparkBalance === null) throw new SparkRepositoryError('USER_NOT_FOUND', 'Spark account user was not found.');
-      return { microSparkBalance, microSparkDebt: microSparkDebt ?? 0, spendingBlocked: (microSparkDebt ?? 0) > 0, transactions };
+      return {
+        microSparkBalance,
+        microSparkDebt: microSparkDebt ?? 0,
+        spendingBlocked: (microSparkDebt ?? 0) > 0,
+        storage: {
+          bytes: storageBytes,
+          estimatedMonthlyMicroSparks: storageCostMicroSparksExact(calculateByteHours(BigInt(storageBytes), HOURS_PER_BILLING_MONTH)),
+        },
+        transactions,
+      };
     },
   });
 }
 
-export const sparkService = createSparkService({ repository: createArangoSparkRepository() });
+const storageChargingRepository = getDefaultStorageChargingRepository();
+export const sparkService = createSparkService({ repository: createArangoSparkRepository(), getActiveStoredBytes: storageChargingRepository.getActiveStoredBytes });

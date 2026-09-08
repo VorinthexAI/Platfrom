@@ -3,14 +3,14 @@ import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
-import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Linking, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ActionPill } from "@vorinthex/shared/ui/action-pill";
 import { Avatar } from "@vorinthex/shared/ui/avatar";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
-import { CheckIcon, ChevronDownIcon, ChevronUpIcon, FolderIcon, HelpIcon, LogOutIcon, PlusIcon, SettingsIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { BellIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, DeleteAccountIcon, FaqIcon, FeedbackIcon, FolderIcon, HelpIcon, IssueIcon, PlusIcon, PrivacyIcon, SettingsIcon, SignOutIcon, SwitchTeamIcon, TermsIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
@@ -25,8 +25,11 @@ import { fonts, palette, radii, spacing } from "@/theme/tokens";
 import { AccountScreenShell } from "@/components/AccountScreenShell";
 import { normalizeCapturedPng } from "@/lib/captured-image";
 import { deleteGalleryImages, fetchGalleryUploadStatus, uploadGalleryImages, type GalleryContext } from "@/lib/gallery-client";
+import { formatStorageSummary } from "@/lib/billing-client";
+import { useBillingSummary } from "@/hooks/use-billing-summary";
+import { NotificationsSheet } from "@/components/NotificationsSheet";
 
-type ProfileSheet = "name" | "faq" | "report" | "feedback" | "feedback-create" | "delete-account" | "scope-help" | "scope-create" | "scope-actions" | "scope-delete" | "teams";
+type ProfileSheet = "name" | "faq" | "notifications" | "report" | "feedback" | "feedback-create" | "delete-account" | "storage-help" | "scope-help" | "scope-create" | "scope-actions" | "scope-delete" | "teams";
 
 const FAQ = [
   ["What are Sparks?", "Sparks power AI actions across Vorinthex. Your balance is shared across every capability."],
@@ -54,6 +57,15 @@ function ScopeCard({ onLongPress, onPress, scope, size }: { onLongPress?: () => 
   </View>;
 }
 
+function SettingsActionCard({ danger = false, icon, label, onPress, size }: { danger?: boolean; icon: ReactNode; label: string; onPress: () => void; size: number }) {
+  return <View style={[styles.settingsCard, { height: size, width: size }]}>
+    <Button accessibilityLabel={label} contentMode="raw" onPress={onPress} shape="rounded" size="xl" style={styles.settingsCardButton} variant="ghost">
+      {icon}
+      <Text numberOfLines={1} style={[styles.settingsCardLabel, danger && styles.settingsCardLabelDanger]}>{label}</Text>
+    </Button>
+  </View>;
+}
+
 export function AccountScreen({ page }: { page: "profile" | "settings" }) {
   const router = useRouter();
   const { width } = useWindowDimensions();
@@ -77,6 +89,7 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
   const [deleteError, setDeleteError] = useState("");
   const [scopeName, setScopeName] = useState("");
   const [scopeDescription, setScopeDescription] = useState("");
+  const [faqQuestionIndex, setFaqQuestionIndex] = useState<number>();
   const [votingKey, setVotingKey] = useState<string>();
   const [selectingTeam, setSelectingTeam] = useState(false);
   const [selectedScope, setSelectedScope] = useState<ScopeSummary>();
@@ -93,10 +106,14 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
   const feedbackQueryKey = ["profile-feedback", teamKey, scopeKey] as const;
   const scopeQueryKey = scopeListQueryKey(String(user?.key ?? ""), teamKey);
   const scopeCardSize = Math.floor((width - spacing.md * 2 - 20) / 3);
+  const settingsCardSize = scopeCardSize;
+  const billingSummaryQuery = useBillingSummary(user?.key);
   const scopesQuery = useQuery({ queryKey: scopeQueryKey, queryFn: ({ signal }) => listScopes(teamKey, signal), enabled: Boolean(user?.key && teamKey), refetchOnMount: "always" });
   const teamsQuery = useQuery({ queryKey: teamListQueryKey(String(user?.key ?? "")), queryFn: ({ signal }) => listTeams(signal), enabled: teamSelectionEnabled && sheet === "teams" });
   const scopes = scopesQuery.data ?? [];
   const sortedScopes = [...scopes].sort((left, right) => left.position - right.position);
+  const selectedFaq = faqQuestionIndex === undefined ? undefined : FAQ[faqQuestionIndex];
+  const canDeleteSelectedScope = Boolean(selectedScope && scopes.some((scope) => scope.key !== selectedScope.key && !scope.key.startsWith("optimistic:")));
   const feedbackQuery = useQuery({
     queryKey: feedbackQueryKey,
     queryFn: async () => {
@@ -423,7 +440,7 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
     if (!selectedScope || !canManageScope(selectedScope) || deletingScope || scopeManagementPending.current) return;
     const target = selectedScope;
     const previous = queryClient.getQueryData<ScopeSummary[]>(scopeQueryKey) ?? scopes;
-    const fallback = previous.find(({ key }) => key !== target.key);
+    const fallback = previous.find(({ key }) => key !== target.key && !key.startsWith("optimistic:"));
     if (!fallback) {
       showToast({ title: "The last scope cannot be deleted.", duration: 2_500 });
       return;
@@ -480,10 +497,10 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
     } finally { setSelectingTeam(false); }
   };
 
-  const headerActions = <>
-    <Button accessibilityLabel="Log out" contentMode="raw" iconOnly onPress={() => void logOut()} size="xs" variant="icon"><LogOutIcon size="sm" /></Button>
-    {page === "profile" ? <Button accessibilityLabel="Open settings" contentMode="raw" iconOnly onPress={() => router.push("/settings")} size="xs" variant="icon"><SettingsIcon size="sm" /></Button> : null}
-  </>;
+  const headerActions = page === "profile" ? <>
+    <Button accessibilityLabel="Open notifications" contentMode="raw" iconOnly onPress={() => setSheet("notifications")} size="xs" variant="icon"><BellIcon size="sm" /></Button>
+    <Button accessibilityLabel="Open settings" contentMode="raw" iconOnly onPress={() => router.push("/settings")} size="xs" variant="icon"><SettingsIcon size="sm" /></Button>
+  </> : undefined;
 
   return <>
     <AccountScreenShell rightAction={headerActions} title={page === "profile" ? "Profile" : "Settings"}>
@@ -491,10 +508,13 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
         <Button accessibilityLabel="Change profile image" contentMode="raw" iconOnly onPress={() => void pickAvatar().catch(() => showToast({ title: "The image picker could not be opened.", duration: 2_500 }))} size="xl" style={styles.avatarButton} variant="ghost">
           <Avatar fallback={profileInitial(user)} size={104} style={styles.avatar} uri={user?.avatarUrl} />
         </Button>
-        <Text style={styles.avatarHint}>Tap to change photo</Text>
         <View style={styles.identity}>
           <Button accessibilityLabel="Edit name" contentMode="raw" onPress={openName} size="xl" style={styles.nameButton} variant="ghost"><Text numberOfLines={2} style={styles.name}>{name}</Text></Button>
           {user?.email ? <Text style={styles.email}>{user.email}</Text> : null}
+        </View>
+        <View style={styles.storageSection}>
+          <View style={styles.scopeTitleRow}><Text style={styles.scopeTitle}>Storage</Text><Button accessibilityLabel="How is storage charged?" contentMode="raw" iconOnly onPress={() => setSheet("storage-help")} size="xs" variant="icon"><HelpIcon size="sm" /></Button></View>
+          {billingSummaryQuery.isPending ? <Skeleton style={styles.storageSkeleton} /> : billingSummaryQuery.isError ? <Text accessibilityRole="alert" style={styles.storageSummary}>Storage usage is unavailable.</Text> : <Text style={styles.storageSummary}>{formatStorageSummary(billingSummaryQuery.data.storage.bytes, billingSummaryQuery.data.storage.estimatedMonthlyMicroSparks)}</Text>}
         </View>
         <View style={styles.scopeSection}>
           <View style={styles.scopeTitleRow}><Text style={styles.scopeTitle}>Scopes</Text><Button accessibilityLabel="What are scopes?" contentMode="raw" iconOnly onPress={() => setSheet("scope-help")} size="xs" variant="icon"><HelpIcon size="sm" /></Button></View>
@@ -504,13 +524,15 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
           </View>
         </View>
       </View> : <View style={styles.settingsContent}>
-        <View style={styles.settingsMenu}>
-          {teamSelectionEnabled ? <Button onPress={() => setSheet("teams")} size="md" variant="secondary">Switch team</Button> : null}
-          <Button onPress={() => router.push("/notifications")} size="md" variant="secondary">Notifications</Button>
-          <Button onPress={() => setSheet("feedback")} size="md" variant="secondary">Give feedback</Button>
-          <Button onPress={() => setSheet("report")} size="md" variant="secondary">Report an issue</Button>
-          <Button onPress={() => setSheet("faq")} size="md" variant="secondary">FAQ</Button>
-          <Button onPress={() => { setDeleteError(""); setSheet("delete-account"); }} size="md" variant="danger">Delete account</Button>
+        <View style={styles.settingsGrid}>
+          {teamSelectionEnabled ? <SettingsActionCard icon={<SwitchTeamIcon size="lg" />} label="Switch team" onPress={() => setSheet("teams")} size={settingsCardSize} /> : null}
+          <SettingsActionCard icon={<IssueIcon size="lg" />} label="Report issue" onPress={() => setSheet("report")} size={settingsCardSize} />
+          <SettingsActionCard icon={<FeedbackIcon size="lg" />} label="Feedback" onPress={() => setSheet("feedback")} size={settingsCardSize} />
+          <SettingsActionCard icon={<FaqIcon size="lg" />} label="FAQ" onPress={() => { setFaqQuestionIndex(undefined); setSheet("faq"); }} size={settingsCardSize} />
+          <SettingsActionCard icon={<TermsIcon size="lg" />} label="Terms" onPress={() => void Linking.openURL("https://vorinthex.com/terms")} size={settingsCardSize} />
+          <SettingsActionCard icon={<PrivacyIcon size="lg" />} label="Privacy" onPress={() => void Linking.openURL("https://vorinthex.com/privacy")} size={settingsCardSize} />
+          <SettingsActionCard danger icon={<DeleteAccountIcon size="lg" variant="danger" />} label="Delete account" onPress={() => { setDeleteError(""); setSheet("delete-account"); }} size={settingsCardSize} />
+          <SettingsActionCard danger icon={<SignOutIcon size="lg" variant="danger" />} label="Log out" onPress={() => void logOut()} size={settingsCardSize} />
         </View>
       </View>}
     </AccountScreenShell>
@@ -519,15 +541,19 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
       <Text style={styles.scopeHelp}>Scopes are separate workspaces for different parts of your life. For example, you can create one for work and another for personal use, keeping their content, conversations, and tools organized independently.</Text>
     </BottomSheet>
 
+    <BottomSheet footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "storage-help"} title="Storage">
+      <Text style={styles.scopeHelp}>Storage reflects tracked files and media across your apps. Usage is measured continuously and charged in Sparks each hour. The monthly amount shown is an estimate at your current usage. If storage remains unfunded for 90 days, your tracked stored data becomes eligible for deletion.</Text>
+    </BottomSheet>
+
     <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "scope-actions" && canManageScope(selectedScope)} title="Scope actions">
       <BottomSheetMenu>
-        <BottomSheetItem onPress={prioritizeSelectedScope}>Prioritize</BottomSheetItem>
-        <BottomSheetItem onPress={() => void changeSelectedScopeCover()}>Change cover</BottomSheetItem>
-        <BottomSheetItem onPress={() => setSheet("scope-delete")}>Delete</BottomSheetItem>
+        <BottomSheetItem onPress={prioritizeSelectedScope} style={styles.scopeActionItem}>Prioritize</BottomSheetItem>
+        <BottomSheetItem onPress={() => void changeSelectedScopeCover()} style={styles.scopeActionItem}>Change cover</BottomSheetItem>
+        {canDeleteSelectedScope ? <BottomSheetItem onPress={() => setSheet("scope-delete")} style={styles.scopeActionItem}>Delete</BottomSheetItem> : null}
       </BottomSheetMenu>
     </BottomSheet>
 
-    <BottomSheet dismissible={!deletingScope} footer={<><Button disabled={deletingScope} loading={deletingScope} onPress={deleteSelectedScope} size="md" variant="primary">Delete</Button><Button disabled={deletingScope} onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open && !deletingScope) setSheet(undefined); }} open={sheet === "scope-delete" && Boolean(selectedScope)} title="Delete scope">
+    <BottomSheet dismissible={!deletingScope} footer={<><Button disabled={deletingScope} loading={deletingScope} onPress={deleteSelectedScope} size="md" variant="primary">Delete</Button><Button disabled={deletingScope} onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open && !deletingScope) setSheet(undefined); }} open={sheet === "scope-delete" && canDeleteSelectedScope} title="Delete scope?">
       <Text style={styles.scopeHelp}>All data connected to this scope will be deleted. This action can&apos;t be undone.</Text>
     </BottomSheet>
 
@@ -550,8 +576,12 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
       {deleteError ? <Text accessibilityRole="alert" style={styles.deleteError}>{deleteError}</Text> : null}
     </BottomSheet>
 
-    <BottomSheet description="Quick answers about plans and Sparks." focusKey="profile-faq" footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "faq"} title="FAQ">
-      <ScrollView contentContainerStyle={styles.faqList}>{FAQ.map(([question, answer]) => <View key={question} style={styles.faqItem}><Text style={styles.faqQuestion}>{question}</Text><Text style={styles.faqAnswer}>{answer}</Text></View>)}</ScrollView>
+    <BottomSheet description="Quick answers about plans and Sparks." focusKey="profile-faq" footer={<Button onPress={() => { setFaqQuestionIndex(undefined); setSheet(undefined); }} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) { setFaqQuestionIndex(undefined); setSheet(undefined); } }} open={sheet === "faq"} title="FAQ">
+      <ScrollView contentContainerStyle={styles.faqList}>{FAQ.map(([question], index) => <ActionPill key={question} onPress={() => setFaqQuestionIndex(index)} pressLabel={`Read ${question}`}><Text numberOfLines={1} style={styles.faqQuestion}>{question}</Text></ActionPill>)}</ScrollView>
+    </BottomSheet>
+
+    <BottomSheet footer={<Button onPress={() => setFaqQuestionIndex(undefined)} size="md" variant="secondary">Close</Button>} onOpenChange={(open) => { if (!open) setFaqQuestionIndex(undefined); }} open={sheet === "faq" && selectedFaq !== undefined} title={selectedFaq?.[0] ?? "FAQ"}>
+      <Text style={styles.faqAnswer}>{selectedFaq?.[1] ?? ""}</Text>
     </BottomSheet>
 
     <BottomSheet focusKey="profile-name" footer={<><Button disabled={!nameDraft.trim()} onPress={saveName} size="md" variant="primary">Save</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "name"} title="Edit name">
@@ -587,16 +617,20 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
     <BottomSheet focusKey="profile-feedback-create" footer={<><Button disabled={!feedbackDraft.trim() || !teamKey || !scopeKey} onPress={sendFeedback} size="md" variant="primary">Send</Button><Button onPress={() => setSheet("feedback")} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet("feedback"); }} open={sheet === "feedback-create"} title="New feedback">
       <View style={styles.form}><Text style={styles.inputLabel}>Suggestion</Text><TextInput accessibilityLabel="Feedback suggestion" maxLength={8_000} multiline onChangeText={(value) => { feedbackRequestKey.current = undefined; setFeedbackDraft(value); }} placeholder="What would make Vorinthex AI better?" style={styles.reportInput} textAlignVertical="top" value={feedbackDraft} /></View>
     </BottomSheet>
+    <NotificationsSheet onClose={() => setSheet(undefined)} open={sheet === "notifications"} />
   </>;
 }
 
 const styles = StyleSheet.create({
   content: { alignItems: "center", flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.xl },
   settingsContent: { flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
-  settingsMenu: { gap: spacing.sm },
+  settingsGrid: { alignContent: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: 10, width: "100%" },
+  settingsCard: { backgroundColor: palette.panelRaised, borderColor: palette.hairline, borderRadius: radii.md, borderWidth: 1, overflow: "hidden" },
+  settingsCardButton: { flexDirection: "column", gap: 10, height: "100%", paddingHorizontal: 8, width: "100%" },
+  settingsCardLabel: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "center", width: "100%" },
+  settingsCardLabelDanger: { color: palette.danger },
   avatarButton: { height: 112, width: 112 },
   avatar: { backgroundColor: palette.voidBlack, borderColor: palette.hairlineBright, borderWidth: 1 },
-  avatarHint: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 12, marginTop: spacing.xs },
   identity: { alignItems: "center", gap: spacing.xs, marginTop: spacing.md },
   nameButton: { maxWidth: "100%", paddingHorizontal: spacing.sm },
   name: { color: palette.silver50, flexShrink: 1, fontFamily: fonts.medium, fontSize: 28, lineHeight: 34, textAlign: "center" },
@@ -613,11 +647,14 @@ const styles = StyleSheet.create({
   voteCount: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 10 },
   voteCountSelected: { color: palette.obsidian900 },
   faqList: { gap: spacing.sm, paddingBottom: spacing.lg },
-  faqItem: { borderBottomColor: palette.hairline, borderBottomWidth: 1, gap: spacing.xs, paddingBottom: spacing.md },
-  faqQuestion: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 16 },
-  faqAnswer: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 13, lineHeight: 20 },
+  faqQuestion: { color: palette.silver50, flexShrink: 1, fontFamily: fonts.medium, fontSize: 14 },
+  faqAnswer: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, lineHeight: 23, paddingBottom: spacing.md },
   deleteError: { color: palette.danger, fontFamily: fonts.regular, fontSize: 13, lineHeight: 19 },
+  storageSection: { alignSelf: "stretch", gap: spacing.xs, marginTop: spacing.xl, width: "100%" },
+  storageSummary: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 14, lineHeight: 20 },
+  storageSkeleton: { height: 20, width: "72%" },
   scopeSection: { alignSelf: "stretch", gap: spacing.sm, marginTop: spacing.xl, width: "100%" },
+  scopeActionItem: { justifyContent: "center" },
   scopeTitleRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", minHeight: 32 },
   scopeTitle: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 16 },
   scopeHelp: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, lineHeight: 23, paddingBottom: spacing.md },

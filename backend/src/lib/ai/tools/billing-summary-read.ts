@@ -8,6 +8,10 @@ export const billingSummaryReadOutputSchema = z.object({
   microSparkBalance: z.number().int().safe().nonnegative(),
   microSparkDebt: z.number().int().safe().nonnegative(),
   spendingBlocked: z.boolean(),
+  storage: z.object({
+    bytes: z.string().regex(/^(0|[1-9]\d*)$/),
+    estimatedMonthlyMicroSparks: z.string().regex(/^(0|[1-9]\d*)$/),
+  }).strict(),
   transactions: z.array(sparkTransactionSchema),
 }).strict();
 
@@ -18,7 +22,7 @@ export function createBillingSummaryReadTool(getSummary: typeof sparkService.get
     isReadOnly: () => true,
     providerDefinition: {
       name: 'billing.summary.read',
-      description: 'Read the authenticated user\'s current credit balance, refund debt status, and recent immutable billing history.',
+      description: 'Read the authenticated user\'s current credit balance, tracked storage estimate, refund debt status, and recent immutable billing history.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,

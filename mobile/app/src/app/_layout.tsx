@@ -18,7 +18,7 @@ import { BookPlaybackProvider } from "@/lib/book-playback";
 import { useAppsStore } from "@/state/apps";
 import { useInternetConnection } from "@/hooks/use-internet-connection";
 import { AppAvailabilitySheets } from "@/components/AppAvailabilitySheets";
-import { SparksBalanceSheet } from "@/components/SparksBalanceSheet";
+import { SparksBalanceObserver } from "@/components/SparksBalanceObserver";
 import { PaywallSheet } from "@/components/PaywallSheet";
 import { readLocalOnboardingState, subscribeLocalOnboardingState, type LocalOnboardingState } from "@/lib/onboarding-state";
 
@@ -105,7 +105,7 @@ export default function RootLayout() {
                   }}
                 />
                 <AppAvailabilitySheets isOffline={isOffline} />
-                <SparksBalanceSheet isOffline={isOffline} />
+                <SparksBalanceObserver isOffline={isOffline} />
                 <PaywallSheet />
               </BookPlaybackProvider>
             </BottomSheetScene>

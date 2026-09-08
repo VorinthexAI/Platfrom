@@ -8,7 +8,6 @@ import { newId } from '@/lib/ids';
 import { redisConnection } from '@/lib/redis';
 import { createPublicS3Client, s3, S3_BUCKET } from '@/lib/s3';
 import { acknowledgeStorageUploadReservation, isStorageKeyReferenced, releaseStorageUploadReservation, reserveStorageKeyForUpload, type StorageUploadReservation } from '@/lib/db/storage-deletion-jobs.node';
-import { assertStorageGrowthAllowed, StorageUnfundedError } from '@/lib/automations/storage-charger-repository';
 import { accountProfileService, type AccountProfileService } from './service';
 
 export const PROFILE_AVATAR_MAX_BYTES = 5 * 1024 * 1024;
@@ -85,7 +84,6 @@ export class ProfileAvatarUploadError extends Error {
 
 export function normalizeProfileAvatarUploadError(error: unknown) {
   if (error instanceof ProfileAvatarUploadError) return error;
-  if (error instanceof StorageUnfundedError) return new ProfileAvatarUploadError(409, error.code, error.message);
   if (error instanceof GalleryImageInputError) return new ProfileAvatarUploadError(400, 'PROFILE_AVATAR_INVALID_IMAGE', error.message);
   if (error instanceof ZodError || error instanceof SyntaxError) return new ProfileAvatarUploadError(400, 'PROFILE_AVATAR_INVALID_INPUT', 'Avatar upload input was invalid.');
   return new ProfileAvatarUploadError(500, 'PROFILE_AVATAR_FAILED', 'Avatar upload failed.');
@@ -114,7 +112,6 @@ export async function reserveProfileAvatarUpload(rawInput: unknown, authenticate
   const redis = dependencies.redis ?? redisConnection;
   if (await redis.set(redisKey(key), JSON.stringify(record), 'EX', PROFILE_AVATAR_URL_TTL_SECONDS, 'NX') !== 'OK') throw new Error('Avatar reservation key collision.');
   try {
-    if (!dependencies.signUpload) await assertStorageGrowthAllowed(userKey);
     const url = await (dependencies.signUpload ?? ((value) => signUrl(publicS3, new PutObjectCommand({ Bucket: S3_BUCKET, Key: value.storageKey, ContentType: value.mimeType }), { expiresIn: PROFILE_AVATAR_URL_TTL_SECONDS })))(record);
     return { uploadKey: key, url, headers: { 'Content-Type': record.mimeType }, expiresAt };
   } catch (error) {

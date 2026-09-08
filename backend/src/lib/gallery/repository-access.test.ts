@@ -34,4 +34,62 @@ describe('Gallery repository collection access', () => {
       expect(deletion.indexOf('scope.coverImageKey IN @imageKeys')).toBeLessThan(deletion.lastIndexOf('REMOVE image IN images'));
     }
   });
+
+  test('declares only the bind variables used by each upload queue query', async () => {
+    const now = new Date().toISOString();
+    const uploadKey = newId();
+    const input = { uploadKeys: [uploadKey], teamKey: 'team', scopeKey: newId(), actorKey: newId(), now };
+    const upload = {
+      _key: uploadKey,
+      teamKey: input.teamKey,
+      scopeKey: input.scopeKey,
+      actorKey: input.actorKey,
+      imageKey: newId(),
+      collectionKey: null,
+      filename: 'cover.png',
+      mimeType: 'image/png',
+      sizeBytes: 8,
+      storageKey: `pending/gallery/${uploadKey}.png`,
+      processingMode: 'cover',
+      status: 'reserved',
+      processingLeaseId: null,
+      errorCode: null,
+      createdAt: now,
+      updatedAt: now,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    const calls: Array<Record<string, unknown>> = [];
+    const database = {
+      async query(_query: string, bindVars: Record<string, unknown>) {
+        calls.push(bindVars);
+        return { async all() { return [{ ...upload, status: calls.length === 1 ? 'reserved' : 'queued' }]; } };
+      },
+    };
+    const repository = createGalleryRepository(database as never, async (_collections, operation) => operation(database as never));
+
+    await expect(repository.queueUploads(input)).resolves.toHaveLength(1);
+    expect(Object.keys(calls[0]!).sort()).toEqual(['actorKey', 'now', 'scopeKey', 'teamKey', 'uploadKeys']);
+    expect(calls[1]).toEqual({ uploadKeys: [uploadKey], now });
+  });
+
+  test('fails expired reservations and durably queues their storage keys for cleanup', async () => {
+    const now = new Date().toISOString();
+    const storageKey = 'pending/gallery/expired.png';
+    const queries: string[] = [];
+    const database = {
+      async query(query: string) {
+        queries.push(query);
+        return { async all() {
+          if (query.includes('upload.status == "reserved"')) return [true];
+          return [];
+        } };
+      },
+    };
+    const repository = createGalleryRepository(database as never, async (_collections, operation) => operation(database as never));
+
+    await expect(repository.recoverUploadQueue(now, now)).resolves.toEqual({ uploads: [], storageKeys: [] });
+    const expiration = queries.find((query) => query.includes('upload.status == "reserved"')) ?? '';
+    expect(expiration).toContain('UPSERT { storageKey: upload.storageKey }');
+    expect(expiration).toContain('errorCode: "UPLOAD_RESERVATION_EXPIRED"');
+  });
 });

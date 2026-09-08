@@ -44,7 +44,7 @@ async function context(c: Context, teamKey: string, scopeKey: string, dependenci
   return { galleryContext, toolContext, idempotencyKey };
 }
 
-export function createGalleryOperationHandler(name: GalleryOperationName, successStatus = 200, transformInput: (input: Record<string, unknown>) => unknown = (input) => input, billedSlug?: 'subject.create' | 'highlight.create' | 'image.create-memory', dependencies: GalleryHandlerDependencies = {}) {
+export function createGalleryOperationHandler(name: GalleryOperationName, successStatus = 200, transformInput: (input: Record<string, unknown>) => unknown = (input) => input, billedSlug?: 'visual-identity.create' | 'highlight.create' | 'image.create-memory', dependencies: GalleryHandlerDependencies = {}) {
   return async (c: Context) => {
     try {
       const { teamKey, scopeKey, ...input } = trustedContextSchema.parse(await c.req.json());
@@ -59,6 +59,7 @@ export function createGalleryOperationHandler(name: GalleryOperationName, succes
     } catch (error) {
       const billing = sparkErrorResponse(c, error); if (billing) return billing;
       const normalized = normalizeGalleryOperationError(error);
+      if (normalized.status === 500) console.error('gallery request failed', { method: c.req.method, path: c.req.path, operation: name, error });
       return c.json({ success: false, error: { code: normalized.code, message: normalized.message } }, normalized.status);
     }
   };
@@ -85,7 +86,7 @@ export const findGalleryCollectionDuplicates = handler('search', 200, duplicateS
 export const deleteGalleryCollectionDuplicates = handler('deleteDuplicates');
 export const transferGalleryCollectionImages = handler('transferCollectionImages');
 export const listGallerySubjects = handler('listSubjects');
-export const createGallerySubject = handler('createSubject', 201, (input) => input, 'subject.create');
+export const createGallerySubject = handler('createSubject', 201, (input) => input, 'visual-identity.create');
 export const listGallerySubjectImages = handler('listSubjectImages');
 export const deleteGallerySubject = handler('deleteSubject');
 export const createGalleryHighlight = handler('createHighlight', 201, (input) => input, 'highlight.create');
