@@ -42,6 +42,13 @@ describe('Polar provider adapter', () => {
     expect(JSON.parse(String(requests[3]?.init.body))).toEqual({ is_archived: true });
   });
 
+  test('accepts the zero-page pagination returned for an empty catalog', async () => {
+    const provider = createPolarProvider({ environment: 'sandbox', accessToken: 'token' }, async () => Response.json({ items: [], pagination: { total_count: 0, max_page: 0 } }));
+    await expect(provider.listProducts()).resolves.toEqual([]);
+    await expect(provider.listOrders(timestamp)).resolves.toEqual([]);
+    await expect(provider.listSubscriptions()).resolves.toEqual([]);
+  });
+
   test('lists paid orders with one fixed cutoff and follows max_page', async () => {
     const urls: string[] = [];
     const provider = createPolarProvider({ environment: 'production', accessToken: 'token' }, async (url) => {
@@ -78,7 +85,7 @@ describe('Polar provider adapter', () => {
     await expect(provider.listOrders(timestamp)).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
     await expect(provider.listSubscriptions()).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
 
-    const invalidPagination = createPolarProvider({ environment: 'production', accessToken: 'token' }, async () => Response.json({ items: [], pagination: { max_page: 0 } }));
+    const invalidPagination = createPolarProvider({ environment: 'production', accessToken: 'token' }, async () => Response.json({ items: [], pagination: { max_page: -1 } }));
     await expect(invalidPagination.listSubscriptions()).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
   });
 
