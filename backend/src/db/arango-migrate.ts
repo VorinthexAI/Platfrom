@@ -310,7 +310,7 @@ export async function retireLegacyScopeIndexes(targetDb: Database): Promise<void
   if (!await collection.exists()) return;
   for (const index of await collection.indexes()) {
     const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
-    if (fields.includes('organizationKey')) {
+    if (fields.includes('organizationKey') || fields.includes('userOrganizationKey')) {
       await collection.dropIndex(index.id);
       console.log(`Dropped legacy scopes index ${index.id}(${fields.join(', ')})`);
     }
