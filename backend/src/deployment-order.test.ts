@@ -77,7 +77,7 @@ test('uploads canonical app logos before graph migration and deployment', async 
 test('CI database scripts do not generate a development env file', async () => {
   const packageJson = await Bun.file(new URL('../package.json', import.meta.url)).json();
 
-  expect(packageJson.scripts['db:migrate:ci']).toBe('bun run src/db/arango-migrate.ts');
+  expect(packageJson.scripts['db:migrate:ci']).toBe('bun run src/db/migration-runner.ts');
   expect(packageJson.scripts['db:seed:ci']).toBe('bun run src/lib/db/seed.ts');
   expect(packageJson.scripts['assets:seed:ci']).toBe('bun run scripts/seed-app-logo-assets.ts --production-ci');
   expect(packageJson.scripts['db:backfill-semantic-embeddings:ci']).toBe(
@@ -91,13 +91,13 @@ test('normal local server scripts seed app logos before migration', async () => 
   for (const name of ['dev', 'start:server', 'start:app']) {
     const script = packageJson.scripts[name] as string;
     expect(script.indexOf('load-local-env')).toBeLessThan(script.indexOf('seed-app-logo-assets.ts --local'));
-    expect(script.indexOf('seed-app-logo-assets.ts --local')).toBeLessThan(script.indexOf('arango-migrate.ts'));
-    expect(script.indexOf('arango-migrate.ts')).toBeLessThan(script.indexOf('src/api/index.ts'));
+    expect(script.indexOf('seed-app-logo-assets.ts --local')).toBeLessThan(script.indexOf('migration-runner.ts'));
+    expect(script.indexOf('migration-runner.ts')).toBeLessThan(script.indexOf('src/api/index.ts'));
   }
 
   for (const name of ['db:migrate', 'db:migrate:dev']) {
     const script = packageJson.scripts[name] as string;
-    expect(script.indexOf('seed-app-logo-assets.ts --local')).toBeLessThan(script.indexOf('arango-migrate.ts'));
+    expect(script.indexOf('seed-app-logo-assets.ts --local')).toBeLessThan(script.indexOf('migration-runner.ts'));
   }
 
   for (const name of ['seed.ts', 'db:seed']) {

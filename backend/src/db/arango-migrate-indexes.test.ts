@@ -32,14 +32,14 @@ describe('Arango migration indexes', () => {
   test('drops obsolete organization scope indexes before canonical scope setup', async () => {
     const dropped: string[] = [];
     await retireLegacyScopeIndexes({
-      collection: () => ({
+      listCollections: async () => [{ name: 'scopes' }, { name: 'scopeMembers' }],
+      collection: (name: string) => ({
         exists: async () => true,
-        indexes: async () => [
+        indexes: async () => name === 'scopes' ? [
           { id: 'primary', fields: ['_key'] },
           { id: 'legacy', fields: ['organizationKey', 'slug'] },
-          { id: 'legacy-membership', fields: ['scopeKey', 'userOrganizationKey'] },
           { id: 'canonical', fields: ['teamKey', 'slug'] },
-        ],
+        ] : [{ id: 'legacy-membership', fields: ['scopeKey', 'userOrganizationKey'] }],
         dropIndex: async (id: string) => { dropped.push(id); },
       }),
     } as never);
@@ -461,7 +461,7 @@ describe('Arango migration indexes', () => {
     expect(collections.filter(({ name }) => emailNames.includes(name)).map(({ name }) => name)).toEqual(emailNames);
     expect(collections.filter(({ name }) => ['tripGuides', 'placeReferences', 'placeHeroMedia'].includes(name)).map(({ name }) => name)).toEqual(['tripGuides', 'placeReferences', 'placeHeroMedia']);
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-    const dropped = source.slice(source.indexOf('const droppedCollections = ['), source.indexOf('async function main()'));
+    const dropped = source.slice(source.indexOf('const droppedCollections = ['), source.indexOf('export async function migrateLegacySchema'));
     for (const name of [...bookNames, ...emailNames, 'tripGuides', 'placeReferences', 'placeHeroMedia']) expect(dropped).not.toContain(`'${name}'`);
   });
   test('declares private user generation history indexes', () => {
