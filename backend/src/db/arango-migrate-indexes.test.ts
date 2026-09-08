@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER } from './arango-migrate-indexes';
-import { collections, deduplicateScopeMembers, deduplicateScopeSlugs, migrateCollectionOwnership, migrateContainerPresentations, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateManagedGeneratedMedia, migrateMinimalPlacesAndRetireTrips, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTicketTypes, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireMomentumScope, retireUserSettings } from './arango-migrate';
+import { collections, deduplicateScopeMembers, deduplicateScopeSlugs, migrateCollectionOwnership, migrateContainerPresentations, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateManagedGeneratedMedia, migrateMinimalPlacesAndRetireTrips, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTicketTypes, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireLegacyScopeIndexes, retireMomentumScope, retireUserSettings } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, LEGACY_EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 import { emailArchiveRootFolderKey, emailMediaCollectionKey } from '../lib/email-inbox/export-container-keys';
@@ -29,6 +29,22 @@ function migrationDatabase(collection: 'documents' | 'documentVersions', row: Re
 }
 
 describe('Arango migration indexes', () => {
+  test('drops obsolete organization scope indexes before canonical scope setup', async () => {
+    const dropped: string[] = [];
+    await retireLegacyScopeIndexes({
+      collection: () => ({
+        exists: async () => true,
+        indexes: async () => [
+          { id: 'primary', fields: ['_key'] },
+          { id: 'legacy', fields: ['organizationKey', 'slug'] },
+          { id: 'canonical', fields: ['teamKey', 'slug'] },
+        ],
+        dropIndex: async (id: string) => { dropped.push(id); },
+      }),
+    } as never);
+    expect(dropped).toEqual(['legacy']);
+  });
+
   test('creates private push notification collections with uniqueness and recovery indexes', async () => {
     const byName = new Map(collections.map((collection) => [collection.name, collection]));
     expect(byName.get('pushSubscriptions')?.indexes).toContainEqual({ fields: ['userKey', 'installationKey'], unique: true });
