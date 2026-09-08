@@ -37,12 +37,13 @@ describe('Arango migration indexes', () => {
         indexes: async () => [
           { id: 'primary', fields: ['_key'] },
           { id: 'legacy', fields: ['organizationKey', 'slug'] },
+          { id: 'legacy-membership', fields: ['scopeKey', 'userOrganizationKey'] },
           { id: 'canonical', fields: ['teamKey', 'slug'] },
         ],
         dropIndex: async (id: string) => { dropped.push(id); },
       }),
     } as never);
-    expect(dropped).toEqual(['legacy']);
+    expect(dropped).toEqual(['legacy', 'legacy-membership']);
   });
 
   test('creates private push notification collections with uniqueness and recovery indexes', async () => {
