@@ -9,6 +9,7 @@ describe('secret seed roster reconciliation', () => {
     expect(source).toContain('status: "inactive"');
     expect(source).toContain('environmentSeeded: true');
     expect(source).toContain('environmentSeeded: false');
+    expect(source).toContain('mainScopeKey: existing ? undefined : String(resolved.currentScopeKey)');
   });
 
   test('defers only normalized retryable provider outages', async () => {

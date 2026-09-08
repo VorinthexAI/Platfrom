@@ -171,7 +171,7 @@ async function main() {
           name: typeof resolved.name === 'string' ? resolved.name : null,
           email: String(resolved.email),
           currentScopeKey: String(resolved.currentScopeKey),
-        }, { mainScopeKey: String(resolved.currentScopeKey) });
+        }, { mainScopeKey: existing ? undefined : String(resolved.currentScopeKey) });
         const membership = await syncSeededTeamMembership({
           userId: saved.key,
           teamKey: resolved.teamKey,
