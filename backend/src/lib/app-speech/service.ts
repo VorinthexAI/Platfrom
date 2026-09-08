@@ -24,6 +24,7 @@ export const appSpeechInputSchema = z.object({
 
 const trustedTargetInputSchema = z.object({
   teamKey: z.string().trim().min(1),
+  billingUserKey: key,
   storageKey: z.string().trim().min(1),
   text: z.string().trim().min(1).max(50_000),
   language: z.string().trim().min(2).max(100).default('English'),
@@ -93,7 +94,7 @@ export function createAppSpeechService(dependencies: AppSpeechDependencies = {})
     const generated = await speech({ text: input.text, language: input.language, voice: voiceMap[input.voice], pace: input.pace, format: 'mp3' }, input.teamKey, actionOptions);
     await afterSpeech?.();
     const durationSeconds = generated.durationSeconds ?? fallbackDurationSeconds(input.text, input.pace);
-    const stored = await storage.upload({ key: input.storageKey, bytes: generated.bytes, mimeType: generated.mimeType });
+    const stored = await storage.upload({ key: input.storageKey, bytes: generated.bytes, mimeType: generated.mimeType, billingUserKey: input.billingUserKey });
     try {
       const target = await persist({ storageKey: stored.storageKey, mimeType: generated.mimeType, sizeBytes: generated.bytes.byteLength, durationMs: durationSeconds * 1_000, durationSeconds, voice: input.voice, speakingRate: input.pace });
       return { target, storageKey: stored.storageKey, durationSeconds };
@@ -123,7 +124,7 @@ export function createAppSpeechService(dependencies: AppSpeechDependencies = {})
       if (!text) throw new ContentError('CONTENT_INVALID_INPUT', 'Document narration is empty.', 'app.speech', { action: 'speech', resourceKey: input.documentKey });
       const timestamp = dependencies.now?.() ?? new Date().toISOString();
       const audioKey = dependencies.id?.() ?? newId();
-      const generated = await generateForTarget({ teamKey: context.teamKey, storageKey: `document-audio/${document.scopeKey}/${document.key}/${audioKey}.mp3`, text, voice: input.voice, pace: input.pace }, {
+      const generated = await generateForTarget({ teamKey: context.teamKey, billingUserKey: principal.user.key, storageKey: `document-audio/${document.scopeKey}/${document.key}/${audioKey}.mp3`, text, voice: input.voice, pace: input.pace }, {
         ...options,
         persist: (audio) => repository.createAudioVersion!({
           key: audioKey, scopeKey: document.scopeKey, documentKey: document.key, sourceContentHash: documentSemanticHash(document.content), sourceTitle: document.name,

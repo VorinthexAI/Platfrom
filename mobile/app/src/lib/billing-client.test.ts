@@ -8,28 +8,30 @@ mock.module("./api-client", () => ({ apiClient: {
   post: async (...args: unknown[]) => { calls.push(args); return { data: response }; },
 } }));
 
-const { billingSummaryQueryKey, billingSummarySchema, currentSubscriptionQueryKey, fetchBillingSummary, fetchCurrentSubscription, formatWholeSparks, setSubscriptionCancellation, sparkTransactionSchema, subscriptionSchema, wholeSparks } = await import("./billing-client");
+const { billingSummaryQueryKey, billingSummarySchema, currentSubscriptionQueryKey, fetchBillingSummary, fetchCurrentSubscription, formatMonthlyStorageSparks, formatStorageBytes, formatStorageSummary, formatWholeSparks, setSubscriptionCancellation, sparkTransactionSchema, subscriptionSchema, wholeSparks } = await import("./billing-client");
 
 beforeEach(() => {
   calls.splice(0);
   response = { success: true, data: { microSparkBalance: 343_999_999, microSparkDebt: 0, spendingBlocked: false, transactions: [] } };
 });
 
-test("fetches the strict one-item billing summary", async () => {
-  expect(await fetchBillingSummary()).toEqual({ microSparkBalance: 343_999_999, microSparkDebt: 0, spendingBlocked: false, transactions: [] });
-  expect(calls).toEqual([["/billing/summary", { params: { limit: 1 } }]]);
+test("fetches the billing summary", async () => {
+  expect(await fetchBillingSummary()).toEqual({ microSparkBalance: 343_999_999, microSparkDebt: 0, spendingBlocked: false, storage: { bytes: "0", estimatedMonthlyMicroSparks: "0" }, transactions: [] });
+  expect(calls).toEqual([["/billing/summary"]]);
 });
 
 test("accepts the previous billing summary shape and additive response fields", async () => {
   response = { success: true, requestId: "future", data: { microSparkBalance: 100_000_000, transactions: [], futureField: true } };
-  expect(await fetchBillingSummary()).toEqual({ microSparkBalance: 100_000_000, microSparkDebt: 0, spendingBlocked: false, transactions: [] });
+  expect(await fetchBillingSummary()).toEqual({ microSparkBalance: 100_000_000, microSparkDebt: 0, spendingBlocked: false, storage: { bytes: "0", estimatedMonthlyMicroSparks: "0" }, transactions: [] });
+  response = { success: true, data: { microSparkBalance: 100_000_000, transactions: [], storage: { bytes: "123000000", estimatedMonthlyMicroSparks: 3_690_000 } } };
+  expect((await fetchBillingSummary()).storage).toEqual({ bytes: "123000000", estimatedMonthlyMicroSparks: "3690000" });
 });
 
 test("rejects negative, fractional, unsafe, and malformed balances", () => {
   for (const microSparkBalance of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, NaN, "1000000", null]) {
     expect(() => billingSummarySchema.parse({ microSparkBalance, microSparkDebt: 0, spendingBlocked: false, transactions: [] })).toThrow();
   }
-  expect(billingSummarySchema.parse({ microSparkBalance: 0, microSparkDebt: 0, spendingBlocked: false, transactions: [], extra: true })).toEqual({ microSparkBalance: 0, microSparkDebt: 0, spendingBlocked: false, transactions: [] });
+  expect(billingSummarySchema.parse({ microSparkBalance: 0, microSparkDebt: 0, spendingBlocked: false, transactions: [], extra: true })).toEqual({ microSparkBalance: 0, microSparkDebt: 0, spendingBlocked: false, storage: { bytes: "0", estimatedMonthlyMicroSparks: "0" }, transactions: [] });
   expect(() => billingSummarySchema.parse({ microSparkBalance: 0 })).toThrow();
   expect(() => billingSummarySchema.parse({ microSparkBalance: 0, microSparkDebt: 0, spendingBlocked: false, transactions: [{ key: "partial" }] })).toThrow();
   expect(() => billingSummarySchema.parse({ microSparkBalance: 0, microSparkDebt: 1, spendingBlocked: false, transactions: [] })).toThrow();
@@ -83,6 +85,19 @@ test("truncates whole Spark boundaries without upward rounding or suffix promoti
   expect(formatWholeSparks(999_999_999)).toBe("999m");
   expect(formatWholeSparks(-10)).toBe("0");
   expect(formatWholeSparks(343.9)).toBe("343");
+});
+
+test("formats storage to two decimals and monthly Sparks as whole numbers", () => {
+  expect(formatStorageBytes("0")).toBe("0 MB");
+  expect(formatStorageBytes("123000000")).toBe("123 MB");
+  expect(formatStorageBytes("1234567890")).toBe("1.23 GB");
+  expect(formatStorageBytes("1999000000")).toBe("2 GB");
+  expect(formatMonthlyStorageSparks("30000")).toBe("less than 1");
+  expect(formatMonthlyStorageSparks("3690000")).toBe("4");
+  expect(formatMonthlyStorageSparks("0")).toBe("0");
+  expect(formatStorageSummary("0", "0")).toBe("0 MB");
+  expect(formatStorageSummary("123000000", "999999")).toBe("123 MB");
+  expect(formatStorageSummary("123000000", "1000000")).toBe("123 MB, approximately 1 Spark per month");
 });
 
 test("isolates billing query keys by authenticated user", () => {

@@ -62,7 +62,7 @@ const storageReferenceAql = `
   LENGTH(FOR audio IN documentAudioVersions FILTER audio.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
   LENGTH(FOR audio IN documentSummaryAudio FILTER audio.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
   LENGTH(FOR image IN images FILTER image.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
-  LENGTH(FOR upload IN galleryUploads FILTER upload.storageKey == @storageKey LIMIT 1 RETURN 1) > 0`;
+  LENGTH(FOR upload IN galleryUploads FILTER upload.storageKey == @storageKey && upload.status != "failed" LIMIT 1 RETURN 1) > 0`;
 
 /** Creates an owned durable upload lease without stealing another live owner. */
 export async function reserveStorageKeyForUpload(storageKey: string): Promise<StorageUploadReservation | null> {

@@ -9,7 +9,6 @@ import { newId } from '@/lib/ids';
 import { redisConnection } from '@/lib/redis';
 import { createPublicS3Client, s3, S3_BUCKET } from '@/lib/s3';
 import { GalleryImageInputError, sanitizeGalleryImage } from '@/lib/gallery/image-location';
-import { assertStorageGrowthAllowed, StorageUnfundedError } from '@/lib/automations/storage-charger-repository';
 import { getDefaultConversationRepository, type ConversationRepository } from './repository';
 
 export const TRANSIENT_ATTACHMENT_RESERVATION_TTL_SECONDS = 15 * 60;
@@ -94,7 +93,6 @@ export class TransientAttachmentError extends Error {
 
 export function normalizeTransientAttachmentError(error: unknown) {
   if (error instanceof TransientAttachmentError) return error;
-  if (error instanceof StorageUnfundedError) return new TransientAttachmentError(409, error.code, error.message);
   if (error instanceof DocumentInputError || error instanceof GalleryImageInputError) return new TransientAttachmentError(400, error.code, error.message);
   if (error instanceof ZodError || error instanceof SyntaxError) return new TransientAttachmentError(400, 'ATTACHMENT_INVALID_INPUT', 'Attachment request input was invalid.');
   console.error('transient attachment request failed', { error });
@@ -142,7 +140,6 @@ export async function reserveTransientAttachments(rawInput: unknown, owner: Tran
     const extension = file.filename.split('.').at(-1)!.toLowerCase();
     return transientAttachmentRecordSchema.parse({ key, binding, ...owner, conversationKey: input.conversationKey, requestKey: input.requestKey, filename: file.filename, mimeType: file.mimeType, sizeBytes: file.sizeBytes, storageKey: `pending/conversation-attachments/${owner.scopeKey}/${key}/original.${extension}`, status: 'reserved', createdAt: now.toISOString(), expiresAt });
   });
-  if (!dependencies.signUpload) await assertStorageGrowthAllowed(owner.userKey);
   const sign = dependencies.signUpload ?? ((record) => signUrl(publicS3, new PutObjectCommand({ Bucket: S3_BUCKET, Key: record.storageKey, ContentType: record.mimeType }), { expiresIn: 10 * 60 }));
   const urls = await Promise.all(records.map(sign));
   const redis = dependencies.redis ?? redisConnection;

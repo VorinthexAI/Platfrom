@@ -28,7 +28,7 @@ const definitions: Array<{
   { operation: 'deleteDuplicates', name: 'collection.duplicates.delete', description: 'Delete non-favorite images returned by the latest duplicate check. Favorite images are reported and left in the collection.', schema: galleryOperationInputSchemas.deleteDuplicates, mutation: true },
   { operation: 'transferCollectionImages', name: 'collection.image.transfer', description: 'Copy or move selected images from one collection to one destination collection.', schema: galleryOperationInputSchemas.transferCollectionImages, mutation: true },
   { operation: 'listSubjects', name: 'subject.list', description: 'List Gallery subjects.', schema: galleryOperationInputSchemas.listSubjects },
-  { operation: 'createSubject', name: 'subject.create', description: 'Create a named subject from reference images.', schema: galleryOperationInputSchemas.createSubject, mutation: true },
+  { operation: 'createSubject', name: 'visual-identity.create', description: 'Create a named visual identity from reference images.', schema: galleryOperationInputSchemas.createSubject, mutation: true },
   { operation: 'listSubjectImages', name: 'subject.image.list', description: 'List images associated with a Gallery subject.', schema: galleryOperationInputSchemas.listSubjectImages },
   { operation: 'deleteSubject', name: 'subject.delete', description: 'Delete a Gallery subject.', schema: galleryOperationInputSchemas.deleteSubject, mutation: true },
   { operation: 'createHighlight', name: 'highlight.create', description: 'Create an owner-managed persistent randomized image highlight for a collection, including an empty highlight when the collection has no images.', schema: galleryOperationInputSchemas.createHighlight, mutation: true },

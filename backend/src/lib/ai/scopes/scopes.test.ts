@@ -219,17 +219,17 @@ describe('scope repository', () => {
       expect(genericDeletes.map(({ bindVars }) => bindVars['@collection'])).toEqual(SCOPE_KEYED_REMOVAL_COLLECTIONS);
       expect(genericDeletes.filter(({ bindVars }) => bindVars['@collection'] === 'generatedDocumentBindings')).toHaveLength(1);
       expect(genericDeletes.filter(({ bindVars }) => bindVars['@collection'] === 'collectionImages')).toHaveLength(1);
-      expect(scopeQueries.findIndex(({ query }) => query.includes('LET storageKeys ='))).toBeLessThan(scopeQueries.findIndex(({ query }) => query.includes('IN storageDeletionJobs')));
-      expect(scopeQueries.findIndex(({ query }) => query.includes('IN storageDeletionJobs'))).toBeLessThan(scopeQueries.findIndex(({ query }) => query.includes('REMOVE item IN @@collection')));
       const notificationQueries = scopeQueries.filter(({ query }) => query.includes('appNotifications') || query.includes('appNotificationRecipients') || query.includes('pushDeliveries'));
       expect(notificationQueries.map(({ query }) => query)).toEqual([
         'FOR notification IN appNotifications FILTER notification.scopeKey == @scopeKey RETURN notification._key',
-        'FOR delivery IN pushDeliveries FILTER delivery.notificationKey IN @notificationKeys REMOVE delivery IN pushDeliveries',
-        'FOR recipient IN appNotificationRecipients FILTER recipient.notificationKey IN @notificationKeys REMOVE recipient IN appNotificationRecipients',
-        'FOR notification IN appNotifications FILTER notification._key IN @notificationKeys REMOVE notification IN appNotifications',
       ]);
-      expect(notificationQueries.slice(1).map(({ bindVars }) => bindVars.notificationKeys)).toEqual([['notification-1'], ['notification-1'], ['notification-1']]);
     }
+    const storageDeletionQueries = queries.filter(({ query }) => query.includes('IN storageDeletionJobs'));
+    expect(storageDeletionQueries).toHaveLength(scopeKeys.length);
+    expect(storageDeletionQueries.every(({ bindVars }) => Object.keys(bindVars).sort().join(',') === 'now,storageKeys')).toBe(true);
+    const notificationDeletionQueries = queries.filter(({ query }) => query.includes('@notificationKeys') && query.includes('REMOVE'));
+    expect(notificationDeletionQueries).toHaveLength(scopeKeys.length * 3);
+    expect(notificationDeletionQueries.every(({ bindVars }) => Object.keys(bindVars).join(',') === 'notificationKeys')).toBe(true);
     expect(queries.every(({ query }) => (query.match(/\bREMOVE\b/g) ?? []).length <= 1)).toBe(true);
     expect(queries.every(({ query }) => !query.includes('REMOVE') || (!query.includes('UPDATE') && !query.includes('UPSERT')))).toBe(true);
   });

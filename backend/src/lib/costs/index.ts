@@ -57,7 +57,7 @@ export const TOOL_COST_RULES: Readonly<Record<string, PublicFixedCostRule>> = Ob
   'book.extend': sparks(30, 'Extend an audio book', 'Generate and save an additional audio book chapter.'),
   'highlight.create': sparks(20, 'Create a highlight', 'Create a generated highlight from an image collection.'),
   'image.create-memory': sparks(10, 'Create a memory', 'Create a generated memory for an image.'),
-  'subject.create': sparks(15, 'Create a subject', 'Create a visual subject from selected images.'),
+  'visual-identity.create': sparks(15, 'Create a visual identity', 'Create a visual identity from selected images.'),
   'email.tone.create': sparks(25, 'Create an email tone', 'Build a reusable writing tone from email examples.'),
   'trip.create': sparks(15, 'Create a trip', 'Create and save a generated trip plan.'),
   'place.create': sparks(5, 'Save a place', 'Create a saved place with generated details.'),
@@ -179,9 +179,13 @@ export function storageCostFraction(byteHours: number | bigint): Readonly<{ nume
 }
 
 export function storageCostMicroSparks(byteHours: number | bigint): number {
+  return toSafeNumber(BigInt(storageCostMicroSparksExact(byteHours)), 'storage cost');
+}
+
+export function storageCostMicroSparksExact(byteHours: number | bigint): string {
   const { numerator, denominator } = storageCostFraction(byteHours);
   const roundedUp = numerator === 0n ? 0n : (numerator + denominator - 1n) / denominator;
-  return toSafeNumber(roundedUp, 'storage cost');
+  return roundedUp.toString();
 }
 
 export function calculateStorageMicroSparks(

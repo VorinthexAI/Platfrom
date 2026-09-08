@@ -90,6 +90,16 @@ describe('Spark service', () => {
     await expect(service.getSummary('missing-user')).rejects.toMatchObject({ code: 'USER_NOT_FOUND' });
   });
 
+  test('reports current tracked storage with the canonical monthly estimate', async () => {
+    const service = createSparkService({ repository: createMemoryRepository(100).repository, getActiveStoredBytes: async (userKey) => userKey === 'user-1' ? '1000000000' : '0' });
+    await expect(service.getSummary('user-1')).resolves.toMatchObject({ storage: { bytes: '1000000000', estimatedMonthlyMicroSparks: '30000000' } });
+  });
+
+  test('keeps storage estimates exact beyond the JavaScript safe-integer boundary', async () => {
+    const service = createSparkService({ repository: createMemoryRepository(100).repository, getActiveStoredBytes: async () => '300239975158033034' });
+    await expect(service.getSummary('user-1')).resolves.toMatchObject({ storage: { estimatedMonthlyMicroSparks: '9007199254740992' } });
+  });
+
   test('keeps balances and idempotency isolated between users', async () => {
     const balances = new Map([['user-1', 100], ['user-2', 50]]);
     const transactions = new Map<string, SparkTransaction>();

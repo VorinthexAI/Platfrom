@@ -2588,7 +2588,7 @@ export async function runContentTool<Name extends ContentToolName>(
                 "copy",
                 source.key,
                 item.targetScopeKey,
-                () => d.storage.copy({ sourceKey, destinationKey, mimeType }),
+                () => d.storage.copy({ sourceKey, destinationKey, mimeType, billingUserKey: member.user.key }),
               );
               copiedStorageKeys.push(copied.storageKey);
               return copied.storageKey;
@@ -3938,7 +3938,7 @@ export async function runContentTool<Name extends ContentToolName>(
                 "copy",
                 key,
                 item.targetScopeKey,
-                () => d.storage.copy({ sourceKey, destinationKey, mimeType }),
+                () => d.storage.copy({ sourceKey, destinationKey, mimeType, billingUserKey: member.user.key }),
               );
               copiedStorageKeys.push(copied.storageKey);
               return copied.storageKey;

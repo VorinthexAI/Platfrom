@@ -21,6 +21,7 @@ import {
   sparksToMicroSparks,
   storageCostFraction,
   storageCostMicroSparks,
+  storageCostMicroSparksExact,
   validateFixedCostRule,
   calculateActionCostMicroSparks,
   calculateToolCostMicroSparks,
@@ -73,6 +74,7 @@ describe('Spark costs', () => {
     expect(storageCostMicroSparks(month)).toBe(30_000_000);
     expect(storageCostMicroSparks(0)).toBe(0);
     expect(storageCostMicroSparks(1)).toBe(1);
+    expect(storageCostMicroSparksExact(BigInt(Number.MAX_SAFE_INTEGER) * BigInt(BYTES_PER_GB) * BigInt(HOURS_PER_BILLING_MONTH))).toMatch(/^\d+$/);
     expect(() => calculateByteHours(-1, 1)).toThrow();
     expect(() => storageCostMicroSparks(BigInt(Number.MAX_SAFE_INTEGER) * BigInt(BYTES_PER_GB) * BigInt(HOURS_PER_BILLING_MONTH))).toThrow('safe integer range');
   });

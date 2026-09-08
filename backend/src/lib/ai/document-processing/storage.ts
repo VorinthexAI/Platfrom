@@ -1,6 +1,6 @@
 import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { currentBillingUserKey } from '@/lib/ai/events/runtime';
-import { assertStorageGrowthAllowed, markStoredObjectDeleted, recordStoredObject } from '@/lib/automations/storage-charger-repository';
+import { markStoredObjectDeleted, recordStoredObject } from '@/lib/automations/storage-charger-repository';
 import { s3, S3_BUCKET } from '@/lib/s3';
 
 export interface DocumentStorage {
@@ -16,7 +16,6 @@ export interface DocumentObjectStorage extends DocumentStorage {
 export const documentStorage: DocumentObjectStorage = {
   async upload(input) {
     const billingUserKey = input.billingUserKey ?? currentBillingUserKey();
-    if (billingUserKey) await assertStorageGrowthAllowed(billingUserKey);
     const result = await s3.send(new PutObjectCommand({
       Bucket: S3_BUCKET,
       Key: input.key,
@@ -46,7 +45,6 @@ export const documentStorage: DocumentObjectStorage = {
   },
   async copy(input) {
     const billingUserKey = input.billingUserKey ?? currentBillingUserKey();
-    if (billingUserKey) await assertStorageGrowthAllowed(billingUserKey);
     const copySource = `${S3_BUCKET}/${input.sourceKey.split('/').map(encodeURIComponent).join('/')}`;
     const result = await s3.send(new CopyObjectCommand({
       Bucket: S3_BUCKET,

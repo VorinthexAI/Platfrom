@@ -111,9 +111,9 @@ export function PricingPage() {
         <p className={styles.taxDisclaimer}>
           Prepaid Sparks remain available after subscription cancellation, and balances
           never go below zero. Storage is charged hourly from prepaid Sparks. If the
-          balance cannot cover storage, no debt or backcharges accrue; new storage
-          growth is blocked while existing data remains available for export, deletion,
-          and recovery. Adding Sparks restores prospective charging. Stored S3-backed
+          balance cannot cover storage, no debt or backcharges accrue and uploads can
+          continue. Existing data remains available for export, deletion, and recovery.
+          Adding Sparks restores prospective charging. Stored S3-backed
           data is hard-deleted after 90 consecutive unfunded days. Prices are shown in
           USD and exclude VAT and other local taxes. Polar calculates and adds
           applicable tax at checkout.

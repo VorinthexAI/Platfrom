@@ -1591,6 +1591,7 @@ export function createGalleryRepository(
           read: ["images", "visualIdentities"],
           write: [
             "galleryUploads",
+            "storageDeletionJobs",
             "images",
             "imageCaptions",
             "collectionImages",
@@ -1626,6 +1627,11 @@ export function createGalleryRepository(
             );
             if (effects) storageKeys.push(...effects.storageKeys);
           }
+          await all(
+            tx,
+            'FOR upload IN galleryUploads FILTER upload.status == "reserved" && upload.expiresAt <= @now LET queuedStorage = FIRST(UPSERT { storageKey: upload.storageKey } INSERT { storageKey: upload.storageKey, createdAt: @now, status: "pending" } UPDATE {} IN storageDeletionJobs RETURN true) UPDATE upload WITH { status: "failed", processingLeaseId: null, errorCode: "UPLOAD_RESERVATION_EXPIRED", updatedAt: @now } IN galleryUploads RETURN queuedStorage',
+            { now },
+          );
           const queued = await all(
             tx,
             'FOR upload IN galleryUploads FILTER upload.status == "queued" SORT upload.updatedAt ASC, upload._key ASC RETURN upload',
@@ -1652,7 +1658,7 @@ export function createGalleryRepository(
           const updated = await all(
             tx,
             'FOR uploadKey IN @uploadKeys UPDATE uploadKey WITH { status: "queued", processingLeaseId: null, errorCode: null, updatedAt: @now } IN galleryUploads RETURN NEW',
-            input,
+            { uploadKeys: input.uploadKeys, now: input.now },
           );
           return updated.map((value) => parse(galleryUploadSchema, value));
         },

@@ -58,7 +58,7 @@ export const PRIVACY_COPY: VaultCopy = {
       title: "Retention",
       paragraphs: [
         "We retain personal data only for as long as needed for the purposes described in this policy. Retention periods depend on the type of data, security needs, contractual obligations, and legal requirements. When data is no longer needed, we delete or deidentify it.",
-        "Storage charges are deducted from prepaid Sparks hourly. If the available balance cannot cover storage, new storage growth is blocked and no debt or grace-period backcharges accrue. Existing data remains available for export, deletion, and recovery. Adding enough Sparks before deletion begins restores prospective storage charging. If storage remains unfunded for 90 consecutive days, stored S3-backed data is hard-deleted, and adding Sparks after deletion begins cannot reverse that process.",
+        "Storage charges are deducted from prepaid Sparks hourly. If the available balance cannot cover storage, no debt or grace-period backcharges accrue and uploads can continue. Existing data remains available for export, deletion, and recovery. Adding enough Sparks before deletion begins restores prospective storage charging. If storage remains unfunded for 90 consecutive days, stored S3-backed data is hard-deleted, and adding Sparks after deletion begins cannot reverse that process.",
       ],
     },
     {
@@ -104,7 +104,7 @@ export const TERMS_COPY: VaultCopy = {
       title: "Sparks, subscriptions, and storage",
       paragraphs: [
         "Prepaid Sparks remain available after you cancel a subscription, and Spark balances never go below zero.",
-        "Storage is charged from prepaid Sparks hourly. If your balance cannot cover storage, no debt or grace-period backcharges accrue, new storage growth is blocked, and existing data remains available for export, deletion, and recovery. Adding enough Sparks before deletion begins restores prospective storage charging. Once deletion begins after 90 consecutive unfunded days, it cannot be reversed.",
+        "Storage is charged from prepaid Sparks hourly. If your balance cannot cover storage, no debt or grace-period backcharges accrue and uploads can continue. Existing data remains available for export, deletion, and recovery. Adding enough Sparks before deletion begins restores prospective storage charging. Once deletion begins after 90 consecutive unfunded days, it cannot be reversed.",
         "Stored S3-backed data is hard-deleted after storage remains unfunded for 90 consecutive days.",
       ],
     },

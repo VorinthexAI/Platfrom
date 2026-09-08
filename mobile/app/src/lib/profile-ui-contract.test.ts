@@ -48,6 +48,15 @@ test("profile and settings are routed screens over bottom-presented child sheets
   expect(profile).toContain('title="Scopes"');
   expect(profile).toContain('title="Create scope"');
   expect(profile).toContain('<Text style={styles.scopeTitle}>Scopes</Text>');
+  expectBefore(profile, '<Text style={styles.scopeTitle}>Storage</Text>', '<Text style={styles.scopeTitle}>Scopes</Text>');
+  expect(profile).toContain('accessibilityLabel="How is storage charged?" contentMode="raw" iconOnly');
+  expect(profile).toContain('open={sheet === "storage-help"} title="Storage"');
+  expect(profile).toContain('Usage is measured continuously and charged in Sparks each hour');
+  expect(profile).toContain('If storage remains unfunded for 90 days');
+  expect(profile).not.toContain('new uploads are paused');
+  expect(profile).toContain('formatStorageSummary(billingSummaryQuery.data.storage.bytes, billingSummaryQuery.data.storage.estimatedMonthlyMicroSparks)');
+  expect(profile).not.toContain('Tap to change photo');
+  expect(profile).not.toContain('borderBottomWidth: 1, gap: spacing.xs, marginTop: spacing.xl');
   expect(profile).toContain('accessibilityLabel="What are scopes?" contentMode="raw" iconOnly');
   expect(profile).toContain('size="xs" variant="icon"><HelpIcon size="sm" /></Button>');
   expect(profile).toContain('footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>}');
@@ -74,12 +83,12 @@ test("profile and settings are routed screens over bottom-presented child sheets
   expect(profile).toContain('<Text style={styles.inputLabel}>Issue description</Text>');
   expect(profile).toContain('accessibilityLabel="Edit name" contentMode="raw" onPress={openName}');
   expect(profile).not.toContain("EditIcon");
-  expect(profile).not.toContain("icon={<");
+  expect(profile).toContain("function SettingsActionCard");
 });
 
 test("team selection is backend-gated and clears the previous team and scope cache", () => {
   expect(profile).toContain('const teamSelectionEnabled = useAuthStore((state) => state.teamSelectionEnabled)');
-  expect(profile).toContain('{teamSelectionEnabled ? <Button onPress={() => setSheet("teams")} size="md" variant="secondary">Switch team</Button> : null}');
+  expect(profile).toContain('{teamSelectionEnabled ? <SettingsActionCard icon={<SwitchTeamIcon size="lg" />} label="Switch team" onPress={() => setSheet("teams")}');
   expect(profile).toContain('queryFn: ({ signal }) => listTeams(signal), enabled: teamSelectionEnabled && sheet === "teams"');
   expect(profile).toContain('selectTeam(targetTeamKey, targetScopeKey)');
   expect(profile).toContain('queryBelongsToTeamScope(queryKey, previousTeamKey, previousScopeKey)');
@@ -110,7 +119,7 @@ test("avatar header integration is reusable, outlined, and visible in Core", () 
   expect(sharedPackage).toContain('"react-native": "./packages/ui/components/avatar/avatar.mobile.tsx"');
   expect(header).toContain('variant="ghost"');
   expect(header).toContain('avatar: { backgroundColor: palette.voidBlack, borderColor: "#262D36", borderWidth: 1 }');
-  expect(header).toContain('openSparksSheet("manual")} size="xs" textStyle={styles.balanceText} variant="secondary"');
+  expect(header).toContain('onPress={openPaywall} size="xs" textStyle={styles.balanceText} variant="secondary"');
   expect(header).not.toContain("balanceBadge");
   expect(header).toContain('borderColor: palette.voidBlack');
   expect(profile).toContain('avatar: { backgroundColor: palette.voidBlack, borderColor: palette.hairlineBright, borderWidth: 1 }');
@@ -122,15 +131,15 @@ test("profile and settings headers expose account actions", () => {
   expect(profile).toContain('accessibilityLabel="Open settings"');
   expect(profile).toContain('router.push("/settings")');
   expect(profile).toContain('<SettingsIcon size="sm" />');
-  expect(profile).toContain('<Button onPress={() => router.push("/notifications")} size="md" variant="secondary">Notifications</Button>');
-  expect(profile).toContain('accessibilityLabel="Log out"');
-  expect(profile).toContain('<LogOutIcon size="sm" />');
+  expect(profile).toContain('accessibilityLabel="Open notifications"');
+  expect(profile).toContain('<BellIcon size="sm" />');
+  expect(profile).toContain('<NotificationsSheet onClose={() => setSheet(undefined)} open={sheet === "notifications"} />');
+  expect(profile).toContain('<SettingsActionCard danger icon={<SignOutIcon size="lg" variant="danger" />} label="Log out"');
   expectBefore(profile.slice(profile.indexOf("const logOut")), "await signOut();", 'router.replace("/auth")');
   expect(profile).toContain('await signOut();\n    queryClient.clear();\n    router.replace("/auth");');
-  expect(profile).toContain('<Button onPress={() => setSheet("feedback")} size="md" variant="secondary">Give feedback</Button>');
-  expect(profile).toContain('<Button onPress={() => setSheet("report")} size="md" variant="secondary">Report an issue</Button>');
-  expect(profile).not.toContain("WarningIcon");
-  expect(profile).not.toContain("SendIcon");
+  expect(profile).toContain('<SettingsActionCard icon={<FeedbackIcon size="lg" />} label="Feedback"');
+  expect(profile).toContain('<SettingsActionCard icon={<IssueIcon size="lg" />} label="Report issue"');
+  for (const icon of ["IssueIcon", "FeedbackIcon", "FaqIcon", "TermsIcon", "PrivacyIcon", "DeleteAccountIcon", "SignOutIcon"]) expect(profile).toContain(`<${icon} size="lg"`);
 });
 
 test("account deletion uses the compact confirmation pattern without secondary copy", () => {
@@ -148,11 +157,16 @@ test("scope cards expose optimistic long-press management actions", () => {
   expect(profile).toContain('delayLongPress={350} onLongPress={onLongPress}');
   expect(profile).toContain("void Haptics.selectionAsync()");
   expect(profile).toContain('<BottomSheet hideHeading');
-  for (const action of ["Prioritize", "Change cover", "Delete"]) expect(profile).toContain(`>${action}</BottomSheetItem>`);
+  for (const action of ["Prioritize", "Change cover"]) expect(profile).toContain(`>${action}</BottomSheetItem>`);
+  expect(profile).toContain('{canDeleteSelectedScope ? <BottomSheetItem');
+  expect(profile).toContain('style={styles.scopeActionItem}>Delete</BottomSheetItem> : null}');
+  expect(profile).toContain('scopeActionItem: { justifyContent: "center" }');
   expectBefore(profile, "queryClient.setQueryData(scopeQueryKey, prioritized)", "prioritizeScope(teamKey, target.key)");
   expectBefore(profile, "coverUrl: asset.uri", "uploadGalleryImages([");
   expect(profile).toContain('launchImageLibraryAsync({ mediaTypes: ["images"]');
-  expect(profile).toContain('title="Delete scope"');
+  expect(profile).toContain('title="Delete scope?"');
+  expect(profile).toContain('open={sheet === "scope-delete" && canDeleteSelectedScope}');
+  expect(profile).toContain('scopes.some((scope) => scope.key !== selectedScope.key && !scope.key.startsWith("optimistic:"))');
   expect(profile).toContain("All data connected to this scope will be deleted. This action can&apos;t be undone.");
   expectBefore(profile, "previous.filter(({ key }) => key !== target.key)", "deleteScope(teamKey, target.key)");
   const deleteFailure = profile.slice(profile.indexOf('}).catch(async (error)', profile.indexOf('const deleteSelectedScope')), profile.indexOf('}).finally(() => setDeletingScope(false))'));

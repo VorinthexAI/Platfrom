@@ -7,6 +7,8 @@ const dottedSlugSchema = z.string().max(200).regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+
 const actionSlugSchema = z.string().max(200).regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*$/);
 const metadataValueSchema = z.union([z.string().max(500), z.boolean(), z.number().int().safe(), z.null()]);
 const metadataSchema = z.record(z.string().min(1).max(64), metadataValueSchema).refine((value) => Object.keys(value).length <= 20);
+const canonicalIntegerSchema = z.string().regex(/^(0|[1-9]\d*)$/);
+const rolloutIntegerSchema = z.union([canonicalIntegerSchema, z.number().int().safe().nonnegative().transform(String)]);
 export const sparkTransactionSchema = z.strictObject({
   key: boundedKeySchema,
   userKey: boundedKeySchema,
@@ -26,7 +28,11 @@ export const billingSummarySchema = z.object({
   microSparkBalance: z.number().int().safe().nonnegative(),
   microSparkDebt: z.number().int().safe().nonnegative().default(0),
   spendingBlocked: z.boolean().default(false),
-  transactions: z.array(sparkTransactionSchema).max(1),
+  storage: z.object({
+    bytes: canonicalIntegerSchema,
+    estimatedMonthlyMicroSparks: rolloutIntegerSchema,
+  }).default({ bytes: "0", estimatedMonthlyMicroSparks: "0" }),
+  transactions: z.array(sparkTransactionSchema).max(200),
 }).refine((summary) => summary.spendingBlocked === (summary.microSparkDebt > 0), {
   message: "Spending block must match the outstanding Spark debt.",
   path: ["spendingBlocked"],
@@ -58,7 +64,7 @@ export const billingSummaryQueryKey = (userKey: string) => ["billing-summary", u
 export const currentSubscriptionQueryKey = (userKey: string) => ["billing-subscription", userKey] as const;
 
 export async function fetchBillingSummary(): Promise<BillingSummary> {
-  const response = await apiClient.get("/billing/summary", { params: { limit: 1 } });
+  const response = await apiClient.get("/billing/summary");
   return billingSummaryEnvelopeSchema.parse(response.data).data;
 }
 
@@ -92,4 +98,27 @@ export function formatWholeSparks(value: number) {
     return `${formatted}${suffix}`;
   }
   return String(whole);
+}
+
+export function formatStorageBytes(rawBytes: string) {
+  const bytes = BigInt(rawBytes);
+  const divisor = bytes >= 1_000_000_000n ? 1_000_000_000n : 1_000_000n;
+  const unit = divisor === 1_000_000_000n ? "GB" : "MB";
+  const hundredths = (bytes * 100n + divisor / 2n) / divisor;
+  const whole = hundredths / 100n;
+  const fraction = (hundredths % 100n).toString().padStart(2, "0").replace(/0+$/, "");
+  return `${whole}${fraction ? `.${fraction}` : ""} ${unit}`;
+}
+
+export function formatMonthlyStorageSparks(rawMicroSparks: string) {
+  const microSparks = BigInt(rawMicroSparks);
+  if (microSparks > 0n && microSparks < 1_000_000n) return "less than 1";
+  return String((microSparks + 500_000n) / 1_000_000n);
+}
+
+export function formatStorageSummary(rawBytes: string, rawMonthlyMicroSparks: string) {
+  const usage = formatStorageBytes(rawBytes);
+  if (BigInt(rawMonthlyMicroSparks) < 1_000_000n) return usage;
+  const sparks = formatMonthlyStorageSparks(rawMonthlyMicroSparks);
+  return `${usage}, approximately ${sparks} ${sparks === "1" ? "Spark" : "Sparks"} per month`;
 }

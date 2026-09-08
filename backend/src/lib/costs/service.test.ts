@@ -15,6 +15,8 @@ describe('public Spark costs', () => {
     expect(charges).toContainEqual(expect.objectContaining({ key: 'book.create', name: 'Create an audio book', description: 'Generate and save a complete audio book.' }));
     expect(charges).toContainEqual(expect.objectContaining({ key: 'book.extend', name: 'Extend an audio book', description: 'Generate and save an additional audio book chapter.' }));
     expect(charges).toContainEqual(expect.objectContaining({ key: 'highlight.create', description: 'Create a generated highlight from an image collection.' }));
+    expect(charges).toContainEqual(expect.objectContaining({ key: 'visual-identity.create', name: 'Create a visual identity', description: 'Create a visual identity from selected images.' }));
+    expect(charges.some(({ key }) => key === 'subject.create')).toBe(false);
     expect(JSON.stringify(charges).toLowerCase()).not.toContain('photo');
     expect(charges).toContainEqual(expect.objectContaining({ key: 'storage', kind: 'storage', sparkCost: '30', unit: 'gb-month' }));
     expect(charges).toContainEqual(expect.objectContaining({ key: 'inbox.sync', kind: 'static', name: 'Connect and initially sync an inbox', sparkCost: '100', unit: 'invocation' }));

@@ -857,15 +857,19 @@ export function createBookRepository(
     },
     async updateBook(context, bookKey, patch) {
       await authorize(database, context, true);
+      const replacesCover = Object.prototype.hasOwnProperty.call(patch, "coverStorageKey");
       const value = (
         await (
           await database.query(
-            'FOR book IN books FILTER book._key == @bookKey && book.scopeKey == @scopeKey && (!@fenced || (book.generationLeaseToken == @generationLeaseToken && book.cancelRequestedAt == null && book.status != "cancelled")) UPDATE book WITH @patch IN books OPTIONS { keepNull: false } RETURN NEW',
+            'FOR book IN books FILTER book._key == @bookKey && book.scopeKey == @scopeKey && (!@fenced || (book.generationLeaseToken == @generationLeaseToken && book.cancelRequestedAt == null && book.status != "cancelled")) LET queuedPreviousCover = LENGTH(FOR storageKey IN (@replacesCover && book.coverStorageKey != null && book.coverStorageKey != @coverStorageKey ? [book.coverStorageKey] : []) UPSERT { storageKey } INSERT { storageKey, createdAt: @updatedAt } UPDATE {} IN storageDeletionJobs RETURN storageKey) UPDATE book WITH @patch IN books OPTIONS { keepNull: false } RETURN NEW',
             {
               bookKey,
               scopeKey: context.scopeKey,
               fenced: context.generationLeaseToken !== undefined,
               generationLeaseToken: context.generationLeaseToken ?? null,
+              replacesCover,
+              coverStorageKey: patch.coverStorageKey ?? null,
+              updatedAt: patch.updatedAt ?? new Date().toISOString(),
               patch: unsetPatch(patch),
             },
           )

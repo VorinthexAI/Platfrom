@@ -71,7 +71,7 @@ describe('Gallery HTTP transport', () => {
     const teamKey = 'team', scopeKey = newId(), userKey = newId();
     const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const cases = [
-      ['createSubject', 'subject.create', 15_000_000, { name: 'Alex', imageKeys: [newId()] }],
+      ['createSubject', 'visual-identity.create', 15_000_000, { name: 'Alex', imageKeys: [newId()] }],
       ['createHighlight', 'highlight.create', 20_000_000, { collectionKey: newId() }],
       ['createMemory', 'image.create-memory', 10_000_000, { collectionKey: newId() }],
     ] as const;

@@ -192,14 +192,14 @@ export function createScopeRepository(
           RETURN storageKeys
         `, { scopeKey });
         const storageKeys = await storage.next() ?? [];
-        if (storageKeys.length) await executor.query('FOR storageKey IN @storageKeys UPSERT { storageKey } INSERT { storageKey, createdAt: @now, status: "pending" } UPDATE {} IN storageDeletionJobs', { storageKeys, scopeKey, now: new Date().toISOString() });
+        if (storageKeys.length) await executor.query('FOR storageKey IN @storageKeys UPSERT { storageKey } INSERT { storageKey, createdAt: @now, status: "pending" } UPDATE {} IN storageDeletionJobs', { storageKeys, now: new Date().toISOString() });
 
         await executor.query('FOR intent IN bookRefundIntents FILTER intent.bookKey IN (FOR book IN books FILTER book.scopeKey == @scopeKey RETURN book._key) REMOVE intent IN bookRefundIntents', { scopeKey });
         const notificationCursor = await executor.query<string>('FOR notification IN appNotifications FILTER notification.scopeKey == @scopeKey RETURN notification._key', { scopeKey });
         const notificationKeys = await notificationCursor.all();
-        await executor.query('FOR delivery IN pushDeliveries FILTER delivery.notificationKey IN @notificationKeys REMOVE delivery IN pushDeliveries', { notificationKeys, scopeKey });
-        await executor.query('FOR recipient IN appNotificationRecipients FILTER recipient.notificationKey IN @notificationKeys REMOVE recipient IN appNotificationRecipients', { notificationKeys, scopeKey });
-        await executor.query('FOR notification IN appNotifications FILTER notification._key IN @notificationKeys REMOVE notification IN appNotifications', { notificationKeys, scopeKey });
+        await executor.query('FOR delivery IN pushDeliveries FILTER delivery.notificationKey IN @notificationKeys REMOVE delivery IN pushDeliveries', { notificationKeys });
+        await executor.query('FOR recipient IN appNotificationRecipients FILTER recipient.notificationKey IN @notificationKeys REMOVE recipient IN appNotificationRecipients', { notificationKeys });
+        await executor.query('FOR notification IN appNotifications FILTER notification._key IN @notificationKeys REMOVE notification IN appNotifications', { notificationKeys });
         for (const collection of SCOPE_KEYED_REMOVAL_COLLECTIONS) {
           await executor.query('FOR item IN @@collection FILTER item.scopeKey == @scopeKey REMOVE item IN @@collection', { '@collection': collection, scopeKey });
         }
