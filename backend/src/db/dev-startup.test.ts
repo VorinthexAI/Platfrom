@@ -9,10 +9,10 @@ const [packageJson, compose, deployCompose] = await Promise.all([
 test('migrates before every local API server entry point', () => {
   for (const script of ['start:server', 'start:app']) {
     const command = packageJson.scripts[script] ?? '';
-    expect(command.indexOf('src/db/arango-migrate.ts')).toBeGreaterThan(-1);
-    expect(command.indexOf('src/db/arango-migrate.ts')).toBeLessThan(command.indexOf('src/api/index.ts'));
+    expect(command.indexOf('src/db/migration-runner.ts')).toBeGreaterThan(-1);
+    expect(command.indexOf('src/db/migration-runner.ts')).toBeLessThan(command.indexOf('src/api/index.ts'));
   }
   for (const source of [compose, deployCompose]) {
-    expect(source).toContain('bun run src/db/arango-migrate.ts && exec bun run --hot src/api/index.ts');
+    expect(source).toContain('bun run src/db/migration-runner.ts && exec bun run --hot src/api/index.ts');
   }
 });

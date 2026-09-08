@@ -60,7 +60,7 @@ services:
       dockerfile: backend/deploy/Dockerfile
       target: dev
     entrypoint: ['/bin/sh', '-c']
-    command: ['bun run src/db/arango-migrate.ts && exec bun run --hot src/api/index.ts']
+    command: ['bun run src/db/migration-runner.ts && exec bun run --hot src/api/index.ts']
     environment:
       ROLE: app
       NODE_ENV: development

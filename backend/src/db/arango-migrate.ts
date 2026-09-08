@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { createHash, randomBytes } from 'node:crypto';
-import { Database } from 'arangojs';
+import type { Database } from 'arangojs';
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, EMBEDDING_PROVIDER_ID, LEGACY_EMBEDDING_DIMENSIONS, embedText, embedTexts, embeddingMetadata } from '../lib/embeddings';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '../lib/alias';
 import { newId } from '../lib/ids';
@@ -26,10 +26,6 @@ import { emailArchiveRootFolderKey, emailMediaCollectionKey } from '../lib/email
 import { CANONICAL_APPS } from '../lib/apps/registry';
 import { createManagedScopeDirectoryRepository, managedScopeDirectoryProduct, reconcileManagedScopeDirectory, type ManagedScopeDirectoryTargets } from '../lib/managed-scope-directory';
 
-const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
-const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
-const username = process.env.ARANGO_USERNAME ?? 'root';
-const password = process.env.ARANGO_ROOT_PASSWORD ?? '';
 export interface CollectionSpec {
   name: string;
   indexes?: Array<{ fields: string[]; unique?: boolean; sparse?: boolean }>;
@@ -306,13 +302,15 @@ export async function deduplicateScopeSlugs(targetDb: Database): Promise<void> {
 }
 
 export async function retireLegacyScopeIndexes(targetDb: Database): Promise<void> {
-  const collection = targetDb.collection('scopes');
-  if (!await collection.exists()) return;
-  for (const index of await collection.indexes()) {
-    const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
-    if (fields.includes('organizationKey') || fields.includes('userOrganizationKey')) {
-      await collection.dropIndex(index.id);
-      console.log(`Dropped legacy scopes index ${index.id}(${fields.join(', ')})`);
+  const collectionNames = (await targetDb.listCollections()).map(({ name }) => name);
+  for (const name of collectionNames) {
+    const collection = targetDb.collection(name);
+    for (const index of await collection.indexes()) {
+      const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
+      if (fields.includes('organizationKey') || fields.includes('userOrganizationKey')) {
+        await collection.dropIndex(index.id);
+        console.log(`Dropped legacy organization index ${index.id} on ${name}(${fields.join(', ')})`);
+      }
     }
   }
 }
@@ -2052,15 +2050,8 @@ const droppedCollections = [
   'emailReplyDrafts',
 ];
 
-async function main() {
-  const systemDb = new Database({ url, auth: { username, password } });
-  const existingDatabases = await systemDb.listDatabases();
-  if (!existingDatabases.includes(databaseName)) {
-    await systemDb.createDatabase(databaseName);
-    console.log(`Created database ${databaseName}`);
-  }
-  const targetDb = systemDb.database(databaseName);
-
+export async function migrateLegacySchema(targetDb: Database) {
+  await retireLegacyScopeIndexes(targetDb);
   await removeLegacyTombstones(targetDb);
   await migrateGenericContentContracts(targetDb);
   await retireUserSettings(targetDb);
@@ -2083,7 +2074,6 @@ async function main() {
   if (!(await scopesCollection.exists())) {
     await scopesCollection.create();
   }
-  await retireLegacyScopeIndexes(targetDb);
   await deduplicateScopeSlugs(targetDb);
   await ensureScopesCollection(targetDb);
   const scopeScopesCollection = targetDb.collection('scopeScopes');
@@ -2860,12 +2850,4 @@ async function main() {
   }
 
   console.log('ArangoDB schema is up to date.');
-  systemDb.close();
-}
-
-if (import.meta.main) {
-  main().catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
 }
