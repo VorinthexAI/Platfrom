@@ -954,6 +954,11 @@ test("all Signal text inputs use the darker page background", () => {
   expect(picker).toContain('rootSearchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent"');
 });
 
+test("Signal uses the standard white Core send icon", () => {
+  expect(workspace).toContain('sendIcon={<SendIcon size="sm" />}');
+  expect(workspace).not.toContain('sendIcon={<SendIcon size="sm" variant="inverse" />}');
+});
+
 test("reply generation and post-send selection remain explicit", () => {
   expect(workspace).toContain('replyMode: "reply"');
   expect(workspace).toContain('created.variant !== "reply"');
