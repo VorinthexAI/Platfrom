@@ -505,7 +505,7 @@ jobs:
         with:
           role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-      - name: Upload canonical app logos
+      - name: Upload canonical system assets
         run: bun run --cwd backend assets:seed:ci
 
   # NOTE (seed/backfill): ArangoDB lives on its own PRIVATE EC2 and is reached

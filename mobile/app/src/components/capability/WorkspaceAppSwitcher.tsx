@@ -46,7 +46,7 @@ export function WorkspaceAppSwitcher({ active, backSize = "xs", identity = "acti
         : <Button accessibilityLabel={`Open app selector. Current app: ${displayedName}`} contentMode="raw" onPress={() => setOpen(true)} size="md" style={styles.trigger} variant="ghost">
           <View style={styles.identity}>
             {placeholder?.icon ?? <ChromeIcon glow={0.55} size={36} source={displayedIcon} />}
-            <Text style={styles.title}>{placeholder ? displayedName : displayedName.toUpperCase()}</Text>
+            <Text style={styles.title}>{displayedName}</Text>
             <ChevronRightIcon size="sm" variant="muted" />
           </View>
         </Button>}

@@ -35,6 +35,7 @@ import {
   createSystemOrchestrator,
   listSystemOrchestrators,
   updateSystemOrchestrator,
+  replyToUserCommunication,
 } from './system';
 import { invokeContentTool } from './content-tools';
 import { communicationHandlers } from './communication';
@@ -46,20 +47,20 @@ import { emailHandlers } from './email-inbox';
 import { bookHandlers } from './books';
 import { respondToAssistant } from './assistant';
 import { userHiddenHandlers } from './user-hiddens';
-import { streamEvents } from './events';
+import { acknowledgeFundingRequirementHandler, streamEvents } from './events';
 import { searchApp } from './app-search';
 import { appTransformationHandlers } from './app-transformation';
 import { appSpeechHandler } from './app-speech';
 import { deleteImageGenerationHistory, generateImage, listImageGenerationHistory } from './image-generation';
 import { conversationHandlers } from './conversations';
 import { transientAttachmentHandlers } from './transient-attachments';
-import { completeAccountAvatar, presignAccountAvatar, updateAccountProfile } from './account-profile';
+import { completeAccountAvatar, presignAccountAvatar, profileBadgeHandlers, updateAccountProfile } from './account-profile';
 import { feedbackHandlers, ticketHandler } from './tickets';
 import { listApps } from './apps';
 import { tagHandlers } from './tags';
 import { recordAnalyticsEvent } from './event-ingestion';
 import { getBillingSummary } from './billing';
-import { getReferralSummary } from './referrals';
+import { getReferralSummary, redeemReferral } from './referrals';
 import { referralCodeTransportSchema } from './auth-referral-code';
 import { commerceHandlers } from './commerce';
 import { onboardingSandboxHandlers } from './onboarding-sandbox';
@@ -67,6 +68,8 @@ import { scopeHandlers } from './scopes';
 import { appNotificationHandlers } from './app-notifications';
 import { teamHandlers } from './teams';
 import { listCosts } from './costs';
+import { generateAgentGreeting } from './agent-guide';
+import { userInboxHandlers } from './user-inbox';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -100,6 +103,7 @@ export function registerRoutes(app: Hono) {
   app.post('/subscriptions/current/restore', commerceHandlers.restoreSubscription);
   app.get('/billing/summary', getBillingSummary);
   app.get('/referrals/summary', getReferralSummary);
+  app.post('/referrals/redeem', redeemReferral);
   app.post('/auth/signup', async (c) => {
     const body = await parseJson(c, authTransportSchemas.signup);
     return c.json(await createUserWithAuth(body), 201);
@@ -397,6 +401,8 @@ export function registerRoutes(app: Hono) {
   app.patch('/auth/me/profile', updateAccountProfile);
   app.post('/auth/me/profile/avatar/uploads/presign', presignAccountAvatar);
   app.post('/auth/me/profile/avatar/uploads/complete', completeAccountAvatar);
+  app.post('/auth/me/profile/badge-candidates', profileBadgeHandlers.generate);
+  app.post('/auth/me/profile/badge-candidates/claim', profileBadgeHandlers.claim);
   app.get('/auth/me/hiddens', userHiddenHandlers.list);
   app.post('/auth/me/hiddens', userHiddenHandlers.hide);
   app.delete('/auth/me/hiddens', userHiddenHandlers.reveal);
@@ -404,10 +410,12 @@ export function registerRoutes(app: Hono) {
   app.put('/auth/me/push-subscription', appNotificationHandlers.register);
   app.delete('/auth/me/push-subscription', appNotificationHandlers.unregister);
   app.post('/auth/me/notifications', appNotificationHandlers.list);
+  app.post('/auth/me/communications/list', userInboxHandlers.list);
+  app.post('/auth/me/communications/:threadKey/read', userInboxHandlers.read);
+  app.put('/auth/me/communications/:threadKey/read-state', userInboxHandlers.markRead);
+  app.post('/auth/me/communications/:threadKey/messages', userInboxHandlers.send);
   app.post('/tickets', ticketHandler);
   app.post('/feedback', feedbackHandlers.create);
-  app.post('/feedback/list', feedbackHandlers.list);
-  app.put('/feedback/:ticketKey/vote', feedbackHandlers.vote);
 
   app.post('/app/search', searchApp);
   app.post('/app/notify', appNotificationHandlers.notify);
@@ -429,6 +437,7 @@ export function registerRoutes(app: Hono) {
   app.delete('/images/generation-history', deleteImageGenerationHistory);
   app.post('/events', recordAnalyticsEvent);
   app.get('/events/stream', streamEvents);
+  app.post('/events/funding-requirements/:messageKey/acknowledge', acknowledgeFundingRequirementHandler);
   app.post('/conversations', conversationHandlers.create);
   app.post('/conversations/list', conversationHandlers.list);
   app.post('/conversations/search', conversationHandlers.search);
@@ -563,6 +572,7 @@ export function registerRoutes(app: Hono) {
   app.post('/books/topic-suggestions', bookHandlers.topicSuggestions);
   app.post('/books/goal-suggestions', bookHandlers.goalSuggestions);
   app.post('/assistant/respond', respondToAssistant);
+  app.post('/agent/greeting', generateAgentGreeting);
   app.post('/books', bookHandlers.create);
   app.post('/books/:bookKey/detail', bookHandlers.detail);
   app.post('/books/:bookKey/extension/preview', bookHandlers.extensionPreview);
@@ -594,5 +604,6 @@ export function registerRoutes(app: Hono) {
   app.get('/system/orchestrators', listSystemOrchestrators);
   app.post('/system/orchestrators', createSystemOrchestrator);
   app.patch('/system/orchestrators/:orchestratorId', updateSystemOrchestrator);
+  app.post('/system/communications/:threadKey/replies', replyToUserCommunication);
 
 }

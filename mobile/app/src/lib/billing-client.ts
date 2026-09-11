@@ -118,7 +118,6 @@ export function formatMonthlyStorageSparks(rawMicroSparks: string) {
 
 export function formatStorageSummary(rawBytes: string, rawMonthlyMicroSparks: string) {
   const usage = formatStorageBytes(rawBytes);
-  if (BigInt(rawMonthlyMicroSparks) < 1_000_000n) return usage;
   const sparks = formatMonthlyStorageSparks(rawMonthlyMicroSparks);
-  return `${usage}, approximately ${sparks} ${sparks === "1" ? "Spark" : "Sparks"} per month`;
+  return `${usage}, approximately ${sparks} ${sparks === "1" || sparks === "less than 1" ? "Spark" : "Sparks"} per month`;
 }

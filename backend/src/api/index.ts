@@ -3,14 +3,16 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { websocket } from 'hono/bun';
 import { errorHandler } from './errors';
-import { autoRefreshAuthTokens, bindEventApp, bindEventIdentifier, rateLimitByIp, requestLogger, requireEnvApiKey, validateQueryParams } from './middleware';
+import { autoRefreshAuthTokens, bindDevice, bindEventApp, bindEventIdentifier, rateLimitByIp, requestLogger, requireEnvApiKey, validateQueryParams } from './middleware';
 import { EVENT_IDENTIFIER_HEADER } from '@/lib/ai/events/event-identifier';
+import { DEVICE_IDENTIFIER_HEADER } from '@/lib/ai/events/device';
 import { handleResendWebhook, RESEND_WEBHOOK_V1_PATH } from './resend';
 import { GMAIL_WEBHOOK_V1_PATH, handleGmailWebhook } from './email-webhook';
 import { closeEmailSyncQueue, enqueueEmailWatchRenewal, recoverEmailSyncQueue, startEmailSyncWorker } from '@/lib/email-inbox/sync-queue';
 import { closeGalleryUploadQueue, recoverGalleryUploadQueue, startGalleryUploadWorker } from '@/lib/gallery/upload-queue';
 import { registerRoutes } from './routes';
 import { closeConversationImageTurnQueue, recoverConversationImageTurnQueue, startConversationImageTurnWorker } from '@/lib/conversations/image-turn-queue';
+import { closeConversationAttachmentPersistenceQueue, recoverConversationAttachmentPersistenceQueue, startConversationAttachmentPersistenceWorker } from '@/lib/conversations/attachment-persistence-queue';
 import { closeAutomations, startAutomations } from '@/lib/automations';
 import { closeBookRefundWorker, startBookRefundWorker } from '@/lib/books/refund-worker';
 import { defaultBookService } from '@/lib/books/default-service';
@@ -45,6 +47,7 @@ app.use('*', cors({
     'X-Vorinthex-Session-Transport',
     'X-Vorinthex-App-Key',
     EVENT_IDENTIFIER_HEADER,
+    DEVICE_IDENTIFIER_HEADER,
     'X-Refresh-Token',
     'svix-id',
     'svix-timestamp',
@@ -56,6 +59,7 @@ app.use('*', cors({
   exposeHeaders: ['WWW-Authenticate', 'X-Access-Token', 'X-Refresh-Token', 'X-Access-Token-Max-Age', 'X-Refresh-Token-Max-Age'],
 }));
 app.use('*', bindEventIdentifier);
+app.use('*', bindDevice);
 app.use('*', requestLogger);
 app.use('*', rateLimitByIp);
 app.use('*', requireEnvApiKey);
@@ -90,18 +94,21 @@ if (import.meta.main) {
   const emailWorker = startEmailSyncWorker();
   const galleryWorker = startGalleryUploadWorker();
   const conversationImageWorker = startConversationImageTurnWorker();
+  const conversationAttachmentWorker = startConversationAttachmentPersistenceWorker();
   const appNotificationWorker = startAppNotificationWorker();
   startBookRefundWorker();
   void recoverGalleryUploadQueue().catch((error) => console.error('gallery upload queue recovery failed', { error }));
   void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error }));
   void recoverEmailSyncQueue().catch((error) => console.error('email synchronization queue recovery failed', { error }));
   void recoverConversationImageTurnQueue().catch((error) => console.error('conversation image queue recovery failed', { error }));
+  void recoverConversationAttachmentPersistenceQueue().catch((error) => console.error('conversation attachment persistence queue recovery failed', { error }));
   void defaultBookService.recoverGenerations().catch((error) => console.error('book generation recovery failed', { error }));
   void recoverAppNotificationQueue().catch((error) => console.error('app notification queue recovery failed', { error }));
   const renewalTimer = setInterval(() => { void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error })); }, 6 * 60 * 60_000);
   const emailRecoveryTimer = setInterval(() => { void recoverEmailSyncQueue().catch((error) => console.error('email synchronization queue recovery failed', { error })); }, 60_000);
   const galleryRecoveryTimer = setInterval(() => { void recoverGalleryUploadQueue().catch((error) => console.error('gallery upload queue recovery failed', { error })); }, 60_000);
   const conversationImageRecoveryTimer = setInterval(() => { void recoverConversationImageTurnQueue().catch((error) => console.error('conversation image queue recovery failed', { error })); }, 60_000);
+  const conversationAttachmentRecoveryTimer = setInterval(() => { void recoverConversationAttachmentPersistenceQueue().catch((error) => console.error('conversation attachment persistence queue recovery failed', { error })); }, 60_000);
   const bookGenerationRecoveryTimer = setInterval(() => { void defaultBookService.recoverGenerations().catch((error) => console.error('book generation recovery failed', { error })); }, 60_000);
 
   let shuttingDown = false;
@@ -113,14 +120,17 @@ if (import.meta.main) {
     clearInterval(emailRecoveryTimer);
     clearInterval(galleryRecoveryTimer);
     clearInterval(conversationImageRecoveryTimer);
+    clearInterval(conversationAttachmentRecoveryTimer);
     clearInterval(bookGenerationRecoveryTimer);
     await emailWorker.close();
     await galleryWorker.close();
     await conversationImageWorker.close();
+    await conversationAttachmentWorker.close();
     await appNotificationWorker.close();
     await closeEmailSyncQueue();
     await closeGalleryUploadQueue();
     await closeConversationImageTurnQueue();
+    await closeConversationAttachmentPersistenceQueue();
     await closeAppNotificationQueue();
     await closeBookRefundWorker();
     await closeAutomations();

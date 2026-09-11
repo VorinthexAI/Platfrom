@@ -98,15 +98,23 @@ describe('Spark costs', () => {
     expect(calculateToolCostMicroSparks('document.parse', { documents: [{}, {}, {}] })).toBe(6_000_000);
     expect(calculateToolCostMicroSparks('document.scan', { pages: [{}, {}] })).toBe(5_000_000);
     expect(calculateToolCostMicroSparks('image.caption', { images: ['a', 'b'] })).toBe(0);
-    expect(calculateToolCostMicroSparks('web.search')).toBe(25_000_000);
-    expect(calculateActionCostMicroSparks('text', { inputTokens: 1, outputTokens: 1 })).toBe(550);
+    expect(calculateActionCostMicroSparks('text', { inputTokens: 1, outputTokens: 1 })).toBe(440);
     expect(calculateActionCostMicroSparks('text', { inputTokens: 0, outputTokens: 0 })).toBe(0);
-    expect(calculateActionCostMicroSparks('text', { inputTokens: 20_000, outputTokens: 2_000 })).toBe(2_000_000);
+    expect(calculateActionCostMicroSparks('text', { inputTokens: 20_000, outputTokens: 2_000 })).toBe(1_600_000);
     expect(calculateActionCostMicroSparks('speech', { inputTokens: 999, outputTokens: 1 })).toBe(10_000);
-    expect(calculateActionCostMicroSparks('image', { inputTokens: 0, outputTokens: 0 }, { operation: 'generate', count: 3 })).toBe(90_000_000);
+    expect(calculateActionCostMicroSparks('image', { inputTokens: 0, outputTokens: 0 }, { operation: 'generate', count: 3 })).toBe(30_000_000);
+    expect(calculateActionCostMicroSparks('image', { inputTokens: 20_000, outputTokens: 2_000 }, { operation: 'caption', images: ['a', 'b'] })).toBe(1_600_000);
     expect(calculateActionCostMicroSparks('image', { inputTokens: 0, outputTokens: 0 }, { operation: 'describe', images: ['a', 'b'] })).toBe(10_000_000);
+    expect(calculateActionCostMicroSparks('image', { inputTokens: 0, outputTokens: 0 }, { operation: 'describe-visual-identity', images: ['a', 'b'] })).toBe(10_000_000);
     expect(calculateActionCostMicroSparks('embed', { inputTokens: 1_000_000, outputTokens: 0 })).toBe(0);
     expect(() => calculateActionCostMicroSparks('text', { inputTokens: 0.5, outputTokens: 0 })).toThrow('safe integer');
+  });
+
+  test('projects cumulative long-conversation cost from each provider-reported turn', () => {
+    const turns = [2_000, 4_000, 8_000, 16_000].map((inputTokens) =>
+      calculateActionCostMicroSparks('text', { inputTokens, outputTokens: 100 }));
+    expect(turns).toEqual([120_000, 200_000, 360_000, 680_000]);
+    expect(turns.reduce((total, amount) => total + amount, 0)).toBe(1_360_000);
   });
 
   test('registers every fixed tool price against an actual unified tool', () => {
@@ -124,7 +132,7 @@ describe('Spark costs', () => {
     expect(Object.keys(TOOL_COST_POLICIES).sort()).toEqual(publicNames);
     const assignments = [...FREE_TOOL_SLUGS, ...ACTION_PRICED_OPERATION_TOOL_SLUGS, ...OUTCOME_PRICED_OPERATION_TOOL_SLUGS, ...Object.keys(TOOL_COST_RULES).filter((slug) => !OUTCOME_PRICED_OPERATION_TOOL_SLUGS.includes(slug as never))];
     expect(new Set(assignments).size).toBe(assignments.length);
-    for (const slug of ['agents.core', 'app.enhance', 'app.search', 'app.translate', 'book.topic.suggest', 'conversation.message.send', 'document.rewrite', 'document.summarize', 'email.draft.create', 'feedback.create', 'image.create-visual-identity', 'image.ideas.create', 'inbox.sort', 'place.find', 'place.reference.generate', 'trip.guide.generate']) {
+    for (const slug of ['agents.core', 'app.enhance', 'app.generate-image', 'app.search', 'app.translate', 'book.topic.suggest', 'conversation.message.send', 'document.rewrite', 'document.summarize', 'email.draft.create', 'feedback.create', 'image.caption', 'image.create-visual-identity', 'image.ideas.create', 'inbox.sort', 'place.find', 'place.reference.generate', 'trip.guide.generate']) {
       expect(lookupToolCostPolicy(slug)).toEqual({ mode: 'action' });
     }
     expect(lookupToolCostPolicy('book.create')).toEqual({ mode: 'fixed', rule: TOOL_COST_RULES['book.create'], paidOutcome: 'queue-accepted' });

@@ -36,11 +36,11 @@ const getQueue = () => {
 
 export const storageWipeJobId = (userKey: string, expectedWipeDueAt: string, batch: number) => createHash('sha256').update(`storage-wipe\0${userKey}\0${expectedWipeDueAt}\0${z.number().int().nonnegative().parse(batch)}`).digest('hex');
 
-export function storageRetentionAction(state: StorageRetentionState & { balanceMicroSparks: number }, now: Date): 'fund' | 'wipe' | 'warn' | 'wait' {
+export function storageRetentionAction(state: StorageRetentionState & { balanceMicroSparks: number; spendingBlocked?: boolean }, now: Date): 'fund' | 'wipe' | 'warn' | 'wait' {
   if (!Number.isFinite(now.getTime())) throw new TypeError('A valid retention scan time is required.');
   if (state.wipeStartedAt && !state.wipedAt) return 'wipe';
   if (state.wipeStartedAt || state.wipedAt) return 'wait';
-  if (state.balanceMicroSparks >= state.minimumBalanceMicroSparks) return 'fund';
+  if (!state.spendingBlocked && state.balanceMicroSparks >= state.minimumBalanceMicroSparks) return 'fund';
   if (Date.parse(state.wipeDueAt) <= now.getTime()) return 'wipe';
   return 'warn';
 }

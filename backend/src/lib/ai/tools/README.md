@@ -59,10 +59,13 @@ Specialized tools remain separate for similarity and duplicate detection,
 signed downloads, persisted generated artifacts, conversation history, and
 other semantics that are not ordinary resource queries.
 
-`agent.guide` reads the canonical apps catalog for product explanation and
-goal-based app recommendations. It does not search user-owned workspace data;
-Core may combine it with `app.search` when guidance needs current workspace
-evidence.
+`agent.guide` derives deterministic keys for the protected guides seeded into
+the authorized runtime scope and reads them through the canonical
+`document.read` Content operation. It never accepts document, scope, or storage
+selectors and never reads S3 directly. Recommend mode returns first-step guides;
+explain mode returns platform and app overview/purpose guides. Its `greet` mode
+generates a short non-persisting opening through the provider-neutral text action
+from one of two server-owned occasions; callers cannot supply the hidden prompt.
 
 Generated travel references use the same canonical travel service from HTTP
 and Core. `trip.guide.generate/list` and the parameterized

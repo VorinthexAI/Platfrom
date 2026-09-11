@@ -3,7 +3,7 @@ import { z, ZodError } from 'zod';
 import { authorizeContentExecution, ContentError, type RunAuthenticatedContentToolOptions } from '@/lib/ai/tools';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { authenticatedTeamContext } from './auth';
-import { createImageGenerationService, imageGenerateModelInputSchema, imageGenerationHistoryDeleteInputSchema, ImageGenerationAccessError, ImageGenerationIdempotencyError, ImageGenerationReferenceError, type ImageGenerationService } from '@/lib/image-generation/service';
+import { appGenerateImageModelInputSchema, createImageGenerationService, imageGenerationHistoryDeleteInputSchema, imageGenerationReferenceKeysSchema, ImageGenerationAccessError, ImageGenerationIdempotencyError, ImageGenerationReferenceError, type ImageGenerationService } from '@/lib/image-generation/service';
 import { getAuthIdentity } from './security';
 import { parseJson, parseQuery } from './validation';
 import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
@@ -11,7 +11,10 @@ import { toolEventService, type ToolEventRecorder } from '@/lib/ai/events/servic
 import { sparkErrorResponse } from './errors';
 
 const selectors = z.object({ teamKey: z.string().trim().min(1), scopeKey: z.string().cuid() }).strict();
-export const imageGenerateHttpInputSchema = selectors.extend(imageGenerateModelInputSchema.shape).strict();
+export const imageGenerateHttpInputSchema = selectors.extend(appGenerateImageModelInputSchema.shape).extend({
+  collectionKey: z.string().cuid(),
+  referenceImageKeys: imageGenerationReferenceKeysSchema,
+}).strict();
 export const imageGenerationHistoryListHttpInputSchema = selectors.extend({ limit: z.coerce.number().int().min(1).max(50).default(20) }).strict();
 export const imageGenerationHistoryDeleteHttpInputSchema = selectors.extend(imageGenerationHistoryDeleteInputSchema.shape).strict();
 const idempotencyKeySchema = z.string().trim().min(1).max(256);
@@ -52,10 +55,10 @@ export function createImageGenerateHandler(dependencies: ImageGenerationHandlerD
   return async (c: Context) => {
     try {
       const requestKey = idempotencyKeySchema.parse(c.req.header('idempotency-key'));
-      const { teamKey, scopeKey, ...input } = await parseJson(c, imageGenerateHttpInputSchema);
+      const { teamKey, scopeKey, collectionKey, referenceImageKeys, ...input } = await parseJson(c, imageGenerateHttpInputSchema);
       const result = await authorized(c, dependencies, teamKey, scopeKey);
       if ('response' in result) return result.response;
-      const data = await observeToolExecution('image.generate', result.context, () => service(c, dependencies).generate(input, result.context, requestKey), { recorder: dependencies.recordEvent ?? toolEventService.record, appScopeKey: dependencies.appScopeKey, idempotencyKey: requestKey, input, ...dependencies.billing });
+      const data = await observeToolExecution('app.generate-image', result.context, () => service(c, dependencies).generate(input, { kind: 'gallery-collection', collectionKey }, result.context, requestKey, referenceImageKeys), { recorder: dependencies.recordEvent ?? toolEventService.record, appScopeKey: dependencies.appScopeKey, idempotencyKey: requestKey, input, ...dependencies.billing });
       return c.json({ success: true, data }, 201);
     } catch (error) { return failure(c, error); }
   };

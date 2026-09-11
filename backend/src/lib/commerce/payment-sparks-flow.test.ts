@@ -45,7 +45,7 @@ describe('payment to Sparks integration', () => {
         return { status: 'applied', order: updated };
       },
     };
-    const service = createCommerceService({ repository, applyFirstPaidReward: async () => ({ status: 'not-attributed' }), reverseFirstPaidReward: async () => 'not-found' });
+    const service = createCommerceService({ repository, applyFirstPaidReward: async () => ({ status: 'not-attributed' }), reverseFirstPaidReward: async () => ({ status: 'not-found' }), getEmailRecipient: async () => null });
     const at = '2026-01-17T12:00:00.000Z';
     const paidOrder = (id: string) => ({ id, status: 'paid' as const, paid: true, billing_reason: 'subscription_cycle' as const, subtotal_amount: 799, discount_amount: 0, net_amount: 799, tax_amount: 64, total_amount: 863, refunded_amount: 0, refunded_tax_amount: 0, currency: 'usd', created_at: at, modified_at: at, customer: { id: 'customer-1', external_id: userKey }, product: { id: 'polar-weekly', metadata: { productId: 'nova.weekly' } }, subscription_id: 'subscription-1', metadata: { userKey, productId: 'nova.weekly' } });
     const event = (id: string) => ({ type: 'order.paid', timestamp: at, data: { ...paidOrder(id), product_id: 'polar-weekly' } });

@@ -10,6 +10,8 @@ export interface PublicToolDependencies {
   executeContent?: typeof runContentTool;
   requestKey?: string;
   teamService?: TeamService;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 const contentDefinitions = new Map(CONTENT_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));

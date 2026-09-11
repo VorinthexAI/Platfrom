@@ -370,8 +370,8 @@
       "name": "Signal",
       "category": "capability",
       "entityId": "capability.signal",
-      "description": "Signal is an AI inbox guard that filters noise across connected inboxes, prioritizes important messages, and can reply in your tone when approved.",
-      "currentVersionId": "v5",
+      "description": "A private inbox for connected email and communication from Vorinthex apps and support.",
+      "currentVersionId": "v8",
       "versions": [
         {
           "id": "v1",
@@ -450,10 +450,26 @@
           "audioPath": "outputs/audio/capability/signal/v5/signal-v5.pcm",
           "metadataPath": "outputs/audio/capability/signal/v5/metadata.json",
           "createdAt": "2026-07-21T20:11:18.780Z"
+        },
+        {
+          "prompt": "Signal is your private communication inbox inside Vorinthex AI. It brings connected email together with communication from Vorinthex AI apps and support, giving important conversations one focused home. Connected email can be organized into useful views, while search helps locate messages by meaning. Signal can retain summaries, translations, writing tones, and reply context where those features are available. App communication and support replies can reach the same private inbox without becoming mixed into unrelated tools. You remain in control of every draft and send action. Authorized communication results can appear in Core search and open in Signal for review. This keeps communication connected to the wider workspace without treating a conversation as permission to change or send anything.",
+          "fullPrompt": "Create an audio asset for Signal.\n\nTarget:\n- Type: capability\n- Slug: signal\n- Description: A private inbox for connected email and communication from Vorinthex apps and support.\n\n\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 12 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nSignal is your private communication inbox inside Vorinthex AI. It brings connected email together with communication from Vorinthex AI apps and support, giving important conversations one focused home. Connected email can be organized into useful views, while search helps locate messages by meaning. Signal can retain summaries, translations, writing tones, and reply context where those features are available. App communication and support replies can reach the same private inbox without becoming mixed into unrelated tools. You remain in control of every draft and send action. Authorized communication results can appear in Core search and open in Signal for review. This keeps communication connected to the wider workspace without treating a conversation as permission to change or send anything.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 12,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/capability/signal/v8/signal-v8.pcm",
+          "metadataPath": "outputs/audio/capability/signal/v8/metadata.json",
+          "id": "v8",
+          "version": 8,
+          "createdAt": "2026-09-09T21:01:44.145Z"
         }
       ],
       "createdAt": "2026-07-07T01:39:29.678Z",
-      "updatedAt": "2026-07-21T20:11:18.782Z"
+      "updatedAt": "2026-09-09T21:01:44.158Z"
     },
     {
       "id": "master-brand-master-brand-vorinthex-ai",
@@ -2761,6 +2777,8 @@
           "createdAt": "2026-07-21T19:24:28.349Z"
         },
         {
+          "id": "v6",
+          "version": 6,
           "prompt": "Themis, Chief Legal Orchestrator. Legal, governance, ethics, contracts, compliance, and policy.",
           "fullPrompt": "Create an audio asset for Themis.\n\nTarget:\n- Type: orchestrator\n- Slug: themis\n- Description: Legal, governance, ethics, contracts, compliance, and policy.\nRole: CLO. Full title: Chief Legal Orchestrator.\nFeature ideas: Legal; Governance; Contracts; Policy.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 12 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nThemis, Chief Legal Orchestrator. Legal, governance, ethics, contracts, compliance, and policy.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
           "mode": "tts",
@@ -2772,8 +2790,6 @@
           "status": "completed",
           "audioPath": "outputs/audio/orchestrator/themis/v6/themis-v6.pcm",
           "metadataPath": "outputs/audio/orchestrator/themis/v6/metadata.json",
-          "id": "v6",
-          "version": 6,
           "createdAt": "2026-07-21T20:14:12.613Z"
         }
       ],

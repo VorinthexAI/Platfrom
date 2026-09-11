@@ -45,15 +45,14 @@ import { TRUSTED_EMAIL_TOOL_DEFINITIONS } from './email-ingestion-tool-definitio
 import { TRUSTED_ACCOUNT_TOOL_DEFINITIONS } from './account-tool-definitions';
 import { CONVERSATION_TOOL_DEFINITIONS } from './conversation-tool-definitions';
 import { AGENT_TOOL_DEFINITIONS } from './agent-tool-definitions';
-import { webSearchTool } from './web-search';
 import { billingSummaryReadToolDefinition } from './billing-summary-read';
 import { referralSummaryReadToolDefinition } from './referral-summary-read';
 import { agentGuideToolDefinition } from './agent-guide';
+import { TRUSTED_COMMUNICATION_TOOL_DEFINITIONS } from './communication-tool-definitions';
 
 export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   imageCaptionTool,
   imageCreateVisualIdentityTool,
-  webSearchTool,
   billingSummaryReadToolDefinition,
   referralSummaryReadToolDefinition,
   agentGuideToolDefinition,
@@ -71,6 +70,7 @@ export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
 export const TRUSTED_TOOL_DEFINITIONS = Object.freeze([
   ...TRUSTED_EMAIL_TOOL_DEFINITIONS,
   ...TRUSTED_ACCOUNT_TOOL_DEFINITIONS,
+  ...TRUSTED_COMMUNICATION_TOOL_DEFINITIONS,
 ] as const);
 
 /** Every canonical business tool, including trusted protocol-triggered entries. */

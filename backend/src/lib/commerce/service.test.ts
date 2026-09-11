@@ -2,10 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { newId } from '@/lib/ids';
 import { COMMERCE_CATALOG } from './catalog';
-import { createCommerceService } from './service';
+import { createCommerceService as createCanonicalCommerceService } from './service';
 import type { CommerceRepository } from './repository';
 import type { PaymentCheckout, PaymentOrder, Subscription } from './contracts';
 import { PolarProviderError } from './polar';
+
+function createCommerceService(dependencies: Parameters<typeof createCanonicalCommerceService>[0]) {
+  return createCanonicalCommerceService({ getEmailRecipient: async () => null, ...dependencies });
+}
 
 function repository(overrides: Partial<CommerceRepository> = {}): CommerceRepository {
   return {
@@ -113,15 +117,75 @@ describe('canonical commerce service', () => {
     expect(orders.get('invoice-1')).toMatchObject({ amountCents: 799 });
   });
 
+  test('sends paid confirmations only for applied orders and classifies them by billing reason', async () => {
+    const userKey = newId();
+    const sent: string[] = [];
+    let duplicate = false;
+    const service = createCommerceService({
+      repository: repository({ fulfillPaidOrder: async (input) => ({ ...await repository().fulfillPaidOrder(input), status: duplicate ? 'duplicate' : 'applied' }) }),
+      applyFirstPaidReward: async () => ({ status: 'not-attributed' }),
+      getEmailRecipient: async (key) => key === userKey ? { email: 'person@example.com', name: 'Ada' } : null,
+      sendTopUpPurchaseEmail: async (input) => { sent.push(`topup:${input.email}:${input.name}:${input.amountCents}`); },
+      sendSubscriptionPurchaseEmail: async (input) => { sent.push(`initial:${input.email}:${input.billingPeriod}:${input.amountCents}`); },
+      sendSubscriptionRenewalEmail: async (input) => { sent.push(`renewal:${input.email}:${input.amountCents}`); },
+    });
+    const paid = (overrides: Record<string, unknown>) => ({ providerOrderId: newId(), userKey, productId: 'nova.weekly', providerSubscriptionId: 'sub-1', billingReason: 'subscription_cycle', amountCents: 799, baseAmountCents: 799, netAmountCents: 799, discountAmountCents: 0, currency: 'USD', paidAt: at, ...overrides });
+
+    await service.applyPaidOrderFacts(paid({ productId: 'topup.small', providerSubscriptionId: null, billingReason: 'purchase', amountCents: 999, baseAmountCents: 999, netAmountCents: 999 }));
+    await service.applyPaidOrderFacts(paid({ billingReason: 'subscription_create' }));
+    await service.applyPaidOrderFacts(paid({}));
+    duplicate = true;
+    await service.applyPaidOrderFacts(paid({}));
+
+    expect(sent).toEqual([
+      'topup:person@example.com:Ada:999',
+      'initial:person@example.com:week:799',
+      'renewal:person@example.com:799',
+    ]);
+  });
+
+  test('keeps paid fulfillment successful when recipient lookup or email delivery fails', async () => {
+    const userKey = newId();
+    const facts = { providerOrderId: 'order-1', userKey, productId: 'topup.small', providerSubscriptionId: null, billingReason: 'purchase', amountCents: 999, baseAmountCents: 999, netAmountCents: 999, discountAmountCents: 0, currency: 'USD', paidAt: at };
+    const lookupFailure = createCommerceService({ repository: repository(), getEmailRecipient: async () => { throw new Error('lookup failed'); } });
+    await expect(lookupFailure.applyPaidOrderFacts(facts)).resolves.toMatchObject({ status: 'applied' });
+
+    const sendFailure = createCommerceService({ repository: repository(), getEmailRecipient: async () => ({ email: 'person@example.com', name: null }), sendTopUpPurchaseEmail: async () => { throw new Error('send failed'); } });
+    await expect(sendFailure.applyPaidOrderFacts(facts)).resolves.toMatchObject({ status: 'applied' });
+  });
+
+  test('does not issue a delayed first-paid referral reward for a fully refunded order', async () => {
+    const userKey = newId();
+    const refundedOrder: PaymentOrder = {
+      ...makeOrderForRefund(),
+      providerOrderId: 'refunded-order',
+      userKey,
+      providerSubscriptionId: 'subscription-1',
+      status: 'refunded',
+      refundedAmountCents: 799,
+      clawedBackMicroSparks: 200_000_000,
+      refundedAt: at,
+    };
+    let referralCalls = 0;
+    const service = createCommerceService({
+      repository: repository({ fulfillPaidOrder: async () => ({ status: 'duplicate', order: refundedOrder }) }),
+      applyFirstPaidReward: async () => { referralCalls += 1; return { status: 'not-attributed' }; },
+    });
+
+    await service.applyPaidOrderFacts({ providerOrderId: 'refunded-order', userKey, productId: 'nova.weekly', providerSubscriptionId: 'subscription-1', billingReason: 'subscription_cycle', amountCents: 799, baseAmountCents: 799, netAmountCents: 799, discountAmountCents: 0, currency: 'USD', paidAt: at });
+    expect(referralCalls).toBe(0);
+  });
+
   test('canonically grants top-ups and initial, weekly, and monthly subscription orders', async () => {
     const userKey = newId();
     const fulfillments: Array<{ productId: string; billingReason?: string; grantMicroSparks: number; providerSubscriptionId: string | null }> = [];
+    const referralPayments: string[] = [];
     const service = createCommerceService({
       repository: repository({ fulfillPaidOrder: async (input) => {
         fulfillments.push({ productId: input.productId, grantMicroSparks: input.grantMicroSparks, providerSubscriptionId: input.providerSubscriptionId });
         return repository().fulfillPaidOrder(input);
       } }),
-      applyFirstPaidReward: async () => ({ status: 'not-attributed' }),
+      applyFirstPaidReward: async (_userKey, paymentKey) => { referralPayments.push(String(paymentKey)); return { status: 'not-attributed' }; },
     });
     const paid = (overrides: Record<string, unknown>) => ({ providerOrderId: newId(), userKey, productId: 'nova.weekly', providerSubscriptionId: 'sub-1', billingReason: 'subscription_cycle', amountCents: 799, baseAmountCents: 799, netAmountCents: 799, discountAmountCents: 0, currency: 'USD', paidAt: at, ...overrides });
 
@@ -136,6 +200,7 @@ describe('canonical commerce service', () => {
       { productId: 'nova.weekly', grantMicroSparks: 200_000_000, providerSubscriptionId: 'sub-1' },
       { productId: 'nova.monthly', grantMicroSparks: 1_000_000_000, providerSubscriptionId: 'sub-2' },
     ]);
+    expect(referralPayments).toHaveLength(3);
   });
 
   test('rejects unsupported billing reasons and fails closed on a persisted grant mismatch', async () => {
@@ -179,7 +244,7 @@ describe('canonical commerce service', () => {
   test('projects cumulative partial and full refunds and fails unknown critical references retryably', async () => {
     let refunded = 0;
     const order = { ...makeOrderForRefund(), status: 'partially_refunded' as const };
-    const service = createCommerceService({ repository: repository({ applyOrderRefund: async () => { refunded += 1; return { status: 'applied', order }; } }), reverseFirstPaidReward: async () => 'not-found' });
+    const service = createCommerceService({ repository: repository({ applyOrderRefund: async () => { refunded += 1; return { status: 'applied', order }; } }), reverseFirstPaidReward: async () => ({ status: 'not-found' }) });
     await expect(service.processWebhook({ type: 'order.refunded', timestamp: at, data: { id: 'order-1', status: 'partially_refunded', refunded_amount: 400 } })).resolves.toMatchObject({ refund: 'applied', status: 'partially_refunded' });
     expect(refunded).toBe(1);
     const unknown = createCommerceService({ repository: repository() });
@@ -189,7 +254,7 @@ describe('canonical commerce service', () => {
   test('shares canonical cumulative refund handling with reconciliation callers', async () => {
     const calls: unknown[] = [];
     const order = { ...makeOrderForRefund(), status: 'refunded' as const, refundedAmountCents: 799 };
-    const service = createCommerceService({ repository: repository({ applyOrderRefund: async (...input) => { calls.push(input); return { status: 'applied', order }; } }), reverseFirstPaidReward: async () => 'applied' });
+    const service = createCommerceService({ repository: repository({ applyOrderRefund: async (...input) => { calls.push(input); return { status: 'applied', order }; } }), reverseFirstPaidReward: async () => ({ status: 'applied', referrerUserKey: 'referrer' }) });
     await expect(service.applyRefundFacts({ providerOrderId: 'order-1', refundedAmountCents: 799, refundedAt: at })).resolves.toMatchObject({ status: 'applied' });
     expect(calls).toEqual([['order-1', 799, at]]);
   });
@@ -215,11 +280,17 @@ describe('canonical commerce service', () => {
   });
 
   test('persists subscription lifecycle and cancel/restore transitions while hiding provider IDs', async () => {
-    const userKey = newId(); let current: Subscription = { key: newId(), userKey, productKey: COMMERCE_CATALOG[0].key, providerSubscriptionId: 'subscription-1', status: 'active', cancelAtPeriodEnd: false, currentPeriodStart: at, currentPeriodEnd: '2026-09-12T10:00:00.000Z', providerModifiedAt: null, createdAt: at, updatedAt: at };
-    const service = createCommerceService({ repository: repository({ getCurrentSubscription: async () => current, upsertSubscription: async (input) => ({ status: 'applied', subscription: current = input }) }), provider: { listProducts: async () => [], createCheckout: async () => { throw new Error('unused'); }, updateSubscription: async (_id: string, cancel: boolean) => ({ id: 'subscription-1', status: 'active', cancel_at_period_end: cancel, current_period_start: current.currentPeriodStart!, current_period_end: current.currentPeriodEnd!, modified_at: '2026-09-05T09:59:59.000Z' }), createProduct: async () => { throw new Error('unused'); }, updateProduct: async () => { throw new Error('unused'); } } as never, now: () => new Date(at) });
+    const userKey = newId(); let providerCalls = 0; const cancellationEmails: string[] = []; let current: Subscription = { key: newId(), userKey, productKey: COMMERCE_CATALOG[0].key, providerSubscriptionId: 'subscription-1', status: 'active', cancelAtPeriodEnd: false, currentPeriodStart: at, currentPeriodEnd: '2026-09-12T10:00:00.000Z', providerModifiedAt: null, createdAt: at, updatedAt: at };
+    const service = createCommerceService({ repository: repository({ getCurrentSubscription: async () => current, upsertSubscription: async (input) => ({ status: 'applied', subscription: current = input }) }), provider: { listProducts: async () => [], createCheckout: async () => { throw new Error('unused'); }, updateSubscription: async (_id: string, cancel: boolean) => { providerCalls += 1; return { id: 'subscription-1', status: 'active', cancel_at_period_end: cancel, current_period_start: current.currentPeriodStart!, current_period_end: current.currentPeriodEnd!, modified_at: '2026-09-05T09:59:59.000Z' }; }, createProduct: async () => { throw new Error('unused'); }, updateProduct: async () => { throw new Error('unused'); } } as never, getEmailRecipient: async () => ({ email: 'person@example.com', name: 'Ada' }), sendSubscriptionCancellationEmail: async (input) => { cancellationEmails.push(`${input.email}:${input.name}`); }, now: () => new Date(at) });
     expect(await service.setCancellation(userKey, true)).toMatchObject({ cancelAtPeriodEnd: true });
+    expect(await service.setCancellation(userKey, true)).toMatchObject({ cancelAtPeriodEnd: true });
+    expect(providerCalls).toBe(1);
+    expect(cancellationEmails).toEqual(['person@example.com:Ada']);
     expect(current.providerModifiedAt).toBe('2026-09-05T09:59:59.000Z');
     expect(await service.setCancellation(userKey, false)).toMatchObject({ cancelAtPeriodEnd: false });
+    expect(await service.setCancellation(userKey, false)).toMatchObject({ cancelAtPeriodEnd: false });
+    expect(providerCalls).toBe(2);
+    expect(cancellationEmails).toHaveLength(1);
     expect(await service.getCurrentSubscription(userKey)).not.toHaveProperty('providerSubscriptionId');
     await expect(service.processWebhook({ type: 'subscription.canceled', timestamp: at, data: { id: 'subscription-1', status: 'active', product_id: 'remote-weekly', customer: { external_id: userKey }, cancel_at_period_end: true } })).resolves.toMatchObject({ subscription: 'active' });
     expect(current).toMatchObject({ status: 'active', cancelAtPeriodEnd: true });

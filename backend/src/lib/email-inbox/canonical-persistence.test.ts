@@ -8,7 +8,7 @@ const key = 'cmrnlzf640001qc7kazsr96k5';
 const otherKey = 'cmrnlzf650002qc7k4p5zem5w';
 const now = '2026-08-27T12:00:00.000Z';
 const embedding = Array(EMBEDDING_DIMENSIONS).fill(0);
-const base = { key, scopeKey: otherKey, embedding, createdAt: now, updatedAt: now };
+const base = { key, userKey: key, scopeKey: key, embedding, createdAt: now, updatedAt: now };
 
 describe('canonical email persistence schemas', () => {
   test('strictly validates every dedicated aggregate without Archive fields', () => {
@@ -25,7 +25,7 @@ describe('canonical email persistence schemas', () => {
   });
 
   test('keeps attachment storage canonical and export identities one-way', () => {
-    const completed = { key, teamKey: 'team', scopeKey: otherKey, connectorKey: key, providerMessageId: 'message', partPath: '1.2', contentHash: 'a'.repeat(64), kind: 'image', filename: 'photo.png', mimeType: 'image/png', sizeBytes: 4, storageKey: `email/${otherKey}/${key}`, status: 'completed', galleryImageKey: otherKey, createdAt: now, updatedAt: now };
+    const completed = { key, userKey: key, teamKey: 'team', scopeKey: otherKey, connectorKey: key, providerMessageId: 'message', partPath: '1.2', contentHash: 'a'.repeat(64), kind: 'image', filename: 'photo.png', mimeType: 'image/png', sizeBytes: 4, storageKey: `email/${otherKey}/${key}`, status: 'completed', galleryImageKey: otherKey, createdAt: now, updatedAt: now };
     expect(emailAttachmentSchema.parse(completed)).toMatchObject({ storageKey: `email/${otherKey}/${key}` });
     expect(() => emailAttachmentSchema.parse({ ...completed, archiveDocumentKey: otherKey })).toThrow();
     expect(() => emailAttachmentSchema.parse({ ...completed, status: 'processing' })).toThrow();
@@ -36,6 +36,7 @@ describe('canonical email persistence schemas', () => {
     const thread = emailThreadRecordSchema.parse({ ...base, accountKey: key, providerThreadId: 'thread', subject: 'Subject', summary: 'Summary', intent: 'Reply', priority: 'normal', state: 'needs_action', lastMessageAt: now });
     const exported = exportEmailThreadToArchive(thread, { scopeKey: otherKey, exportKey: 'cmrnlzf660003qc7kmember001', folderKey: key, exportedAt: now });
     expect(exported.key).not.toBe(thread.key);
+    expect(exported.scopeKey).toBe(otherKey);
     expect(exported.content).toBe('Summary\n\nReply');
     expect(exported.content.startsWith('{')).toBe(false);
     expect(() => exportEmailThreadToArchive(thread, { scopeKey: otherKey, exportKey: thread.key, folderKey: key, exportedAt: now })).toThrow('independent');

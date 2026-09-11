@@ -37,6 +37,7 @@ import { approveHandoff, createHandoffSecret, HANDOFF_CLAIM_WINDOW_MS } from './
 import { rawReferralCodeSchema } from '@/lib/referrals/contracts';
 import { normalizeReferralCode } from '@/lib/referrals/service';
 import { completeReferralForNewlyVerifiedUser } from './auth-referrals';
+import { recordAuthCompletion } from '@/lib/ai/events/auth-events';
 
 const EMAIL_LINK_TTL_MS = 15 * 60 * 1000;
 const TOTP_CHALLENGE_TTL_MS = 10 * 60 * 1000;
@@ -912,6 +913,7 @@ async function exchangeAppleCode(code: string, redirectUri: string) {
 
 async function completeOAuthProfile(
   profile: { email: string; name: string | null; profileUrl: string | null },
+  provider: OAuthProvider,
   mobileRedirectUri?: string,
   referralCode?: string | null,
 ) {
@@ -925,9 +927,15 @@ async function completeOAuthProfile(
     ...(!(existingUser?.isVerified ?? false) && referralCode ? { pendingReferralCode: normalizeReferralCode(referralCode) } : {}),
   }, { initializeNameOnly: true });
   await provisionPersonalAuthContext(user);
-  await selectPersonalAuthContext(user.key);
+  const personalContext = await selectPersonalAuthContext(user.key);
   const tokens = await issueUserTokens(user);
   await completeReferralForNewlyVerifiedUser({ userKey: user.key, wasVerified: existingUser?.isVerified ?? false, referralCode });
+  await recordAuthCompletion({
+    method: provider,
+    userKey: user.key,
+    scopeKey: personalContext?.scope.key ?? user.currentScopeKey,
+    wasVerified: existingUser?.isVerified ?? false,
+  });
   const alias = user.alias ?? generateAlias(user.key);
   return {
     status: 'authenticated' as const,
@@ -951,12 +959,12 @@ export async function completeOAuthSignIn(input: {
   const profile = input.provider === 'google'
     ? await exchangeGoogleCode(input.code, input.redirectUri)
     : await exchangeAppleCode(input.code, input.redirectUri);
-  return profile ? completeOAuthProfile(profile, state.mobileRedirectUri, state.referralCode) : null;
+  return profile ? completeOAuthProfile(profile, input.provider, state.mobileRedirectUri, state.referralCode) : null;
 }
 
 export async function completeNativeGoogleSignIn(idToken: string, referralCode?: string) {
   const profile = await verifyGoogleIdentityToken(idToken);
-  return profile ? completeOAuthProfile(profile, undefined, referralCode) : null;
+  return profile ? completeOAuthProfile(profile, 'google', undefined, referralCode) : null;
 }
 
 export async function completeNativeAppleSignIn(idToken: string, nonce: string, name?: string, referralCode?: string) {
@@ -964,7 +972,7 @@ export async function completeNativeAppleSignIn(idToken: string, nonce: string, 
     clientId: requiredEnv('APPLE_NATIVE_CLIENT_ID'),
     nonce,
   });
-  return profile ? completeOAuthProfile({ ...profile, name: name?.trim() || profile.name }, undefined, referralCode) : null;
+  return profile ? completeOAuthProfile({ ...profile, name: name?.trim() || profile.name }, 'apple', undefined, referralCode) : null;
 }
 
 function allowedMobileOAuthRedirect(uri: string) {
@@ -1236,7 +1244,7 @@ export async function validateMagicLink(token: string): Promise<MagicLinkValidat
       updatedAt: new Date().toISOString(),
     });
     await provisionPersonalAuthContext(verifiedUser);
-    await selectPersonalAuthContext(verifiedUser.key);
+    const personalContext = await selectPersonalAuthContext(verifiedUser.key);
     const tokens = await issueUserTokens(verifiedUser);
     await completeReferralForNewlyVerifiedUser({ userKey: verifiedUser.key, wasVerified: user.isVerified, referralCode: emailChallenge.referralCode });
     // Publish only after verification and session prerequisites are durable,
@@ -1248,6 +1256,12 @@ export async function validateMagicLink(token: string): Promise<MagicLinkValidat
       // not turn that successful one-time link into an unrecoverable error.
       console.warn('magic-link handoff approval failed', error instanceof Error ? error.message : String(error));
     }
+    await recordAuthCompletion({
+      method: 'email',
+      userKey: verifiedUser.key,
+      scopeKey: personalContext?.scope.key ?? verifiedUser.currentScopeKey,
+      wasVerified: user.isVerified,
+    });
     const alias = verifiedUser.alias ?? generateAlias(verifiedUser.key);
     return {
       status: 'authenticated',

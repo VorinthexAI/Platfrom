@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createNodeHelpers } from './base';
 import { eventIdentifierSchema } from '@/lib/ai/events/event-identifier';
+import { deviceSchema } from '@/lib/ai/events/device';
 import { scopeSchema } from '@/lib/ai/scopes';
 
 export const EVENTS_COLLECTION = 'events';
@@ -10,6 +11,7 @@ export const eventSchema = z.object({
   userId: z.string().min(1).nullable().default(null),
   scopeKey: z.string().min(1).nullable().default(null),
   eventIdentifier: eventIdentifierSchema,
+  device: deviceSchema.nullable(),
   slug: z.string().trim().min(1).max(200),
   appScopeKey: scopeSchema.shape.key,
   createdAt: z.string().datetime(),

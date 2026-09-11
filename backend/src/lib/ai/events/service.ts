@@ -3,6 +3,7 @@ import { getEventById, insertEvent } from '@/lib/db/events.node';
 import { isArangoUniqueConstraintError } from '@/lib/db/base';
 import { newId } from '@/lib/ids';
 import { createEventIdentifier, currentEventIdentifier, eventIdentifierSchema } from './event-identifier';
+import { currentDevice } from './device';
 import { createProductScopeRepository, requireProductScopes } from '@/lib/apps/repository';
 import { scopeSchema } from '@/lib/ai/scopes';
 
@@ -50,7 +51,7 @@ export function createToolEventService(dependencies: ToolEventServiceDependencie
       const key = options.key ? z.string().cuid().parse(options.key) : id();
       try {
         const eventIdentifier = eventIdentifierSchema.parse(input.eventIdentifier ?? currentEventIdentifier() ?? createIdentifier());
-        return await insert({ key, ...input, eventIdentifier, createdAt: now() });
+        return await insert({ key, ...input, eventIdentifier, device: currentDevice(), createdAt: now() });
       } catch (error) {
         if (!options.key || !isArangoUniqueConstraintError(error)) throw error;
         const existing = await getById(key);

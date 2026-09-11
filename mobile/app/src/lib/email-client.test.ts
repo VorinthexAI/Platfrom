@@ -1,7 +1,7 @@
 import { beforeEach, expect, mock, test } from "bun:test";
 
 const calls: { method: string; path: string; body: unknown; config?: unknown }[] = [];
-const authState = { team: { key: "team-key", role: "member" }, scope: { key: "scope-key", role: "moderator" } };
+const authState = { user: { key: "user-key" }, team: { key: "team-key", role: "member" }, scope: { key: "scope-key", role: "moderator" } };
 const now = "2026-08-11T10:00:00.000Z";
 const connector = { key: "inbox-a", connectorKey: "connector-a", provider: "gmail" as const, email: "a@example.com", name: "Client inbox", description: "Priority client mail", isFavorite: true, status: "active" as const, syncEnabled: true, initialSyncCompleted: true, syncStatus: "idle" as const, createdAt: now, updatedAt: now };
 
@@ -151,7 +151,7 @@ test("accepts and sends arbitrary custom tone selectors while rejecting empty se
   expect(() => client.emailToneSchema.parse(" ")).toThrow();
   await client.composeEmailDraft({ to: ["one@example.com"], subject: "Custom voice", tone: "custom-tone-key" });
   expect(calls[0]).toMatchObject({ path: "/email/drafts/compose", body: { tone: "custom-tone-key" } });
-  expect(client.getEmailPermissions()).toEqual({ canManageConnector: false, canMutate: true });
+  expect(client.getEmailPermissions()).toEqual({ canManageConnector: true, canMutate: true });
 });
 
 test("sends strict new compose and reply attachment requests", async () => {

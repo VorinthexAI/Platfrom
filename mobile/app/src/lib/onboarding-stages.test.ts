@@ -23,7 +23,7 @@ test("selects onboarding apps in explicit order using server presentation fields
   const shuffled = [...ONBOARDING_APP_SLUGS].reverse().map(app);
   const stages = selectOnboardingAppStages([app("future-app", 9), ...shuffled]);
   expect(stages.map(({ slug }) => slug)).toEqual(ONBOARDING_APP_SLUGS);
-  expect(stages[0]).toMatchObject({ name: "archive server name", description: "archive server description", logoUrl: "https://vorinthex.com/logos/archive.png" });
+  expect(stages[0]).toMatchObject({ name: "vorinthex-ai server name", description: "vorinthex-ai server description", logoUrl: "https://vorinthex.com/logos/vorinthex-ai.png" });
 });
 
 test("safely omits a missing registry stage", () => {

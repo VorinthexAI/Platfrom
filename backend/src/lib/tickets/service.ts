@@ -5,16 +5,15 @@ import { chatOutputSchema, type ChatOutput } from '@/lib/ai/providers';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
-import { getDefaultTicketRepository, ticketSchema, ticketVoteValueSchema, type Ticket, type TicketRepository } from './repository';
+import { getDefaultTicketRepository, ticketSchema, type Ticket, type TicketRepository } from './repository';
+import { userInboxMessageSchema, userInboxThreadSchema } from '@/lib/user-inbox/schemas';
 
 export const ticketSubmitInputSchema = z.object({
   message: ticketSchema.shape.message,
 }).strict();
 
 export const ticketIdempotencyKeySchema = ticketSchema.shape.idempotencyKey;
-export const feedbackListInputSchema = z.object({ cursor: z.string().cuid().optional(), limit: z.number().int().min(1).max(50).default(20) }).strict();
-export const feedbackVoteInputSchema = z.object({ ticketKey: z.string().cuid(), vote: ticketVoteValueSchema.nullable() }).strict();
-export const safeTicketSchema = z.object({ key: ticketSchema.shape.key, message: ticketSchema.shape.message, upvotes: z.number().int().nonnegative(), downvotes: z.number().int().nonnegative(), viewerVote: ticketVoteValueSchema.nullable(), createdAt: ticketSchema.shape.createdAt }).strict();
+export const safeTicketSchema = z.object({ key: ticketSchema.shape.key, threadKey: ticketSchema.shape.threadKey, initialMessageKey: ticketSchema.shape.initialMessageKey, message: ticketSchema.shape.message, kind: ticketSchema.shape.type, createdAt: ticketSchema.shape.createdAt }).strict();
 const feedbackClassificationSchema = z.object({ valid: z.boolean() }).strict();
 const feedbackClassificationResponseFormat = { name: 'feedback_classification', schema: { type: 'object', additionalProperties: false, required: ['valid'], properties: { valid: { type: 'boolean' } } } } as const;
 export type SafeTicket = z.infer<typeof safeTicketSchema>;
@@ -38,8 +37,6 @@ export class TicketFeedbackRejectedError extends Error {
 export interface TicketService {
   submit(input: z.input<typeof ticketSubmitInputSchema>, context: ToolContext, idempotencyKey: string): Promise<SafeTicket>;
   createFeedback(input: z.input<typeof ticketSubmitInputSchema>, context: ToolContext, idempotencyKey: string): Promise<SafeTicket>;
-  listFeedback(input: z.input<typeof feedbackListInputSchema>, context: ToolContext): Promise<{ items: SafeTicket[]; nextCursor: string | null }>;
-  setFeedbackVote(input: z.input<typeof feedbackVoteInputSchema>, context: ToolContext, requestKey: string): Promise<SafeTicket>;
 }
 
 function memberContext(context: ToolContext) {
@@ -49,8 +46,8 @@ function memberContext(context: ToolContext) {
   return { teamKey: z.string().cuid().parse(context.teamKey), scopeKey: z.string().cuid().parse(context.runtimeScopeKey), userKey: z.string().cuid().parse(user.key), teamMembershipKey: z.string().cuid().parse(userTeam.key) };
 }
 
-function safe(ticket: Ticket, viewerVote: z.infer<typeof ticketVoteValueSchema> | null = null) {
-  return safeTicketSchema.parse({ key: ticket.key, message: ticket.message, upvotes: ticket.upvotes ?? 0, downvotes: ticket.downvotes ?? 0, viewerVote, createdAt: ticket.createdAt });
+function safe(ticket: Ticket) {
+  return safeTicketSchema.parse({ key: ticket.key, threadKey: ticket.threadKey, initialMessageKey: ticket.initialMessageKey, message: ticket.message, kind: ticket.type, createdAt: ticket.createdAt });
 }
 
 export function createTicketService(options: { repository?: TicketRepository; embed?: typeof embedText; ask?: typeof executeAsk; id?: () => string; now?: () => string } = {}): TicketService {
@@ -83,9 +80,12 @@ export function createTicketService(options: { repository?: TicketRepository; em
       // Preserve issue replay hashes already persisted before ticket types existed.
       const requestHash = createHash('sha256').update(JSON.stringify(type === 'issue' ? { scopeKey, message } : { scopeKey, message, type })).digest('hex');
       const embedding = currentEmbeddingSchema.parse(await embed({ text: message, purpose: 'document' }));
-      const result = await repository.createOrReplay(ticketSchema.parse({
-        key: id(), teamKey, scopeKey, userKey, message, embedding, idempotencyKey, requestHash, type, ...(type === 'feedback' ? { upvotes: 0, downvotes: 0 } : {}), createdAt: now(),
-      }), teamMembershipKey);
+      const createdAt = now();
+      const ticketKey = id(), threadKey = id(), initialMessageKey = id();
+      const ticket = ticketSchema.parse({ key: ticketKey, teamKey, scopeKey, userKey, message, embedding, idempotencyKey, requestHash, type, threadKey, initialMessageKey, createdAt });
+      const thread = userInboxThreadSchema.parse({ key: threadKey, teamKey, scopeKey, userKey, kind: type, subject: type === 'issue' ? 'Support issue' : 'Product feedback', ticketKey, createdBy: 'user', readAt: createdAt, lastMessageAt: createdAt, createdAt, updatedAt: createdAt });
+      const initialMessage = userInboxMessageSchema.parse({ key: initialMessageKey, threadKey, teamKey, scopeKey, userKey, sender: 'user', senderUserKey: userKey, body: message, createdAt });
+      const result = await repository.createOrReplay(ticket, thread, initialMessage, teamMembershipKey);
       if (result.state === 'forbidden') throw new TicketAccessError('Active team and scope membership is required.');
       if (result.state === 'conflict') throw new TicketIdempotencyError('Idempotency-Key was already used for a different ticket request.');
       return safe(result.ticket);
@@ -93,22 +93,6 @@ export function createTicketService(options: { repository?: TicketRepository; em
   return {
     submit: (input, context, idempotencyKey) => create(input, context, idempotencyKey, 'issue'),
     createFeedback: (input, context, idempotencyKey) => create(input, context, idempotencyKey, 'feedback'),
-    async listFeedback(rawInput, context) {
-      const input = feedbackListInputSchema.parse(rawInput);
-      const actor = memberContext(context);
-      const result = await repository.listFeedback({ ...actor, ...input });
-      if (result.state === 'forbidden') throw new TicketAccessError('Active team and scope membership is required.');
-      return { items: result.tickets.map(({ ticket, viewerVote }) => safe(ticket, viewerVote)), nextCursor: result.nextCursor };
-    },
-    async setFeedbackVote(rawInput, context, rawRequestKey) {
-      const input = feedbackVoteInputSchema.parse(rawInput);
-      ticketIdempotencyKeySchema.parse(rawRequestKey);
-      const actor = memberContext(context);
-      const result = await repository.setFeedbackVote({ ...actor, ...input, voteKey: id(), now: now() });
-      if (result.state === 'forbidden') throw new TicketAccessError('Active team and scope membership is required.');
-      if (result.state === 'not_found') throw new TicketNotFoundError('Feedback was not found in the current team and scope.');
-      return safe(result.ticket, result.viewerVote);
-    },
   };
 }
 

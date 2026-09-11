@@ -38,7 +38,8 @@ export async function runGraphMigrations(database: MigrationDatabase, migrations
     const checksum = migrationChecksumSchema.parse(await migration.checksum());
     const existing = ledger.get(migration.id);
     if (existing) {
-      if (existing.checksum !== checksum) throw new Error(`Recorded graph migration ${migration.id} was modified.`);
+      const compatibleChecksums = (migration.compatibleChecksums ?? []).map((value) => migrationChecksumSchema.parse(value));
+      if (existing.checksum !== checksum && !compatibleChecksums.includes(existing.checksum)) throw new Error(`Recorded graph migration ${migration.id} was modified.`);
       if (existing.status === 'applied') continue;
     }
 

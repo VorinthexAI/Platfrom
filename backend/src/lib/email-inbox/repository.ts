@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
+import { publishUserEvent } from '@/api/events';
 import { createCanonicalEmailRepository } from './canonical-repository';
 
 type Database = Pick<typeof db, 'query' | 'collection'> & Partial<Pick<typeof db, 'beginTransaction'>>;
@@ -26,5 +27,5 @@ const emailCursorSchema = z.object({ v: z.literal(2), threadKey: z.string().cuid
 export function encodeEmailCursor(value: z.infer<typeof emailCursorSchema>) { return Buffer.from(JSON.stringify(emailCursorSchema.parse(value))).toString('base64url'); }
 export function decodeEmailCursor(value: string, threadKey: string) { const parsed = emailCursorSchema.parse(JSON.parse(Buffer.from(value, 'base64url').toString('utf8'))); if (parsed.threadKey !== threadKey) throw new EmailRepositoryError('conflict', 'Email cursor belongs to another thread'); return parsed; }
 
-export function createEmailRepository(database: Database = db) { return createCanonicalEmailRepository(database, (reason, message) => new EmailRepositoryError(reason, message), stableKey); }
+export function createEmailRepository(database: Database = db, publishBalance: typeof publishUserEvent = async () => {}) { return createCanonicalEmailRepository(database, (reason, message) => new EmailRepositoryError(reason, message), stableKey, (userKey) => publishBalance(userKey, 'spark.balance.changed')); }
 export type EmailRepository = ReturnType<typeof createEmailRepository>;

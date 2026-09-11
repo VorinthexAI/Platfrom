@@ -10,7 +10,7 @@ import { EmailWatchRepairPendingError } from './service';
 const STATE_PREFIX = 'email:oauth:state:';
 const GRANT_PREFIX = 'email:oauth:grant:';
 const stateSchema = z.object({
-  userKey: z.string().cuid(), teamKey: z.string().min(1), scopeKey: z.string().cuid(), teamMembershipKey: z.string().cuid(),
+  userKey: z.string().cuid(), teamKey: z.string().min(1), scopeKey: z.string().cuid(),
   provider: z.literal('gmail').default('gmail'),
   returnUri: z.string().url(), verifier: z.string().min(43), nonce: z.string().min(20),
   name: z.string().trim().min(1).max(255), description: z.string().trim().min(1).max(10_000).optional(),
@@ -64,16 +64,15 @@ export function createEmailOAuthService(options: {
   const authorize = options.authorize ?? (async (userKey, teamKey, scopeKey) => {
     const { membership } = await requireTeamAccess(userKey, teamKey);
     await requireScopeAccess(membership, scopeKey);
-    if (membership.teamRole !== 'owner' && membership.teamRole !== 'admin') throw new Error('Owner or admin role is required to connect email');
     return { teamMembershipKey: membership.key };
   });
   return {
     async start(input: { userKey: string; teamKey: string; scopeKey: string; provider?: 'gmail'; name: string; description?: string; returnUri: string }) {
-      const access = await authorize(input.userKey, input.teamKey, input.scopeKey);
+      await authorize(input.userKey, input.teamKey, input.scopeKey);
       const state = token('vrtx_email_state_');
       const nonce = randomBytes(24).toString('base64url');
       const pkce = createPkce();
-      const record = stateSchema.parse({ ...input, provider: input.provider ?? 'gmail', teamMembershipKey: access.teamMembershipKey, returnUri: allowedReturnUri(input.returnUri), verifier: pkce.verifier, nonce });
+      const record = stateSchema.parse({ ...input, provider: input.provider ?? 'gmail', returnUri: allowedReturnUri(input.returnUri), verifier: pkce.verifier, nonce });
       if (!(await store.put(`${STATE_PREFIX}${state}`, JSON.stringify(record), 600))) throw new Error('Could not create email authorization state');
       return { authorizationUrl: buildGmailAuthorizationUrl({ state, nonce, codeChallenge: pkce.challenge }) };
     },
@@ -88,12 +87,11 @@ export function createEmailOAuthService(options: {
       }
       let reconnect: { connectorKey: string; connectorRevision: string; inboxKey?: string; inboxRevision?: string; previous: Awaited<ReturnType<ConnectorRepository['findExact']>>; previousInbox: Awaited<ReturnType<InboxRepository['getByConnector']>> } | undefined;
       try {
-        const access = await authorize(state.userKey, state.teamKey, state.scopeKey);
-        if (access.teamMembershipKey !== state.teamMembershipKey) throw new Error('Email authorization membership changed');
+        await authorize(state.userKey, state.teamKey, state.scopeKey);
         const result = await exchange(input.code, state.verifier, state.nonce);
         const providerProfile = await profile(result.credentials.accessToken);
-        const previous = await connectors.findExact(state.teamKey, state.scopeKey, result.identity.providerAccountId, state.provider);
-        const previousInbox = previous ? await inboxes.getByConnector(state.teamKey, state.scopeKey, previous.key) : null;
+        const previous = await connectors.findExact(state.userKey, result.identity.providerAccountId, state.provider);
+        const previousInbox = previous ? await inboxes.getByConnector(state.userKey, previous.key) : null;
         if (!result.credentials.refreshToken && previous && previous.status !== 'revoked' && previous.encryptedCredentials !== 'revoked') {
           const previousCredentials = connectors.credentials(previous);
           if ('refreshToken' in previousCredentials) result.credentials.refreshToken = previousCredentials.refreshToken;
@@ -101,7 +99,7 @@ export function createEmailOAuthService(options: {
         if (!result.credentials.refreshToken) throw new Error('Gmail did not issue an offline refresh token');
         const initializeInactive = !previous || previous.status === 'revoked';
         let connector = await connectors.upsert({
-          teamKey: state.teamKey, scopeKey: state.scopeKey, createdByTeamMembershipKey: state.teamMembershipKey, billingUserKey: state.userKey,
+          userKey: state.userKey, teamKey: state.teamKey, scopeKey: state.scopeKey,
           provider: state.provider, providerAccountId: result.identity.providerAccountId, email: result.identity.email, scopes: result.scopes, credentials: result.credentials, initializeInactive,
           expectedRevision: previous?.revision ?? null,
         });
@@ -140,7 +138,7 @@ export function createEmailOAuthService(options: {
       if (grant.userKey !== input.userKey || grant.teamKey !== input.teamKey || grant.scopeKey !== input.scopeKey) return null;
       await authorize(input.userKey, input.teamKey, input.scopeKey);
       const connector = await connectors.getByKey(grant.connectorKey);
-      if (!connector || connector.status !== 'active' || connector.teamKey !== input.teamKey || connector.scopeKey !== input.scopeKey) return null;
+      if (!connector || connector.status !== 'active' || connector.userKey !== input.userKey) return null;
       return inboxView({ userKey: input.userKey, teamKey: input.teamKey, scopeKey: input.scopeKey }, connector.key);
     },
   };

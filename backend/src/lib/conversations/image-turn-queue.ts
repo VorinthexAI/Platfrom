@@ -1,11 +1,15 @@
 import { Queue, Worker, type JobsOptions } from 'bullmq';
 import { z } from 'zod';
 import { createRedisConnection } from '@/lib/redis';
-import { createImageGenerationService, managedImageGenerateInputSchema, type ImageGenerationService } from '@/lib/image-generation/service';
+import { createImageGenerationService, managedImageGenerateInputSchema, type ImageGenerationService, type ResolvedImageGenerationReference } from '@/lib/image-generation/service';
 import { getDefaultConversationRepository, type ConversationRepository } from './repository';
 import { publishUserEvent } from '@/api/events';
 import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
 import { toolEventService, type ToolEventRecorder } from '@/lib/ai/events/service';
+import { SparkRepositoryError } from '@/lib/sparks/repository';
+import { artifactSha256, getDefaultConversationAttachmentArtifactRepository, type ConversationAttachmentArtifact, type ConversationAttachmentArtifactRepository } from './attachment-artifacts';
+import { documentStorage, type DocumentObjectStorage } from '@/lib/ai/document-processing';
+import { imageDataUrl } from '@/lib/gallery/image-reference';
 
 const QUEUE_NAME = 'conversation-image-turns';
 const jobOptions: JobsOptions = {
@@ -18,6 +22,7 @@ export const conversationImageTurnJobSchema = z.object({
   schemaVersion: z.literal(1), assistantMessageKey: z.string().cuid(), conversationKey: z.string().cuid(),
   teamKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(), userKey: z.string().cuid(), actorKey: z.string().cuid(),
   requestKey: z.string().trim().min(1).max(180), input: managedImageGenerateInputSchema,
+  stagedImageArtifactKeys: z.array(z.string().cuid()).max(8).refine((keys) => new Set(keys).size === keys.length, 'Staged image artifact keys must be unique.').default([]),
 }).strict();
 export type ConversationImageTurnJob = z.infer<typeof conversationImageTurnJobSchema>;
 type QueueAccess = Pick<Queue<ConversationImageTurnJob, { imageKey: string }>, 'add' | 'getJob' | 'getJobs'>;
@@ -32,6 +37,42 @@ function getQueue() {
 }
 
 export const conversationImageTurnJobId = (assistantMessageKey: string) => z.string().cuid().parse(assistantMessageKey);
+
+function assertOwnedImageArtifact(artifact: ConversationAttachmentArtifact | null, job: ConversationImageTurnJob, now: string) {
+  if (!artifact || artifact.teamKey !== job.teamKey || artifact.scopeKey !== job.scopeKey || artifact.userKey !== job.userKey || artifact.ownerKey !== job.actorKey || artifact.conversationKey !== job.conversationKey) throw new Error('A staged image reference does not belong to this conversation execution.');
+  if (artifact.kind !== 'image') throw new Error('Document artifacts cannot be used as image generation references.');
+  if (Date.parse(artifact.expiresAt) <= Date.parse(now)) throw new Error('A staged image reference has expired.');
+  if (artifact.status === 'FAILED' || artifact.status === 'PREPARED') throw new Error('A staged image reference is unavailable.');
+  return artifact;
+}
+
+async function resolveStagedImageReferences(job: ConversationImageTurnJob, artifacts: Pick<ConversationAttachmentArtifactRepository, 'read'>, storage: Pick<DocumentObjectStorage, 'download'>, now: string) {
+  const finalReferenceImageKeys: string[] = [];
+  const resolvedReferences: ResolvedImageGenerationReference[] = [];
+  for (const key of job.stagedImageArtifactKeys) {
+    let artifact = assertOwnedImageArtifact(await artifacts.read(key), job, now);
+    if (artifact.status === 'COMPLETED') {
+      if (artifact.finalReference?.kind !== 'image') throw new Error('A completed staged image reference has no Gallery image.');
+      finalReferenceImageKeys.push(artifact.finalReference.key);
+      continue;
+    }
+    try {
+      const object = await storage.download(artifact.stagedStorageKey);
+      if (object.mimeType !== undefined && object.mimeType.toLowerCase() !== 'image/png') throw new Error('A staged image reference MIME type changed.');
+      if (object.sizeBytes !== undefined && object.sizeBytes !== artifact.sizeBytes) throw new Error('A staged image reference size changed.');
+      if (object.bytes.byteLength !== artifact.sizeBytes || artifactSha256(object.bytes) !== artifact.stagedSha256) throw new Error('A staged image reference content changed.');
+      resolvedReferences.push({ identity: `artifact:${artifact.key}:${artifact.stagedSha256}`, inputReference: imageDataUrl(object.bytes, 'image/png') });
+    } catch (error) {
+      artifact = assertOwnedImageArtifact(await artifacts.read(key), job, now);
+      if (artifact.status === 'COMPLETED' && artifact.finalReference?.kind === 'image') {
+        finalReferenceImageKeys.push(artifact.finalReference.key);
+        continue;
+      }
+      throw error;
+    }
+  }
+  return { finalReferenceImageKeys, resolvedReferences };
+}
 
 export async function enqueueConversationImageTurn(raw: unknown, targetQueue: Pick<QueueAccess, 'add' | 'getJob'> = getQueue()) {
   const job = conversationImageTurnJobSchema.parse(raw);
@@ -49,6 +90,8 @@ export async function processConversationImageTurn(raw: unknown, dependencies: {
   recordEvent?: ToolEventRecorder;
   appScopeKey?: string;
   billing?: ToolBillingDependencies;
+  artifacts?: Pick<ConversationAttachmentArtifactRepository, 'read'>;
+  storage?: Pick<DocumentObjectStorage, 'download'>;
   terminalFailure?: boolean;
   now?: () => string;
 } = {}) {
@@ -56,20 +99,24 @@ export async function processConversationImageTurn(raw: unknown, dependencies: {
   const repository = dependencies.repository ?? getDefaultConversationRepository();
   const context = { teamKey: job.teamKey, runtimeScopeKey: job.scopeKey, principal: { kind: 'member' as const, user: { key: job.userKey }, userTeam: { key: job.actorKey, teamKey: job.teamKey, userId: job.userKey, status: 'active' as const }, scopeMember: null } };
   try {
+    const resolved = await resolveStagedImageReferences(job, dependencies.artifacts ?? getDefaultConversationAttachmentArtifactRepository(), dependencies.storage ?? documentStorage, (dependencies.now ?? (() => new Date().toISOString()))());
+    const input = { ...job.input, referenceImageKeys: [...job.input.referenceImageKeys, ...resolved.finalReferenceImageKeys] };
     const output = await observeToolExecution(
-      'conversation.image.enqueue',
+      'app.generate-image',
       context as never,
-      () => (dependencies.images ?? createImageGenerationService()).generateManaged(job.input, context as never, job.requestKey),
+      () => (dependencies.images ?? createImageGenerationService()).generateManaged(input, context as never, job.requestKey, resolved.resolvedReferences),
       { recorder: dependencies.recordEvent ?? (dependencies.images ? undefined : toolEventService.record), appScopeKey: dependencies.appScopeKey, idempotencyKey: job.requestKey, input: job.input, ...dependencies.billing },
     );
     if (output.images.length !== 1) throw new Error('Conversation image generation must produce exactly one image.');
-    const completed = await repository.completeImageTurn({ teamKey: job.teamKey, scopeKey: job.scopeKey, userKey: job.userKey }, job.conversationKey, job.assistantMessageKey, output.images[0]!.key, (dependencies.now ?? (() => new Date().toISOString()))());
+    const completed = await repository.completeImageTurn({ teamKey: job.teamKey, scopeKey: job.scopeKey, userKey: job.userKey }, job.conversationKey, job.assistantMessageKey, output.images[0]!.key, output.images[0]!.caption, (dependencies.now ?? (() => new Date().toISOString()))());
     if (!completed) throw new Error('Conversation image response changed before completion.');
     await (dependencies.publishChanged ?? publishUserEvent)(job.userKey, 'conversation.changed').catch(() => undefined);
     return { imageKey: output.images[0]!.key };
   } catch (error) {
     if (dependencies.terminalFailure ?? true) {
-      await repository.failTurn({ teamKey: job.teamKey, scopeKey: job.scopeKey, userKey: job.userKey }, job.conversationKey, job.assistantMessageKey, (dependencies.now ?? (() => new Date().toISOString()))());
+      const fundingRequiredCode = error instanceof SparkRepositoryError && (error.code === 'INSUFFICIENT_BALANCE' || error.code === 'OUTSTANDING_DEBT') ? error.code : undefined;
+      const failed = await repository.failTurn({ teamKey: job.teamKey, scopeKey: job.scopeKey, userKey: job.userKey }, job.conversationKey, job.assistantMessageKey, (dependencies.now ?? (() => new Date().toISOString()))(), fundingRequiredCode);
+      if (failed && fundingRequiredCode) await (dependencies.publishChanged ?? publishUserEvent)(job.userKey, 'spark.balance.required', fundingRequiredCode, job.assistantMessageKey).catch(() => undefined);
       await (dependencies.publishChanged ?? publishUserEvent)(job.userKey, 'conversation.changed').catch(() => undefined);
     }
     throw error;
@@ -91,7 +138,7 @@ export async function recoverConversationImageTurnQueue(dependencies: { reposito
   let enqueued = 0;
   for (const { message, actorKey } of pending) {
     if (queued.has(message.key)) continue;
-    await enqueueConversationImageTurn({ schemaVersion: 1, assistantMessageKey: message.key, conversationKey: message.conversationKey, teamKey: message.teamKey, scopeKey: message.scopeKey, userKey: message.userKey, actorKey, requestKey: message.key, input: JSON.parse(message.content) }, targetQueue);
+    await enqueueConversationImageTurn({ schemaVersion: 1, assistantMessageKey: message.key, conversationKey: message.conversationKey, teamKey: message.teamKey, scopeKey: message.scopeKey, userKey: message.userKey, actorKey, requestKey: message.key, input: JSON.parse(message.content), stagedImageArtifactKeys: message.imageReferenceArtifactKeys ?? [] }, targetQueue);
     enqueued += 1;
   }
   return { enqueued };

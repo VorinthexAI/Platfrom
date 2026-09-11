@@ -8,10 +8,16 @@ import { SparkRepositoryError } from '@/lib/sparks/repository';
 describe('conversation HTTP contract', () => {
   test('uses strict correlated SSE payloads and safe message projections', () => {
     const correlationKey = newId(), conversationKey = newId(), userMessageKey = newId(), assistantMessageKey = newId();
-    expect(conversationStartEventSchema.parse({ type: 'start', correlationKey, conversationKey, userMessageKey, assistantMessageKey })).toHaveProperty('correlationKey', correlationKey);
+    const userMessage = { key: userMessageKey, conversationKey, turnKey: 'request', role: 'USER', status: 'COMPLETED', content: 'question', createdAt: '2026-09-01T00:00:00.000Z', completedAt: '2026-09-01T00:00:00.000Z' };
+    expect(conversationStartEventSchema.parse({ type: 'start', correlationKey, conversationKey, userMessageKey, assistantMessageKey, userMessage })).toMatchObject({ correlationKey, userMessage: { attachments: [], attachmentStatus: 'NONE' } });
+    expect(conversationStartEventSchema.parse({ type: 'start', correlationKey, conversationKey, userMessageKey, assistantMessageKey, userMessage: { ...userMessage, attachmentStatus: 'PENDING' } })).toMatchObject({ userMessage: { attachments: [], attachmentStatus: 'PENDING' } });
+    const attachment = { key: newId(), kind: 'document', filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 3 };
+    expect(conversationStartEventSchema.parse({ type: 'start', correlationKey, conversationKey, userMessageKey, assistantMessageKey, userMessage: { ...userMessage, attachments: [attachment], attachmentStatus: 'COMPLETED' } })).toMatchObject({ userMessage: { attachments: [attachment], attachmentStatus: 'COMPLETED' } });
+    expect(conversationStartEventSchema.parse({ type: 'start', correlationKey, conversationKey, userMessageKey, assistantMessageKey, userMessage: { ...userMessage, attachmentStatus: 'FAILED' } })).toMatchObject({ userMessage: { attachments: [], attachmentStatus: 'FAILED' } });
+    expect(() => conversationStartEventSchema.parse({ type: 'start', correlationKey, conversationKey, userMessageKey, assistantMessageKey, userMessage: { ...userMessage, attachmentStatus: 'PENDING', pendingAttachmentKeys: [newId()] } })).toThrow('Unrecognized key');
     expect(conversationDeltaEventSchema.parse({ type: 'delta', correlationKey, assistantMessageKey, text: 'hello' })).toHaveProperty('text', 'hello');
     const message = { key: assistantMessageKey, conversationKey, turnKey: 'request', role: 'ASSISTANT', status: 'COMPLETED', content: 'hello', createdAt: '2026-09-01T00:00:00.000Z', completedAt: '2026-09-01T00:00:01.000Z' };
-    expect(conversationDoneEventSchema.parse({ type: 'done', correlationKey, conversationKey, message, replayed: false })).toMatchObject({ message: { content: 'hello', retrievals: [] } });
+    expect(conversationDoneEventSchema.parse({ type: 'done', correlationKey, conversationKey, message, replayed: false })).toMatchObject({ message: { content: 'hello', retrievals: [], attachmentStatus: 'NONE' } });
     const retrieval = { query: 'roadmap', limit: 3, minimumScore: 0.55, groups: [{ collectionSlug: 'documents', results: [{ key: newId(), label: 'Roadmap' }] }] };
     expect(conversationDoneEventSchema.parse({ type: 'done', correlationKey, conversationKey, message: { ...message, retrievals: [retrieval] }, replayed: false })).toHaveProperty('message.retrievals', [retrieval]);
     expect(() => conversationDoneEventSchema.parse({ type: 'done', correlationKey, conversationKey, message: { ...message, retrievals: [{ ...retrieval, rawOutput: true }] }, replayed: false })).toThrow('Unrecognized key');
@@ -71,7 +77,7 @@ describe('conversation HTTP contract', () => {
   test('strictly enqueues an image turn through the canonical service and returns accepted', async () => {
     const teamKey = 'team', scopeKey = newId(), userKey = newId(), conversationKey = newId(); const calls: unknown[] = []; const published: unknown[] = [];
     const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
-    const handlers = createConversationHandlers({ getIdentity: async () => ({ identityType: 'user', key: userKey }) as never, authorize: async () => ({ context }), service: { enqueueImageTurn: async (...args: unknown[]) => { calls.push(args); return { queued: true }; } } as any, publishChanged: async (...args: unknown[]) => { published.push(args); } });
+    const handlers = createConversationHandlers({ getIdentity: async () => ({ identityType: 'user', key: userKey }) as never, authorize: async () => ({ context }), service: { enqueueImageTurn: async (...args: unknown[]) => { calls.push(args); return { queued: true }; } } as any, publishChanged: async (...args: unknown[]) => { published.push(args); }, billing: { getBalance: async () => 100_000_000, getDebt: async () => 0 } });
     const app = new Hono(); app.post('/conversations/:conversationKey/image-turns', handlers.imageTurn);
     const body = { teamKey, scopeKey, prompt: 'A moonlit harbor', requestKey: 'image-request' };
     const response = await app.request(`/conversations/${conversationKey}/image-turns`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -79,6 +85,17 @@ describe('conversation HTTP contract', () => {
     expect(calls).toEqual([[{ conversationKey, prompt: body.prompt, requestKey: body.requestKey, referenceImageKeys: [], size: '1024x1024', quality: 'medium', mode: 'default' }, context]]);
     expect(published).toEqual([[userKey, 'conversation.changed']]);
     expect((await app.request(`/conversations/${conversationKey}/image-turns`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, count: 2 }) })).status).toBe(400);
+  });
+
+  test('rejects an unfunded queued image before persistence so mobile can open Sparks', async () => {
+    const teamKey = 'team', scopeKey = newId(), userKey = newId(), conversationKey = newId(); let enqueued = false;
+    const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const handlers = createConversationHandlers({ getIdentity: async () => ({ identityType: 'user', key: userKey }) as never, authorize: async () => ({ context }), service: { enqueueImageTurn: async () => { enqueued = true; return {}; } } as never, billing: { getBalance: async () => 9_999_999, getDebt: async () => 0 } });
+    const app = new Hono(); app.post('/conversations/:conversationKey/image-turns', handlers.imageTurn);
+    const response = await app.request(`/conversations/${conversationKey}/image-turns`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, prompt: 'A moonlit harbor', requestKey: 'image-request' }) });
+    expect(response.status).toBe(402);
+    expect(await response.json()).toMatchObject({ error: { code: 'INSUFFICIENT_BALANCE' } });
+    expect(enqueued).toBe(false);
   });
 
   test('does not emit a second terminal SSE event when change publication fails after done', async () => {

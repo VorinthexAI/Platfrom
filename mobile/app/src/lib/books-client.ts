@@ -24,6 +24,8 @@ export const bookSchema = z.strictObject({
   status: bookStatusSchema,
   isFavorite: z.boolean(),
   isExtending: z.boolean(),
+  canExtend: z.boolean(),
+  managed: z.boolean(),
   coverUrl: z.url().optional(),
   narrator: narratorVoiceSchema.optional(),
   estimatedMinutes: z.number().int().nonnegative(),

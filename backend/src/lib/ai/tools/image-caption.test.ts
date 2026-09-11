@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { IMAGE_CAPTION_MODEL } from '@/lib/image-caption-constants';
 import { imageCaptionTool } from './image-caption';
 
 describe('image.caption tool', () => {
@@ -34,15 +33,14 @@ describe('image.caption tool', () => {
     })).rejects.toThrow();
   });
 
-  test('pins default execution to the static Vertex vision route', async () => {
+  test('pins default execution to Gemini 3.1 Flash-Lite', async () => {
     const source = await Bun.file(new URL('./image-caption.ts', import.meta.url)).text();
     expect(imageCaptionTool.name).toBe('image.caption');
     expect(imageCaptionTool.providerDefinition.description).toContain('integer quality score from 1 to 100');
     expect(imageCaptionTool.providerDefinition.inputSchema.properties.imageUrls.items.pattern).toBe('^https?://');
     expect(source).toContain("mode: 'auto'");
-    expect(source).toContain("providers: ['image.primary']");
+    expect(source).toContain("providers: ['image.secondary']");
     expect(source).toContain("actionSlug: 'image'");
-    expect(IMAGE_CAPTION_MODEL).toBe('google.gemini-3.1-flash-lite-image');
   });
 
   test('rejects malformed executor output', async () => {

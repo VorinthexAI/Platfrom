@@ -13,10 +13,20 @@ export interface PersonalAuthContext {
   scopeMembership: ScopeMember;
 }
 
-async function ensurePersonalMailDefaults(scopeKey: string) {
+async function ensurePersonalMailDefaults(userKey: string, scopeKey: string) {
   const { db } = await import('./client');
   const { createEmailRepository } = await import('@/lib/email-inbox/repository');
-  await createEmailRepository(db).initializeTones(scopeKey);
+  await createEmailRepository(db).initializeTones(userKey, scopeKey);
+}
+
+async function ensurePersonalWorkspaceDefaults(userKey: string, scopeKey: string) {
+  await ensurePersonalMailDefaults(userKey, scopeKey);
+  try {
+    const { initialWorkspaceContentService } = await import('@/lib/initial-workspace-content');
+    await initialWorkspaceContentService.ensure(scopeKey);
+  } catch (error) {
+    console.error('initial workspace content provisioning failed', { scopeKey, error });
+  }
 }
 
 function personalTeamName(name: string | null, email: string) {
@@ -36,7 +46,7 @@ export async function provisionPersonalAuthContext(
       const { db } = await import('./client');
       await db.query(aql`UPDATE ${user.key} WITH { currentScopeKey: ${existing.scope.key} } IN users`);
     }
-    await ensurePersonalMailDefaults(existing.scope.key);
+    await ensurePersonalWorkspaceDefaults(user.key, existing.scope.key);
     return existing;
   }
   const now = new Date().toISOString();
@@ -94,7 +104,7 @@ export async function provisionPersonalAuthContext(
     scope: scopeSchema.parse({ ...result.scope, key: result.scope._key }),
     scopeMembership: scopeMemberSchema.parse({ ...result.scopeMembership, key: result.scopeMembership._key }),
   };
-  await ensurePersonalMailDefaults(context.scope.key);
+  await ensurePersonalWorkspaceDefaults(user.key, context.scope.key);
   return context;
 }
 

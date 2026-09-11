@@ -59,6 +59,8 @@ describe('app search service', () => {
     expect(APP_SEARCH_COLLECTION_ADAPTERS.images.operations).toEqual(['search', 'list', 'count', 'sum']);
     expect(APP_SEARCH_COLLECTION_ADAPTERS.images.sumFields).toEqual({ sizeBytes: { description: expect.any(String), unit: 'bytes' } });
     expect(APP_SEARCH_COLLECTION_ADAPTERS.documents.fields).toEqual(expect.arrayContaining(['mimeType', 'sizeBytes']));
+    expect(APP_SEARCH_COLLECTION_ADAPTERS.inboxes.description).toContain('private Signal');
+    expect(APP_SEARCH_COLLECTION_ADAPTERS['email-messages'].description).toContain('Connected email conversations in private Signal');
     for (const [slug, adapter] of Object.entries(APP_SEARCH_COLLECTION_ADAPTERS)) {
       const raw = { operation: 'count', collectionSlugs: [slug], ...((slug === 'email-messages' || slug === 'email-drafts') ? { filters: { connectorKey: newId() } } : {}) };
       expect(appSearchInputSchema.safeParse(raw).success, `${slug} count support`).toBe((adapter.operations as readonly string[]).includes('count'));
@@ -128,9 +130,9 @@ describe('app search service', () => {
   test('filters authorized tags before limits and exact count/sum, projects tags, redacts keys, and persists filters', async () => {
     const workTag = newId(), urgentTag = newId();
     const rows = [
-      { key: newId(), title: 'First', subtitle: '', description: '', status: 'ready', isFavorite: false, isExtending: false, estimatedMinutes: 10, chapterCount: 1, progressPercent: 0, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', score: 0.9 },
-      { key: newId(), title: 'Tagged second', subtitle: '', description: '', status: 'ready', isFavorite: false, isExtending: false, estimatedMinutes: 20, chapterCount: 2, progressPercent: 0, createdAt: '2026-01-02T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z', score: 0.8 },
-      { key: newId(), title: 'Tagged third', subtitle: '', description: '', status: 'ready', isFavorite: false, isExtending: false, estimatedMinutes: 30, chapterCount: 3, progressPercent: 0, createdAt: '2026-01-03T00:00:00.000Z', updatedAt: '2026-01-03T00:00:00.000Z', score: 0.7 },
+      { key: newId(), title: 'First', subtitle: '', description: '', status: 'ready', isFavorite: false, isExtending: false, canExtend: true, managed: false, estimatedMinutes: 10, chapterCount: 1, progressPercent: 0, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', score: 0.9 },
+      { key: newId(), title: 'Tagged second', subtitle: '', description: '', status: 'ready', isFavorite: false, isExtending: false, canExtend: true, managed: false, estimatedMinutes: 20, chapterCount: 2, progressPercent: 0, createdAt: '2026-01-02T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z', score: 0.8 },
+      { key: newId(), title: 'Tagged third', subtitle: '', description: '', status: 'ready', isFavorite: false, isExtending: false, canExtend: true, managed: false, estimatedMinutes: 30, chapterCount: 3, progressPercent: 0, createdAt: '2026-01-03T00:00:00.000Z', updatedAt: '2026-01-03T00:00:00.000Z', score: 0.7 },
     ];
     const calls: unknown[] = [];
     const scopeTags = {
@@ -254,8 +256,8 @@ describe('app search service', () => {
   test('lists and counts canonical resources without creating an embedding or search history', async () => {
     let embedded = false; let history = 0;
     const books = [
-      { key: newId(), title: 'First', status: 'ready', isFavorite: false, isExtending: false, estimatedMinutes: 10, chapterCount: 1, progressPercent: 0, createdAt: '2026-07-01T00:00:00.000Z', updatedAt: '2026-07-02T00:00:00.000Z' },
-      { key: newId(), title: 'Second', status: 'ready', isFavorite: true, isExtending: false, estimatedMinutes: 5, chapterCount: 0, progressPercent: 0, createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-02T00:00:00.000Z' },
+      { key: newId(), title: 'First', status: 'ready', isFavorite: false, isExtending: false, canExtend: true, managed: false, estimatedMinutes: 10, chapterCount: 1, progressPercent: 0, createdAt: '2026-07-01T00:00:00.000Z', updatedAt: '2026-07-02T00:00:00.000Z' },
+      { key: newId(), title: 'Second', status: 'ready', isFavorite: true, isExtending: false, canExtend: true, managed: false, estimatedMinutes: 5, chapterCount: 0, progressPercent: 0, createdAt: '2026-08-01T00:00:00.000Z', updatedAt: '2026-08-02T00:00:00.000Z' },
     ];
     const service = createAppSearchService({
       executeEmbedding: async () => { embedded = true; return { embedding }; },
@@ -274,7 +276,7 @@ describe('app search service', () => {
   test('gets book detail and previews a document summary through canonical services', async () => {
     const bookKey = newId(); const documentKey = newId(); const calls: Array<{ tool: string; input: unknown }> = [];
     const service = createAppSearchService({
-      books: { detail: async () => ({ book: { key: bookKey, title: 'Systems', description: 'A systems guide.', status: 'ready', isFavorite: false, isExtending: false, estimatedMinutes: 20, chapterCount: 2, progressPercent: 50 }, chapters: [] }) } as never,
+      books: { detail: async () => ({ book: { key: bookKey, title: 'Systems', description: 'A systems guide.', status: 'ready', isFavorite: false, isExtending: false, canExtend: true, managed: false, estimatedMinutes: 20, chapterCount: 2, progressPercent: 50 }, chapters: [] }) } as never,
       executeContent: (async (tool: string, input: unknown) => { calls.push({ tool, input }); return { results: [{ success: true, data: { documentKey, text: 'Brief summary.' } }] }; }) as never,
     });
     await expect(service.search({ operation: 'get', collectionSlugs: ['books'], key: bookKey }, context)).resolves.toMatchObject({ operation: 'get', groups: [{ collectionSlug: 'books', results: [{ key: bookKey, description: 'A systems guide.' }] }] });
@@ -434,7 +436,7 @@ describe('app search service', () => {
     const place = { key: newId(), kind: 'place', name: 'Paris', summary: 'City', countryCode: 'FR', latitude: 48.8, longitude: 2.3, status: 'wishlist', isFavorite: false, createdAt: date };
     const trip = { key: newId(), name: 'Spring trip', status: 'planned', isFavorite: false, createdAt: date, updatedAt: date, places: [], attachments: [] };
     const country = { name: 'France', countryCode: 'FR', latitude: 46, longitude: 2 };
-    const book = { key: newId(), title: 'Clear Decisions', subtitle: 'Guide', description: 'Description', status: 'ready', isFavorite: false, isExtending: false, estimatedMinutes: 10, chapterCount: 2, progressPercent: 0, createdAt: date, updatedAt: date, score: 0.8 };
+    const book = { key: newId(), title: 'Clear Decisions', subtitle: 'Guide', description: 'Description', status: 'ready', isFavorite: false, isExtending: false, canExtend: true, managed: false, estimatedMinutes: 10, chapterCount: 2, progressPercent: 0, createdAt: date, updatedAt: date, score: 0.8 };
     const groups = [
       { collectionSlug: 'folders', results: [folder] }, { collectionSlug: 'documents', results: [document] }, { collectionSlug: 'files', results: [file] },
       { collectionSlug: 'collections', results: [collection] }, { collectionSlug: 'images', results: [image] }, { collectionSlug: 'inboxes', results: [inbox] },
@@ -487,6 +489,17 @@ describe('app search service', () => {
     expect(inputs[2]).not.toHaveProperty('threshold');
   });
 
+  test('disables the country relevance cutoff and returns the best semantic match', async () => {
+    let received: unknown;
+    const country = { name: 'Sweden', countryCode: 'SE', latitude: 60.1282, longitude: 18.6435 };
+    const service = createAppSearchService({
+      executeEmbedding: async () => ({ embedding }),
+      countries: { search: async (_input: unknown, _actorKey: string, options: unknown) => { received = options; return { country }; } } as never,
+    });
+    await expect(service.search({ query: 'nordic country', collectionSlugs: ['countries'], recordHistory: false }, context)).resolves.toMatchObject({ groups: [{ collectionSlug: 'countries', results: [country] }] });
+    expect(received).toMatchObject({ minimumScore: -1, queryEmbedding: embedding, recordHistory: false });
+  });
+
   test('forwards normalized creation ranges to every timestamped semantic adapter', async () => {
     const calls = new Map<string, any>(); const connectorKey = newId(); const boundary = '2026-08-01T00:00:00.000Z';
     const service = createAppSearchService({
@@ -512,12 +525,15 @@ describe('app search service', () => {
     await service.search({ query: 'recent travel books', collectionSlugs: ['trips', 'books'], filters, recordHistory: false }, context);
     for (const slug of ['content', 'collections', 'images', 'inboxes', 'email-tones', 'email-messages', 'email-drafts', 'places', 'trips', 'books']) {
       expect(calls.get(slug), `${slug} input`).toMatchObject({ createdFrom: boundary, createdTo: boundary });
+      expect(calls.get(slug), `${slug} threshold`).not.toHaveProperty('threshold');
     }
+    for (const slug of ['content', 'collections', 'inboxes', 'email-tones', 'email-messages', 'email-drafts', 'books']) expect(calls.get(slug), `${slug} cutoff`).toMatchObject({ minimumScore: -1 });
+    for (const slug of ['images', 'places', 'trips']) expect(calls.get(slug), `${slug} cutoff`).not.toHaveProperty('minimumScore');
   });
 
   test('reads the top three matched Archive resources through the canonical content runtime', async () => {
     const date = '2026-08-24T00:00:00.000Z'; const query = `canonical evidence ${newId()}`;
-    const documents = Array.from({ length: 4 }, (_, index) => ({ documentKey: newId(), scopeKey, name: `Plan ${index}`, isFavorite: false, createdAt: date, updatedAt: date, score: 1 - index / 10 }));
+    const documents = Array.from({ length: 4 }, (_, index) => ({ documentKey: newId(), scopeKey, name: `Plan ${index}`, managed: index === 0, isFavorite: false, createdAt: date, updatedAt: date, score: 1 - index / 10 }));
     const calls: Array<{ tool: string; input: any; suppliedContext: unknown }> = [];
     const service = createAppSearchService({
       executeEmbedding: async () => ({ embedding }),
@@ -532,6 +548,7 @@ describe('app search service', () => {
     expect(calls[1]!.input).toEqual({ documentKeys: documents.slice(0, 3).map(({ documentKey }) => documentKey), include: ['content'] });
     expect(calls[1]!.suppliedContext).toBe(context);
     expect(output.groups[0]!.results.slice(0, 3).every((result) => 'content' in result)).toBe(true);
+    expect(output.groups[0]!.results[0]).toMatchObject({ key: documents[0]!.documentKey, managed: true });
     expect(output.groups[0]!.results[3]).not.toHaveProperty('content');
   });
 
@@ -551,7 +568,7 @@ describe('app search service', () => {
     const books = createAppSearchService({
       executeEmbedding: async () => ({ embedding }),
       books: {
-        search: async () => ({ books: [{ key: bookKey, title: 'Systems', subtitle: 'A guide', description: 'Systems thinking', status: 'ready', isFavorite: false, isExtending: false, estimatedMinutes: 20, chapterCount: 1, progressPercent: 0, createdAt: date, updatedAt: date, score: 0.8 }] }),
+        search: async () => ({ books: [{ key: bookKey, title: 'Systems', subtitle: 'A guide', description: 'Systems thinking', status: 'ready', isFavorite: false, isExtending: false, canExtend: true, managed: false, estimatedMinutes: 20, chapterCount: 1, progressPercent: 0, createdAt: date, updatedAt: date, score: 0.8 }] }),
         detail: async () => ({ book: {}, chapters: [{ key: newId(), title: 'Feedback', description: 'Loops', content: 'Causal loops amplify change.', position: 1, estimatedMinutes: 5 }] }),
       } as never,
     });
@@ -834,12 +851,12 @@ describe('app search service', () => {
       executeEmbedding: async () => ({ embedding }),
       books: { search: async (input: unknown, actorKey: string, options: unknown) => {
         received = { input, actorKey, options };
-        return { books: [{ key: bookKey, title: 'Clear decisions', subtitle: 'A practical guide', description: 'Make better decisions.', status: 'ready', isFavorite: false, isExtending: false, estimatedMinutes: 30, chapterCount: 4, progressPercent: 25, createdAt: date, updatedAt: date, score: 0.88 }] };
+        return { books: [{ key: bookKey, title: 'Clear decisions', subtitle: 'A practical guide', description: 'Make better decisions.', status: 'ready', isFavorite: false, isExtending: false, canExtend: true, managed: false, estimatedMinutes: 30, chapterCount: 4, progressPercent: 25, createdAt: date, updatedAt: date, score: 0.88 }] };
       } } as never,
     });
     const result = await service.search({ query: 'decisions', collectionSlugs: ['books'], recordHistory: false }, context);
     expect(received).toEqual({ input: { teamKey, scopeKey, query: 'decisions', minimumScore: -1, limit: 10 }, actorKey: userKey, options: { queryEmbedding: embedding } });
-    expect(result.groups).toEqual([{ collectionSlug: 'books', results: [{ key: bookKey, title: 'Clear decisions', subtitle: 'A practical guide', description: 'Make better decisions.', status: 'ready', isFavorite: false, isExtending: false, estimatedMinutes: 30, chapterCount: 4, progressPercent: 25, createdAt: date, updatedAt: date, score: 0.88, tags: [] }] }]);
+    expect(result.groups).toEqual([{ collectionSlug: 'books', results: [{ key: bookKey, title: 'Clear decisions', subtitle: 'A practical guide', description: 'Make better decisions.', status: 'ready', isFavorite: false, isExtending: false, canExtend: true, managed: false, estimatedMinutes: 30, chapterCount: 4, progressPercent: 25, createdAt: date, updatedAt: date, score: 0.88, tags: [] }] }]);
   });
 
   test('searches authorized Gallery collections with trusted membership and ownership metadata', async () => {

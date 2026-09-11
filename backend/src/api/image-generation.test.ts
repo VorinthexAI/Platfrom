@@ -29,25 +29,25 @@ describe('image generation HTTP API', () => {
   test('HTTP and Core invoke the same canonical generation service with trusted context', async () => {
     const calls: unknown[][] = [];
     const service = { generate: async (...args: unknown[]) => { calls.push(args); return { images: [], provider: { durationMs: 0, costUsd: null } }; } } as never;
-    await runTool('image.generate', '', { collectionKey, prompt: 'Earth', count: 2 }, { contentContext: context, requestKey: 'request-1', images: service });
+    await runTool('app.generate-image', '', { prompt: 'Earth', count: 2 }, { contentContext: context, requestKey: 'request-1', imageDestination: { kind: 'gallery-collection', collectionKey }, images: service });
     const app = new Hono();
     app.post('/images/generate', createImageGenerateHandler({ getIdentity: identity, authorize, service, appScopeKey: newId() }));
     const response = await app.request('/images/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'request-1' }, body: JSON.stringify({ teamKey, scopeKey, collectionKey, prompt: 'Earth', count: 2 }) });
     expect(response.status).toBe(201);
     expect(calls).toHaveLength(2);
     expect(calls[0]).toEqual(calls[1]);
-    expect(calls[0]?.[1]).toBe(context);
+    expect(calls[0]?.[2]).toBe(context);
   });
 
   test('meters image actions identically and returns 402 before generated output is accepted', async () => {
     const charges: Record<string, unknown>[] = [];
     const service = { generate: async (input: { count?: number }) => { await recordActionCost('image'); await recordActionUsage('image', { operation: 'generate', count: input.count ?? 1 }, { inputTokens: 0, outputTokens: 0, totalTokens: 0 }); return { images: [], provider: { durationMs: 0, costUsd: null } }; } } as never;
     const billing = { charge: async (_key: string, input: Record<string, unknown>) => { charges.push(input); return { status: 'applied', transaction: { key: newId() } } as never; } };
-    await runTool('image.generate', '', { collectionKey, prompt: 'Earth', count: 2 }, { contentContext: context, requestKey: 'core-image', images: service, recordEvent: async () => {}, appScopeKey: 'cmrnlzf640001qc7kazsr96k5', billing });
+    await runTool('app.generate-image', '', { prompt: 'Earth', count: 2 }, { contentContext: context, requestKey: 'core-image', imageDestination: { kind: 'gallery-collection', collectionKey }, images: service, recordEvent: async () => {}, appScopeKey: 'cmrnlzf640001qc7kazsr96k5', billing });
     const app = new Hono().post('/images/generate', createImageGenerateHandler({ getIdentity: identity, authorize, service, recordEvent: async () => {}, appScopeKey: newId(), billing }));
     expect((await app.request('/images/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'http-image' }, body: JSON.stringify({ teamKey, scopeKey, collectionKey, prompt: 'Earth', count: 2 }) })).status).toBe(201);
     expect(charges).toHaveLength(2);
-    expect(charges.every((charge) => charge.actionSlug === 'image' && charge.microSparks === 60_000_000)).toBe(true);
+    expect(charges.every((charge) => charge.actionSlug === 'image' && charge.microSparks === 20_000_000)).toBe(true);
 
     const insufficient = new Hono().post('/images/generate', createImageGenerateHandler({ getIdentity: identity, authorize, service, recordEvent: async () => {}, appScopeKey: newId(), billing: { charge: async () => { throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'private'); } } }));
     expect((await insufficient.request('/images/generate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'insufficient-image' }, body: JSON.stringify({ teamKey, scopeKey, collectionKey, prompt: 'Earth' }) })).status).toBe(402);

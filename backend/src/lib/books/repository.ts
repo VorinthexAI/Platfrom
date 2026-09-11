@@ -38,6 +38,7 @@ import {
   type BookExtension,
 } from "@/lib/db/book-extensions.node";
 import type { FixedChargeReceipt } from "@/lib/ai/events/runtime";
+import { initialWorkspaceFolderKey } from "@/lib/initial-workspace-content-identifiers";
 
 export interface BookAccessContext {
   teamKey: string;
@@ -536,16 +537,35 @@ export function createBookRepository(
       await authorize(database, context, false);
       const rows = await (
         await database.query(
-          'FOR document IN documents FILTER document.scopeKey == @scopeKey && document._key IN @keys && document.mutationPolicy != "system-only" && (!HAS(document, "_internalDeletion") || document._internalDeletion == null) RETURN document',
+          'FOR document IN documents FILTER document.scopeKey == @scopeKey && document._key IN @keys && (document.archiveVisibility || "visible") == "visible" && (!HAS(document, "_internalDeletion") || document._internalDeletion == null) RETURN document',
           { scopeKey: context.scopeKey, keys },
         )
       ).all();
-      if (rows.length !== new Set(keys).size)
+      const folders = await (
+        await database.query(
+          'FOR folder IN folders FILTER folder.scopeKey == @scopeKey RETURN { _key: folder._key, parentFolderKey: folder.parentFolderKey, archiveVisibility: folder.archiveVisibility, _internalDeletion: folder._internalDeletion }',
+          { scopeKey: context.scopeKey },
+        )
+      ).all() as Array<{ _key: string; parentFolderKey?: string; archiveVisibility?: string; _internalDeletion?: unknown }>;
+      const byKey = new Map(folders.map((folder) => [folder._key, folder]));
+      const visible = (folderKey: unknown) => {
+        if (typeof folderKey !== 'string') return folderKey == null;
+        const visited = new Set<string>();
+        let folder = byKey.get(folderKey);
+        while (folder && folder.archiveVisibility !== 'domain-only' && folder._internalDeletion == null && !visited.has(folder._key)) {
+          visited.add(folder._key);
+          if (!folder.parentFolderKey) return true;
+          folder = byKey.get(folder.parentFolderKey);
+        }
+        return false;
+      };
+      const available = rows.filter((value) => visible((value as Record<string, unknown>).folderKey));
+      if (available.length !== new Set(keys).size)
         throw new BookRepositoryError(
           "forbidden",
           "One or more selected source documents are unavailable.",
         );
-      return rows.map((value) => {
+      return available.map((value) => {
         const source = value as Record<string, unknown>;
         return {
           key: String(source._key),
@@ -1114,11 +1134,12 @@ export function createBookRepository(
               "conflict",
               "Archive publication prerequisites changed or the generation lease was lost.",
             );
-          const rootKey = stableKey("archive-ascend-root", context.scopeKey);
+          const rootKey = initialWorkspaceFolderKey(context.scopeKey, "learning");
           await transaction.query(
-            'UPSERT { _key: @rootKey } INSERT { _key: @rootKey, scopeKey: @scopeKey, name: "Ascend", description: "Generated books", presentation: "learning", mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE { name: "Ascend", description: "Generated books", presentation: "learning", embedding: @embedding, updatedAt: @now } IN folders',
+            'UPSERT { _key: @rootKey } INSERT { _key: @rootKey, scopeKey: @scopeKey, parentFolderKey: @platformKey, name: "Ascend", presentation: "learning", mutationPolicy: "system-container", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE { parentFolderKey: @platformKey, presentation: "learning", mutationPolicy: "system-container" } IN folders',
             {
               rootKey,
+              platformKey: initialWorkspaceFolderKey(context.scopeKey, "platform"),
               scopeKey: context.scopeKey,
               embedding: book.embedding,
               now,

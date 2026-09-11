@@ -17,7 +17,7 @@ describe('action registry', () => {
 
   test('contains only generic runtime primitives with explicit model policies', () => {
     expect(ACTION_SLUGS).toEqual([
-      'text', 'web', 'image', 'speech', 'embed', 'file', 'upload', 'queue',
+      'text', 'image', 'speech', 'embed', 'file', 'upload', 'queue',
       'traverse', 'read', 'insert', 'upsert', 'update', 'delete',
     ]);
     expect(ACTION_DEFINITIONS.filter((action) => action.modelPolicy === 'none').map((action) => action.id))
@@ -25,7 +25,10 @@ describe('action registry', () => {
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'text')?.models)
       .toEqual([{ slot: 'primary', provider: 'openrouter', model: 'google.gemini-3.1-flash-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'image')?.models)
-      .toEqual([{ slot: 'primary', provider: 'openrouter', model: 'google.gemini-3.1-flash-lite-image', priority: 100 }]);
+      .toEqual([
+        { slot: 'primary', provider: 'openrouter', model: 'google.gemini-3.1-flash-lite-image', priority: 100 },
+        { slot: 'secondary', provider: 'openrouter', model: 'google.gemini-3.1-flash-lite', priority: 90 },
+      ]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'speech')?.models)
       .toEqual([{ slot: 'primary', provider: 'openrouter', model: 'xai.grok-voice-tts-1.0', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'embed')?.models)

@@ -15,6 +15,10 @@
     "backup": "bun src/backup.ts",
     "backfill:svgs": "bun src/backfill-svgs.ts",
     "logo:rgba": "bun src/logo-rgba.ts",
+    "screenshots:render": "tsx src/product-screenshots.ts",
+    "screenshots:smoke": "tsx src/product-screenshots.ts --preset all",
+    "browser:install": "playwright install chromium",
+    "frame:generate": "bun src/generate-device-frame.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -29,6 +33,8 @@
     "@types/bun": "^1.2.0",
     "@types/node": "^24.0.0",
     "@types/prompts": "^2.4.9",
+    "playwright": "^1.61.1",
+    "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   }
 }

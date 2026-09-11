@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { createObservedHttpError, extractDomainErrorCode, extractDomainErrorMessage, observeDomainError, rejectObservedDomainError, subscribeDomainErrors } from "./domain-error-observer";
+import { createObservedHttpError, extractDomainErrorCode, extractDomainErrorMessage, isSparkFundingError, observeDomainError, rejectObservedDomainError, subscribeDomainErrors } from "./domain-error-observer";
 
 test("extracts exact codes from Axios responses, envelopes, and direct SSE errors", () => {
   expect(extractDomainErrorCode({ response: { data: { success: false, error: { code: "INSUFFICIENT_BALANCE" } } } })).toBe("INSUFFICIENT_BALANCE");
@@ -53,7 +53,9 @@ test("observes separate repeated insufficient-balance failures", () => {
   const unsubscribe = subscribeDomainErrors(() => { count += 1; });
   observeDomainError({ code: "INSUFFICIENT_BALANCE" });
   observeDomainError({ code: "INSUFFICIENT_BALANCE" });
+  observeDomainError({ code: "OUTSTANDING_DEBT" });
   observeDomainError({ code: "STORAGE_UNFUNDED" });
-  expect(count).toBe(2);
+  expect(count).toBe(3);
+  expect(isSparkFundingError({ code: "OUTSTANDING_DEBT" })).toBe(true);
   unsubscribe();
 });

@@ -642,11 +642,12 @@ test("shows the selected cleanup count in the visible confirmation question", ()
   expect(source).not.toContain('hideHeading={activeSheet === "confirmCleanupDelete"');
 });
 
-test("gates collection search focus while the Core sheet closes", () => {
+test("restores collection search focus immediately after the Core sheet closes", () => {
   expect(source).toContain("editable={!collectionSearchFocusBlocked}");
   expect(source).toContain("collectionSearchInput.current?.blur()");
   expect(source).toContain("onFocusChange={handleCoreFocusChange}");
-  expect(source).toContain("setTimeout(() => setCollectionSearchFocusBlocked(false), 350)");
+  expect(source).toContain("setCollectionSearchFocusBlocked(false)");
+  expect(source).not.toContain("searchFocusReleaseTimer");
 });
 
 test("keeps the collection workspace owner-only", () => {

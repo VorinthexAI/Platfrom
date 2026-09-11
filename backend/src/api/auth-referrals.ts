@@ -37,7 +37,7 @@ export async function completeReferralForNewlyVerifiedUser(
     await (dependencies.completeReferral ?? referralService.completeVerifiedReferral)(input.userKey, pending);
     await update(input.userKey, { pendingReferralCode: null, updatedAt: new Date().toISOString() });
   } catch (error) {
-    if (error instanceof ReferralRepositoryError && ['INVALID_CODE', 'SELF_REFERRAL', 'REFERRAL_CODE_MISSING'].includes(error.code)) {
+    if (error instanceof ReferralRepositoryError && ['INVALID_CODE', 'SELF_REFERRAL', 'REFERRAL_CODE_MISSING', 'ALREADY_ATTRIBUTED'].includes(error.code)) {
       await update(input.userKey, { pendingReferralCode: null, updatedAt: new Date().toISOString() });
     }
     (dependencies.warn ?? console.warn)('verified referral completion failed', error instanceof Error ? error.message : String(error));

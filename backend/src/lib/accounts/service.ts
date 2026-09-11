@@ -12,6 +12,7 @@ import { toolEventService } from '@/lib/ai/events/service';
 import { sparkService } from '@/lib/sparks/service';
 import { ACCOUNT_GRANT_MICRO_SPARKS } from '@/lib/costs';
 import { referralService } from '@/lib/referrals/service';
+import { sendWelcomeEmail } from '@/lib/email/lifecycle';
 
 export function newcomerGrantInput(eventKey: string) {
   return {
@@ -28,6 +29,7 @@ async function initializeNewAccount(user: User): Promise<User> {
   if (grant.status === 'conflict') throw new Error(`Spark account initialization conflicted for user ${user.key}.`);
   await recordAccountCreatedEvent(user, grant.transaction);
   await referralService.ensurePersonalCode(user.key);
+  if (!user.email.endsWith('@guest.vorinthex.com')) await sendWelcomeEmail(user.email).catch((error) => console.error('welcome email delivery failed', { userKey: user.key, error }));
   return await getUserById(user.key) ?? user;
 }
 

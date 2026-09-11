@@ -69,6 +69,7 @@ test("the switcher limits routes at compile time and renders only server names",
   expect(switcher).not.toContain("serverApp.description");
   expect(switcher).not.toContain("itemDescription");
   expect(switcher).toContain("enterWorkspace(slug)");
+  expect(switcher).not.toContain("displayedName.toUpperCase()");
   expect(switcher).not.toContain("onboardingDescription");
   expect(switcher).not.toMatch(/name: "(Archive|Gallery|Compass|Signal|Ascend)"/);
 });

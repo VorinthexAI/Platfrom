@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useState } from "react";
+import { AppOpenEventBridge } from "./app-open-events";
 import { AuthenticatedEventBridge } from "./event-bridge";
 import { PushNotificationBridge } from "./push-notifications";
 import { PresenceBridge } from "./presence";
@@ -23,7 +24,7 @@ function createQueryClient(): QueryClient {
 
 export function AppQueryProvider({ children }: { children: ReactNode }) {
   const [client] = useState(createQueryClient);
-  return <QueryClientProvider client={client}><AuthenticatedEventBridge /><PresenceBridge /><PushNotificationBridge /><ScopeBootstrap />{children}</QueryClientProvider>;
+  return <QueryClientProvider client={client}><AppOpenEventBridge /><AuthenticatedEventBridge /><PresenceBridge /><PushNotificationBridge /><ScopeBootstrap />{children}</QueryClientProvider>;
 }
 
 function ScopeBootstrap() {

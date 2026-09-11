@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const TEAM_CONNECTORS_COLLECTION = 'teamConnectors';
+export const USER_CONNECTORS_COLLECTION = 'userConnectors';
 
 export const emailProviderSchema = z.literal('gmail');
 export type EmailProvider = z.infer<typeof emailProviderSchema>;
@@ -15,8 +15,9 @@ export const emailConnectorCredentialsSchema = oauthEmailConnectorCredentialsSch
 export type EmailConnectorCredentials = z.infer<typeof emailConnectorCredentialsSchema>;
 export type OAuthEmailConnectorCredentials = z.infer<typeof oauthEmailConnectorCredentialsSchema>;
 
-export const teamConnectorSchema = z.object({
+export const userConnectorSchema = z.object({
   key: z.string().cuid(),
+  userKey: z.string().cuid(),
   teamKey: z.string().min(1),
   scopeKey: z.string().cuid(),
   provider: emailProviderSchema,
@@ -26,8 +27,6 @@ export const teamConnectorSchema = z.object({
   encryptionKeyId: z.string().min(1),
   accessTokenFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   scopes: z.array(z.string().min(1)).min(1),
-  createdByTeamMembershipKey: z.string().cuid(),
-  billingUserKey: z.string().cuid().optional(),
   initialSyncChargeKey: z.string().cuid().optional(),
   status: z.enum(['active', 'error', 'revoked']),
   syncEnabled: z.boolean().default(true),
@@ -52,4 +51,15 @@ export const teamConnectorSchema = z.object({
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 }).strict();
-export type TeamConnector = z.infer<typeof teamConnectorSchema>;
+export type UserConnector = z.infer<typeof userConnectorSchema>;
+
+/** @deprecated Use the user-owned connector names. */
+export const TEAM_CONNECTORS_COLLECTION = USER_CONNECTORS_COLLECTION;
+/** @deprecated Use userConnectorSchema. */
+export const teamConnectorSchema = z.preprocess((value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const { createdByTeamMembershipKey, billingUserKey, ...connector } = value as Record<string, unknown>;
+  return { ...connector, userKey: connector.userKey ?? billingUserKey ?? connector.key ?? createdByTeamMembershipKey };
+}, userConnectorSchema);
+/** @deprecated Use UserConnector. */
+export type TeamConnector = UserConnector;

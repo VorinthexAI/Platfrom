@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { newId } from '@/lib/ids';
-import { createCompleteAccountAvatarHandler, createUpdateAccountProfileHandler } from './account-profile';
+import { APP_KEYS } from '@/lib/apps/registry';
+import { runWithEventApp } from '@/lib/ai/events/runtime';
+import { createCompleteAccountAvatarHandler, createProfileBadgeHandlers, createUpdateAccountProfileHandler } from './account-profile';
 
 describe('account profile HTTP API', () => {
   test('requires a user and rejects unknown fields', async () => {
@@ -58,5 +60,44 @@ describe('account profile HTTP API', () => {
     const completeResponse = await complete.request('/avatar/complete', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ uploadKey: newId() }) });
     expect(completeResponse.status).toBe(200);
     expect(await completeResponse.json()).toMatchObject({ success: true, data: { profile: { name: 'Ada', avatarUrl: null } } });
+  });
+
+  test('routes badge generation and claim through the same canonical service with trusted identity', async () => {
+    const userKey = newId();
+    const scopeKey = newId();
+    const teamKey = 'team-1';
+    const candidateKey = newId();
+    const appScopeKey = newId();
+    const calls: unknown[][] = [];
+    const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey, name: 'Ada' }, userTeam: { key: newId(), teamKey, userId: userKey, status: 'active' } } } as any;
+    const recordEvent = async (...args: unknown[]) => { calls.push(['event', ...args]); };
+    const handlers = createProfileBadgeHandlers({
+      getIdentity: async () => ({ key: userKey, identityType: 'user' }),
+      authorize: async (selectors) => { calls.push(['authorize', selectors]); return { context }; },
+      service: {
+        generate: async (...args) => { calls.push(['generate', ...args]); return { candidateKey, avatarUrl: 'https://example.com/candidate.png', expiresAt: '2026-09-09T10:10:00.000Z' }; },
+        claim: (async (...args: unknown[]) => { calls.push(['claim', ...args]); return { profile: { name: 'Ada', profileStorageKey: `profiles/${userKey}/${candidateKey}.png` } }; }) as any,
+      },
+      recordEvent,
+      billing: {
+        charge: async () => ({ status: 'applied', transaction: { key: newId(), eventKey: newId() }, claimOwner: 'owner-1' }) as any,
+        complete: async () => true,
+        renew: async () => true,
+      },
+      signAvatar: async () => 'https://example.com/profile.png',
+    });
+    const app = new Hono()
+      .post('/badge', (c) => runWithEventApp(APP_KEYS.CORE, appScopeKey, () => handlers.generate(c), recordEvent))
+      .post('/badge/claim', (c) => runWithEventApp(APP_KEYS.CORE, appScopeKey, () => handlers.claim(c), recordEvent));
+
+    const generate = await app.request('/badge', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'badge-request-1' }, body: JSON.stringify({ teamKey, scopeKey }) });
+    expect(generate.status).toBe(201);
+    expect(await generate.json()).toMatchObject({ success: true, data: { candidateKey } });
+    const claim = await app.request('/badge/claim', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, candidateKey }) });
+    expect(claim.status).toBe(200);
+    expect(await claim.json()).toEqual({ success: true, data: { profile: { name: 'Ada', avatarUrl: 'https://example.com/profile.png' } } });
+    expect(calls).toContainEqual(['generate', {}, context, 'badge-request-1']);
+    expect(calls).toContainEqual(['claim', { candidateKey }, userKey]);
+    expect(calls.filter(([kind]) => kind === 'authorize')).toEqual([['authorize', { teamKey, scopeKey }], ['authorize', { teamKey, scopeKey }]]);
   });
 });

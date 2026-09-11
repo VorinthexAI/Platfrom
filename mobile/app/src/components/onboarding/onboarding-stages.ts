@@ -1,6 +1,7 @@
 import type { ServerApp } from "@/lib/apps-registry";
 
 export const ONBOARDING_APP_SLUGS = [
+  "vorinthex-ai",
   "archive",
   "gallery",
   "compass",

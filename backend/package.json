@@ -22,6 +22,7 @@
     "test:email-attachments:live": "bun --no-env-file run scripts/email-attachments-live.ts",
     "test:e2e:archive-api": "bun run load-local-env && bun --env-file=.env.local run scripts/archive-api-e2e.ts",
     "test:e2e:core-agent-live": "bun run load-local-env && bun --env-file=.env.local run scripts/core-agent-live-e2e.ts",
+    "test:e2e:core-agent-paid": "bun run load-local-env && bun --env-file=.env.local run scripts/core-agent-live-e2e.ts --paid",
     "test:e2e:travel": "bun run load-local-env && bun --env-file=.env.local run scripts/travel-e2e.ts",
     "test:e2e:place-guide": "bun run load-local-env && bun --env-file=.env.local run scripts/place-guide-live.ts",
     "test:e2e:rag-live": "bun run scripts/rag-live-e2e.ts",

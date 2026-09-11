@@ -47,7 +47,7 @@ describe('canonical scope service', () => {
   test('allows only owners/admins to create and injects trusted identity and idempotency', async () => {
     const calls: unknown[] = [];
     const created = scope();
-    const service = createScopeService({ authorizeTeam: async () => teamDecision('admin'), createInTransaction: async (input) => { calls.push(input); return { scope: created, role: 'admin', currentScopeKey }; } });
+    const service = createScopeService({ authorizeTeam: async () => teamDecision('admin'), createInTransaction: async (input) => { calls.push(input); return { scope: created, role: 'admin', currentScopeKey }; }, ensureInitialWorkspaceContent: async (scopeKey) => { expect(scopeKey).toBe(created.key); } });
     await expect(service.create({ name: ' Plans ', description: ' Team plans ' }, context, 'request-1')).resolves.toMatchObject({ key: created.key, role: 'admin', isCurrent: false });
     expect(calls).toEqual([{ teamKey, userKey, name: 'Plans', description: 'Team plans', idempotencyKey: 'scope.create:request-1' }]);
     const denied = createScopeService({ authorizeTeam: async () => teamDecision('viewer'), createInTransaction: async () => ({ scope: created, role: 'viewer', currentScopeKey }) });

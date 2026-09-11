@@ -35,6 +35,18 @@ describe('Gallery repository collection access', () => {
     }
   });
 
+  test('attaches conversation media only through the exact managed uploaded-image boundary', async () => {
+    const queries: string[] = [];
+    const database = { async query(query: string) { queries.push(query); return { async all() { return query.includes('RETURN { elevated:') ? [{ elevated: true, memberScopes: [], relations: [] }] : [newId()]; } }; } };
+    const repository = createGalleryRepository(database as never, async (_collections, operation) => operation(database as never));
+    await expect(repository.attachConversationMedia(newId(), newId(), [newId()], newId(), new Date().toISOString())).resolves.toBe(true);
+    const attachment = queries.find((query) => query.includes('image.origin == "uploaded"')) ?? '';
+    expect(attachment).toContain('collection.purpose == "generated-media"');
+    expect(attachment).toContain('collection.mutationPolicy == "system-only"');
+    expect(attachment).toContain('image.mutationPolicy == "user"');
+    expect(attachment).toContain('image.createdByKey == @actorKey');
+  });
+
   test('declares only the bind variables used by each upload queue query', async () => {
     const now = new Date().toISOString();
     const uploadKey = newId();

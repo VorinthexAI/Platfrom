@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { sparkCostsResponseSchema } from "./cost-client";
 
 test("parses inbox, storage, and variable Spark charges while rejecting retired recurring contracts and grants", () => {
-  const response = sparkCostsResponseSchema.parse({ success: true, data: { charges: [
+  const response = sparkCostsResponseSchema.parse({ success: true, data: { capabilityCosts: { "profile.badge.generate": { sparkCost: "10", microSparkCost: 10_000_000, unit: "invocation" } }, charges: [
     { key: "document.parse", kind: "static", name: "Parse a document", description: "Extract content.", sparkCost: "2", unit: "documents" },
     { key: "storage", kind: "storage", name: "Storage", description: "Charged hourly.", sparkCost: "30", unit: "gb-month" },
     { key: "inbox.sync", kind: "static", name: "Connect an inbox", description: "Initial import.", sparkCost: "100", unit: "invocation" },
@@ -11,6 +11,7 @@ test("parses inbox, storage, and variable Spark charges while rejecting retired 
     { key: "ai-usage", kind: "variable", name: "AI actions", description: "Based on usage." },
   ] } });
   expect(response.data.charges).toHaveLength(5);
-  expect(() => sparkCostsResponseSchema.parse({ success: true, data: { charges: [{ key: "connected-inbox", kind: "recurring", name: "Connected inbox", description: "Retired", sparkCost: "100", unit: "inbox-month" }] } })).toThrow();
-  expect(() => sparkCostsResponseSchema.parse({ success: true, data: { charges: [{ key: "topup.small", kind: "grant", name: "Top-up", description: "Grant", sparkCost: "200", unit: "invocation" }] } })).toThrow();
+  expect(response.data.capabilityCosts["profile.badge.generate"]?.sparkCost).toBe("10");
+  expect(() => sparkCostsResponseSchema.parse({ success: true, data: { capabilityCosts: {}, charges: [{ key: "connected-inbox", kind: "recurring", name: "Connected inbox", description: "Retired", sparkCost: "100", unit: "inbox-month" }] } })).toThrow();
+  expect(() => sparkCostsResponseSchema.parse({ success: true, data: { capabilityCosts: {}, charges: [{ key: "topup.small", kind: "grant", name: "Top-up", description: "Grant", sparkCost: "200", unit: "invocation" }] } })).toThrow();
 });

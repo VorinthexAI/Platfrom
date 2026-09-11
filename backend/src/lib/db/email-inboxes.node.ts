@@ -5,6 +5,7 @@ export const EMAIL_INBOXES_COLLECTION = 'emailInboxes';
 export const emailInboxEmbeddingFields = ['name', 'description'] as const;
 export const emailInboxSchema = z.object({
   key: z.string().cuid(),
+  userKey: z.string().cuid(),
   teamKey: z.string().min(1),
   scopeKey: z.string().cuid(),
   connectorKey: z.string().cuid(),

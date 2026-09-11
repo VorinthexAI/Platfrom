@@ -124,4 +124,17 @@ describe('Spark service', () => {
     expect(await service.getBalance('user-1')).toBe(20);
     expect(await service.getBalance('user-2')).toBe(50);
   });
+
+  test('publishes balance invalidation after persisted charges and refunds', async () => {
+    const memory = createMemoryRepository(100);
+    const events: string[] = [];
+    const service = createSparkService({
+      repository: memory.repository,
+      createKey: () => `transaction-${memory.transactions.length}`,
+      publishBalance: async (userKey, event) => { events.push(`${userKey}:${event}`); },
+    });
+    const charge = await service.charge('user-1', { ...identity, kind: 'tool', toolSlug: 'document.create', microSparks: 20 });
+    await service.refund('user-1', { ...identity, idempotencyKey: 'refund-1', microSparks: 20, chargeTransactionKey: charge.transaction.key });
+    expect(events).toEqual(['user-1:spark.balance.changed', 'user-1:spark.balance.changed']);
+  });
 });

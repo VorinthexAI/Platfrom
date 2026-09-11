@@ -17,7 +17,7 @@ describe('team connector indexes', () => {
     };
     await ensureTeamConnectorsCollection({ collection: () => collection, query: async () => ({ next: async () => 0 }) } as never);
     expect(dropped).toEqual(['legacy']);
-    expect(ensured[0]).toEqual({ type: 'persistent', fields: ['teamKey', 'scopeKey', 'provider', 'providerAccountId'], unique: true });
+    expect(ensured[0]).toEqual({ type: 'persistent', fields: ['userKey', 'provider', 'providerAccountId'], unique: true });
     expect(ensured).not.toContainEqual({ type: 'persistent', fields: ['billingStatus'] });
     expect(operations.slice(0, 2)).toEqual(['ensure', 'drop:legacy']);
   });

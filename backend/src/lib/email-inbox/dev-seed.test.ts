@@ -3,11 +3,13 @@ import { assertLocalMailSeedEnvironment, buildMailDevSeedManifest, mailDevFixtur
 import { folderSchema } from '@/lib/db/folders.node';
 import { toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { createEmailRepository } from './repository';
+import { initialWorkspaceFolderKey } from '@/lib/initial-workspace-content-identifiers';
 
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
 const teamKey = 'cmrnlzf650002qc7k4p5zem5w';
-const teamMembershipKey = 'cmrnlzf660003qc7kmember001';
+const userKey = 'cmrnlzf670004qc7kuser00001';
 const credentials = () => ({ encryptedCredentials: 'v1:fixture:fixture:fixture', encryptionKeyId: 'fixture', accessTokenFingerprint: '0'.repeat(64) });
+const seedInput = { userKey, teamKey, scopeKey, credentials };
 
 describe('mail development seed safety', () => {
   test('accepts only explicit loopback URLs outside production', () => {
@@ -18,10 +20,12 @@ describe('mail development seed safety', () => {
   });
 
   test('builds schema-valid deterministic disabled connectors, inboxes, and archive documents', () => {
-    const first = buildMailDevSeedManifest({ teamKey, scopeKey, teamMembershipKey, credentials });
-    const second = buildMailDevSeedManifest({ teamKey, scopeKey, teamMembershipKey, credentials });
+    const first = buildMailDevSeedManifest(seedInput);
+    const second = buildMailDevSeedManifest(seedInput);
     expect(second).toEqual(first);
     expect(first.connectors).toHaveLength(3);
+    expect(first.connectors.every((connector) => connector.userKey === userKey)).toBe(true);
+    expect(first.emailThreads.every((thread) => thread.userKey === userKey && thread.scopeKey === userKey)).toBe(true);
     expect(first.fixtures.threads).toHaveLength(30);
     expect(first.fixtures.threads.reduce((sum, thread) => sum + thread.messages.length, 0)).toBe(60);
     expect(first.fixtures.drafts).toHaveLength(6);
@@ -32,9 +36,10 @@ describe('mail development seed safety', () => {
     expect(first.inboxes.map(({ connectorKey }) => connectorKey)).toEqual(first.connectors.map(({ key }) => key));
     expect(first.inboxes.every(({ key }) => first.exportFolders.every(({ _key }) => _key !== key))).toBe(true);
     expect(first.inboxes.every(({ connectorKey }) => first.exportFolders.some(({ _key }) => _key === mailDevFixtureKey('email-archive-export-inbox', scopeKey, connectorKey)))).toBe(true);
+    expect(first.exportFolders.every(({ _key }) => _key !== initialWorkspaceFolderKey(scopeKey, 'communication'))).toBe(true);
     expect(first.exportFolders.every((folder) => folderSchema.safeParse(withArangoKey(folder)).success)).toBe(true);
     expect(first.exportFolders.every(({ mutationPolicy, managedPurpose, managedOwnerKey }) => mutationPolicy === 'user' && managedPurpose == null && managedOwnerKey == null)).toBe(true);
-    expect(first.exportFolders.filter(({ parentFolderKey }) => parentFolderKey == null).every(({ presentation }) => presentation === 'communication')).toBe(true);
+    expect(first.exportFolders.every(({ parentFolderKey }) => parentFolderKey != null)).toBe(true);
     expect(first.exportFolders.filter(({ parentFolderKey }) => parentFolderKey != null).every(({ presentation }) => presentation == null)).toBe(true);
     expect(first.exportFolders.filter(({ name }) => name === 'Files')).toHaveLength(3);
     const threadExportKeys = new Set(first.emailThreads.map((thread) => mailDevFixtureKey('email-archive-thread-export', thread.key)));
@@ -57,7 +62,7 @@ describe('mail development seed safety', () => {
   });
 
   test('canonical thread detail preserves fixture attachments on every message', async () => {
-    const manifest = buildMailDevSeedManifest({ teamKey, scopeKey, teamMembershipKey, credentials });
+    const manifest = buildMailDevSeedManifest(seedInput);
     const fixture = manifest.fixtures.threads.find(({ messages }) => messages.every(({ hasAttachments }) => hasAttachments));
     if (!fixture) throw new Error('Expected an attachment fixture spanning both thread messages.');
     const threadKey = mailDevFixtureKey('mail-thread', scopeKey, fixture.thread.accountKey, fixture.thread.providerThreadId);
@@ -70,7 +75,7 @@ describe('mail development seed safety', () => {
       },
       collection() { return {}; },
     };
-    const detail = await createEmailRepository(database as never).thread(scopeKey, threadKey);
+    const detail = await createEmailRepository(database as never).thread(userKey, threadKey);
     expect(detail.messages.map(({ attachments }) => attachments)).toEqual(fixture.messages.map(({ attachments }) => attachments));
     expect(detail.messages.map(({ attachmentAvailability }) => attachmentAvailability)).toEqual(['complete', 'complete']);
   });
@@ -78,12 +83,12 @@ describe('mail development seed safety', () => {
   test('reconciliation uses change-filtered upserts and fixture-bounded stale cleanup', async () => {
     const queries: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const database = { async query(query: string, bindVars?: Record<string, unknown>) { queries.push({ query, bindVars }); return { async next() { return 0; }, async all() { return []; } }; } };
-    const manifest = buildMailDevSeedManifest({ teamKey, scopeKey, teamMembershipKey, credentials });
+    const manifest = buildMailDevSeedManifest(seedInput);
     await reconcileMailDevSeed(database, manifest);
     const upserts = queries.filter(({ query }) => query.includes('UPSERT'));
     expect(upserts).toHaveLength(9);
     expect(upserts.every(({ query }) => query.includes('FILTER current == null ||'))).toBe(true);
-    expect(upserts.map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['teamConnectors', 'emailInboxes', 'folders', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'documents']);
+    expect(upserts.map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['userConnectors', 'emailInboxes', 'folders', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'documents']);
     const staleConnectors = queries.find(({ query }) => query.includes('staleConnectorKeys'))!;
     expect(staleConnectors.query).toContain('REMOVE inbox IN emailInboxes');
     const staleDocuments = queries.find(({ query }) => query.includes('document.developmentFixtureIdentifier == @prefix'))!;
@@ -94,7 +99,7 @@ describe('mail development seed safety', () => {
   test('verification compares exact fixture state while preserving only encrypted credential fields', async () => {
     let query = '';
     const database = { async query(value: string) { query = value; return { async next() { return { connectorMismatches: 0, folderMismatches: 0, documentMismatches: 0, attachmentMismatches: 0, extraFixtureConnectors: 0, extraFixtureDocuments: 0 }; }, async all() { return []; } }; } };
-    const manifest = buildMailDevSeedManifest({ teamKey, scopeKey, teamMembershipKey, credentials });
+    const manifest = buildMailDevSeedManifest(seedInput);
     await expect(verifyMailDevSeed(database, manifest)).resolves.toMatchObject({ connectors: 3, threads: 30, messages: 60, attachmentReferences: 13 });
     expect(query).toContain('UNSET(current, "_id", "_rev") != desired');
     expect(query).toContain('extraFixtureDocuments');
@@ -107,7 +112,7 @@ describe('mail development seed safety', () => {
 
   test('verification rejects any extra fixture-owned entity', async () => {
     const database = { async query() { return { async next() { return { connectorMismatches: 0, folderMismatches: 0, documentMismatches: 0, attachmentMismatches: 0, extraFixtureConnectors: 0, extraFixtureDocuments: 1 }; }, async all() { return []; } }; } };
-    const manifest = buildMailDevSeedManifest({ teamKey, scopeKey, teamMembershipKey, credentials });
+    const manifest = buildMailDevSeedManifest(seedInput);
     await expect(verifyMailDevSeed(database, manifest)).rejects.toThrow('Mail fixture verification failed');
   });
 });

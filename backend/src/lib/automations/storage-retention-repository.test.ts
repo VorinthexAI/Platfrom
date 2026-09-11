@@ -33,9 +33,9 @@ describe('storage retention repository', () => {
   test('projects exact stored bytes and monthly Sparks at the canonical decimal GB rate', async () => {
     expect(storageMonthlyCostSparks('6000000000')).toBe('180');
     expect(storageMonthlyCostSparks('1')).toBe('0.000001');
-    const database = { async query() { return { async next() { return undefined; }, async all() { return [{ state: { _key: 'state', userKey: 'user', paymentPastDueAt: '2026-01-01T00:00:00.000Z', wipeDueAt: '2026-04-01T00:00:00.000Z', minimumBalanceMicroSparks: 10 }, balanceMicroSparks: 0, storedByteSizes: ['9007199254740993', '7'] }]; } }; } };
+    const database = { async query() { return { async next() { return undefined; }, async all() { return [{ state: { _key: 'state', userKey: 'user', paymentPastDueAt: '2026-01-01T00:00:00.000Z', wipeDueAt: '2026-04-01T00:00:00.000Z', minimumBalanceMicroSparks: 10 }, balanceMicroSparks: 0, spendingBlocked: false, storedByteSizes: ['9007199254740993', '7'] }]; } }; } };
     const [state] = await createStorageRetentionRepository(database, async (operation) => operation(database)).listUnfunded();
-    expect(state).toMatchObject({ storedBytes: '9007199254741000', monthlyCostSparks: '270215977.64223' });
+    expect(state).toMatchObject({ spendingBlocked: false, storedBytes: '9007199254741000', monthlyCostSparks: '270215977.64223' });
   });
 
   test('detaches the complete owned reference set and completes the fenced wipe', async () => {

@@ -198,7 +198,7 @@ test("matches Signal attachment presentation for Archive context", () => {
 });
 
 test("provides detail, chapter summaries, playback infrastructure, and lifecycle controls", () => {
-  expect(workspace).toContain('detail.book.coverUrl ? <Cover book={detail.book} /> : <Skeleton accessibilityLabel="Creating audio book cover"');
+  expect(workspace).toContain('detail.book.coverUrl || detail.book.managed ? <Cover book={detail.book} /> : <Skeleton accessibilityLabel="Creating audio book cover"');
   expect(workspace).toContain('<Skeleton style={styles.detailHeroSkeleton} />');
   expect(workspace).toContain('<Text style={styles.chapterHeading}>Chapters</Text>');
   expect(workspace).toContain('<LoadingText text={chapterLoadingText} />');
@@ -298,7 +298,8 @@ test("delegates custom topic and goal sheet focus to shared BottomSheet", () => 
 });
 
 test("optimistically extends ready audio books by three chapters", () => {
-  expect(workspace).toContain('selectedBook.status === "ready" ? <BottomSheetItem');
+  expect(workspace).toContain('selectedBook.status === "ready" && selectedBook.canExtend ? <BottomSheetItem');
+  expect(workspace).toContain('{!selectedBook.managed ? <BottomSheetItem');
   expect(workspace).toContain('>Extend</BottomSheetItem>');
   expect(workspace).toContain('sheet === "extend"');
   expect(workspace).toContain('? "Extend audio book?"');
@@ -314,6 +315,17 @@ test("optimistically extends ready audio books by three chapters", () => {
   expect(workspace).toContain('book === mutationContext.optimisticBook ? mutationContext.previousBook : book');
   expect(workspace).toContain('requestKey: randomUUID()');
   expect(workspace).not.toContain('ascendQueryKeys.extension');
+});
+
+test("renders the managed cover as separate auth backdrop and centered logo layers", () => {
+  expect(workspace).toContain("if (book.managed)");
+  expect(workspace).toContain("styles.managedCoverBackdropLayer");
+  expect(workspace).toContain("<NeuralBackdrop height={fallbackSize.height} width={fallbackSize.width} />");
+  expect(workspace).toContain("styles.managedCoverLogoLayer");
+  expect(workspace).toContain("const fallbackLogoSize = Math.max(56, Math.min(96, Math.round(fallbackSize.width * 0.58)))");
+  expect(workspace).toContain("<ChromeIcon glow={0} size={fallbackLogoSize} source={vorinthexMarkSource} />");
+  expect(workspace).toContain("source={vorinthexMarkSource}");
+  expect(workspace).toContain("detail.book.coverUrl || detail.book.managed");
 });
 
 test("optimistically removes a single deleted audio book without a loading button", () => {

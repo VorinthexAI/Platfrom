@@ -39,11 +39,20 @@ test("workspace events and reconnects refresh active canonical search retrievals
   expect(bridge).toContain('refetchType: "active"');
 });
 
-test("referral rewards and no-replay recovery refresh the authenticated user's billing summary", () => {
+test("referral rewards and no-replay recovery refresh billing and referral status", () => {
   expect(bridge).toContain('import { billingSummaryQueryKey } from "./billing-client"');
+  expect(bridge).toContain('import { referralSummaryQueryKey } from "./referral-client"');
   expect(bridge).toContain('queryKey: billingSummaryQueryKey(userKey), exact: true, refetchType: "active"');
-  expect(bridge).toContain('if (event.event === "referral.reward.created") invalidateBilling()');
-  expect(bridge.match(/invalidateBilling\(\)/g)?.length).toBe(3);
-  expect(bridge).toMatch(/}, currentController\.signal, \(\) => \{[\s\S]*?invalidateBilling\(\)[\s\S]*?publishAppEvent\(\{ type: "event-stream\.connected" \}\)/);
-  expect(bridge).toMatch(/if \(!wasActive\) \{[\s\S]*?invalidateBilling\(\)[\s\S]*?connect\(\)/);
+  expect(bridge).toContain('queryKey: referralSummaryQueryKey(userKey), exact: true, refetchType: "active"');
+  expect(bridge).toContain('if (event.event === "spark.balance.changed") invalidateBilling()');
+  expect(bridge).toContain('event.data === "OUTSTANDING_DEBT" ? "OUTSTANDING_DEBT" : INSUFFICIENT_BALANCE_CODE');
+  expect(bridge).toContain('handledFundingRequirementKeys.current.has(event.id)');
+  expect(bridge).toContain('fundingRequirementAcknowledgements.current.has(event.id)');
+  expect(bridge).toContain('fundingRequirementAcknowledgements.current.delete(event.id!)');
+  expect(bridge).toContain('if (!isCurrent() || !active) return');
+  expect(bridge).toMatch(/if \(event\.event === "referral\.reward\.created"\) \{\s+invalidateBilling\(\);\s+invalidateReferral\(\);/);
+  expect(bridge.match(/invalidateBilling\(\)/g)?.length).toBe(4);
+  expect(bridge.match(/invalidateReferral\(\)/g)?.length).toBe(3);
+  expect(bridge).toMatch(/}, currentController\.signal, \(\) => \{[\s\S]*?invalidateBilling\(\);\s+invalidateReferral\(\);[\s\S]*?publishAppEvent\(\{ type: "event-stream\.connected" \}\)/);
+  expect(bridge).toMatch(/if \(!wasActive\) \{[\s\S]*?invalidateBilling\(\);\s+invalidateReferral\(\);[\s\S]*?connect\(\)/);
 });

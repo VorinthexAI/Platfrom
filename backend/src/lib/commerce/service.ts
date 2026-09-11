@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { publishUserEvent } from '@/api/events';
 import { newId } from '@/lib/ids';
 import { resolvePurchaseGrantMicroSparks } from '@/lib/costs';
 import { referralService } from '@/lib/referrals/service';
+import { getUserById } from '@/lib/db/users.node';
+import { sendSubscriptionCancellationEmail, sendSubscriptionPurchaseEmail, sendSubscriptionRenewalEmail, sendTopUpPurchaseEmail } from '@/lib/email/lifecycle';
 import { checkoutCreateInputSchema, checkoutCreateResultSchema, currentSubscriptionResultSchema, productIdSchema, publicProductSchema, subscriptionSchema, subscriptionStatusSchema } from './contracts';
 import { createArangoCommerceRepository, type CommerceRepository } from './repository';
 import { createPolarProvider, PolarProviderError, type PolarProvider } from './polar';
@@ -76,6 +79,12 @@ export interface CommerceServiceDependencies {
   createProvider?: () => PolarProvider;
   applyFirstPaidReward?: typeof referralService.applyFirstPaidReward;
   reverseFirstPaidReward?: typeof referralService.reverseFirstPaidReward;
+  publishBalance?: typeof publishUserEvent;
+  getEmailRecipient?: (userKey: string) => Promise<{ email: string; name?: string | null } | null>;
+  sendTopUpPurchaseEmail?: typeof sendTopUpPurchaseEmail;
+  sendSubscriptionPurchaseEmail?: typeof sendSubscriptionPurchaseEmail;
+  sendSubscriptionRenewalEmail?: typeof sendSubscriptionRenewalEmail;
+  sendSubscriptionCancellationEmail?: typeof sendSubscriptionCancellationEmail;
   createKey?: () => string;
   now?: () => Date;
 }
@@ -83,8 +92,12 @@ export interface CommerceServiceDependencies {
 const CHECKOUT_SUCCESS_URL = 'https://vorinthex.com/checkout/success';
 const CHECKOUT_RETURN_URL = 'https://vorinthex.com/checkout/error';
 
-export function createCommerceService({ repository, provider, createProvider = createPolarProvider, applyFirstPaidReward = referralService.applyFirstPaidReward, reverseFirstPaidReward = referralService.reverseFirstPaidReward, createKey = newId, now = () => new Date() }: CommerceServiceDependencies) {
+export function createCommerceService({ repository, provider, createProvider = createPolarProvider, applyFirstPaidReward = referralService.applyFirstPaidReward, reverseFirstPaidReward = referralService.reverseFirstPaidReward, publishBalance = async () => {}, getEmailRecipient = getUserById, sendTopUpPurchaseEmail: sendTopUp = sendTopUpPurchaseEmail, sendSubscriptionPurchaseEmail: sendSubscriptionPurchase = sendSubscriptionPurchaseEmail, sendSubscriptionRenewalEmail: sendSubscriptionRenewal = sendSubscriptionRenewalEmail, sendSubscriptionCancellationEmail: sendSubscriptionCancellation = sendSubscriptionCancellationEmail, createKey = newId, now = () => new Date() }: CommerceServiceDependencies) {
   const polar = () => provider ?? createProvider();
+  async function emailRecipient(userKey: string) {
+    const recipient = await getEmailRecipient(userKey);
+    return recipient && !recipient.email.endsWith('@guest.vorinthex.com') ? { email: recipient.email, name: recipient.name } : null;
+  }
   async function productReference(data: z.infer<typeof webhookDataSchema>) {
     const providerIds = [data.product_id, data.product?.id].filter((value): value is string => Boolean(value));
     const metadataIds = [data.metadata?.productId, data.product?.metadata?.productId].filter((value): value is string => typeof value === 'string');
@@ -124,7 +137,18 @@ export function createCommerceService({ repository, provider, createProvider = c
       throw new CommerceError('INVALID_REFERENCE', 'Paid order does not match the immutable catalog price.');
     }
     const result = await repository.fulfillPaidOrder({ ...facts, productKey: product.key, productId: product.productId, currency: 'USD', grantMicroSparks, occurredAt: facts.paidAt });
-    await applyFirstPaidReward(facts.userKey, result.order.key);
+    await publishBalance(facts.userKey, 'spark.balance.changed').catch(() => undefined);
+    if (product.type === 'subscription' && result.order.status !== 'refunded') await applyFirstPaidReward(facts.userKey, result.order.key);
+    if (result.status === 'applied') {
+      await (async () => {
+        const recipient = await emailRecipient(facts.userKey);
+        if (!recipient) return;
+        const input = { ...recipient, amountCents: facts.amountCents, billingPeriod: product.billingPeriod, grantMicroSparks };
+        if (facts.billingReason === 'purchase') await sendTopUp(input);
+        else if (facts.billingReason === 'subscription_create') await sendSubscriptionPurchase(input);
+        else await sendSubscriptionRenewal(input);
+      })().catch((error) => console.error('commerce confirmation email delivery failed', { userKey: facts.userKey, billingReason: facts.billingReason, error }));
+    }
     return result;
   }
   async function applySubscriptionFacts(rawFacts: unknown) {
@@ -153,6 +177,7 @@ export function createCommerceService({ repository, provider, createProvider = c
     const result = await repository.applyOrderRefund(facts.providerOrderId, facts.refundedAmountCents, facts.refundedAt);
     if (!result) throw new CommerceError('INVALID_REFERENCE', 'Refund references an unknown paid order.');
     if (result.order.status === 'refunded') await reverseFirstPaidReward(result.order.key, facts.refundedAt);
+    await publishBalance(result.order.userKey, 'spark.balance.changed').catch(() => undefined);
     return result;
   }
   return Object.freeze({
@@ -201,9 +226,20 @@ export function createCommerceService({ repository, provider, createProvider = c
     async setCancellation(trustedUserKey: string, cancelAtPeriodEnd: boolean) {
       const current = await repository.getCurrentSubscription(trustedUserKey);
       if (!current) throw new CommerceError('SUBSCRIPTION_NOT_FOUND', 'Current subscription was not found.');
+      if (current.cancelAtPeriodEnd === cancelAtPeriodEnd) {
+        const { providerSubscriptionId: _providerSubscriptionId, ...safe } = current;
+        return currentSubscriptionResultSchema.parse(safe);
+      }
       const response = await polar().updateSubscription(current.providerSubscriptionId, cancelAtPeriodEnd);
       const projectedAt = now().toISOString();
-      const saved = (await repository.upsertSubscription({ ...current, status: response.status, cancelAtPeriodEnd: response.cancel_at_period_end, currentPeriodStart: response.current_period_start ?? current.currentPeriodStart, currentPeriodEnd: response.current_period_end ?? current.currentPeriodEnd, providerModifiedAt: response.modified_at ?? current.providerModifiedAt, updatedAt: projectedAt })).subscription;
+      const projection = await repository.upsertSubscription({ ...current, status: response.status, cancelAtPeriodEnd: response.cancel_at_period_end, currentPeriodStart: response.current_period_start ?? current.currentPeriodStart, currentPeriodEnd: response.current_period_end ?? current.currentPeriodEnd, providerModifiedAt: response.modified_at ?? current.providerModifiedAt, updatedAt: projectedAt });
+      const saved = projection.subscription;
+      if (projection.status === 'applied' && !current.cancelAtPeriodEnd && saved.cancelAtPeriodEnd) {
+        await (async () => {
+          const recipient = await emailRecipient(trustedUserKey);
+          if (recipient) await sendSubscriptionCancellation({ ...recipient, currentPeriodEnd: saved.currentPeriodEnd });
+        })().catch((error) => console.error('subscription cancellation email delivery failed', { userKey: trustedUserKey, error }));
+      }
       const { providerSubscriptionId: _providerSubscriptionId, ...safe } = saved;
       return currentSubscriptionResultSchema.parse(safe);
     },
@@ -274,5 +310,5 @@ export function createCommerceService({ repository, provider, createProvider = c
   });
 }
 
-export const commerceService = createCommerceService({ repository: createArangoCommerceRepository() });
+export const commerceService = createCommerceService({ repository: createArangoCommerceRepository(), publishBalance: publishUserEvent });
 export type CommerceService = ReturnType<typeof createCommerceService>;

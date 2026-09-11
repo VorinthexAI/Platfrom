@@ -145,6 +145,13 @@ export interface GalleryRepository {
     actorKey: string,
     now: string,
   ): Promise<boolean>;
+  attachConversationMedia(
+    scopeKey: string,
+    collectionKey: string,
+    imageKeys: string[],
+    actorKey: string,
+    now: string,
+  ): Promise<boolean>;
   createCollection(collection: Collection): Promise<boolean>;
   listOverview(input: {
     scopeKey: string;
@@ -900,6 +907,17 @@ export function createGalleryRepository(
             `LET collection = DOCUMENT(collections, @collectionKey) LET eligible = collection != null && collection.scopeKey == @scopeKey && collection.purpose == "generated-media" && collection.mutationPolicy == "system-only" ? (FOR relation IN @relations LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.origin == "generated" && image.mutationPolicy == "user" && image.createdByKey == @actorKey RETURN relation) : [] FILTER LENGTH(eligible) == LENGTH(@relations) FOR relation IN eligible UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: relation.imageKey } INSERT relation UPDATE {} IN collectionImages RETURN relation.imageKey`,
             { scopeKey, collectionKey, actorKey, relations },
           );
+          return attached.length === imageKeys.length;
+        },
+      );
+    },
+    attachConversationMedia(scopeKey, collectionKey, imageKeys, actorKey, now) {
+      const relations = imageKeys.map((imageKey) => toArangoDoc(collectionImageSchema.parse({ key: newId(), scopeKey, collectionKey, imageKey, addedByKey: actorKey, createdAt: now })));
+      return transaction(
+        { read: ["images", "collections", "scopeMembers", "scopeScopes", "userTeams"], write: ["collectionImages"] },
+        async (tx) => {
+          if (!(await hasEffectiveScopeAccess(tx, scopeKey, actorKey))) return false;
+          const attached = await all(tx, `LET collection = DOCUMENT(collections, @collectionKey) LET eligible = collection != null && collection.scopeKey == @scopeKey && collection.purpose == "generated-media" && collection.mutationPolicy == "system-only" ? (FOR relation IN @relations LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.origin == "uploaded" && image.mutationPolicy == "user" && image.createdByKey == @actorKey RETURN relation) : [] FILTER LENGTH(eligible) == LENGTH(@relations) FOR relation IN eligible UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: relation.imageKey } INSERT relation UPDATE {} IN collectionImages RETURN relation.imageKey`, { scopeKey, collectionKey, actorKey, relations });
           return attached.length === imageKeys.length;
         },
       );

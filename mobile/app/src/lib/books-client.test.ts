@@ -5,7 +5,7 @@ const calls: { method: string; path: string; body: unknown; config?: unknown }[]
 let lifecycleFailure = false;
 let favoriteDeleteFailure = false;
 const authState: { team: { key: string } | null; scope: { key: string } | null } = { team: { key: "team-key" }, scope: { key: "scope-key" } };
-const book = { key: "book-key", title: "A Better Practice", subtitle: "Small systems, durable change", description: "A practical guide.", status: "ready", isFavorite: false, isExtending: false, estimatedMinutes: 45, chapterCount: 1, progressPercent: 25, currentChapterKey: "chapter-key", createdAt: "2026-08-28T09:00:00.000Z", updatedAt: "2026-08-28T10:00:00.000Z" };
+const book = { key: "book-key", title: "A Better Practice", subtitle: "Small systems, durable change", description: "A practical guide.", status: "ready", isFavorite: false, isExtending: false, canExtend: true, managed: false, estimatedMinutes: 45, chapterCount: 1, progressPercent: 25, currentChapterKey: "chapter-key", createdAt: "2026-08-28T09:00:00.000Z", updatedAt: "2026-08-28T10:00:00.000Z" };
 const chapter = { key: "chapter-key", title: "Begin", description: "Start with the useful part.", content: "Chapter body", position: 1, estimatedMinutes: 8, audioUrl: "https://example.com/chapter.mp3", audioDurationSeconds: 480, progressSeconds: 120, isCompleted: false };
 
 mock.module("@/state/auth", () => ({ useAuthStore: { getState: () => authState } }));

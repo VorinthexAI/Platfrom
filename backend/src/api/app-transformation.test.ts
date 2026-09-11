@@ -80,7 +80,7 @@ describe('app transformation HTTP API', () => {
     const response = await appWith({ getIdentity: identity, authorize, service, recordEvent: async () => {}, billing }).request('/app/translate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'http-translate' }, body: JSON.stringify({ teamKey, scopeKey, input: { text: 'Draft', targetLanguage: 'French' } }) });
     expect(response.status).toBe(200);
     expect(charges).toHaveLength(2);
-    expect(charges.every((charge) => charge.actionSlug === 'text' && charge.microSparks === 550)).toBe(true);
+    expect(charges.every((charge) => charge.actionSlug === 'text' && charge.microSparks === 440)).toBe(true);
 
     const insufficient = await appWith({ getIdentity: identity, authorize, service, recordEvent: async () => {}, billing: { charge: async () => { throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'private'); } } }).request('/app/translate', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'insufficient-translate' }, body: JSON.stringify({ teamKey, scopeKey, input: { text: 'Draft', targetLanguage: 'French' } }) });
     expect(insufficient.status).toBe(402);

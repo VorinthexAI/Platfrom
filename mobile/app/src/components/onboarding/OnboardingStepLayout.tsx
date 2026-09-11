@@ -12,6 +12,7 @@ export function OnboardingStepLayout({
   closeDisabled = false,
   closeLabel,
   description,
+  descriptionAfterChildren = false,
   icon,
   onClose,
   title,
@@ -21,6 +22,7 @@ export function OnboardingStepLayout({
   closeDisabled?: boolean;
   closeLabel?: string;
   description: string;
+  descriptionAfterChildren?: boolean;
   icon?: ReactNode;
   onClose?: () => void;
   title: string;
@@ -34,8 +36,9 @@ export function OnboardingStepLayout({
     </View>
     <View style={styles.hero}>
       {icon ? <View style={styles.icon}><View style={styles.iconScale}>{icon}</View></View> : null}
-      <Text style={styles.description}>{description}</Text>
+      {!descriptionAfterChildren ? <Text style={styles.description}>{description}</Text> : null}
       {children}
+      {descriptionAfterChildren ? <Text style={styles.description}>{description}</Text> : null}
     </View>
     <View style={styles.footer}>{action}</View>
   </View>;

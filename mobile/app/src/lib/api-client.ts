@@ -6,6 +6,7 @@ import { consumeServerSentEvents, isAuthenticatedBearerRejection, parseServerSen
 import { selectedAppKeyHeaders } from "./app-request-headers";
 import { createObservedHttpError, rejectObservedDomainError } from "./domain-error-observer";
 import { getInstallationEventIdentifier, INSTALLATION_EVENT_IDENTIFIER_HEADER } from "./installation-event-identifier-vault";
+import { getDeviceIdentifier, DEVICE_IDENTIFIER_HEADER } from "./device-identifier-vault";
 import { ensureAppsReady } from "@/state/apps";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://vorinthex.com";
@@ -25,13 +26,14 @@ export const apiClient: AxiosInstance = create({
 
 apiClient.interceptors.request.use(async (config) => {
   await ensureAppsReady();
-  const eventIdentifier = await getInstallationEventIdentifier();
+  const [eventIdentifier, device] = await Promise.all([getInstallationEventIdentifier(), getDeviceIdentifier()]);
   config.url = normalizeApiPath(config.url ?? "/");
   const { session, generation, invalidated } = await tokenVault.snapshot();
   if (invalidated) unauthorizedListener?.();
   requestSessions.set(config, { generation, authenticated: Boolean(session) });
   const headers = AxiosHeaders.from(config.headers);
   headers.set(INSTALLATION_EVENT_IDENTIFIER_HEADER, eventIdentifier);
+  if (device) headers.set(DEVICE_IDENTIFIER_HEADER, device);
   for (const [name, value] of Object.entries(selectedAppKeyHeaders())) headers.set(name, value);
   if (BACKEND_API_KEY) headers.set("X-Vorinthex-API-Key", BACKEND_API_KEY);
   if (session) {
@@ -77,6 +79,13 @@ export async function postJson<TBody, TResponse>(path: string, body: TBody): Pro
   return (await apiClient.post<TResponse>(path, body)).data;
 }
 
+export async function deleteRemoteAccount(session: { accessToken: string; refreshToken: string }) {
+  await apiClient.post("/auth/me/delete", { confirmation: "DELETE MY ACCOUNT" }, { headers: {
+    Authorization: `Bearer ${session.accessToken}`,
+    "X-Refresh-Token": session.refreshToken,
+  } });
+}
+
 export async function patchJson<TBody, TResponse>(path: string, body: TBody): Promise<TResponse> {
   return (await apiClient.patch<TResponse>(path, body)).data;
 }
@@ -90,13 +99,16 @@ async function authenticatedEventStream(
   onOpen?: () => void,
 ) {
   await ensureAppsReady();
-  const eventIdentifier = await getInstallationEventIdentifier();
+  const [eventIdentifier, device] = await Promise.all([getInstallationEventIdentifier(), getDeviceIdentifier()]);
   const { session, generation, invalidated } = await tokenVault.snapshot();
   if (invalidated) unauthorizedListener?.();
   const headers: Record<string, string> = {
+    "Accept": "text/event-stream",
+    "Cache-Control": "no-cache",
     "Content-Type": "application/json",
     "X-Vorinthex-Session-Transport": "header",
     [INSTALLATION_EVENT_IDENTIFIER_HEADER]: eventIdentifier,
+    ...(device ? { [DEVICE_IDENTIFIER_HEADER]: device } : {}),
     ...selectedAppKeyHeaders(),
     ...(BACKEND_API_KEY ? { "X-Vorinthex-API-Key": BACKEND_API_KEY } : {}),
     ...(session?.accessExpiresAt && session.accessExpiresAt > Date.now() ? { Authorization: `Bearer ${session.accessToken}` } : {}),
@@ -173,11 +185,12 @@ export async function revokeRemoteSession(session: { accessToken: string; refres
 }
 
 export async function cleanupRemoteSession(session: { accessToken: string; refreshToken: string }) {
-  const eventIdentifier = await getInstallationEventIdentifier();
+  const [eventIdentifier, device] = await Promise.all([getInstallationEventIdentifier(), getDeviceIdentifier()]);
   const headers = {
     "Content-Type": "application/json",
     "X-Vorinthex-Session-Transport": "header",
     [INSTALLATION_EVENT_IDENTIFIER_HEADER]: eventIdentifier,
+    ...(device ? { [DEVICE_IDENTIFIER_HEADER]: device } : {}),
     ...selectedAppKeyHeaders(),
     ...(BACKEND_API_KEY ? { "X-Vorinthex-API-Key": BACKEND_API_KEY } : {}),
     Authorization: `Bearer ${session.accessToken}`,

@@ -38,6 +38,11 @@
             {
               "scheme": "https",
               "host": "vorinthex.com",
+              "path": "/open"
+            },
+            {
+              "scheme": "https",
+              "host": "vorinthex.com",
               "path": "/public/auth/token"
             },
             {
@@ -89,7 +94,7 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Vorinthex full access to your photo library so Gallery can organize, search, and enrich it.",
+          "photosPermission": "Allow Vorinthex access to your photo library so you can upload images to the app.",
           "cameraPermission": "Allow Vorinthex to scan documents and take photos for Gallery."
         }
       ],

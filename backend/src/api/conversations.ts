@@ -11,10 +11,13 @@ import { projectSparkError, sparkErrorResponse } from './errors';
 import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
 import type { ToolEventRecorder } from '@/lib/ai/events/service';
 import { authenticatedTeamContext } from './auth';
+import { calculateActionCostMicroSparks } from '@/lib/costs';
+import { sparkService } from '@/lib/sparks/service';
+import { SparkRepositoryError } from '@/lib/sparks/repository';
 
 const selector = { teamKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid() };
 const selected = <T extends z.ZodRawShape>(shape: T) => z.object({ ...selector, ...shape }).strict();
-export const conversationStartEventSchema = z.object({ type: z.literal('start'), correlationKey: z.string().min(1), conversationKey: z.string().cuid(), userMessageKey: z.string().cuid(), assistantMessageKey: z.string().cuid() }).strict();
+export const conversationStartEventSchema = z.object({ type: z.literal('start'), correlationKey: z.string().min(1), conversationKey: z.string().cuid(), userMessageKey: z.string().cuid(), assistantMessageKey: z.string().cuid(), userMessage: conversationSafeMessageSchema }).strict();
 export const conversationDeltaEventSchema = z.object({ type: z.literal('delta'), correlationKey: z.string().min(1), assistantMessageKey: z.string().cuid(), text: z.string().min(1) }).strict();
 export const conversationDoneEventSchema = z.object({ type: z.literal('done'), correlationKey: z.string().min(1), conversationKey: z.string().cuid(), message: conversationSafeMessageSchema, name: z.string().trim().min(1).max(200).optional(), replayed: z.boolean() }).strict();
 export const conversationErrorEventSchema = z.object({ type: z.literal('error'), correlationKey: z.string().min(1), code: z.string().min(1), message: z.string().min(1) }).strict();
@@ -73,6 +76,15 @@ export function createConversationHandlers(dependencies: ConversationHandlerDepe
     try {
       const body = await parseJson(c, selected({ prompt: conversationImageTurnShape.prompt, requestKey: conversationImageTurnRequestKeySchema, referenceImageKeys: conversationImageTurnShape.referenceImageKeys, size: conversationImageTurnShape.size, quality: conversationImageTurnShape.quality, mode: conversationImageTurnShape.mode }));
       const context = await authenticated(c, body.teamKey, body.scopeKey, dependencies); if (context instanceof Response) return context;
+      if (context.principal.kind === 'member') {
+        const userKey = context.principal.user.key;
+        const debt = await (dependencies.billing?.getDebt ?? sparkService.getDebt)(userKey);
+        if ((debt ?? 0) > 0) throw new SparkRepositoryError('OUTSTANDING_DEBT', 'Spark spending is blocked until refund debt is resolved.');
+        const balance = await (dependencies.billing?.getBalance ?? sparkService.getBalance)(userKey);
+        if (balance === null) throw new SparkRepositoryError('USER_NOT_FOUND', 'Spark account user was not found.');
+        const required = calculateActionCostMicroSparks('image', { inputTokens: 0, outputTokens: 0 }, { operation: 'generate', count: 1 });
+        if (balance < required) throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'Spark balance is insufficient for this execution.');
+      }
       const { teamKey: _teamKey, scopeKey: _scopeKey, ...input } = body;
       const data = await (dependencies.service ?? getDefaultConversationService()).enqueueImageTurn({ ...input, conversationKey: z.string().cuid().parse(c.req.param('conversationKey')) }, context);
       if (context.principal.kind === 'member') await (dependencies.publishChanged ?? publishUserEvent)(context.principal.user.key, 'conversation.changed');
@@ -81,7 +93,7 @@ export function createConversationHandlers(dependencies: ConversationHandlerDepe
   },
   async turn(c: Context) {
     try {
-      const body = await parseJson(c, selected({ message: z.string().trim().min(1).max(20_000), requestKey: z.string().trim().min(1).max(180), attachmentKeys: z.array(z.string().cuid()).max(10).default([]), referenceImageKeys: z.array(z.string().cuid()).max(1).default([]) }));
+      const body = await parseJson(c, selected({ message: z.string().trim().min(1).max(20_000), requestKey: z.string().trim().min(1).max(180), attachmentKeys: z.array(z.string().cuid()).max(12).default([]), referenceImageKeys: z.array(z.string().cuid()).max(1).default([]) }));
       const context = await authenticated(c, body.teamKey, body.scopeKey, dependencies); if (context instanceof Response) return context;
       const input = conversationSendInputSchema.parse({ conversationKey: c.req.param('conversationKey'), message: body.message, requestKey: body.requestKey, attachmentKeys: body.attachmentKeys, referenceImageKeys: body.referenceImageKeys });
       return streamSSE(c, async (stream) => {

@@ -26,7 +26,7 @@ describe('OpenRouter provider', () => {
     expect(result).toMatchObject({ output: { toolCalls: [{ id: 'call-1', name: 'weather', arguments: { city: 'Oslo' } }], stopReason: 'tool_use' }, usage: { totalTokens: 6 }, costUsd: 0.001, providerId: 'openrouter' });
   });
 
-  test('pins the flash-lite text model to its upstream provider without fallbacks and leaves other models unpinned', async () => {
+  test('applies the flash-lite latency routing policy and leaves other models unpinned', async () => {
     const bodies: any[] = [];
     const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
       bodies.push(JSON.parse(String(init?.body)));
@@ -34,7 +34,14 @@ describe('OpenRouter provider', () => {
     }) as typeof fetch);
     await provider.execute(request('text', chatInput, 'google/gemini-3.1-flash-lite'));
     await provider.execute(request('text', chatInput, 'vendor/model'));
-    expect(bodies[0]).toMatchObject({ model: 'google/gemini-3.1-flash-lite', provider: { order: ['google-vertex/us'], allow_fallbacks: false } });
+    expect(bodies[0].provider).toEqual({
+      sort: 'latency',
+      allow_fallbacks: true,
+      require_parameters: true,
+      preferred_max_latency: { p50: 1, p90: 3 },
+      preferred_min_throughput: { p50: 50 },
+    });
+    expect(bodies[0].model).toBe('google/gemini-3.1-flash-lite');
     expect(bodies[1].provider).toBeUndefined();
   });
 
@@ -54,16 +61,55 @@ describe('OpenRouter provider', () => {
     ]);
   });
 
-  test('normalizes grounded web annotations and enables bounded native server search', async () => {
+  test('converts private file bytes to an inline OpenRouter file part', async () => {
     let body: any;
     const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
       body = JSON.parse(String(init?.body));
-      return Response.json({ choices: [{ message: { content: 'Current answer', annotations: [{ type: 'url_citation', url_citation: { url: 'https://example.com/news', title: 'News' } }] }, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 } });
+      return Response.json({ choices: [{ message: { content: 'read' }, finish_reason: 'stop' }] });
     }) as typeof fetch);
-    const result = await provider.execute(request('web', { prompt: 'What changed?' }));
-    expect(body).toMatchObject({ model: 'vendor/model', tools: [{ type: 'openrouter:web_search', parameters: { engine: 'native', max_results: 5, max_uses: 2, max_total_results: 10 } }], max_tool_calls: 2 });
+    await provider.execute(request('text', { messages: [{ role: 'user', content: [
+      { type: 'text', text: 'Read this file.' },
+      { type: 'file', filename: 'private.pdf', mimeType: 'application/pdf', bytes: new Uint8Array([1, 2, 3]) },
+    ] }] }));
+    expect(body.messages[0].content).toEqual([
+      { type: 'text', text: 'Read this file.' },
+      { type: 'file', file: { filename: 'private.pdf', file_data: 'data:application/pdf;base64,AQID' } },
+    ]);
+    expect(body.plugins).toEqual([{ id: 'file-parser', pdf: { engine: 'cloudflare-ai' } }]);
+  });
+
+  test('sends only provider-neutral function tools without native search controls', async () => {
+    let body: any;
+    const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
+      body = JSON.parse(String(init?.body));
+      return Response.json({ choices: [{ message: { content: 'Current answer' }, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 } });
+    }) as typeof fetch);
+    const result = await provider.execute(request('text', { ...chatInput, tools: [{ name: 'weather', description: 'Weather', inputSchema: { type: 'object' } }] }));
+    expect(body.tools).toEqual([{ type: 'function', function: { name: 'weather', description: 'Weather', parameters: { type: 'object' } } }]);
+    expect(body.model).toBe('vendor/model');
+    expect(body.max_tool_calls).toBeUndefined();
     expect(body.plugins).toBeUndefined();
-    expect(result.output).toEqual({ text: 'Current answer', citations: [{ title: 'News', url: 'https://example.com/news' }], sources: ['https://example.com/news'] });
+    expect(body.stream_options).toBeUndefined();
+    expect(result.output).toMatchObject({ text: 'Current answer' });
+  });
+
+  test('adds one model-selected native web tool and server-owned tool limit', async () => {
+    let body: any;
+    const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
+      body = JSON.parse(String(init?.body));
+      return Response.json({ choices: [{ message: { content: 'Answer with citation text', annotations: [{ type: 'url_citation', url: 'https://example.com' }] }, finish_reason: 'stop' }] });
+    }) as typeof fetch);
+    const grounded = request('text', { ...chatInput, tools: [{ name: 'weather', description: 'Weather', inputSchema: { type: 'object' } }] });
+    grounded.capabilities = { webGrounding: 'model-selected' };
+    const result = await provider.execute(grounded);
+    expect(body.tools).toEqual([
+      { type: 'function', function: { name: 'weather', description: 'Weather', parameters: { type: 'object' } } },
+      { type: 'openrouter:web_search', parameters: { engine: 'native' } },
+    ]);
+    expect(body.tools.filter((tool: { type: string }) => tool.type === 'openrouter:web_search')).toHaveLength(1);
+    expect(body.max_tool_calls).toBe(2);
+    expect(body.plugins).toBeUndefined();
+    expect(result.output).toMatchObject({ text: 'Answer with citation text' });
   });
 
   test('orders and validates batch embeddings through embed and execute', async () => {
@@ -110,23 +156,37 @@ describe('OpenRouter provider', () => {
     const encoder = new TextEncoder();
     const stream = new ReadableStream({ start(controller) { controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n')); controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"lo"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}\n\ndata: [DONE]')); controller.close(); } });
     const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
-      expect(JSON.parse(String(init?.body))).toMatchObject({ stream: true, stream_options: { include_usage: true } });
+      const body = JSON.parse(String(init?.body));
+      expect(body.stream).toBe(true);
+      expect(body.stream_options).toEqual({ include_usage: true });
       return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
     }) as typeof fetch);
     const chunks = []; for await (const chunk of provider.stream!(request('text', chatInput))) chunks.push(chunk);
     expect(chunks).toEqual([{ type: 'text-delta', text: 'Hel' }, { type: 'text-delta', text: 'lo' }, { type: 'usage', usage: { inputTokens: 2, outputTokens: 1, totalTokens: 3 } }, { type: 'done' }]);
   });
 
-  test('assembles strict streamed tool-call argument fragments', async () => {
+  test('preserves mixed text and ordered fragmented function calls through usage and completion', async () => {
     const encoder = new TextEncoder();
     const stream = new ReadableStream({ start(controller) {
-      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"agent.query","arguments":"{\\"query\\":\\"prior"}}]}}]}\n\n'));
-      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":" context\\"}"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]'));
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Checking. "}}]}\n\ndata: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call-2","function":{"name":"calendar.","arguments":"{\\"day\\":"}},{"index":0,"id":"call-1","function":{"name":"weather.","arguments":"{\\"city\\":\\"Os"}}]}}]}\n\n'));
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"lookup","arguments":"lo\\"}"}},{"index":1,"function":{"name":"list","arguments":"\\"Monday\\"}"}}]},"finish_reason":"tool_calls"}]}\n\ndata: {"choices":[],"usage":{"prompt_tokens":8,"completion_tokens":5,"total_tokens":13}}\n\ndata: [DONE]'));
       controller.close();
     } });
-    const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, _init) => new Response(stream, { headers: { 'content-type': 'text/event-stream' } })) as typeof fetch);
-    const chunks = []; for await (const chunk of provider.stream!(request('text', { ...chatInput, tools: [{ name: 'agent.query', description: 'History', inputSchema: { type: 'object' } }] }))) chunks.push(chunk);
-    expect(chunks).toEqual([{ type: 'tool-call', toolCall: { id: 'call-1', name: 'agent.query', arguments: { query: 'prior context' } } }, { type: 'done' }]);
+    const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
+      expect(JSON.parse(String(init?.body)).stream_options).toEqual({ include_usage: true });
+      return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
+    }) as typeof fetch);
+    const chunks = []; for await (const chunk of provider.stream!(request('text', { ...chatInput, tools: [
+      { name: 'weather.lookup', description: 'Weather', inputSchema: { type: 'object' } },
+      { name: 'calendar.list', description: 'Calendar', inputSchema: { type: 'object' } },
+    ] }))) chunks.push(chunk);
+    expect(chunks).toEqual([
+      { type: 'text-delta', text: 'Checking. ' },
+      { type: 'usage', usage: { inputTokens: 8, outputTokens: 5, totalTokens: 13 } },
+      { type: 'tool-call', toolCall: { id: 'call-1', name: 'weather.lookup', arguments: { city: 'Oslo' } } },
+      { type: 'tool-call', toolCall: { id: 'call-2', name: 'calendar.list', arguments: { day: 'Monday' } } },
+      { type: 'done' },
+    ]);
   });
 
   test('orders streamed tool calls by index and rejects malformed completion semantics', async () => {

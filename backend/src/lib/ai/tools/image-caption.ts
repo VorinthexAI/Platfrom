@@ -51,7 +51,7 @@ export const imageCaptionTool = {
           mode: 'auto',
           teamKey,
           actionSlug: 'image',
-        }, { operation: 'caption', ...input }, { providers: ['image.primary'], ...dependencies });
+        }, { operation: 'caption', ...input }, { providers: ['image.secondary'], ...dependencies });
     const output = imageCaptionOutputSchema.parse(response.output);
     if (output.results.length !== input.imageUrls.length) {
       throw new Error('Image result count must match the supplied image count.');

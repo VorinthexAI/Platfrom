@@ -172,7 +172,7 @@ export function formatGuideDate(value: string) {
 
 const wait = (duration: number) => new Promise((resolve) => setTimeout(resolve, duration));
 
-export function TravelWorkspace({ initialCollectionKind, initialCountryCode, initialPlaceKey, initialSearchQuery, initialTripKey, openTripAssets: shouldOpenTripAssets = false }: { initialCollectionKind?: string; initialCountryCode?: string; initialPlaceKey?: string; initialSearchQuery?: string; initialTripKey?: string; openTripAssets?: boolean } = {}) {
+export function TravelWorkspace({ initialAction, initialCollectionKind, initialCountryCode, initialPlaceKey, initialSearchQuery, initialTripKey, openTripAssets: shouldOpenTripAssets = false }: { initialAction?: "create" | "find-place" | "create-trip"; initialCollectionKind?: string; initialCountryCode?: string; initialPlaceKey?: string; initialSearchQuery?: string; initialTripKey?: string; openTripAssets?: boolean } = {}) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const { showToast } = useToast();
@@ -218,12 +218,12 @@ export function TravelWorkspace({ initialCollectionKind, initialCountryCode, ini
   const [detailSource, setDetailSource] = useState<DetailSource>("globe");
   const [countryDetailOpen, setCountryDetailOpen] = useState(Boolean(initialCountryCode));
   const [cityDetailOpen, setCityDetailOpen] = useState(false);
-  const [actionsOpen, setActionsOpen] = useState(false);
-  const [createPlaceOpen, setCreatePlaceOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(initialAction === "create");
+  const [createPlaceOpen, setCreatePlaceOpen] = useState(initialAction === "find-place");
   const [placeSearchQuery, setPlaceSearchQuery] = useState("");
   const [placeSearchResults, setPlaceSearchResults] = useState<PlaceSearchResult[]>([]);
   const [placeSearchLoading, setPlaceSearchLoading] = useState(false);
-  const [tripSelectionOpen, setTripSelectionOpen] = useState(false);
+  const [tripSelectionOpen, setTripSelectionOpen] = useState(initialAction === "create-trip");
   const [tripOrderOpen, setTripOrderOpen] = useState(false);
   const [tripDetailsOpen, setTripDetailsOpen] = useState(false);
   const [selectedPlaceKeys, setSelectedPlaceKeys] = useState<string[]>([]);
@@ -286,7 +286,6 @@ export function TravelWorkspace({ initialCollectionKind, initialCountryCode, ini
   const placeSearchGeneration = useRef(0);
   const countrySearchInput = useRef<NativeTextInput>(null);
   const placeSearchInput = useRef<NativeTextInput>(null);
-  const searchFocusReleaseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const recordedCountryOpen = useRef(0);
   const recordedCityOpen = useRef(0);
   const orderScrollRef = useRef<ScrollView>(null);
@@ -530,7 +529,6 @@ export function TravelWorkspace({ initialCollectionKind, initialCountryCode, ini
   }, [initialTripKey, shouldOpenTripAssets, trips]);
 
   useEffect(() => () => {
-    if (searchFocusReleaseTimer.current) clearTimeout(searchFocusReleaseTimer.current);
     if (sheetTransitionTimer.current) clearTimeout(sheetTransitionTimer.current);
   }, []);
 
@@ -1266,11 +1264,10 @@ export function TravelWorkspace({ initialCollectionKind, initialCountryCode, ini
   }
 
   function handleCoreFocusChange(focused: boolean) {
-    if (searchFocusReleaseTimer.current) clearTimeout(searchFocusReleaseTimer.current);
     if (focused) { setCountrySearchFocusBlocked(true); countrySearchInput.current?.blur(); Keyboard.dismiss(); return; }
     setAssistantMessage(undefined);
     setAssistantFailed(false);
-    searchFocusReleaseTimer.current = setTimeout(() => setCountrySearchFocusBlocked(false), 350);
+    setCountrySearchFocusBlocked(false);
   }
 
   async function askAssistant() {
@@ -1365,7 +1362,7 @@ export function TravelWorkspace({ initialCollectionKind, initialCountryCode, ini
       </View>}</View>}
     </View>
 
-    <CoreComposer accessory={rootView === "globe" && !selectedPlace && !selectedTrip && selectedCountry && !countryDetailOpen && !cityDetailOpen ? <Button accessibilityLabel={`Reopen ${selectedCountry.name}`} contentMode="raw" onPress={() => openCountryDetail(selectedCountry, "globe", true)} size="sm" style={styles.placeIsland} variant="secondary"><LocationPinIcon size="sm" /><Text numberOfLines={1} style={styles.placeIslandText}>{selectedCountry.name}</Text><ChevronRightIcon size="sm" /></Button> : undefined} accessibilityLabel="Ask Core about saved cities" disabled={assistantBusy} editable={!assistantBusy} leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />} loading={assistantBusy} message={assistantMessage ? <View style={assistantFailed ? styles.inlineError : styles.inlineNotice}><Text style={styles.messageText}>{assistantMessage}</Text></View> : null} onChangeText={(value) => { setAssistantInput(value); assistantRequestKey.current = undefined; }} onFocusChange={handleCoreFocusChange} onSubmit={() => void askAssistant()} pageIdentity={(closeCore) => <WorkspaceAppSwitcher active="compass" identity="core" onSelectActive={closeCore} />} prompts={CORE_PROMPTS} sendIcon={<SendIcon size="sm" variant="inverse" />} value={assistantInput} />
+    <CoreComposer accessory={rootView === "globe" && !selectedPlace && !selectedTrip && selectedCountry && !countryDetailOpen && !cityDetailOpen ? <Button accessibilityLabel={`Reopen ${selectedCountry.name}`} contentMode="raw" onPress={() => openCountryDetail(selectedCountry, "globe", true)} size="sm" style={styles.placeIsland} variant="secondary"><LocationPinIcon size="sm" /><Text numberOfLines={1} style={styles.placeIslandText}>{selectedCountry.name}</Text><ChevronRightIcon size="sm" /></Button> : undefined} accessibilityLabel="Ask Core about saved cities" disabled={assistantBusy} editable={!assistantBusy} leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />} loading={assistantBusy} message={assistantMessage ? <View style={assistantFailed ? styles.inlineError : styles.inlineNotice}><Text style={styles.messageText}>{assistantMessage}</Text></View> : null} onChangeText={(value) => { setAssistantInput(value); assistantRequestKey.current = undefined; }} onFocusChange={handleCoreFocusChange} onSubmit={() => void askAssistant()} pageIdentity={(closeCore) => <WorkspaceAppSwitcher active="compass" identity="core" onSelectActive={closeCore} />} prompts={CORE_PROMPTS} sendIcon={<SendIcon size="sm" />} value={assistantInput} />
 
     <BottomSheet footer={<View style={styles.sheetFooter}>{!countryAlreadySaved && countryDetail ? <Button disabled={countryImage?.status !== "ready"} onPress={saveCountry} size="md" variant="primary">Save</Button> : null}<Button onPress={() => setCountryDetailOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} height="full" onOpenChange={setCountryDetailOpen} open={countryDetailOpen} title={selectedCountry?.name ?? "Country"}>
       <ScrollView contentContainerStyle={[styles.sheetContent, countryDetailError && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" ref={countryScrollRef} showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}><View style={[styles.countryDetail, countryDetailError && styles.sheetEmptyContent]}>{countryDetailLoading ? <GuideLoading label={`Loading information about ${selectedCountry?.name ?? "country"}`} text="Generating country guide..." /> : countryDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{countryDetailError}</Text></View> : countryDetail ? <><GuideHero detail={countryDetail} image={countryImage?.image} onImageError={() => { if (savedCountryImage) void overviewQuery.refetch(); }} />{detailSource === "globe" ? <><Text style={styles.popularCitiesTitle}>Popular cities</Text><View style={[styles.cityList, styles.countryCityList]}>{countryDetail.popularCities.map((city) => <Button accessibilityLabel={`Open ${city.name}, ${selectedCountry?.name ?? "country"}`} contentMode="raw" key={city.name} onPress={() => { if (selectedCountry) openCityDetail(city, selectedCountry, detailSource); }} size="md" style={[styles.cityPill, styles.sheetSecondary]} variant="secondary"><Text style={styles.cityName}>{city.name}</Text><ChevronRightIcon size="sm" /></Button>)}</View></> : null}</> : null}</View></ScrollView>

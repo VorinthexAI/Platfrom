@@ -11,8 +11,9 @@ function mockDeps() {
         if (emailHash === 'hash:missing@example.com') return null;
         return { key: 'usr_test', email: 'person@example.com', emailHash } as any;
       },
-      async deleteAccount(input: unknown, id: string) {
+      async deleteAccount(input: unknown, id: string, options: unknown) {
         expect(input).toEqual({ confirmation: 'DELETE MY ACCOUNT' });
+        expect(options).toEqual({ sendConfirmation: false });
         deletedUsers.push(id);
         return { deleted: true as const };
       },

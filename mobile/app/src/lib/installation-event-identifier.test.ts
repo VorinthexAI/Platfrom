@@ -40,9 +40,23 @@ test("the persistent vault serializes initialization and replaces invalid Secure
 
 test("global Axios, manual XHR SSE, and logout cleanup await the installation header", () => {
   const client = read("./api-client.ts");
+  const analytics = read("./onboarding-events.ts");
 
-  expect(client.match(/await getInstallationEventIdentifier\(\)/g)).toHaveLength(3);
+  expect(client.match(/getInstallationEventIdentifier\(\)/g)).toHaveLength(3);
   expect(client).toContain("headers.set(INSTALLATION_EVENT_IDENTIFIER_HEADER, eventIdentifier)");
   expect(client).toContain("[INSTALLATION_EVENT_IDENTIFIER_HEADER]: eventIdentifier");
   expect(client).toContain("request.setRequestHeader(name, value)");
+  expect(analytics).toContain('recordAnalyticsEvent(slug: AnalyticsEventSlug)');
+  expect(analytics).toContain('postJson<{ slug: AnalyticsEventSlug }, { success: true }>("/events", { slug })');
+});
+
+test("native transports persist and inject a trusted device identifier", () => {
+  const vault = read("./device-identifier-vault.ts");
+  const client = read("./api-client.ts");
+  expect(vault).toContain('Platform.OS === "android" || Platform.OS === "ios"');
+  expect(vault).toContain("SecureStore.getItemAsync(DEVICE_IDENTIFIER_KEY)");
+  expect(vault).toContain("SecureStore.setItemAsync(DEVICE_IDENTIFIER_KEY, device");
+  expect(vault).toContain('DEVICE_IDENTIFIER_HEADER = "X-Vorinthex-Device-Identifier"');
+  expect(client.match(/getDeviceIdentifier\(\)/g)).toHaveLength(3);
+  expect(client).toContain("headers.set(DEVICE_IDENTIFIER_HEADER, device)");
 });

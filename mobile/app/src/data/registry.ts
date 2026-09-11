@@ -41,9 +41,9 @@ export const CAPABILITIES: readonly Capability[] = registrySchema.parse([
   {
     slug: "signal",
     name: "Signal",
-    tagline: "Only what matters\nreaches you.",
-    searchPlaceholder: "Search signal...",
-    sectionLabel: "Priority",
+    tagline: "Your private inbox for email\nand Vorinthex communication.",
+    searchPlaceholder: "Search Signal...",
+    sectionLabel: "Inbox",
   },
   {
     slug: "compass",

@@ -14,6 +14,7 @@ import type { AppSearchService } from '@/lib/app-search/service';
 import type { AppTransformationService } from '@/lib/app-transformation/service';
 import type { AppSpeechService } from '@/lib/app-speech/service';
 import type { AccountProfileService } from '@/lib/account-profile/service';
+import type { ProfileBadgeService } from '@/lib/account-profile/badge';
 import type { TicketService } from '@/lib/tickets/service';
 import type { ScopeTagService } from '@/lib/scope-tags/service';
 import type { ReferralService } from '@/lib/referrals/service';
@@ -21,6 +22,7 @@ import type { CommerceService } from '@/lib/commerce/service';
 import type { ScopeService } from '@/lib/ai/scopes';
 import type { AppNotificationService } from '@/lib/app-notifications/service';
 import type { CostService } from '@/lib/costs/service';
+import type { UserInboxService } from '@/lib/user-inbox/service';
 import { APP_SEARCH_OVERLAPPING_TOOL_NAME_SET } from '@/lib/ai/tools/search-routing-policy';
 import { appSpeechCapability, appEnhanceCapability, appSearchCapability, appTranslateCapability, archiveCapabilities, ascendCapabilities, compassCapabilities, hiddenListCapability, platformCapabilities, signalCapabilities } from './service-capabilities';
 import { galleryAssistantCapabilities } from './gallery-capabilities';
@@ -61,13 +63,15 @@ export interface AssistantCapabilityContext {
   appTransformation?: AppTransformationService;
   appSpeech?: AppSpeechService;
   accountProfile?: AccountProfileService;
+  profileBadges?: ProfileBadgeService;
   tickets?: TicketService;
   scopeTags?: ScopeTagService;
-  referrals?: Pick<ReferralService, 'readSummary'>;
+  referrals?: Pick<ReferralService, 'readSummary' | 'redeem'>;
   commerce?: CommerceService;
   costs?: CostService;
   scopes?: ScopeService;
   appNotifications?: AppNotificationService;
+  userInbox?: UserInboxService;
 }
 
 export type MutationWorkspace = 'archive' | 'gallery' | 'signal' | 'compass' | 'ascend';

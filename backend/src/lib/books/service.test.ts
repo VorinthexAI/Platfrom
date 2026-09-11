@@ -7,6 +7,7 @@ import { bookCreateInputSchema, createBookService, isTerminalBookGenerationFailu
 import { BookRepositoryError } from './repository';
 import { ProviderExecutionError } from '@/lib/ai/router';
 import { BookGenerationTerminalError } from './generation-errors';
+import { initialWorkspaceBookKey } from '@/lib/initial-workspace-content-identifiers';
 
 const teamKey = 'team'; const scopeKey = newId(); const userKey = newId(); const bookKey = newId(); const now = '2026-08-12T12:00:00.000Z';
 const input = { teamKey, scopeKey, generationRequestKey: 'request-1', topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'I know the basics', writingTone: 'Clear and practical', language: 'English', narratorVoiceKey: 'clear' as const, narrationPace: 1, archiveDocumentKeys: [] };
@@ -164,6 +165,17 @@ describe('book service asynchronous lifecycle', () => {
     const calls: string[] = []; const repository: any = { deleteBook: async () => { calls.push('delete'); return { deleted: true, bookKey }; } };
     const service = createBookService({ repository, publishChanged: async () => { calls.push('publish'); } });
     await expect(service.delete(bookKey, { teamKey, scopeKey }, userKey)).resolves.toEqual({ key: bookKey }); expect(calls).toEqual(['delete', 'publish']);
+  });
+
+  test('keeps the managed workspace introduction non-extendable and non-deletable', async () => {
+    const current: any = row('ready');
+    current.book.key = initialWorkspaceBookKey(scopeKey);
+    delete current.book.generationInput;
+    delete current.book.generationOwnerKey;
+    const service = createBookService({ repository: { detail: async () => current, deleteBook: async () => { throw new Error('must not delete'); } } as never, signUrl: async () => 'signed' });
+    await expect(service.detail(current.book.key, { teamKey, scopeKey }, userKey)).resolves.toMatchObject({ book: { managed: true, canExtend: false } });
+    await expect(service.extend(current.book.key, { teamKey, scopeKey, mode: 'preview', chapterCount: 1 }, userKey)).rejects.toThrow('fixed chapter set');
+    await expect(service.delete(current.book.key, { teamKey, scopeKey }, userKey)).rejects.toThrow('cannot be deleted');
   });
 
   test('computes listening progress from audio duration rather than chapter count', async () => {

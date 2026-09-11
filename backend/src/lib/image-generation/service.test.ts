@@ -2,9 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import type { ProcessImageInput } from '@/lib/ai/image-processing';
-import { createImageGenerationService as createProductionImageGenerationService, imageGenerateModelInputSchema, imageIdeasInputSchema, parseImageIdeas } from './service';
+import { appGenerateImageModelInputSchema, createImageGenerationService as createProductionImageGenerationService, imageDestinationSchema, imageIdeasInputSchema, parseImageIdeas } from './service';
 
 const teamKey = newId(), scopeKey = newId(), teamMembershipKey = newId(), collectionKey = newId();
+const galleryDestination = { kind: 'gallery-collection' as const, collectionKey };
 const context = {
   teamKey,
   runtimeScopeKey: scopeKey,
@@ -23,10 +24,12 @@ describe('image generation service', () => {
   test('uses strict bounded contracts and an exact distinct fallback', () => {
     expect(() => imageIdeasInputSchema.parse({ prompt: 'A globe', requestedCount: 2, teamKey })).toThrow('Unrecognized key');
     expect(() => imageIdeasInputSchema.parse({ prompt: 'A globe', requestedCount: 9 })).toThrow();
-    expect(() => imageGenerateModelInputSchema.parse({ prompt: 'A globe', count: 1, size: '512x512', quality: 'high' })).toThrow();
-    expect(imageGenerateModelInputSchema.parse({ prompt: 'A globe', collectionKey }).mode).toBe('default');
-    expect(imageGenerateModelInputSchema.parse({ prompt: 'A globe', collectionKey, count: 1, size: '1536x1024', quality: 'low', mode: 'fast' }).mode).toBe('fast');
-    expect(() => imageGenerateModelInputSchema.parse({ prompt: 'A globe', collectionKey, referenceImageKeys: [scopeKey, scopeKey] })).toThrow('distinct');
+    expect(() => appGenerateImageModelInputSchema.parse({ prompt: 'A globe', count: 1, size: '512x512', quality: 'high' })).toThrow();
+    expect(appGenerateImageModelInputSchema.parse({ prompt: 'A globe' }).mode).toBe('default');
+    expect(appGenerateImageModelInputSchema.parse({ prompt: 'A globe', count: 1, size: '1536x1024', quality: 'low', mode: 'fast' }).mode).toBe('fast');
+    expect(imageDestinationSchema.parse({ kind: 'managed-gallery' })).toEqual({ kind: 'managed-gallery' });
+    expect(() => imageDestinationSchema.parse({ type: 'managed-gallery' })).toThrow();
+    for (const field of ['collectionKey', 'conversationKey', 'referenceImageKeys', 'scopeKey', 'requestKey', 'userKey']) expect(() => appGenerateImageModelInputSchema.parse({ prompt: 'A globe', [field]: field.endsWith('Keys') ? [scopeKey] : scopeKey })).toThrow('Unrecognized key');
     const input = imageIdeasInputSchema.parse({ prompt: 'A globe', requestedCount: 3, style: 'editorial', colors: ['navy', 'gold'] });
     const concepts = parseImageIdeas('not valid JSON', input);
     expect(concepts).toHaveLength(3);
@@ -81,8 +84,8 @@ describe('image generation service', () => {
       gallery: authorizedGallery,
       idempotency: claimedLedger(),
     });
-    const input = { collectionKey, prompt: 'Earth', count: 1, size: '1024x1024' as const, quality: 'medium' as const };
-    const [first, second] = await Promise.all([service.generate(input, context, 'request-1'), service.generate(input, context, 'request-1')]);
+    const input = { prompt: 'Earth', count: 1, size: '1024x1024' as const, quality: 'medium' as const };
+    const [first, second] = await Promise.all([service.generate(input, galleryDestination, context, 'request-1'), service.generate(input, galleryDestination, context, 'request-1')]);
     expect(first).toEqual(second);
     expect(providerCalls).toBe(1);
     expect(processCalls).toHaveLength(1);
@@ -96,16 +99,16 @@ describe('image generation service', () => {
   test('requires a trusted member and server request key before provider execution', async () => {
     let called = false;
     const service = createImageGenerationService({ executeAsk: safeAsk, history, execute: (async () => { called = true; throw new Error('unexpected'); }) as any, gallery: authorizedGallery, idempotency: claimedLedger() });
-    const input = { collectionKey, prompt: 'Earth', count: 1, size: '1024x1024' as const, quality: 'low' as const };
-    await expect(service.generate(input, { ...context, principal: { kind: 'system' } }, 'request-1')).rejects.toThrow('authenticated member');
-    await expect(service.generate(input, context, undefined)).rejects.toThrow();
+    const input = { prompt: 'Earth', count: 1, size: '1024x1024' as const, quality: 'low' as const };
+    await expect(service.generate(input, galleryDestination, { ...context, principal: { kind: 'system' } }, 'request-1')).rejects.toThrow('authenticated member');
+    await expect(service.generate(input, galleryDestination, context, undefined)).rejects.toThrow();
     expect(called).toBe(false);
   });
 
   test('authorizes Gallery persistence before claiming or invoking the provider', async () => {
     let claimed = 0, provider = 0;
     const service = createImageGenerationService({ executeAsk: safeAsk, history, gallery: { ...authorizedGallery, getCollectionRole: async () => 'viewer' }, idempotency: { ...claimedLedger(), claim: async () => { claimed += 1; return { status: 'claimed' }; } }, execute: (async () => { provider += 1; return {}; }) as any });
-    await expect(service.generate({ collectionKey, prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, context, 'denied')).rejects.toThrow('ownership');
+    await expect(service.generate({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, galleryDestination, context, 'denied')).rejects.toThrow('ownership');
     expect({ claimed, provider }).toEqual({ claimed: 0, provider: 0 });
   });
 
@@ -116,7 +119,7 @@ describe('image generation service', () => {
       idempotency: { ...claimedLedger(), claim: async () => { claimed += 1; return { status: 'claimed' }; } },
       execute: (async () => { provider += 1; return {}; }) as any,
     });
-    await expect(service.generate({ collectionKey, prompt: 'Not email media', count: 1 }, context, 'managed-denied')).rejects.toThrow('cannot modify this managed');
+    await expect(service.generate({ prompt: 'Not email media', count: 1 }, galleryDestination, context, 'managed-denied')).rejects.toThrow('cannot modify this managed');
     expect({ claimed, provider, roleChecks }).toEqual({ claimed: 0, provider: 0, roleChecks: 0 });
   });
 
@@ -138,10 +141,10 @@ describe('image generation service', () => {
   test('routes direct multi-image generation into managed Core through one atomic dedicated attachment', async () => {
     const attached: unknown[][] = []; let genericAttachments = 0, roleChecks = 0;
     const service = createImageGenerationService({
-      history, idempotency: claimedLedger(), getImage: async () => null, signUrl: async () => 'https://images.example/generated.png',
+      history, idempotency: claimedLedger(), getImage: async () => null, embedCollection: async () => [], signUrl: async () => 'https://images.example/generated.png',
       gallery: {
         ...authorizedGallery,
-        getCollection: async () => ({ key: collectionKey, purpose: 'generated-media', mutationPolicy: 'system-only' }) as never,
+        ensureGeneratedMediaCollection: async () => ({ key: collectionKey, purpose: 'generated-media', mutationPolicy: 'system-only' }) as never,
         getCollectionRole: async () => { roleChecks += 1; return 'viewer'; },
         attachGeneratedImages: async () => { genericAttachments += 1; return true; },
         attachGeneratedMedia: async (...args) => { attached.push(args); return true; },
@@ -149,7 +152,7 @@ describe('image generation service', () => {
       execute: (async () => ({ output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' })) as any,
       process: async (inputs) => inputs.map(() => persistedImage()),
     });
-    const result = await service.generate({ collectionKey, prompt: 'Two managed images', count: 2 }, context, 'direct-managed');
+    const result = await service.generate({ prompt: 'Two managed images', count: 2 }, { kind: 'managed-gallery' }, context, 'direct-managed');
     expect(result.images).toHaveLength(2);
     expect(roleChecks).toBe(0);
     expect(genericAttachments).toBe(0);
@@ -165,7 +168,7 @@ describe('image generation service', () => {
       execute: (async (...args: unknown[]) => { calls.push(args); return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' }; }) as any,
       process: async () => [persistedImage()], publishGeneratedImages: async () => {}, signUrl: async () => 'https://images.example/generated.png',
     });
-    await expect(service.generate({ collectionKey, prompt: 'request', count: 1 }, context, 'direct-image-action')).resolves.toMatchObject({ images: [{ origin: 'generated' }] });
+    await expect(service.generate({ prompt: 'request', count: 1 }, galleryDestination, context, 'direct-image-action')).resolves.toMatchObject({ images: [{ origin: 'generated' }] });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.[0]).toEqual({ mode: 'auto', teamKey, actionSlug: 'image' });
     expect(calls[0]?.[1]).toMatchObject({ operation: 'generate', prompt: 'request', count: 1 });
@@ -184,7 +187,7 @@ describe('image generation service', () => {
       publishGeneratedImages: async (...args) => { events.push(['publish', ...args]); },
       getImage: async () => null, idempotency: claimedLedger(), process: async () => [persistedImage()], signUrl: async () => 'https://images.example/generated.png',
     });
-    await service.generate({ collectionKey, prompt: 'Use this composition', referenceImageKeys: [referenceKey] }, context, 'references');
+    await service.generate({ prompt: 'Use this composition' }, galleryDestination, context, 'references', [referenceKey]);
     expect(events.find(([name]) => name === 'generate')?.[1]).toMatchObject({ inputReferences: ['data:image/png;base64,iVBORw0KGgo='] });
     expect(events.some(([name]) => name === 'safety')).toBe(false);
     expect(events.filter(([name]) => name === 'attach')).toHaveLength(1);
@@ -210,7 +213,7 @@ describe('image generation service', () => {
       execute: (async (_route: unknown, input: { inputReferences?: string[] }) => { providerReferences = input.inputReferences ?? []; return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' }; }) as any,
       process: async () => [persistedImage()], signUrl: async () => 'https://images.example/generated.png',
     });
-    await service.generate({ collectionKey, prompt: 'Use all references', referenceImageKeys: referenceKeys }, context, 'eight-references');
+    await service.generate({ prompt: 'Use all references' }, galleryDestination, context, 'eight-references', referenceKeys);
     expect(providerReferences).toHaveLength(8);
     expect(maximumActive).toBe(1);
 
@@ -222,9 +225,33 @@ describe('image generation service', () => {
       maxReferenceDataUrlBytes: 40,
       execute: (async () => { providerCalls += 1; return {}; }) as any,
     });
-    await expect(oversized.generate({ collectionKey, prompt: 'Too large', referenceImageKeys: referenceKeys.slice(0, 2) }, context, 'oversized-references')).rejects.toMatchObject({ code: 'IMAGE_GENERATION_REFERENCES_TOO_LARGE' });
+    await expect(oversized.generate({ prompt: 'Too large' }, galleryDestination, context, 'oversized-references', referenceKeys.slice(0, 2))).rejects.toMatchObject({ code: 'IMAGE_GENERATION_REFERENCES_TOO_LARGE' });
     expect(resolutions).toBe(0);
     expect(providerCalls).toBe(0);
+  });
+
+  test('bounds durable and already-resolved references together', async () => {
+    const referenceKey = newId(); let claims = 0, providerCalls = 0;
+    const service = createImageGenerationService({
+      executeAsk: safeAsk, history, getImage: async () => null,
+      gallery: { ...authorizedGallery, getImage: async () => ({ ...persistedImage(referenceKey), sizeBytes: 8 }) },
+      maxReferenceDataUrlBytes: 50,
+      idempotency: { ...claimedLedger(), claim: async () => { claims += 1; return { status: 'claimed' }; } },
+      execute: (async () => { providerCalls += 1; return {}; }) as any,
+    });
+    await expect(service.generate({ prompt: 'Too much reference data' }, galleryDestination, context, 'aggregate-trusted', [referenceKey], [{ identity: 'artifact:one:hash', inputReference: 'data:image/png;base64,1234567890' }])).rejects.toMatchObject({ code: 'IMAGE_GENERATION_REFERENCES_TOO_LARGE' });
+    expect(claims).toBe(0); expect(providerCalls).toBe(0);
+  });
+
+  test('hashes stable trusted reference identities without hashing their base64 payloads', async () => {
+    const hashes: string[] = [];
+    const service = createImageGenerationService({ executeAsk: safeAsk, history, gallery: authorizedGallery, idempotency: { ...claimedLedger(), claim: async (_identity, hash) => { hashes.push(hash); return { status: 'conflict' }; } } });
+    for (const reference of [
+      { identity: 'artifact:stable:hash', inputReference: 'data:image/png;base64,AQID' },
+      { identity: 'artifact:stable:hash', inputReference: 'data:image/png;base64,BAUG' },
+      { identity: 'artifact:different:hash', inputReference: 'data:image/png;base64,AQID' },
+    ]) await expect(service.generate({ prompt: 'Identity hash' }, galleryDestination, context, 'identity-hash', [], [reference])).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_CONFLICT' });
+    expect(hashes[0]).toBe(hashes[1]); expect(hashes[2]).not.toBe(hashes[0]);
   });
 
   test('separates deterministic generated-image keys for different owners sharing an idempotency key', async () => {
@@ -239,9 +266,9 @@ describe('image generation service', () => {
       process: async (inputs) => { processInputs.push(...inputs); return inputs.map((input) => ({ ...persistedImage(), createdByKey: input.ownerKey })) as any; },
       signUrl: async () => 'https://images.example/generated.png',
     });
-    const input = { collectionKey, prompt: 'Shared request key' };
-    await service.generate(input, context, 'same-key');
-    await service.generate(input, secondContext, 'same-key');
+    const input = { prompt: 'Shared request key' };
+    await service.generate(input, galleryDestination, context, 'same-key');
+    await service.generate(input, galleryDestination, secondContext, 'same-key');
     expect(new Set(lookupKeys).size).toBe(2);
     expect(processInputs.map(({ ownerKey }) => ownerKey)).toEqual([teamMembershipKey, secondTeamMembershipKey]);
     expect(processInputs.map(({ imageKey }) => imageKey)).toEqual(lookupKeys);
@@ -269,9 +296,9 @@ describe('image generation service', () => {
       process: async () => { processCalls += 1; return [stored = persistedImage(expectedKey)]; },
       signUrl: async () => 'https://images.example/generated.png',
     });
-    const input = { collectionKey, prompt: 'Recover attachment' };
-    await expect(service.generate(input, context, 'attachment-recovery')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_FAILED', retryable: true });
-    await expect(service.generate(input, context, 'attachment-recovery')).resolves.toMatchObject({ images: [{ key: expectedKey }] });
+    const input = { prompt: 'Recover attachment' };
+    await expect(service.generate(input, galleryDestination, context, 'attachment-recovery')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_FAILED', retryable: true });
+    await expect(service.generate(input, galleryDestination, context, 'attachment-recovery')).resolves.toMatchObject({ images: [{ key: expectedKey }] });
     expect({ providerCalls, processCalls, attachCalls }).toEqual({ providerCalls: 1, processCalls: 1, attachCalls: 2 });
   });
 
@@ -288,7 +315,7 @@ describe('image generation service', () => {
       publishGeneratedImages: async () => {},
       signUrl: async () => 'https://images.example/generated.png',
     });
-    await expect(service.generate({ collectionKey, prompt: 'Earth' }, context, 'history-outage')).resolves.toMatchObject({ images: [{ caption: 'Earth' }] });
+    await expect(service.generate({ prompt: 'Earth' }, galleryDestination, context, 'history-outage')).resolves.toMatchObject({ images: [{ caption: 'Earth' }] });
     expect(completed).toBe(1);
   });
 
@@ -308,9 +335,9 @@ describe('image generation service', () => {
       process: async () => [{ key: newId(), scopeKey, filename: 'generated.png', caption: 'Earth', imageCaptionKey: newId(), createdByKey: teamMembershipKey, storageKey: 'durable/key.png', mimeType: 'image/png', sizeBytes: 8, width: 1024, height: 1024, embedding: [], isFavorite: false, createdAt: '2026-08-19T00:00:00.000Z', updatedAt: '2026-08-19T00:00:00.000Z' }] as any,
       signUrl: async () => `https://images.example/fresh-${++signCount}`,
     };
-    const input = { collectionKey, prompt: 'Earth', count: 1, size: '1024x1024' as const, quality: 'medium' as const };
-    const first = await createImageGenerationService(dependencies).generate(input, context, 'durable-request');
-    const second = await createImageGenerationService(dependencies).generate(input, context, 'durable-request');
+    const input = { prompt: 'Earth', count: 1, size: '1024x1024' as const, quality: 'medium' as const };
+    const first = await createImageGenerationService(dependencies).generate(input, galleryDestination, context, 'durable-request');
+    const second = await createImageGenerationService(dependencies).generate(input, galleryDestination, context, 'durable-request');
     expect(providerCalls).toBe(1);
     expect(first.images[0]!.url).not.toBe(second.images[0]!.url);
     expect(JSON.stringify(replay)).toContain('durable/key.png');
@@ -321,7 +348,7 @@ describe('image generation service', () => {
     let providerCalls = 0;
     for (const status of ['conflict', 'pending'] as const) {
       const service = createImageGenerationService({ executeAsk: safeAsk, history, gallery: authorizedGallery, idempotency: { ...claimedLedger(), claim: async () => ({ status }) }, execute: (async () => { providerCalls += 1; return {}; }) as any });
-      await expect(service.generate({ collectionKey, prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, context, `request-${status}`)).rejects.toThrow(status === 'conflict' ? 'different request' : 'another server');
+      await expect(service.generate({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, galleryDestination, context, `request-${status}`)).rejects.toThrow(status === 'conflict' ? 'different request' : 'another server');
     }
     expect(providerCalls).toBe(0);
   });
@@ -330,9 +357,9 @@ describe('image generation service', () => {
     let providerCalls = 0;
     const execute = (async () => { providerCalls += 1; return {}; }) as any;
     const indeterminate = createImageGenerationService({ executeAsk: safeAsk, history, gallery: authorizedGallery, idempotency: { ...claimedLedger(), claim: async () => ({ status: 'indeterminate' }) }, execute });
-    await expect(indeterminate.generate({ collectionKey, prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, context, 'indeterminate')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_INDETERMINATE', retryable: false });
+    await expect(indeterminate.generate({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, galleryDestination, context, 'indeterminate')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_INDETERMINATE', retryable: false });
     const failed = createImageGenerationService({ executeAsk: safeAsk, history, gallery: authorizedGallery, idempotency: { ...claimedLedger(), claim: async () => ({ status: 'failed', failure: { code: 'IMAGE_GENERATION_FAILED', message: 'Image generation request could not be completed.', retryable: false } }) }, execute });
-    await expect(failed.generate({ collectionKey, prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, context, 'failed')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_FAILED', retryable: false });
+    await expect(failed.generate({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, galleryDestination, context, 'failed')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_FAILED', retryable: false });
     expect(providerCalls).toBe(0);
   });
 
@@ -346,7 +373,7 @@ describe('image generation service', () => {
       scheduleLeaseRenewal: (renew) => { renew(); return () => {}; },
       execute: (async () => { throw new Error('provider failed'); }) as any,
     });
-    await expect(service.generate({ collectionKey, prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, context, 'failure')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_FAILED', retryable: true });
+    await expect(service.generate({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'low' }, galleryDestination, context, 'failure')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_FAILED', retryable: true });
     expect(renewals).toBeGreaterThan(0);
     expect(releases).toBe(0);
     expect(failures).toBe(1);
@@ -376,9 +403,9 @@ describe('image generation service', () => {
       }) as any,
       process: async () => [persistedImage()], publishGeneratedImages: async () => {}, signUrl: async () => 'https://images.example/generated.png',
     });
-    const input = { collectionKey, prompt: 'Retry Earth', count: 1, size: '1024x1024' as const, quality: 'low' as const };
-    await expect(service.generate(input, context, 'retryable-image')).rejects.toMatchObject({ retryable: true });
-    await expect(service.generate(input, context, 'retryable-image')).resolves.toMatchObject({ images: [{ origin: 'generated' }] });
+    const input = { prompt: 'Retry Earth', count: 1, size: '1024x1024' as const, quality: 'low' as const };
+    await expect(service.generate(input, galleryDestination, context, 'retryable-image')).rejects.toMatchObject({ retryable: true });
+    await expect(service.generate(input, galleryDestination, context, 'retryable-image')).resolves.toMatchObject({ images: [{ origin: 'generated' }] });
     expect(providerCalls).toBe(2);
     expect(state as string).toBe('completed');
     expect(storedFailure?.retryable).toBe(true);
@@ -393,9 +420,9 @@ describe('image generation service', () => {
       fail: async () => { throw new Error('ledger unavailable'); },
     };
     const dependencies = { executeAsk: safeAsk, history, gallery: authorizedGallery, idempotency: ledger, getImage: async () => null, execute: (async () => { providerCalls += 1; throw new Error('provider failed'); }) as any };
-    const input = { collectionKey, prompt: 'Earth', count: 1, size: '1024x1024' as const, quality: 'low' as const };
-    await expect(createImageGenerationService(dependencies).generate(input, context, 'failure-write')).rejects.toThrow('provider failed');
-    await expect(createImageGenerationService(dependencies).generate(input, context, 'failure-write')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_INDETERMINATE', retryable: false });
+    const input = { prompt: 'Earth', count: 1, size: '1024x1024' as const, quality: 'low' as const };
+    await expect(createImageGenerationService(dependencies).generate(input, galleryDestination, context, 'failure-write')).rejects.toThrow('provider failed');
+    await expect(createImageGenerationService(dependencies).generate(input, galleryDestination, context, 'failure-write')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_INDETERMINATE', retryable: false });
     expect(providerCalls).toBe(1);
   });
 
@@ -413,7 +440,7 @@ describe('image generation service', () => {
       process: async (inputs) => { processed.push([...inputs]); return [second]; },
       signUrl: async (key) => `https://images.example/${key}`,
     });
-    const result = await service.generate({ collectionKey, prompt: 'Earth', count: 2, size: '1024x1024', quality: 'medium' }, context, 'partial');
+    const result = await service.generate({ prompt: 'Earth', count: 2, size: '1024x1024', quality: 'medium' }, galleryDestination, context, 'partial');
     expect(providerCalls).toBe(1);
     expect(processed[0]?.[0]?.idempotencyKey).toMatch(/^image-generation:[a-f0-9]{64}$/);
     expect(processed[0]?.[0]?.origin).toBe('generated');
@@ -430,7 +457,7 @@ describe('image generation service', () => {
       getImage: async (key) => ({ ...persistedImage(key), createdByKey: newId() }),
       execute: (async () => { providerCalls += 1; return {}; }) as any,
     });
-    await expect(service.generate({ collectionKey, prompt: 'Earth', count: 1, size: '1024x1024', quality: 'medium' }, context, 'wrong-owner')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_FAILED' });
+    await expect(service.generate({ prompt: 'Earth', count: 1, size: '1024x1024', quality: 'medium' }, galleryDestination, context, 'wrong-owner')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_FAILED' });
     expect(providerCalls).toBe(0);
   });
 
@@ -456,10 +483,10 @@ describe('image generation service', () => {
       process: async () => { processCalls += 1; stored = persistedImage(); return [stored]; },
       signUrl: async () => 'https://images.example/refreshed.png',
     };
-    const input = { collectionKey, prompt: 'Earth', count: 1, size: '1024x1024' as const, quality: 'medium' as const };
-    await expect(createImageGenerationService(dependencies).generate(input, context, 'completion-recovery')).rejects.toThrow('ledger completion failed');
+    const input = { prompt: 'Earth', count: 1, size: '1024x1024' as const, quality: 'medium' as const };
+    await expect(createImageGenerationService(dependencies).generate(input, galleryDestination, context, 'completion-recovery')).rejects.toThrow('ledger completion failed');
     beyondLease = true;
-    await expect(createImageGenerationService(dependencies).generate(input, context, 'completion-recovery')).rejects.toThrow('another server');
+    await expect(createImageGenerationService(dependencies).generate(input, galleryDestination, context, 'completion-recovery')).rejects.toThrow('another server');
     expect({ providerCalls, processCalls, completions, releases, failures }).toEqual({ providerCalls: 1, processCalls: 1, completions: 1, releases: 0, failures: 0 });
     expect(state as 'new' | 'claimed' | 'started').toBe('started');
   });

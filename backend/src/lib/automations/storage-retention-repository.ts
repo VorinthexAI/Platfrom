@@ -38,7 +38,7 @@ export const STORAGE_WIPE_COLLECTIONS = [
 ] as const;
 
 export interface StorageRetentionRepository {
-  listUnfunded(input?: { afterKey?: string; limit?: number }): Promise<Array<StorageRetentionState & { balanceMicroSparks: number; storedBytes: string; monthlyCostSparks: string }>>;
+  listUnfunded(input?: { afterKey?: string; limit?: number }): Promise<Array<StorageRetentionState & { balanceMicroSparks: number; spendingBlocked: boolean; storedBytes: string; monthlyCostSparks: string }>>;
   markFunded(userKey: string, fundedAt: string): Promise<boolean>;
   wipe(input: { userKey: string; expectedWipeDueAt: string; batch: number; now: string }): Promise<StorageWipeResult>;
 }
@@ -55,25 +55,26 @@ export function createStorageRetentionRepository(
   return {
     async listUnfunded(input = {}) {
       const limit = Math.min(Math.max(input.limit ?? STORAGE_RETENTION_SCAN_BATCH_SIZE, 1), STORAGE_RETENTION_SCAN_BATCH_SIZE);
-      const cursor = await database.query('FOR state IN @@retention FILTER state.fundedAt == null && state._key > @afterKey SORT state._key ASC LIMIT @limit LET user = DOCUMENT(users, state.userKey) LET balanceMicroSparks = user != null && IS_NUMBER(user.microSparkBalance) ? user.microSparkBalance : 0 LET storedByteSizes = (FOR object IN @@objects FILTER object.userKey == state.userKey && object.deletedAt == null RETURN object.sizeBytes) RETURN { state, balanceMicroSparks, storedByteSizes }', { '@retention': STORAGE_RETENTION_STATES_COLLECTION, '@objects': STORAGE_OBJECTS_COLLECTION, afterKey: input.afterKey ?? '', limit });
+      const cursor = await database.query('FOR state IN @@retention FILTER state.fundedAt == null && state._key > @afterKey SORT state._key ASC LIMIT @limit LET user = DOCUMENT(users, state.userKey) LET balanceMicroSparks = user != null && IS_NUMBER(user.microSparkBalance) ? user.microSparkBalance : 0 LET spendingBlocked = user != null && IS_NUMBER(user.microSparkDebt) && user.microSparkDebt > 0 LET storedByteSizes = (FOR object IN @@objects FILTER object.userKey == state.userKey && object.deletedAt == null RETURN object.sizeBytes) RETURN { state, balanceMicroSparks, spendingBlocked, storedByteSizes }', { '@retention': STORAGE_RETENTION_STATES_COLLECTION, '@objects': STORAGE_OBJECTS_COLLECTION, afterKey: input.afterKey ?? '', limit });
       return (await cursor.all()).map((raw) => {
-        const value = raw as { state: Record<string, unknown>; balanceMicroSparks: unknown; storedByteSizes: unknown };
+        const value = raw as { state: Record<string, unknown>; balanceMicroSparks: unknown; spendingBlocked: unknown; storedByteSizes: unknown };
         const balanceMicroSparks = z.number().int().nonnegative().safe().parse(value.balanceMicroSparks);
+        const spendingBlocked = z.boolean().parse(value.spendingBlocked);
         const storedBytes = z.array(z.string().regex(/^\d+$/)).parse(value.storedByteSizes).reduce((total, size) => total + BigInt(size), 0n).toString();
-        return { ...storageRetentionStateSchema.parse(withArangoKey(value.state)), balanceMicroSparks, storedBytes, monthlyCostSparks: storageMonthlyCostSparks(storedBytes) };
+        return { ...storageRetentionStateSchema.parse(withArangoKey(value.state)), balanceMicroSparks, spendingBlocked, storedBytes, monthlyCostSparks: storageMonthlyCostSparks(storedBytes) };
       });
     },
 
     async markFunded(userKey, fundedAt) {
       const valid = z.object({ userKey: storageRetentionStateSchema.shape.userKey, fundedAt: z.string().datetime() }).strict().parse({ userKey, fundedAt });
-      const cursor = await database.query('FOR state IN @@retention FILTER state.userKey == @userKey && state.fundedAt == null && state.wipeStartedAt == null LET user = DOCUMENT(users, state.userKey) FILTER user != null && IS_NUMBER(user.microSparkBalance) && user.microSparkBalance >= state.minimumBalanceMicroSparks UPDATE state WITH { fundedAt: @fundedAt } IN @@retention RETURN true', { '@retention': STORAGE_RETENTION_STATES_COLLECTION, ...valid });
+      const cursor = await database.query('FOR state IN @@retention FILTER state.userKey == @userKey && state.fundedAt == null && state.wipeStartedAt == null LET user = DOCUMENT(users, state.userKey) FILTER user != null && (!IS_NUMBER(user.microSparkDebt) || user.microSparkDebt == 0) && IS_NUMBER(user.microSparkBalance) && user.microSparkBalance >= state.minimumBalanceMicroSparks UPDATE state WITH { fundedAt: @fundedAt } IN @@retention RETURN true', { '@retention': STORAGE_RETENTION_STATES_COLLECTION, ...valid });
       return await cursor.next() === true;
     },
 
     async wipe(rawInput) {
       const input = wipeInputSchema.parse(rawInput);
       return transact(async (transaction) => {
-        const eligible = await transaction.query('LET state = FIRST(FOR value IN @@retention FILTER value.userKey == @userKey LIMIT 1 RETURN value) LET user = DOCUMENT(users, @userKey) LET currentBatch = state != null && IS_NUMBER(state.wipeBatch) ? state.wipeBatch : 0 FILTER state != null && state.wipeDueAt == @expectedWipeDueAt && currentBatch == @batch && state.fundedAt == null && state.wipedAt == null && state.wipeDueAt <= @now && ((@batch == 0 && state.wipeStartedAt == null && (user == null || !IS_NUMBER(user.microSparkBalance) || user.microSparkBalance < state.minimumBalanceMicroSparks)) || (@batch > 0 && state.wipeStartedAt != null)) RETURN true', { '@retention': STORAGE_RETENTION_STATES_COLLECTION, ...input });
+        const eligible = await transaction.query('LET state = FIRST(FOR value IN @@retention FILTER value.userKey == @userKey LIMIT 1 RETURN value) LET user = DOCUMENT(users, @userKey) LET currentBatch = state != null && IS_NUMBER(state.wipeBatch) ? state.wipeBatch : 0 LET spendingBlocked = user != null && IS_NUMBER(user.microSparkDebt) && user.microSparkDebt > 0 FILTER state != null && state.wipeDueAt == @expectedWipeDueAt && currentBatch == @batch && state.fundedAt == null && state.wipedAt == null && state.wipeDueAt <= @now && ((@batch == 0 && state.wipeStartedAt == null && (user == null || spendingBlocked || !IS_NUMBER(user.microSparkBalance) || user.microSparkBalance < state.minimumBalanceMicroSparks)) || (@batch > 0 && state.wipeStartedAt != null)) RETURN true', { '@retention': STORAGE_RETENTION_STATES_COLLECTION, ...input });
         if (await eligible.next() !== true) return { status: 'stale' };
 
         const rows = await transaction.query('FOR object IN @@objects FILTER object.userKey == @userKey && object.deletedAt == null COLLECT storageKey = object.storageKey SORT storageKey ASC LIMIT @batchSize RETURN storageKey', { '@objects': STORAGE_OBJECTS_COLLECTION, userKey: input.userKey, batchSize: STORAGE_WIPE_BATCH_SIZE });

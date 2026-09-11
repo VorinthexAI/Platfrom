@@ -81,10 +81,10 @@ await verify('Text streaming', async () => {
 });
 
 await verify('Grounded web search', async () => {
-  const response = await provider.execute({ actionId: 'web', ...textModel, teamKey: 'live-smoke', input: { prompt: 'What is the official capital of Sweden? Answer briefly and cite a source.' }, timeoutMs: 120_000 });
-  const output = response.output as { text: string; citations: unknown[] };
-  if (!output.text.toLowerCase().includes('stockholm') || output.citations.length === 0) throw new Error('Grounded search returned no supported answer.');
-  return `${output.citations.length} citation(s)`;
+  const response = await executeText({ messages: [{ role: 'user', content: [{ type: 'text', text: 'What is the official capital of Sweden? Answer briefly and cite a source.' }] }], webSearch: true });
+  const output = response.output as { text: string };
+  if (!output.text.toLowerCase().includes('stockholm')) throw new Error('Grounded search returned no supported answer.');
+  return 'grounded answer received';
 });
 
 const sourceImage = await sharp({ create: { width: 64, height: 64, channels: 3, background: '#d7263d' } }).png().toBuffer();

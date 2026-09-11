@@ -6,6 +6,7 @@ import { executeAction, executeRoute, streamAsk, type RouteAttemptTelemetry } fr
 import type { RouteDecision } from './types';
 import { observeToolExecution as observePersistedToolExecution } from '@/lib/ai/events/runtime';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
+import { SparkRepositoryError } from '@/lib/sparks/repository';
 
 const decision: RouteDecision = { teamKey: newId(), actionSlug: 'text', modelSlug: 'google.gemini-3.1-flash-lite', providerSlug: 'openrouter', providerModelId: 'google/gemini-3.1-flash-lite' };
 const observeToolExecution: typeof observePersistedToolExecution = (slug, context, execute, options = {}) => observePersistedToolExecution(slug, context, execute, { appScopeKey: 'cmrnlzf640001qc7kazsr96k5', ...options });
@@ -37,6 +38,30 @@ describe('route execution', () => {
     expect(response.providerId).toBe('openrouter');
   });
 
+  test('threads trusted execution capabilities for nonstreaming and streaming text actions', async () => {
+    const requests: ProviderExecuteRequest[] = [];
+    const adapter = {
+      id: 'openrouter' as const,
+      name: 'OpenRouter',
+      async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) {
+        requests.push(request as ProviderExecuteRequest);
+        return { output: { text: 'ok' } as TOutput, usage: tokenUsage(), providerId: 'openrouter' as const, modelId: request.modelId, externalModelId: request.externalModelId };
+      },
+      async *stream<TInput>(request: ProviderExecuteRequest<TInput>) {
+        requests.push(request as ProviderExecuteRequest);
+        yield { type: 'done' as const };
+      },
+    };
+    const options = { capabilities: { webGrounding: 'model-selected' as const }, adapters: { openrouter: adapter } };
+    await executeAction({ mode: 'auto', teamKey: newId(), actionSlug: 'text' }, { messages: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }] }, options);
+    for await (const _chunk of streamAsk(newId(), { messages: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }] }, options)) {}
+    expect(requests).toHaveLength(2);
+    expect(requests.map(({ capabilities }) => capabilities)).toEqual([
+      { webGrounding: 'model-selected' },
+      { webGrounding: 'model-selected' },
+    ]);
+  });
+
   test('does not retry invalid input', async () => {
     let calls = 0;
     await expect(executeAction({ mode: 'auto', teamKey: newId(), actionSlug: 'text' }, { messages: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }] }, {
@@ -57,6 +82,17 @@ describe('route execution', () => {
       lookupCost: (input) => input.actionSlug ? { source: 'action', slug: input.actionSlug, rule: { type: 'fixed', microSparks: 1 } } : null,
     })).rejects.toThrow('stable request key');
     expect(providerCalls).toBe(0);
+  });
+
+  test('preserves post-provider Spark failures for the HTTP and mobile billing boundary', async () => {
+    const teamKey = newId(), userKey = newId();
+    const context = { teamKey, runtimeScopeKey: newId(), principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    await expect(observeToolExecution('app.translate', context, () => executeAction({ mode: 'auto', teamKey, actionSlug: 'text' }, { messages: [] }, {
+      providers: ['text.primary'], adapters: { openrouter: { id: 'openrouter', name: 'OpenRouter', async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) { return { output: {} as TOutput, usage: tokenUsage(1, 1), providerId: 'openrouter', modelId: request.modelId, externalModelId: request.externalModelId }; } } },
+    }), {
+      idempotencyKey: 'low-balance', recorder: async () => {}, getBalance: async () => 1,
+      charge: async () => { throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'insufficient'); },
+    })).rejects.toMatchObject({ code: 'INSUFFICIENT_BALANCE' });
   });
 
   test('retries rate-limited streams only before the first emitted chunk', async () => {
@@ -94,7 +130,7 @@ describe('route execution', () => {
       charge: async (_key, input) => { charge = input; return { status: 'applied', transaction: { key: 'charge', eventKey: input.eventKey } } as never; },
     });
     expect(calls).toBe(2);
-    expect(charge).toMatchObject({ kind: 'action', actionSlug: 'text', microSparks: 550 });
+    expect(charge).toMatchObject({ kind: 'action', actionSlug: 'text', microSparks: 440 });
   });
 
   test('bills generated images by returned successful fan-out calls', async () => {
@@ -110,8 +146,8 @@ describe('route execution', () => {
     });
     expect(charges).toHaveLength(2);
     expect(charges).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'action', actionSlug: 'image', microSparks: 30_000_000 }),
-      expect.objectContaining({ kind: 'action', actionSlug: 'image', microSparks: 30_000_000 }),
+      expect.objectContaining({ kind: 'action', actionSlug: 'image', microSparks: 10_000_000 }),
+      expect.objectContaining({ kind: 'action', actionSlug: 'image', microSparks: 10_000_000 }),
     ]));
   });
 });

@@ -22,6 +22,8 @@ let contextResponse: unknown = realContext;
 let patchResponse: unknown = realContext;
 let patchError: Error | undefined;
 let patchGate: Promise<void> | undefined;
+let postGate: Promise<void> | undefined;
+let postError: Error | undefined;
 let session: typeof storedSession | null = null;
 let getCalls = 0;
 let clearContextCalls = 0;
@@ -62,9 +64,10 @@ mock.module("@/lib/api-client", () => ({
     return () => undefined;
   },
   patchJson: async (path: string, input: unknown) => { patchCalls.push({ path, input }); await patchGate; if (patchError) throw patchError; return patchResponse; },
-  postJson: async (path: string, input: unknown) => { postCalls.push({ path, input }); return { deleted: true }; },
+  postJson: async (path: string, input: unknown) => { postCalls.push({ path, input }); await postGate; if (postError) throw postError; return { deleted: true }; },
   revokeRemoteSession: async () => { revokeCalls += 1; },
   cleanupRemoteSession: async () => { cleanupCalls += 1; await cleanupGate; if (cleanupError) throw cleanupError; },
+  deleteRemoteAccount: async () => { postCalls.push({ path: "/auth/me/delete", input: { confirmation: "DELETE MY ACCOUNT" } }); await postGate; if (postError) throw postError; },
 }));
 mock.module("@/lib/auth-context-vault", () => ({
   clearAuthContext: async () => { clearContextCalls += 1; },
@@ -91,6 +94,8 @@ beforeEach(() => {
   patchResponse = realContext;
   patchError = undefined;
   patchGate = undefined;
+  postGate = undefined;
+  postError = undefined;
   session = null;
   getCalls = 0;
   clearContextCalls = 0;
@@ -136,17 +141,57 @@ test("rolls optimistic onboarding completion back when the profile request fails
   expect(clearOnboardingCalls).toBe(0);
 });
 
-test("deletes the remote account before clearing local auth and onboarding state", async () => {
+test("preserves and reconciles an optimistic avatar while onboarding completion returns stale profile data", async () => {
+  let releasePatch!: () => void;
+  patchGate = new Promise<void>((resolve) => { releasePatch = resolve; });
+  patchResponse = { ...realContext, user: { ...realContext.user, is_onboarded: true, avatar_url: null } };
+  useAuthStore.setState({ status: "authenticated", user: { ...realContext.user, isOnboarded: false }, team: realContext.team, teamMembership: realContext.teamMembership, teamSelectionEnabled: true, scope: realContext.scope });
+  const avatar = useAuthStore.getState().optimisticProfile({ avatarUrl: "https://example.com/candidate.png" });
+
+  const completion = useAuthStore.getState().completeOnboarding();
+  expect(useAuthStore.getState().user?.avatarUrl).toBe("https://example.com/candidate.png");
+  releasePatch();
+  await completion;
+  expect(useAuthStore.getState().user?.avatarUrl).toBe("https://example.com/candidate.png");
+
+  avatar.reconcile({ avatarUrl: "https://example.com/profile.png" });
+  expect(useAuthStore.getState().user?.avatarUrl).toBe("https://example.com/profile.png");
+});
+
+test("clears auth immediately while remote account deletion is pending", async () => {
   session = storedSession;
   useAuthStore.setState({ status: "authenticated", user: { key: "user", email: "user@example.com" }, team: { key: "team" }, scope: { key: "scope" } });
+  let releasePost!: () => void;
+  postGate = new Promise<void>((resolve) => { releasePost = resolve; });
 
-  await useAuthStore.getState().deleteAccount();
+  const completion = useAuthStore.getState().deleteAccount();
 
-  expect(postCalls).toEqual([{ path: "/auth/me/delete", input: { confirmation: "DELETE MY ACCOUNT" } }]);
   expect(useAuthStore.getState().status).toBe("unauthenticated");
+  expect(useAuthStore.getState().user).toBeNull();
+  expect(clearContextCalls).toBe(1);
+  expect(clearOnboardingCalls).toBe(1);
+  await Promise.resolve();
+  expect(postCalls).toEqual([{ path: "/auth/me/delete", input: { confirmation: "DELETE MY ACCOUNT" } }]);
+  releasePost();
+  await completion;
+  expect(useAuthStore.getState().status).toBe("unauthenticated");
+  expect(useAuthStore.getState().user).toBeNull();
   expect(clearTokenCalls).toBe(1);
   expect(clearContextCalls).toBe(1);
   expect(clearOnboardingCalls).toBe(1);
+});
+
+test("keeps local auth cleared when remote account deletion fails", async () => {
+  session = storedSession;
+  useAuthStore.setState({ status: "authenticated", user: { key: "user", email: "user@example.com" }, team: { key: "team" }, scope: { key: "scope" } });
+  postError = new Error("deletion unavailable");
+
+  await expect(useAuthStore.getState().deleteAccount()).rejects.toThrow("deletion unavailable");
+
+  expect(useAuthStore.getState().status).toBe("unauthenticated");
+  expect(useAuthStore.getState().user).toBeNull();
+  expect(clearTokenCalls).toBe(1);
+  expect(clearContextCalls).toBe(1);
 });
 
 test("optimistically switches scope and can reconcile or roll back", () => {

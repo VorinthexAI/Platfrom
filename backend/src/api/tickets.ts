@@ -2,7 +2,7 @@ import type { Context } from 'hono';
 import { z, ZodError } from 'zod';
 import { authorizeContentExecution, ContentError, type RunAuthenticatedContentToolOptions } from '@/lib/ai/tools';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
-import { feedbackListInputSchema, feedbackVoteInputSchema, getDefaultTicketService, ticketIdempotencyKeySchema, ticketSubmitInputSchema, TicketAccessError, TicketFeedbackRejectedError, TicketIdempotencyError, TicketNotFoundError, type TicketService } from '@/lib/tickets/service';
+import { getDefaultTicketService, ticketIdempotencyKeySchema, ticketSubmitInputSchema, TicketAccessError, TicketFeedbackRejectedError, TicketIdempotencyError, type TicketService } from '@/lib/tickets/service';
 import { getAuthIdentity } from './security';
 import { parseJson } from './validation';
 import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
@@ -15,8 +15,6 @@ export const ticketHttpInputSchema = z.object({
   scopeKey: z.string().cuid(),
   message: ticketSubmitInputSchema.shape.message,
 }).strict();
-export const feedbackListHttpInputSchema = z.object({ teamKey: z.string().cuid(), scopeKey: z.string().cuid(), cursor: feedbackListInputSchema.shape.cursor, limit: feedbackListInputSchema.shape.limit.optional() }).strict();
-export const feedbackVoteHttpInputSchema = z.object({ teamKey: z.string().cuid(), scopeKey: z.string().cuid(), vote: feedbackVoteInputSchema.shape.vote }).strict();
 
 export interface TicketHandlerDependencies {
   getIdentity?: typeof getAuthIdentity;
@@ -61,7 +59,6 @@ async function authorizedRequest(c: Context, dependencies: TicketHandlerDependen
 function feedbackError(c: Context, error: unknown) {
   const billing = sparkErrorResponse(c, error); if (billing) return billing;
   if (error instanceof TicketIdempotencyError) return c.json({ success: false, error: { code: error.code, message: error.message } }, 409);
-  if (error instanceof TicketNotFoundError) return c.json({ success: false, error: { code: error.code, message: error.message } }, 404);
   if (error instanceof TicketFeedbackRejectedError) return c.json({ success: false, error: { code: error.code, message: error.message } }, 400);
   if (error instanceof TicketAccessError) return c.json({ success: false, error: { code: error.code, message: error.message } }, 403);
   if (error instanceof ContentError) return c.json({ success: false, error: error.toJSON() }, error.code === 'CONTENT_FORBIDDEN' || error.code === 'CONTENT_UNAUTHORIZED' ? 403 : error.code === 'CONTENT_NOT_FOUND' ? 404 : 400);
@@ -80,25 +77,6 @@ export function createFeedbackHandlers(dependencies: TicketHandlerDependencies =
         const input = ticketSubmitInputSchema.parse(request.body);
         const ticket = await observeToolExecution('feedback.create', request.context, () => (dependencies.service ?? getDefaultTicketService()).createFeedback(input, request.context, idempotencyKey), { recorder: dependencies.recordEvent ?? toolEventService.record, appScopeKey: dependencies.appScopeKey, idempotencyKey, input, ...dependencies.billing });
         return c.json({ success: true, data: ticket }, 201);
-      } catch (error) { return feedbackError(c, error); }
-    },
-    list: async (c: Context) => {
-      try {
-        const request = await authorizedRequest(c, dependencies, feedbackListHttpInputSchema);
-        if ('response' in request) return request.response;
-        const result = await (dependencies.service ?? getDefaultTicketService()).listFeedback(feedbackListInputSchema.parse(request.body), request.context);
-        return c.json({ success: true, data: result });
-      } catch (error) { return feedbackError(c, error); }
-    },
-    vote: async (c: Context) => {
-      try {
-        const requestKey = ticketIdempotencyKeySchema.parse(c.req.header('idempotency-key'));
-        const ticketKey = z.string().cuid().parse(c.req.param('ticketKey'));
-        const request = await authorizedRequest(c, dependencies, feedbackVoteHttpInputSchema);
-        if ('response' in request) return request.response;
-        const { vote } = feedbackVoteInputSchema.pick({ vote: true }).parse(request.body);
-        const ticket = await (dependencies.service ?? getDefaultTicketService()).setFeedbackVote({ ticketKey, vote }, request.context, requestKey);
-        return c.json({ success: true, data: ticket });
       } catch (error) { return feedbackError(c, error); }
     },
   };

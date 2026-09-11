@@ -62,7 +62,7 @@
             </tr>
 
             <tr>
-              <td class="vtx-panel" style="background:#0d1117; background-color:#0d1117; background-image:linear-gradient(180deg, #141922 0%, #0a0e13 100%); border:1px solid rgba(221,226,229,0.14); border-radius:20px; padding:46px 44px;">
+              <td class="vtx-panel" style="background:#030507; background-color:#030507; padding:24px 0 16px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                   <tr>
                     <td style="font-family:Consolas, Menlo, 'Courier New', monospace; font-size:11px; line-height:1.2; font-weight:600; color:#aeb6bc; letter-spacing:0.22em; text-transform:uppercase; padding:0 0 22px;">
@@ -80,12 +80,13 @@
                     </td>
                   </tr>
 
+                  <!-- action:start -->
                   <tr>
                     <td style="padding:0 0 32px;">
                       <table class="vtx-button-wrap" role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%; table-layout:fixed;">
                         <tr>
                           <td align="left" style="padding:0;">
-                            <a class="vtx-button" href="{{action_url}}" style="background:#dde2e5; background-color:#dde2e5; background-image:linear-gradient(135deg, #ffffff 0%, #dde2e5 45%, #aeb6bc 100%); border:1px solid rgba(255,255,255,0.55); border-radius:999px; color:#030507; display:inline-block; font-size:13px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; line-height:1.2; max-width:100%; mso-padding-alt:0; padding:15px 32px; text-decoration:none; box-sizing:border-box; overflow-wrap:anywhere; word-break:break-word; box-shadow:0 0 34px rgba(221,226,229,0.22);">
+                            <a class="vtx-button" href="{{action_url}}" style="background:#f5f7f8; background-color:#f5f7f8; border:1px solid #f5f7f8; border-radius:999px; color:#030507; display:inline-block; font-size:13px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; line-height:1.2; max-width:100%; mso-padding-alt:0; padding:15px 32px; text-decoration:none; box-sizing:border-box; overflow-wrap:anywhere; word-break:break-word;">
                               {{action_label}}
                             </a>
                           </td>
@@ -93,18 +94,15 @@
                       </table>
                     </td>
                   </tr>
+                  <!-- action:end -->
 
+                  <!-- supporting:start -->
                   <tr>
-                    <td style="padding:0 0 28px;">
-                      <div style="height:1px; line-height:1px; font-size:0; background:rgba(221,226,229,0.14); background-image:linear-gradient(90deg, rgba(221,226,229,0), rgba(221,226,229,0.32), rgba(221,226,229,0));">&nbsp;</div>
-                    </td>
-                  </tr>
-
-                  <tr>
-                    <td style="background:#141922; background-color:#141922; border:1px solid rgba(221,226,229,0.10); border-radius:12px; color:#aeb6bc; font-size:14px; line-height:1.55; padding:16px 18px;">
+                    <td style="color:#aeb6bc; font-size:14px; line-height:1.55; padding:0;">
                       {{supporting_html}}
                     </td>
                   </tr>
+                  <!-- supporting:end -->
                 </table>
               </td>
             </tr>
@@ -115,12 +113,14 @@
               </td>
             </tr>
 
+            <!-- action:start -->
             <tr>
               <td style="padding:14px 0 0; color:#7b858c; font-size:12px; line-height:1.5;">
                 If the button does not work, open this link:<br>
                 <a href="{{action_url}}" style="color:#aeb6bc; text-decoration:underline; word-break:break-all;">{{action_url}}</a>
               </td>
             </tr>
+            <!-- action:end -->
           </table>
         </td>
       </tr>

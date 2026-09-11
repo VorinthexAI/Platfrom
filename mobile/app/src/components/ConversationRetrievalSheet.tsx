@@ -39,7 +39,7 @@ export function ConversationRetrievalSheet({ contextIdentity, onClose, onNavigat
   const visible = filterConversationRetrievalResults(merged, validations);
   const failed = queries.some(({ isError }) => isError);
 
-  return <BottomSheet height="full" onOpenChange={(next) => { if (!next) onClose(); }} open={open} title="Search results">
+  return <BottomSheet footer={<Button onPress={onClose} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(next) => { if (!next) onClose(); }} open={open} title="Search results">
     <FlatList contentContainerStyle={[styles.results, visible.length === 0 && styles.emptyResults]} data={visible} initialNumToRender={12} keyboardShouldPersistTaps="handled" keyExtractor={(result) => `${result.collectionSlug}:${result.key}`} ListEmptyComponent={!queries.some(({ isPending, isFetching }) => isPending || isFetching) && !failed ? <Text style={styles.empty}>These results are no longer available.</Text> : null} ListHeaderComponent={failed ? <View accessibilityRole="alert" style={styles.error}><Text style={styles.errorText}>Some results could not be checked.</Text><Button onPress={() => { queries.forEach((query) => { if (query.isError) void query.refetch(); }); }} size="md" variant="secondary">Retry</Button></View> : null} maxToRenderPerBatch={12} renderItem={({ item }) => <ActionPill compact onPress={() => onNavigate(item)} pressLabel={`Open ${item.label}`}><Text numberOfLines={1} style={styles.label}>{item.label}</Text></ActionPill>} showsVerticalScrollIndicator={false} style={styles.scroll} updateCellsBatchingPeriod={50} windowSize={7} />
   </BottomSheet>;
 }

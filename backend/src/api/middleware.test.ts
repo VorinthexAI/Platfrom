@@ -4,10 +4,11 @@ import { FOUNDER_ACCESS_MAX_AGE_SECONDS, FOUNDER_REFRESH_MAX_AGE_SECONDS } from 
 import { isResendWebhookPath } from './resend';
 import { isGmailWebhookPath } from './email-webhook';
 import { isPolarWebhookPath } from './polar-webhook';
-import { bindEventIdentifier, createAutoRefreshAuthTokens, createBindEventApp, isOnboardingSandboxPath, isPublicFounderAuthPath, isPublicProductPath, rateLimitByIp, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
+import { bindDevice, bindEventIdentifier, createAutoRefreshAuthTokens, createBindEventApp, isOnboardingSandboxPath, isPublicFounderAuthPath, isPublicProductPath, rateLimitByIp, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
 import { currentEventAppKey, currentEventAppScopeKey } from '@/lib/ai/events/runtime';
 import { APP_KEYS } from '@/lib/apps/registry';
 import { currentEventIdentifier } from '@/lib/ai/events/event-identifier';
+import { currentDevice } from '@/lib/ai/events/device';
 
 function middlewareContext(path: string, headers: Record<string, string> = {}, search = '', method = 'GET') {
   return {
@@ -90,6 +91,21 @@ describe('event identifier middleware', () => {
     for (const identifier of ['a'.repeat(127), 'A'.repeat(128), ` ${'a'.repeat(128)} `]) {
       expect((await bindEventIdentifier(middlewareContext('/api/v1/events', { 'x-vorinthex-event-identifier': identifier }), async () => undefined))?.status).toBe(400);
     }
+  });
+});
+
+describe('device middleware', () => {
+  test('is globally registered, allowed by CORS, and binds validated values', async () => {
+    const source = await Bun.file(new URL('./index.ts', import.meta.url)).text();
+    expect(source).toContain('DEVICE_IDENTIFIER_HEADER,');
+    expect(source.indexOf("app.use('*', bindDevice)")).toBeLessThan(source.indexOf('registerRoutes(api)'));
+    const seen: { value: string | null } = { value: null };
+    await bindDevice(middlewareContext('/api/v1/events', { 'x-vorinthex-device-identifier': 'android' }), async () => { await Promise.resolve(); seen.value = currentDevice(); });
+    expect(seen.value).toBe('android');
+    expect((await bindDevice(middlewareContext('/api/v1/events', { 'x-vorinthex-device-identifier': 'web' }), async () => undefined))?.status).toBe(400);
+    let absentCalls = 0;
+    await bindDevice(middlewareContext('/api/v1/health'), async () => { absentCalls += 1; });
+    expect(absentCalls).toBe(1);
   });
 });
 
@@ -256,6 +272,14 @@ describe('validateQueryParams', () => {
       ),
     ).rejects.toThrow();
     expect(nextCalls).toBe(0);
+  });
+
+  test('allows only billing summary pagination query params', async () => {
+    let nextCalls = 0;
+    const before = encodeURIComponent('2026-09-11T12:00:00.000Z');
+    await validateQueryParams(middlewareContext('/api/v1/billing/summary', {}, `?limit=50&beforeCreatedAt=${before}&beforeKey=transaction-1`), async () => { nextCalls += 1; });
+    expect(nextCalls).toBe(1);
+    await expect(validateQueryParams(middlewareContext('/api/v1/billing/summary', {}, '?limit=50&userKey=forged'), async () => {})).rejects.toThrow();
   });
 
   test('still rejects query params on paths without a whitelist entry', async () => {

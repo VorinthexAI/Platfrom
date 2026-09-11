@@ -1,4 +1,5 @@
 export const INSUFFICIENT_BALANCE_CODE = "INSUFFICIENT_BALANCE";
+export const OUTSTANDING_DEBT_CODE = "OUTSTANDING_DEBT";
 
 type DomainErrorListener = (error: unknown) => void;
 const listeners = new Set<DomainErrorListener>();
@@ -21,6 +22,11 @@ export function extractDomainErrorCode(value: unknown): string | undefined {
 
 export function isInsufficientBalanceError(value: unknown) {
   return extractDomainErrorCode(value) === INSUFFICIENT_BALANCE_CODE;
+}
+
+export function isSparkFundingError(value: unknown) {
+  const code = extractDomainErrorCode(value);
+  return code === INSUFFICIENT_BALANCE_CODE || code === OUTSTANDING_DEBT_CODE;
 }
 
 function responseErrorMessage(payload: unknown) {
@@ -48,7 +54,7 @@ export function createObservedHttpError(status: number, responseText: string) {
 }
 
 export function observeDomainError<T>(error: T): T {
-  if (!isInsufficientBalanceError(error)) return error;
+  if (!isSparkFundingError(error)) return error;
   if (typeof error === "object" && error !== null) {
     if (observedErrors.has(error)) return error;
     observedErrors.add(error);

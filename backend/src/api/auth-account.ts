@@ -90,7 +90,7 @@ export async function patchAuthAccount(c: Context) {
   if (!identity || identity.identityType !== 'user') return c.json({ error: 'user authentication required' }, 401);
   const existing = await getUserById(identity.key);
   if (!existing?.isVerified) return c.json({ error: 'verified authentication required' }, 403);
-  const context = await getPersonalAuthContext(existing.key) ?? await provisionPersonalAuthContext(existing);
+  const context = await provisionPersonalAuthContext(existing);
   const user = existing.isOnboarded ? existing : await updateUser(existing.key, {
     isOnboarded: body.isOnboarded,
     updatedAt: new Date().toISOString(),
@@ -105,7 +105,7 @@ export async function getAuthAccount(c: Context) {
   if (!identity) return c.json({ error: 'authentication required' }, 401);
   const user = await getUserById(identity.key);
   if (!user?.isVerified) return c.json({ error: 'verified authentication required' }, 403);
-  const context = await getPersonalAuthContext(user.key) ?? await provisionPersonalAuthContext(user);
+  const context = await provisionPersonalAuthContext(user);
   return c.json(await buildAuthAccountResponse(user, context, signProfileAvatarUrl, await hasActiveEnvironmentSeededMembership(user.key)));
 }
 

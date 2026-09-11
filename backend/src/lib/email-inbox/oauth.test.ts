@@ -76,7 +76,7 @@ describe('email OAuth state', () => {
     expect(watchWrites).toBe(1);
     expect(initialJobs).toEqual([{ teamKey: 'team-1', scopeKey, connectorKey: connector.key, operationKey: expect.any(String) }]);
     expect(initialJobs[0].operationKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-    expect(upsertInput).toMatchObject({ billingUserKey: userKey });
+    expect(upsertInput).toMatchObject({ userKey });
     expect(await oauth.exchange({ userKey, teamKey: 'team-1', scopeKey, code })).toMatchObject({ email: 'person@example.com' });
     expect(await oauth.exchange({ userKey, teamKey: 'team-1', scopeKey, code })).toBeNull();
   });
@@ -146,8 +146,8 @@ describe('email OAuth state', () => {
     });
     let upserted: any;
     const connectors = {
-      findExact: async (teamKey: string, selectedScopeKey: string, providerAccountId: string) => {
-        expect({ teamKey, selectedScopeKey, providerAccountId }).toEqual({ teamKey: 'team-1', selectedScopeKey: scopeKey, providerAccountId: 'google-2' });
+      findExact: async (selectedUserKey: string, providerAccountId: string) => {
+        expect({ selectedUserKey, providerAccountId }).toEqual({ selectedUserKey: userKey, providerAccountId: 'google-2' });
         return previous;
       },
       credentials: () => ({ accessToken: 'old-access', refreshToken: 'exact-refresh', tokenType: 'Bearer', expiresAt: now }),

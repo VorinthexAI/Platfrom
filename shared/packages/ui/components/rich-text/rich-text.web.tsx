@@ -1,9 +1,15 @@
-import { createElement, type CSSProperties, type HTMLAttributes, type ReactNode } from "react";
-import { isSafeRichTextUrl, parseRichText, type RichTextBlock, type RichTextInline } from "./rich-text-parser";
+"use client";
+
+import { createElement, Fragment, memo, useLayoutEffect, useRef, type CSSProperties, type HTMLAttributes, type ReactNode } from "react";
+import { advanceStreamingRichText, isSafeRichTextUrl, parseRichText, type RichTextBlock, type RichTextInline, type StreamingRichTextState } from "./rich-text-parser";
 
 export type RichTextStyles = Partial<Record<"root" | "paragraph" | "heading" | "heading1" | "heading2" | "heading3" | "heading4" | "heading5" | "heading6" | "bold" | "italic" | "strikethrough" | "link" | "inlineCode" | "codeBlockContainer" | "codeBlock" | "blockquote" | "blockquoteText" | "unorderedList" | "orderedList" | "listItem" | "listMarker" | "thematicBreak" | "tableScroll" | "table" | "tableRow" | "tableHeaderCell" | "tableHeaderText" | "tableCell" | "tableCellText", CSSProperties>>;
 export type RichTextClassNames = Partial<Record<keyof RichTextStyles, string>>;
 export type RichTextProps = Omit<HTMLAttributes<HTMLDivElement>, "children"> & { content: string; styles?: RichTextStyles; classNames?: RichTextClassNames; onLinkPress?: (url: string) => void };
+export type StreamingRichTextProps = RichTextProps & { streaming: boolean };
+
+const EMPTY_RICH_TEXT_STYLES: RichTextStyles = {};
+const EMPTY_RICH_TEXT_CLASS_NAMES: RichTextClassNames = {};
 
 const classes = (base: string, extra?: string) => [base, extra].filter(Boolean).join(" ");
 
@@ -44,4 +50,22 @@ function Blocks({ blocks, styles, classNames, onLinkPress, prefix, quote = false
 
 export function RichText({ content, styles = {}, classNames = {}, onLinkPress, className, style, ...props }: RichTextProps) {
   return <div className={classes("vui-rich-text", className)} style={{ ...styles.root, ...style }} {...props}><Blocks blocks={parseRichText(content)} styles={styles} classNames={classNames} onLinkPress={onLinkPress} prefix="rich-text" /></div>;
+}
+
+const StableRichText = memo(function StableRichText({ classNames, content, onLinkPress, styles }: { classNames: RichTextClassNames; content: string; onLinkPress?: (url: string) => void; styles: RichTextStyles }) {
+  return <Fragment><Blocks blocks={parseRichText(content)} styles={styles} classNames={classNames} onLinkPress={onLinkPress} prefix="stream-stable" /></Fragment>;
+});
+
+export function StreamingRichText({ content, streaming, styles = EMPTY_RICH_TEXT_STYLES, classNames = EMPTY_RICH_TEXT_CLASS_NAMES, onLinkPress, className, style, ...props }: StreamingRichTextProps) {
+  const state = useRef<StreamingRichTextState | undefined>(undefined);
+  const tail = useRef<HTMLDivElement>(null);
+  state.current = advanceStreamingRichText(state.current, content);
+  useLayoutEffect(() => {
+    if (!streaming || typeof window === "undefined" || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    tail.current?.animate([{ opacity: 0.82 }, { opacity: 1 }], { duration: 90, easing: "ease-out" });
+  }, [content, streaming]);
+  return <div className={classes("vui-rich-text", className)} style={{ ...styles.root, ...style }} {...props}>
+    {state.current.stableSegments.map((segment) => <StableRichText classNames={classNames} content={segment.content} key={segment.key} onLinkPress={onLinkPress} styles={styles} />)}
+    {state.current.tail ? <div ref={tail}><Blocks blocks={parseRichText(state.current.tail)} styles={styles} classNames={classNames} onLinkPress={onLinkPress} prefix="stream-tail" /></div> : null}
+  </div>;
 }

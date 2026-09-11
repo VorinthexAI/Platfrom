@@ -63,22 +63,15 @@ export const insertUser = helpers.insert;
 export const getUserById = helpers.getById;
 export const updateUser = helpers.updateById;
 export async function deleteUser(userKey: string): Promise<void> {
-  await withTransaction(['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages', 'ticketVotes', 'tickets', 'events', 'sparkTransactions', 'referralCodes', 'referralAttributions', 'referralRewards', 'checkoutHandoffs', 'paymentCheckouts', 'paymentOrders', 'subscriptions', 'storageDeletionJobs', 'tags', 'tagAssignments'], async (transaction) => {
+  await withTransaction(['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages', 'userInboxThreads', 'userInboxMessages', 'tickets', 'events', 'sparkTransactions', 'referralCodes', 'referralAttributions', 'referralRewards', 'checkoutHandoffs', 'paymentCheckouts', 'paymentOrders', 'subscriptions', 'storageDeletionJobs', 'tags', 'tagAssignments'], async (transaction) => {
     await transaction.query('LET tagKeys = (FOR tag IN tags FILTER tag.userKey == @userKey RETURN tag._key) FOR assignment IN tagAssignments FILTER assignment.tagKey IN tagKeys REMOVE assignment IN tagAssignments', { userKey });
     await transaction.query('FOR tag IN tags FILTER tag.userKey == @userKey REMOVE tag IN tags', { userKey });
     await transaction.query('FOR hidden IN userHiddens FILTER hidden.userKey == @userKey REMOVE hidden IN userHiddens', { userKey });
     await transaction.query('FOR generation IN userGenerations FILTER generation.userKey == @userKey REMOVE generation IN userGenerations', { userKey });
     await transaction.query('FOR message IN conversationMessages FILTER message.userKey == @userKey REMOVE message IN conversationMessages', { userKey });
     await transaction.query('FOR conversation IN conversations FILTER conversation.userKey == @userKey REMOVE conversation IN conversations', { userKey });
-    await transaction.query(`
-      LET authoredTicketKeys = (FOR ticket IN tickets FILTER ticket.userKey == @userKey RETURN ticket._key)
-      LET votedTicketKeys = UNIQUE(FOR vote IN ticketVotes FILTER vote.userKey == @userKey RETURN vote.ticketKey)
-      LET removedVotes = (FOR vote IN ticketVotes FILTER vote.userKey == @userKey || vote.ticketKey IN authoredTicketKeys REMOVE vote IN ticketVotes RETURN 1)
-      FOR ticket IN tickets
-        FILTER ticket._key IN MINUS(votedTicketKeys, authoredTicketKeys) && ticket.type == "feedback"
-        LET counts = FIRST(FOR vote IN ticketVotes FILTER vote.ticketKey == ticket._key COLLECT AGGREGATE upvotes = SUM(vote.vote == "up" ? 1 : 0), downvotes = SUM(vote.vote == "down" ? 1 : 0) RETURN { upvotes, downvotes })
-        UPDATE ticket WITH counts IN tickets
-    `, { userKey });
+    await transaction.query('FOR message IN userInboxMessages FILTER message.userKey == @userKey REMOVE message IN userInboxMessages', { userKey });
+    await transaction.query('FOR thread IN userInboxThreads FILTER thread.userKey == @userKey REMOVE thread IN userInboxThreads', { userKey });
     await transaction.query('FOR ticket IN tickets FILTER ticket.userKey == @userKey REMOVE ticket IN tickets', { userKey });
     await transaction.query('FOR event IN events FILTER event.userId == @userKey REMOVE event IN events', { userKey });
     await transaction.query('FOR item IN sparkTransactions FILTER item.userKey == @userKey REMOVE item IN sparkTransactions', { userKey });

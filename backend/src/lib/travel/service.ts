@@ -4,6 +4,7 @@ import { strictObject } from '@/api/validation';
 import { generatedPlaceDetailSchema, generatedPlaceLocationSchema, generatedPopularCitySchema, generatedPopularCitiesSchema, placeCountryCodeSchema, placeSchema, type GeneratedPlaceDetail, type Place } from '@/lib/db/places.node';
 import { embedText } from '@/lib/embeddings';
 import { executeAsk, type ExecuteActionOptions } from '@/lib/ai/router';
+import { USER_VISIBLE_AI_PROSE_POLICY } from '@/lib/ai/prose-style';
 import { chatOutputSchema, type ChatOutput } from '@/lib/ai/providers';
 import type { CoreChatInput } from '@/lib/ai/actions';
 import { decryptAuthenticatedJson, encryptAuthenticatedJson } from '@/lib/authenticated-encryption';
@@ -352,7 +353,7 @@ const guideSystemPrompt = 'You write concise travel guides from general knowledg
 const guideSectionInstructions = 'Treat summary, culture, food, and whyVisit as four separate display sections. Write 1-2 short sentences and 20-45 words in each field. Do not use headings, bullets, markdown, or repeat information across fields. Keep the four fields to about 100-150 words total.';
 const heroSubjectInstructions = 'Focus on landscapes, vegetation, architecture, buildings, streets, and city form. Strictly exclude people, human figures, crowds, faces, and body parts. Do not request or emphasize animals; incidental distant wildlife is acceptable.';
 const chatInput = (systemPrompt: string, prompt: string, options: { temperature: number; maxTokens: number }): CoreChatInput => ({
-  systemPrompt,
+  systemPrompt: `${systemPrompt} ${USER_VISIBLE_AI_PROSE_POLICY}`,
   messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
   options,
 });

@@ -59,7 +59,7 @@ describe("public discoverability registry", () => {
     expect(sitemap().map(({ url }) => url).sort()).toEqual(
       PUBLIC_ROUTES.map(({ path }) => canonicalUrl(path)).sort(),
     );
-    expect(sitemap().every(({ lastModified }) => lastModified === "2026-09-06")).toBe(
+    expect(sitemap().every(({ lastModified }) => lastModified === "2026-09-09")).toBe(
       true,
     );
   });
@@ -122,13 +122,23 @@ describe("structured data", () => {
 });
 
 describe("generated answer-engine content", () => {
+  test("describes Signal as a provider-neutral private communication inbox", () => {
+    const signal = PRODUCT_FACTS.capabilities.find(({ id }) => id === "signal");
+    const copy = JSON.stringify(signal);
+
+    expect(signal?.description).toContain("private inbox");
+    expect(copy).toContain("connected email");
+    expect(copy).toContain("Vorinthex app communication and support");
+    expect(copy).not.toMatch(/Gmail/i);
+  });
+
   test("states product facts consistently and links canonical evidence", () => {
     const outputs = [buildLlmsText(), buildLlmsFullText()];
 
     for (const output of outputs) {
       expect(output).toContain("# Vorinthex AI");
       expect(output).toContain("> ");
-      expect(output).toContain("Last reviewed: 2026-09-06");
+      expect(output).toContain("Last reviewed: 2026-09-09");
       expect(output).toContain("personal AI");
       expect(output).toContain(PRICING_HERO_HEADING);
       expect(output).toContain(PRICING_HERO_BODY);

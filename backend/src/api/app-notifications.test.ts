@@ -3,10 +3,9 @@ import { Hono } from 'hono';
 import { newId } from '@/lib/ids';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { createAppNotificationHandlers } from './app-notifications';
-import { InvalidNotificationCursorError } from '@/lib/app-notifications/repository';
 
 describe('notification history HTTP transport', () => {
-  test('uses the canonical notification.list service with trusted identity and strict selectors', async () => {
+  test('uses the canonical app.history service with trusted identity and strict selectors', async () => {
     const userKey = newId();
     const teamKey = newId();
     const scopeKey = newId();
@@ -20,9 +19,9 @@ describe('notification history HTTP transport', () => {
     const app = new Hono();
     app.post('/notifications', handlers.list);
     const request = (body: unknown) => app.request('/notifications', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    expect((await request({ teamKey, scopeKey, markRead: true, limit: 25 })).status).toBe(200);
-    expect(calls).toEqual([[{ markRead: true, limit: 25 }, context]]);
-    expect((await request({ teamKey, scopeKey, markRead: false, userKey })).status).toBe(400);
+    expect((await request({ teamKey, scopeKey, mailbox: 'sent', limit: 25 })).status).toBe(200);
+    expect(calls).toEqual([[{ mailbox: 'sent', limit: 25 }, context]]);
+    expect((await request({ teamKey, scopeKey, userKey })).status).toBe(400);
   });
 
   test('enforces authentication and trusted installation context for registration', async () => {
@@ -64,19 +63,4 @@ describe('notification history HTTP transport', () => {
     expect(calls).toEqual([[userKey, 'installation-1']]);
   });
 
-  test('maps an expired or foreign history cursor to a client error', async () => {
-    const userKey = newId();
-    const teamKey = newId();
-    const scopeKey = newId();
-    const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
-    const handlers = createAppNotificationHandlers({
-      getIdentity: async () => ({ key: userKey, identityType: 'user' }),
-      authorize: async () => ({ context }) as never,
-      service: { list: async () => { throw new InvalidNotificationCursorError('Invalid notification cursor.'); } } as never,
-    });
-    const app = new Hono(); app.post('/notifications', handlers.list);
-    const response = await app.request('/notifications', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, cursor: `${newId()}-${newId()}` }) });
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ success: false, error: 'Invalid notification cursor.' });
-  });
 });

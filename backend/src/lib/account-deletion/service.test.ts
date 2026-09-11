@@ -9,7 +9,7 @@ function fixture(fences: Array<'fenced' | 'not_found' | 'shared_access' | 'activ
     fence: async () => {
       const status = fences.shift() ?? 'fenced';
       calls.push(['fence', status]);
-      return status === 'fenced' ? { status, presenceSessionKeys: ['session-1'] } : { status };
+      return status === 'fenced' ? { status, presenceSessionKeys: ['session-1'], recipient: { email: 'person@example.com' } } : { status };
     },
     finalize: async () => { calls.push(['finalize']); return { status: 'deleted' as const }; },
   };
@@ -18,7 +18,8 @@ function fixture(fences: Array<'fenced' | 'not_found' | 'shared_access' | 'activ
     revokeUserSubscriptions: async () => { calls.push(['revoke']); return { revoked: 1 }; },
   };
   const invalidateSessions = async (key: string, sessions: string[]) => { calls.push(['invalidate', key, sessions]); };
-  return { calls, service: createAccountDeletionService({ repository, commerce, invalidateSessions }) };
+  const sendDeletedEmail = async (email: string) => { calls.push(['email', email]); };
+  return { calls, service: createAccountDeletionService({ repository, commerce, invalidateSessions, sendDeletedEmail }) };
 }
 
 describe('canonical account deletion service', () => {
@@ -26,7 +27,7 @@ describe('canonical account deletion service', () => {
     const context = fixture();
     await expect(context.service.delete({ confirmation: 'DELETE MY ACCOUNT' }, userKey)).resolves.toEqual({ deleted: true });
     expect(context.calls).toEqual([
-      ['fence', 'fenced'], ['revoke'], ['invalidate', userKey, ['session-1']], ['finalize'],
+      ['fence', 'fenced'], ['revoke'], ['invalidate', userKey, ['session-1']], ['finalize'], ['email', 'person@example.com'],
     ]);
   });
 
@@ -34,16 +35,16 @@ describe('canonical account deletion service', () => {
     let transactionActive = false;
     const calls: string[] = [];
     const repository = {
-      fence: async () => { transactionActive = true; calls.push('fence-transaction'); await Promise.resolve(); transactionActive = false; return { status: 'fenced' as const, presenceSessionKeys: [] }; },
+      fence: async () => { transactionActive = true; calls.push('fence-transaction'); await Promise.resolve(); transactionActive = false; return { status: 'fenced' as const, presenceSessionKeys: [], recipient: { email: 'person@example.com' } }; },
       finalize: async () => { transactionActive = true; calls.push('final-transaction'); await Promise.resolve(); transactionActive = false; return { status: 'deleted' as const }; },
     };
     const commerce = {
       recoverUserPendingCheckouts: async () => ({ recovered: 0 }),
       revokeUserSubscriptions: async () => { expect(transactionActive).toBe(false); calls.push('commerce-read-and-revoke'); return { revoked: 0 }; },
     };
-    const service = createAccountDeletionService({ repository, commerce, invalidateSessions: async () => { expect(transactionActive).toBe(false); calls.push('redis-fence'); } });
+    const service = createAccountDeletionService({ repository, commerce, invalidateSessions: async () => { expect(transactionActive).toBe(false); calls.push('redis-fence'); }, sendDeletedEmail: async () => { expect(transactionActive).toBe(false); calls.push('email'); } });
     await service.delete({ confirmation: 'DELETE MY ACCOUNT' }, userKey);
-    expect(calls).toEqual(['fence-transaction', 'commerce-read-and-revoke', 'redis-fence', 'final-transaction']);
+    expect(calls).toEqual(['fence-transaction', 'commerce-read-and-revoke', 'redis-fence', 'final-transaction', 'email']);
   });
 
   test('recovers stale pending checkouts canonically before trying to fence again', async () => {
@@ -63,9 +64,9 @@ describe('canonical account deletion service', () => {
   test('keeps the durable fence when provider or Redis preparation fails so retry remains fail-closed', async () => {
     for (const failure of ['provider', 'redis'] as const) {
       let finalized = false;
-      const repository = { fence: async () => ({ status: 'fenced' as const, presenceSessionKeys: ['session-1'] }), finalize: async () => { finalized = true; return { status: 'deleted' as const }; } };
+      const repository = { fence: async () => ({ status: 'fenced' as const, presenceSessionKeys: ['session-1'], recipient: { email: 'person@example.com' } }), finalize: async () => { finalized = true; return { status: 'deleted' as const }; } };
       const commerce = { recoverUserPendingCheckouts: async () => ({ recovered: 0 }), revokeUserSubscriptions: async () => { if (failure === 'provider') throw new Error('provider unavailable'); return { revoked: 0 }; } };
-      const service = createAccountDeletionService({ repository, commerce, invalidateSessions: async () => { if (failure === 'redis') throw new Error('redis unavailable'); } });
+      const service = createAccountDeletionService({ repository, commerce, invalidateSessions: async () => { if (failure === 'redis') throw new Error('redis unavailable'); }, sendDeletedEmail: async () => undefined });
       await expect(service.delete({ confirmation: 'DELETE MY ACCOUNT' }, userKey)).rejects.toThrow(`${failure} unavailable`);
       expect(finalized).toBe(false);
     }
@@ -78,5 +79,12 @@ describe('canonical account deletion service', () => {
     const retry = fixture(['not_found']);
     await expect(retry.service.delete({ confirmation: 'DELETE MY ACCOUNT' }, userKey)).resolves.toEqual({ deleted: true });
     expect(retry.calls).toEqual([['fence', 'not_found']]);
+  });
+
+  test('suppresses deletion confirmation for provider bounce cleanup', async () => {
+    const context = fixture();
+    await expect(context.service.delete({ confirmation: 'DELETE MY ACCOUNT' }, userKey, { sendConfirmation: false })).resolves.toEqual({ deleted: true });
+    expect(context.calls).not.toContainEqual(['email', 'person@example.com']);
+    expect(context.calls.at(-1)).toEqual(['finalize']);
   });
 });

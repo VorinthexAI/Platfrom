@@ -18,6 +18,8 @@ export type RichTextBlock =
   | { type: "table"; align: Array<"center" | "left" | "right" | null>; header: RichTextInline[][]; rows: RichTextInline[][][] }
   | { type: "thematicBreak" };
 
+export type StreamingRichTextState = { source: string; stable: string; stableSegments: readonly { key: number; content: string }[]; tail: string };
+
 function literal(value: string): RichTextInline[] {
   return value ? [{ type: "text", text: value }] : [];
 }
@@ -104,4 +106,29 @@ export function isSafeRichTextUrl(value: string) {
 export function parseRichText(content: string): RichTextBlock[] {
   if (!content) return [];
   return parseBlocks(marked.lexer(content, { gfm: true, breaks: false, pedantic: false }));
+}
+
+const EMPTY_STREAMING_RICH_TEXT_STATE: StreamingRichTextState = { source: "", stable: "", stableSegments: [], tail: "" };
+
+function partitionStreamingTail(content: string) {
+  if (!content) return { stable: "", tail: "" };
+  const tokens = marked.lexer(content, { gfm: true, breaks: false, pedantic: false });
+  if (tokens.length < 2) return { stable: "", tail: content };
+  const last = tokens.at(-1)!;
+  if (last.type === "space") return { stable: content, tail: "" };
+  const tailLength = last.raw.length;
+  return { stable: content.slice(0, Math.max(0, content.length - tailLength)), tail: content.slice(-tailLength) };
+}
+
+/** Advances only the mutable Markdown tail while preserving the exact streamed source. */
+export function advanceStreamingRichText(previous: StreamingRichTextState | undefined, source: string): StreamingRichTextState {
+  const current = previous ? { ...previous, stableSegments: previous.stableSegments ?? (previous.stable ? [{ key: 0, content: previous.stable }] : []) } : EMPTY_STREAMING_RICH_TEXT_STATE;
+  if (!source.startsWith(current.source)) {
+    const reset = partitionStreamingTail(source);
+    return { source, ...reset, stableSegments: reset.stable ? [{ key: 0, content: reset.stable }] : [] };
+  }
+  if (source === current.source) return current;
+  const candidate = current.tail + source.slice(current.source.length);
+  const next = partitionStreamingTail(candidate);
+  return { source, stable: current.stable + next.stable, stableSegments: next.stable ? [...current.stableSegments, { key: current.stable.length, content: next.stable }] : current.stableSegments, tail: next.tail };
 }

@@ -3,6 +3,10 @@ import { completeEmailConnectorReconciliation, emailClearTrashJobId, emailInitia
 import { GmailApiError } from './gmail';
 
 const operationKey = '11111111-1111-4111-8111-111111111111';
+const ownerKey = 'cmrnlzf670004qc7kuser00001';
+const reconciliationConnectors = (target: { teamKey: string; scopeKey: string; connectorKey: string }) => ({
+  getByKey: async () => ({ key: target.connectorKey, userKey: ownerKey, teamKey: target.teamKey, scopeKey: target.scopeKey, status: 'active', syncEnabled: true }),
+});
 
 describe('email synchronization jobs', () => {
   test('strictly validates notification jobs without credentials', () => {
@@ -77,12 +81,12 @@ describe('email synchronization jobs', () => {
       setReadState: async (...args: unknown[]) => { calls.push(['read', ...args]); return { succeeded: 1, failed: 0, repairPending: 0 }; },
       clearTrash: async (...args: unknown[]) => { calls.push(['clear', ...args]); return { providerMessagesDeleted: 3 }; },
     };
-    expect(await processEmailSyncJob({ schemaVersion: 1, kind: 'connector-reconciliation', ...target, reason: 'read-state', operation: { kind: 'read-state', threadKeys: [target.connectorKey], isRead: true }, operationKey, requestedAt: '2026-08-23T12:00:00.000Z' }, { service: service as never })).toEqual({ synchronized: 1 });
+    expect(await processEmailSyncJob({ schemaVersion: 1, kind: 'connector-reconciliation', ...target, reason: 'read-state', operation: { kind: 'read-state', threadKeys: [target.connectorKey], isRead: true }, operationKey, requestedAt: '2026-08-23T12:00:00.000Z' }, { connectors: reconciliationConnectors(target) as never, service: service as never })).toEqual({ synchronized: 1 });
     const messages = [{ id: 'provider-message', threadId: 'provider-thread' }];
     const trashSnapshotAt = '2026-08-23T11:59:00.000Z';
     expect(await processEmailSyncJob({ schemaVersion: 1, kind: 'clear-trash-continuation', ...target, operationKey, requestedAt: '2026-08-23T12:00:00.000Z', trashSnapshotAt, messages }, { service: service as never })).toEqual({ cleared: 3 });
     expect(calls).toEqual([
-      ['read', { userKey: 'system', teamKey: target.teamKey, scopeKey: target.scopeKey }, { threadKeys: [target.connectorKey], isRead: true }, true],
+      ['read', { userKey: ownerKey, teamKey: target.teamKey, scopeKey: target.scopeKey }, { threadKeys: [target.connectorKey], isRead: true }, true],
       ['clear', { userKey: 'system', teamKey: target.teamKey, scopeKey: target.scopeKey }, { connectorKey: target.connectorKey }, true, messages, undefined, trashSnapshotAt],
     ]);
   });
@@ -97,8 +101,8 @@ describe('email synchronization jobs', () => {
   test('completes definitive thread failures but retries repair-pending outcomes', async () => {
     const target = { teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
     const job = { schemaVersion: 1 as const, kind: 'connector-reconciliation' as const, ...target, reason: 'trash' as const, operation: { kind: 'trash' as const, threadKeys: [target.connectorKey] }, operationKey, requestedAt: '2026-08-23T12:00:00.000Z' };
-    await expect(processEmailSyncJob(job, { service: { trashThread: async () => ({ succeeded: 0, failed: 1, repairPending: 0 }) } as never })).resolves.toEqual({ synchronized: 0 });
-    await expect(processEmailSyncJob(job, { service: { trashThread: async () => ({ succeeded: 0, failed: 0, repairPending: 1 }) } as never })).rejects.toThrow('remains incomplete');
+    await expect(processEmailSyncJob(job, { connectors: reconciliationConnectors(target) as never, service: { trashThread: async () => ({ succeeded: 0, failed: 1, repairPending: 0 }) } as never })).resolves.toEqual({ synchronized: 0 });
+    await expect(processEmailSyncJob(job, { connectors: reconciliationConnectors(target) as never, service: { trashThread: async () => ({ succeeded: 0, failed: 0, repairPending: 1 }) } as never })).rejects.toThrow('remains incomplete');
   });
 
   test('retries a delayed thread repair when the canonical operation reports an active connector lease', async () => {
@@ -106,8 +110,15 @@ describe('email synchronization jobs', () => {
     const job = { schemaVersion: 1 as const, kind: 'connector-reconciliation' as const, ...target, reason: 'read-state' as const, operation: { kind: 'read-state' as const, threadKeys: [target.connectorKey], isRead: true }, operationKey, requestedAt: '2026-08-23T12:00:00.000Z' };
     let repairQueued: boolean | undefined;
     const service = { setReadState: async (_actor: unknown, _input: unknown, queued: boolean) => { repairQueued = queued; return { succeeded: 0, failed: 0, repairPending: 1, items: [{ threadKey: target.connectorKey, status: 'repairPending', error: 'Email synchronization or sending is already running' }] }; } };
-    await expect(processEmailSyncJob(job, { service: service as never })).rejects.toThrow('remains incomplete');
+    await expect(processEmailSyncJob(job, { connectors: reconciliationConnectors(target) as never, service: service as never })).rejects.toThrow('remains incomplete');
     expect(repairQueued).toBe(true);
+  });
+
+  test('rejects reconciliation when the connector belongs to a different destination workspace', async () => {
+    const target = { teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
+    const job = { schemaVersion: 1 as const, kind: 'connector-reconciliation' as const, ...target, reason: 'trash' as const, operation: { kind: 'trash' as const, threadKeys: [target.connectorKey] }, operationKey, requestedAt: '2026-08-23T12:00:00.000Z' };
+    const connectors = { getByKey: async () => ({ key: target.connectorKey, userKey: ownerKey, teamKey: target.teamKey, scopeKey: 'cmrnlzf680005qc7kother0001', status: 'active', syncEnabled: true }) };
+    await expect(processEmailSyncJob(job, { connectors: connectors as never, service: { trashThread: async () => { throw new Error('must not execute'); } } as never })).rejects.toThrow('unavailable');
   });
 
   test('schedules strict connector-specific notification jobs and dispatches without calling sync', async () => {

@@ -8,10 +8,13 @@ import {
   conversationMatchesFilter,
   conversationMessages,
   conversationQueryKeys,
+  createLocalConversationAttachments,
   invalidateConversationSearches,
+  mergeConversationMessages,
   removeConversationFromLists,
   replaceConversationInMatchingLists,
   replaceTurnMessages,
+  settlePendingAttachmentOverlays,
 } from "./conversation-cache";
 
 const at = "2026-09-01T10:00:00.000Z";
@@ -35,7 +38,7 @@ test("matches server list membership and favorite-first updatedAt ordering", () 
 });
 
 test("flattens multipage messages into chronological display order", () => {
-  const message = (key: string) => ({ key, conversationKey: "one", turnKey: key, kind: "text" as const, role: "assistant" as const, status: "COMPLETED" as const, content: key, retrievals: [], createdAt: at });
+  const message = (key: string) => ({ key, conversationKey: "one", turnKey: key, kind: "text" as const, role: "assistant" as const, status: "COMPLETED" as const, attachmentStatus: "NONE" as const, content: key, attachments: [], retrievals: [], createdAt: at });
   expect(conversationMessages({ pages: [{ messages: [message("latest")] }, { messages: [message("older")] }], pageParams: [undefined, "older"] }).map(({ key }) => key)).toEqual(["older", "latest"]);
 });
 
@@ -93,11 +96,72 @@ test("invalidates search caches without invalidating unfiltered lists or other i
 
 test("reconciles optimistic turn pairs with retained statuses and no duplicate server keys", () => {
   const optimistic = [
-    { key: "optimistic-user", conversationKey: "one", turnKey: "turn", kind: "image" as const, role: "user" as const, status: "COMPLETED" as const, content: "Q", retrievals: [], createdAt: at, optimistic: true as const },
-    { key: "optimistic-assistant", conversationKey: "one", turnKey: "turn", kind: "image" as const, role: "assistant" as const, status: "PENDING" as const, content: "Generating image...", retrievals: [], createdAt: at, optimistic: true as const },
+    { key: "optimistic-user", conversationKey: "one", turnKey: "turn", kind: "image" as const, role: "user" as const, status: "COMPLETED" as const, attachmentStatus: "NONE" as const, content: "Q", attachments: [], retrievals: [], createdAt: at, optimistic: true as const },
+    { key: "optimistic-assistant", conversationKey: "one", turnKey: "turn", kind: "image" as const, role: "assistant" as const, status: "PENDING" as const, attachmentStatus: "NONE" as const, content: "Generating image...", attachments: [], retrievals: [], createdAt: at, optimistic: true as const },
   ];
   const user = { ...optimistic[0], key: "user", optimistic: undefined };
   const assistant = { ...optimistic[1], key: "assistant", status: "COMPLETED" as const, content: "A", optimistic: undefined };
   const result = replaceTurnMessages(optimistic, user, assistant, optimistic.map(({ key }) => key));
   expect(result.map(({ key, status }) => [key, status])).toEqual([["user", "COMPLETED"], ["assistant", "COMPLETED"]]);
+});
+
+test("keeps local pending turn roles through query races and does not duplicate canonical keys", () => {
+  const [localAttachment] = createLocalConversationAttachments([{ clientKey: "transient-upload-key", kind: "image", filename: "photo.png", mimeType: "image/png", sizeBytes: 42, uri: "file:///photo.png" }]);
+  expect(localAttachment).toEqual({ local: true, clientKey: "transient-upload-key", kind: "image", filename: "photo.png", mimeType: "image/png", sizeBytes: 42, uri: "file:///photo.png" });
+  expect(localAttachment).not.toHaveProperty("key");
+  const pending = [
+    { key: "optimistic-user", conversationKey: "one", turnKey: "turn", kind: "text" as const, role: "user" as const, status: "COMPLETED" as const, attachmentStatus: "PENDING" as const, content: "Q", attachments: [localAttachment], retrievals: [], createdAt: at, optimistic: true as const },
+    { key: "optimistic-assistant", conversationKey: "one", turnKey: "turn", kind: "text" as const, role: "assistant" as const, status: "PENDING" as const, attachmentStatus: "NONE" as const, content: "", attachments: [], retrievals: [], createdAt: at, optimistic: true as const },
+  ];
+  const raced = [
+    { ...pending[0], key: "server-user", attachments: [], completedAt: at, optimistic: undefined },
+    { ...pending[1], key: "server-assistant", optimistic: undefined },
+  ];
+  const merged = mergeConversationMessages(raced, pending);
+  expect(merged.map(({ key }) => key)).toEqual(["optimistic-user", "optimistic-assistant"]);
+  expect(merged[0]?.attachments).toEqual([localAttachment]);
+});
+
+test("replaces query-raced messages by turn and role with non-optimistic authoritative messages", () => {
+  const raced = [
+    { key: "raced-user", conversationKey: "one", turnKey: "turn", kind: "text" as const, role: "user" as const, status: "COMPLETED" as const, attachmentStatus: "NONE" as const, content: "Q", attachments: [], retrievals: [], createdAt: at, optimistic: true as const },
+    { key: "raced-assistant", conversationKey: "one", turnKey: "turn", kind: "text" as const, role: "assistant" as const, status: "PENDING" as const, attachmentStatus: "NONE" as const, content: "", attachments: [], retrievals: [], createdAt: at, optimistic: true as const },
+  ];
+  const user = { ...raced[0], key: "server-user", optimistic: undefined };
+  const assistant = { ...raced[1], key: "server-assistant", status: "COMPLETED" as const, content: "A", optimistic: undefined };
+  const replaced = replaceTurnMessages(raced, user, assistant, []);
+  expect(replaced).toEqual([user, assistant]);
+  expect(replaced.every((message) => message.optimistic === undefined)).toBe(true);
+});
+
+test("retains the local preview until durable attachment media is preloaded", () => {
+  const local = {
+    key: "optimistic-user", conversationKey: "one", turnKey: "turn", kind: "text" as const, role: "user" as const, status: "COMPLETED" as const,
+    attachmentStatus: "PENDING" as const, content: "Q", attachments: createLocalConversationAttachments([{ clientKey: "local", kind: "image", filename: "photo.png", mimeType: "image/png", sizeBytes: 42, uri: "file:///photo.png" }]), retrievals: [], createdAt: at, optimistic: true as const,
+  };
+  const durable = {
+    ...local, key: "server-user", attachmentStatus: "COMPLETED" as const, attachments: [{ key: "image-key", kind: "image" as const, filename: "photo.png", mimeType: "image/png" as const, sizeBytes: 42, width: 10, height: 10 }], completedAt: at, optimistic: undefined,
+  };
+  expect(mergeConversationMessages([durable], [local])).toEqual([local]);
+});
+
+test("retains local attachment overlays while authoritative persistence is pending", () => {
+  const [attachment] = createLocalConversationAttachments([{ clientKey: "local", kind: "document", filename: "brief.pdf", mimeType: "application/pdf", sizeBytes: 42, uri: "file:///brief.pdf" }]);
+  const overlay = { key: "user", conversationKey: "one", turnKey: "turn", kind: "text" as const, role: "user" as const, status: "COMPLETED" as const, attachmentStatus: "PENDING" as const, content: "Q", attachments: [attachment], retrievals: [], createdAt: at, optimistic: true as const };
+  const authoritative = { ...overlay, attachments: [], completedAt: at, optimistic: undefined };
+  const result = settlePendingAttachmentOverlays([authoritative], [overlay]);
+  expect(result.pendingMessages).toEqual([overlay]);
+  expect(result.settledTurnKeys).toEqual([]);
+});
+
+test.each(["COMPLETED", "PARTIAL", "FAILED"] as const)("settles local overlays only after authoritative attachment status %s", (attachmentStatus) => {
+  const [attachment] = createLocalConversationAttachments([{ clientKey: "local", kind: "image", filename: "photo.png", mimeType: "image/png", sizeBytes: 42, uri: "file:///photo.png" }]);
+  const overlay = { key: "user", conversationKey: "one", turnKey: "turn", kind: "text" as const, role: "user" as const, status: "COMPLETED" as const, attachmentStatus: "PENDING" as const, content: "Q", attachments: [attachment], retrievals: [], createdAt: at, optimistic: true as const };
+  const durableAttachments = attachmentStatus === "FAILED" ? [] : [{ key: "document", kind: "document" as const, filename: "brief.pdf", mimeType: "application/pdf", sizeBytes: 42 }];
+  const authoritative = { ...overlay, attachmentStatus, attachments: durableAttachments, completedAt: at, optimistic: undefined };
+  const ordinaryPending = { ...overlay, key: "ordinary", turnKey: "ordinary", attachmentStatus: "NONE" as const, attachments: [] };
+  const result = settlePendingAttachmentOverlays([authoritative], [overlay, ordinaryPending]);
+  expect(result.pendingMessages).toEqual([ordinaryPending]);
+  expect(result.settledTurnKeys).toEqual(["turn"]);
+  expect(mergeConversationMessages([authoritative], result.pendingMessages)[0]?.attachments).toEqual(durableAttachments);
 });

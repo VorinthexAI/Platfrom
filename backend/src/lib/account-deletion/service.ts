@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createAccountDeletionRepository, type AccountDeletionRepository } from './repository';
 import { commerceService, type CommerceService } from '@/lib/commerce/service';
 import { invalidatePresenceSessions } from '@/lib/presence/session-state';
+import { sendAccountDeletedEmail } from '@/lib/email/lifecycle';
 
 export const ACCOUNT_DELETE_CONFIRMATION = 'DELETE MY ACCOUNT' as const;
 export const accountDeleteInputSchema = z.object({ confirmation: z.literal(ACCOUNT_DELETE_CONFIRMATION) }).strict();
@@ -14,14 +15,16 @@ export interface AccountDeletionServiceDependencies {
   repository?: AccountDeletionRepository;
   commerce?: Pick<CommerceService, 'recoverUserPendingCheckouts' | 'revokeUserSubscriptions'>;
   invalidateSessions?: typeof invalidatePresenceSessions;
+  sendDeletedEmail?: typeof sendAccountDeletedEmail;
 }
 
 export function createAccountDeletionService(dependencies: AccountDeletionServiceDependencies = {}) {
   const repository = dependencies.repository ?? createAccountDeletionRepository();
   const commerce = dependencies.commerce ?? commerceService;
   const invalidateSessions = dependencies.invalidateSessions ?? invalidatePresenceSessions;
+  const sendDeletedEmail = dependencies.sendDeletedEmail ?? sendAccountDeletedEmail;
   return Object.freeze({
-    async delete(rawInput: unknown, trustedUserKey: string) {
+    async delete(rawInput: unknown, trustedUserKey: string, options: { sendConfirmation?: boolean } = {}) {
       accountDeleteInputSchema.parse(rawInput);
       const requestedAt = new Date().toISOString();
       const pendingCutoff = new Date(Date.now() - 5 * 60_000).toISOString();
@@ -41,6 +44,7 @@ export function createAccountDeletionService(dependencies: AccountDeletionServic
       const result = await repository.finalize(trustedUserKey);
       if (result.status === 'shared_access') throw new AccountDeletionError('ACCOUNT_SHARED_ACCESS', 'Account ownership changed during deletion; retry after removing shared access.');
       if (result.status === 'active_checkout') throw new AccountDeletionError('ACCOUNT_ACTIVE_CHECKOUT', 'A payment checkout became active before the deletion fence was established.');
+      if (result.status === 'deleted' && options.sendConfirmation !== false) await sendDeletedEmail(fence.recipient.email).catch((error) => console.error('account deletion email delivery failed', { userKey: trustedUserKey, error }));
       return { deleted: true as const };
     },
   });

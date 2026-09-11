@@ -8,8 +8,9 @@ describe("push notification integration", () => {
     expect(source).toContain("getExpoPushTokenAsync({ projectId })");
     expect(source).toContain("addPushTokenListener");
     expect(source).toContain("addPushTokenListener(() => sync())");
-    expect(source).toContain("notificationHubDataSchema.safeParse");
-    expect(source).toContain('router.push("/notifications")');
+    expect(source).toContain("signalThreadPushDataSchema.safeParse");
+    expect(source).toContain('thread: parsed.data.signalThreadKey');
+    expect(source).toContain('pathname: "/capability/[slug]"');
     expect(source).toContain("shouldShowBanner: false");
     expect(source).toContain('apiClient.put("/auth/me/push-subscription"');
     expect(plugin[1]).toEqual({ icon: "./assets/brand/notification-icon.png", color: "#FFFFFF", defaultChannel: "default" });

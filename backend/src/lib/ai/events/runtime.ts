@@ -203,6 +203,9 @@ export async function observeToolExecution<T>(
     hash?: ToolBillingDependencies['hash'];
   } = {},
 ): Promise<T> {
+  // Durable conversation image jobs created before the public capability
+  // migration still execute under their persisted queue contract.
+  if (slug === 'conversation.image.enqueue' || slug === 'image.generate') slug = 'app.generate-image';
   const parent = storage.getStore();
   const recorder = options.recorder ?? parent?.recorder;
   const appKey = parseAppAliasKey(options.appKey ?? parent?.appKey ?? APP_KEYS.CORE);

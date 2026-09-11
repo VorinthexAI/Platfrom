@@ -11,6 +11,7 @@ import { currentEmbeddingSchema, EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
 import { documentStorage, type DocumentObjectStorage } from '@/lib/ai/document-processing/storage';
 import { executeAction, executeAsk } from '@/lib/ai/router';
+import { USER_VISIBLE_AI_PROSE_POLICY } from '@/lib/ai/prose-style';
 import type { ChatOutput } from '@/lib/ai/providers';
 import { canonicalizeImageToPng, processImages } from '@/lib/ai/image-processing';
 import { speechOutputSchema, type SpeechInput } from '@/lib/ai/actions/speech';
@@ -124,7 +125,7 @@ export function createBookRuntime(options: BookRuntimeDependencies = {}): BookGe
     return { bytes: new Uint8Array(result.data), width: result.info.width, height: result.info.height, mimeType: 'image/png' as const };
   };
   const vector = async (fields: readonly string[], value: Record<string, unknown>, teamKey: string, signal?: AbortSignal) => currentEmbeddingSchema.parse(await embed(buildEmbeddingText(fields, value)!, teamKey, signal));
-  const prompt = (systemPrompt: string, text: string, maxTokens = 8_000, responseFormat?: { name: string; schema: Record<string, unknown> }) => ({ systemPrompt: `${systemPrompt} ${BOOK_CONTEXT_POLICY} ${BOOK_LANGUAGE_POLICY}`, messages: [{ role: 'user', content: [{ type: 'text', text }] }], options: { temperature: 0.3, maxTokens }, ...(responseFormat ? { responseFormat } : {}) });
+  const prompt = (systemPrompt: string, text: string, maxTokens = 8_000, responseFormat?: { name: string; schema: Record<string, unknown> }) => ({ systemPrompt: `${systemPrompt} ${BOOK_CONTEXT_POLICY} ${BOOK_LANGUAGE_POLICY} ${USER_VISIBLE_AI_PROSE_POLICY}`, messages: [{ role: 'user', content: [{ type: 'text', text }] }], options: { temperature: 0.3, maxTokens }, ...(responseFormat ? { responseFormat } : {}) });
   const check = async (context: Parameters<BookRepository['isCancellationRequested']>[0], bookKey: string) => { if (context.signal?.aborted || await repository.isCancellationRequested(context, bookKey)) throw new Error('Audio book generation cancelled.'); };
   const dumpArchiveCopies = async (detail: Awaited<ReturnType<BookRepository['detail']>>, context: Parameters<BookRepository['detail']>[0]) => {
     const folderKey = `c${hash(`archive-book-export\0${context.scopeKey}\0${detail.book.key}`).slice(0, 24)}`;

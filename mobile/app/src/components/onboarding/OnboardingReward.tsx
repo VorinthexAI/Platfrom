@@ -9,9 +9,9 @@ export function OnboardingReward({ onFinished }: { onFinished: () => void }) {
   useEffect(() => { void recordOnboardingEvent("onboarding.reward").catch(() => undefined); }, []);
 
   return <OnboardingStepLayout
-    action={<><Button onPress={onFinished} size="md" variant="primary">Collect</Button><Button onPress={onFinished} size="md" variant="secondary">Skip</Button></>}
+    action={<Button onPress={onFinished} size="md" variant="primary">Next</Button>}
     closeLabel="Close reward introduction"
-    description="Your first 100 Sparks are ready. Use them anywhere in Vorinthex AI."
+    description="You have been granted 100 Sparks."
     icon={<GiftIcon size="lg" />}
     onClose={onFinished}
     title="Free sparks"

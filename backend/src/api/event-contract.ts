@@ -14,12 +14,16 @@ export const APP_EVENT_SLUGS = [
   'book.changed',
   'conversation.changed',
   'referral.reward.created',
+  'spark.balance.changed',
+  'spark.balance.required',
 ] as const;
 export type AppEventSlug = (typeof APP_EVENT_SLUGS)[number];
+export type SparkBalanceRequiredCode = 'INSUFFICIENT_BALANCE' | 'OUTSTANDING_DEBT';
 export type EventEnvelope =
-  | { route: 'user'; userKey: string; event: AppEventSlug }
-  | { route: 'collection'; collectionKey: string; event: AppEventSlug }
-  | { route: 'scope'; scopeKey: string; event: AppEventSlug };
+  | { route: 'user'; userKey: string; event: 'spark.balance.required'; code: SparkBalanceRequiredCode; key: string }
+  | { route: 'user'; userKey: string; event: Exclude<AppEventSlug, 'spark.balance.required'> }
+  | { route: 'collection'; collectionKey: string; event: Exclude<AppEventSlug, 'spark.balance.required'> }
+  | { route: 'scope'; scopeKey: string; event: Exclude<AppEventSlug, 'spark.balance.required'> };
 
 const eventSlugs = new Set<string>(APP_EVENT_SLUGS);
 
@@ -34,17 +38,24 @@ export function parseEventEnvelope(message: string): EventEnvelope | null {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
     const envelope = value as Record<string, unknown>;
     if (typeof envelope.event !== 'string' || !eventSlugs.has(envelope.event)) return null;
-    if (envelope.route === 'user'
+    if (envelope.route === 'user' && envelope.event === 'spark.balance.required'
+      && hasExactKeys(envelope, ['route', 'userKey', 'event', 'code', 'key'])
+      && (envelope.code === 'INSUFFICIENT_BALANCE' || envelope.code === 'OUTSTANDING_DEBT')
+      && typeof envelope.key === 'string' && envelope.key.length > 0
+      && typeof envelope.userKey === 'string' && envelope.userKey.length > 0) {
+      return envelope as EventEnvelope;
+    }
+    if (envelope.route === 'user' && envelope.event !== 'spark.balance.required'
       && hasExactKeys(envelope, ['route', 'userKey', 'event'])
       && typeof envelope.userKey === 'string' && envelope.userKey.length > 0) {
       return envelope as EventEnvelope;
     }
-    if (envelope.route === 'collection'
+    if (envelope.route === 'collection' && envelope.event !== 'spark.balance.required'
       && hasExactKeys(envelope, ['route', 'collectionKey', 'event'])
       && typeof envelope.collectionKey === 'string' && envelope.collectionKey.length > 0) {
       return envelope as EventEnvelope;
     }
-    if (envelope.route === 'scope'
+    if (envelope.route === 'scope' && envelope.event !== 'spark.balance.required'
       && hasExactKeys(envelope, ['route', 'scopeKey', 'event'])
       && typeof envelope.scopeKey === 'string' && envelope.scopeKey.length > 0) {
       return envelope as EventEnvelope;

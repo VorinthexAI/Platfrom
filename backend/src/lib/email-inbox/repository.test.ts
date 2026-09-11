@@ -5,17 +5,18 @@ import { decodeEmailCursor, emailMessageKey, emailSubscriptionDraftKey, emailThr
 
 const scopeKey = newId();
 const accountKey = newId();
+const userKey = newId();
 const embedding = Array(EMBEDDING_DIMENSIONS).fill(0);
 const at = '2026-08-25T12:00:00.000Z';
 
 const thread = {
-  key: emailThreadKey(scopeKey, accountKey, 'provider-thread'), scopeKey, accountKey,
+  key: emailThreadKey(scopeKey, accountKey, 'provider-thread'), userKey, scopeKey, accountKey,
   providerThreadId: 'provider-thread', subject: 'Roadmap', summary: 'Review the roadmap', intent: 'Review',
   priority: 'high' as const, state: 'needs_action' as const, lastMessageAt: at, unread: true,
   inInbox: true, isFavorite: true, inboxCategory: 'Important' as const, embedding, createdAt: at, updatedAt: at,
 };
 const message = {
-  key: emailMessageKey(scopeKey, accountKey, 'provider-message'), scopeKey, accountKey, threadKey: thread.key,
+  key: emailMessageKey(scopeKey, accountKey, 'provider-message'), userKey, scopeKey, accountKey, threadKey: thread.key,
   providerMessageId: 'provider-message', from: 'sender@example.com', to: ['recipient@example.com'], subject: 'Roadmap',
   body: 'Please review the roadmap.', summary: 'Review requested', replyDepth: 0, unread: true,
   direction: 'inbound' as const, sentAt: at, hasAttachments: false, attachmentAvailability: 'none' as const,
@@ -44,6 +45,7 @@ describe('canonical email persistence', () => {
     const database = { query: async (query: string, bindVars: Record<string, any>) => {
       calls.push({ query, bindVars });
       if (query.includes('IN emailThreads RETURN NEW')) return cursor(bindVars.value);
+      if (query.includes('DOCUMENT(userConnectors')) return cursor(scopeKey);
       if (query.includes('IN folders')) return cursor({ _key: bindVars.key, scopeKey });
       return cursor();
     } };
@@ -67,6 +69,7 @@ describe('canonical email persistence', () => {
 
   test('atomically debits one Spark for each absent subscription email before persistence', async () => {
     const calls: Array<{ query: string; bindVars: Record<string, any> }> = [];
+    const events: string[] = [];
     const second = { ...message, key: emailMessageKey(scopeKey, accountKey, 'provider-message-2'), providerMessageId: 'provider-message-2' };
     const database = { query: async (query: string, bindVars: Record<string, any>) => {
       calls.push({ query, bindVars });
@@ -75,7 +78,7 @@ describe('canonical email persistence', () => {
       if (query.includes('IN folders')) return cursor({ _key: bindVars.key, scopeKey });
       return cursor();
     } };
-    await createEmailRepository(database as never).syncThread({
+    await createEmailRepository(database as never, async (userKey, event) => { events.push(`${userKey}:${event}`); }).syncThread({
       thread: { ...thread, key: undefined, createdAt: undefined, updatedAt: undefined } as never,
       messages: [{ ...message, key: undefined, threadKey: undefined, createdAt: undefined, updatedAt: undefined }, { ...second, key: undefined, threadKey: undefined, createdAt: undefined, updatedAt: undefined }] as never,
       subscriptionBilling: { userKey: accountKey, providerMessageIds: [second.providerMessageId, message.providerMessageId, message.providerMessageId] },
@@ -87,6 +90,7 @@ describe('canonical email persistence', () => {
     expect(calls[chargeIndex]!.query).toContain('DOCUMENT(emailMessages, message._key) == null');
     expect(calls[chargeIndex]!.query).toContain('LENGTH(billableIds) * @microSparksPerEmail');
     expect(calls[chargeIndex]!.bindVars).toMatchObject({ providerMessageIds: ['provider-message', 'provider-message-2'], microSparksPerEmail: 1_000_000, userKey: accountKey });
+    expect(events).toEqual([`${accountKey}:spark.balance.changed`]);
   });
 
   test('does not persist subscription email outcomes when the atomic debit is unfunded', async () => {
@@ -143,8 +147,8 @@ describe('canonical email persistence', () => {
     const queryEmbedding = [1, ...Array(EMBEDDING_DIMENSIONS - 1).fill(0)];
     const old = '2026-08-24T12:00:00.000Z';
     const drafts = [
-      { key: newId(), scopeKey, accountKey, variant: 'new' as const, to: ['person@example.com'], subject: 'Other', generatedContent: 'Unrelated', status: 'generated' as const, embedding: [0, 1, ...Array(EMBEDDING_DIMENSIONS - 2).fill(0)], createdAt: at, updatedAt: at },
-      { key: newId(), scopeKey, accountKey, variant: 'new' as const, to: ['person@example.com'], subject: 'Roadmap', generatedContent: 'Review it', status: 'generated' as const, embedding: queryEmbedding, createdAt: old, updatedAt: old },
+      { key: newId(), userKey, scopeKey, accountKey, variant: 'new' as const, to: ['person@example.com'], subject: 'Other', generatedContent: 'Unrelated', status: 'generated' as const, embedding: [0, 1, ...Array(EMBEDDING_DIMENSIONS - 2).fill(0)], createdAt: at, updatedAt: at },
+      { key: newId(), userKey, scopeKey, accountKey, variant: 'new' as const, to: ['person@example.com'], subject: 'Roadmap', generatedContent: 'Review it', status: 'generated' as const, embedding: queryEmbedding, createdAt: old, updatedAt: old },
     ];
     const database = { query: async (_query: string, bindVars: Record<string, unknown>) => cursor(undefined, bindVars['@collection'] === 'emailDrafts' ? drafts.map(arango) : []) };
     const result = await createEmailRepository(database as never).searchDrafts(scopeKey, accountKey, queryEmbedding, 'roadmap', -1, 1, { createdFrom: old, createdTo: old });
@@ -152,7 +156,7 @@ describe('canonical email persistence', () => {
   });
 
   test('lists every eligible overview draft through an exact-count paginated query', async () => {
-    const reply = { key: newId(), scopeKey, variant: 'reply' as const, replyMode: 'reply' as const, creationSource: 'subscription' as const, threadKey: thread.key, messageKey: message.key, to: ['sender@example.com'], cc: [], generatedContent: 'Reply', status: 'generated' as const, embedding, createdAt: at, updatedAt: at };
+    const reply = { key: newId(), userKey, scopeKey, variant: 'reply' as const, replyMode: 'reply' as const, creationSource: 'subscription' as const, threadKey: thread.key, messageKey: message.key, to: ['sender@example.com'], cc: [], generatedContent: 'Reply', status: 'generated' as const, embedding, createdAt: at, updatedAt: at };
     let call: { query: string; bindVars: Record<string, unknown> } | undefined;
     const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return cursor({ drafts: [arango(reply)], total: 73 }); } };
     const result = await createEmailRepository(database as never).listDraftPage(scopeKey, accountKey, { createdFrom: at, createdTo: at, offset: 50, limit: 25 });

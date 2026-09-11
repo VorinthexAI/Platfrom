@@ -6,8 +6,8 @@ import { useEffect, useEffectEvent } from "react";
 import { AppState, Platform } from "react-native";
 
 import { apiClient } from "./api-client";
-import { notificationQueryKey } from "./notification-client";
-import { isPushPermissionAllowed, notificationHubDataSchema } from "./notification-policy";
+import { communicationQueryKeys } from "./communication-client";
+import { isPushPermissionAllowed, signalThreadPushDataSchema } from "./notification-policy";
 import { useAuthStore } from "@/state/auth";
 
 const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
@@ -41,12 +41,14 @@ export function PushNotificationBridge() {
   const status = useAuthStore((state) => state.status);
   const userKey = useAuthStore((state) => String(state.user?.key ?? ""));
   const teamKey = useAuthStore((state) => String(state.team?.key ?? ""));
+  const scopeKey = useAuthStore((state) => String(state.scope?.key ?? ""));
   const sync = useEffectEvent(() => { void syncPushSubscription().catch(() => undefined); });
-  const receive = useEffectEvent(() => { if (userKey && teamKey) void queryClient.invalidateQueries({ queryKey: notificationQueryKey(userKey, teamKey) }); });
+  const receive = useEffectEvent(() => { if (userKey && teamKey && scopeKey) void queryClient.invalidateQueries({ queryKey: communicationQueryKeys.all({ userKey, teamKey, scopeKey }) }); });
   const open = useEffectEvent((response: Notifications.NotificationResponse) => {
-    if (!notificationHubDataSchema.safeParse(response.notification.request.content.data).success) return;
+    const parsed = signalThreadPushDataSchema.safeParse(response.notification.request.content.data);
+    if (!parsed.success) return;
     receive();
-    if (useAuthStore.getState().status === "authenticated") router.push("/notifications");
+    if (useAuthStore.getState().status === "authenticated") router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "inbox", inbox: "internal", thread: parsed.data.signalThreadKey } });
   });
 
   useEffect(() => {

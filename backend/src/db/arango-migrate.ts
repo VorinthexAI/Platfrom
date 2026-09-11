@@ -829,7 +829,7 @@ export async function migrateEmailInitialSyncCompletion(targetDb: Database): Pro
 
 /** Restores private Signal rows from the managed Archive/Gallery representation shipped by the previous migration. */
 export async function migrateCanonicalEmailPersistence(targetDb: Database): Promise<void> {
-  if (!await targetDb.collection('documents').exists()) return;
+  if (!await targetDb.collection('documents').exists() || !await targetDb.collection('teamConnectors').exists()) return;
   await targetDb.query(`FOR folder IN folders FILTER folder.managedPurpose == "mail-inbox" && IS_STRING(folder.managedOwnerKey)
     LET connector = DOCUMENT(teamConnectors, folder.managedOwnerKey) FILTER connector != null && connector.scopeKey == folder.scopeKey
     LET value = { _key: folder._key, teamKey: connector.teamKey, scopeKey: folder.scopeKey, connectorKey: connector._key, name: folder.name, description: folder.description, coverImageKey: folder.coverImageKey, isFavorite: folder.isFavorite || false, embedding: folder.embedding, createdAt: folder.createdAt, updatedAt: folder.updatedAt }
