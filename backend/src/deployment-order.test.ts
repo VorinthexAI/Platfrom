@@ -65,8 +65,9 @@ test('uploads canonical app logos before graph migration and deployment', async 
   expect(assetJob).toContain('aws-actions/configure-aws-credentials@v4');
   expect(assetJob).toContain('bun run --cwd backend assets:seed:ci');
   const deployPolicy = await Bun.file(new URL('../../terraform/environments/production/deploy_iam.tf', import.meta.url)).text();
-  expect(deployPolicy).toContain('Action   = ["s3:GetObject", "s3:PutObject"]');
+  expect(deployPolicy).toMatch(/Action\s+= \["s3:GetObject", "s3:PutObject"\]/);
   expect(deployPolicy).toContain('/apps/logos/v1/*');
+  expect(deployPolicy).toContain('/system/initial-audiobook/v1/*');
   expect(deployPolicy).toContain('Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]');
   expect(deployPolicy).toContain('/managed/scope-directory/v1/*');
   expect(workflow).toContain('web/app/public/logos/*) web=true; backend=true');

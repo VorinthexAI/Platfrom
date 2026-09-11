@@ -10,9 +10,12 @@ resource "aws_iam_role_policy" "backend_deploy_system_assets" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:PutObject"]
-        Resource = ["${module.storage.s3_bucket_arn}/apps/logos/v1/*"]
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:PutObject"]
+        Resource = [
+          "${module.storage.s3_bucket_arn}/apps/logos/v1/*",
+          "${module.storage.s3_bucket_arn}/system/initial-audiobook/v1/*"
+        ]
       },
       {
         Effect   = "Allow"
