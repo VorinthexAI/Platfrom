@@ -53,6 +53,17 @@ async function existingIdentity(nodeName: string, emailHash: unknown): Promise<R
   return null;
 }
 
+async function existingScopedSlug(nodeName: string, value: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  if (nodeName !== 'emailTones' || typeof value.scopeKey !== 'string' || typeof value.slug !== 'string') return null;
+  const cursor = await db.query<Record<string, unknown>>(`
+    FOR document IN emailTones
+      FILTER document.scopeKey == @scopeKey && document.slug == @slug
+      LIMIT 1
+      RETURN MERGE(document, { key: document._key })
+  `, { scopeKey: value.scopeKey, slug: value.slug });
+  return await cursor.next() ?? null;
+}
+
 function resolveRefs(value: unknown, idMap: Map<string, string>): unknown {
   if (typeof value === 'string' && value.startsWith('$ref:')) {
     const alias = value.slice('$ref:'.length);
@@ -160,6 +171,8 @@ async function main() {
       if (nodeName === 'users' && !doc.currentScopeKey) doc.currentScopeKey = newId();
 
       let resolved = resolveRefs(doc, idMap) as Record<string, unknown>;
+      const scopedIdentity = await existingScopedSlug(nodeName, resolved);
+      if (scopedIdentity) resolved = { ...scopedIdentity, ...resolved, key: scopedIdentity.key, updatedAt: now };
       if (nodeName === 'teams') resolved = enforceRootTeamMfa(resolved);
       const saved = (await accessor.upsertByKey(resolved as never)) as { key: string };
       results.push({ node: nodeName, key: saved.key });
