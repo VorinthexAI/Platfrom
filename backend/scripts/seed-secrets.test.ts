@@ -18,6 +18,13 @@ describe('secret seed roster reconciliation', () => {
     expect(source).toContain('if (!isProviderError(error) || !error.retryable) throw error;');
     expect(source).toContain('Secret seed deferred because');
   });
+
+  test('reuses built-in tone identity after personal workspace provisioning', async () => {
+    const source = await Bun.file(new URL('./seed-secrets.ts', import.meta.url)).text();
+    expect(source).toContain("nodeName !== 'emailTones'");
+    expect(source).toContain('document.scopeKey == @scopeKey && document.slug == @slug');
+    expect(source).toContain('key: scopedIdentity.key');
+  });
 });
 
 describe('secret seed founder verification', () => {
