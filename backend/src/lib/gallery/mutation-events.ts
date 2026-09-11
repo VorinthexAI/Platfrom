@@ -46,7 +46,7 @@ export const GALLERY_CANONICAL_MUTATION_PUBLICATIONS = {
   createMemory: { events: ['memoryCreated'] },
   deleteMemory: { events: ['memoryDeleted'] },
 } as const satisfies Partial<Record<GalleryOperationName, { events: readonly GalleryMutationEventName[]; deferredEvents?: readonly GalleryMutationEventName[] }>>;
-export type GalleryEventTarget = { route: 'collection' | 'user'; key: string; event: AppEventSlug };
+export type GalleryEventTarget = { route: 'collection' | 'user'; key: string; event: Exclude<AppEventSlug, 'spark.balance.required'> };
 
 export async function publishGalleryEvents(
   targets: Iterable<GalleryEventTarget>,

@@ -1,7 +1,7 @@
 import { isAxiosError } from "axios";
 import { create } from "zustand";
 
-import { cleanupRemoteSession, getJson, onUnauthorized, patchJson, postJson, revokeRemoteSession } from "@/lib/api-client";
+import { cleanupRemoteSession, deleteRemoteAccount, getJson, onUnauthorized, patchJson, revokeRemoteSession } from "@/lib/api-client";
 import { clearAuthContext, readAuthContext, writeAuthContext } from "@/lib/auth-context-vault";
 import { hasCompleteAuthContext, normalizeAuthContext, type AuthUser } from "@/lib/auth-helpers";
 import { tokenVault } from "@/lib/token-vault";
@@ -53,11 +53,12 @@ function profileKeys(patch: ProfilePatch) {
 }
 
 function queueProfileContextWrite(state: Pick<AuthState, "team" | "teamMembership" | "teamSelectionEnabled" | "scope" | "status" | "user">, operation: number) {
-  if (state.status !== "authenticated" || !state.user) return;
+  if (state.status !== "authenticated" || !state.user) return Promise.resolve();
   const context = { user: state.user, team: state.team, teamMembership: state.teamMembership, teamSelectionEnabled: state.teamSelectionEnabled, scope: confirmedScope ?? state.scope };
   profileVaultWrites = profileVaultWrites.then(async () => {
     if (operation === authOperation) await writeAuthContext(context);
   }).catch(() => undefined);
+  return profileVaultWrites;
 }
 
 async function loadContext() {
@@ -147,7 +148,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
   completeOnboarding: async () => {
-    const operation = ++authOperation;
+    const operation = authOperation;
     const previousUser = get().user;
     if (!previousUser) throw new Error("Onboarding completion requires an authenticated user.");
     set({ user: { ...previousUser, isOnboarded: true } });
@@ -155,12 +156,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const context = normalizeAuthContext(await patchJson<{ isOnboarded: true }, unknown>("/auth/me", { isOnboarded: true }));
       if (operation === authOperation) {
         confirmedScope = context.scope;
-        await Promise.all([writeAuthContext(context), markOnboardingComplete().catch(() => undefined)]);
-        if (operation === authOperation) set({ status: "authenticated", ...context });
+        set((state) => ({
+          status: "authenticated",
+          ...context,
+          user: state.user && context.user ? { ...context.user, name: state.user.name, avatarUrl: state.user.avatarUrl } : context.user,
+        }));
+        await Promise.all([queueProfileContextWrite(get(), operation), markOnboardingComplete().catch(() => undefined)]);
       }
     } catch (error) {
       if (operation === authOperation) {
-        set({ user: previousUser });
+        set((state) => ({ user: state.user ? { ...state.user, isOnboarded: previousUser.isOnboarded } : previousUser }));
       }
       throw error;
     }
@@ -225,11 +230,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     };
   },
   deleteAccount: async () => {
-    await postJson<{ confirmation: "DELETE MY ACCOUNT" }, { deleted: true }>("/auth/me/delete", { confirmation: "DELETE MY ACCOUNT" });
+    const sessionSnapshot = tokenVault.snapshot();
+    const localCleanup = Promise.allSettled([clearAuthContext(), clearOnboardingCompletion()]);
     authOperation += 1;
     confirmedScope = null;
     set(signedOutState);
-    await Promise.allSettled([tokenVault.clear(), clearAuthContext(), clearOnboardingCompletion()]);
+    const { session } = await sessionSnapshot;
+    const deletion = session ? deleteRemoteAccount(session) : Promise.reject(new Error("Account deletion requires an authenticated session."));
+    await Promise.allSettled([tokenVault.clear(), localCleanup]);
+    await deletion;
   },
   signOut: async () => {
     authOperation += 1;

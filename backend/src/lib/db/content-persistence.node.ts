@@ -28,6 +28,7 @@ import {
   documentSemanticHash,
 } from "@/lib/ai/document-processing/chunking";
 import { z } from "zod";
+import { initialWorkspaceFolderKey, isInitialWorkspaceDocumentKey, isInitialWorkspaceFolderKey } from "@/lib/initial-workspace-content-identifiers";
 
 type QueryCursor = { next(): Promise<unknown>; all?(): Promise<unknown[]> };
 export interface ContentQueryExecutor {
@@ -82,6 +83,17 @@ function splitPatch(patch: Record<string, unknown>) {
   return { set, unset };
 }
 
+function prepareDocumentForInsert(document: Document) {
+  currentEmbeddingSchema.parse(document.embedding);
+  const expectedChunks = chunkDocumentContent(document.content);
+  if (document.contentChunks && (document.contentChunks.length !== expectedChunks.length || document.contentChunks.some((chunk, index) => chunk !== expectedChunks[index]))) throw new Error("Document chunks must be derived from canonical content.");
+  const contentChunks = document.contentChunks ?? expectedChunks;
+  const chunkEmbeddings = document.chunkEmbeddings ?? (contentChunks.length === 1 ? [document.embedding] : undefined);
+  if (!chunkEmbeddings || contentChunks.length !== chunkEmbeddings.length) throw new Error("Documents require aligned semantic chunks and embeddings.");
+  currentEmbeddingBatchSchema.parse(chunkEmbeddings);
+  return documentSchema.parse({ ...document, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(document.content), _semanticChunkingSkipped: undefined });
+}
+
 async function scopedUpdate<T>(
   executor: ContentQueryExecutor,
   collection: "folders" | "documents" | "documentVersions",
@@ -96,6 +108,7 @@ async function scopedUpdate<T>(
     collection === "folders"
       ? `
       FILTER !HAS(current, "_internalDeletion") || current._internalDeletion == null
+      FILTER !@changesLocation || !@structurallyProtected
       FILTER (current.mutationPolicy != "system-container" && current.managedPurpose == null) || @allowManagedUpdate
       LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "parentFolderKey") ? current.parentFolderKey : null)
       LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
@@ -106,6 +119,7 @@ async function scopedUpdate<T>(
       : collection === "documents"
         ? `
       FILTER !HAS(current, "_internalDeletion") || current._internalDeletion == null
+      FILTER !@changesLocation || !@structurallyProtected
        FILTER (current.mutationPolicy != "system-only" && current.managedPurpose == null) || @allowManagedUpdate
       LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "folderKey") ? current.folderKey : null)
       LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
@@ -165,6 +179,9 @@ async function scopedUpdate<T>(
       patch: set,
       unset,
       expectedUpdatedAt: expectedUpdatedAt ?? null,
+      ...(collection === "folders" || collection === "documents" ? {
+        structurallyProtected: collection === "folders" ? isInitialWorkspaceFolderKey(scopeKey, key) : isInitialWorkspaceDocumentKey(scopeKey, key),
+      } : {}),
     },
   );
   const value = await cursor.next();
@@ -197,6 +214,7 @@ async function scopedDelete(
     LET affectedTripKeys = @attachmentType == null ? [] : (FOR attachment IN tripAttachments FILTER attachment.scopeKey == @scopeKey && attachment.targetType == @attachmentType && attachment.targetKey == @key RETURN DISTINCT attachment.tripKey)
     LET removedKey = FIRST(FOR current IN @@collection
         FILTER current._key == @key && current.scopeKey == @scopeKey
+        FILTER !@structurallyProtected
         FILTER (!@protectSystemContainer || current.mutationPolicy != "system-container") && current.mutationPolicy != "system-only" && current.managedPurpose == null
         LIMIT 1
         REMOVE current IN @@collection
@@ -214,6 +232,7 @@ async function scopedDelete(
       scopeKey,
       attachmentType,
       protectSystemContainer,
+      structurallyProtected: collection === "folders" ? isInitialWorkspaceFolderKey(scopeKey, key) : collection === "documents" ? isInitialWorkspaceDocumentKey(scopeKey, key) : false,
       now,
     },
   );
@@ -629,35 +648,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       );
     },
     async insertDocument(document: Document): Promise<Document> {
-      currentEmbeddingSchema.parse(document.embedding);
-      const expectedChunks = chunkDocumentContent(document.content);
-      if (
-        document.contentChunks &&
-        (document.contentChunks.length !== expectedChunks.length ||
-          document.contentChunks.some(
-            (chunk, index) => chunk !== expectedChunks[index],
-          ))
-      )
-        throw new Error(
-          "Document chunks must be derived from canonical content.",
-        );
-      const contentChunks = document.contentChunks ?? expectedChunks;
-      const chunkEmbeddings =
-        document.chunkEmbeddings ??
-        (contentChunks.length === 1 ? [document.embedding] : undefined);
-      if (!chunkEmbeddings || contentChunks.length !== chunkEmbeddings.length)
-        throw new Error(
-          "Documents require aligned semantic chunks and embeddings.",
-        );
-      currentEmbeddingBatchSchema.parse(chunkEmbeddings);
-      const parsed = documentSchema.parse({
-        ...document,
-        contentChunks,
-        chunkEmbeddings,
-        semanticChunkCount: contentChunks.length,
-        semanticContentHash: documentSemanticHash(document.content),
-        _semanticChunkingSkipped: undefined,
-      });
+      const parsed = prepareDocumentForInsert(document);
       const cursor = await executor.query(
         `LET folder = @folderKey == null ? null : DOCUMENT(folders, @folderKey)
          FILTER @folderKey == null || (folder != null && folder.scopeKey == @scopeKey)
@@ -676,6 +667,23 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       return documentSchema.parse(
         withArangoKey(created as Record<string, unknown>),
       );
+    },
+    async insertConversationAttachmentDocument(document: Document, actorKey: string): Promise<Document> {
+      const parsed = prepareDocumentForInsert(document);
+      const expectedFolderKey = initialWorkspaceFolderKey(parsed.scopeKey, "assistant");
+      if (parsed.folderKey !== expectedFolderKey || parsed.mutationPolicy !== "user" || parsed.managedPurpose !== undefined || parsed.archiveVisibility !== "visible") throw new Error("Conversation attachments require the canonical managed destination and a user-mutable document.");
+      const cursor = await executor.query(
+        `LET actor = DOCUMENT(userTeams, @actorKey)
+         LET scope = DOCUMENT(scopes, @scopeKey)
+         LET folder = DOCUMENT(folders, @folderKey)
+         FILTER actor != null && actor.status == "active" && scope != null && actor.teamKey == scope.teamKey
+         FILTER folder != null && folder._key == @expectedFolderKey && folder.scopeKey == @scopeKey && folder.mutationPolicy == "system-container" && folder.managedPurpose == null
+         INSERT @document INTO documents RETURN NEW`,
+        { actorKey: z.string().cuid().parse(actorKey), scopeKey: parsed.scopeKey, folderKey: parsed.folderKey, expectedFolderKey, document: toArangoDoc(parsed) },
+      );
+      const created = await cursor.next();
+      if (!created) throw new Error("Conversation attachment destination or actor is unavailable.");
+      return documentSchema.parse(withArangoKey(created as Record<string, unknown>));
     },
     async createVersion(
       version: Omit<DocumentVersion, "key" | "version" | "createdAt">,
@@ -963,12 +971,13 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
         `
         FOR current IN folders
           FILTER current._key == @key && current.scopeKey == @scopeKey && current.mutationPolicy != "system-container" && current.managedPurpose == null
+          FILTER !@structurallyProtected
           FILTER @owner == null || current._internalDeletion.owner == @owner
           LIMIT 1
           UPDATE current WITH MERGE(@patch, ZIP(@unset, @unset[* RETURN null])) IN folders OPTIONS { keepNull: false }
           RETURN NEW
       `,
-        { key, scopeKey, owner: owner ?? null, patch: set, unset },
+        { key, scopeKey, owner: owner ?? null, structurallyProtected: marker !== undefined && isInitialWorkspaceFolderKey(scopeKey, key), patch: set, unset },
       );
       const value = await cursor.next();
       return value
@@ -987,12 +996,13 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
         FOR current IN documents
           FILTER current._key == @key && current.scopeKey == @scopeKey
           FILTER current.mutationPolicy != "system-only" && current.managedPurpose == null
+          FILTER !@structurallyProtected
           FILTER @owner == null || current._internalDeletion.owner == @owner
           LIMIT 1
           UPDATE current WITH MERGE(@patch, ZIP(@unset, @unset[* RETURN null])) IN documents OPTIONS { keepNull: false }
           RETURN NEW
       `,
-        { key, scopeKey, owner: owner ?? null, patch: set, unset },
+        { key, scopeKey, owner: owner ?? null, structurallyProtected: marker !== undefined && isInitialWorkspaceDocumentKey(scopeKey, key), patch: set, unset },
       );
       const value = await cursor.next();
       return value

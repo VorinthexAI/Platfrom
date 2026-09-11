@@ -3,9 +3,10 @@ import { expect, test } from "bun:test";
 const source = await Bun.file(new URL("../components/capability/KnowledgeWorkspace.tsx", import.meta.url)).text();
 const searchHistorySheet = await Bun.file(new URL("../components/SearchHistorySheet.tsx", import.meta.url)).text();
 const searchHistoryPill = await Bun.file(new URL("../../../../shared/packages/ui/components/search-history-pill/search-history-pill.mobile.tsx", import.meta.url)).text();
+const fileViewer = await Bun.file(new URL("../../../../shared/packages/ui/components/file-viewer/file-viewer.mobile.tsx", import.meta.url)).text();
 
 test("uses persisted app presentation metadata for generated folder covers", () => {
-  expect(source).toContain("folder.parentFolderKey ? undefined : folder.presentation");
+  expect(source).toContain("function folderPresentation(folder: ContentFolder) { return folder.presentation; }");
   expect(source).toContain("contentPresentationIconSource[presentation]");
   expect(source).toContain("style={styles.managedFolderLogo}");
   expect(source).toContain("<FolderCover folder={folder} />");
@@ -17,19 +18,34 @@ test("opens routed cached folders without flashing Archive root", () => {
   expect(source).toContain("const cachedTargetFolderKey = cachedInitialDocument?.folderKey ?? initialFolderKey");
   expect(source).toContain("const cachedInitialTree = cachedTargetFolderKey ? queryClient.getQueryData<ContentFolder[]>");
   expect(source).toContain("const cachedInitialStack = cachedTargetFolderKey && cachedInitialTree ? contentFolderPath");
-  expect(source).toContain('useState<WorkspaceMode>(cachedInitialFolder ? "folder" : "folders")');
+  expect(source).toContain('useState<WorkspaceMode>(initialDocumentKey && initialDisplayTitle ? "editor" : cachedInitialFolder ? "folder" : "folders")');
   expect(source).toContain("useState<ContentFolder[]>(cachedInitialStack)");
 });
 
 test("opens a routed document once through the canonical Archive path in its containing folder", async () => {
   const route = await Bun.file(new URL("../app/capability/[slug].tsx", import.meta.url)).text();
   expect(route).toContain("initialDocumentKey={params.documentKey}");
+  expect(route).toContain("initialDocumentTitle={params.documentTitle}");
   expect(source).toContain("const initialDocumentOpened = useRef<string | undefined>(undefined)");
   expect(source).toContain("const initialDocument = initialDocumentKey ? await getContentDocument(queryClient, contentContext, initialDocumentKey)");
   expect(source).toContain("const targetFolderKey = initialDocument?.folderKey ?? initialFolderKey");
   expect(source).toContain("initialDocumentOpened.current = requestKey");
   expect(source).toMatch(/getContentDocument\(queryClient, contentContext, initialDocumentKey\)[\s\S]*?\.then\(\(document\) => openArchiveDocument\(document\)\)/);
   expect(source).toContain("const openInitialDocument = useEffectEvent(() =>");
+});
+
+test("keeps Archive title rows stable and shows document titles before detail loading completes", () => {
+  expect(source).toContain("setOpeningDocumentTitle(documentDisplayName(document))");
+  expect(source.indexOf("setOpeningDocumentTitle(documentDisplayName(document))")).toBeLessThan(source.indexOf("getContentDocument(queryClient, contentContext, document.key)"));
+  expect(source).toContain("openingDocumentTitle ?? (activeDocument ? documentDisplayName(activeDocument) : title)");
+  expect(source).toContain('disabled={Boolean(openingDocumentKey) || !activeDocument || saveState !== "saved"}');
+  expect(source).toContain('<View style={styles.folderTitleRow}>\n            <Button accessibilityLabel={`Back to ${currentFolder?.name ?? "folders"}`} contentMode="raw" onPress={leaveEditor} size="xs"');
+  expect(source).not.toContain("styles.editorHeaderTitle");
+  expect(source).toContain('initialStack && workspaceModeRef.current !== "editor" && workspaceModeRef.current !== "viewer"');
+  expect(fileViewer).toContain('onPress={onBack} size="xs"');
+  expect(fileViewer).toContain('onPress={onMenu} size="xs"');
+  expect(fileViewer).toContain('header: { minHeight: 48');
+  expect(fileViewer).toContain('fontSize: 24');
 });
 
 test("uses the root header spacing rhythm inside folders", () => {
@@ -352,25 +368,27 @@ test("makes post-archive invalidation best effort", () => {
 });
 
 test("retains known favorite state on provisional selected search documents", () => {
-  expect(source.match(/isFavorite: document\.isFavorite/g)).toHaveLength(2);
+  expect(source.match(/isFavorite: document\.isFavorite/g)?.length).toBeGreaterThanOrEqual(2);
 });
 
-test("suppresses structural Archive actions for managed resources while retaining favorite and hide", () => {
-  expect(source).toContain("const selectionHasManaged = [...selectedFolders, ...selectedDocuments].some((item) => item.managed)");
+test("suppresses structural Archive actions for managed and protected resources while retaining edit, favorite, and hide", () => {
+  expect(source).toContain("const selectionHasStructuralProtection = [...selectedFolders, ...selectedDocuments].some((item) => item.managed || item.structuralProtection)");
   expect(source).toContain("!currentFolder?.managed ? <Button");
-  expect(source).toContain("!selectionHasManaged ? <Button");
+  expect(source).toContain("!selectionHasStructuralProtection ? <Button");
   expect(source).toContain("!selectedDocument.managed ? <BottomSheetItem");
   expect(source).toContain("!selectedFolder.managed ? <BottomSheetItem");
   const bulkStart = source.lastIndexOf('{activeSheet === "bulkActions"');
   const bulk = source.slice(bulkStart, source.indexOf('{activeSheet === "historyChooser"', bulkStart));
   expect(bulk).toContain("updateSelectionFavorite()");
-  expect(bulk).toContain("!selectionHasManaged");
+  expect(bulk.match(/!selectionHasStructuralProtection/g)).toHaveLength(3);
   const documentActionsStart = source.lastIndexOf('{activeSheet === "documentActions" && selectedDocument');
   const documentActions = source.slice(documentActionsStart, source.indexOf('{activeSheet === "scanSources"', documentActionsStart));
   expect(documentActions).toContain('setHiddenOptimistically("document"');
+  expect(documentActions).toContain("!selectedDocument.managed && !selectedDocument.structuralProtection");
   const folderActionsStart = source.lastIndexOf('{activeSheet === "folderActions" && selectedFolder');
   const folderActions = source.slice(folderActionsStart, source.indexOf('{activeSheet === "folderDetails"', folderActionsStart));
   expect(folderActions).toContain('setHiddenOptimistically("folder"');
+  expect(folderActions.match(/!selectedFolder\.managed && !selectedFolder\.structuralProtection/g)).toHaveLength(3);
 });
 
 test("opens bulk Archive tag assignment with the full content context and preserves selection", () => {

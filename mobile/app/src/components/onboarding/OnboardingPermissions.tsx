@@ -13,10 +13,10 @@ import { syncPushSubscription } from "@/lib/push-notifications";
 type PermissionStep = "notifications" | "photos" | "camera";
 type Recovery = "request" | "settings";
 
-const STEPS: readonly PermissionStep[] = ["notifications", "photos", "camera"];
+const STEPS: readonly PermissionStep[] = ["photos", "camera", "notifications"];
 const PRESENTATION = {
   notifications: { title: "Allow notifications", description: "Stay up to date with updates and never miss anything.", Icon: BellIcon },
-  photos: { title: "Allow Gallery", description: "Let Gallery organize, search, and enrich your photo library for the features you choose.", Icon: GalleryIcon },
+  photos: { title: "Allow full photo access", description: "Let Gallery organize, search, and enrich your full photo library.", Icon: GalleryIcon },
   camera: { title: "Allow camera", description: "Use your camera to scan documents and capture images directly in Vorinthex.", Icon: CameraIcon },
 } as const;
 
@@ -46,7 +46,7 @@ export function OnboardingPermissions({ onFinished }: { onFinished: () => void }
   const [recovery, setRecovery] = useState<Recovery>("request");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const step = STEPS[index] ?? "notifications";
+  const step = STEPS[index] ?? "photos";
   const presentation = PRESENTATION[step];
   const StepIcon = presentation.Icon;
   const advanceAfterSettings = useEffectEvent(() => next());

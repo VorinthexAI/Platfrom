@@ -3,6 +3,7 @@ import { createScopeRepository, SCOPE_REMOVAL_WRITE_COLLECTIONS } from '@/lib/ai
 
 export interface AccountDeletionPlan {
   userKey: string;
+  email: string;
   teamKeys: string[];
   scopeKeys: string[];
   presenceSessionKeys: string[];
@@ -12,7 +13,7 @@ export interface AccountDeletionPlan {
 }
 
 export type AccountDeletionFenceResult =
-  | { status: 'fenced'; presenceSessionKeys: string[] }
+  | { status: 'fenced'; presenceSessionKeys: string[]; recipient: { email: string } }
   | { status: 'not_found' | 'shared_access' | 'active_checkout' | 'checkout_recovery_required' };
 export type AccountDeletionResult =
   | { status: 'deleted' }
@@ -28,10 +29,10 @@ export interface AccountDeletionRepository {
 }
 
 const ACCOUNT_DELETE_WRITE_COLLECTIONS = [
-  'users', 'teams', 'userTeams', 'scopes', 'scopeMembers', 'authSessions', 'authChallenges', 'userSessions',
+  'users', 'teams', 'userTeams', 'scopes', 'scopeMembers', 'authSessions', 'authChallenges', 'userSessions', 'userConnectors',
   'visitors', 'visitorSessions',
   'userMentions', 'userReactions', 'userHiddens', 'userGenerations', 'userSearches', 'contentSearchQueries', 'contentIdempotency',
-  'conversations', 'conversationMessages', 'ticketVotes', 'tickets', 'events', 'tags', 'tagAssignments',
+  'conversations', 'conversationMessages', 'conversationAttachmentArtifacts', 'tickets', 'userInboxThreads', 'userInboxMessages', 'events', 'tags', 'tagAssignments',
   'pushSubscriptions', 'appNotifications', 'appNotificationRecipients', 'pushDeliveries',
   'sparkTransactions', 'billingExecutions', 'referralCodes', 'referralAttributions', 'referralRewards',
   'checkoutHandoffs', 'paymentCheckouts', 'paymentOrders', 'subscriptions', 'bookRefundIntents',
@@ -63,7 +64,7 @@ const INSPECT_QUERY = `
   ) > 0
   LET activeCheckout = LENGTH(FOR checkout IN paymentCheckouts FILTER checkout.userKey == @userKey && (checkout.status == "open" || (checkout.status == "pending" && checkout.updatedAt >= @pendingCutoff)) LIMIT 1 RETURN 1) > 0
   LET recoverableCheckout = LENGTH(FOR checkout IN paymentCheckouts FILTER checkout.userKey == @userKey && checkout.status == "pending" && checkout.updatedAt < @pendingCutoff LIMIT 1 RETURN 1) > 0
-  RETURN { userKey: user._key, teamKeys, scopeKeys, presenceSessionKeys, blocked: foreignActiveMembership || otherTeamMember || otherScopeMember, activeCheckout, recoverableCheckout }
+  RETURN { userKey: user._key, email: user.email, teamKeys, scopeKeys, presenceSessionKeys, blocked: foreignActiveMembership || otherTeamMember || otherScopeMember, activeCheckout, recoverableCheckout }
 `;
 
 const FENCE_COLLECTIONS = {
@@ -86,7 +87,7 @@ export function createAccountDeletionRepository(
         if (plan.recoverableCheckout) return { status: 'checkout_recovery_required' as const };
         const fenced = await transaction.query('LET user = DOCUMENT(users, @userKey) FILTER user != null UPDATE user WITH { deletionRequestedAt: user.deletionRequestedAt || @requestedAt, updatedAt: @requestedAt } IN users RETURN NEW._key', { userKey, requestedAt });
         if (await fenced.next() !== userKey) throw new Error('Account deletion fence was not persisted.');
-        return { status: 'fenced' as const, presenceSessionKeys: plan.presenceSessionKeys };
+        return { status: 'fenced' as const, presenceSessionKeys: plan.presenceSessionKeys, recipient: { email: plan.email } };
       });
     },
     async finalize(userKey) {
@@ -102,22 +103,6 @@ export function createAccountDeletionRepository(
         const scopeRepository = createScopeRepository(transaction as never, async () => []);
         for (const scopeKey of plan.scopeKeys) await scopeRepository.removeScope(scopeKey, userKey);
 
-        const ticketPlanCursor = await transaction.query(`
-          LET authoredTicketKeys = (FOR item IN tickets FILTER item.userKey == @userKey RETURN item._key)
-          LET votedTicketKeys = UNIQUE(FOR item IN ticketVotes FILTER item.userKey == @userKey RETURN item.ticketKey)
-          RETURN { authoredTicketKeys, votedTicketKeys }
-        `, { userKey });
-        const ticketPlan = await ticketPlanCursor.next() as { authoredTicketKeys: string[]; votedTicketKeys: string[] } | null;
-        const authoredTicketKeys = ticketPlan?.authoredTicketKeys ?? [];
-        const retainedVotedTicketKeys = (ticketPlan?.votedTicketKeys ?? []).filter((key) => !authoredTicketKeys.includes(key));
-        await transaction.query('FOR item IN ticketVotes FILTER item.userKey == @userKey || item.ticketKey IN @authoredTicketKeys REMOVE item IN ticketVotes', { userKey, authoredTicketKeys });
-        await transaction.query(`
-          FOR item IN tickets
-            FILTER item._key IN @ticketKeys && item.type == "feedback"
-            LET counts = FIRST(FOR vote IN ticketVotes FILTER vote.ticketKey == item._key COLLECT AGGREGATE upvotes = SUM(vote.vote == "up" ? 1 : 0), downvotes = SUM(vote.vote == "down" ? 1 : 0) RETURN { upvotes, downvotes })
-            UPDATE item WITH counts IN tickets
-        `, { ticketKeys: retainedVotedTicketKeys });
-
         const cursor = await transaction.query(`
            LET user = DOCUMENT(users, @userKey)
            FILTER user != null
@@ -132,7 +117,8 @@ export function createAccountDeletionRepository(
           LET storageKeys = UNIQUE(UNION(
             IS_STRING(user.profileStorageKey) ? [user.profileStorageKey] : [],
             (FOR upload IN galleryUploads FILTER upload.actorKey IN teamMembershipKeys && IS_STRING(upload.storageKey) RETURN upload.storageKey),
-            (FOR object IN storageObjects FILTER object.userKey == @userKey && IS_STRING(object.storageKey) RETURN object.storageKey)
+             (FOR object IN storageObjects FILTER object.userKey == @userKey && IS_STRING(object.storageKey) RETURN object.storageKey),
+             (FOR artifact IN conversationAttachmentArtifacts FILTER artifact.userKey == @userKey && IS_STRING(artifact.stagedStorageKey) RETURN artifact.stagedStorageKey)
           ))
           LET queuedStorage = (FOR storageKey IN storageKeys UPSERT { storageKey } INSERT { storageKey, createdAt: @now, status: "pending" } UPDATE {} IN storageDeletionJobs RETURN 1)
           LET cleanupStorageObjects = (FOR item IN storageObjects FILTER item.userKey == @userKey REMOVE item IN storageObjects RETURN 1)
@@ -140,9 +126,10 @@ export function createAccountDeletionRepository(
           LET cleanupStorageMeters = (FOR item IN storageChargingMeters FILTER item.userKey == @userKey REMOVE item IN storageChargingMeters RETURN 1)
           LET cleanupStorageRetention = (FOR item IN storageRetentionStates FILTER item.userKey == @userKey REMOVE item IN storageRetentionStates RETURN 1)
           LET cleanupGalleryUploads = (FOR item IN galleryUploads FILTER item.actorKey IN teamMembershipKeys REMOVE item IN galleryUploads RETURN 1)
-          LET cleanupAuthSessions = (FOR item IN authSessions FILTER item.userId == @userKey REMOVE item IN authSessions RETURN 1)
-          LET cleanupAuthChallenges = (FOR item IN authChallenges FILTER item.identityKey == @userKey || item.userId == @userKey REMOVE item IN authChallenges RETURN 1)
-           LET cleanupPresenceSessions = (FOR item IN userSessions FILTER item.userId == @userKey REMOVE item IN userSessions RETURN 1)
+           LET cleanupAuthSessions = (FOR item IN authSessions FILTER item.userId == @userKey REMOVE item IN authSessions RETURN 1)
+           LET cleanupAuthChallenges = (FOR item IN authChallenges FILTER item.identityKey == @userKey || item.userId == @userKey REMOVE item IN authChallenges RETURN 1)
+           LET cleanupUserConnectors = (FOR item IN userConnectors FILTER item.userKey == @userKey REMOVE item IN userConnectors RETURN 1)
+            LET cleanupPresenceSessions = (FOR item IN userSessions FILTER item.userId == @userKey REMOVE item IN userSessions RETURN 1)
            LET cleanupVisitorSessions = (FOR item IN visitorSessions FILTER item.visitorId IN visitorKeys REMOVE item IN visitorSessions RETURN 1)
            LET cleanupVisitors = (FOR item IN visitors FILTER item._key IN visitorKeys REMOVE item IN visitors RETURN 1)
           LET cleanupMentions = (FOR item IN userMentions FILTER item.userKey == @userKey REMOVE item IN userMentions RETURN 1)
@@ -153,11 +140,15 @@ export function createAccountDeletionRepository(
           LET cleanupSearchCache = (FOR item IN contentSearchQueries FILTER item.actorKey == @userKey REMOVE item IN contentSearchQueries RETURN 1)
           LET cleanupIdempotency = (FOR item IN contentIdempotency FILTER item.actorKey == @userKey REMOVE item IN contentIdempotency RETURN 1)
           LET cleanupConversationMessages = (FOR item IN conversationMessages FILTER item.userKey == @userKey REMOVE item IN conversationMessages RETURN 1)
-          LET cleanupConversations = (FOR item IN conversations FILTER item.userKey == @userKey REMOVE item IN conversations RETURN 1)
-           LET cleanupTickets = (FOR item IN tickets FILTER item.userKey == @userKey REMOVE item IN tickets RETURN 1)
-          LET cleanupEvents = (FOR item IN events FILTER item.userId == @userKey REMOVE item IN events RETURN 1)
-           LET notificationKeys = (FOR item IN appNotifications FILTER item.actorUserKey == @userKey RETURN item._key)
-           LET cleanupPushDeliveries = (FOR item IN pushDeliveries FILTER item.userKey == @userKey || item.notificationKey IN notificationKeys REMOVE item IN pushDeliveries RETURN 1)
+           LET cleanupConversationAttachmentArtifacts = (FOR item IN conversationAttachmentArtifacts FILTER item.userKey == @userKey REMOVE item IN conversationAttachmentArtifacts RETURN 1)
+           LET cleanupConversations = (FOR item IN conversations FILTER item.userKey == @userKey REMOVE item IN conversations RETURN 1)
+            LET cleanupTickets = (FOR item IN tickets FILTER item.userKey == @userKey REMOVE item IN tickets RETURN 1)
+            LET notificationKeys = (FOR item IN appNotifications FILTER item.actorUserKey == @userKey RETURN item._key)
+            LET notificationThreadKeys = (FOR item IN userInboxThreads FILTER item.notificationKey IN notificationKeys RETURN item._key)
+            LET cleanupInboxMessages = (FOR item IN userInboxMessages FILTER item.userKey == @userKey || item.threadKey IN notificationThreadKeys REMOVE item IN userInboxMessages RETURN 1)
+            LET cleanupInboxThreads = (FOR item IN userInboxThreads FILTER item.userKey == @userKey || item._key IN notificationThreadKeys REMOVE item IN userInboxThreads RETURN 1)
+            LET cleanupEvents = (FOR item IN events FILTER item.userId == @userKey REMOVE item IN events RETURN 1)
+            LET cleanupPushDeliveries = (FOR item IN pushDeliveries FILTER item.userKey == @userKey || item.notificationKey IN notificationKeys REMOVE item IN pushDeliveries RETURN 1)
            LET cleanupNotificationRecipients = (FOR item IN appNotificationRecipients FILTER item.userKey == @userKey || item.notificationKey IN notificationKeys REMOVE item IN appNotificationRecipients RETURN 1)
            LET cleanupNotifications = (FOR item IN appNotifications FILTER item._key IN notificationKeys REMOVE item IN appNotifications RETURN 1)
           LET cleanupPushSubscriptions = (FOR item IN pushSubscriptions FILTER item.userKey == @userKey REMOVE item IN pushSubscriptions RETURN 1)

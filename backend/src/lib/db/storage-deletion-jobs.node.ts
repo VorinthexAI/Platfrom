@@ -52,6 +52,7 @@ export async function renewStorageDeletionClaim(key: string, storageKey: string,
 }
 
 const storageReferenceAql = `
+  STARTS_WITH(@storageKey, "system/initial-audiobook/") ||
   LENGTH(FOR user IN users FILTER user.profileStorageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
   LENGTH(FOR book IN books FILTER book.coverStorageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
   LENGTH(FOR chapter IN bookChapters FILTER chapter.audioStorageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
@@ -62,6 +63,7 @@ const storageReferenceAql = `
   LENGTH(FOR audio IN documentAudioVersions FILTER audio.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
   LENGTH(FOR audio IN documentSummaryAudio FILTER audio.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
   LENGTH(FOR image IN images FILTER image.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
+  LENGTH(FOR artifact IN conversationAttachmentArtifacts FILTER artifact.stagedStorageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
   LENGTH(FOR upload IN galleryUploads FILTER upload.storageKey == @storageKey && upload.status != "failed" LIMIT 1 RETURN 1) > 0`;
 
 /** Creates an owned durable upload lease without stealing another live owner. */

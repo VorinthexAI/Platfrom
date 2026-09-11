@@ -47,7 +47,7 @@ type RedisLike = Pick<typeof redisConnection, 'get' | 'set' | 'del' | 'eval'>;
 type Transition = (record: ProfileAvatarReservation, next: ProfileAvatarReservation, ttlSeconds: number) => Promise<boolean>;
 const publicS3 = createPublicS3Client();
 const signUrl = getSignedUrl as unknown as (client: S3Client, command: PutObjectCommand, options: { expiresIn: number }) => Promise<string>;
-const redisKey = (uploadKey: string) => `profile-avatar-upload:${uploadKey}`;
+export const profileAvatarReservationRedisKey = (uploadKey: string) => `profile-avatar-upload:${uploadKey}`;
 const extensionFor = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' } as const;
 const formatFor = { 'image/jpeg': 'jpeg', 'image/png': 'png', 'image/webp': 'webp' } as const;
 
@@ -91,7 +91,7 @@ export function normalizeProfileAvatarUploadError(error: unknown) {
 
 async function transition(record: ProfileAvatarReservation, next: ProfileAvatarReservation, ttlSeconds: number, dependencies: ProfileAvatarUploadDependencies) {
   if (dependencies.transition) return dependencies.transition(record, next, ttlSeconds);
-  return Number(await (dependencies.redis ?? redisConnection).eval(TRANSITION_SCRIPT, 1, redisKey(record.key), record.status, record.userKey, JSON.stringify(next), String(ttlSeconds))) === 1;
+  return Number(await (dependencies.redis ?? redisConnection).eval(TRANSITION_SCRIPT, 1, profileAvatarReservationRedisKey(record.key), record.status, record.userKey, JSON.stringify(next), String(ttlSeconds))) === 1;
 }
 
 export async function reserveProfileAvatarUpload(rawInput: unknown, authenticatedUserKey: string, dependencies: ProfileAvatarUploadDependencies = {}) {
@@ -110,12 +110,12 @@ export async function reserveProfileAvatarUpload(rawInput: unknown, authenticate
     expiresAt,
   });
   const redis = dependencies.redis ?? redisConnection;
-  if (await redis.set(redisKey(key), JSON.stringify(record), 'EX', PROFILE_AVATAR_URL_TTL_SECONDS, 'NX') !== 'OK') throw new Error('Avatar reservation key collision.');
+  if (await redis.set(profileAvatarReservationRedisKey(key), JSON.stringify(record), 'EX', PROFILE_AVATAR_URL_TTL_SECONDS, 'NX') !== 'OK') throw new Error('Avatar reservation key collision.');
   try {
     const url = await (dependencies.signUpload ?? ((value) => signUrl(publicS3, new PutObjectCommand({ Bucket: S3_BUCKET, Key: value.storageKey, ContentType: value.mimeType }), { expiresIn: PROFILE_AVATAR_URL_TTL_SECONDS })))(record);
     return { uploadKey: key, url, headers: { 'Content-Type': record.mimeType }, expiresAt };
   } catch (error) {
-    await redis.del(redisKey(key));
+    await redis.del(profileAvatarReservationRedisKey(key));
     throw error;
   }
 }
@@ -124,7 +124,7 @@ export async function completeProfileAvatarUpload(rawInput: unknown, authenticat
   const userKey = userKeySchema.parse(authenticatedUserKey);
   const input = profileAvatarCompleteInputSchema.parse(rawInput);
   const redis = dependencies.redis ?? redisConnection;
-  const raw = await redis.get(redisKey(input.uploadKey));
+  const raw = await redis.get(profileAvatarReservationRedisKey(input.uploadKey));
   const record = raw ? profileAvatarReservationSchema.parse(JSON.parse(raw)) : null;
   if (!record || record.userKey !== userKey) throw new ProfileAvatarUploadError(404, 'PROFILE_AVATAR_UPLOAD_NOT_FOUND', 'Avatar upload reservation not found.');
   const now = dependencies.now?.() ?? new Date();
@@ -168,7 +168,7 @@ export async function completeProfileAvatarUpload(rawInput: unknown, authenticat
     const result = await (dependencies.profileService ?? accountProfileService).replaceAvatar({ storageKey: canonicalStorageKey }, userKey);
     canonicalReferenced = true;
     if (!await acknowledgeReservation(reservation)) throw new Error('Profile avatar storage reservation acknowledgement fence was lost.');
-    await Promise.all([storage.delete(record.storageKey).catch(() => undefined), redis.del(redisKey(record.key)).catch(() => undefined)]);
+    await Promise.all([storage.delete(record.storageKey).catch(() => undefined), redis.del(profileAvatarReservationRedisKey(record.key)).catch(() => undefined)]);
     return { ...result, avatar: { mimeType: 'image/png' as const, sizeBytes: canonical.byteLength, width: metadata.width, height: metadata.height } };
   } catch (error) {
     if (canonicalStored && !canonicalReferenced) {
@@ -178,7 +178,7 @@ export async function completeProfileAvatarUpload(rawInput: unknown, authenticat
       storage.delete(record.storageKey).catch(() => undefined),
       canonicalStored && !canonicalReferenced ? storage.delete(canonicalStorageKey).catch(() => undefined) : Promise.resolve(),
       reservation ? canonicalReferenced ? acknowledgeReservation(reservation).catch(() => false) : releaseReservation(reservation).catch(() => false) : Promise.resolve(false),
-      redis.del(redisKey(record.key)).catch(() => undefined),
+      redis.del(profileAvatarReservationRedisKey(record.key)).catch(() => undefined),
     ]);
     throw error;
   }

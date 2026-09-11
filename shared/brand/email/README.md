@@ -21,6 +21,13 @@ layouts; keep values inline and in sync with the design system.
 - `{{supporting_html}}`
 - `{{footer_html}}`
 
+`action_url` and `action_label` are optional through `renderBrandedEmail`. When
+either is omitted, the marked CTA button and plain-link fallback blocks are
+removed from the rendered transactional email.
+
+`supporting_html` is also optional. When omitted, its marked plain-text block
+is removed.
+
 Use the same template for sign-in links, TOTP setup notices,
 invitations, receipts, and operational alerts by changing the placeholder values.
 

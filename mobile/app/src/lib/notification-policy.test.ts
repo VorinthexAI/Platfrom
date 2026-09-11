@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isPushPermissionAllowed, notificationHubDataSchema } from "./notification-policy";
+import { isPushPermissionAllowed, signalThreadPushDataSchema } from "./notification-policy";
 
 describe("notification policies", () => {
   test("accepts granted and approved iOS permission states only", () => {
@@ -10,16 +10,16 @@ describe("notification policies", () => {
     expect(isPushPermissionAllowed(false, undefined, approved)).toBe(false);
   });
 
-  test("accepts only the strict versioned notification-hub payload", () => {
-    const valid = { v: "1", target: "notification-hub", notificationKey: "notification-1" };
-    expect(notificationHubDataSchema.parse(valid)).toEqual(valid);
+  test("accepts only the strict versioned Signal thread payload", () => {
+    const valid = { v: "2", target: "signal-inbox", notificationKey: "notification-1", signalThreadKey: "thread-1", signalMessageKey: "message-1" };
+    expect(signalThreadPushDataSchema.parse(valid)).toEqual(valid);
     for (const invalid of [
-      { ...valid, v: "2" },
+      { ...valid, v: "1" },
       { ...valid, target: "profile" },
-      { ...valid, notificationKey: "" },
+      { ...valid, signalThreadKey: "" },
       { ...valid, extra: true },
-      { target: "notification-hub", notificationKey: "notification-1" },
+      { target: "signal-inbox", notificationKey: "notification-1", signalThreadKey: "thread-1", signalMessageKey: "message-1" },
       null,
-    ]) expect(notificationHubDataSchema.safeParse(invalid).success).toBe(false);
+    ]) expect(signalThreadPushDataSchema.safeParse(invalid).success).toBe(false);
   });
 });

@@ -1,10 +1,9 @@
 import { contentZodToJsonSchema } from './content-json-schema';
 import type { ToolContext } from './tool-context';
 import type { ConversationService } from '@/lib/conversations/service';
-import { conversationCreateInputSchema, conversationFavoriteInputSchema, conversationImageTurnModelInputSchema, conversationKeyInputSchema, conversationListInputSchema, conversationMessageDeleteInputSchema, conversationMessageListInputSchema, conversationModelSendInputSchema, conversationRenameInputSchema, conversationSearchInputSchema } from '@/lib/conversations/schemas';
-import { agentQueryToolContract, executeAgentQueryAdapter } from './conversation-tool-contracts';
+import { conversationCreateInputSchema, conversationFavoriteInputSchema, conversationKeyInputSchema, conversationListInputSchema, conversationMessageDeleteInputSchema, conversationMessageListInputSchema, conversationModelSendInputSchema, conversationRenameInputSchema, conversationSearchInputSchema } from '@/lib/conversations/schemas';
 
-type ConversationToolService = Omit<ConversationService, 'query'> & { query(context: ToolContext, input: unknown): Promise<unknown> };
+type ConversationToolService = ConversationService;
 export interface ConversationToolDependencies { context: ToolContext; conversations?: ConversationToolService; requestKey?: string; currentConversationKey?: string; currentReferenceImageKeys?: string[] }
 const defaultService = async () => (await import('@/lib/conversations/service')).getDefaultConversationService() as unknown as ConversationToolService;
 const build = (name: string, description: string, inputSchema: any, effect: 'read' | 'write', execute: (input: unknown, service: ConversationToolService, dependencies: ConversationToolDependencies) => Promise<unknown>) => ({
@@ -23,10 +22,4 @@ export const CONVERSATION_TOOL_DEFINITIONS = Object.freeze([
   build('conversation.message.list', 'List messages in a private conversation.', conversationMessageListInputSchema, 'read', (input, service, deps) => service.messages(input, deps.context)),
   build('conversation.message.delete', 'Permanently delete a private conversation turn containing the selected message.', conversationMessageDeleteInputSchema, 'write', (input, service, deps) => service.deleteMessage(input, deps.context)),
   build('conversation.message.send', 'Send an idempotent user turn and complete its assistant answer.', conversationModelSendInputSchema, 'write', async (input, service, deps) => { if (!deps.requestKey) throw new Error('conversation.message.send requires a trusted request key.'); const events: unknown[] = []; await service.turn({ ...(input as object), requestKey: deps.requestKey }, deps.context, (event) => { events.push(event); }); return events.at(-1); }),
-  build('conversation.image.enqueue', 'Generate an image in the current Core conversation as one non-blocking image turn.', conversationImageTurnModelInputSchema, 'write', async (input, service, deps) => {
-    if (!deps.requestKey) throw new Error('conversation.image.enqueue requires a trusted request key.');
-    if (!deps.currentConversationKey) throw new Error('conversation.image.enqueue requires a trusted current conversation.');
-    return service.enqueueImageTurn({ ...(input as object), ...(deps.currentReferenceImageKeys?.length ? { referenceImageKeys: deps.currentReferenceImageKeys } : {}), conversationKey: deps.currentConversationKey, requestKey: deps.requestKey }, deps.context);
-  }),
-  { ...agentQueryToolContract, isReadOnly: (): boolean => true, async execute(raw: unknown, dependencies: ConversationToolDependencies) { const service = dependencies.conversations ?? await defaultService(); return executeAgentQueryAdapter(raw, { query: (input) => service.query(dependencies.context, input) }); } },
 ]);

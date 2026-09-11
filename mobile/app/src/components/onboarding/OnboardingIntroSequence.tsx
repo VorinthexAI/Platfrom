@@ -23,6 +23,7 @@ const STAGE_REVEAL_MS = 1_000;
 type Stage = { kind: "mission" } | { kind: "app"; app: OnboardingAppStage };
 
 const LOCAL_APP_LOGOS = {
+  "vorinthex-ai": vorinthexMarkSource,
   archive: capabilityIconSource.archive,
   gallery: capabilityIconSource.gallery,
   compass: capabilityIconSource.compass,
@@ -53,7 +54,7 @@ export function OnboardingIntroSequence({ apps, onFinished }: { apps: readonly S
   const insets = useSafeAreaInsets();
   const { height, width } = useWindowDimensions();
   const reducedMotion = useReducedMotion();
-  const appStages = selectOnboardingAppStages(apps);
+  const appStages = selectOnboardingAppStages(apps).filter(({ slug }) => slug !== "vorinthex-ai");
   const stages: Stage[] = [{ kind: "mission" }, ...appStages.map((app) => ({ kind: "app" as const, app }))];
   const [activeIndex, setActiveIndex] = useState(0);
   const [outgoingStage, setOutgoingStage] = useState<Stage>();
@@ -196,6 +197,73 @@ export function OnboardingIntroSequence({ apps, onFinished }: { apps: readonly S
       </View>
     </View>
     <View style={styles.actions}><Button accessibilityLabel={isFinalStage ? "Try Core" : "Next onboarding stage"} onPress={next} size="md" style={styles.next} variant="primary">{isFinalStage ? "Try Core" : "Next"}</Button></View>
+  </View>;
+}
+
+export function OnboardingAppPreview({ app, onFinished }: { app: OnboardingAppStage; onFinished: () => void }) {
+  const insets = useSafeAreaInsets();
+  const { height, width } = useWindowDimensions();
+  const reducedMotion = useReducedMotion();
+  const logoOpacity = useSharedValue(reducedMotion ? 1 : 0.3);
+  const logoY = useSharedValue(reducedMotion ? 50 : 120);
+  const titleOpacity = useSharedValue(reducedMotion ? 1 : 0.3);
+  const descriptionOpacity = useSharedValue(reducedMotion ? 1 : 0.3);
+  const titleY = useSharedValue(reducedMotion ? 0 : 32);
+  const descriptionY = useSharedValue(reducedMotion ? 0 : 32);
+  const [remoteLogoReady, setRemoteLogoReady] = useState(false);
+  const isMission = app.slug === "vorinthex-ai";
+  const heroHeight = Math.max(280, height * 0.4);
+  const description = isMission ? MISSION : app.description;
+  const source = remoteLogoReady ? { uri: app.logoUrl } : LOCAL_APP_LOGOS[app.slug];
+
+  useLayoutEffect(() => {
+    if (reducedMotion) return;
+    logoOpacity.value = withTiming(1, { duration: STAGE_REVEAL_MS, easing: easings.luxury });
+    logoY.value = withTiming(50, { duration: STAGE_REVEAL_MS, easing: easings.luxury });
+    titleOpacity.value = withDelay(100, withTiming(1, { duration: STAGE_REVEAL_MS, easing: easings.luxury }));
+    titleY.value = withDelay(100, withTiming(0, { duration: STAGE_REVEAL_MS, easing: easings.luxury }));
+    descriptionOpacity.value = withDelay(180, withTiming(1, { duration: STAGE_REVEAL_MS, easing: easings.luxury }));
+    descriptionY.value = withDelay(180, withTiming(0, { duration: STAGE_REVEAL_MS, easing: easings.luxury }));
+  }, [descriptionOpacity, descriptionY, logoOpacity, logoY, reducedMotion, titleOpacity, titleY]);
+
+  useEffect(() => {
+    if (isMission) return;
+    let mounted = true;
+    void Image.prefetch(app.logoUrl, "memory-disk").then((cached) => {
+      if (mounted && cached) setRemoteLogoReady(true);
+    }).catch(() => undefined);
+    return () => { mounted = false; };
+  }, [app.logoUrl, isMission]);
+
+  useEffect(() => {
+    const announcement = `${app.name}. ${description}`;
+    AccessibilityInfo.announceForAccessibility(announcement);
+  }, [app.name, description]);
+
+  const logoStyle = useAnimatedStyle(() => ({ opacity: logoOpacity.value, transform: [{ translateY: logoY.value }] }));
+  const titleStyle = useAnimatedStyle(() => ({ opacity: titleOpacity.value, transform: [{ translateY: titleY.value }] }));
+  const descriptionStyle = useAnimatedStyle(() => ({ opacity: descriptionOpacity.value, transform: [{ translateY: descriptionY.value }] }));
+
+  return <View style={[styles.root, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
+    <View style={styles.presentation}>
+      <View style={[styles.hero, { height: heroHeight }]}>
+        {isMission ? <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.neuralBackdrop}>
+            <NeuralBackdrop height={heroHeight} width={width - spacing.lg * 2} />
+          </View>
+          <LinearGradient colors={["rgba(3,5,7,0)", "rgba(3,5,7,0.96)"]} locations={[0.42, 1]} style={StyleSheet.absoluteFill} />
+        </View> : <View accessibilityElementsHidden accessible={false} importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.backdrop}><ChromeIcon glow={0.15} size={320} source={source} /></View>}
+        <View style={styles.logoArea}>
+          <Animated.View style={[styles.logo, logoStyle]}><ChromeIcon glow={0.72} size={176} source={source} /></Animated.View>
+        </View>
+      </View>
+      <View style={styles.sheet}>
+        <View style={styles.separator}><SheetSeparator width={width} /></View>
+        <Animated.Text accessibilityRole="header" style={[isMission ? styles.wordmark : styles.title, titleStyle]}>{isMission ? "VORINTHEX AI" : app.name}</Animated.Text>
+        <View style={styles.copy}><Animated.Text style={[styles.description, descriptionStyle]}>{description}</Animated.Text></View>
+      </View>
+    </View>
+    <View style={styles.actions}><Button accessibilityLabel={`Done exploring ${app.name}`} onPress={onFinished} size="md" style={styles.next} variant="primary">Done</Button></View>
   </View>;
 }
 

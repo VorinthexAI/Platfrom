@@ -51,6 +51,13 @@ describe('versioned graph migrations', () => {
     expect(() => validateMigrationRegistry([migration('0002-second', checksum('a'), []), migration('0001-first', checksum('b'), [])])).toThrow('ordered');
   });
 
+  test('accepts an explicitly compatible checksum for an amended migration', async () => {
+    const fixture = databaseWith([{ id: '0001-first', checksum: checksum('a'), status: 'applied' }]);
+    const calls: string[] = [];
+    await runGraphMigrations(fixture.database as never, [{ ...migration('0001-first', checksum('b'), calls), compatibleChecksums: [checksum('a')] }]);
+    expect(calls).toEqual([]);
+  });
+
   test('rejects a database migrated by a newer or incomplete registry', async () => {
     const fixture = databaseWith([{ id: '0002-newer', checksum: checksum('a'), status: 'applied' }]);
     await expect(runGraphMigrations(fixture.database as never, [])).rejects.toThrow('absent from this build');

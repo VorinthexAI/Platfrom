@@ -22,6 +22,8 @@ test("mounts one catalog-driven shared-control paywall with checkout and referra
   expect(paywall).toContain("refreshAuthoritativeBilling(queryClient, userKey)");
   expect(paywall).toContain('setPage("referral")');
   expect(paywall).toContain("Invite a friend with your code");
+  expect(paywall).toContain('await NativeShare.share({ message: code }, { dialogTitle: "Share referral" })');
+  expect(paywall).not.toContain("Join me on Vorinthex");
   expect(paywall).toContain("Taxes are calculated at checkout.");
   expect(paywall).toContain("activeTopup(products)");
   expect(paywall).toContain('offerTab === "plans" ? subscriptions : topup ? [topup] : []');
@@ -32,12 +34,16 @@ test("mounts one catalog-driven shared-control paywall with checkout and referra
   expect(paywall).toContain("formatWholeSparks(balance ?? 0)");
   expect(paywall).toContain("Current balance");
   expect(paywall).toContain('from "@vorinthex/shared/ui/tabs"');
-  expect(paywall).toContain('<TabsList accessibilityLabel="Spark offers"');
+  expect(paywall).toContain('<Tabs accessibilityLabel="Spark offers" accessibilityRole="tablist"');
   expect(paywall).toContain('<TabsTrigger style={styles.offerTab} value="plans">');
   expect(paywall).toContain('<TabsTrigger style={styles.offerTab} value="topup">');
   expect(paywall).toContain('>Current plan</Text></Badge>');
+  expect(paywall).toContain('current={currentSubscriptionProductKey === product.key}');
+  expect(paywall).toContain('["active", "trialing", "past_due"].includes(subscription.status)');
   expect(paywall).toContain("selected && styles.planSelected");
-  expect(paywall).toContain("planSelected: { backgroundColor: palette.insetHighlight }");
+  expect(paywall).toContain("planSelected: { borderColor: palette.silver50 }");
+  expect(paywall).toContain('offerTabs: { alignSelf: "stretch" }');
+  expect(paywall).toContain('currentPlanBadge: { backgroundColor: palette.page, borderColor: palette.silver50');
   expect(paywall).toContain("Cancel renewal");
   expect(paywall).toContain("Restore renewal");
   expect(paywall).not.toContain("styles.markBackdrop");
@@ -46,7 +52,9 @@ test("mounts one catalog-driven shared-control paywall with checkout and referra
   expect(paywall).toContain("Sparks give you a simple way to use AI capabilities, store your work, and keep services connected across Vorinthex.");
   expect(paywall).not.toMatch(/Choose an offer\.|Choose your plan\.|Usage-based pricing|Pay only for what you use/i);
   expect(paywall).toContain('accessibilityLabel="How Sparks are billed"');
-  expect(paywall.match(/variant="icon"><HelpIcon size="sm" \/><\/Button>/g)).toHaveLength(2);
+  expect(paywall.match(/size="xs" variant="icon"><HelpIcon size="sm" \/><\/Button>/g)).toHaveLength(2);
+  expect(paywall).not.toContain("Share a referral");
+  expect(paywall).toContain('enabled: Boolean(userKey && open && (mode === "onboarding" || page === "referral"))');
   expect(paywall).toContain("<SparkCostsSheet");
   expect(sparkCosts).toContain("charges.map((charge)");
   expect(sparkCosts).not.toContain("charges.filter(");
@@ -68,7 +76,7 @@ test("insufficient balance opens the same Sparks shop", () => {
 
 test("Profile routes to Settings while account actions remain available", () => {
   expect(profile).toContain('router.push("/settings")');
-  expect(profile).toContain('accessibilityLabel="Open notifications"');
+  expect(profile).toContain('accessibilityLabel="Open notifications in Signal"');
   expect(profile).toContain('label="Feedback"');
   expect(profile).toContain('label="Report issue"');
   expect(profile).toContain('label="FAQ"');

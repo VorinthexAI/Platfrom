@@ -24,6 +24,6 @@ describe('app search routing policy', () => {
 
   test('retains search capabilities with distinct semantics', () => {
     const modelNames = new Set(MODEL_TOOL_NAMES);
-    for (const specialized of ['web.search', 'image.search', 'conversation.search', 'agent.query', 'content.neighbors', 'email.similar.find', 'folder.find', 'document.find']) expect(modelNames.has(specialized)).toBe(true);
+    for (const specialized of ['image.search', 'conversation.search', 'content.neighbors', 'email.similar.find', 'folder.find', 'document.find']) expect(modelNames.has(specialized)).toBe(true);
   });
 });

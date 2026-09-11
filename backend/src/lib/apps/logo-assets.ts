@@ -2,10 +2,12 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { HeadObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import { APP_LOGO_MANIFEST } from './logo-manifest';
+import { INITIAL_AUDIOBOOK_ASSET_MANIFEST } from '@/lib/initial-audiobook-assets';
 
 export const APP_LOGO_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
 type LogoAssetClient = Pick<S3Client, 'send'>;
+type SystemAsset = { storageKey: string; sourcePath: string; contentType: string };
 
 function isMissingObject(error: unknown) {
   if (!error || typeof error !== 'object') return false;
@@ -57,5 +59,46 @@ export async function seedAppLogoAssets({
     results.push({ slug, storageKey: asset.storageKey, status: unchanged ? 'unchanged' : 'uploaded', checksum });
   }
 
+  return results;
+}
+
+export async function seedInitialAudiobookAssets({
+  client,
+  bucket,
+  repositoryRoot,
+  forceUpload = false,
+}: {
+  client: LogoAssetClient;
+  bucket: string;
+  repositoryRoot: string;
+  forceUpload?: boolean;
+}) {
+  if (!bucket.trim()) throw new Error('Initial audio book asset seeding requires a non-empty S3 bucket.');
+  const assets: readonly SystemAsset[] = INITIAL_AUDIOBOOK_ASSET_MANIFEST.chapters;
+  const results: Array<{ storageKey: string; status: 'uploaded' | 'unchanged'; checksum: string }> = [];
+  for (const asset of assets) {
+    const body = new Uint8Array(await Bun.file(resolve(repositoryRoot, asset.sourcePath)).arrayBuffer());
+    if (body.byteLength === 0) throw new Error(`Initial audio book source is empty: ${asset.sourcePath}`);
+    const checksum = createHash('sha256').update(body).digest('hex');
+    let unchanged = false;
+    if (!forceUpload) {
+      try {
+        const head = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: asset.storageKey }));
+        unchanged = head.Metadata?.sha256 === checksum && head.ContentType === asset.contentType && head.CacheControl === APP_LOGO_CACHE_CONTROL;
+      } catch (error) {
+        if (!isMissingObject(error)) throw error;
+      }
+    }
+    if (!unchanged) await client.send(new PutObjectCommand({
+      Bucket: bucket,
+      Key: asset.storageKey,
+      Body: body,
+      ContentType: asset.contentType,
+      CacheControl: APP_LOGO_CACHE_CONTROL,
+      Metadata: { sha256: checksum },
+      ChecksumSHA256: Buffer.from(checksum, 'hex').toString('base64'),
+    }));
+    results.push({ storageKey: asset.storageKey, status: unchanged ? 'unchanged' : 'uploaded', checksum });
+  }
   return results;
 }

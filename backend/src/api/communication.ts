@@ -3,6 +3,7 @@ import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import { sanitizedAgentMessageSchema } from '@/lib/ai/tools';
 import { orchestratorResponseRuntime, type OrchestratorResponseDependencies } from '@/lib/ai/orchestrator-response-runtime';
+import { USER_VISIBLE_AI_PROSE_POLICY } from '@/lib/ai/prose-style';
 import { dedupeMentionCandidates } from '@/lib/communication/mention-candidates';
 import { getDefaultScopeRepository } from '@/lib/ai/scopes';
 import { listAccessibleScopes, requireTeamAccess, FoundersAccessError } from '@/lib/founders/access';
@@ -28,7 +29,7 @@ const pollBody = strictObject({ messageKey: key, question: z.string().trim().min
   if (new Set(normalized).size !== normalized.length) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['options'], message: 'Poll options must be unique' });
 });
 const voteBody = strictObject({ optionKey: key });
-const COMMUNICATION_RESPONSE_INSTRUCTION = `Reply directly to the user with a detailed, self-contained plain-text answer. Other orchestrator mentions only select independent recipients: do not address, converse with, or refer to other mentioned orchestrators or their responses. Explain the relevant reasoning, assumptions, tradeoffs, and practical next steps when useful. Use no Markdown, headings, bullets, numbering, emphasis markers, or preamble. Keep the complete response under 500 words.`;
+const COMMUNICATION_RESPONSE_INSTRUCTION = `Reply directly to the user with a detailed, self-contained plain-text answer. Other orchestrator mentions only select independent recipients: do not address, converse with, or refer to other mentioned orchestrators or their responses. Explain the relevant reasoning, assumptions, tradeoffs, and practical next steps when useful. Use no Markdown, headings, bullets, numbering, emphasis markers, or preamble. Keep the complete response under 500 words. ${USER_VISIBLE_AI_PROSE_POLICY}`;
 const COMMUNICATION_PROVIDER_FALLBACK = 'I could not generate a response right now. Please try again.';
 const COMMUNICATION_PARTIAL_FALLBACK = '\n\nI could not complete this response. Please try again.';
 const MAX_ORCHESTRATOR_RECIPIENTS = 4;

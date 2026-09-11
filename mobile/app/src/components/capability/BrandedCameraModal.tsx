@@ -16,12 +16,13 @@ type Props = {
   disabled?: boolean;
   doneLoading?: boolean;
   externalError?: string;
+  showCaptureLoading?: boolean;
   onCapture: (picture: CameraCapturedPicture) => Promise<void> | void;
   onClose: () => void;
   onDone?: () => void;
 };
 
-export function BrandedCameraModal({ title, hint = "Keep the page flat and fill the frame", count = 0, countUnit, maximum = 1, bottomContent, disabled = false, doneLoading = false, externalError, onCapture, onClose, onDone }: Props) {
+export function BrandedCameraModal({ title, hint = "Keep the page flat and fill the frame", count = 0, countUnit, maximum = 1, bottomContent, disabled = false, doneLoading = false, externalError, showCaptureLoading = true, onCapture, onClose, onDone }: Props) {
   const insets = useSafeAreaInsets();
   const camera = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -64,7 +65,7 @@ export function BrandedCameraModal({ title, hint = "Keep the page flat and fill 
             {count >= maximum || hint ? <Text style={styles.hint}>{count >= maximum ? "Capture limit reached" : hint}</Text> : null}
             <View style={styles.controls}>
               <View style={styles.controlSide}><Button accessibilityLabel={`${torch ? "Turn off" : "Turn on"} camera light`} disabled={capturing || disabled} onPress={() => setTorch((value) => !value)} size="sm" variant={torch ? "primary" : "secondary"}>{torch ? "Light off" : "Light on"}</Button></View>
-              <Button accessibilityLabel="Take photo" contentMode="raw" disabled={!ready || capturing || disabled || count >= maximum} loading={capturing} onPress={() => void takePicture()} size="xl" style={styles.shutter} variant="primary" />
+              <Button accessibilityLabel="Take photo" contentMode="raw" disabled={!ready || capturing || disabled || count >= maximum} loading={showCaptureLoading && capturing} onPress={() => void takePicture()} size="xl" style={styles.shutter} variant="primary" />
               <View style={styles.controlSide}>{onDone ? <Button disabled={capturing || disabled || count === 0} loading={doneLoading} onPress={onDone} size="sm" variant="secondary">Done</Button> : null}</View>
             </View>
           </View>

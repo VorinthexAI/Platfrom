@@ -9,7 +9,6 @@ describe('public Spark costs', () => {
     const listedRules = Object.entries(TOOL_COST_RULES).filter(([, rule]) => rule.showInPricing !== false);
     expect(staticCharges).toHaveLength(listedRules.length + 2);
     expect(staticCharges.slice(0, listedRules.length).map(({ key }) => key)).toEqual(listedRules.map(([key]) => key));
-    expect(charges.some(({ key }) => key === 'web.search')).toBe(false);
     expect(charges.some(({ key }) => key === 'image.caption')).toBe(false);
     expect(charges).toContainEqual(expect.objectContaining({ key: 'document.parse', name: 'Upload a document' }));
     expect(charges).toContainEqual(expect.objectContaining({ key: 'book.create', name: 'Create an audio book', description: 'Generate and save a complete audio book.' }));
@@ -19,8 +18,9 @@ describe('public Spark costs', () => {
     expect(charges.some(({ key }) => key === 'subject.create')).toBe(false);
     expect(JSON.stringify(charges).toLowerCase()).not.toContain('photo');
     expect(charges).toContainEqual(expect.objectContaining({ key: 'storage', kind: 'storage', sparkCost: '30', unit: 'gb-month' }));
-    expect(charges).toContainEqual(expect.objectContaining({ key: 'inbox.sync', kind: 'static', name: 'Connect and initially sync an inbox', sparkCost: '100', unit: 'invocation' }));
-    expect(charges).toContainEqual(expect.objectContaining({ key: 'inbox.subscribe', kind: 'static', name: 'Receive a new email', sparkCost: '1', unit: 'new-email' }));
+    expect(charges).toContainEqual(expect.objectContaining({ key: 'email.tone.create', name: 'Create a Signal writing tone', description: 'Build a reusable writing tone from connected email examples.' }));
+    expect(charges).toContainEqual(expect.objectContaining({ key: 'inbox.sync', kind: 'static', name: 'Connect and initially sync email', description: expect.stringContaining('private Signal inbox'), sparkCost: '100', unit: 'invocation' }));
+    expect(charges).toContainEqual(expect.objectContaining({ key: 'inbox.subscribe', kind: 'static', name: 'Receive connected email', description: expect.stringContaining('private Signal inbox'), sparkCost: '1', unit: 'new-email' }));
     expect(charges.some(({ key }) => key === 'connected-inbox')).toBe(false);
     expect(charges).toContainEqual(expect.objectContaining({ key: 'ai-usage', kind: 'variable' }));
     for (const productId of Object.keys(PURCHASE_GRANT_RULES)) expect(charges.some(({ key }) => key === productId)).toBe(false);

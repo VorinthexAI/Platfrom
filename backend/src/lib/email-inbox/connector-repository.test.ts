@@ -35,9 +35,9 @@ describe('team connector repository', () => {
     };
     const repository = createConnectorRepository(database as never);
     const credentials = { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' };
-    const accountA = await repository.upsert({ teamKey: 'team-1', scopeKey, providerAccountId: 'google-a', email: 'a@example.com', scopes: ['email'], createdByTeamMembershipKey: teamMembershipKey, credentials });
-    const accountB = await repository.upsert({ teamKey: 'team-1', scopeKey, providerAccountId: 'google-b', email: 'b@example.com', scopes: ['email'], createdByTeamMembershipKey: teamMembershipKey, credentials });
-    const reconnectedA = await repository.upsert({ teamKey: 'team-1', scopeKey, providerAccountId: 'google-a', email: 'a@example.com', scopes: ['email'], createdByTeamMembershipKey: teamMembershipKey, credentials: { ...credentials, accessToken: 'new-access' } });
+    const accountA = await repository.upsert({ userKey: teamMembershipKey, teamKey: 'team-1', scopeKey, providerAccountId: 'google-a', email: 'a@example.com', scopes: ['email'], credentials });
+    const accountB = await repository.upsert({ userKey: teamMembershipKey, teamKey: 'team-1', scopeKey, providerAccountId: 'google-b', email: 'b@example.com', scopes: ['email'], credentials });
+    const reconnectedA = await repository.upsert({ userKey: teamMembershipKey, teamKey: 'team-1', scopeKey, providerAccountId: 'google-a', email: 'a@example.com', scopes: ['email'], credentials: { ...credentials, accessToken: 'new-access' } });
     expect(accountA.key).not.toBe(accountB.key);
     expect(reconnectedA.key).toBe(accountA.key);
     expect(upserts).toHaveLength(3);
@@ -56,8 +56,8 @@ describe('team connector repository', () => {
   test('exact lookup includes revoked connectors for reconnect recovery', async () => {
     const calls: Record<string, unknown>[] = [];
     const database = { collection: () => ({}), query: async (_query: string, bindVars: Record<string, unknown>) => { calls.push(bindVars); return { next: async () => null }; } };
-    await createConnectorRepository(database as never).findExact('team-1', scopeKey, 'google-a');
-    expect(calls[0]).toMatchObject({ teamKey: 'team-1', scopeKey, providerAccountId: 'google-a' });
+    await createConnectorRepository(database as never).findExact(teamMembershipKey, 'google-a');
+    expect(calls[0]).toMatchObject({ userKey: teamMembershipKey, providerAccountId: 'google-a' });
   });
 
   test('credential refresh is fenced by observed update time and active status', async () => {
@@ -98,7 +98,7 @@ describe('team connector repository', () => {
     const calls: Array<{ query: string; bindVars: Record<string, any> }> = [];
     const database = { collection: () => ({ document: async () => null }), query: async (query: string, bindVars: Record<string, any>) => { calls.push({ query, bindVars }); return { next: async () => null, all: async () => [] }; } };
     const repository = createConnectorRepository(database as never);
-    await expect(repository.upsert({ teamKey: 'team-1', scopeKey, providerAccountId: 'google-cas', email: 'cas@example.com', scopes: ['email'], createdByTeamMembershipKey: teamMembershipKey, credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }, expectedRevision: 'snapshot-revision' })).rejects.toThrow('changed during OAuth');
+    await expect(repository.upsert({ userKey: teamMembershipKey, teamKey: 'team-1', scopeKey, providerAccountId: 'google-cas', email: 'cas@example.com', scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }, expectedRevision: 'snapshot-revision' })).rejects.toThrow('changed during OAuth');
     expect(await repository.setSyncState(teamMembershipKey, 'idle', { expectedRevision: 'upsert-revision' })).toBeNull();
     expect(await repository.activateInitialization(teamMembershipKey, 'fingerprint', 'sync-revision')).toBeNull();
     expect(await repository.updateWatch(teamMembershipKey, { historyId: 'history', expiration: String(Date.now() + 60_000) }, 'active-revision')).toBeNull();
@@ -124,20 +124,20 @@ describe('team connector repository', () => {
     const calls: Array<{ query: string; bindVars: Record<string, any> }> = [];
     const database = { collection: () => ({}), query: async (query: string, bindVars: Record<string, any>) => { calls.push({ query, bindVars }); return { next: async () => null, all: async () => [] }; } };
     const repository = createConnectorRepository(database as never);
-    await expect(repository.upsert({ teamKey: 'team-1', scopeKey, providerAccountId: 'billing', email: 'billing@example.com', scopes: ['email'], createdByTeamMembershipKey: teamMembershipKey, billingUserKey: teamMembershipKey, credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }, expectedRevision: null })).rejects.toThrow('changed during OAuth');
-    expect(calls[0]!.query).toContain('OLD.billingUserKey == null ? @billingUserKey : OLD.billingUserKey');
+    await expect(repository.upsert({ userKey: teamMembershipKey, teamKey: 'team-1', scopeKey, providerAccountId: 'billing', email: 'billing@example.com', scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }, expectedRevision: null })).rejects.toThrow('changed during OAuth');
+    expect(calls[0]!.query).toContain('connector.userKey == @userKey');
     expect(calls[0]!.query).not.toContain('billingStatus');
     expect(calls[0]!.query).not.toContain('billingPeriodStartedAt');
     expect(calls[0]!.query).not.toContain('inboxBillingPeriods');
-    expect(calls[0]!.bindVars.billingUserKey).toBe(teamMembershipKey);
-    expect(calls[0]!.bindVars.document).toMatchObject({ billingUserKey: teamMembershipKey });
+    expect(calls[0]!.bindVars.userKey).toBe(teamMembershipKey);
+    expect(calls[0]!.bindVars.document).toMatchObject({ userKey: teamMembershipKey });
   });
 
   test('activates a newly initialized connector without recurring billing writes', async () => {
     let query = '';
     const database = { collection: () => ({}), query: async (value: string) => { query = value; return { next: async () => null }; } };
     await createConnectorRepository(database as never).activateInitialization(teamMembershipKey, 'a'.repeat(64));
-    expect(query).toContain('connector.billingUserKey != null');
+    expect(query).toContain('connector.userKey != null');
     expect(query).not.toContain('inboxBillingPeriods');
     expect(query).not.toContain('billingStatus');
   });

@@ -36,6 +36,13 @@ describe('analytics event ingestion HTTP API', () => {
     expect(calls).toEqual([{ userId: null, scopeKey: null, eventIdentifier: identifier, slug: 'navigation.sidebar-opened', appScopeKey }]);
   });
 
+  test('records app opens with the installation identifier', async () => {
+    const calls: unknown[] = [];
+    const response = await postEvent(testApp({ getIdentity: async () => null, getAppScopeKey: () => appScopeKey, record: async (input) => { calls.push(input); } }), { slug: 'app.opened' });
+    expect(response.status).toBe(201);
+    expect(calls).toEqual([expect.objectContaining({ slug: 'app.opened', eventIdentifier: identifier, appScopeKey })]);
+  });
+
   test('rejects invalid presented credentials instead of downgrading them to anonymous attribution', async () => {
     const calls: unknown[] = [];
     const app = new Hono<{ Variables: { authCredentialsPresented: boolean } }>();

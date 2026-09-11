@@ -5,14 +5,15 @@ import { apiClient } from "./api-client";
 import * as apiTransport from "./api-client";
 import { publishUserSearchHistoryAppend } from "./user-search-history-events";
 import type { ServerSentEvent } from "./sse";
-import { observeDomainError } from "./domain-error-observer";
+import { extractDomainErrorMessage, observeDomainError } from "./domain-error-observer";
+import { mapWithConcurrency } from "./bounded-concurrency";
 
 export const CONVERSATION_PAGE_SIZE = 25;
 export const CONVERSATION_MESSAGE_PAGE_SIZE = 10;
 export const CONVERSATION_NAME_MAX_LENGTH = 200;
 export const CONVERSATION_MESSAGE_MAX_LENGTH = 20_000;
 export const CONVERSATION_IMAGE_PROMPT_MAX_LENGTH = 8_000;
-export const CONVERSATION_ATTACHMENT_MAX_FILES = 10;
+export const CONVERSATION_ATTACHMENT_MAX_FILES = 12;
 export const CONVERSATION_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 
 export const conversationContextSchema = z.strictObject({
@@ -73,6 +74,12 @@ export const conversationRetrievalSchema = z.strictObject({
 export type ConversationRetrieval = z.infer<typeof conversationRetrievalSchema>;
 export type ConversationRetrievalCollectionSlug = z.infer<typeof conversationRetrievalCollectionSlugSchema>;
 
+export const conversationAttachmentReferenceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ key: z.string().min(1), kind: z.literal("document"), filename: z.string().min(1).max(255), mimeType: z.string().min(1), sizeBytes: z.number().int().positive() }),
+  z.strictObject({ key: z.string().min(1), kind: z.literal("image"), filename: z.string().min(1).max(255), mimeType: z.literal("image/png"), sizeBytes: z.number().int().positive(), width: z.number().int().positive(), height: z.number().int().positive() }),
+]);
+export type ConversationAttachmentReference = z.infer<typeof conversationAttachmentReferenceSchema>;
+
 const serverConversationMessageSchema = z.strictObject({
   key: z.string().min(1),
   conversationKey: z.string().min(1),
@@ -80,8 +87,11 @@ const serverConversationMessageSchema = z.strictObject({
   type: z.enum(["TEXT", "IMAGE"]),
   role: z.enum(["USER", "ASSISTANT"]),
   status: z.enum(["PENDING", "COMPLETED", "FAILED"]),
+  attachmentStatus: z.enum(["NONE", "PENDING", "COMPLETED", "PARTIAL", "FAILED"]),
   content: z.string().min(1).max(100_000),
   imageKey: z.string().cuid().optional(),
+  imageSummaryText: z.string().trim().min(1).max(20_000).optional(),
+  attachments: z.array(conversationAttachmentReferenceSchema).max(CONVERSATION_ATTACHMENT_MAX_FILES).default([]),
   retrievals: z.array(conversationRetrievalSchema).max(4),
   createdAt: z.string().datetime(),
   completedAt: z.string().datetime().optional(),
@@ -90,9 +100,11 @@ const serverConversationMessageSchema = z.strictObject({
   if (message.status === "PENDING" && message.completedAt) context.addIssue({ code: "custom", path: ["completedAt"], message: "Pending messages cannot have a completion time." });
   if (message.status !== "PENDING" && !message.completedAt) context.addIssue({ code: "custom", path: ["completedAt"], message: "Terminal messages require a completion time." });
   if (message.type === "TEXT" && message.imageKey) context.addIssue({ code: "custom", path: ["imageKey"], message: "Text messages cannot reference an image." });
+  if (message.attachments.length && (message.type !== "TEXT" || message.role !== "USER")) context.addIssue({ code: "custom", path: ["attachments"], message: "Attachments belong only to text user messages." });
   if (message.type === "IMAGE" && message.role === "USER" && message.imageKey) context.addIssue({ code: "custom", path: ["imageKey"], message: "Image prompts cannot reference their generated image." });
   if (message.type === "IMAGE" && message.role === "ASSISTANT" && (message.status === "COMPLETED") !== Boolean(message.imageKey)) context.addIssue({ code: "custom", path: ["imageKey"], message: "Only completed image responses require an image reference." });
   if (message.type === "IMAGE" && message.retrievals.length) context.addIssue({ code: "custom", path: ["retrievals"], message: "Image messages cannot have retrievals." });
+  if (message.imageSummaryText && (message.type !== "IMAGE" || message.role !== "ASSISTANT" || message.status !== "COMPLETED")) context.addIssue({ code: "custom", path: ["imageSummaryText"], message: "Image summaries belong only to completed image responses." });
 }).transform(({ role, type, ...message }) => ({ ...message, kind: type === "IMAGE" ? "image" as const : "text" as const, role: role === "USER" ? "user" as const : "assistant" as const }));
 export const conversationMessageSchema = serverConversationMessageSchema;
 export type ConversationMessage = z.infer<typeof conversationMessageSchema>;
@@ -120,26 +132,39 @@ const attachmentFileSchema = z.strictObject({
 export type ConversationAttachmentFile = z.infer<typeof attachmentFileSchema>;
 const attachmentUploadSchema = z.strictObject({ clientKey: z.string().min(1), attachmentKey: z.string().min(1), url: z.string().url(), headers: z.record(z.string(), z.string()), expiresAt: z.string().datetime() });
 const attachmentDescriptorSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ attachmentKey: z.string().min(1), kind: z.literal("image"), filename: z.string().min(1), mimeType: z.literal("image/png"), sizeBytes: z.number().int().positive(), width: z.number().int().positive(), height: z.number().int().positive(), status: z.literal("sealed") }),
-  z.strictObject({ attachmentKey: z.string().min(1), kind: z.literal("document"), filename: z.string().min(1), mimeType: z.string().min(1), sizeBytes: z.number().int().positive(), extractedCharacters: z.number().int().nonnegative(), status: z.literal("sealed") }),
+  z.strictObject({ attachmentKey: z.string().min(1), kind: z.literal("image"), filename: z.string().min(1), mimeType: z.literal("image/png"), sizeBytes: z.number().int().positive(), width: z.number().int().positive(), height: z.number().int().positive(), status: z.literal("prepared") }),
+  z.strictObject({ attachmentKey: z.string().min(1), kind: z.literal("document"), filename: z.string().min(1), mimeType: z.string().min(1), sizeBytes: z.number().int().positive(), status: z.literal("prepared") }),
 ]);
+
+function attachmentStageError(stage: "reservation" | "completion", error: unknown) {
+  const message = extractDomainErrorMessage(error);
+  return new Error(`Attachment ${stage} failed${message ? `: ${message}` : "."}`, { cause: error });
+}
+
+async function attachmentUploadError(response: Response) {
+  const body = await response.text().catch(() => "");
+  const code = body.match(/<Code>([^<]+)<\/Code>/)?.[1];
+  const message = body.match(/<Message>([^<]+)<\/Message>/)?.[1];
+  const detail = [code, message].filter(Boolean).join(": ");
+  return new Error(`Attachment upload failed (${response.status}${detail ? `: ${detail}` : ""}).`);
+}
 
 export async function uploadConversationAttachments(context: ConversationContext, conversationKey: string, requestKey: string, rawFiles: ConversationAttachmentFile[], signal?: AbortSignal) {
   const files = z.array(attachmentFileSchema).min(1).max(CONVERSATION_ATTACHMENT_MAX_FILES).refine((items) => new Set(items.map(({ clientKey }) => clientKey)).size === items.length, "Attachment client keys must be unique.").parse(rawFiles);
   const key = z.string().min(1).parse(conversationKey);
   const request = z.string().trim().min(1).max(180).parse(requestKey);
-  const reservationResponse = await apiClient.post(`/conversations/${encodeURIComponent(key)}/attachments/uploads/presign`, { ...selectors(context), requestKey: request, files: files.map(({ uri: _uri, kind: _kind, ...file }) => file) }, { signal });
+  const reservationResponse = await apiClient.post(`/conversations/${encodeURIComponent(key)}/attachments/uploads/presign`, { ...selectors(context), requestKey: request, files: files.map(({ uri: _uri, kind: _kind, ...file }) => file) }, { signal }).catch((error) => { throw attachmentStageError("reservation", error); });
   const reservation = unwrap(conversationEnvelope(z.strictObject({ uploads: z.array(attachmentUploadSchema).min(1).max(CONVERSATION_ATTACHMENT_MAX_FILES) })).parse(reservationResponse.data));
-  await Promise.all(reservation.uploads.map(async (upload) => {
+  await mapWithConcurrency(reservation.uploads, 3, async (upload) => {
     const file = files.find(({ clientKey }) => clientKey === upload.clientKey);
     if (!file) throw new Error("An attachment upload reservation could not be matched.");
     const bytes = await new (await import("expo-file-system")).File(file.uri).arrayBuffer();
     if (bytes.byteLength !== file.sizeBytes) throw new Error("An attachment changed before it could be uploaded.");
     const response = await fetch(upload.url, { method: "PUT", headers: upload.headers, body: bytes, signal });
-    if (!response.ok) throw new Error(`Attachment upload failed (${response.status}).`);
-  }));
+    if (!response.ok) throw await attachmentUploadError(response);
+  });
   const attachmentKeys = reservation.uploads.map(({ attachmentKey }) => attachmentKey);
-  const completionResponse = await apiClient.post(`/conversations/${encodeURIComponent(key)}/attachments/uploads/complete`, { ...selectors(context), requestKey: request, attachmentKeys }, { signal, timeout: 2 * 60_000 });
+  const completionResponse = await apiClient.post(`/conversations/${encodeURIComponent(key)}/attachments/uploads/complete`, { ...selectors(context), requestKey: request, attachmentKeys }, { signal, timeout: 2 * 60_000 }).catch((error) => { throw attachmentStageError("completion", error); });
   const completed = unwrap(conversationEnvelope(z.strictObject({ attachments: z.array(attachmentDescriptorSchema).length(attachmentKeys.length) })).parse(completionResponse.data));
   return { attachmentKeys: completed.attachments.map(({ attachmentKey }) => attachmentKey), attachments: completed.attachments };
 }
@@ -216,7 +241,7 @@ export async function enqueueConversationImageTurn(context: ConversationContext,
 }
 
 export const conversationTurnEventSchema = z.discriminatedUnion("type", [
-  z.strictObject({ type: z.literal("start"), correlationKey: z.string().min(1), conversationKey: z.string().min(1), userMessageKey: z.string().min(1), assistantMessageKey: z.string().min(1) }),
+  z.strictObject({ type: z.literal("start"), correlationKey: z.string().min(1), conversationKey: z.string().min(1), userMessageKey: z.string().min(1), assistantMessageKey: z.string().min(1), userMessage: serverConversationMessageSchema }),
   z.strictObject({ type: z.literal("delta"), correlationKey: z.string().min(1), assistantMessageKey: z.string().min(1), text: z.string().min(1) }),
   z.strictObject({ type: z.literal("done"), correlationKey: z.string().min(1), conversationKey: z.string().min(1), message: serverConversationMessageSchema, name: z.string().trim().min(1).max(CONVERSATION_NAME_MAX_LENGTH).optional(), replayed: z.boolean() }),
   z.strictObject({ type: z.literal("error"), correlationKey: z.string().min(1), message: z.string().min(1), code: z.string().min(1) }),
@@ -243,6 +268,7 @@ export async function streamConversationTurnWithTransport(transport: Conversatio
     if (event.type === "start") {
       if (started) throw new Error("Conversation stream emitted more than one start event.");
       if (event.conversationKey !== conversationKey) throw new Error("Conversation stream started for a different conversation.");
+      if (event.userMessageKey !== event.userMessage.key || event.userMessage.conversationKey !== conversationKey || event.userMessage.role !== "user") throw new Error("Conversation stream started with an invalid user message.");
       started = event;
     } else if (event.type === "delta") {
       if (!started) throw new Error("Conversation stream emitted a delta before start.");

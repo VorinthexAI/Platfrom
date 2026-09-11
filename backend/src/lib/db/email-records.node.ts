@@ -17,6 +17,7 @@ const timestampsSchema = z.object({
 }).strict();
 const canonicalRecordSchema = z.object({
   key: keySchema,
+  userKey: keySchema,
   scopeKey: keySchema,
   embedding: currentEmbeddingSchema,
   developmentFixtureIdentifier: z.string().trim().min(1).optional(),

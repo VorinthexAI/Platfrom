@@ -89,9 +89,64 @@ export function invalidateConversationSearches(queryClient: QueryClient, context
   });
 }
 
-export type OptimisticMessage = Omit<ConversationMessage, "turnKey" | "completedAt"> & { turnKey?: string; completedAt?: string; optimistic?: true };
+export type LocalConversationAttachment = {
+  local: true;
+  clientKey: string;
+  kind: "image" | "document";
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  uri: string;
+};
+export type ConversationDisplayAttachment = ConversationMessage["attachments"][number] | LocalConversationAttachment;
+export type OptimisticMessage = Omit<ConversationMessage, "turnKey" | "completedAt" | "attachments"> & {
+  turnKey?: string;
+  completedAt?: string;
+  attachments: ConversationDisplayAttachment[];
+  optimistic?: true;
+};
+
+const turnRoleIdentity = ({ turnKey, role }: Pick<OptimisticMessage, "turnKey" | "role">) => turnKey ? `${turnKey}:${role}` : undefined;
+
+export function createLocalConversationAttachments(files: readonly Omit<LocalConversationAttachment, "local">[]): LocalConversationAttachment[] {
+  return files.map(({ clientKey, kind, filename, mimeType, sizeBytes, uri }) => ({ local: true, clientKey, kind, filename, mimeType, sizeBytes, uri }));
+}
+
+export function mergeConversationMessages(persisted: readonly ConversationMessage[], pending: readonly OptimisticMessage[]) {
+  if (!pending.length) return persisted;
+  const pendingByIdentity = new Map(pending.map((message) => [turnRoleIdentity(message), message]).filter((entry): entry is [string, OptimisticMessage] => Boolean(entry[0])));
+  const pendingByKey = new Map(pending.map((message) => [message.key, message]));
+  const consumed = new Set<OptimisticMessage>();
+  const merged: OptimisticMessage[] = [];
+  for (const message of persisted) {
+    const match = pendingByIdentity.get(turnRoleIdentity(message) ?? "") ?? pendingByKey.get(message.key);
+    if (!match) merged.push(message);
+    else if (!consumed.has(match)) {
+      // Keep local attachment previews mounted until the UI has preloaded the
+      // durable image and explicitly releases the optimistic overlay.
+      merged.push(match);
+      consumed.add(match);
+    }
+  }
+  for (const message of pending) if (!consumed.has(message)) merged.push(message);
+  return merged;
+}
+
+export function settlePendingAttachmentOverlays(persisted: readonly ConversationMessage[], pending: readonly OptimisticMessage[]): { pendingMessages: OptimisticMessage[]; settledTurnKeys: string[] } {
+  const settledTurnKeys = new Set(persisted.filter((message) => message.role === "user" && (["COMPLETED", "PARTIAL", "FAILED"] as const).includes(message.attachmentStatus as "COMPLETED" | "PARTIAL" | "FAILED")).map(({ turnKey }) => turnKey));
+  if (!settledTurnKeys.size) return { pendingMessages: [...pending], settledTurnKeys: [] };
+  const releasedTurnKeys = new Set<string>();
+  const pendingMessages = pending.filter((message) => {
+    const localOverlay = message.role === "user" && Boolean(message.turnKey) && message.attachments.some((attachment) => "local" in attachment);
+    if (!localOverlay || !settledTurnKeys.has(message.turnKey!)) return true;
+    releasedTurnKeys.add(message.turnKey!);
+    return false;
+  });
+  return { pendingMessages, settledTurnKeys: [...releasedTurnKeys] };
+}
 
 export function replaceTurnMessages(messages: readonly OptimisticMessage[], userMessage: OptimisticMessage, assistantMessage: OptimisticMessage, optimisticKeys: readonly string[]) {
-  const withoutOptimistic = messages.filter(({ key }) => !optimisticKeys.includes(key) && key !== userMessage.key && key !== assistantMessage.key);
+  const authoritativeIdentities = new Set([turnRoleIdentity(userMessage), turnRoleIdentity(assistantMessage)].filter(Boolean));
+  const withoutOptimistic = messages.filter((message) => !optimisticKeys.includes(message.key) && message.key !== userMessage.key && message.key !== assistantMessage.key && !authoritativeIdentities.has(turnRoleIdentity(message)));
   return [...withoutOptimistic, userMessage, assistantMessage];
 }

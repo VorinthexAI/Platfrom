@@ -5,7 +5,7 @@ import { db } from './client';
 import { currentEmbeddingSchema } from '@/lib/embeddings';
 
 export const FOLDERS_COLLECTION = 'folders';
-export const contentPresentationSchema = z.enum(['travel', 'communication', 'learning']);
+export const contentPresentationSchema = z.enum(['platform', 'assistant', 'knowledge', 'media', 'travel', 'communication', 'learning']);
 
 export const folderSchema = z.object({
   key: z.string().cuid(),

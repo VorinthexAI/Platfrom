@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { EngineConfig } from "./types";
 
@@ -11,7 +12,9 @@ const envSchema = z.object({
   DEFAULT_OUTPUT_FORMAT: z.preprocess((value) => value === "" ? undefined : value, z.literal("png").default("png"))
 });
 
-export function loadConfig(rootDir = path.resolve(import.meta.dir, "..")): EngineConfig {
+const moduleDir = typeof import.meta.dir === "string" ? import.meta.dir : path.dirname(fileURLToPath(import.meta.url));
+
+export function loadConfig(rootDir = path.resolve(moduleDir, "..")): EngineConfig {
   const environmentsPath = path.resolve(rootDir, "..", "..", ".github", "environments.json");
   let registryApiKey: string | undefined;
   try {

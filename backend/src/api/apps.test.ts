@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { CANONICAL_APPS } from '@/lib/apps/registry';
 import { createAppsService } from '@/lib/apps/service';
-import { createAgentGuideTool } from '@/lib/ai/tools/agent-guide';
 import { createListApps } from './apps';
 
 describe('GET /api/v1/apps', () => {
@@ -19,24 +18,6 @@ describe('GET /api/v1/apps', () => {
     expect(body.apps.map(({ slug }) => slug)).toEqual(apps.map(({ slug }) => slug));
     expect(body.apps[0].logoUrl).toBe(`https://assets.example/${apps[0].logoStorageKey}`);
     expect(body.apps[0]).not.toHaveProperty('logoStorageKey');
-  });
-
-  test('shares the canonical apps service with agent.guide while projecting model-safe fields', async () => {
-    let calls = 0;
-    const service = createAppsService({ list: async () => { calls += 1; return scopes; } }, async (key) => `https://assets.example/${key}`, readCatalog);
-    const app = new Hono().get('/api/v1/apps', createListApps(service));
-
-    const response = await app.request('/api/v1/apps');
-    const guide = await createAgentGuideTool(service).execute({ mode: 'explain' });
-
-    expect(response.status).toBe(200);
-    expect(calls).toBe(2);
-    expect(guide.apps).toHaveLength(scopes.length);
-    expect(guide.apps[0]).toEqual(expect.objectContaining({ slug: expect.any(String), detailedDescription: expect.any(String) }));
-    expect(guide.apps[0]).not.toHaveProperty('key');
-    expect(guide.apps[0]).not.toHaveProperty('createdAt');
-    expect(guide.apps[0]).not.toHaveProperty('logoStorageKey');
-    expect(guide.apps[0]).not.toHaveProperty('logoUrl');
   });
 
   test('allows only the app-key header through CORS and leaves health unchanged', async () => {

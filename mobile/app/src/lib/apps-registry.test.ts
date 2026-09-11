@@ -25,7 +25,7 @@ function response(extra: ReturnType<typeof app>[] = []) {
 }
 
 const products = { success: true, data: [{ key: "c000000000000000000000001", productId: "nova.weekly", priceCents: 799, discountedPriceCents: null, active: true, type: "subscription", billingPeriod: "week", currency: "USD", sparkGrantMicroSparks: 200_000_000, createdAt: timestamp, updatedAt: timestamp }] };
-const costs = { success: true, data: { charges: [{ key: "ai-usage", kind: "variable", name: "AI usage", description: "Varies by usage." }] } };
+const costs = { success: true, data: { capabilityCosts: { "profile.badge.generate": { sparkCost: "10", microSparkCost: 10_000_000, unit: "invocation" } }, charges: [{ key: "ai-usage", kind: "variable", name: "AI usage", description: "Varies by usage." }] } };
 
 function mockResponse(body: unknown) {
   globalThis.fetch = (async (input) => {
@@ -62,6 +62,7 @@ describe("apps registry state", () => {
       apps: [],
       products: [],
       sparkCosts: [],
+      capabilityCosts: {},
       sparkCostsStatus: "idle",
       sparkCostsError: null,
       productsStatus: "idle",

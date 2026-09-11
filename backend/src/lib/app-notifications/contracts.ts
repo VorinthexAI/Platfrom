@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { communicationHistoryInputSchema } from '@/lib/user-inbox/schemas';
 
 export const expoProjectIdSchema = z.string().uuid();
 export const expoPushTokenSchema = z.string().trim().max(512).refine(
@@ -24,11 +25,7 @@ export const appNotifyInputSchema = z.object({
   'Provide userKeys or set notifyAll to true.',
 );
 
-export const notificationListInputSchema = z.object({
-  cursor: z.string().min(1).max(255).regex(/^[A-Za-z0-9_:\-]+$/).optional(),
-  limit: z.number().int().min(1).max(100).default(50),
-  markRead: z.boolean().default(false),
-}).strict();
+export const notificationListInputSchema = communicationHistoryInputSchema;
 
 export type AppNotifyInput = z.infer<typeof appNotifyInputSchema>;
 export type NotificationListInput = z.input<typeof notificationListInputSchema>;

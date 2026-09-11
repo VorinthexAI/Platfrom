@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "defaults": {
+    "logo": "../../../shared/brand/logos/logo-symbol-cream-512.png",
+    "deviceFrame": "../../../shared/brand/device-frames/iphone-frame.png",
+    "screenInsets": {
+      "top": 2.35,
+      "right": 5.15,
+      "bottom": 2.35,
+      "left": 5.15
+    }
+  },
+  "screenshots": [
+    {
+      "id": "01",
+      "title": "Vorinthex AI",
+      "description": "Your personal AI brain, built to think, create, organize, and grow with you.",
+      "screenshot": "./example-screen.svg",
+      "backgroundPrompt": "Minimal premium obsidian space, subtle polished chrome orbital arcs, controlled silver reflections, deep black negative space, no objects in the center, no text, no logo"
+    }
+  ]
+}

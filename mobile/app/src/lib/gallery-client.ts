@@ -22,6 +22,7 @@ export type GalleryCollection = {
   createdAt: string;
   updatedAt: string;
   score?: number;
+  tags?: { key: string; name: string }[];
 };
 
 export type GalleryImage = {
@@ -48,6 +49,7 @@ export type GalleryImage = {
   score?: number;
   createdByKey?: string | null;
   collections?: { key: string; name: string }[];
+  tags?: { key: string; name: string }[];
 };
 
 export type GalleryImageOrigin = "uploaded" | "generated";
@@ -75,10 +77,11 @@ export type GalleryOverview = {
 };
 
 const galleryCollectionAccessSchema = z.strictObject({ canRead: z.boolean(), canContribute: z.boolean(), canManage: z.boolean() });
+const galleryResultTagsSchema = z.array(z.strictObject({ key: z.string().min(1), name: z.string() }));
 const galleryCollectionTransportSchema = z.strictObject({
   key: z.string().min(1), name: z.string().min(1), description: z.string().nullable(), purpose: z.enum(["place-media", "email-media", "generated-media"]).nullable(), mutationPolicy: z.enum(["user", "system-only"]),
   isFavorite: z.boolean(), count: z.number().int().nonnegative(), coverUrl: z.string().min(1).nullable(), presentation: z.enum(["travel", "communication", "learning"]).optional(), actorKey: z.string().min(1), isOwned: z.boolean().optional(),
-  role: z.enum(["owner", "viewer"]), access: galleryCollectionAccessSchema, createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(), score: z.number().optional(),
+  role: z.enum(["owner", "viewer"]), access: galleryCollectionAccessSchema, createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(), score: z.number().optional(), tags: galleryResultTagsSchema.optional(),
 });
 const isVisibleCollection = (collection: z.infer<typeof galleryCollectionTransportSchema>) => collection.mutationPolicy === "system-only" || (collection.isOwned ?? collection.role === "owner");
 const ownerCollection = ({ isOwned: _isOwned, role: _role, ...collection }: z.infer<typeof galleryCollectionTransportSchema>): GalleryCollection => collection;
@@ -89,7 +92,7 @@ export const galleryImageSchema = z.strictObject({
   countryCode: z.string().length(2).nullable(), latitude: z.number().finite().min(-90).max(90).nullable(), longitude: z.number().finite().min(-180).max(180).nullable(),
   locationSource: z.enum(["exif", "supplied", "place"]).nullable(), origin: z.enum(["uploaded", "generated"]), mutationPolicy: z.enum(["user", "system-only"]), isFavorite: z.boolean(),
   createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(), url: z.string().min(1), score: z.number().optional(), createdByKey: z.string().min(1).nullable(),
-  collections: z.array(z.strictObject({ key: z.string().min(1), name: z.string().min(1) })).optional(),
+  collections: z.array(z.strictObject({ key: z.string().min(1), name: z.string().min(1) })).optional(), tags: galleryResultTagsSchema.optional(),
 });
 const galleryOverviewSchema = z.strictObject({ collections: z.array(galleryCollectionTransportSchema), images: z.array(galleryImageSchema), nextCursor: z.string().nullable(), canCreateCollections: z.boolean() })
   .transform(({ collections, ...overview }) => ({ ...overview, collections: collections.filter(isVisibleCollection).map(ownerCollection) }));

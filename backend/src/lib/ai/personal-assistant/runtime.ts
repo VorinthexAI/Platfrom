@@ -19,6 +19,7 @@ import { describeAppSearchCollections, type AppSearchService } from '@/lib/app-s
 import { executeAsk, type ExecuteActionOptions } from '@/lib/ai/router';
 import { assistantSourceSchema, assistantSurfaceSchema, defaultAssistantCapabilityRegistry, type AssistantCapability, type AssistantCapabilityContext, type AssistantCapabilityRegistry } from './capabilities';
 import { protectPlatformOutput, requestsPlatformInternals } from '@/lib/ai/agents/internal-data-policy';
+import { USER_VISIBLE_AI_PROSE_POLICY } from '@/lib/ai/prose-style';
 
 const currentNoteSchema = z.object({
   documentKey: z.string().cuid().optional(),
@@ -65,7 +66,7 @@ export interface PersonalAssistantDependencies {
   appSearch?: AppSearchService;
   accountProfile?: AccountProfileService;
   tickets?: TicketService;
-  referrals?: Pick<ReferralService, 'readSummary'>;
+  referrals?: Pick<ReferralService, 'readSummary' | 'redeem'>;
   commerce?: CommerceService;
   costs?: CostService;
   scopeTags?: AssistantCapabilityContext['scopeTags'];
@@ -84,7 +85,8 @@ Rules:
 - Call at most one tool per response. Do not invent tool names or source documents.
 - You are capability-bound. On the first turn, call an available domain tool when the request can be completed by that tool. Otherwise call assistant.unsupported.
 - Never answer from general knowledge, current events, live data, or capabilities that are not represented by an available domain tool.
-- Semantic collection registry: ${describeAppSearchCollections()}`;
+- Semantic collection registry: ${describeAppSearchCollections()}
+- ${USER_VISIBLE_AI_PROSE_POLICY}`;
 
 const unsupportedRequestDefinition = {
   name: 'assistant.unsupported',
@@ -97,7 +99,7 @@ const UNSUPPORTED_MESSAGES = {
   'media-workspace': 'This request is not supported in Gallery. Core can search your images.',
   'book-workspace': 'This request is not supported in Ascend. Core can create a book from your brief.',
   'travel-workspace': 'This request is not supported in Compass. Core can search your saved knowledge for travel context.',
-  'signal-workspace': 'This request is not supported in Signal. Core can manage connected email threads and drafts.',
+  'signal-workspace': 'This request is not supported in Signal. Core can help with your private inbox, connected email threads, and drafts.',
 } as const;
 
 const EMPTY_RESPONSE_MESSAGES = {
@@ -146,7 +148,7 @@ function systemPrompt(surface: z.infer<typeof assistantSurfaceSchema>) {
 - You are operating inside Compass. Use app.search with collectionSlugs ["places", "trips", "countries"] for text search, and use Compass tools to list saved cities.
 - Do not answer live weather, current conditions, or general destination facts.`;
   if (surface === 'signal-workspace') return `${BASE_SYSTEM_PROMPT}
-- You are operating inside Signal. Use app.search with collectionSlugs ["inboxes", "email-tones", "email-messages", "email-drafts"] for text search. Use Signal tools for inbox overview, synchronization, threads, favorites, and reply drafts.
+- You are operating inside Signal, the user's private inbox for connected email and communication from Vorinthex apps and support. Use app.search with collectionSlugs ["inboxes", "email-tones", "email-messages", "email-drafts"] for connected email search. Use Signal tools for connected inbox overview, synchronization, threads, favorites, and reply drafts.
 - Never claim a draft was sent until email.draft.send succeeds. OAuth connection and inbox credential lifecycle operations are user-mediated and unavailable.`;
   return `${BASE_SYSTEM_PROMPT}
 - Use Archive folder and document tools for requested CRUD operations. Use app.search with collectionSlugs ["folders", "documents", "files"] when the request depends on stored information.

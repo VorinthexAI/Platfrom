@@ -10,32 +10,21 @@ export const avatarUploadSchema = z.strictObject({
   sizeBytes: z.number().int().positive().max(5 * 1024 * 1024),
   uri: z.string().min(1),
 });
+export const profileBadgeCandidateSchema = z.strictObject({ candidateKey: z.string().min(1), avatarUrl: z.string().url(), expiresAt: z.string().datetime() });
+export type ProfileBadgeCandidate = z.infer<typeof profileBadgeCandidateSchema>;
 export const ticketSchema = z.strictObject({
   teamKey: z.string().trim().min(1),
   scopeKey: z.string().trim().min(1),
   message: z.string().trim().min(1).max(8_000),
 });
-export const feedbackVoteSchema = z.enum(["up", "down"]);
-export const feedbackItemSchema = z.strictObject({
+export const ticketThreadLinkSchema = z.strictObject({
   key: z.string().min(1),
+  threadKey: z.string().min(1),
+  initialMessageKey: z.string().min(1),
   message: z.string().min(1).max(8_000),
-  upvotes: z.number().int().nonnegative(),
-  downvotes: z.number().int().nonnegative(),
-  viewerVote: feedbackVoteSchema.nullable(),
+  kind: z.enum(["issue", "feedback"]),
   createdAt: z.string().datetime(),
 });
-export const feedbackListSchema = z.strictObject({
-  teamKey: z.string().trim().min(1),
-  scopeKey: z.string().trim().min(1),
-  limit: z.number().int().min(1).max(50).optional(),
-});
-export const feedbackVoteRequestSchema = z.strictObject({
-  teamKey: z.string().trim().min(1),
-  scopeKey: z.string().trim().min(1),
-  ticketKey: z.string().trim().min(1),
-  vote: feedbackVoteSchema.nullable(),
-});
-export type FeedbackItem = z.infer<typeof feedbackItemSchema>;
 
 type ProfilePatch = { avatarUrl?: string; name?: string };
 const mutationQueues = { avatar: Promise.resolve(), name: Promise.resolve() };
@@ -93,29 +82,32 @@ export function uploadProfileAvatar(rawFile: z.input<typeof avatarUploadSchema>)
   });
 }
 
+export async function generateProfileBadge(teamKey: string, scopeKey: string, idempotencyKey: string) {
+  const response = await apiClient.post("/auth/me/profile/badge-candidates", { teamKey: z.string().min(1).parse(teamKey), scopeKey: z.string().min(1).parse(scopeKey) }, { headers: { "Idempotency-Key": z.string().min(1).max(200).parse(idempotencyKey) } });
+  return profileBadgeCandidateSchema.parse(responseData(response.data));
+}
+
+export function claimProfileBadge(teamKey: string, scopeKey: string, candidateKey: string) {
+  return serializeMutation("avatar", async () => {
+    const response = await apiClient.post("/auth/me/profile/badge-candidates/claim", {
+      teamKey: z.string().min(1).parse(teamKey),
+      scopeKey: z.string().min(1).parse(scopeKey),
+      candidateKey: z.string().min(1).parse(candidateKey),
+    });
+    return profilePatch(response.data);
+  });
+}
+
 export async function createSupportTicket(rawInput: z.input<typeof ticketSchema>, idempotencyKey: string) {
   const input = ticketSchema.parse(rawInput);
   const key = z.string().trim().min(1).max(200).parse(idempotencyKey);
-  await apiClient.post("/tickets", input, { headers: { "Idempotency-Key": key } });
+  const response = await apiClient.post("/tickets", input, { headers: { "Idempotency-Key": key } });
+  return ticketThreadLinkSchema.parse(responseData(response.data));
 }
 
 export async function createFeedback(rawInput: z.input<typeof ticketSchema>, idempotencyKey: string) {
   const input = ticketSchema.parse(rawInput);
   const key = z.string().trim().min(1).max(200).parse(idempotencyKey);
   const response = await apiClient.post("/feedback", input, { headers: { "Idempotency-Key": key } });
-  return feedbackItemSchema.parse(responseData(response.data));
-}
-
-export async function listFeedback(rawInput: z.input<typeof feedbackListSchema>) {
-  const input = feedbackListSchema.parse(rawInput);
-  const response = await apiClient.post("/feedback/list", input);
-  const result = z.strictObject({ items: z.array(feedbackItemSchema), nextCursor: z.string().nullable() }).parse(responseData(response.data));
-  return { ...result, items: result.items.toReversed() };
-}
-
-export async function setFeedbackVote(rawInput: z.input<typeof feedbackVoteRequestSchema>, idempotencyKey: string) {
-  const { ticketKey, ...input } = feedbackVoteRequestSchema.parse(rawInput);
-  const key = z.string().trim().min(1).max(200).parse(idempotencyKey);
-  const response = await apiClient.put(`/feedback/${ticketKey}/vote`, input, { headers: { "Idempotency-Key": key } });
-  return feedbackItemSchema.parse(responseData(response.data));
+  return ticketThreadLinkSchema.parse(responseData(response.data));
 }

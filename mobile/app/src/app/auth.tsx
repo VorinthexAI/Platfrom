@@ -14,6 +14,7 @@ import { ChromeIcon } from "@/components/ChromeIcon";
 import { NeuralBackdrop } from "@/components/NeuralBackdrop";
 import { getJson, postJson } from "@/lib/api-client";
 import { launchOAuthProvider, type OAuthProvider } from "@/lib/oauth";
+import { recordAnalyticsEvent } from "@/lib/onboarding-events";
 import { useAuthStore } from "@/state/auth";
 import { fonts, palette, spacing, tracking } from "@/theme/tokens";
 import { clearPendingReferralCode, readPendingReferralCode } from "@/lib/pending-referral-vault";
@@ -106,6 +107,7 @@ export default function AuthRoute() {
   }, [error]);
 
   const oauth = async (provider: OAuthProvider) => {
+    void recordAnalyticsEvent(`auth.option.selected.${provider}`).catch(() => undefined);
     setError(null);
     setLoading(provider);
     try {
@@ -117,6 +119,12 @@ export default function AuthRoute() {
     } finally {
       setLoading(null);
     }
+  };
+
+  const selectEmail = () => {
+    void recordAnalyticsEvent("auth.option.selected.email").catch(() => undefined);
+    setError(null);
+    setEmailVisible(true);
   };
 
   const submitEmail = async () => {
@@ -203,7 +211,7 @@ export default function AuthRoute() {
                   <>
                     <Button disabled={busy} icon={<GoogleIcon />} loading={loading === "google"} onPress={() => void oauth("google")} size="lg" trailingIcon={loading === "google" ? <Spinner size="small" /> : undefined} variant="secondary">Continue with Google</Button>
                     <Button disabled={busy} icon={<AppleIcon />} loading={loading === "apple"} onPress={() => void oauth("apple")} size="lg" trailingIcon={loading === "apple" ? <Spinner size="small" /> : undefined} variant="secondary">Continue with Apple</Button>
-                    <Button disabled={busy} icon={<MailIcon />} loading={loading === "email"} onPress={() => { setError(null); setEmailVisible(true); }} size="lg" variant="secondary">Continue with email</Button>
+                    <Button disabled={busy} icon={<MailIcon />} loading={loading === "email"} onPress={selectEmail} size="lg" variant="secondary">Continue with email</Button>
                   </>
                 )}
               </>

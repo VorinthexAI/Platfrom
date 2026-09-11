@@ -7,11 +7,11 @@ const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
 const teamMembershipKey = 'cmrnlzf650002qc7k4p5zemb0';
 const connectorKey = 'cmrnlzf660003qc7kw1n9j93a';
 const billingUserKey = 'cmrnlzf670004qc7kw1n9j94b';
-const common = { teamKey, scopeKey, teamMembershipKey, billingUserKey, connectorKey, providerMessageId: 'provider-message' };
+const common = { userKey: billingUserKey, teamKey, scopeKey, teamMembershipKey, billingUserKey, connectorKey, providerMessageId: 'provider-message' };
 const at = new Date('2026-08-25T12:00:00.000Z');
 
 function fixture(options: { exportFailure?: boolean } = {}) {
-  const bindings = new Map<string, EmailAttachmentBinding & { storageKey?: string }>();
+  const bindings = new Map<string, EmailAttachmentBinding & { userKey: string; storageKey?: string }>();
   const events: string[] = [];
   const uploads: Array<{ key: string; billingUserKey?: string }> = [];
   const deleted: string[] = [];

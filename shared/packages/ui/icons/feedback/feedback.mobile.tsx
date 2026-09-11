@@ -20,7 +20,6 @@ export function FeedbackIcon({ variant = "default", size = "md", strokeWidth = 1
     <Svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none">
       <Path d="M4 5.5h16v11H9l-5 4v-15Z" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
       <Path d="M8 10h8M8 13h5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-      <Path d="M17.5 2.5v2M16.5 3.5h2" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
     </Svg>
   );
 }

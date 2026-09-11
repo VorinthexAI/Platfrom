@@ -462,9 +462,9 @@ test("deletes one global search-history entry", async () => {
 });
 
 test("runs fast combined search without summaries", async () => {
-  responseForTool = () => ({ data: { success: true, data: { query: "roadmap", groups: [{ collectionSlug: "folders", results: [{ key: "folder", scopeKey: "scope-authenticated", name: "Roadmaps", isFavorite: false, score: 0.8 }] }, { collectionSlug: "documents", results: [] }, { collectionSlug: "files", results: [{ key: "document", scopeKey: "scope-authenticated", name: "Roadmap", extension: "docx", isFavorite: false, score: 0.72 }] }] } } });
+  responseForTool = () => ({ data: { success: true, data: { query: "roadmap", groups: [{ collectionSlug: "folders", results: [{ key: "folder", scopeKey: "scope-authenticated", name: "Roadmaps", managed: true, isFavorite: false, score: 0.8 }] }, { collectionSlug: "documents", results: [] }, { collectionSlug: "files", results: [{ key: "document", scopeKey: "scope-authenticated", name: "Roadmap", extension: "docx", managed: true, isFavorite: false, score: 0.72 }] }] } } });
 
-  expect(await searchContentMatches("roadmap")).toMatchObject({ folders: [{ key: "folder" }], documents: [{ documentKey: "document", extension: "docx" }] });
+  expect(await searchContentMatches("roadmap")).toMatchObject({ folders: [{ key: "folder", managed: true }], documents: [{ documentKey: "document", extension: "docx", managed: true }] });
   expect(calls[0]?.url).toBe("/app/search");
   expect(calls[0]?.body).toMatchObject({ query: "roadmap", collectionSlugs: ["folders", "documents", "files"] });
   expect(calls[0]?.body).not.toHaveProperty("minimumScore");

@@ -21,7 +21,8 @@ describe('ticket HTTP API', () => {
 
   test('authorizes selectors and invokes the canonical service with trusted context', async () => {
     const calls: unknown[][] = [];
-    const service = { submit: async (...args: Parameters<TicketService['submit']>) => { calls.push(args); return { key: newId(), message: 'Help', upvotes: 0, downvotes: 0, viewerVote: null, createdAt: '2026-09-03T10:00:00.000Z' }; } } as TicketService;
+    const ticketKey = newId(), threadKey = newId(), initialMessageKey = newId();
+    const service = { submit: async (...args: Parameters<TicketService['submit']>) => { calls.push(args); return { key: ticketKey, threadKey, initialMessageKey, message: 'Help', kind: 'issue' as const, createdAt: '2026-09-03T10:00:00.000Z' }; }, createFeedback: async () => { throw new Error('unexpected'); } } as TicketService;
     let authorized: unknown;
     const app = new Hono().post('/tickets', createTicketHandler({
       getIdentity: identity,
@@ -31,7 +32,7 @@ describe('ticket HTTP API', () => {
     const response = await app.request('/tickets', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'request-1' }, body: JSON.stringify({ teamKey, scopeKey, message: 'Help' }) });
     expect(response.status).toBe(201);
     const payload = await response.json() as { data: Record<string, unknown> };
-    expect(payload.data).toEqual({ key: expect.any(String), message: 'Help', upvotes: 0, downvotes: 0, viewerVote: null, createdAt: '2026-09-03T10:00:00.000Z' });
+    expect(payload.data).toEqual({ key: ticketKey, threadKey, initialMessageKey, message: 'Help', kind: 'issue', createdAt: '2026-09-03T10:00:00.000Z' });
     expect(payload.data).not.toHaveProperty('embedding');
     expect(authorized).toEqual({ selectors: { teamKey, scopeKey }, options: { authenticatedUserKey: userKey } });
     expect(calls).toEqual([[{ message: 'Help' }, context, 'request-1']]);
@@ -44,26 +45,17 @@ describe('ticket HTTP API', () => {
     expect(await response.json()).toEqual({ success: false, error: { code: 'TICKET_IDEMPOTENCY_CONFLICT', message: 'different payload' } });
   });
 
-  test('feedback routes strictly authorize selectors and call canonical methods', async () => {
+  test('feedback creation strictly authorizes selectors and calls the canonical method', async () => {
     const ticketKey = newId(), calls: unknown[][] = [];
-    const safe = { key: ticketKey, message: 'Dark mode', upvotes: 1, downvotes: 0, viewerVote: 'up' as const, createdAt: '2026-09-03T10:00:00.000Z' };
+    const safe = { key: ticketKey, threadKey: newId(), initialMessageKey: newId(), message: 'Dark mode', kind: 'feedback' as const, createdAt: '2026-09-03T10:00:00.000Z' };
     const service = {
       createFeedback: async (...args: unknown[]) => { calls.push(['create', ...args]); return safe; },
-      listFeedback: async (...args: unknown[]) => { calls.push(['list', ...args]); return { items: [safe], nextCursor: null }; },
-      setFeedbackVote: async (...args: unknown[]) => { calls.push(['vote', ...args]); return safe; },
     } as unknown as TicketService;
     const handlers = createFeedbackHandlers({ getIdentity: identity, authorize: async () => ({ context }), service, recordEvent: async () => {}, appScopeKey: newId() });
-    const app = new Hono().post('/feedback', handlers.create).post('/feedback/list', handlers.list).put('/feedback/:ticketKey/vote', handlers.vote);
+    const app = new Hono().post('/feedback', handlers.create);
     const headers = { 'content-type': 'application/json', 'idempotency-key': 'request-1' };
     expect((await app.request('/feedback', { method: 'POST', headers, body: JSON.stringify({ teamKey, scopeKey, message: 'Dark mode' }) })).status).toBe(201);
-    expect((await app.request('/feedback/list', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, forged: true }) })).status).toBe(400);
-    expect((await app.request('/feedback/list', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, limit: 10 }) })).status).toBe(200);
-    expect((await app.request(`/feedback/${ticketKey}/vote`, { method: 'PUT', headers, body: JSON.stringify({ teamKey, scopeKey, vote: 'up' }) })).status).toBe(200);
-    expect(calls).toEqual([
-      ['create', { message: 'Dark mode' }, context, 'request-1'],
-      ['list', { limit: 10 }, context],
-      ['vote', { ticketKey, vote: 'up' }, context, 'request-1'],
-    ]);
+    expect(calls).toEqual([['create', { message: 'Dark mode' }, context, 'request-1']]);
   });
 
   test('maps AI-rejected feedback to a safe client error', async () => {

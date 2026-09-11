@@ -7,6 +7,7 @@ import { documentKeyForRequest, DocumentProcessingError } from '@/lib/ai/documen
 import { documentEmbed } from '@/lib/ai/document-processing';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { chatInputSchema } from '@/lib/ai/providers/types';
+import { initialWorkspaceDocumentKey, initialWorkspaceFolderKey } from '@/lib/initial-workspace-content-identifiers';
 
 const now = '2026-07-22T12:00:00.000Z';
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
@@ -1284,6 +1285,44 @@ describe('Content runtime', () => {
     await expect(runContentTool('document.update', { updates: [{ documentKey, isFavorite: true }] }, f.context, { repository: f.repository })).resolves.toMatchObject({ summary: { succeeded: 1 }, results: [{ success: true, data: { document: { managed: true, isFavorite: true } } }] });
     await expect(runContentTool('document.delete', { documentKeys: [documentKey] }, f.context, { repository: f.repository, storage: { delete: async () => undefined } as never })).resolves.toMatchObject({ summary: { failed: 1 }, results: [{ success: false, error: { code: 'CONTENT_FORBIDDEN', resourceKey: documentKey } }] });
     expect(f.documents.has(documentKey)).toBe(true);
+  });
+
+  test('keeps initial guide content editable while rejecting move, copy, and delete operations', async () => {
+    const f = fixture('owner');
+    const targetFolderKey = newId();
+    f.folders.set(targetFolderKey, { key: targetFolderKey, scopeKey: f.scopeKey, name: 'Target', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    const protectedFolderKey = initialWorkspaceFolderKey(f.scopeKey, 'platform');
+    f.folders.set(protectedFolderKey, { key: protectedFolderKey, scopeKey: f.scopeKey, name: 'Guide', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    const ordinaryDocumentKey = f.addDocument('Editable guide');
+    const protectedDocumentKey = initialWorkspaceDocumentKey(f.scopeKey, 'platform-welcome');
+    f.documents.set(protectedDocumentKey, { ...f.documents.get(ordinaryDocumentKey), key: protectedDocumentKey, folderKey: protectedFolderKey });
+    f.documents.delete(ordinaryDocumentKey);
+    const dependencies = { repository: f.repository, embed: async () => embedding, storage: { copy: async () => { throw new Error('protected copy reached storage'); }, delete: async () => { throw new Error('protected deletion reached storage'); } } as never };
+
+    const folderOperations = [
+      runContentTool('folder.move', { moves: [{ folderKey: protectedFolderKey, targetParentFolderKey: targetFolderKey }] }, f.context, dependencies),
+      runContentTool('folder.copy', { copies: [{ folderKey: protectedFolderKey, targetScopeKey: f.scopeKey, targetParentFolderKey: targetFolderKey }] }, f.context, dependencies),
+      runContentTool('folder.delete', { folderKeys: [protectedFolderKey], recursive: true }, f.context, dependencies),
+    ];
+    const documentOperations = [
+      runContentTool('document.move', { moves: [{ documentKey: protectedDocumentKey, targetScopeKey: f.scopeKey, targetFolderKey }] }, f.context, dependencies),
+      runContentTool('document.copy', { copies: [{ documentKey: protectedDocumentKey, targetScopeKey: f.scopeKey, targetFolderKey }] }, f.context, dependencies),
+      runContentTool('document.delete', { documentKeys: [protectedDocumentKey] }, f.context, dependencies),
+    ];
+    for (const output of await Promise.all([...folderOperations, ...documentOperations])) expect(output).toMatchObject({ summary: { failed: 1 }, results: [{ success: false, error: { code: 'CONTENT_FORBIDDEN' } }] });
+
+    f.documents.get(protectedDocumentKey).folderKey = f.folderKey;
+    const ancestorOperations = [
+      runContentTool('folder.move', { moves: [{ folderKey: f.folderKey, targetParentFolderKey: targetFolderKey }] }, f.context, dependencies),
+      runContentTool('folder.copy', { copies: [{ folderKey: f.folderKey, targetScopeKey: f.scopeKey, targetParentFolderKey: targetFolderKey }] }, f.context, dependencies),
+      runContentTool('folder.delete', { folderKeys: [f.folderKey], recursive: true }, f.context, dependencies),
+    ];
+    for (const output of await Promise.all(ancestorOperations)) expect(output).toMatchObject({ summary: { failed: 1 }, results: [{ success: false, error: { code: 'CONTENT_FORBIDDEN', resourceKey: protectedDocumentKey } }] });
+
+    await expect(runContentTool('document.update', { updates: [{ documentKey: protectedDocumentKey, content: 'Updated guide content' }] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 }, results: [{ data: { document: { structuralProtection: true, managed: false } } }] });
+    await expect(runContentTool('folder.list', { scopeKey: f.scopeKey, includeDescendants: true }, f.context, dependencies)).resolves.toMatchObject({ folders: expect.arrayContaining([expect.objectContaining({ key: protectedFolderKey, structuralProtection: true, managed: false })]) });
+    expect(f.folders.has(protectedFolderKey)).toBe(true);
+    expect(f.documents.has(protectedDocumentKey)).toBe(true);
   });
 
   test('projects visible managed resources and hides domain-only hierarchies from generic reads and search', async () => {

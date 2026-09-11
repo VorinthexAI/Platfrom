@@ -69,7 +69,7 @@ export async function processResendEmailEvent(
   // A permanent bounce means the mailbox does not exist, so purge the account.
   // Transient and unclassified bounces leave the account intact.
   if (bounce?.type?.toLowerCase() === 'permanent') {
-    await deps.deleteAccount({ confirmation: ACCOUNT_DELETE_CONFIRMATION }, user.key);
+    await deps.deleteAccount({ confirmation: ACCOUNT_DELETE_CONFIRMATION }, user.key, { sendConfirmation: false });
     return { processed: true, matched: true, deleted: true };
   }
 

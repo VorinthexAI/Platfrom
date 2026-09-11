@@ -2,7 +2,7 @@
 
 Actions are reusable AI primitives, not user-facing business capabilities.
 They describe provider-neutral work such as generation, reasoning, embeddings,
-speech, image analysis, web search, and structured extraction.
+speech, image analysis, and structured extraction.
 
 ## Ownership
 
@@ -19,8 +19,8 @@ speech, image analysis, web search, and structured extraction.
 
 Use a tool when the caller requests a domain outcome: create a folder, find a
 place, send an email draft, or update a collection. Use an action when domain
-code needs a reusable provider capability: generate text, embed content,
-analyze media, or search the web.
+code needs a reusable provider capability: generate text, optionally ground a
+text chat with provider-native web search, embed content, or analyze media.
 
 A model-backed tool may call an action, but it still owns the domain intent and
 must converge with HTTP callers on the same canonical service or operation.
@@ -43,6 +43,7 @@ const response = await executeAction(
   input,
   {
     providers: ['text.primary'],
+    capabilities: { webGrounding: 'model-selected' },
     retry: {
       intervalMs: 2_000,
       attempts: 10,
@@ -59,6 +60,10 @@ model-visible values. The slot prefix must match the requested action. Duplicate
 slots and slots from another action are rejected. Undeclared optional slots are
 ignored when another requested slot is usable; execution fails if no requested
 slot is operational.
+
+`capabilities.webGrounding: 'model-selected'` is a trusted execution option for
+the text action. It allows the selected model to use provider-native web
+grounding; it is not part of the model-visible chat input contract.
 
 `retry.intervalMs` is the initial retry delay in milliseconds and defaults to
 2,000. `retry.attempts` is the total number of route-cycle attempts and defaults

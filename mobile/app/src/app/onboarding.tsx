@@ -2,10 +2,9 @@ import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 
-import { OnboardingIntroSequence } from "@/components/onboarding/OnboardingIntroSequence";
-import { OnboardingCoreSandbox } from "@/components/onboarding/OnboardingCoreSandbox";
-import { OnboardingPermissions } from "@/components/onboarding/OnboardingPermissions";
+import { OnboardingCoreConversation } from "@/components/onboarding/OnboardingCoreConversation";
 import { OnboardingReward } from "@/components/onboarding/OnboardingReward";
+import { OnboardingProfileBadge } from "@/components/onboarding/OnboardingProfileBadge";
 import { PaywallSheet } from "@/components/PaywallSheet";
 import { markOnboardingPreviewComplete } from "@/lib/onboarding-state";
 import { useAppsStore } from "@/state/apps";
@@ -18,7 +17,7 @@ export default function OnboardingRoute() {
   const completeOnboarding = useAuthStore((state) => state.completeOnboarding);
   const authStatus = useAuthStore((state) => state.status);
   const [initialPage] = useState<"plans" | "referral">(() => useUiStore.getState().consumeOnboardingReferralEntry() ? "referral" : "plans");
-  const [phase, setPhase] = useState<"intro" | "sandbox" | "paywall" | "reward" | "permissions">(initialPage === "referral" || authStatus === "authenticated" ? "paywall" : "intro");
+  const [phase, setPhase] = useState<"conversation" | "paywall" | "reward" | "profile-badge">(initialPage === "referral" || authStatus === "authenticated" ? "paywall" : "conversation");
   const apps = useAppsStore((state) => state.apps);
   const alreadyOnboarded = useRef(useAuthStore.getState().user?.isOnboarded === true);
   useEffect(() => {
@@ -26,6 +25,7 @@ export default function OnboardingRoute() {
   }, [router]);
   const handleComplete = useCallback(() => {
     const completion = completeOnboarding();
+    useUiStore.getState().requestAgentGreeting("onboarding");
     router.replace("/capability/archive");
     void completion.catch(() => router.replace("/onboarding"));
   }, [completeOnboarding, router]);
@@ -34,15 +34,13 @@ export default function OnboardingRoute() {
     router.replace("/auth");
   }, [router]);
 
-  return <View style={styles.root}>{phase === "permissions"
-    ? <OnboardingPermissions onFinished={handleComplete} />
-    : phase === "reward"
-      ? <OnboardingReward onFinished={() => setPhase("permissions")} />
+  return <View style={styles.root}>{phase === "profile-badge"
+      ? <OnboardingProfileBadge onFinished={handleComplete} />
+      : phase === "reward"
+      ? <OnboardingReward onFinished={() => setPhase("profile-badge")} />
       : phase === "paywall"
         ? <PaywallSheet initialPage={initialPage} mode="onboarding" onComplete={() => setPhase("reward")} />
-    : phase === "sandbox"
-      ? <OnboardingCoreSandbox onFinished={() => void startAuth()} />
-      : <OnboardingIntroSequence apps={apps} onFinished={() => setPhase("sandbox")} />}
+        : <OnboardingCoreConversation apps={apps} onFinished={() => void startAuth()} />}
   </View>;
 }
 

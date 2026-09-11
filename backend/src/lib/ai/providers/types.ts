@@ -25,6 +25,14 @@ export const PROVIDER_NAMES: Record<ProviderId, string> = {
   openrouter: 'OpenRouter',
 };
 
+export interface ProviderExecutionCapabilities {
+  webGrounding?: 'model-selected';
+}
+
+export const providerExecutionCapabilitiesSchema = z.object({
+  webGrounding: z.literal('model-selected').optional(),
+}).strict();
+
 /**
  * Normalized request every adapter receives. `modelId` is the INTERNAL
  * model id — typed as a plain string here because the provider layer sits
@@ -37,6 +45,7 @@ export interface ProviderExecuteRequest<TInput = unknown> {
   externalModelId: string;
   input: TInput;
   teamKey: string;
+  capabilities?: ProviderExecutionCapabilities;
   timeoutMs?: number;
   signal?: AbortSignal;
 }
@@ -47,6 +56,7 @@ export const providerExecuteRequestSchema = z.object({
   externalModelId: z.string().min(1),
   input: z.unknown(),
   teamKey: teamKeySchema,
+  capabilities: providerExecutionCapabilitiesSchema.optional(),
   timeoutMs: z.number().int().positive().optional(),
   signal: z.instanceof(AbortSignal).optional(),
 });

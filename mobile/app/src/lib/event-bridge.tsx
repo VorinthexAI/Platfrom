@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
 
-import { getEventStream } from "./api-client";
+import { apiClient, getEventStream } from "./api-client";
 import { publishAppEvent } from "./app-events";
 import { appSearchQueryRoot } from "./app-search-client";
 import { publishBookChanged } from "./book-events";
@@ -10,8 +10,11 @@ import { createCoalescedRefresh } from "./async-refresh";
 import { billingSummaryQueryKey } from "./billing-client";
 import { compassQueryKeys } from "./compass-query-keys";
 import { conversationQueryKeys } from "./conversation-cache";
+import { communicationQueryKeys } from "./communication-client";
 import { contentQueryKeys } from "./content-query-cache";
 import { galleryRefreshPlan, isCurrentContextGeneration, type GalleryRefreshFamily } from "./gallery-convergence";
+import { referralSummaryQueryKey } from "./referral-client";
+import { INSUFFICIENT_BALANCE_CODE, observeDomainError } from "./domain-error-observer";
 import { eventStreamRetryDelay, invalidatesGalleryQueries } from "./sse";
 import { ascendQueryKeys, signalQueryKeys } from "./workspace-query-cache";
 import { subscribeUserSearchHistoryAppends, userSearchHistoryQueryKey } from "./user-search-history-events";
@@ -25,6 +28,8 @@ export function AuthenticatedEventBridge() {
   const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
   const previousIdentity = useRef<{ teamKey: string; scopeKey: string; userKey: string } | null | undefined>(undefined);
   const streamGeneration = useRef(0);
+  const handledFundingRequirementKeys = useRef(new Set<string>());
+  const fundingRequirementAcknowledgements = useRef(new Set<string>());
 
   useEffect(() => {
     const identity = status === "authenticated" && userKey ? { userKey, teamKey, scopeKey } : null;
@@ -34,6 +39,10 @@ export function AuthenticatedEventBridge() {
       void queryClient.cancelQueries({ predicate: ({ queryKey }) => queryKey[0] !== "scope-list" });
       queryClient.removeQueries({ predicate: ({ queryKey }) => queryKey[0] !== "scope-list" });
     } else if (changed) queryClient.clear();
+    if (changed) {
+      handledFundingRequirementKeys.current.clear();
+      fundingRequirementAcknowledgements.current.clear();
+    }
     previousIdentity.current = identity;
   }, [teamKey, queryClient, scopeKey, status, userKey]);
 
@@ -54,7 +63,9 @@ export function AuthenticatedEventBridge() {
     const compassContext = { teamKey, scopeKey };
     const contentContext = { userKey, teamKey, scopeKey };
     const conversationContext = { userKey, teamKey, scopeKey };
+    const communicationContext = { userKey, teamKey, scopeKey };
     const invalidateBilling = () => void queryClient.invalidateQueries({ queryKey: billingSummaryQueryKey(userKey), exact: true, refetchType: "active" });
+    const invalidateReferral = () => void queryClient.invalidateQueries({ queryKey: referralSummaryQueryKey(userKey), exact: true, refetchType: "active" });
     const invalidateCompassTrips = () => void queryClient.invalidateQueries({ queryKey: compassQueryKeys.trips(compassContext) });
     const invalidateAppSearch = () => void queryClient.invalidateQueries({ queryKey: appSearchQueryRoot, refetchType: "active" });
     const invalidateCompassPlaceReferences = () => void queryClient.invalidateQueries({ queryKey: compassQueryKeys.places(compassContext) });
@@ -63,6 +74,7 @@ export function AuthenticatedEventBridge() {
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.overviews(compassContext), refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.details(compassContext), refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.replyContexts(compassContext), refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: communicationQueryKeys.all(communicationContext), refetchType: "active" });
     };
     const invalidateBooks = createCoalescedRefresh(
       () => queryClient.invalidateQueries({ queryKey: ascendQueryKeys.all(compassContext), refetchType: "active" }),
@@ -86,16 +98,34 @@ export function AuthenticatedEventBridge() {
       controller = new AbortController();
       const currentController = controller;
       void getEventStream("/events/stream", (event) => {
-        if (!isCurrent()) return;
+        if (!isCurrent() || !active) return;
         invalidateAppSearch();
         invalidateUserHiddens();
-        if (event.event === "referral.reward.created") invalidateBilling();
+        if (event.event === "spark.balance.changed") invalidateBilling();
+        if (event.event === "spark.balance.required") {
+          if (!event.id || !handledFundingRequirementKeys.current.has(event.id)) {
+            if (event.id) handledFundingRequirementKeys.current.add(event.id);
+            observeDomainError({ code: event.data === "OUTSTANDING_DEBT" ? "OUTSTANDING_DEBT" : INSUFFICIENT_BALANCE_CODE });
+          }
+          if (event.id && !fundingRequirementAcknowledgements.current.has(event.id)) {
+            fundingRequirementAcknowledgements.current.add(event.id);
+            void apiClient.post(`/events/funding-requirements/${encodeURIComponent(event.id)}/acknowledge`, {}).catch(() => { fundingRequirementAcknowledgements.current.delete(event.id!); });
+          }
+        }
+        if (event.event === "referral.reward.created") {
+          invalidateBilling();
+          invalidateReferral();
+        }
         if (event.event === "trip.changed") invalidateCompassTrips();
         if (event.event === "place.reference.changed") invalidateCompassPlaceReferences();
         if (event.event === "inbox.changed") {
           invalidateSignal();
           invalidateArchive();
           publishAppEvent({ type: "inbox.changed" });
+        }
+        if (event.event === "communication.changed" || event.event === "notification.changed" || event.event === "support.thread.changed") {
+          void queryClient.invalidateQueries({ queryKey: communicationQueryKeys.all(communicationContext), refetchType: "active" });
+          publishAppEvent({ type: "communication.changed" });
         }
         if (event.event === "conversation.changed") {
           void queryClient.invalidateQueries({ queryKey: conversationQueryKeys.all(conversationContext), refetchType: "active" });
@@ -130,6 +160,7 @@ export function AuthenticatedEventBridge() {
         invalidateSignal();
         invalidateBooks();
         invalidateBilling();
+        invalidateReferral();
         void queryClient.invalidateQueries({ queryKey: conversationQueryKeys.all(conversationContext), refetchType: "active" });
         publishAppEvent({ type: "event-stream.connected" });
       }).catch((error: unknown) => {
@@ -162,6 +193,7 @@ export function AuthenticatedEventBridge() {
         invalidateSignal();
         invalidateBooks();
         invalidateBilling();
+        invalidateReferral();
         connect();
       }
     });

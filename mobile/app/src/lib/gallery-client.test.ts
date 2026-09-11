@@ -177,6 +177,19 @@ test("searches Gallery collections through app.search without a score cutoff", a
   expect(calls[0]?.body).not.toHaveProperty("minimumScore");
 });
 
+test("accepts canonical app.search tags while keeping Gallery results strict", async () => {
+  const taggedCollection = { ...collection("Rain", "rain"), isOwned: true, tags: [{ key: "weather", name: "Weather" }] };
+  responses.set("/app/search", { query: "rain", groups: [{ collectionSlug: "collections", results: [taggedCollection] }] });
+  const { isOwned: _isOwned, role: _role, ...visibleCollection } = taggedCollection;
+  expect(await searchGalleryCollections("rain", false)).toEqual({ collections: [visibleCollection] });
+
+  const taggedImage = { ...image("rain", "rain.jpg", "Rain"), tags: [{ key: "weather", name: "Weather" }] };
+  responses.set("/app/search", { query: "rain", groups: [{ collectionSlug: "images", results: [taggedImage] }] });
+  expect(await searchGalleryImages({ query: "rain", recordHistory: false })).toEqual({ images: [taggedImage] });
+  responses.set("/app/search", { query: "rain", groups: [{ collectionSlug: "images", results: [{ ...taggedImage, unknown: true }] }] });
+  expect(searchGalleryImages({ query: "rain", recordHistory: false })).rejects.toThrow("Unrecognized key");
+});
+
 test("lists and searches tag-filtered Gallery collections and images through app.search with all-tag matching", async () => {
   await searchGalleryCollections("", false, undefined, ["summer", "family"]);
   await searchGalleryImages({ query: "", collectionKey: "collection", recordHistory: false, limit: 50, tagKeys: ["summer", "family"] });

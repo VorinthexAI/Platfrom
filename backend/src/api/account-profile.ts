@@ -2,8 +2,15 @@ import type { Context } from 'hono';
 import { completeProfileAvatarUpload, normalizeProfileAvatarUploadError, profileAvatarCompleteInputSchema, profileAvatarReserveInputSchema, reserveProfileAvatarUpload } from '@/lib/account-profile/avatar-upload';
 import { signProfileAvatarUrl, trySignProfileAvatarUrl } from '@/lib/account-profile/avatar-url';
 import { accountProfileService, normalizeAccountProfileError, profileNameUpdateInputSchema, type AccountProfileService } from '@/lib/account-profile/service';
+import { profileBadgeClaimInputSchema, profileBadgeGenerateInputSchema, profileBadgeService, type ProfileBadgeService } from '@/lib/account-profile/badge';
+import { authorizeContentExecution, type ToolContext } from '@/lib/ai/tools';
+import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
+import { toolEventService, type ToolEventRecorder } from '@/lib/ai/events/service';
 import { getAuthIdentity } from './security';
 import { parseJson } from './validation';
+import { authenticatedTeamContext } from './auth';
+import { sparkErrorResponse } from './errors';
+import { z } from 'zod';
 
 async function userKey(c: Context) {
   const identity = await getAuthIdentity(c);
@@ -62,3 +69,52 @@ export function createCompleteAccountAvatarHandler(dependencies: {
 }
 
 export const completeAccountAvatar = createCompleteAccountAvatarHandler();
+
+const profileBadgeSelectorsSchema = z.object({ teamKey: z.string().trim().min(1), scopeKey: z.string().cuid() }).strict();
+export const profileBadgeGenerateHttpInputSchema = profileBadgeSelectorsSchema.extend(profileBadgeGenerateInputSchema.shape).strict();
+export const profileBadgeClaimHttpInputSchema = profileBadgeSelectorsSchema.extend(profileBadgeClaimInputSchema.shape).strict();
+
+export function createProfileBadgeHandlers(dependencies: {
+  getIdentity?: typeof getAuthIdentity;
+  authorize?: (selectors: { teamKey: string; scopeKey: string }, options: ReturnType<typeof authenticatedTeamContext>) => Promise<{ context: ToolContext }>;
+  service?: ProfileBadgeService;
+  recordEvent?: ToolEventRecorder;
+  billing?: ToolBillingDependencies;
+  signAvatar?: typeof signProfileAvatarUrl;
+} = {}) {
+  const authorized = async (c: Context, selectors: { teamKey: string; scopeKey: string }) => {
+    const identity = await (dependencies.getIdentity ?? getAuthIdentity)(c);
+    if (!identity || identity.identityType !== 'user') return null;
+    return (dependencies.authorize ?? authorizeContentExecution)(selectors, authenticatedTeamContext(identity));
+  };
+  const fail = (c: Context, error: unknown) => {
+    const billing = sparkErrorResponse(c, error); if (billing) return billing;
+    return failure(c, error, true);
+  };
+  return {
+    generate: async (c: Context) => {
+      try {
+        const requestKey = z.string().trim().min(1).max(200).parse(c.req.header('idempotency-key'));
+        const { teamKey, scopeKey, ...input } = await parseJson(c, profileBadgeGenerateHttpInputSchema);
+        const result = await authorized(c, { teamKey, scopeKey });
+        if (!result) return c.json({ success: false, error: 'user authentication required' }, 401);
+        const service = dependencies.service ?? profileBadgeService;
+        const candidate = await observeToolExecution('profile.badge.generate', result.context, () => service.generate(input, result.context, requestKey), { recorder: dependencies.recordEvent ?? toolEventService.record, idempotencyKey: requestKey, input, ...dependencies.billing });
+        return c.json({ success: true, data: candidate }, 201);
+      } catch (error) { return fail(c, error); }
+    },
+    claim: async (c: Context) => {
+      try {
+        const { teamKey, scopeKey, ...input } = await parseJson(c, profileBadgeClaimHttpInputSchema);
+        const result = await authorized(c, { teamKey, scopeKey });
+        if (!result || result.context.principal.kind !== 'member') return c.json({ success: false, error: 'user authentication required' }, 401);
+        const userKey = result.context.principal.user.key;
+        const service = dependencies.service ?? profileBadgeService;
+        const claimed = await observeToolExecution('profile.badge.claim', result.context, () => service.claim(input, userKey), { recorder: dependencies.recordEvent ?? toolEventService.record, input });
+        return c.json({ success: true, data: { profile: await profileResponse(claimed.profile, dependencies.signAvatar) } });
+      } catch (error) { return fail(c, error); }
+    },
+  };
+}
+
+export const profileBadgeHandlers = createProfileBadgeHandlers();

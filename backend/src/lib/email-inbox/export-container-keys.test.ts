@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { emailExportContainerKeys } from './export-container-keys';
+import { initialWorkspaceFolderKey } from '@/lib/initial-workspace-content-identifiers';
 
 describe('email export destinations', () => {
   test('always reuses one scope root, one scope collection, and one connector folder', () => {
     const first = emailExportContainerKeys('scope-1', 'connector-1');
     expect(emailExportContainerKeys('scope-1', 'connector-1')).toEqual(first);
+    expect(first.rootKey).toBe(initialWorkspaceFolderKey('scope-1', 'communication'));
     expect(emailExportContainerKeys('scope-1', 'connector-2')).toMatchObject({
       rootKey: first.rootKey,
       collectionKey: first.collectionKey,

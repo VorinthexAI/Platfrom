@@ -27,6 +27,7 @@ import type { AppTransformationService } from '@/lib/app-transformation/service'
 import type { AppSpeechService } from '@/lib/app-speech/service';
 import type { CommerceService } from '@/lib/commerce/service';
 import type { CostService } from '@/lib/costs/service';
+import type { ReferralService } from '@/lib/referrals/service';
 
 export interface WorkspaceToolDependencies {
   context: ToolContext;
@@ -45,12 +46,14 @@ export interface WorkspaceToolDependencies {
   appSpeech?: AppSpeechService;
   scopeTags?: AssistantCapabilityContext['scopeTags'];
   accountProfile?: AssistantCapabilityContext['accountProfile'];
+  profileBadges?: AssistantCapabilityContext['profileBadges'];
   tickets?: AssistantCapabilityContext['tickets'];
-  referrals?: AssistantCapabilityContext['referrals'];
+  referrals?: Pick<ReferralService, 'readSummary' | 'redeem'>;
   commerce?: CommerceService;
   costs?: CostService;
   scopes?: AssistantCapabilityContext['scopes'];
   appNotifications?: AssistantCapabilityContext['appNotifications'];
+  userInbox?: AssistantCapabilityContext['userInbox'];
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -85,12 +88,14 @@ function publicDefinition(capability: AssistantCapability) {
         appTransformation: dependencies.appTransformation,
         appSpeech: dependencies.appSpeech,
         accountProfile: dependencies.accountProfile,
+        profileBadges: dependencies.profileBadges,
         tickets: dependencies.tickets,
         referrals: dependencies.referrals,
         commerce: dependencies.commerce,
         costs: dependencies.costs,
         scopes: dependencies.scopes,
         appNotifications: dependencies.appNotifications,
+        userInbox: dependencies.userInbox,
         scopeTags: dependencies.scopeTags,
         signal: dependencies.signal,
         timeoutMs: dependencies.timeoutMs,
@@ -118,7 +123,8 @@ const WORKSPACE_CAPABILITIES = Object.freeze([
   ...ascendCapabilities,
 ]);
 
-export const WORKSPACE_MUTATION_TOOL_NAMES = Object.freeze(WORKSPACE_CAPABILITIES.filter((capability) => Boolean(capability.mutationWorkspace) || capability.executionEffect === 'write').map((capability) => capability.definition.name));
+// Core's generation adapter can mutate only its trusted current conversation.
+export const WORKSPACE_MUTATION_TOOL_NAMES = Object.freeze(WORKSPACE_CAPABILITIES.filter((capability) => (Boolean(capability.mutationWorkspace) || capability.executionEffect === 'write') && capability.definition.name !== 'app.generate-image').map((capability) => capability.definition.name));
 
 export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze(WORKSPACE_CAPABILITIES.filter(({ definition }) => !new Set([
     'referral.summary.read',

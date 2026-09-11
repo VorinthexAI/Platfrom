@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { chunkDocumentText } from '@/lib/ai/document-processing/chunking';
+import { USER_VISIBLE_AI_PROSE_POLICY } from '@/lib/ai/prose-style';
 
 export type TextGeneration = (input: { systemPrompt: string; text: string; temperature: number; maxTokens: number }) => Promise<string>;
 
@@ -25,7 +26,7 @@ export function parseGeneratedSummary(value: unknown) {
 
 export async function generateDocumentSummary(input: { documents: Array<{ name: string; content: string }>; topic?: string; style: 'brief' | 'detailed' | 'executive' | 'bullet-points' | 'technical'; language?: string }, generate: TextGeneration) {
   const text = await generate({
-    systemPrompt: `Create a ${input.style} summary${input.topic ? ` focused on ${input.topic}` : ''}${input.language ? ` in ${input.language}` : ''}. Use only the supplied document content and preserve its facts. Return strict JSON only in the form {"sections":[{"heading":"Short heading","body":"Prose paragraph"}]}. Return 1 to 4 distinct sections. Bodies must be concise prose paragraphs, never bullet points or numbered lists. Do not include analysis, reasoning, planning, self-reference, a preamble, a conclusion about the task, Markdown, code fences, or commentary. Output the JSON object and nothing else.`,
+    systemPrompt: `Create a ${input.style} summary${input.topic ? ` focused on ${input.topic}` : ''}${input.language ? ` in ${input.language}` : ''}. Use only the supplied document content and preserve its facts. Return strict JSON only in the form {"sections":[{"heading":"Short heading","body":"Prose paragraph"}]}. Return 1 to 4 distinct sections. Bodies must be concise prose paragraphs, never bullet points or numbered lists. Do not include analysis, reasoning, planning, self-reference, a preamble, a conclusion about the task, Markdown, code fences, or commentary. Output the JSON object and nothing else. ${USER_VISIBLE_AI_PROSE_POLICY}`,
     text: input.documents.map((item) => `Title: ${item.name}\n\n${item.content}`).join('\n\n---\n\n'),
     temperature: 0.2,
     maxTokens: 5_000,

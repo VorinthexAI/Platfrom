@@ -18,14 +18,17 @@ import { APP_SEARCH_COLLECTION_ADAPTERS, appSearchModelInputSchema, createAppSea
 import { appTextEnhanceInputSchema, appTextTranslateInputSchema, createAppTransformationService } from '@/lib/app-transformation/service';
 import { appSpeechInputSchema, createAppSpeechService } from '@/lib/app-speech/service';
 import { accountProfileService, profileNameUpdateInputSchema, safeProfileUpdateResultSchema } from '@/lib/account-profile/service';
-import { feedbackListInputSchema, feedbackVoteInputSchema, getDefaultTicketService, ticketSubmitInputSchema } from '@/lib/tickets/service';
+import { profileBadgeClaimInputSchema, profileBadgeGenerateInputSchema, profileBadgeService } from '@/lib/account-profile/badge';
+import { getDefaultTicketService, ticketSubmitInputSchema } from '@/lib/tickets/service';
 import { scopeTagCreateInputSchema, scopeTagDeleteInputSchema, scopeTagListInputSchema, scopeTagService, scopeTagSetAssignmentsInputSchema, scopeTagUpdateInputSchema } from '@/lib/scope-tags/service';
-import { referralSummaryReadInputSchema, referralSummarySchema } from '@/lib/referrals/contracts';
+import { referralRedeemInputSchema, referralRedeemResultSchema, referralSummaryReadInputSchema, referralSummarySchema } from '@/lib/referrals/contracts';
 import { referralService } from '@/lib/referrals/service';
 import { checkoutCreateInputSchema, subscriptionMutationInputSchema } from '@/lib/commerce/contracts';
 import { commerceService } from '@/lib/commerce/service';
 import { scopeCreateInputSchema, scopeDeleteInputSchema, scopeListInputSchema, scopePrioritizeInputSchema, scopeSelectInputSchema, scopeUpdateInputSchema, scopeService } from '@/lib/ai/scopes';
 import { appNotifyInputSchema, notificationListInputSchema } from '@/lib/app-notifications/contracts';
+import { communicationMarkReadInputSchema, communicationSendInputSchema, communicationThreadInputSchema } from '@/lib/user-inbox/schemas';
+import { userInboxService } from '@/lib/user-inbox/service';
 import { appNotificationService } from '@/lib/app-notifications/service';
 import { teamListInputSchema, teamSelectInputSchema, teamService } from '@/lib/teams';
 import { costService } from '@/lib/costs/service';
@@ -181,7 +184,10 @@ export const hiddenListCapability = capability('content.hidden.list', 'List cont
 export const platformCapabilities = [
   capability('team.list', 'List teams and scopes available to the authenticated account when team selection is enabled.', teamListInputSchema, async (input, context) => teamService.list(input, context.domain), undefined, 'read'),
   capability('app.notify', 'Send a notification with a dynamic title and message to specific eligible users by user key, or to every eligible user in the current team. Set notifyAll true only when every team user should be notified.', appNotifyInputSchema, async (input, context) => (context.appNotifications ?? appNotificationService).notify(input, context.domain, `${context.requestKey ?? newId()}:app.notify`), undefined, 'write'),
-  capability('notification.list', "List the authenticated user's notifications in the current team and optionally mark them read.", notificationListInputSchema, async (input, context) => (context.appNotifications ?? appNotificationService).list(input, context.domain), undefined, 'write'),
+  capability('app.history', "List the authenticated user's internal communication Inbox or Sent history.", notificationListInputSchema, async (input, context) => context.userInbox ? context.userInbox.list(input, context.domain) : (context.appNotifications ?? appNotificationService).list(input, context.domain), undefined, 'read'),
+  capability('communication.thread.read', 'Read one internal communication thread and its messages.', communicationThreadInputSchema, async (input, context) => (context.userInbox ?? userInboxService).read(input, context.domain), undefined, 'read'),
+  capability('communication.thread.mark-read', 'Mark one internal communication thread read or unread.', communicationMarkReadInputSchema, async (input, context) => (context.userInbox ?? userInboxService).markRead(input, context.domain), undefined, 'write'),
+  capability('communication.message.send', 'Send a user follow-up in an internal communication thread.', communicationSendInputSchema, async (input, context) => (context.userInbox ?? userInboxService).send(input, context.domain, context.requestKey ?? newId()), undefined, 'write'),
   capability('scope.list', 'List the active scopes the authenticated user can access in the current team.', scopeListInputSchema, async (input, context) => (context.scopes ?? scopeService).list(input, context.domain), undefined, 'read'),
   capability('pricing.read', 'Read the current Spark charges without purchase grants or free capabilities.', z.object({}).strict(), async (_input, context) => {
     identity(context);
@@ -211,10 +217,23 @@ export const platformCapabilities = [
     const { userKey } = identity(context);
     return referralSummarySchema.parse(await (context.referrals ?? referralService).readSummary(userKey));
   }, undefined, 'read'),
+  capability('referral.redeem', 'Apply a referral code to the authenticated account. Use this when the user provides an invite or referral code, extracting only the code into the code field. The result identifies whether the friend earned the 50 Spark signup reward and whether the 100 Spark first-paid reward is pending, earned, or reversed.', referralRedeemInputSchema, async ({ code }, context) => {
+    const { userKey } = identity(context);
+    return referralRedeemResultSchema.parse(await (context.referrals ?? referralService).redeem(userKey, code));
+  }, undefined, 'write'),
   capability('profile.update', 'Change the authenticated user\'s profile name.', profileNameUpdateInputSchema, async (input, context) => {
     const { userKey } = identity(context);
     const { profile } = await (context.accountProfile ?? accountProfileService).updateName(input, userKey);
     return safeProfileUpdateResultSchema.parse({ profile: { name: profile.name } });
+  }, undefined, 'write'),
+  capability('profile.badge.generate', 'Generate a custom abstract profile badge for the authenticated user.', profileBadgeGenerateInputSchema, async (input, context) => {
+    identity(context);
+    return (context.profileBadges ?? profileBadgeService).generate(input, context.domain, context.requestKey ?? newId());
+  }, undefined, 'write'),
+  capability('profile.badge.claim', 'Claim a generated profile badge as the authenticated user\'s avatar.', profileBadgeClaimInputSchema, async (input, context) => {
+    const { userKey } = identity(context);
+    await (context.profileBadges ?? profileBadgeService).claim(input, userKey);
+    return { claimed: true };
   }, undefined, 'write'),
   capability('ticket.create', 'Submit an issue ticket for the authenticated user in the current team and scope.', ticketSubmitInputSchema, async (input, context) => {
     identity(context);
@@ -223,14 +242,6 @@ export const platformCapabilities = [
   capability('feedback.create', 'Submit product feedback for the authenticated user in the current team and scope.', ticketSubmitInputSchema, async (input, context) => {
     identity(context);
     return (context.tickets ?? getDefaultTicketService()).createFeedback(input, context.domain, context.requestKey ?? newId());
-  }, undefined, 'write'),
-  capability('feedback.list', 'List recent product feedback and the authenticated user\'s vote in the current team and scope.', feedbackListInputSchema, async (input, context) => {
-    identity(context);
-    return (context.tickets ?? getDefaultTicketService()).listFeedback(input, context.domain);
-  }),
-  capability('feedback.vote', 'Set, change, or clear the authenticated user\'s vote on product feedback in the current team and scope.', feedbackVoteInputSchema, async (input, context) => {
-    identity(context);
-    return (context.tickets ?? getDefaultTicketService()).setFeedbackVote(input, context.domain, context.requestKey ?? newId());
   }, undefined, 'write'),
 ] as const;
 

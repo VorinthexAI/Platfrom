@@ -8,7 +8,7 @@ import { parseJson } from './validation';
 
 const selectedSchema = z.object({ teamKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(), requestKey: z.string().trim().min(1).max(200) }).strict();
 const reserveSchema = selectedSchema.extend({ files: z.array(z.object({ clientKey: z.string().trim().min(1).max(120), filename: z.string().trim().min(1).max(255), mimeType: z.string().trim().min(1).max(160), sizeBytes: z.number().int().positive() }).strict()).min(1).max(10) }).strict();
-const completeSchema = selectedSchema.extend({ attachmentKeys: z.array(z.string().cuid()).min(1).max(10) }).strict();
+const completeSchema = selectedSchema.extend({ attachmentKeys: z.array(z.string().cuid()).min(1).max(12) }).strict();
 
 export interface TransientAttachmentHandlerDependencies {
   getIdentity?: typeof getAuthIdentity;
@@ -43,7 +43,7 @@ export function createTransientAttachmentHandlers(dependencies: TransientAttachm
         return c.json({ success: true, data }, 201);
       }
       const input = completeSchema.parse(body);
-      const data = await (dependencies.complete ?? completeTransientAttachments)({ conversationKey, requestKey: input.requestKey, attachmentKeys: input.attachmentKeys }, owner(context));
+       const data = await (dependencies.complete ?? completeTransientAttachments)({ conversationKey, requestKey: input.requestKey, attachmentKeys: input.attachmentKeys }, owner(context), { ownerKey: context.principal.kind === 'member' ? context.principal.userTeam.key : undefined, ...(context.teamAssurance ? { teamAssurance: context.teamAssurance } : {}) });
       return c.json({ success: true, data }, 200);
     } catch (error) { return failure(c, error); }
   };

@@ -3,8 +3,7 @@ import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
 import { Badge } from "@vorinthex/shared/ui/badge";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CloseIcon, HelpIcon, ReferralIcon } from "@vorinthex/shared/ui/icons-mobile";
-import { SubtleButton } from "@vorinthex/shared/ui/subtle-button";
-import { Tabs, TabsList, TabsTrigger } from "@vorinthex/shared/ui/tabs";
+import { Tabs, TabsTrigger } from "@vorinthex/shared/ui/tabs";
 import { useToast } from "@vorinthex/shared/ui/toast";
 import * as Crypto from "expo-crypto";
 import { LinearGradient } from "expo-linear-gradient";
@@ -24,7 +23,7 @@ import { currentSubscriptionQueryKey, formatWholeSparks, setSubscriptionCancella
 import { refreshAuthoritativeBilling } from "@/lib/billing-refresh";
 import { CHECKOUT_SUCCESS_URL, checkoutCallbackFromUrl, createCheckoutHandoff } from "@/lib/checkout-client";
 import { activeSubscriptionOffers, activeTopup, effectivePriceCents, formatProductPrice, productSparkAmount, type MobileProduct } from "@/lib/product-client";
-import { fetchReferralSummary, referralLinks, referralSummaryQueryKey } from "@/lib/referral-client";
+import { fetchReferralSummary, referralSummaryQueryKey } from "@/lib/referral-client";
 import { recordOnboardingEvent } from "@/lib/onboarding-events";
 import { subscriptionPresentation } from "@/lib/subscription-presentation";
 import { useAppsStore } from "@/state/apps";
@@ -39,7 +38,7 @@ type CheckoutState = "checkout-error" | "confirming" | "idle" | "opening" | "ref
 
 const checkoutHandoffExpired = (expiresAt: string) => Date.parse(expiresAt) <= Date.now();
 
-function PlanCard({ onSelect, product, selected }: { onSelect: () => void; product: MobileProduct; selected: boolean }) {
+function PlanCard({ current, onSelect, product, selected }: { current: boolean; onSelect: () => void; product: MobileProduct; selected: boolean }) {
   const period = product.billingPeriod === "month" ? "month" : product.billingPeriod === "week" ? "week" : null;
   const sparkAmount = productSparkAmount(product);
   return <View style={styles.planWrap}>
@@ -47,7 +46,7 @@ function PlanCard({ onSelect, product, selected }: { onSelect: () => void; produ
       <View style={styles.planValue}><Text style={styles.planGrant}>{sparkAmount.toLocaleString("en-US")} Sparks</Text><Text style={styles.planName}>{product.billingPeriod === "month" ? "Monthly plan" : product.billingPeriod === "week" ? "Weekly plan" : "One-time top-up"}</Text></View>
       <View style={styles.priceRow}>{product.discountedPriceCents !== null ? <Text accessibilityLabel={`Reference price ${formatProductPrice(product.priceCents, product.currency)}`} style={styles.referencePrice}>{formatProductPrice(product.priceCents, product.currency)}</Text> : null}<Text style={styles.price}>{formatProductPrice(effectivePriceCents(product), product.currency)}</Text>{period ? <Text style={styles.period}>/{period}</Text> : null}</View>
     </Button>
-    {period ? <Badge accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.currentPlanBadge}><Text style={styles.currentPlanBadgeText}>Current plan</Text></Badge> : null}
+    {current ? <Badge accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.currentPlanBadge}><Text style={styles.currentPlanBadgeText}>Current plan</Text></Badge> : null}
   </View>;
 }
 
@@ -85,6 +84,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
   const selected = offers.find(({ key }) => key === effectiveSelectedKey);
   const subscription = subscriptionQuery.data;
   const subscriptionProduct = subscription ? products.find(({ key }) => key === subscription.productKey) : undefined;
+  const currentSubscriptionProductKey = subscription && ["active", "trialing", "past_due"].includes(subscription.status) ? subscription.productKey : undefined;
   const subscriptionView = subscription ? subscriptionPresentation(subscription, subscriptionProduct) : undefined;
   const updateSubscription = useMutation({
     mutationFn: setSubscriptionCancellation,
@@ -94,7 +94,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
     },
     onError: () => showToast({ title: "Subscription could not be updated.", duration: 2_500 }),
   });
-  const referral = useQuery({ queryKey: referralSummaryQueryKey(userKey ?? "unauthenticated"), queryFn: fetchReferralSummary, enabled: Boolean(userKey), refetchOnMount: "always" });
+  const referral = useQuery({ queryKey: referralSummaryQueryKey(userKey ?? "unauthenticated"), queryFn: fetchReferralSummary, enabled: Boolean(userKey && open && (mode === "onboarding" || page === "referral")), refetchOnMount: "always" });
 
   useEffect(() => {
     if (!open) return;
@@ -190,8 +190,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
     setSharing(true);
     setMessage(undefined);
     try {
-      const links = referralLinks(code);
-      await NativeShare.share({ title: "Share Vorinthex", message: `Join me on Vorinthex with referral code ${code}: ${links.universal}`, url: links.universal }, { dialogTitle: "Share referral" });
+      await NativeShare.share({ message: code }, { dialogTitle: "Share referral" });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The share sheet could not be opened.");
     } finally {
@@ -217,11 +216,10 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
   </OnboardingStepLayout>;
 
   const content = page === "plans" ? <ScrollView contentContainerStyle={[styles.content, mode === "onboarding" && styles.onboardingContent]} showsVerticalScrollIndicator={false}>
-    {mode === "onboarding" ? <View style={styles.hero}><View style={styles.heroTitleRow}><Text style={styles.heroTitle}>One balance for everything you create and use</Text><Button accessibilityLabel="How Sparks are billed" contentMode="raw" iconOnly onPress={() => setSparkCostsOpen(true)} size="md" variant="icon"><HelpIcon size="sm" /></Button></View><Text style={styles.heroCopy}>Sparks give you a simple way to use AI capabilities, store your work, and keep services connected across Vorinthex.</Text></View> : <View style={styles.balanceHero}><View><Text style={styles.balanceLabel}>Current balance</Text><Text accessibilityLabel={balance === undefined ? "Sparks balance unavailable. Showing 0 Sparks" : `Current balance: ${balance} Sparks`} style={styles.balance}>{formatWholeSparks(balance ?? 0)} <Text style={styles.balanceUnit}>Sparks</Text></Text></View><Button accessibilityLabel="How Sparks are billed" contentMode="raw" iconOnly onPress={() => setSparkCostsOpen(true)} size="md" variant="icon"><HelpIcon size="sm" /></Button></View>}
+    {mode === "onboarding" ? <View style={styles.hero}><View style={styles.heroTitleRow}><Text style={styles.heroTitle}>One balance for everything you create and use</Text><Button accessibilityLabel="How Sparks are billed" contentMode="raw" iconOnly onPress={() => setSparkCostsOpen(true)} size="xs" variant="icon"><HelpIcon size="sm" /></Button></View><Text style={styles.heroCopy}>Sparks give you a simple way to use AI capabilities, store your work, and keep services connected across Vorinthex.</Text></View> : <View style={styles.balanceHero}><View><Text style={styles.balanceLabel}>Current balance</Text><Text accessibilityLabel={balance === undefined ? "Sparks balance unavailable. Showing 0 Sparks" : `Current balance: ${balance} Sparks`} style={styles.balance}>{formatWholeSparks(balance ?? 0)} <Text style={styles.balanceUnit}>Sparks</Text></Text></View><Button accessibilityLabel="How Sparks are billed" contentMode="raw" iconOnly onPress={() => setSparkCostsOpen(true)} size="xs" variant="icon"><HelpIcon size="sm" /></Button></View>}
     {mode === "standard" && subscription ? <View style={styles.subscriptionCard}><View style={styles.subscriptionHeading}><Text style={styles.sectionLabel}>YOUR SUBSCRIPTION</Text><Badge><Text style={styles.subscriptionBadge}>{subscription.status.replace("_", " ").toUpperCase()}</Text></Badge></View><Text style={styles.subscriptionTitle}>{subscriptionView?.title}</Text><Text style={styles.subscriptionCopy}>{subscriptionView?.copy}</Text>{subscriptionView?.action ? <Button loading={updateSubscription.isPending} onPress={() => updateSubscription.mutate(subscriptionView.action === "cancel")} size="md" variant="secondary">{subscriptionView.action === "restore" ? "Restore renewal" : "Cancel renewal"}</Button> : null}</View> : mode === "standard" && subscriptionQuery.isError ? <View style={styles.state}><Text accessibilityRole="alert" style={styles.error}>Subscription status could not be loaded.</Text><Button onPress={() => void subscriptionQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : null}
-    {mode === "standard" ? <><Tabs onValueChange={(value) => setOfferTab(value as OfferTab)} value={offerTab}><TabsList accessibilityLabel="Spark offers" style={styles.offerTabs}><TabsTrigger style={styles.offerTab} value="plans">Plans</TabsTrigger><TabsTrigger style={styles.offerTab} value="topup">Top-up</TabsTrigger></TabsList></Tabs><View style={styles.plans}>{offers.map((product) => <PlanCard key={product.key} onSelect={() => setSelectedKey(product.key)} product={product} selected={effectiveSelectedKey === product.key} />)}</View></> : <View style={styles.plans}>{subscriptions.map((product) => <PlanCard key={product.key} onSelect={() => setSelectedKey(product.key)} product={product} selected={effectiveSelectedKey === product.key} />)}</View>}
+    {mode === "standard" ? <><Tabs accessibilityLabel="Spark offers" accessibilityRole="tablist" onValueChange={(value) => setOfferTab(value as OfferTab)} style={styles.offerTabs} value={offerTab}><TabsTrigger style={styles.offerTab} value="plans">Plans</TabsTrigger><TabsTrigger style={styles.offerTab} value="topup">Top-up</TabsTrigger></Tabs><View style={styles.plans}>{offers.map((product) => <PlanCard current={currentSubscriptionProductKey === product.key} key={product.key} onSelect={() => setSelectedKey(product.key)} product={product} selected={effectiveSelectedKey === product.key} />)}</View></> : <View style={styles.plans}>{subscriptions.map((product) => <PlanCard current={currentSubscriptionProductKey === product.key} key={product.key} onSelect={() => setSelectedKey(product.key)} product={product} selected={effectiveSelectedKey === product.key} />)}</View>}
     {!offers.length ? <View style={styles.state}><Text style={styles.error}>{productsStatus === "loading" ? "Loading offers..." : "Offers are temporarily unavailable."}</Text>{productsStatus !== "loading" ? <Button onPress={() => void refreshProducts()} size="md" variant="secondary">Retry</Button> : null}</View> : null}
-    {mode === "standard" ? <SubtleButton onPress={() => setPage("referral")} size="md">Share a referral</SubtleButton> : null}
     {message ? <Text accessibilityLiveRegion="polite" style={styles.error}>{message}</Text> : null}
     {completionError ? <Text accessibilityRole="alert" style={styles.error}>{completionError}</Text> : null}
   </ScrollView> : <ScrollView contentContainerStyle={styles.referralContent} showsVerticalScrollIndicator={false}>
@@ -267,7 +265,7 @@ const styles = StyleSheet.create({
   eyebrow: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 10, letterSpacing: 2.4 },
   heroTitle: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 28, lineHeight: 33 },
   heroCopy: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 14, lineHeight: 21 },
-  offerTabs: { alignSelf: "stretch", flexDirection: "row" },
+  offerTabs: { alignSelf: "stretch" },
   offerTab: { flex: 1 },
   plans: { gap: spacing.sm },
   subscriptionCard: { borderColor: palette.hairline, borderRadius: 16, borderWidth: 1, gap: spacing.sm, padding: spacing.md },
@@ -277,8 +275,8 @@ const styles = StyleSheet.create({
   subscriptionCopy: { color: palette.muted, fontFamily: fonts.regular, fontSize: 13, lineHeight: 19 },
   planWrap: { alignSelf: "stretch", maxWidth: "100%", paddingTop: spacing.xs, position: "relative", width: "100%" },
   plan: { alignItems: "center", alignSelf: "stretch", backgroundColor: "transparent", borderColor: palette.hairline, flexDirection: "row", height: "auto", justifyContent: "space-between", maxWidth: "100%", minHeight: 78, overflow: "hidden", paddingHorizontal: spacing.md, paddingVertical: spacing.sm, width: "100%" },
-  planSelected: { backgroundColor: palette.insetHighlight },
-  currentPlanBadge: { backgroundColor: palette.page, borderRadius: 999, paddingHorizontal: spacing.sm, paddingVertical: 3, position: "absolute", right: spacing.md, top: 0 },
+  planSelected: { borderColor: palette.silver50 },
+  currentPlanBadge: { backgroundColor: palette.page, borderColor: palette.silver50, borderRadius: 999, borderWidth: 1, paddingHorizontal: spacing.sm, paddingVertical: 3, position: "absolute", right: spacing.md, top: 0 },
   currentPlanBadgeText: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 11 },
   planValue: { flex: 1, gap: 2, minWidth: 0 },
   planName: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 11 },

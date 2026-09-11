@@ -58,7 +58,7 @@ export const TOOL_COST_RULES: Readonly<Record<string, PublicFixedCostRule>> = Ob
   'highlight.create': sparks(20, 'Create a highlight', 'Create a generated highlight from an image collection.'),
   'image.create-memory': sparks(10, 'Create a memory', 'Create a generated memory for an image.'),
   'visual-identity.create': sparks(15, 'Create a visual identity', 'Create a visual identity from selected images.'),
-  'email.tone.create': sparks(25, 'Create an email tone', 'Build a reusable writing tone from email examples.'),
+  'email.tone.create': sparks(25, 'Create a Signal writing tone', 'Build a reusable writing tone from connected email examples.'),
   'trip.create': sparks(15, 'Create a trip', 'Create and save a generated trip plan.'),
   'place.create': sparks(5, 'Save a place', 'Create a saved place with generated details.'),
   'place.guide.find': sparks(5, 'Find a place guide', 'Find a guide for a place.'),
@@ -66,18 +66,18 @@ export const TOOL_COST_RULES: Readonly<Record<string, PublicFixedCostRule>> = Ob
   'place.find-children': sparks(5, 'Explore nearby places', 'Find places within a selected destination.'),
   'document.parse': sparks(2, 'Upload a document', 'Upload a document and extract its readable content.', 'documents'),
   'document.scan': sparks(5, 'Scan a document', 'Scan an uploaded document with optical character recognition.', 'documents'),
-  'web.search': sparks(25, 'Search the web', 'Search the live web for relevant sources.', undefined, false),
+  'profile.badge.generate': sparks(10, 'Generate a profile badge', 'Generate a custom profile badge for the authenticated user.', undefined, false),
 });
 export const ACTION_COST_RULES: Readonly<Record<string, FixedCostRule>> = Object.freeze({});
 
 export const ACTION_PRICED_OPERATION_TOOL_SLUGS = Object.freeze([
   'agents.core', 'app.enhance', 'app.search', 'app.speech', 'app.translate',
   'book.goal.suggest', 'book.topic.suggest',
-  'conversation.image.enqueue', 'conversation.message.send',
+  'app.generate-image', 'conversation.message.send',
   'document.rewrite', 'document.summarize', 'document.topics',
   'email.draft.compose', 'email.draft.create', 'email.message.summarize',
   'feedback.create',
-  'image.create-visual-identity', 'image.generate', 'image.ideas.create',
+  'image.caption', 'image.create-visual-identity', 'image.ideas.create',
   'inbox.sort',
   'place.find', 'place.reference.generate',
   'trip.guide.generate',
@@ -90,7 +90,7 @@ export const OUTCOME_PRICED_OPERATION_TOOL_SLUGS = Object.freeze([
 // This list is intentionally exhaustive rather than a fallback. Adding a public
 // tool without choosing fixed, action, or free billing must fail registry tests.
 export const FREE_TOOL_SLUGS = Object.freeze([
-  'agent.guide', 'agent.query', 'app.notify', 'billing.summary.read', 'catalog.list', 'notification.list', 'payment.checkout.create', 'pricing.read', 'referral.summary.read', 'subscription.current.cancel', 'subscription.current.read', 'subscription.current.restore',
+  'agent.guide', 'app.history', 'app.notify', 'billing.summary.read', 'catalog.list', 'communication.message.send', 'communication.thread.mark-read', 'communication.thread.read', 'payment.checkout.create', 'pricing.read', 'referral.redeem', 'referral.summary.read', 'subscription.current.cancel', 'subscription.current.read', 'subscription.current.restore',
   'book.chapter.progress', 'book.delete', 'book.detail', 'book.favorite', 'book.generation.cancel', 'book.generation.retry', 'book.list',
   'collection.create', 'collection.delete', 'collection.duplicates.delete', 'collection.hide', 'collection.image.transfer', 'collection.list', 'collection.reveal', 'collection.update',
   'content.hidden.list', 'content.neighbors', 'content.search', 'content.search-history.delete', 'content.search-history.list',
@@ -98,13 +98,12 @@ export const FREE_TOOL_SLUGS = Object.freeze([
   'country.search',
   'document.audio.playback.clear', 'document.audio.playback.update', 'document.copy', 'document.create', 'document.create-version', 'document.delete', 'document.delete-version', 'document.download', 'document.export', 'document.find', 'document.find-summary', 'document.find-version', 'document.hide', 'document.list', 'document.list-audio-versions', 'document.list-summaries', 'document.list-versions', 'document.move', 'document.read', 'document.rename', 'document.restore-version', 'document.reveal', 'document.search', 'document.search-all', 'document.update',
   'email.draft.assign', 'email.draft.delete', 'email.draft.send', 'email.draft.update', 'email.message.summary.delete', 'email.message.summary.list', 'email.message.translation.delete', 'email.message.translation.list', 'email.overview', 'email.reply-context.create', 'email.reply-context.delete', 'email.reply-context.list', 'email.reply-context.update', 'email.similar.find', 'email.thread.favorite', 'email.thread.read', 'email.thread.read-state', 'email.thread.trash', 'email.tone.delete', 'email.tone.list', 'email.tone.search', 'email.tone.update', 'email.trash.clear',
-  'feedback.list', 'feedback.vote',
   'folder.copy', 'folder.create', 'folder.delete', 'folder.find', 'folder.hide', 'folder.list', 'folder.move', 'folder.rename', 'folder.reveal', 'folder.update',
   'highlight.delete', 'highlight.list', 'highlight.read',
-  'image.caption', 'image.delete', 'image.favorite', 'image.generation-history.delete', 'image.generation-history.list', 'image.hide', 'image.memory.delete', 'image.memory.list', 'image.memory.read', 'image.reveal', 'image.search', 'image.update',
+  'image.delete', 'image.favorite', 'image.generation-history.delete', 'image.generation-history.list', 'image.hide', 'image.memory.delete', 'image.memory.list', 'image.memory.read', 'image.reveal', 'image.search', 'image.update',
   'inbox.refresh', 'inbox.search', 'inbox.update',
   'place.delete', 'place.list', 'place.open', 'place.reference.list', 'place.search', 'place.update',
-  'profile.update', 'subject.delete', 'subject.image.list', 'subject.list',
+  'profile.badge.claim', 'profile.update', 'subject.delete', 'subject.image.list', 'subject.list',
   'scope.create', 'scope.delete', 'scope.list', 'scope.prioritize', 'scope.select', 'scope.update',
   'tag.assignment.set', 'tag.create', 'tag.delete', 'tag.list', 'tag.update', 'team.list', 'team.select', 'ticket.create',
   'trip.attachment.set', 'trip.delete', 'trip.guide.list', 'trip.list', 'trip.search', 'trip.update',
@@ -253,17 +252,17 @@ export function calculateActionCostMicroSparks(actionSlug: string, usage: Readon
   const outputTokens = safeBigInt(usage.outputTokens, 'outputTokens');
   let numerator = 0n;
   let denominator = 1n;
-  if (actionSlug === 'text') {
-    numerator = inputTokens * 50n * BigInt(MICRO_SPARKS_PER_SPARK) + outputTokens * 500n * BigInt(MICRO_SPARKS_PER_SPARK);
+  const operation = typeof input === 'object' && input !== null ? (input as Record<string, unknown>).operation : undefined;
+  if (actionSlug === 'text' || actionSlug === 'image' && operation === 'caption') {
+    numerator = inputTokens * 40n * BigInt(MICRO_SPARKS_PER_SPARK) + outputTokens * 400n * BigInt(MICRO_SPARKS_PER_SPARK);
     denominator = 1_000_000n;
   } else if (actionSlug === 'speech') {
     numerator = outputTokens * 10_000n * BigInt(MICRO_SPARKS_PER_SPARK);
     denominator = 1_000_000n;
   } else if (actionSlug === 'image') {
-    const operation = typeof input === 'object' && input !== null ? (input as Record<string, unknown>).operation : undefined;
     const count = typeof input === 'object' && input !== null ? (input as Record<string, unknown>).count : undefined;
     const images = Number.isSafeInteger(count) && (count as number) >= 0 ? BigInt(count as number) : BigInt(arrayLength(input, ['images', 'imageUrls', 'imageKeys']) ?? 1);
-    numerator = images * BigInt(operation === 'generate' ? 30 : 5) * BigInt(MICRO_SPARKS_PER_SPARK);
+    numerator = images * BigInt(operation === 'generate' ? 10 : 5) * BigInt(MICRO_SPARKS_PER_SPARK);
   } else if (actionSlug === 'embed') {
     return 0;
   }

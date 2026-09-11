@@ -4,7 +4,7 @@ import type { AssistantCapability, AssistantCapabilityContext } from './capabili
 import { GalleryOperationError, galleryOperationInputSchemas, galleryOperations, type GalleryOperationContext, type GalleryOperationName } from '@/lib/gallery/operations';
 import { nonTextImageSearchInputSchema, nonTextImageSearchProviderInputSchema } from '@/lib/ai/tools/image-search';
 import { userHiddenOperations } from '@/lib/user-hiddens/operations';
-import { createImageGenerationService, imageGenerateModelInputSchema, imageGenerationHistoryDeleteInputSchema, imageGenerationHistoryListInputSchema, imageIdeasInputSchema, type ImageGenerationService } from '@/lib/image-generation/service';
+import { appGenerateImageModelInputSchema, createImageGenerationService, imageGenerationHistoryDeleteInputSchema, imageGenerationHistoryListInputSchema, imageIdeasInputSchema, type ImageGenerationService } from '@/lib/image-generation/service';
 
 type GalleryExecutor = (input: unknown, context: GalleryOperationContext) => Promise<unknown>;
 
@@ -88,10 +88,10 @@ export function createGalleryAssistantCapabilities(operations: Partial<Record<Ga
       async execute(input, context) { return { kind: 'continue', result: await (context.images ?? imageService).createIdeas(imageIdeasInputSchema.parse(input), context.domain) }; },
     },
     {
-      inputSchema: imageGenerateModelInputSchema,
+      inputSchema: appGenerateImageModelInputSchema,
       mutationWorkspace: 'gallery',
-      definition: { name: 'image.generate', description: 'Generate images and save them into an authorized Gallery collection, optionally using accessible reference images.', inputSchema: contentZodToJsonSchema(imageGenerateModelInputSchema) },
-      async execute(input, context) { return { kind: 'continue', result: await (context.images ?? imageService).generate(imageGenerateModelInputSchema.parse(input), context.domain, context.requestKey) }; },
+      definition: { name: 'app.generate-image', description: 'Generate images from creative instructions and save them to the authorized destination supplied by the current app.', inputSchema: contentZodToJsonSchema(appGenerateImageModelInputSchema) },
+      async execute(input, context) { return { kind: 'continue', result: await (context.images ?? imageService).generate(appGenerateImageModelInputSchema.parse(input), { kind: 'managed-gallery' }, context.domain, context.requestKey) }; },
     },
     {
       inputSchema: imageGenerationHistoryListInputSchema,

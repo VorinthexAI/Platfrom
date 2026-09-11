@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { IMAGE_CAPTION_MODEL } from '@/lib/image-caption-constants';
 import { imageCreateVisualIdentityTool } from './image-create-visual-identity';
 
 describe('image.create-visual-identity tool', () => {
@@ -23,7 +22,6 @@ describe('image.create-visual-identity tool', () => {
   test('pins execution to the Vertex vision model', async () => {
     const source = await Bun.file(new URL('./image-create-visual-identity.ts', import.meta.url)).text();
     expect(imageCreateVisualIdentityTool.name).toBe('image.create-visual-identity');
-    expect(IMAGE_CAPTION_MODEL).toBe('google.gemini-3.1-flash-lite-image');
     expect(source).toContain("actionSlug: 'image'");
     expect(source).toContain("providers: ['image.primary']");
   });

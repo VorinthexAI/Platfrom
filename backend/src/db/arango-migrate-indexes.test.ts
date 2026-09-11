@@ -1,9 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER } from './arango-migrate-indexes';
 import { collections, deduplicateScopeMembers, deduplicateScopeSlugs, migrateCollectionOwnership, migrateContainerPresentations, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateGeneratedTravelDocuments, migrateImageCaptions, migrateManagedGeneratedMedia, migrateMinimalPlacesAndRetireTrips, migratePlaceReports, migrateProviderIndependentEmailDrafts, migrateRetiredEmailDefaultTones, migrateTicketTypes, migrateTripAttachments, migrateTripCreationReceipts, migrateTripGuides, needsExactSemanticEmbedding, retireLegacyScopeIndexes, retireMomentumScope, retireUserSettings } from './arango-migrate';
+import { migrateCanonicalManagedArchiveFolders } from './migrations/0005-canonical-managed-archive-folders';
 import { EMBEDDING_DIMENSIONS, LEGACY_EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 import { emailArchiveRootFolderKey, emailMediaCollectionKey } from '../lib/email-inbox/export-container-keys';
+import { generatedDocumentFolderKey } from '../lib/generated-documents/folders';
+import { initialWorkspaceFolderKey } from '../lib/initial-workspace-content-identifiers';
 
 function migrationDatabase(collection: 'documents' | 'documentVersions', row: Record<string, unknown>) {
   let page = 0;
@@ -90,6 +93,29 @@ describe('Arango migration indexes', () => {
     expect(queries[1]).toContain('{ mutationPolicy: "system-only" }');
     expect(queries[2]).toContain('collection.purpose == "generated-media"');
     expect(queries[2]).toContain('{ mutationPolicy: "user" }');
+  });
+
+  test('reparents every legacy managed-root child before removing the empty root', async () => {
+    const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
+    const legacyKey = generatedDocumentFolderKey(scopeKey, 'generated-documents-root');
+    const queries: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    let discoveryCalls = 0;
+    const database = { query: async (query: string, bindVars?: Record<string, unknown>) => {
+      queries.push({ query, bindVars });
+      if (query.includes('RETURN KEEP(folder')) return { all: async () => discoveryCalls++ === 0 ? [{ _key: legacyKey, scopeKey, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }] : [] };
+      if (query.includes('FOR book IN books')) return { all: async () => [] };
+      if (query.includes('RETURN LENGTH')) return { next: async () => 0 };
+      return { all: async () => [], next: async () => undefined };
+    } };
+    const declarations: Array<{ write: string[] }> = [];
+    await migrateCanonicalManagedArchiveFolders(database as never, async (collections, operation) => { declarations.push(collections); await operation(database as never); });
+
+    const destinationKey = initialWorkspaceFolderKey(scopeKey, 'travel');
+    expect(declarations).toEqual([{ write: ['folders', 'documents'] }]);
+    expect(queries.find(({ query }) => query.includes('UPSERT { _key: @destinationKey }'))?.bindVars).toMatchObject({ destinationKey, scopeKey, name: 'Compass', presentation: 'travel' });
+    expect(queries.find(({ query }) => query.includes('UPDATE folder WITH { parentFolderKey'))?.bindVars).toMatchObject({ legacyKey, destinationKey });
+    expect(queries.find(({ query }) => query.includes('UPDATE document WITH { folderKey'))?.bindVars).toMatchObject({ legacyKey, destinationKey });
+    expect(queries.findIndex(({ query }) => query.includes('RETURN LENGTH'))).toBeLessThan(queries.findIndex(({ query }) => query.includes('REMOVE folder IN folders')));
   });
 
   test('regenerates only malformed exact semantic vectors', () => {
@@ -507,6 +533,7 @@ describe('Arango migration indexes', () => {
     expect(migration).toContain('archiveVisibility: "visible"');
     expect(migration).toContain('purpose: null');
     expect(migration).not.toContain('ensureMailFolders');
+    expect(migration).toContain("!await targetDb.collection('teamConnectors').exists()");
   });
   test('assigns provider-independent active drafts only when one active team connector exists', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];

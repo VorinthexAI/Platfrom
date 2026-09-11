@@ -50,8 +50,8 @@ describe('conversation tool result retrieval capture', () => {
     expect(projectToolResultRetrieval('folder.delete', { deletedKey: newId() })).toBeNull();
     expect(projectToolResultRetrieval('image.remove', { key: newId() })).toBeNull();
     expect(projectToolResultRetrieval('image.memory.read', { key: newId(), name: 'Memory' })).toBeNull();
-    expect(projectToolResultRetrieval('web.search', { results: [{ key: newId(), name: 'Page' }] })).toBeNull();
-    expect(projectToolResultRetrieval('agent.query', { answer: 'no resources' })).toBeNull();
+    expect(projectToolResultRetrieval('agent.guide', { results: [{ key: newId(), name: 'Guide' }] })).toBeNull();
+    expect(projectToolResultRetrieval('unknown.query', { answer: 'no resources' })).toBeNull();
     expect(projectToolResultRetrieval('folder.create', { name: 'No key' })).toBeNull();
     expect(projectToolResultRetrieval('collection.list', { collections: [], images: [] })).toBeNull();
     expect(projectToolResultRetrieval('folder.create', null)).toBeNull();

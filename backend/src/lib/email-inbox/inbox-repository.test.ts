@@ -52,8 +52,8 @@ describe('dedicated inbox repository', () => {
     const connectorKey = newId();
     let call: { query: string; bindVars: Record<string, unknown> } | undefined;
     const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return { all: async () => [] }; } };
-    expect(await createInboxRepository(database as never).search('team', scopeKey, [connectorKey], embedding, '  Leadership  ', 0.55, 10, { createdFrom: now, createdTo: now })).toEqual([]);
-    expect(call?.query).toContain('inbox.teamKey == @teamKey && inbox.scopeKey == @scopeKey');
+    expect(await createInboxRepository(database as never).search(scopeKey, [connectorKey], embedding, '  Leadership  ', 0.55, 10, { createdFrom: now, createdTo: now })).toEqual([]);
+    expect(call?.query).toContain('inbox.userKey == @userKey');
     expect(call?.query).toContain('connector.provider == "gmail" && connector.status != "revoked"');
     expect(call?.query).toContain('FOR inbox IN @@inboxes');
     expect(call?.bindVars).toMatchObject({ '@inboxes': 'emailInboxes', connectorKeys: [connectorKey], query: 'leadership', createdFrom: now, createdTo: now });

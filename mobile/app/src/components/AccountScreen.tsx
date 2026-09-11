@@ -3,33 +3,37 @@ import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Linking, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ActionPill } from "@vorinthex/shared/ui/action-pill";
+import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { Linking, ScrollView, Share as NativeShare, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Avatar } from "@vorinthex/shared/ui/avatar";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
-import { BellIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, DeleteAccountIcon, FaqIcon, FeedbackIcon, FolderIcon, HelpIcon, IssueIcon, PlusIcon, PrivacyIcon, SettingsIcon, SignOutIcon, SwitchTeamIcon, TermsIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { BellIcon, CheckIcon, DeleteAccountIcon, FaqIcon, FeedbackIcon, FolderIcon, HelpIcon, IssueIcon, PlusIcon, PrivacyIcon, ReferralIcon, SettingsIcon, SignOutIcon, SwitchTeamIcon, TermsIcon, WarningIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
+import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
 
-import { createFeedback, createSupportTicket, listFeedback, setFeedbackVote, updateProfileName, uploadProfileAvatar, type FeedbackItem } from "@/lib/profile-client";
+import { updateProfileName, uploadProfileAvatar } from "@/lib/profile-client";
 import { profileInitial } from "@/lib/auth-helpers";
 import { createScope, deleteScope, listScopes, prioritizeScope, scheduleScopeOperation, scopeListQueryKey, scopeOperationIsPending, selectScope, updateScopeCover, type ScopeSummary } from "@/lib/scope-client";
 import { listTeams, queryBelongsToTeamScope, selectTeam, setPendingTeamMfa, teamListQueryKey } from "@/lib/team-client";
 import { useAuthStore } from "@/state/auth";
+import { useAppsStore } from "@/state/apps";
 import { extractDomainErrorMessage } from "@/lib/domain-error-observer";
 import { fonts, palette, radii, spacing } from "@/theme/tokens";
 import { AccountScreenShell } from "@/components/AccountScreenShell";
 import { normalizeCapturedPng } from "@/lib/captured-image";
 import { deleteGalleryImages, fetchGalleryUploadStatus, uploadGalleryImages, type GalleryContext } from "@/lib/gallery-client";
-import { formatStorageSummary } from "@/lib/billing-client";
-import { useBillingSummary } from "@/hooks/use-billing-summary";
-import { NotificationsSheet } from "@/components/NotificationsSheet";
+import { currentSubscriptionQueryKey, formatStorageSummary, setSubscriptionCancellation } from "@/lib/billing-client";
+import { useBillingSummary, useCurrentSubscription } from "@/hooks/use-billing-summary";
+import { fetchReferralSummary, normalizeReferralCode, redeemReferralCode, referralCodeSchema, referralRedemptionErrorMessage, referralSummaryQueryKey, type ReferralRedeemResult } from "@/lib/referral-client";
+import { subscriptionPresentation } from "@/lib/subscription-presentation";
 
-type ProfileSheet = "name" | "faq" | "notifications" | "report" | "feedback" | "feedback-create" | "delete-account" | "storage-help" | "scope-help" | "scope-create" | "scope-actions" | "scope-delete" | "teams";
+type ProfileSheet = "name" | "faq" | "cancel-subscription" | "delete-account" | "referral" | "storage-help" | "scope-help" | "scope-create" | "scope-actions" | "scope-delete" | "teams";
+type ReferralMode = "share" | "redeem";
+export type AccountScreenInitialState = { sheet: "referral"; referralMode: ReferralMode };
 
 const FAQ = [
   ["What are Sparks?", "Sparks power AI actions across Vorinthex. Your balance is shared across every capability."],
@@ -51,7 +55,7 @@ function ScopeCard({ onLongPress, onPress, scope, size }: { onLongPress?: () => 
   return <View style={[styles.scopeCard, scope?.isCurrent && styles.scopeCardSelected, { height: size, width: size }]}>
     {scope?.coverUrl ? <Image contentFit="cover" source={scope.coverUrl} style={styles.scopeCover} /> : null}
     <Button accessibilityHint={onLongPress ? "Long press for scope actions" : undefined} accessibilityLabel={scope ? `${scope.isCurrent ? "Current scope" : "Select scope"}: ${scope.name}` : "Create scope"} contentMode="raw" delayLongPress={350} onLongPress={onLongPress} onPress={onPress} shape="rounded" size="md" style={[styles.scopeCardButton, scope?.coverUrl && styles.scopeCardButtonCovered]} variant="ghost">
-      {scope ? <>{scope.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={2} style={[styles.scopeCardLabel, scope.coverUrl && styles.scopeCardLabelCovered]}>{scope.name}</Text></> : <PlusIcon size="lg" />}
+      {scope ? <>{scope.coverUrl ? null : <FolderIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.scopeCardLabel, scope.coverUrl && styles.scopeCardLabelCovered]}>{scope.name}</Text></> : <PlusIcon size="lg" />}
     </Button>
     {scope?.isCurrent ? <View pointerEvents="none" style={styles.scopeSelectedBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}
   </View>;
@@ -61,12 +65,12 @@ function SettingsActionCard({ danger = false, icon, label, onPress, size }: { da
   return <View style={[styles.settingsCard, { height: size, width: size }]}>
     <Button accessibilityLabel={label} contentMode="raw" onPress={onPress} shape="rounded" size="xl" style={styles.settingsCardButton} variant="ghost">
       {icon}
-      <Text numberOfLines={1} style={[styles.settingsCardLabel, danger && styles.settingsCardLabelDanger]}>{label}</Text>
+      <Text numberOfLines={2} style={[styles.settingsCardLabel, danger && styles.settingsCardLabelDanger]}>{label}</Text>
     </Button>
   </View>;
 }
 
-export function AccountScreen({ page }: { page: "profile" | "settings" }) {
+export function AccountScreen({ initialState, onReferralSheetClose, page }: { initialState?: AccountScreenInitialState; onReferralSheetClose?: () => void; page: "profile" | "settings" }) {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const queryClient = useQueryClient();
@@ -80,61 +84,77 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
   const hydrate = useAuthStore((state) => state.hydrate);
   const signOut = useAuthStore((state) => state.signOut);
   const deleteAccount = useAuthStore((state) => state.deleteAccount);
-  const [sheet, setSheet] = useState<ProfileSheet>();
+  const products = useAppsStore((state) => state.products);
+  const storageSparkCost = useAppsStore((state) => state.sparkCosts.find((charge) => charge.kind === "storage")?.sparkCost);
+  const [sheet, setSheet] = useState<ProfileSheet | undefined>(initialState?.sheet);
   const [nameDraft, setNameDraft] = useState("");
-  const [reportDraft, setReportDraft] = useState("");
-  const [feedbackDraft, setFeedbackDraft] = useState("");
-  const [submittingFeedback, setSubmittingFeedback] = useState(false);
-  const [deletingAccount, setDeletingAccount] = useState(false);
-  const [deleteError, setDeleteError] = useState("");
   const [scopeName, setScopeName] = useState("");
   const [scopeDescription, setScopeDescription] = useState("");
   const [faqQuestionIndex, setFaqQuestionIndex] = useState<number>();
-  const [votingKey, setVotingKey] = useState<string>();
   const [selectingTeam, setSelectingTeam] = useState(false);
   const [selectedScope, setSelectedScope] = useState<ScopeSummary>();
   const [deletingScope, setDeletingScope] = useState(false);
-  const reportRequestKey = useRef<string | undefined>(undefined);
-  const feedbackRequestKey = useRef<string | undefined>(undefined);
-  const feedbackScrollRef = useRef<ScrollView>(null);
-  const feedbackSyncKeys = useRef(new Set<string>());
-  const scrollToNewFeedback = useRef(false);
+  const [sharingReferral, setSharingReferral] = useState(false);
+  const [referralMode, setReferralMode] = useState<ReferralMode>(initialState?.referralMode ?? "share");
+  const [referralCode, setReferralCode] = useState("");
+  const [referralRedemption, setReferralRedemption] = useState<ReferralRedeemResult>();
+  const [referralRedemptionError, setReferralRedemptionError] = useState("");
+  const [redeemingReferral, setRedeemingReferral] = useState(false);
+  const referralCodeInputRef = useRef<ComponentRef<typeof TextInput>>(null);
   const longPressedScopeKey = useRef<string | undefined>(undefined);
   const scopeListMutation = useRef(0);
   const scopeManagementPending = useRef(false);
   const name = displayName(user?.name, user?.email);
-  const feedbackQueryKey = ["profile-feedback", teamKey, scopeKey] as const;
   const scopeQueryKey = scopeListQueryKey(String(user?.key ?? ""), teamKey);
   const scopeCardSize = Math.floor((width - spacing.md * 2 - 20) / 3);
   const settingsCardSize = scopeCardSize;
   const billingSummaryQuery = useBillingSummary(user?.key);
+  const subscriptionQuery = useCurrentSubscription(page === "settings" ? user?.key : undefined);
+  const referralQuery = useQuery({ queryKey: referralSummaryQueryKey(String(user?.key ?? "")), queryFn: fetchReferralSummary, enabled: Boolean(user?.key && sheet === "referral"), refetchOnMount: "always" });
   const scopesQuery = useQuery({ queryKey: scopeQueryKey, queryFn: ({ signal }) => listScopes(teamKey, signal), enabled: Boolean(user?.key && teamKey), refetchOnMount: "always" });
   const teamsQuery = useQuery({ queryKey: teamListQueryKey(String(user?.key ?? "")), queryFn: ({ signal }) => listTeams(signal), enabled: teamSelectionEnabled && sheet === "teams" });
   const scopes = scopesQuery.data ?? [];
   const sortedScopes = [...scopes].sort((left, right) => left.position - right.position);
   const selectedFaq = faqQuestionIndex === undefined ? undefined : FAQ[faqQuestionIndex];
   const canDeleteSelectedScope = Boolean(selectedScope && scopes.some((scope) => scope.key !== selectedScope.key && !scope.key.startsWith("optimistic:")));
-  const feedbackQuery = useQuery({
-    queryKey: feedbackQueryKey,
-    queryFn: async () => {
-      const result = await listFeedback({ teamKey, scopeKey, limit: 50 });
-      const serverKeys = new Set(result.items.map(({ key }) => key));
-      for (const key of serverKeys) feedbackSyncKeys.current.delete(key);
-      const pending = queryClient.getQueryData<Awaited<ReturnType<typeof listFeedback>>>(feedbackQueryKey)?.items.filter(({ key }) => (key.startsWith("optimistic:") || feedbackSyncKeys.current.has(key)) && !serverKeys.has(key)) ?? [];
-      return { ...result, items: [...result.items, ...pending] };
+  const referralUnused = Boolean(referralQuery.data && referralQuery.data.attributionCount === 0);
+  const normalizedReferralCode = normalizeReferralCode(referralCode);
+  const referralCodeValid = referralCodeSchema.safeParse(normalizedReferralCode).success;
+  const subscription = subscriptionQuery.data;
+  const subscriptionProduct = subscription ? products.find(({ key }) => key === subscription.productKey) : undefined;
+  const subscriptionView = subscription ? subscriptionPresentation(subscription, subscriptionProduct) : undefined;
+  const cancellationPeriodEnd = subscription?.currentPeriodEnd ? new Date(subscription.currentPeriodEnd).toLocaleDateString() : undefined;
+  const cancelSubscription = useMutation({
+    mutationFn: () => setSubscriptionCancellation(true),
+    onSuccess: (updated) => {
+      if (user?.key) {
+        const queryKey = currentSubscriptionQueryKey(user.key);
+        queryClient.setQueryData(queryKey, updated);
+        void queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "active" });
+      }
+      setSheet(undefined);
+      showToast({ title: "Cancellation scheduled.", duration: 2_500 });
     },
-    enabled: false,
+    onError: () => showToast({ title: "Subscription could not be canceled. Please try again.", duration: 2_500 }),
   });
-  const refetchFeedback = feedbackQuery.refetch;
-
-  useEffect(() => {
-    if (sheet !== "feedback" || !teamKey || !scopeKey) return;
-    void queryClient.invalidateQueries({ queryKey: ["profile-feedback", teamKey, scopeKey] }).then(() => refetchFeedback());
-  }, [teamKey, queryClient, refetchFeedback, scopeKey, sheet]);
-
   useEffect(() => {
     if (sheet === "scope-create" && !scopeOperationIsPending()) void queryClient.invalidateQueries({ queryKey: scopeListQueryKey(String(user?.key ?? ""), teamKey) });
   }, [teamKey, queryClient, sheet, user?.key]);
+  const initialReferralMode = initialState?.referralMode;
+  const initialSheet = initialState?.sheet;
+  useEffect(() => {
+    if (!initialSheet || !initialReferralMode) return;
+    const timeout = setTimeout(() => {
+      setReferralMode(initialReferralMode);
+      setSheet(initialSheet);
+    }, 0);
+    return () => clearTimeout(timeout);
+  }, [initialReferralMode, initialSheet]);
+  useEffect(() => {
+    if (sheet !== "referral" || referralMode !== "redeem") return;
+    const timeout = setTimeout(() => referralCodeInputRef.current?.focus(), 300);
+    return () => clearTimeout(timeout);
+  }, [referralMode, sheet]);
 
   const pickAvatar = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -179,72 +199,16 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
     });
   };
 
-  const sendReport = () => {
-    const message = reportDraft.trim();
-    if (!message || !teamKey || !scopeKey) return;
-    const requestKey = reportRequestKey.current ?? randomUUID();
-    reportRequestKey.current = requestKey;
+  const permanentlyDeleteAccount = () => {
     setSheet(undefined);
-    void createSupportTicket({ teamKey, scopeKey, message }, requestKey).then(() => {
-      reportRequestKey.current = undefined;
-      setReportDraft("");
-      showToast({ title: "Issue report sent.", duration: 2_500 });
-    }).catch(() => {
-      setSheet("report");
-      showToast({ title: "Your report could not be sent.", duration: 2_500 });
+    const deletion = deleteAccount();
+    queryClient.clear();
+    router.replace("/onboarding");
+    void deletion.then(() => {
+      showToast({ title: "Your account has been deleted.", duration: 3_000 });
+    }).catch((error) => {
+      showToast({ title: extractDomainErrorMessage(error) ?? "Your account could not be deleted. Please try again.", duration: 3_000 });
     });
-  };
-
-  const sendFeedback = () => {
-    const message = feedbackDraft.trim();
-    if (!message || !teamKey || !scopeKey) return;
-    const requestKey = feedbackRequestKey.current ?? randomUUID();
-    feedbackRequestKey.current = requestKey;
-    setFeedbackDraft("");
-    const optimisticKey = `optimistic:${requestKey}`;
-    const optimisticFeedback: FeedbackItem = { key: optimisticKey, message, upvotes: 0, downvotes: 0, viewerVote: null, createdAt: new Date().toISOString() };
-    feedbackSyncKeys.current.add(optimisticKey);
-    queryClient.setQueryData<Awaited<ReturnType<typeof listFeedback>>>(feedbackQueryKey, (current) => ({ items: [...(current?.items ?? []).filter(({ key }) => key !== optimisticKey), optimisticFeedback], nextCursor: current?.nextCursor ?? null }));
-    scrollToNewFeedback.current = true;
-    setSubmittingFeedback(true);
-    setSheet("feedback");
-    void createFeedback({ teamKey, scopeKey, message }, requestKey).then((created) => {
-      feedbackRequestKey.current = undefined;
-      feedbackSyncKeys.current.delete(optimisticKey);
-      feedbackSyncKeys.current.add(created.key);
-      queryClient.setQueryData<Awaited<ReturnType<typeof listFeedback>>>(feedbackQueryKey, (current) => current ? { ...current, items: current.items.map((item) => item.key === optimisticKey ? created : item) } : { items: [created], nextCursor: null });
-      showToast({ title: "Feedback sent. Thank you!", duration: 2_500 });
-    }).catch(() => {
-      feedbackSyncKeys.current.delete(optimisticKey);
-      queryClient.setQueryData<Awaited<ReturnType<typeof listFeedback>>>(feedbackQueryKey, (current) => current ? { ...current, items: current.items.filter(({ key }) => key !== optimisticKey) } : current);
-      showToast({ title: "Please send a clear feature request or product improvement.", duration: 3_000 });
-    }).finally(() => setSubmittingFeedback(false));
-  };
-
-  const vote = (item: FeedbackItem, nextVote: "up" | "down") => {
-    if (votingKey || !teamKey || !scopeKey) return;
-    const desiredVote = item.viewerVote === nextVote ? null : nextVote;
-    setVotingKey(item.key);
-    void setFeedbackVote({ teamKey, scopeKey, ticketKey: item.key, vote: desiredVote }, randomUUID()).then((updated) => {
-      queryClient.setQueryData<Awaited<ReturnType<typeof listFeedback>>>(feedbackQueryKey, (current) => current ? { ...current, items: current.items.map((candidate) => candidate.key === updated.key ? updated : candidate) } : current);
-    }).catch(() => {
-      void queryClient.invalidateQueries({ queryKey: feedbackQueryKey }).then(() => feedbackQuery.refetch());
-      showToast({ title: "Your vote could not be saved.", duration: 2_500 });
-    }).finally(() => setVotingKey(undefined));
-  };
-
-  const permanentlyDeleteAccount = async () => {
-    if (deletingAccount) return;
-    setDeletingAccount(true);
-    setDeleteError("");
-    try {
-      await deleteAccount();
-      queryClient.clear();
-      router.replace("/onboarding");
-    } catch (error) {
-      setDeleteError(extractDomainErrorMessage(error) ?? "Your account could not be deleted. Please try again.");
-      setDeletingAccount(false);
-    }
   };
 
   const logOut = async () => {
@@ -498,9 +462,40 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
   };
 
   const headerActions = page === "profile" ? <>
-    <Button accessibilityLabel="Open notifications" contentMode="raw" iconOnly onPress={() => setSheet("notifications")} size="xs" variant="icon"><BellIcon size="sm" /></Button>
+    <Button accessibilityLabel="Open notifications in Signal" contentMode="raw" iconOnly onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "inbox", inbox: "internal" } })} size="xs" variant="icon"><BellIcon size="sm" /></Button>
     <Button accessibilityLabel="Open settings" contentMode="raw" iconOnly onPress={() => router.push("/settings")} size="xs" variant="icon"><SettingsIcon size="sm" /></Button>
   </> : undefined;
+
+  async function shareReferral() {
+    const code = referralQuery.data?.code.code;
+    if (!code || sharingReferral) return;
+    setSharingReferral(true);
+    try {
+      await NativeShare.share({ message: code }, { dialogTitle: "Share referral" });
+    } catch {
+      showToast({ title: "The share sheet could not be opened.", duration: 2_500 });
+    } finally {
+      setSharingReferral(false);
+    }
+  }
+
+  function closeReferralSheet() {
+    setSheet(undefined);
+    onReferralSheetClose?.();
+  }
+
+  async function submitReferralCode() {
+    if (!referralCodeValid || redeemingReferral || referralRedemption) return;
+    setRedeemingReferral(true);
+    setReferralRedemptionError("");
+    try {
+      setReferralRedemption(await redeemReferralCode(normalizedReferralCode));
+    } catch (error) {
+      setReferralRedemptionError(referralRedemptionErrorMessage(error));
+    } finally {
+      setRedeemingReferral(false);
+    }
+  }
 
   return <>
     <AccountScreenShell rightAction={headerActions} title={page === "profile" ? "Profile" : "Settings"}>
@@ -513,7 +508,7 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
           {user?.email ? <Text style={styles.email}>{user.email}</Text> : null}
         </View>
         <View style={styles.storageSection}>
-          <View style={styles.scopeTitleRow}><Text style={styles.scopeTitle}>Storage</Text><Button accessibilityLabel="How is storage charged?" contentMode="raw" iconOnly onPress={() => setSheet("storage-help")} size="xs" variant="icon"><HelpIcon size="sm" /></Button></View>
+          <View style={styles.scopeTitleRow}><Text style={styles.scopeTitle}>{storageSparkCost ? `Storage (${storageSparkCost} Sparks / GB / Month)` : "Storage"}</Text><Button accessibilityLabel="How is storage charged?" contentMode="raw" iconOnly onPress={() => setSheet("storage-help")} size="xs" variant="icon"><HelpIcon size="sm" /></Button></View>
           {billingSummaryQuery.isPending ? <Skeleton style={styles.storageSkeleton} /> : billingSummaryQuery.isError ? <Text accessibilityRole="alert" style={styles.storageSummary}>Storage usage is unavailable.</Text> : <Text style={styles.storageSummary}>{formatStorageSummary(billingSummaryQuery.data.storage.bytes, billingSummaryQuery.data.storage.estimatedMonthlyMicroSparks)}</Text>}
         </View>
         <View style={styles.scopeSection}>
@@ -526,12 +521,14 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
       </View> : <View style={styles.settingsContent}>
         <View style={styles.settingsGrid}>
           {teamSelectionEnabled ? <SettingsActionCard icon={<SwitchTeamIcon size="lg" />} label="Switch team" onPress={() => setSheet("teams")} size={settingsCardSize} /> : null}
-          <SettingsActionCard icon={<IssueIcon size="lg" />} label="Report issue" onPress={() => setSheet("report")} size={settingsCardSize} />
-          <SettingsActionCard icon={<FeedbackIcon size="lg" />} label="Feedback" onPress={() => setSheet("feedback")} size={settingsCardSize} />
+          <SettingsActionCard icon={<IssueIcon size="lg" />} label="Report issue" onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "inbox", inbox: "internal", compose: "issue" } })} size={settingsCardSize} />
+          <SettingsActionCard icon={<FeedbackIcon size="lg" />} label="Feedback" onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "inbox", inbox: "internal", compose: "feedback" } })} size={settingsCardSize} />
           <SettingsActionCard icon={<FaqIcon size="lg" />} label="FAQ" onPress={() => { setFaqQuestionIndex(undefined); setSheet("faq"); }} size={settingsCardSize} />
           <SettingsActionCard icon={<TermsIcon size="lg" />} label="Terms" onPress={() => void Linking.openURL("https://vorinthex.com/terms")} size={settingsCardSize} />
           <SettingsActionCard icon={<PrivacyIcon size="lg" />} label="Privacy" onPress={() => void Linking.openURL("https://vorinthex.com/privacy")} size={settingsCardSize} />
-          <SettingsActionCard danger icon={<DeleteAccountIcon size="lg" variant="danger" />} label="Delete account" onPress={() => { setDeleteError(""); setSheet("delete-account"); }} size={settingsCardSize} />
+          <SettingsActionCard icon={<ReferralIcon size="lg" />} label="Referral" onPress={() => { setReferralMode("share"); setSheet("referral"); }} size={settingsCardSize} />
+          {subscriptionView?.action === "cancel" ? <SettingsActionCard danger icon={<WarningIcon size="lg" variant="danger" />} label="Cancel subscription" onPress={() => setSheet("cancel-subscription")} size={settingsCardSize} /> : null}
+          <SettingsActionCard danger icon={<DeleteAccountIcon size="lg" variant="danger" />} label="Delete account" onPress={() => setSheet("delete-account")} size={settingsCardSize} />
           <SettingsActionCard danger icon={<SignOutIcon size="lg" variant="danger" />} label="Log out" onPress={() => void logOut()} size={settingsCardSize} />
         </View>
       </View>}
@@ -572,52 +569,36 @@ export function AccountScreen({ page }: { page: "profile" | "settings" }) {
       </BottomSheetMenu>
     </BottomSheet>
 
-    <BottomSheet dismissible={!deletingAccount} focusKey="profile-delete-account" footer={<><Button disabled={deletingAccount} loading={deletingAccount} onPress={() => void permanentlyDeleteAccount()} size="md" variant="primary">Delete</Button><Button disabled={deletingAccount} onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open && !deletingAccount) setSheet(undefined); }} open={sheet === "delete-account"} title="Delete account?">
-      {deleteError ? <Text accessibilityRole="alert" style={styles.deleteError}>{deleteError}</Text> : null}
+    <BottomSheet dismissible={!cancelSubscription.isPending} focusKey="profile-cancel-subscription" footer={<><Button disabled={cancelSubscription.isPending} loading={cancelSubscription.isPending} onPress={() => cancelSubscription.mutate()} size="md" variant="primary">Cancel subscription</Button><Button disabled={cancelSubscription.isPending} onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open && !cancelSubscription.isPending) setSheet(undefined); }} open={sheet === "cancel-subscription"} title="Cancel subscription?">
+      <Text style={styles.scopeHelp}>{cancellationPeriodEnd ? `Your subscription remains active until ${cancellationPeriodEnd}, then it will not renew.` : "Your subscription remains active through the current billing period, then it will not renew."}</Text>
     </BottomSheet>
 
-    <BottomSheet description="Quick answers about plans and Sparks." focusKey="profile-faq" footer={<Button onPress={() => { setFaqQuestionIndex(undefined); setSheet(undefined); }} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) { setFaqQuestionIndex(undefined); setSheet(undefined); } }} open={sheet === "faq"} title="FAQ">
-      <ScrollView contentContainerStyle={styles.faqList}>{FAQ.map(([question], index) => <ActionPill key={question} onPress={() => setFaqQuestionIndex(index)} pressLabel={`Read ${question}`}><Text numberOfLines={1} style={styles.faqQuestion}>{question}</Text></ActionPill>)}</ScrollView>
+    <BottomSheet focusKey="profile-delete-account" footer={<><Button onPress={permanentlyDeleteAccount} size="md" variant="primary">Delete</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "delete-account"} title="Delete account?" />
+
+    <BottomSheet description={referralMode === "share" ? "Invite a friend with your code and earn Sparks as they get started." : "Apply the referral code from the person who invited you."} dismissible={!redeemingReferral} focusKey="profile-referral" footer={<>{referralMode === "share" ? referralUnused ? <Button disabled={sharingReferral} loading={sharingReferral} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button> : null : <Button disabled={!referralCodeValid || redeemingReferral || Boolean(referralRedemption)} loading={redeemingReferral} onPress={() => void submitReferralCode()} size="md" variant="primary">{referralRedemption ? "Code applied" : "Use code"}</Button>}<Button disabled={redeemingReferral} onPress={closeReferralSheet} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open && !redeemingReferral) closeReferralSheet(); }} open={sheet === "referral"} title="Referral">
+      <ScrollView contentContainerStyle={styles.referralContent} showsVerticalScrollIndicator={false}>
+        <Tabs accessibilityLabel="Referral settings" accessibilityRole="tablist" style={styles.referralTabs}><Button accessibilityRole="tab" accessibilityState={{ selected: referralMode === "share" }} onPress={() => setReferralMode("share")} size="xs" style={styles.referralTab} variant={referralMode === "share" ? "secondary" : "ghost"}>My code</Button><Button accessibilityRole="tab" accessibilityState={{ selected: referralMode === "redeem" }} onPress={() => setReferralMode("redeem")} size="xs" style={styles.referralTab} variant={referralMode === "redeem" ? "secondary" : "ghost"}>Use code</Button></Tabs>
+        {referralMode === "share" ? <>
+          <View style={styles.referralHero}><View style={styles.referralIcon}><View style={styles.referralIconScale}><ReferralIcon size="lg" /></View></View><Text style={styles.referralCopy}>Earn 50 Sparks when your friend signs up, plus 100 more when they start their first subscription.</Text></View>
+          {referralQuery.isPending ? <Text style={styles.referralState}>Loading your referral status...</Text> : referralQuery.isError ? <View style={styles.referralStateBlock}><Text accessibilityRole="alert" style={styles.deleteError}>Your referral status could not be loaded.</Text><Button onPress={() => void referralQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : referralQuery.data ? referralUnused ? <View style={styles.referralCodeBlock}><Text style={styles.referralLabel}>YOUR CODE</Text><Text selectable style={styles.referralCode}>{referralQuery.data.code.code}</Text></View> : referralQuery.data.invitees.length === 0 ? <Text style={styles.referralState}>{referralQuery.data.attributionCount} {referralQuery.data.attributionCount === 1 ? "friend has" : "friends have"} joined. Detailed milestones will be available shortly.</Text> : <View style={styles.referralInvitees}>{referralQuery.data.invitees.map((invitee, index) => <View key={`${invitee.displayName ?? "friend"}-${index}`} style={styles.referralInvitee}><Text style={styles.referralInviteeName}>{invitee.displayName ?? "Invited friend"}</Text><View style={styles.referralMilestone}><Text style={styles.referralMilestoneReward}>50 Sparks</Text><Text style={invitee.signupRewardEarned ? styles.referralEarned : styles.referralPending}>{invitee.signupRewardEarned ? "Earned" : "Pending"}</Text></View><View style={styles.referralMilestone}><Text style={styles.referralMilestoneReward}>100 Sparks</Text><Text style={invitee.firstPaidRewardStatus === "earned" ? styles.referralEarned : styles.referralPending}>{invitee.firstPaidRewardStatus === "earned" ? "Earned" : invitee.firstPaidRewardStatus === "reversed" ? "Reversed" : "Pending"}</Text></View></View>)}</View> : null}
+        </> : <View style={styles.referralRedeemForm}>
+          <Text style={styles.inputLabel}>Referral code</Text>
+          <TextInput accessibilityLabel="Referral code" autoCapitalize="characters" autoCorrect={false} autoFocusInBottomSheet={false} editable={!redeemingReferral && !referralRedemption} maxLength={64} onChangeText={(value) => { setReferralCode(value.toUpperCase()); setReferralRedemptionError(""); }} onSubmitEditing={() => void submitReferralCode()} placeholder="12-character code" ref={referralCodeInputRef} returnKeyType="done" value={referralCode} />
+          {referralCode && !referralCodeValid ? <Text accessibilityRole="alert" style={styles.deleteError}>Enter a 12-character code using 0-9 and A-F.</Text> : null}
+          {referralRedemptionError ? <Text accessibilityRole="alert" style={styles.deleteError}>{referralRedemptionError}</Text> : null}
+          {referralRedemption ? <View accessibilityLiveRegion="polite" style={styles.referralSuccess}><Text style={styles.referralSuccessTitle}>{referralRedemption.status === "applied" ? "Referral code applied" : "Referral code already applied"}</Text><Text style={styles.referralState}>{referralRedemption.referrerName ? `Invited by ${referralRedemption.referrerName}.` : "Your referral is connected."}</Text><View style={styles.referralMilestone}><Text style={styles.referralMilestoneReward}>Sign-up reward</Text><Text style={styles.referralEarned}>Issued</Text></View><View style={styles.referralMilestone}><Text style={styles.referralMilestoneReward}>First subscription reward</Text><Text style={referralRedemption.firstPaidRewardStatus === "earned" ? styles.referralEarned : styles.referralPending}>{referralRedemption.firstPaidRewardStatus === "earned" ? "Earned" : referralRedemption.firstPaidRewardStatus === "reversed" ? "Reversed" : "Pending"}</Text></View></View> : null}
+        </View>}
+      </ScrollView>
     </BottomSheet>
 
-    <BottomSheet footer={<Button onPress={() => setFaqQuestionIndex(undefined)} size="md" variant="secondary">Close</Button>} onOpenChange={(open) => { if (!open) setFaqQuestionIndex(undefined); }} open={sheet === "faq" && selectedFaq !== undefined} title={selectedFaq?.[0] ?? "FAQ"}>
-      <Text style={styles.faqAnswer}>{selectedFaq?.[1] ?? ""}</Text>
+    <BottomSheet description={selectedFaq ? undefined : "Quick answers about plans and Sparks."} focusKey="profile-faq" footer={<Button onPress={() => { if (selectedFaq) setFaqQuestionIndex(undefined); else setSheet(undefined); }} size="md" variant="secondary">{selectedFaq ? "Back" : "Close"}</Button>} height="full" onOpenChange={(open) => { if (!open) { setFaqQuestionIndex(undefined); setSheet(undefined); } }} open={sheet === "faq"} pageKey={selectedFaq ? `answer-${faqQuestionIndex}` : "questions"} title={selectedFaq?.[0] ?? "FAQ"}>
+      {selectedFaq ? <Text style={styles.faqAnswer}>{selectedFaq[1]}</Text> : <ScrollView contentContainerStyle={styles.faqList}>{FAQ.map(([question], index) => <Button accessibilityLabel={`Read ${question}`} contentMode="raw" key={question} onPress={() => setFaqQuestionIndex(index)} shape="pill" size="md" style={styles.faqPill} variant="secondary"><Text numberOfLines={2} style={styles.faqQuestion}>{question}</Text></Button>)}</ScrollView>}
     </BottomSheet>
 
     <BottomSheet focusKey="profile-name" footer={<><Button disabled={!nameDraft.trim()} onPress={saveName} size="md" variant="primary">Save</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "name"} title="Edit name">
       <View style={styles.form}><Text style={styles.inputLabel}>Name</Text><TextInput accessibilityLabel="Name" maxLength={200} onChangeText={setNameDraft} onSubmitEditing={saveName} placeholder="Name" returnKeyType="done" value={nameDraft} /></View>
     </BottomSheet>
 
-    <BottomSheet focusKey="profile-report" footer={<><Button disabled={!reportDraft.trim() || !teamKey || !scopeKey} onPress={sendReport} size="md" variant="primary">Send</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "report"} title="Report an issue">
-      <View style={styles.form}><Text style={styles.inputLabel}>Issue description</Text><TextInput accessibilityLabel="Issue description" maxLength={8_000} multiline onChangeText={(value) => { reportRequestKey.current = undefined; setReportDraft(value); }} placeholder="What happened?" style={styles.reportInput} textAlignVertical="top" value={reportDraft} /></View>
-    </BottomSheet>
-
-    <BottomSheet description="Share an idea, or upvote and downvote suggestions from others." focusKey="profile-feedback" footer={<><Button disabled={submittingFeedback} onPress={() => setSheet("feedback-create")} size="md" variant="primary">New</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "feedback"} title="Give us feedback">
-      <ScrollView contentContainerStyle={styles.feedbackList} onContentSizeChange={() => { if (scrollToNewFeedback.current) { scrollToNewFeedback.current = false; requestAnimationFrame(() => feedbackScrollRef.current?.scrollToEnd({ animated: true })); } }} ref={feedbackScrollRef}>
-        {feedbackQuery.isFetching && !feedbackQuery.data?.items.length ? [0, 1, 2].map((index) => <Skeleton key={index} style={styles.feedbackSkeleton} />) : feedbackQuery.isError && !feedbackQuery.data?.items.length ? <View style={styles.feedbackState}><Text style={styles.feedbackEmpty}>Feedback could not be loaded. Close and reopen this sheet to try again.</Text></View> : feedbackQuery.data?.items.length ? feedbackQuery.data.items.map((item) => {
-          const upSelected = item.viewerVote === "up";
-          const downSelected = item.viewerVote === "down";
-          return <ActionPill
-            action={<View style={styles.voteContent}><ChevronUpIcon size="sm" variant={upSelected ? "inverse" : "muted"} /><Text style={[styles.voteCount, upSelected && styles.voteCountSelected]}>{item.upvotes}</Text></View>}
-            actionLabel={`Upvote: ${item.message}`}
-            actionSelected={upSelected}
-            appearance="reorder"
-            disabled={votingKey === item.key || item.key.startsWith("optimistic:")}
-            key={item.key}
-            onAction={() => vote(item, "up")}
-            onSecondaryAction={() => vote(item, "down")}
-            secondaryAction={<View style={styles.voteContent}><ChevronDownIcon size="sm" variant={downSelected ? "inverse" : "muted"} /><Text style={[styles.voteCount, downSelected && styles.voteCountSelected]}>{item.downvotes}</Text></View>}
-            secondaryActionLabel={`Downvote: ${item.message}`}
-            secondaryActionSelected={downSelected}
-          ><Text numberOfLines={1} style={styles.feedbackMessage}>{item.message}</Text></ActionPill>;
-        }) : <View style={styles.feedbackState}><Text style={styles.feedbackEmpty}>No suggestions yet. Be the first to share one.</Text></View>}
-      </ScrollView>
-    </BottomSheet>
-
-    <BottomSheet focusKey="profile-feedback-create" footer={<><Button disabled={!feedbackDraft.trim() || !teamKey || !scopeKey} onPress={sendFeedback} size="md" variant="primary">Send</Button><Button onPress={() => setSheet("feedback")} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet("feedback"); }} open={sheet === "feedback-create"} title="New feedback">
-      <View style={styles.form}><Text style={styles.inputLabel}>Suggestion</Text><TextInput accessibilityLabel="Feedback suggestion" maxLength={8_000} multiline onChangeText={(value) => { feedbackRequestKey.current = undefined; setFeedbackDraft(value); }} placeholder="What would make Vorinthex AI better?" style={styles.reportInput} textAlignVertical="top" value={feedbackDraft} /></View>
-    </BottomSheet>
-    <NotificationsSheet onClose={() => setSheet(undefined)} open={sheet === "notifications"} />
   </>;
 }
 
@@ -636,19 +617,34 @@ const styles = StyleSheet.create({
   name: { color: palette.silver50, flexShrink: 1, fontFamily: fonts.medium, fontSize: 28, lineHeight: 34, textAlign: "center" },
   email: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 14 },
   form: { gap: spacing.sm },
-  feedbackList: { flexGrow: 1, gap: spacing.sm, paddingBottom: spacing.md },
-  feedbackSkeleton: { borderRadius: 999, height: 48, width: "100%" },
-  feedbackMessage: { color: palette.silver100, flexShrink: 1, fontFamily: fonts.regular, fontSize: 14 },
-  feedbackEmpty: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 14, lineHeight: 20, paddingHorizontal: spacing.sm, textAlign: "center" },
-  feedbackState: { alignItems: "center", flex: 1, justifyContent: "center" },
   inputLabel: { color: palette.silver300, fontFamily: fonts.medium, fontSize: 12, letterSpacing: 0.4, marginLeft: 2 },
   reportInput: { minHeight: 180 },
-  voteContent: { alignItems: "center", flexDirection: "row", gap: 2 },
-  voteCount: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 10 },
-  voteCountSelected: { color: palette.obsidian900 },
   faqList: { gap: spacing.sm, paddingBottom: spacing.lg },
-  faqQuestion: { color: palette.silver50, flexShrink: 1, fontFamily: fonts.medium, fontSize: 14 },
+  faqPill: { justifyContent: "flex-start", minHeight: 40, paddingHorizontal: spacing.md, width: "100%" },
+  faqQuestion: { color: palette.silver100, flexShrink: 1, fontFamily: fonts.regular, fontSize: 13, lineHeight: 17, textAlign: "left" },
   faqAnswer: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, lineHeight: 23, paddingBottom: spacing.md },
+  referralContent: { flexGrow: 1, gap: spacing.xl, paddingBottom: spacing.lg },
+  referralTabs: { alignSelf: "stretch", width: "100%" },
+  referralTab: { flex: 1 },
+  referralHero: { alignItems: "center", gap: spacing.lg, paddingTop: spacing.lg },
+  referralIcon: { alignItems: "center", height: 88, justifyContent: "center", width: 88 },
+  referralIconScale: { transform: [{ scale: 2 }] },
+  referralCopy: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 14, lineHeight: 21, maxWidth: 350, textAlign: "center" },
+  referralState: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 14, textAlign: "center" },
+  referralStateBlock: { alignItems: "center", gap: spacing.md },
+  referralCodeBlock: { alignItems: "center", gap: spacing.xs },
+  referralLabel: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 10, letterSpacing: 2 },
+  referralCode: { color: palette.chromeWhite, fontFamily: fonts.medium, fontSize: 30, letterSpacing: 4 },
+  referralInvitees: { gap: spacing.sm },
+  referralInvitee: { borderColor: palette.hairline, borderRadius: radii.md, borderWidth: 1, gap: spacing.sm, padding: spacing.md },
+  referralInviteeName: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 15 },
+  referralMilestone: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  referralMilestoneReward: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 13 },
+  referralEarned: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 12 },
+  referralPending: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 12 },
+  referralRedeemForm: { gap: spacing.sm },
+  referralSuccess: { borderColor: palette.hairline, borderRadius: radii.md, borderWidth: 1, gap: spacing.md, marginTop: spacing.sm, padding: spacing.md },
+  referralSuccessTitle: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 16, textAlign: "center" },
   deleteError: { color: palette.danger, fontFamily: fonts.regular, fontSize: 13, lineHeight: 19 },
   storageSection: { alignSelf: "stretch", gap: spacing.xs, marginTop: spacing.xl, width: "100%" },
   storageSummary: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 14, lineHeight: 20 },
@@ -662,9 +658,9 @@ const styles = StyleSheet.create({
   scopeCard: { backgroundColor: palette.panelRaised, borderColor: palette.hairline, borderRadius: radii.md, borderWidth: 1, overflow: "hidden", position: "relative" },
   scopeCardSelected: { borderColor: palette.silver50, elevation: 4, shadowColor: palette.silver50, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.62, shadowRadius: 5 },
   scopeCardButton: { flexDirection: "column", gap: 10, height: "100%", paddingHorizontal: 8, width: "100%" },
-  scopeCardButtonCovered: { backgroundColor: "rgba(0, 0, 0, 0.28)" },
+  scopeCardButtonCovered: { justifyContent: "flex-end", paddingBottom: 10 },
   scopeCardLabel: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "center", width: "100%" },
-  scopeCardLabelCovered: { color: palette.chromeWhite, textShadowColor: "rgba(0, 0, 0, 0.9)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
+  scopeCardLabelCovered: { paddingHorizontal: 5, paddingVertical: 4, borderRadius: radii.sm, backgroundColor: "rgba(0, 0, 0, 0.68)", color: "#FFFFFF" },
   scopeCover: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   scopeSelectedBadge: { alignItems: "center", backgroundColor: palette.silver50, borderRadius: 10, height: 20, justifyContent: "center", position: "absolute", right: 4, top: 4, width: 20 },
   scopeSkeleton: { backgroundColor: palette.hairlineBright, borderRadius: radii.md, opacity: 0.72 },

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import type { ProviderAdapter, ProviderExecuteRequest } from '@/lib/ai/providers';
 import { selectRoute } from './select-route';
-import { executeAsk, executeWebSearch } from './execute-route';
+import { executeAsk } from './execute-route';
 import { NoEligibleRouteError, RouteValidationError } from './errors';
 
 const teamKey = newId();
@@ -32,16 +32,14 @@ describe('action-definition router', () => {
     await expect(selectRoute({ mode: 'auto', teamKey, actionSlug: 'text', teamProviderKey: 'retired' } as never, { adapters })).rejects.toBeInstanceOf(RouteValidationError);
   });
 
-  test('executes text and web through OpenRouter without forwarding mode', async () => {
+  test('executes text through OpenRouter without forwarding mode', async () => {
     const calls: Array<{ model: string; input: unknown }> = [];
     const openrouter: ProviderAdapter = { id: 'openrouter', name: 'OpenRouter', async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) { calls.push({ model: request.modelId, input: request.input }); return { output: { text: 'ok', toolCalls: [], stopReason: 'stop' } as TOutput, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, providerId: 'openrouter', modelId: request.modelId, externalModelId: request.externalModelId }; } };
     const options = { adapters: { openrouter } };
     const input = { messages: [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'Hello' }] }] };
     await executeAsk(teamKey, input, options);
     await executeAsk(teamKey, { ...input, mode: 'deep' }, options);
-    await executeWebSearch(teamKey, { prompt: 'Current facts' }, options);
     expect(calls.map(({ model }) => model)).toEqual([
-      'google.gemini-3.1-flash-lite',
       'google.gemini-3.1-flash-lite',
       'google.gemini-3.1-flash-lite',
     ]);

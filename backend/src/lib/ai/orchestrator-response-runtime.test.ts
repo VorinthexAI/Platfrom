@@ -154,7 +154,7 @@ describe('orchestrator response runtime', () => {
       idempotencyKey: 'orchestrator-request', recorder: async (event) => { events.push(event as Record<string, unknown>); }, appScopeKey: newId(),
       charge: async (_key, input) => { charge = input; return { status: 'applied', transaction: { key: 'charge', eventKey: input.eventKey } } as never; },
     });
-    expect(charge).toMatchObject({ kind: 'action', actionSlug: 'text', microSparks: 550 });
+    expect(charge).toMatchObject({ kind: 'action', actionSlug: 'text', microSparks: 440 });
     expect(events[0]).toMatchObject({ inputTokens: 1, outputTokens: 1, totalTokens: 2 });
   });
 });

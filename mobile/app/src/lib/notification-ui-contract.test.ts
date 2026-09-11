@@ -2,13 +2,12 @@ import { describe, expect, test } from "bun:test";
 
 const read = (path: string) => Bun.file(new URL(path, import.meta.url)).text();
 
-describe("notification hub integration", () => {
-  test("uses authenticated presence and exposes a static full-screen notification list", async () => {
-    const [presence, profile, route, sheet, avatar, provider] = await Promise.all([
+describe("Signal notification integration", () => {
+  test("uses authenticated presence and routes notifications into the permanent internal inbox", async () => {
+    const [presence, profile, signal, avatar, provider] = await Promise.all([
       read("./presence.tsx"),
       read("../app/profile.tsx"),
-      read("../app/notifications.tsx"),
-      read("../components/NotificationsSheet.tsx"),
+      read("../components/capability/SignalWorkspace.tsx"),
       read("../components/ProfileAvatarButton.tsx"),
       read("./query-client.tsx"),
     ]);
@@ -21,13 +20,14 @@ describe("notification hub integration", () => {
     expect(presence).toContain("useAuthStore.getState().status !== \"authenticated\"");
     expect(profile).toContain('<AccountScreen page="profile" />');
     const account = await Bun.file(new URL("../components/AccountScreen.tsx", import.meta.url)).text();
-    expect(account).toContain('onPress={() => setSheet("notifications")}');
-    expect(account).toContain('<NotificationsSheet onClose={() => setSheet(undefined)} open={sheet === "notifications"} />');
-    expect(route).toContain('<NotificationsSheet onClose={close} open />');
-    expect(sheet).toContain('height="full"');
-    expect(sheet).toContain("<ActionPill");
-    expect(sheet).toContain('enabled: open && Boolean(userKey && teamKey && scopeKey)');
-    expect(sheet).toContain('if (!open || !userKey || !teamKey || !scopeKey) return;');
+    expect(account).toContain('inbox: "internal"');
+    expect(account).not.toContain("NotificationsSheet");
+    expect(signal).toContain('accessibilityLabel="Open Vorinthex inbox"');
+    expect(signal).toContain('source={contentPresentationIconSource.platform}');
+    expect(signal).toContain('style={styles.managedAccountLogo}');
+    expect(signal).not.toContain("<ChatBubbleIcon");
+    expect(signal).toContain('thread.source.kind === "internal"');
+    expect(signal).toContain('<SupportComposeSheets');
     expect(avatar).toContain("notificationBadge");
     expect(avatar).toContain("unreadCount");
   });

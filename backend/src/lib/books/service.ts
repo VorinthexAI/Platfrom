@@ -10,6 +10,7 @@ import { ProviderExecutionError } from '@/lib/ai/router';
 import { currentFixedChargeReceipt, markFixedChargeOutcomeAccepted, type FixedChargeReceipt } from '@/lib/ai/events/runtime';
 import type { ChatOutput } from '@/lib/ai/providers';
 import { BookRepositoryError, createBookRepository, type BookAccessContext, type BookDetailRow, type BookRepository } from './repository';
+import { initialWorkspaceBookKey } from '@/lib/initial-workspace-content-identifiers';
 import { BOOK_GENERATION_LEASE_MS, BOOK_GENERATION_RENEW_MS } from './generation-config';
 import { BookGenerationTerminalError } from './generation-errors';
 
@@ -85,7 +86,7 @@ async function bookDto(row: BookDetailRow, sign: UrlSigner) {
   const active = row.chapters.find(({ progress }) => progress && !progress.isCompleted && progress.progressSeconds > 0)?.chapter.key ?? row.chapters.find(({ progress }) => !progress?.isCompleted)?.chapter.key ?? null;
   const voice = row.book.narratorVoiceKey ? { key: row.book.narratorVoiceKey, name: row.book.narratorVoiceKey[0]!.toUpperCase() + row.book.narratorVoiceKey.slice(1) } : undefined;
   const generationProgressPercent = row.book.generationTotalUnits ? Math.min(100, Math.round(row.book.generationCompletedUnits / row.book.generationTotalUnits * 100)) : 0;
-  const book = { key: row.book.key, title: row.book.title, subtitle: row.book.subtitle ?? row.book.title, description: row.book.description, status: row.book.status, isFavorite: row.book.isFavorite, isExtending: Boolean(row.book.activeExtensionKey), ...(voice ? { narrator: voice } : {}), ...(row.book.coverStorageKey ? { coverUrl: await sign(row.book.coverStorageKey) } : {}), estimatedMinutes: row.book.estimatedMinutes, chapterCount: row.book.chapterCount, progressPercent: totalAudioSeconds > 0 ? Math.min(100, Math.round(listenedSeconds / totalAudioSeconds * 100)) : row.chapters.length ? Math.round(completed / row.chapters.length * 100) : 0, createdAt: row.book.createdAt, updatedAt: row.book.updatedAt ?? row.book.createdAt, ...(row.book.status !== 'ready' ? { generationProgressPercent } : {}), ...(row.book.generationError ? { failureMessage: row.book.generationError } : {}), ...(active ? { currentChapterKey: active } : {}) };
+  const book = { key: row.book.key, title: row.book.title, subtitle: row.book.subtitle ?? row.book.title, description: row.book.description, status: row.book.status, isFavorite: row.book.isFavorite, isExtending: Boolean(row.book.activeExtensionKey), canExtend: Boolean(row.book.generationInput && row.book.generationOwnerKey), managed: row.book.key === initialWorkspaceBookKey(row.book.scopeKey), ...(voice ? { narrator: voice } : {}), ...(row.book.coverStorageKey ? { coverUrl: await sign(row.book.coverStorageKey) } : {}), estimatedMinutes: row.book.estimatedMinutes, chapterCount: row.book.chapterCount, progressPercent: totalAudioSeconds > 0 ? Math.min(100, Math.round(listenedSeconds / totalAudioSeconds * 100)) : row.chapters.length ? Math.round(completed / row.chapters.length * 100) : 0, createdAt: row.book.createdAt, updatedAt: row.book.updatedAt ?? row.book.createdAt, ...(row.book.status !== 'ready' ? { generationProgressPercent } : {}), ...(row.book.generationError ? { failureMessage: row.book.generationError } : {}), ...(active ? { currentChapterKey: active } : {}) };
   return book;
 }
 
@@ -164,6 +165,7 @@ export function createBookService(options: { repository?: BookRepository; genera
     async detail(bookKey: string, raw: unknown, userKey: string) { const input = bookDetailInputSchema.parse(raw); return detailDto(await repository.detail(access(input, userKey), bookKey), sign); },
     async extend(bookKey: string, raw: unknown, userKey: string, execution: { signal?: AbortSignal; timeoutMs?: number } = {}) {
       const input = bookExtendInputSchema.parse(raw); const context = access(input, userKey); const row = await repository.detail(context, bookKey);
+      if (!row.book.generationInput || !row.book.generationOwnerKey) throw new BookRepositoryError('conflict', 'This audio book has a fixed chapter set and cannot be extended.');
       if (input.mode === 'preview') {
         if (row.book.status !== 'ready' || row.chapters.length !== row.book.chapterCount || row.chapters.some(({ chapter }, index) => chapter.position !== index + 1 || chapter.status !== 'audio-ready' || !chapter.content || !chapter.audioStorageKey)) throw new BookRepositoryError('conflict', 'Only a fully ready current audio book can be extended.');
         const response = await suggest({
@@ -225,7 +227,7 @@ export function createBookService(options: { repository?: BookRepository; genera
     },
     async cancel(bookKey: string, raw: unknown, userKey: string) { const input = bookMutationInputSchema.parse(raw); const context = access(input, userKey); await repository.cancelGeneration(context, bookKey, now()); await publish(input.scopeKey); return bookDto(await repository.detail(context, bookKey), sign); },
     async setFavorite(bookKey: string, raw: unknown, userKey: string) { const input = bookFavoriteInputSchema.parse(raw); const context = access(input, userKey); await repository.setFavorite(context, bookKey, input.isFavorite, now()); await publish(input.scopeKey); return bookDto(await repository.detail(context, bookKey), sign); },
-    async delete(bookKey: string, raw: unknown, userKey: string) { const input = bookMutationInputSchema.parse(raw); await repository.deleteBook(access(input, userKey), bookKey, now()); await publish(input.scopeKey); return { key: bookKey }; },
+    async delete(bookKey: string, raw: unknown, userKey: string) { const input = bookMutationInputSchema.parse(raw); if (bookKey === initialWorkspaceBookKey(input.scopeKey)) throw new BookRepositoryError('conflict', 'The workspace introduction audio book cannot be deleted.'); await repository.deleteBook(access(input, userKey), bookKey, now()); await publish(input.scopeKey); return { key: bookKey }; },
     async progress(bookKey: string, chapterKey: string, raw: unknown, userKey: string) { const input = bookProgressInputSchema.parse(raw); const context = access(input, userKey); const timestamp = now(); await repository.upsertProgress(context, bookKey, chapterKey, bookProgressSchema.parse({ key: id(), scopeKey: input.scopeKey, userKey, bookKey, chapterKey, progressSeconds: input.progressSeconds, isCompleted: input.isCompleted, completedAt: input.isCompleted ? timestamp : null, createdAt: timestamp, updatedAt: timestamp })); const detail = await detailDto(await repository.detail(context, bookKey), sign); return { book: detail.book, chapter: detail.chapters.find((chapter) => chapter.key === chapterKey)! }; },
   };
 }

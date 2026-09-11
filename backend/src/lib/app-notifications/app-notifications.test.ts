@@ -38,9 +38,9 @@ describe('app notifications', () => {
   });
 
   test('keeps notification history pagination and read state strict', () => {
-    expect(notificationListInputSchema.parse({})).toEqual({ limit: 50, markRead: false });
-    expect(notificationListInputSchema.parse({ cursor: `${newId()}-${newId()}`, limit: 10, markRead: true })).toMatchObject({ limit: 10, markRead: true });
-    expect(() => notificationListInputSchema.parse({ markRead: false, userKey: newId() })).toThrow('Unrecognized key');
+    expect(notificationListInputSchema.parse({})).toEqual({ limit: 25, mailbox: 'inbox' });
+    expect(notificationListInputSchema.parse({ cursor: newId(), limit: 10, mailbox: 'sent' })).toMatchObject({ limit: 10, mailbox: 'sent' });
+    expect(() => notificationListInputSchema.parse({ userKey: newId() })).toThrow('Unrecognized key');
   });
 
   test('accepts current and legacy Expo token forms but rejects arbitrary strings', () => {
@@ -85,7 +85,9 @@ describe('app notifications', () => {
     const result = await repository.createNotification({ title: 'Ready', message: 'Open the app.', userKeys: recipientUserKeys, notifyAll: false }, { actorUserKey: actor.userKey, teamKey: actor.value.teamKey, scopeKey: actor.value.runtimeScopeKey, idempotencyKey: 'request-1' }, recipientUserKeys, await embed());
     expect(result).toMatchObject({ recipients: 2, deliveries: 0, replayed: false });
     expect(queries[1]?.query).toContain('INTO appNotificationRecipients');
-    expect(queries[1]?.query).toContain('FOR userKey IN @recipientUserKeys');
+    expect(queries[1]?.query).toContain('FOR inbox IN @recipientInboxes');
+    expect(queries[1]?.query).toContain('INTO userInboxThreads');
+    expect(queries[1]?.query).toContain('INTO userInboxMessages');
   });
 
   test('formats ceil elapsed days with friendly singular and plural grammar', () => {
@@ -102,7 +104,7 @@ describe('app notifications', () => {
     const service = createAppNotificationService({ repository, embed: async (text) => { order.push(`embed:${text}`); return Array(EMBEDDING_DIMENSIONS).fill(0.25); }, enqueue: async (key) => { order.push(`enqueue:${key}`); } });
     await service.notifyStorageRetentionWarning({ userKey: 'user', paymentPastDueAt: '2026-01-01T00:00:00.000Z', wipeDueAt: '2026-04-01T00:00:00.000Z', monthlyCostSparks: '180', now: '2026-02-03T00:00:00.000Z' });
     expect(order).toEqual(['embed:Your storage needs Sparks\n\nYour stored data costs 180 Sparks a month and will be deleted in 57 days unless Sparks are refilled.', 'persist', 'enqueue:warning-1']);
-    expect(persisted).toMatchObject({ expectedPaymentPastDueAt: '2026-01-01T00:00:00.000Z', expectedWipeDueAt: '2026-04-01T00:00:00.000Z', cooldownCutoff: '2026-02-02T00:00:00.000Z', embedding: expect.any(Array) });
+    expect(persisted).toMatchObject({ expectedPaymentPastDueAt: '2026-01-01T00:00:00.000Z', expectedWipeDueAt: '2026-04-01T00:00:00.000Z', warningDayStart: '2026-02-03T00:00:00.000Z', embedding: expect.any(Array) });
 
     order.length = 0;
     repository.createStorageRetentionWarning = async () => { order.push('persist'); return { key: 'history', recipients: 1, deliveries: 0, replayed: false }; };
@@ -110,13 +112,13 @@ describe('app notifications', () => {
     expect(order.at(-1)).toBe('persist');
   });
 
-  test('atomically fences the 24-hour cooldown and lifecycle while persisting embedding metadata and delivery rows', async () => {
+  test('atomically fences one warning per UTC day and lifecycle while persisting embedding metadata and delivery rows', async () => {
     const queries: Array<{ query: string; bind?: Record<string, unknown> }> = [];
     const repository = createAppNotificationRepository({ query: async (query: string, bind?: Record<string, unknown>) => { queries.push({ query, bind }); return { next: async () => ({ key: 'warning', deliveries: 1 }) }; } } as never);
-    const result = await repository.createStorageRetentionWarning({ userKey: 'user', expectedPaymentPastDueAt: '2026-01-01T00:00:00.000Z', expectedWipeDueAt: '2026-04-01T00:00:00.000Z', title: 'Title', message: 'Message', embedding: Array(EMBEDDING_DIMENSIONS).fill(0.5), now: '2026-02-03T00:00:00.000Z', cooldownCutoff: '2026-02-02T00:00:00.000Z' });
+    const result = await repository.createStorageRetentionWarning({ userKey: 'user', expectedPaymentPastDueAt: '2026-01-01T00:00:00.000Z', expectedWipeDueAt: '2026-04-01T00:00:00.000Z', title: 'Title', message: 'Message', embedding: Array(EMBEDDING_DIMENSIONS).fill(0.5), now: '2026-02-03T00:00:00.000Z', warningDayStart: '2026-02-03T00:00:00.000Z' });
     expect(result).toMatchObject({ recipients: 1, deliveries: 1 });
     const source = queries[0]!.query;
-    expect(source).toContain('state.warningSentAt <= @cooldownCutoff');
+    expect(source).toContain('state.warningSentAt < @warningDayStart');
     expect(source).toContain('state.paymentPastDueAt == @expectedPaymentPastDueAt && state.wipeDueAt == @expectedWipeDueAt');
     expect(source).toContain('state.wipeDueAt > @now');
     expect(source).toContain('user.microSparkBalance) < state.minimumBalanceMicroSparks');
@@ -178,10 +180,25 @@ describe('app notifications', () => {
   test('lists only through the authenticated member context', async () => {
     const actor = context();
     const calls: unknown[] = [];
-    const service = createAppNotificationService({ repository: { listNotifications: async (...args: unknown[]) => { calls.push(args); return { items: [], unreadCount: 0, nextCursor: null }; } } as any });
-    await expect(service.list({ limit: 25, markRead: true }, actor.value)).resolves.toMatchObject({ unreadCount: 0 });
-    expect(calls).toEqual([[actor.userKey, actor.value.teamKey, { limit: 25, markRead: true }]]);
+    const service = createAppNotificationService({ inbox: { list: async (...args: unknown[]) => { calls.push(args); return { items: [], unreadCount: 0, nextCursor: null }; } } as any });
+    await expect(service.list({ limit: 25, mailbox: 'sent' }, actor.value)).resolves.toMatchObject({ unreadCount: 0 });
+    expect(calls).toEqual([[{ limit: 25, mailbox: 'sent' }, actor.value]]);
     await expect(service.list({}, { ...actor.value, principal: { kind: 'system' } })).rejects.toThrow('Active team membership');
+  });
+
+  test('sources every queued push from its managed Signal thread and message', async () => {
+    let source = '';
+    const repository = createAppNotificationRepository({ query: async (query: string) => {
+      source = query;
+      return { all: async () => [] };
+    } } as never);
+
+    await expect(repository.pendingDeliveries('notification-1')).resolves.toEqual([]);
+    expect(source).toContain('DOCUMENT(userInboxThreads, delivery.signalThreadKey)');
+    expect(source).toContain('DOCUMENT(userInboxMessages, delivery.signalMessageKey)');
+    expect(source).toContain('title: thread.subject, message: signalMessage.body');
+    expect(source).not.toContain('notification.title');
+    expect(source).not.toContain('notification.message');
   });
 
   test('suppresses device deliveries for active users without removing their history', async () => {
@@ -201,7 +218,7 @@ describe('app notifications', () => {
     const activeUserKey = newId();
     const inactiveUserKey = newId();
     const projectId = newId();
-    const delivery = (key: string, userKey: string, token: string) => ({ key, userKey, tokenCiphertext: encryptPushToken(token), projectId, title: 'Ready', message: 'Body', notificationKey: 'notification-1' });
+    const delivery = (key: string, userKey: string, token: string) => ({ key, userKey, tokenCiphertext: encryptPushToken(token), projectId, title: 'Ready', message: 'Body', notificationKey: 'notification-1', signalThreadKey: 'thread-1', signalMessageKey: 'message-1' });
     const initial = [delivery('active-1', activeUserKey, 'ExpoPushToken[active-1]'), delivery('active-2', activeUserKey, 'ExpoPushToken[active-2]'), delivery('inactive-1', inactiveUserKey, 'ExpoPushToken[inactive-1]'), delivery('inactive-2', inactiveUserKey, 'ExpoPushToken[inactive-2]')];
     let reads = 0;
     const suppressed: string[][] = [];
@@ -220,42 +237,14 @@ describe('app notifications', () => {
     expect(result).toEqual({ processed: 2, suppressed: 2 });
     expect(suppressed).toEqual([['active-1', 'active-2']]);
     expect(sent).toEqual([[
-      { to: 'ExpoPushToken[inactive-1]', title: 'Ready', body: 'Body', data: { v: '1', target: 'notification-hub', notificationKey: 'notification-1' } },
-      { to: 'ExpoPushToken[inactive-2]', title: 'Ready', body: 'Body', data: { v: '1', target: 'notification-hub', notificationKey: 'notification-1' } },
+      { to: 'ExpoPushToken[inactive-1]', title: 'Ready', body: 'Body', data: { v: '2', target: 'signal-inbox', notificationKey: 'notification-1', signalThreadKey: 'thread-1', signalMessageKey: 'message-1' } },
+      { to: 'ExpoPushToken[inactive-2]', title: 'Ready', body: 'Body', data: { v: '2', target: 'signal-inbox', notificationKey: 'notification-1', signalThreadKey: 'thread-1', signalMessageKey: 'message-1' } },
     ]]);
     expect(recorded).toEqual([[
       { key: 'inactive-1', status: 'receipt_pending', receiptId: 'receipt-1', deviceNotRegistered: false },
       { key: 'inactive-2', status: 'failed', error: 'DeviceNotRegistered', deviceNotRegistered: true },
     ]]);
     expect((scheduled[0] as unknown[])?.[0]).toBe('receipts');
-  });
-
-  test('rejects a foreign history cursor before marking notifications read', async () => {
-    const queries: string[] = [];
-    const repository = createAppNotificationRepository({ query: async (query: string) => { queries.push(query); return { next: async () => undefined }; } } as never);
-    await expect(repository.listNotifications(newId(), newId(), { cursor: `${newId()}-${newId()}`, limit: 10, markRead: true })).rejects.toThrow('Invalid notification cursor');
-    expect(queries).toHaveLength(1);
-    expect(queries[0]).toContain('recipient.userKey == @userKey');
-    expect(queries[0]).not.toContain('UPDATE recipient');
-  });
-
-  test('uses an owned cursor, excludes orphan history, and returns a stable next cursor', async () => {
-    const recipientKeys = [`${newId()}-${newId()}`, `${newId()}-${newId()}`, `${newId()}-${newId()}`];
-    const queries: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
-    let call = 0;
-    const repository = createAppNotificationRepository({ query: async (query: string, bindVars?: Record<string, unknown>) => {
-      queries.push({ query, bindVars });
-      call += 1;
-      if (call === 1) return { next: async () => ({ key: recipientKeys[0], createdAt: '2026-09-06T12:00:00.000Z' }) };
-      if (call === 2) return { next: async () => undefined };
-      return { next: async () => ({ items: recipientKeys.map((key, index) => ({ key, title: 'Ready', message: 'Body', scopeKey: newId(), isRead: false, readAt: null, createdAt: `2026-09-06T11:00:0${index}.000Z` })), unreadCount: 3 }) };
-    } } as never);
-    const result = await repository.listNotifications(newId(), newId(), { cursor: recipientKeys[0], limit: 2, markRead: true });
-    expect(result).toMatchObject({ unreadCount: 3, nextCursor: recipientKeys[1] });
-    expect(result.items).toHaveLength(2);
-    expect(queries[2]?.bindVars).toMatchObject({ cursorCreatedAt: '2026-09-06T12:00:00.000Z', cursorKey: recipientKeys[0], pageSize: 3 });
-    expect(queries[2]?.query.indexOf('LET notification = DOCUMENT')).toBeLessThan(queries[2]!.query.indexOf('LIMIT @pageSize'));
-    expect(queries[2]?.query).toContain('FILTER notification != null');
   });
 
   test('records available receipts, leaves missing receipts pending, and schedules another check', async () => {

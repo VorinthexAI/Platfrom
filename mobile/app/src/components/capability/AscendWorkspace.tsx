@@ -49,13 +49,14 @@ import {
 } from "@vorinthex/shared/ui/icons-mobile";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
+import { NeuralBackdrop } from "@/components/NeuralBackdrop";
 import { ResourceTagsSheet } from "@/components/ResourceTagsSheet";
 import { SearchHistorySheet } from "@/components/SearchHistorySheet";
 import { TagFilterLane } from "@/components/TagFilterLane";
 import { TagFilterSheet } from "@/components/TagFilterSheet";
 import { EmailAttachmentPicker, type EmailAttachmentLabels } from "@/components/capability/EmailAttachmentPicker";
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
-import { assistantIconSource } from "@/data/capability-icons";
+import { assistantIconSource, vorinthexMarkSource } from "@/data/capability-icons";
 import { enhanceAppTextForContext, translateAppTextForContext } from "@/lib/app-transformation-client";
 import { languageForCountryCode } from "@/lib/auth-helpers";
 import { audioTimelineDuration, audioTimelinePosition, formatAudioTime, resolveAudioTimelinePosition } from "@/lib/audio-playback-timeline";
@@ -165,6 +166,26 @@ function errorMessage(error: unknown) {
     : "The request could not be completed.";
 }
 export function Cover({ book, index = 0 }: { book: Book; index?: number }) {
+  const [fallbackSize, setFallbackSize] = useState({ height: 0, width: 0 });
+  const fallbackLogoSize = Math.max(56, Math.min(96, Math.round(fallbackSize.width * 0.58)));
+  if (book.managed)
+    return (
+      <View
+        onLayout={({ nativeEvent }) => {
+          const height = Math.round(nativeEvent.layout.height);
+          const width = Math.round(nativeEvent.layout.width);
+          setFallbackSize((current) => current.height === height && current.width === width ? current : { height, width });
+        }}
+        style={[styles.cover, styles.managedCover]}
+      >
+        <View pointerEvents="none" style={styles.managedCoverBackdropLayer}>
+          {fallbackSize.height > 0 && fallbackSize.width > 0 ? <NeuralBackdrop height={fallbackSize.height} width={fallbackSize.width} /> : null}
+        </View>
+        <View pointerEvents="none" style={styles.managedCoverLogoLayer}>
+          <ChromeIcon glow={0} size={fallbackLogoSize} source={vorinthexMarkSource} />
+        </View>
+      </View>
+    );
   if (book.coverUrl)
     return (
       <Image
@@ -232,7 +253,7 @@ function ChapterReading({ chapter }: { chapter?: BookChapter }) {
   );
 }
 
-export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initialBookKey?: string; initialSearchQuery?: string } = {}) {
+export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQuery }: { initialAction?: "create" | "create-custom"; initialBookKey?: string; initialSearchQuery?: string } = {}) {
   const queryClient = useQueryClient();
   const playback = useBookPlayback();
   const context = useMemo(() => getBooksContext(), []);
@@ -253,6 +274,7 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
   const [createGoalOpen, setCreateGoalOpen] = useState(false);
   const [createGoalCustomOpen, setCreateGoalCustomOpen] = useState(false);
   const [createDetailsOpen, setCreateDetailsOpen] = useState(false);
+  const initialActionHandled = useRef(false);
   const [customCreate, setCustomCreate] = useState(false);
   const [contextPickerOpen, setContextPickerOpen] = useState(false);
   const [contextLabels, setContextLabels] = useState<EmailAttachmentLabels>({});
@@ -295,7 +317,6 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
   const rootSearchInputRef = useRef<NativeTextInput>(null);
   const customTopicInputRef = useRef<NativeTextInput>(null);
   const customGoalInputRef = useRef<NativeTextInput>(null);
-  const rootSearchFocusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const briefTransformationGeneration = useRef(0);
   const longPressedBook = useRef<string | undefined>(undefined);
   const bulkMutationLocked = useRef(false);
@@ -360,9 +381,6 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
   const resourceTagTargets = selectedBookKeys.map((key) => ({ type: "book" as const, key }));
   const contextCardSize = Math.floor(((contextGridWidth || width - 40) - 18) / 4);
 
-  useEffect(() => () => {
-    if (rootSearchFocusTimer.current) clearTimeout(rootSearchFocusTimer.current);
-  }, []);
   useEffect(() => {
     const next = query.trim();
     const timer = setTimeout(() => setSearchTerm(next), next ? BOOK_SEARCH_DEBOUNCE_MS : 0);
@@ -392,6 +410,8 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
         status: "queued",
         isFavorite: false,
         isExtending: false,
+        canExtend: true,
+        managed: false,
         narrator: DEFAULT_NARRATOR,
         estimatedMinutes: 10,
         chapterCount: 10,
@@ -619,6 +639,15 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
     setSheet(undefined);
     setCreateDetailsOpen(true);
   }
+  useEffect(() => {
+    if (!initialAction || initialActionHandled.current) return;
+    initialActionHandled.current = true;
+    const timeout = setTimeout(() => {
+      if (initialAction === "create") beginCreate();
+      else beginCustomCreate();
+    }, 0);
+    return () => clearTimeout(timeout);
+  }, [initialAction]);
   function loadNewTopics() {
     setTopicSuggestionsError(undefined);
     topicSuggestionsMutation.mutate(topicSuggestions);
@@ -1063,7 +1092,7 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
         detailQuery.isPending ? <View accessibilityLabel="Loading audio book" accessibilityRole="progressbar" style={[styles.detailLoading, styles.detailPage]}><Skeleton style={styles.detailHeroSkeleton} /><View style={styles.chapterHeadingRow}><Text style={styles.chapterHeading}>Chapters</Text></View><View onLayout={({ nativeEvent }) => setChapterGridWidth(nativeEvent.layout.width)} style={styles.grid}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.chapterSkeleton, { width: chapterWidth, height: 132 }]} />)}</View></View> : detail ? (
           <ScrollView alwaysBounceVertical contentContainerStyle={[styles.detail, styles.detailPage]} refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />} showsVerticalScrollIndicator={false}>
             <Button accessibilityLabel={`About ${detail.book.title}`} contentMode="raw" onPress={() => open("bookSummary")} shape="rounded" size="md" style={styles.detailHero} variant="ghost">
-              <View style={styles.detailCover}>{detail.book.coverUrl ? <Cover book={detail.book} /> : <Skeleton accessibilityLabel="Creating audio book cover" accessibilityRole="progressbar" style={styles.detailCoverLoading} />}</View>
+              <View style={styles.detailCover}>{detail.book.coverUrl || detail.book.managed ? <Cover book={detail.book} /> : <Skeleton accessibilityLabel="Creating audio book cover" accessibilityRole="progressbar" style={styles.detailCoverLoading} />}</View>
               <View style={styles.detailCopy}>
                 <Text style={styles.detailDescription}>{detail.book.description || "A description is unavailable for this audio book."}</Text>
               </View>
@@ -1122,17 +1151,8 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
           assistantRequestKey.current = undefined;
         }}
         onFocusChange={(focused) => {
-          if (rootSearchFocusTimer.current) clearTimeout(rootSearchFocusTimer.current);
-          rootSearchInputRef.current?.blur();
-          Keyboard.dismiss();
-          setRootSearchFocusable(false);
-          if (!focused) {
-            rootSearchFocusTimer.current = setTimeout(() => {
-              rootSearchInputRef.current?.blur();
-              Keyboard.dismiss();
-              setRootSearchFocusable(true);
-            }, 300);
-          }
+          if (focused) { rootSearchInputRef.current?.blur(); Keyboard.dismiss(); setRootSearchFocusable(false); }
+          else setRootSearchFocusable(true);
           if (!focused) setAssistantMessage(undefined);
         }}
         onSubmit={askAssistant}
@@ -1190,8 +1210,8 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
               </Text>
             ) : null}
             <BottomSheetItem disabled={bulkLoading || selectedBook.key.startsWith("pending-")} onPress={() => void updateBooksFavorite([selectedBook], !selectedBook.isFavorite, false)} style={styles.sheetAction} variant="secondary">{selectedBook.isFavorite ? "Unfavorite" : "Favorite"}</BottomSheetItem>
-            {selectedBook.status === "ready" ? <BottomSheetItem disabled={extensionMutation.isPending} onPress={openExtension} style={styles.sheetAction} variant="secondary">Extend</BottomSheetItem> : null}
-            <BottomSheetItem
+            {selectedBook.status === "ready" && selectedBook.canExtend ? <BottomSheetItem disabled={extensionMutation.isPending} onPress={openExtension} style={styles.sheetAction} variant="secondary">Extend</BottomSheetItem> : null}
+            {!selectedBook.managed ? <BottomSheetItem
               disabled={
                 lifecycleMutation.isPending ||
                 selectedBook.key.startsWith("pending-")
@@ -1201,13 +1221,13 @@ export function AscendWorkspace({ initialBookKey, initialSearchQuery }: { initia
               variant="secondary"
             >
               Delete
-            </BottomSheetItem>
+            </BottomSheetItem> : null}
           </BottomSheetMenu>
         ) : null}
         {sheet === "bulkActions" ? <BottomSheetMenu>
           <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void updateBooksFavorite(selectedBooks, !allSelectedFavorite, true)} size="md" variant="secondary">{allSelectedFavorite ? "Unfavorite" : "Favorite"}</Button>
           <Button disabled={bulkLoading} onPress={openSelectedBookTags} size="md" variant="secondary">Tags</Button>
-          <Button disabled={bulkLoading} onPress={() => setSheet("bulkDelete")} size="md" variant="secondary">Delete</Button>
+          <Button disabled={bulkLoading || selectedBooks.some(({ managed }) => managed)} onPress={() => setSheet("bulkDelete")} size="md" variant="secondary">Delete</Button>
         </BottomSheetMenu> : null}
         {sheet === "bulkDelete" ? <View style={styles.compactSheetActions}>
           <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void deleteSelectedBooks()} size="md" variant="primary">Delete</Button>
@@ -1447,6 +1467,9 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
+  managedCover: { backgroundColor: palette.page, overflow: "hidden" },
+  managedCoverBackdropLayer: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, opacity: 0.72 },
+  managedCoverLogoLayer: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", justifyContent: "center", elevation: 2, zIndex: 2 },
   cardShade: {
     position: "absolute",
     top: 0,

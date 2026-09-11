@@ -43,7 +43,7 @@ export async function processAppNotificationJob(raw: unknown, repository: AppNot
     for (const delivery of pending) byProject.set(delivery.projectId, [...(byProject.get(delivery.projectId) ?? []), delivery]);
     for (const deliveries of byProject.values()) for (let index = 0; index < deliveries.length; index += 100) {
       const group = deliveries.slice(index, index + 100);
-      const tickets = await (dependencies.sendPush ?? sendExpoPush)(group.map((item) => ({ to: decryptPushToken(item.tokenCiphertext), title: item.title, body: item.message, data: { v: '1', target: 'notification-hub', notificationKey: item.notificationKey } })));
+      const tickets = await (dependencies.sendPush ?? sendExpoPush)(group.map((item) => ({ to: decryptPushToken(item.tokenCiphertext), title: item.title, body: item.message, data: { v: '2', target: 'signal-inbox', notificationKey: item.notificationKey, signalThreadKey: item.signalThreadKey, signalMessageKey: item.signalMessageKey } })));
       await repository.recordTickets(tickets.map((ticket, ticketIndex) => {
         const error = ticket.status === 'error' ? ticket.details?.error ?? ticket.message ?? 'Expo ticket error' : undefined;
         const retry = error === 'MessageRateExceeded' && job.check < 3;

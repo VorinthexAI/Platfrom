@@ -1,6 +1,7 @@
 ﻿import { createContext, useContext, useState, type ReactNode } from "react";
 import { StyleSheet, View, type ViewProps } from "react-native";
 import { Button, ButtonSizeProvider, type ButtonProps } from "../button/button.mobile";
+import { colors } from "../../tokens";
 
 type TabsContextValue = { onValueChange?: (value: string) => void; value?: string };
 const TabsContext = createContext<TabsContextValue>({});
@@ -36,7 +37,12 @@ export function TabsContent({ value, ...props }: TabsContentProps) {
 
 const styles = StyleSheet.create({
   list: {
-    borderColor: "#262D36",
+    backgroundColor: colors.panel,
+    borderColor: colors.border,
     borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 4,
+    padding: 3,
   },
 });

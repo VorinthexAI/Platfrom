@@ -296,7 +296,7 @@ describe('scope repository', () => {
     await expect(repository.coverStorageKey(target.key, null)).resolves.toBeUndefined();
   });
 
-  test('seeds exact default tones without provider work after scope persistence', async () => {
+  test('does not seed private email tones when creating a shared scope', async () => {
     const { fake, stores } = createFakeDb();
     const query = fake.query.bind(fake);
     const seeded: Record<string, any>[] = [];
@@ -315,13 +315,7 @@ describe('scope repository', () => {
 
     expect(stores.get(SCOPES_COLLECTION)?.has(created.key)).toBe(true);
     expect(embeddingCalls).toBe(1);
-    expect(seeded.map(({ name }) => name)).toEqual(['Casual', 'Formal', 'Direct']);
-    expect(seeded.map(({ embedding }) => embedding)).toEqual(Array.from({ length: 3 }, () => Array(EMBEDDING_DIMENSIONS).fill(0)));
-    expect(seeded.map(({ instruction }) => instruction)).toEqual([
-      'Use conversational language, natural contractions, and an approachable tone.',
-      'Use professional language, complete sentences, and a clear conventional structure.',
-      'Lead with the answer or action and avoid hedging.',
-    ]);
+    expect(seeded).toEqual([]);
   });
 
   test('enforces team boundaries, strict parents, and cycles', async () => {

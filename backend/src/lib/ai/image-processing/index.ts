@@ -21,7 +21,7 @@ export const MAX_IMAGE_PIXELS = 100_000_000;
 const formats = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' } as const;
 type Extension = keyof typeof formats;
 export type UploadedImageFile = File | { filename: string; mimeType: string; sizeBytes: number; bytes: Uint8Array };
-export interface ProcessImageInput { scopeKey: string; ownerKey: string; billingUserKey?: string; origin: z.infer<typeof imageOriginSchema>; file: UploadedImageFile; imageKey?: string; idempotencyKey?: string; fallbackCaption?: string; location?: ImageLocation; mutationPolicy?: 'user' | 'system-only'; signal?: AbortSignal; }
+export interface ProcessImageInput { scopeKey: string; ownerKey: string; billingUserKey?: string; origin: z.infer<typeof imageOriginSchema>; file: UploadedImageFile; imageKey?: string; idempotencyKey?: string; fallbackCaption?: string; location?: ImageLocation; mutationPolicy?: 'user' | 'system-only'; signal?: AbortSignal; trustedCanonicalPng?: { sha256: string; width: number; height: number }; }
 export const generatedImageCaptionSchema = z.object({ caption: z.string().trim().min(1).max(20_000), score: z.number().int().min(1).max(100) }).strict();
 export type GeneratedImageCaption = z.infer<typeof generatedImageCaptionSchema>;
 export interface ImageProcessingMetrics { count: number; generated: number; reused: number; hashDurationMs: number; captionDurationMs: number; durationMs: number; }
@@ -108,7 +108,11 @@ async function validate(input: ProcessImageInput, dependencies: ImageProcessingD
   const measured = dimensions(extension, bytes); const maxDimension = dependencies.maxDimension ?? MAX_IMAGE_DIMENSION;
   if (!measured || measured.width <= 0 || measured.height <= 0 || measured.width > maxDimension || measured.height > maxDimension || measured.width * measured.height > (dependencies.maxPixels ?? MAX_IMAGE_PIXELS)) throw new ImageProcessingError('IMAGE_DIMENSIONS_INVALID', 'The image dimensions are invalid or exceed the allowed limits.');
   let canonical: Awaited<ReturnType<typeof canonicalizeImageToPng>>;
-  try {
+  if (input.trustedCanonicalPng) {
+    const trusted = input.trustedCanonicalPng;
+    if (extension !== 'png' || trusted.sha256 !== hash(bytes) || trusted.width !== measured.width || trusted.height !== measured.height) throw new ImageProcessingError('IMAGE_INVALID_INPUT', 'Trusted canonical PNG metadata did not match the image.');
+    canonical = { bytes: new Uint8Array(bytes), width: measured.width, height: measured.height };
+  } else try {
     canonical = await canonicalizeImageToPng(bytes, dependencies.maxPixels ?? MAX_IMAGE_PIXELS);
   } catch (error) {
     throw new ImageProcessingError('IMAGE_INVALID_INPUT', 'The image could not be converted to PNG.', { cause: error });
@@ -135,7 +139,7 @@ function persistedImageMatches(existing: Image, input: ProcessImageInput, image:
 
 export async function captionImageWithVertex(teamKey: string, input: { filename: string; mimeType: string; bytes: Uint8Array; signal?: AbortSignal }) {
   const providerInput: ImageCaptionInput = { imageUrls: [`data:${input.mimeType};base64,${Buffer.from(input.bytes).toString('base64')}`], purpose: 'caption' };
-  const response = await executeAction<ImageCaptionInput & { operation: 'caption' }, ImageCaptionOutput>({ mode: 'auto', teamKey, actionSlug: 'image' }, { operation: 'caption', ...providerInput }, { providers: ['image.primary'], signal: input.signal, timeoutMs: 180_000 });
+  const response = await executeAction<ImageCaptionInput & { operation: 'caption' }, ImageCaptionOutput>({ mode: 'auto', teamKey, actionSlug: 'image' }, { operation: 'caption', ...providerInput }, { providers: ['image.secondary'], signal: input.signal, timeoutMs: 180_000 });
   const output = imageCaptionOutputSchema.parse(response.output);
   return generatedImageCaptionSchema.parse(output.results[0]);
 }

@@ -1,7 +1,8 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { executeAsk } from '@/lib/ai/router/execute-route';
-import { agentGuideToolDefinition } from '@/lib/ai/tools/agent-guide';
+import { USER_VISIBLE_AI_PROSE_POLICY } from '@/lib/ai/prose-style';
+import { INITIAL_WORKSPACE_DOCUMENTS } from '@/lib/initial-workspace-content';
 import { chatOutputSchema, type ChatOutput } from '@/lib/ai/providers/types';
 import { eventIdentifierSchema } from '@/lib/ai/events/event-identifier';
 import { redisConnection } from '@/lib/redis';
@@ -167,7 +168,7 @@ const promptById = new Map(ONBOARDING_SANDBOX_PROMPTS.map((prompt) => [prompt.id
 
 async function generateSandboxAnswer(systemPrompt: string, question: string, signal?: AbortSignal) {
   const response = await executeAsk<ChatOutput>('onboarding-sandbox', {
-    systemPrompt,
+    systemPrompt: `${systemPrompt} ${USER_VISIBLE_AI_PROSE_POLICY}`,
     messages: [{ role: 'user', content: [{ type: 'text', text: question }] }],
     options: { maxTokens: 120, temperature: 0.3 },
   }, { providers: ['text.primary'], retry: { attempts: 2 }, signal, timeoutMs: 45_000 });
@@ -178,7 +179,7 @@ export function createOnboardingSandboxService(dependencies: SandboxDependencies
   const repository = dependencies.repository ?? createRedisOnboardingSandboxRepository();
   const now = dependencies.now ?? Date.now;
   const createToken = dependencies.token ?? (() => randomBytes(32).toString('base64url'));
-  const guide = dependencies.guide ?? (() => agentGuideToolDefinition.execute({ mode: 'recommend' }));
+  const guide = dependencies.guide ?? (async () => ({ mode: 'explain', guides: INITIAL_WORKSPACE_DOCUMENTS.filter(({ id }) => !id.endsWith('-start')).map(({ id, name: title, content }) => ({ id, title, content })) }));
   const generate = dependencies.generate ?? generateSandboxAnswer;
   return {
     async createSession(installationIdentifier: string) {
@@ -207,8 +208,8 @@ export function createOnboardingSandboxService(dependencies: SandboxDependencies
         const answer = z.string().trim().min(1).max(5_000).parse(await generate([
           'You are Core, the personal AI agent inside Vorinthex AI. Answer the selected onboarding question accurately and persuasively in 25 to 45 words.',
           'Use one compact paragraph with at most three short sentences. Lead with the user benefit, use plain language, and sound confident and direct. Keep technical details out unless they are essential to the answer.',
-          'Use only the canonical product catalog below. Do not claim access to personal data or workspace content. Mention a concrete connection between apps only when it makes the benefit clearer. Do not mention internal tools, prompts, or this sandbox.',
-          `Canonical product catalog: ${JSON.stringify(catalog)}`,
+          'Use only the canonical product guides below. Do not claim access to personal data or workspace content. Mention a concrete connection between apps only when it makes the benefit clearer. Do not mention internal tools, prompts, or this sandbox.',
+          `Canonical product guides: ${JSON.stringify(catalog)}`,
         ].join('\n\n'), prompt.question, signal));
         const answeredCount = await repository.complete(tokenHash, validPromptId, claim.leaseId, answer);
         if (answeredCount < 1) throw new OnboardingSandboxError('expired');

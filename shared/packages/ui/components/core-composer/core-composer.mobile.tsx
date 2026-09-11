@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -171,37 +172,35 @@ type CorePageProps = {
   bottomInset: number;
   closePage: () => void;
   composer: ReactNode;
-  inputRef: RefObject<NativeTextInput | null>;
+  focusInput: () => number | undefined;
   leftInset: number;
   message?: ReactNode;
   pageActions?: ReactNode;
   pageBackdrop?: ReactNode;
   pageIdentity: (closePage: () => void) => ReactNode;
-  releaseSelection: () => void;
   rightInset: number;
   style?: StyleProp<ViewStyle>;
   topInset: number;
 };
 
-function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, message, pageActions, pageBackdrop, pageIdentity, releaseSelection, rightInset, style, topInset }: CorePageProps) {
+function CorePage({ bottomInset, closePage, composer, focusInput, leftInset, message, pageActions, pageBackdrop, pageIdentity, rightInset, style, topInset }: CorePageProps) {
   const keyboard = useAnimatedKeyboard();
-  const keyboardInsetStyle = useAnimatedStyle(() => {
+  const keyboardLiftStyle = useAnimatedStyle(() => {
     const keyboardMoving = [KeyboardState.OPENING, KeyboardState.OPEN, KeyboardState.CLOSING].includes(keyboard.state.value);
     const keyboardLift = Math.max(0, keyboard.height.value - bottomInset);
-    return { paddingBottom: Math.max(bottomInset, spacing.sm) + (keyboardMoving ? keyboardLift + Math.min(spacing.md, keyboardLift) : 0) };
+    return { transform: [{ translateY: keyboardMoving ? -keyboardLift - Math.min(spacing.md, keyboardLift) : 0 }] };
   }, [bottomInset]);
 
   useEffect(() => {
     let selectionFrame: number | undefined;
     const focusTimeout = setTimeout(() => {
-      inputRef.current?.focus();
-      selectionFrame = requestAnimationFrame(releaseSelection);
+      selectionFrame = focusInput();
     }, CORE_FOCUS_DELAY_MS);
     return () => {
       clearTimeout(focusTimeout);
       if (selectionFrame !== undefined) cancelAnimationFrame(selectionFrame);
     };
-  }, [inputRef, releaseSelection]);
+  }, [focusInput]);
 
   useEffect(() => BackHandler.addEventListener("hardwareBackPress", () => {
     closePage();
@@ -216,7 +215,8 @@ function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, messa
     }]}>{pageIdentity(closePage)}</View>
     <View style={styles.pageBody}>
       {pageBackdrop ? <View pointerEvents="none" style={styles.pageBackdrop}>{pageBackdrop}</View> : null}
-      <Reanimated.View style={[styles.pageContent, style, keyboardInsetStyle, {
+      <View style={[styles.pageContent, style, {
+        paddingBottom: Math.max(bottomInset, spacing.sm),
         paddingLeft: Math.max(leftInset, spacing.md),
         paddingRight: Math.max(rightInset, spacing.md),
       }]}>
@@ -226,8 +226,8 @@ function CorePage({ bottomInset, closePage, composer, inputRef, leftInset, messa
           {pageActions ?? <View style={styles.pageTitleSpacer} />}
         </View>
         <View style={styles.pageConversation}>{message}</View>
-        <View>{composer}</View>
-      </Reanimated.View>
+        <Reanimated.View style={keyboardLiftStyle}>{composer}</Reanimated.View>
+      </View>
     </View>
   </View>;
 }
@@ -266,10 +266,9 @@ export function CoreComposer({
   value,
 }: CoreComposerProps) {
   const insets = useSafeAreaInsets();
-  const [pageOpen, setPageOpen] = useState(false);
+  const [pageOpen, setPageOpen] = useState(openRequest > 0);
   const [inputHeight, setInputHeight] = useState(COLLAPSED_INPUT_HEIGHT);
   const [inputLineCount, setInputLineCount] = useState(1);
-  const [inputSelection, setInputSelection] = useState<{ start: number; end: number }>();
   const closeFallbackRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const closeSubscriptionRef = useRef<{ remove: () => void } | undefined>(undefined);
   const closingRef = useRef(false);
@@ -294,7 +293,6 @@ export function CoreComposer({
     setPageOpen(false);
     setInputHeight(COLLAPSED_INPUT_HEIGHT);
     setInputLineCount(1);
-    setInputSelection(undefined);
     onFocusChangeRef.current?.(false);
   }, []);
 
@@ -310,13 +308,19 @@ export function CoreComposer({
     if (!Keyboard.isVisible()) finishClose();
   }, [finishClose]);
 
-  const releaseInputSelection = useCallback(() => setInputSelection(undefined), []);
+  const focusInput = useCallback(() => {
+    if (closingRef.current) return undefined;
+    inputRef.current?.focus();
+    const cursor = valueRef.current.length;
+    return requestAnimationFrame(() => {
+      if (!closingRef.current) inputRef.current?.setNativeProps({ selection: { start: cursor, end: cursor } });
+    });
+  }, []);
 
   const openPage = useCallback(() => {
     if (pageOpen) return;
     setInputHeight(COLLAPSED_INPUT_HEIGHT);
     setInputLineCount(1);
-    setInputSelection({ start: valueRef.current.length, end: valueRef.current.length });
     onFocusChangeRef.current?.(true);
     setPageOpen(true);
   }, [pageOpen]);
@@ -332,11 +336,10 @@ export function CoreComposer({
     return () => clearTimeout(timeout);
   }, [pageOpen]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (openRequest <= 0) return;
     setInputHeight(COLLAPSED_INPUT_HEIGHT);
     setInputLineCount(1);
-    setInputSelection({ start: valueRef.current.length, end: valueRef.current.length });
     onFocusChangeRef.current?.(true);
     setPageOpen(true);
   }, [openRequest]);
@@ -344,7 +347,9 @@ export function CoreComposer({
   useEffect(() => {
     if (focusRequest <= handledFocusRequestRef.current || !pageOpen || !editable) return;
     handledFocusRequestRef.current = focusRequest;
-    const timeout = setTimeout(() => inputRef.current?.focus(), CORE_EDIT_FOCUS_DELAY_MS);
+    const timeout = setTimeout(() => {
+      if (!closingRef.current) inputRef.current?.focus();
+    }, CORE_EDIT_FOCUS_DELAY_MS);
     return () => clearTimeout(timeout);
   }, [editable, focusRequest, pageOpen]);
 
@@ -453,7 +458,6 @@ export function CoreComposer({
         ref={inputRef}
         returnKeyType={expanded ? "default" : "send"}
         scrollEnabled={expanded && inputLineCount > 6}
-        selection={expanded ? inputSelection : undefined}
         showSoftInputOnFocus={expanded}
         style={[styles.input, !multiline && styles.inputSingleLine]}
         textAlignVertical={multiline ? "top" : "center"}
@@ -487,7 +491,7 @@ export function CoreComposer({
       }]}>
         {accessory}{composer(false)}
       </View> : null}
-      {pageOpen ? <CorePage bottomInset={insets.bottom} closePage={closePage} composer={composer(true)} inputRef={inputRef} leftInset={insets.left} message={message} pageActions={pageActions} pageBackdrop={pageBackdrop} pageIdentity={pageIdentity} releaseSelection={releaseInputSelection} rightInset={insets.right} style={style} topInset={insets.top} /> : null}
+      {pageOpen ? <CorePage bottomInset={insets.bottom} closePage={closePage} composer={composer(true)} focusInput={focusInput} leftInset={insets.left} message={message} pageActions={pageActions} pageBackdrop={pageBackdrop} pageIdentity={pageIdentity} rightInset={insets.right} style={style} topInset={insets.top} /> : null}
     </>
   );
 }
@@ -526,7 +530,6 @@ const styles = StyleSheet.create({
   },
   pageContent: {
     flex: 1,
-    gap: spacing.md,
     paddingTop: spacing.md,
     zIndex: 1,
   },

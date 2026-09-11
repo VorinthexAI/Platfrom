@@ -125,7 +125,7 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Gallery could not complete that request.";
 }
 
-export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initialSearchQuery, returnSignalConnectorKey, returnSignalMessageKey, returnSignalThreadKey, returnTripKey, returnTripName }: { initialCollectionKey?: string; initialImageKey?: string; initialSearchQuery?: string; returnSignalConnectorKey?: string; returnSignalMessageKey?: string; returnSignalThreadKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
+export function GalleryWorkspace({ initialAction, initialCollectionKey, initialImageKey, initialSearchQuery, returnSignalConnectorKey, returnSignalMessageKey, returnSignalThreadKey, returnTripKey, returnTripName }: { initialAction?: "create" | "create-collection"; initialCollectionKey?: string; initialImageKey?: string; initialSearchQuery?: string; returnSignalConnectorKey?: string; returnSignalMessageKey?: string; returnSignalThreadKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -232,7 +232,6 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
   const searchRequest = useRef(0);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const favoritePageRequest = useRef<string | undefined>(undefined);
-  const searchFocusReleaseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const collectionSearchInput = useRef<NativeTextInput>(null);
   const rootSearchInput = useRef<NativeTextInput>(null);
   const rootSearchRequest = useRef<AbortController | undefined>(undefined);
@@ -620,7 +619,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
   }
 
   const handleGalleryEvent = useEffectEvent((event: Parameters<Parameters<typeof subscribeAppEvent>[0]>[0]) => {
-    if (event.type === "inbox.changed" || event.type === "conversation.changed") return;
+    if (event.type === "inbox.changed" || event.type === "communication.changed" || event.type === "conversation.changed") return;
     const plan = galleryRefreshPlan(event.type === "event-stream.connected" ? "reconnect" : event.slug);
     if (!busyRef.current && plan.has("cleanup") && (activeSheetRef.current === "cleanup" || activeSheetRef.current === "confirmCleanupDelete")) invalidateCleanupLoad();
     scheduleGalleryRefresh(plan);
@@ -748,11 +747,11 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
       setSelectedImageKeys([]);
       setCollectionSearchResults(result.images);
       setStatus(undefined);
-    } catch {
+    } catch (cause) {
       const expectedView = collection ? "search" : "root";
       if (request === searchRequest.current && activeCollectionKey.current === collection?.key && visibleGalleryView.current === expectedView) {
         setCollectionSearchResults([]);
-        setStatus(undefined);
+        setStatus(errorMessage(cause));
       }
     } finally {
       if (activeSearch.current === searchKey) activeSearch.current = undefined;
@@ -808,7 +807,10 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
           if (!controller.signal.aborted) setRootSearchResults(matches);
         })
         .catch((cause) => {
-          if (!controller.signal.aborted) setStatus(errorMessage(cause));
+          if (!controller.signal.aborted) {
+            setRootSearchResults([]);
+            setStatus(errorMessage(cause));
+          }
         })
         .finally(() => {
           if (!controller.signal.aborted) setRootSearching(false);
@@ -832,15 +834,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
     [],
   );
 
-  useEffect(
-    () => () => {
-      if (searchFocusReleaseTimer.current) clearTimeout(searchFocusReleaseTimer.current);
-    },
-    [],
-  );
-
   function handleCoreFocusChange(focused: boolean) {
-    if (searchFocusReleaseTimer.current) clearTimeout(searchFocusReleaseTimer.current);
     if (focused) {
       setCollectionSearchFocusBlocked(true);
       collectionSearchInput.current?.blur();
@@ -848,7 +842,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
       Keyboard.dismiss();
     } else {
       setAiResponse(undefined);
-      searchFocusReleaseTimer.current = setTimeout(() => setCollectionSearchFocusBlocked(false), 350);
+      setCollectionSearchFocusBlocked(false);
     }
   }
 
@@ -862,6 +856,12 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
     setActiveSheet(sheet);
     setSheetOpen(true);
   }
+  const initialActionHandled = useRef(false);
+  useEffect(() => {
+    if (!initialAction || initialActionHandled.current) return;
+    initialActionHandled.current = true;
+    openSheet(initialAction === "create" ? "rootActions" : "newCollection");
+  }, [initialAction]);
 
   function openTagFilters() {
     closeSheet();
@@ -3306,7 +3306,7 @@ export function GalleryWorkspace({ initialCollectionKey, initialImageKey, initia
         onSubmit={() => void askAssistant()}
         pageIdentity={(closeCore) => <WorkspaceAppSwitcher active="gallery" identity="core" onSelectActive={closeCore} />}
         prompts={CORE_PROMPTS}
-        sendIcon={<SendIcon size="sm" variant="inverse" />}
+        sendIcon={<SendIcon size="sm" />}
         value={aiInput}
       />
 

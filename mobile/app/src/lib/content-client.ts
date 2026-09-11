@@ -32,6 +32,7 @@ export type ContentFolder = {
   presentation?: ContentPresentation;
   isFavorite?: boolean;
   managed?: boolean;
+  structuralProtection?: boolean;
 };
 
 export type ContentDocument = {
@@ -46,6 +47,7 @@ export type ContentDocument = {
   currentVersionKey?: string | null;
   isFavorite: boolean;
   managed?: boolean;
+  structuralProtection?: boolean;
   updatedAt: string;
 };
 
@@ -122,6 +124,7 @@ export type ContentSearchDocument = {
   extension?: ContentDocument["extension"];
   isFavorite: boolean;
   managed?: boolean;
+  structuralProtection?: boolean;
   score: number;
   summary?: string;
   scopeKey?: string;
@@ -698,8 +701,8 @@ export async function scanContentDocument(pages: { name: string; size: number; b
 }
 
 const appResultTagsSchema = z.array(z.strictObject({ key: z.string().min(1), name: z.string() })).optional();
-const appFolderResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), parentFolderKey: z.string().min(1).optional(), name: z.string().min(1), description: z.string().optional(), isFavorite: z.boolean(), createdAt: z.string().datetime().optional(), updatedAt: z.string().datetime().optional(), score: z.number().optional(), tags: appResultTagsSchema });
-const appDocumentResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), folderKey: z.string().min(1).optional(), folder: z.strictObject({ key: z.string().min(1), name: z.string().min(1) }).optional(), name: z.string().min(1), extension: z.string().optional(), mimeType: z.string().optional(), sizeBytes: z.number().int().positive().optional(), isFavorite: z.boolean(), createdAt: z.string().datetime().optional(), updatedAt: z.string().datetime().optional(), score: z.number().optional(), tags: appResultTagsSchema });
+const appFolderResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), parentFolderKey: z.string().min(1).optional(), name: z.string().min(1), description: z.string().optional(), presentation: z.enum(["platform", "assistant", "knowledge", "media", "travel", "communication", "learning"]).optional(), managed: z.boolean().optional(), structuralProtection: z.literal(true).optional(), isFavorite: z.boolean(), createdAt: z.string().datetime().optional(), updatedAt: z.string().datetime().optional(), score: z.number().optional(), tags: appResultTagsSchema });
+const appDocumentResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), folderKey: z.string().min(1).optional(), folder: z.strictObject({ key: z.string().min(1), name: z.string().min(1) }).optional(), name: z.string().min(1), extension: z.string().optional(), mimeType: z.string().optional(), sizeBytes: z.number().int().positive().optional(), managed: z.boolean().optional(), structuralProtection: z.literal(true).optional(), isFavorite: z.boolean(), createdAt: z.string().datetime().optional(), updatedAt: z.string().datetime().optional(), score: z.number().optional(), tags: appResultTagsSchema });
 
 async function searchAppContent(query: string, signal: AbortSignal | undefined, folderKey: string | undefined, includeDescendants: boolean, recordHistory: boolean, limit = 50, tagKeys: string[] = []): Promise<ContentSearchResponse> {
   const filters = { ...(folderKey ? { folderKey, includeDescendants } : {}), ...(tagKeys.length ? { tagKeys, tagMatch: "all" as const } : {}) };

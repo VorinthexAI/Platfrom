@@ -3,6 +3,7 @@ import { createToolEventService, toolEventInputSchema } from './service';
 import { runWithEventIdentifier } from './event-identifier';
 import { addToolTokenUsage, chargeToolOutcome, currentFixedChargeReceipt, markFixedChargeOutcomeAccepted, markToolOutcomeAccepted, observeToolExecution as observePersistedToolExecution, recordActionCost, recordActionUsage, runWithEventApp, SparkExecutionPendingError, SparkRefundError } from './runtime';
 import { APP_KEYS } from '@/lib/apps/registry';
+import { runWithDevice } from './device';
 
 const APP_SCOPE_KEY = 'cmrnlzf640001qc7kazsr96k5';
 const observeToolExecution: typeof observePersistedToolExecution = (slug, context, execute, options = {}) => observePersistedToolExecution(slug, context, execute, { appScopeKey: APP_SCOPE_KEY, ...options });
@@ -17,8 +18,8 @@ describe('tool events', () => {
       insert: async (event) => { inserted.push(event); return event as never; },
       productScopeExists: async () => true,
     });
-    await service.record({ userId: 'user-1', scopeKey: 'scope-1', slug: 'document.summarize', appScopeKey: APP_SCOPE_KEY, microSparks: 2_000_000, inputTokens: 10, outputTokens: 5, totalTokens: 15 });
-    expect(inserted[0]).toEqual({ key: 'event-1', userId: 'user-1', scopeKey: 'scope-1', eventIdentifier: 'f'.repeat(128), slug: 'document.summarize', appScopeKey: APP_SCOPE_KEY, createdAt: '2026-09-02T12:00:00.000Z', status: 'completed', microSparks: 2_000_000, sparkTransactionKey: null, inputTokens: 10, outputTokens: 5, totalTokens: 15 });
+    await runWithDevice('ios', () => service.record({ userId: 'user-1', scopeKey: 'scope-1', slug: 'document.summarize', appScopeKey: APP_SCOPE_KEY, microSparks: 2_000_000, inputTokens: 10, outputTokens: 5, totalTokens: 15 }));
+    expect(inserted[0]).toEqual({ key: 'event-1', userId: 'user-1', scopeKey: 'scope-1', eventIdentifier: 'f'.repeat(128), device: 'ios', slug: 'document.summarize', appScopeKey: APP_SCOPE_KEY, createdAt: '2026-09-02T12:00:00.000Z', status: 'completed', microSparks: 2_000_000, sparkTransactionKey: null, inputTokens: 10, outputTokens: 5, totalTokens: 15 });
   });
 
   test('accepts arbitrary bounded slugs without maintaining an event allowlist', () => {
@@ -29,6 +30,7 @@ describe('tool events', () => {
     expect(() => toolEventInputSchema.parse({ userId: null, scopeKey: 'scope-1', slug: '', appScopeKey: APP_SCOPE_KEY })).toThrow();
     expect(() => toolEventInputSchema.parse({ userId: null, scopeKey: 'scope-1', slug: 'x'.repeat(201), appScopeKey: APP_SCOPE_KEY })).toThrow();
     expect(() => toolEventInputSchema.parse({ userId: null, scopeKey: 'scope-1', slug: 'folder.create', appScopeKey: 'unknown' })).toThrow();
+    expect(() => toolEventInputSchema.parse({ userId: null, scopeKey: null, slug: 'folder.create', appScopeKey: APP_SCOPE_KEY, device: 'ios' })).toThrow();
   });
 
   test('prefers an explicit identifier, then request context, then a random fallback', async () => {
@@ -50,13 +52,23 @@ describe('tool events', () => {
     const events: Record<string, unknown>[] = [];
     const recorder = async (event: Record<string, unknown>) => { events.push(event); };
     await runWithEventApp(APP_KEYS.GALLERY, APP_SCOPE_KEY, async () => {
-      await observeToolExecution('image.generate', { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'system' } }, async () => {
+      await observeToolExecution('app.generate-image', { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'system' } }, async () => {
         addToolTokenUsage({ inputTokens: 4, outputTokens: 6, totalTokens: 10 });
         return 'ok';
       });
     }, recorder);
     await Promise.resolve();
-    expect(events).toEqual([{ userId: null, scopeKey: 'scope-1', slug: 'image.generate', appScopeKey: APP_SCOPE_KEY, status: 'completed', microSparks: 0, sparkTransactionKey: null, inputTokens: 4, outputTokens: 6, totalTokens: 10 }]);
+    expect(events).toEqual([{ userId: null, scopeKey: 'scope-1', slug: 'app.generate-image', appScopeKey: APP_SCOPE_KEY, status: 'completed', microSparks: 0, sparkTransactionKey: null, inputTokens: 4, outputTokens: 6, totalTokens: 10 }]);
+  });
+
+  test('observes durable conversation image jobs as the canonical public capability', async () => {
+    const events: Record<string, unknown>[] = [];
+    await observeToolExecution('conversation.image.enqueue', { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'system' } }, async () => 'ok', { recorder: async (event) => { events.push(event as Record<string, unknown>); } });
+    await observeToolExecution('image.generate', { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'system' } }, async () => 'ok', { recorder: async (event) => { events.push(event as Record<string, unknown>); } });
+    expect(events).toEqual([
+      expect.objectContaining({ slug: 'app.generate-image', status: 'completed' }),
+      expect.objectContaining({ slug: 'app.generate-image', status: 'completed' }),
+    ]);
   });
 
   test('rejects an unknown app before inserting', async () => {
@@ -100,6 +112,7 @@ describe('tool events', () => {
     });
     expect(charged).toHaveLength(2);
     expect(charged[0]).toMatchObject({ kind: 'action', actionSlug: 'text.generate', microSparks: 200, metadata: { amountMicroSparks: 200 } });
+    expect(charged.map(({ eventKey }) => eventKey)).toEqual(['event-1', 'event-1']);
     expect(charged[0]?.requestHash).toBe(charged[1]?.requestHash);
     expect(JSON.stringify(charged)).not.toContain('usage');
   });
@@ -122,7 +135,7 @@ describe('tool events', () => {
     await expect(run({ inputTokens: 2, outputTokens: 3, totalTokens: 5 }, true)).rejects.toThrow('persistence failed');
     expect(charges[0]?.requestHash).toBe(charges[1]?.requestHash);
     expect(charges[0]?.metadata).not.toEqual(charges[1]?.metadata);
-    expect(refunds).toEqual([expect.objectContaining({ microSparks: 1_600, chargeTransactionKey: 'charge-2' })]);
+    expect(refunds).toEqual([expect.objectContaining({ microSparks: 1_280, chargeTransactionKey: 'charge-2' })]);
   });
 
   test('reuses the original event key from a replayed charge', async () => {

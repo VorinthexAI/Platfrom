@@ -2,11 +2,14 @@
 
 Local Bun CLI for generating, reviewing, locking, versioning, exporting, and backing up Vorinthex AI brand assets.
 
+It also includes a deterministic HTML-to-PNG product screenshot renderer. See [`product-screenshots/README.md`](product-screenshots/README.md).
+
 ## Setup
 
 ```bash
 cd scripts/image
 bun install
+bun run browser:install
 ```
 
 The CLI reads `OPENROUTER_API_KEY` from `secrets.dev.backend` in the encrypted repository file `.github/environments.json`. The image model handles generation, editing, review, and comparison. Optional non-secret overrides can be supplied through the process environment:
@@ -24,6 +27,8 @@ DEFAULT_OUTPUT_FORMAT=png
 bun run design
 bun run validate
 bun run backup
+bun run screenshots:render -- --preset all
+bun run frame:generate
 ```
 
 From the monorepo root:

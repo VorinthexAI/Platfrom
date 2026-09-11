@@ -252,13 +252,16 @@ export async function processEmailSyncJob(raw: unknown, dependencies: {
     return { renewed: 1 };
   }
   if (job.kind === 'connector-reconciliation') {
-    const actor = { userKey: 'system', teamKey: job.teamKey, scopeKey: job.scopeKey };
+    const systemActor = { userKey: 'system', teamKey: job.teamKey, scopeKey: job.scopeKey };
     if (job.reason === 'send') {
-      const result = await service.reconcileSends(actor, job.connectorKey, job.sendDraftKey!);
+      const result = await service.reconcileSends(systemActor, job.connectorKey, job.sendDraftKey!);
       if (result.busy || result.pending) throw new Error('Email send reconciliation remains incomplete');
       return { synchronized: result.recovered };
     }
     if (job.operation) {
+      const connector = await connectors.getByKey(job.connectorKey);
+      if (!connector || connector.teamKey !== job.teamKey || connector.scopeKey !== job.scopeKey || connector.status === 'revoked' || connector.syncEnabled === false) throw new Error('Email connector is unavailable for reconciliation');
+      const actor = { userKey: connector.userKey, teamKey: job.teamKey, scopeKey: job.scopeKey };
       const result = job.operation.kind === 'favorite'
         ? await service.setFavorite(actor, { threadKeys: job.operation.threadKeys, isFavorite: job.operation.isFavorite }, true)
         : job.operation.kind === 'read-state'

@@ -1,7 +1,6 @@
 import { normalizeProviderError } from '@/lib/ai/providers/errors';
 import { executeQueueAction, type ActionId, type ActionRouteId } from '@/lib/ai/actions';
-import { webInputSchema, type WebInput } from '@/lib/ai/actions/web';
-import { imageActionInputSchema, imageOutputSchema, type ImageOutput, type ProviderAdapter, type ProviderExecuteResponse, type ProviderId } from '@/lib/ai/providers/types';
+import { imageActionInputSchema, imageOutputSchema, type ImageOutput, type ProviderAdapter, type ProviderExecuteResponse, type ProviderExecutionCapabilities, type ProviderId } from '@/lib/ai/providers/types';
 import { createRegisteredProviderAdapter } from '@/lib/ai/providers';
 import { tokenUsage, ZERO_TOKEN_USAGE, type TokenUsage } from '@/lib/ai/shared/usage';
 import { ProviderExecutionError } from './errors';
@@ -10,12 +9,14 @@ import type { RouteRequestInput } from './route-request';
 import type { RouteDecision, RouterDependencies } from './types';
 import { coreChatInputSchema, type CoreChatInput } from '@/lib/ai/actions/core-chat';
 import { addToolTokenUsage, recordActionCost, recordActionUsage } from '@/lib/ai/events/runtime';
+import { SparkRepositoryError } from '@/lib/sparks/repository';
 
 export interface ExecuteRouteOptions<TInput> {
   decision: RouteDecision;
   input: TInput;
   adapters?: Partial<Record<ProviderId, ProviderAdapter>>;
   env?: ExecuteActionOptions['env'];
+  capabilities?: ProviderExecutionCapabilities;
   timeoutMs?: number;
   signal?: AbortSignal;
   onAttemptStart?: (attempt: RouteAttemptStartTelemetry) => string | undefined | Promise<string | undefined>;
@@ -64,6 +65,7 @@ export async function executeRoute<TInput, TOutput>(options: ExecuteRouteOptions
       externalModelId: decision.providerModelId,
       input: options.input,
       teamKey: decision.teamKey,
+      capabilities: options.capabilities,
       timeoutMs: options.timeoutMs,
       signal: options.signal,
     });
@@ -74,6 +76,10 @@ export async function executeRoute<TInput, TOutput>(options: ExecuteRouteOptions
     return response;
   } catch (error) {
     const endedAtMs = Date.now();
+    if (error instanceof SparkRepositoryError) {
+      await options.onAttempt?.({ ...attemptBase, callKey, status: 'failed', usage: ZERO_TOKEN_USAGE, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs, errorCode: error.code });
+      throw error;
+    }
     const normalized = normalizeProviderError(decision.providerSlug, error);
     await options.onAttempt?.({ ...attemptBase, callKey, status: 'failed', usage: ZERO_TOKEN_USAGE, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs, errorCode: normalized.code });
     throw new ProviderExecutionError(decision.actionSlug, [{ modelId: decision.modelSlug, providerId: decision.providerSlug, externalModelId: decision.providerModelId, code: normalized.code, message: normalized.message }], { cause: normalized });
@@ -81,6 +87,7 @@ export async function executeRoute<TInput, TOutput>(options: ExecuteRouteOptions
 }
 
 export interface ExecuteActionOptions extends RouterDependencies {
+  capabilities?: ProviderExecutionCapabilities;
   timeoutMs?: number;
   signal?: AbortSignal;
   providers?: readonly ActionRouteId[];
@@ -98,7 +105,7 @@ export async function executeAction<TInput, TOutput>(request: RouteRequestInput,
     const failures: ProviderExecutionError['attempts'][number][] = [];
     for (const decision of decisions) {
       try {
-        return await executeRoute<TSelectedInput, TSelectedOutput>({ decision, input: selectedInput, adapters: options.adapters, env: options.env, timeoutMs: options.timeoutMs, signal: options.signal });
+        return await executeRoute<TSelectedInput, TSelectedOutput>({ decision, input: selectedInput, adapters: options.adapters, env: options.env, capabilities: options.capabilities, timeoutMs: options.timeoutMs, signal: options.signal });
       } catch (error) {
         if (!(error instanceof ProviderExecutionError)) throw error;
         failures.push(...error.attempts);
@@ -152,14 +159,6 @@ export async function executeAsk<TOutput>(teamKey: string, input: CoreChatInput,
   return executeAction<typeof providerInput, TOutput>(request, providerInput, options);
 }
 
-/** Executes grounded web search using the model selected by its provider-neutral mode. */
-export async function executeWebSearch<TOutput>(teamKey: string, input: WebInput, options: ExecuteActionOptions = {}) {
-  const { mode, ...providerInput } = webInputSchema.parse(input);
-  return executeAction<typeof providerInput, TOutput>({
-    mode: 'auto', teamKey, actionSlug: 'web',
-  }, providerInput, options);
-}
-
 /** Streams normalized provider chunks over the selected route. */
 export async function* streamRoute<TInput>(options: ExecuteRouteOptions<TInput>): AsyncIterable<import('@/lib/ai/providers').ProviderStreamChunk> {
   await recordActionCost(options.decision.actionSlug, options.input);
@@ -167,7 +166,7 @@ export async function* streamRoute<TInput>(options: ExecuteRouteOptions<TInput>)
   if (!adapter?.stream) throw new ProviderExecutionError(options.decision.actionSlug, [{ modelId: options.decision.modelSlug, providerId: options.decision.providerSlug, externalModelId: options.decision.providerModelId, code: 'adapter_unavailable', message: 'provider streaming adapter is unavailable' }]);
   let usage: TokenUsage | undefined;
   try {
-    for await (const chunk of adapter.stream({ actionId: options.decision.actionSlug, modelId: options.decision.modelSlug, externalModelId: options.decision.providerModelId, input: options.input, teamKey: options.decision.teamKey, timeoutMs: options.timeoutMs, signal: options.signal })) {
+    for await (const chunk of adapter.stream({ actionId: options.decision.actionSlug, modelId: options.decision.modelSlug, externalModelId: options.decision.providerModelId, input: options.input, teamKey: options.decision.teamKey, capabilities: options.capabilities, timeoutMs: options.timeoutMs, signal: options.signal })) {
       if (chunk.type === 'usage') usage = chunk.usage;
       yield chunk;
     }
@@ -176,6 +175,7 @@ export async function* streamRoute<TInput>(options: ExecuteRouteOptions<TInput>)
       await recordActionUsage(options.decision.actionSlug, options.input, usage);
     }
   } catch (error) {
+    if (error instanceof SparkRepositoryError) throw error;
     const normalized = normalizeProviderError(options.decision.providerSlug, error);
     throw new ProviderExecutionError(options.decision.actionSlug, [{ modelId: options.decision.modelSlug, providerId: options.decision.providerSlug, externalModelId: options.decision.providerModelId, code: normalized.code, message: normalized.message }], { cause: normalized });
   }
@@ -190,7 +190,7 @@ export async function* streamAsk(teamKey: string, input: CoreChatInput, options:
   for (let attempt = 0; ; attempt += 1) {
     let emitted = false;
     try {
-      for await (const chunk of streamRoute({ decision, input: providerInput, adapters: options.adapters, env: options.env, timeoutMs: options.timeoutMs, signal: options.signal })) {
+      for await (const chunk of streamRoute({ decision, input: providerInput, adapters: options.adapters, env: options.env, capabilities: options.capabilities, timeoutMs: options.timeoutMs, signal: options.signal })) {
         emitted = true;
         yield chunk;
       }

@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { APP_LINK_ROUTES, appLinkHeaderSources, buildAndroidAssetLinks, buildAppleAppSiteAssociation } from "./app-links";
+import { readFileSync } from "node:fs";
+
+const openFallback = readFileSync(new URL("../app/open/page.tsx", import.meta.url), "utf8");
 
 describe("mobile app associations", () => {
   test("limits iOS universal links to supported app routes", () => {
@@ -31,8 +34,11 @@ describe("mobile app associations", () => {
   });
 
   test("keeps every claimed route paired with a no-store fallback header", () => {
-    expect(APP_LINK_ROUTES.map(({ fallback }) => fallback)).toEqual(["magic", "mfa", "signal", "referral"]);
-    expect(appLinkHeaderSources()).toEqual(["/public/auth/token", "/auth/mfa", "/capability/signal", "/referral/:path*"]);
+    expect(APP_LINK_ROUTES.map(({ fallback }) => fallback)).toEqual(["open", "magic", "mfa", "signal", "referral"]);
+    expect(appLinkHeaderSources()).toEqual(["/open", "/public/auth/token", "/auth/mfa", "/capability/signal", "/referral/:path*"]);
     expect(JSON.stringify(APP_LINK_ROUTES)).not.toContain("share");
+    expect(openFallback).toContain('href="vorinthexcore://"');
+    expect(openFallback).toContain("<DownloadAppCta />");
+    expect(openFallback).toContain("PRIVATE_ROUTE_METADATA");
   });
 });

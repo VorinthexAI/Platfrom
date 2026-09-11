@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 import type { CapabilitySlug } from "@/data/registry";
 import { fetchAppsRegistry, type ServerApp } from "@/lib/apps-registry";
-import { fetchSparkCosts, type SparkCharge } from "@/lib/cost-client";
+import { fetchSparkCosts, type CapabilitySparkCost, type SparkCharge } from "@/lib/cost-client";
 import { fetchPublicBootstrap, type MobileProduct } from "@/lib/product-client";
 
 export type AppBootstrapStatus = "idle" | "bootstrapping" | "ready" | "failed";
@@ -12,6 +12,7 @@ type AppsState = {
   apps: ServerApp[];
   products: MobileProduct[];
   sparkCosts: SparkCharge[];
+  capabilityCosts: Record<string, CapabilitySparkCost>;
   sparkCostsStatus: ProductBootstrapStatus;
   sparkCostsError: string | null;
   productsStatus: ProductBootstrapStatus;
@@ -40,8 +41,8 @@ function refreshProducts(set: (patch: Partial<AppsState>) => void) {
         ? { products: productsResult.value, productsStatus: "ready", productsError: null }
         : { products: [], productsStatus: "unavailable", productsError: productsResult.reason instanceof Error ? productsResult.reason.message : "Product catalog is unavailable." });
       set(costsResult.status === "fulfilled"
-        ? { sparkCosts: costsResult.value.charges, sparkCostsStatus: "ready", sparkCostsError: null }
-        : { sparkCosts: [], sparkCostsStatus: "unavailable", sparkCostsError: costsResult.reason instanceof Error ? costsResult.reason.message : "Spark costs are unavailable." });
+        ? { capabilityCosts: costsResult.value.capabilityCosts, sparkCosts: costsResult.value.charges, sparkCostsStatus: "ready", sparkCostsError: null }
+        : { capabilityCosts: {}, sparkCosts: [], sparkCostsStatus: "unavailable", sparkCostsError: costsResult.reason instanceof Error ? costsResult.reason.message : "Spark costs are unavailable." });
     })
     .finally(() => { productsPromise = null; });
   return productsPromise;
@@ -61,6 +62,7 @@ export const useAppsStore = create<AppsState>((set, get) => ({
   apps: [],
   products: [],
   sparkCosts: [],
+  capabilityCosts: {},
   sparkCostsStatus: "idle",
   sparkCostsError: null,
   productsStatus: "idle",

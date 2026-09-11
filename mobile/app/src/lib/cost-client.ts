@@ -25,11 +25,17 @@ const variableChargeSchema = chargeBaseSchema.extend({ kind: z.literal("variable
 export const sparkCostsResponseSchema = z.strictObject({
   success: z.literal(true),
   data: z.strictObject({
+    capabilityCosts: z.record(z.string(), z.strictObject({
+      sparkCost: z.string().regex(/^[1-9]\d*(?:\.\d{1,6})?$/),
+      microSparkCost: z.number().int().safe().positive(),
+      unit: z.literal("invocation"),
+    })),
     charges: z.array(z.discriminatedUnion("kind", [staticChargeSchema, storageChargeSchema, variableChargeSchema])).max(100),
   }),
 });
 
 export type SparkCharge = z.infer<typeof sparkCostsResponseSchema>["data"]["charges"][number];
+export type CapabilitySparkCost = z.infer<typeof sparkCostsResponseSchema>["data"]["capabilityCosts"][string];
 export type SparkCosts = z.infer<typeof sparkCostsResponseSchema>["data"];
 
 export async function fetchSparkCosts() {

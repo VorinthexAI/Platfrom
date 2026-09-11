@@ -1,5 +1,5 @@
 export const CANONICAL_ORIGIN = "https://vorinthex.com" as const;
-export const CONTENT_LAST_REVIEWED = "2026-09-06" as const;
+export const CONTENT_LAST_REVIEWED = "2026-09-09" as const;
 export const CONTACT_EMAIL = "contact@vorinthex.com" as const;
 export const PRICING_HERO_HEADING = "One balance for everything you create and use" as const;
 export const PRICING_HERO_BODY =
@@ -68,18 +68,18 @@ export const CORE_CAPABILITIES = [
     id: "signal",
     name: "Signal",
     icon: "/logos/entities/capability-signal.png",
-    description: "Prioritize email, understand conversations, and write replies in your voice.",
-    promise: "Turn an endless inbox into focused communication.",
+    description: "A private inbox for connected email and communication from Vorinthex apps and support.",
+    promise: "Keep the communication that matters in one private place.",
     details: [
-      "Connect your email and Signal separates what matters from what does not, surfaces conversations that need attention, and makes important messages easier to understand.",
-      "When it is time to respond, Signal helps write replies that sound like you. It can learn your tone, style, structure, and how you communicate with different people.",
+      "Signal brings connected email together with communication from Vorinthex apps and support in one focused, private inbox.",
+      "For connected email, Signal helps prioritize conversations, understand messages, and prepare replies in your voice while keeping every send action under your control.",
     ],
     connection:
-      "Signal draws on Core context to explain references and prepare replies without creating another isolated silo.",
+      "Signal keeps private communication connected to authorized Core context without creating another isolated silo.",
     features: [
-      "Connect multiple inboxes",
-      "Filter noise and prioritize what matters",
-      "Draft replies for your approval",
+      "Connected email in one private inbox",
+      "Vorinthex app communication and support",
+      "Connected email replies for your approval",
     ],
   },
   {

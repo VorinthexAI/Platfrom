@@ -40,13 +40,13 @@ describe('personal assistant runtime', () => {
     });
 
     expect(request).toBe(teamKey);
-    expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
+    expect(chatInput.tools.filter(({ name }: { name: string }) => !name.startsWith('profile.badge.')).map(({ name }: { name: string }) => name)).toEqual([
       'app.search',
       'app.enhance', 'app.translate', 'app.speech',
       'content.hidden.list',
-      'team.list', 'app.notify', 'notification.list', 'scope.list', 'pricing.read',
+      'team.list', 'app.notify', 'app.history', 'communication.thread.read', 'communication.thread.mark-read', 'communication.message.send', 'scope.list', 'pricing.read',
       'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore',
-      'referral.summary.read', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote',
+      'referral.summary.read', 'referral.redeem', 'profile.update', 'ticket.create', 'feedback.create',
       'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal',
       'folder.create', 'folder.update', 'folder.move', 'folder.copy',
       'document.create', 'document.update',
@@ -84,19 +84,19 @@ describe('personal assistant runtime', () => {
       },
     });
 
-    expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
+    expect(chatInput.tools.filter(({ name }: { name: string }) => !name.startsWith('profile.badge.')).map(({ name }: { name: string }) => name)).toEqual([
       'app.search',
       'content.hidden.list',
-      'team.list', 'app.notify', 'notification.list', 'scope.list', 'pricing.read',
+      'team.list', 'app.notify', 'app.history', 'communication.thread.read', 'communication.thread.mark-read', 'communication.message.send', 'scope.list', 'pricing.read',
       'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore',
-      'referral.summary.read', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote',
+      'referral.summary.read', 'referral.redeem', 'profile.update', 'ticket.create', 'feedback.create',
       'collection.create', 'collection.update', 'collection.delete',
       'image.search', 'image.favorite', 'image.update', 'image.delete',
       'collection.duplicates.delete', 'collection.image.transfer', 'subject.list', 'visual-identity.create',
       'subject.image.list', 'subject.delete', 'highlight.create', 'highlight.list',
       'highlight.read', 'highlight.delete', 'image.create-memory', 'image.memory.list',
       'image.memory.read', 'image.memory.delete', 'collection.hide', 'collection.reveal',
-      'image.hide', 'image.reveal', 'image.ideas.create', 'image.generate', 'image.generation-history.list', 'image.generation-history.delete', 'assistant.unsupported',
+      'image.hide', 'image.reveal', 'image.ideas.create', 'app.generate-image', 'image.generation-history.list', 'image.generation-history.delete', 'assistant.unsupported',
     ]);
     expect(chatInput.systemPrompt).toContain('Use app.search with collectionSlugs ["images"]');
     expect(chatInput.systemPrompt).toContain('duplicates true plus collectionKey');
@@ -112,17 +112,16 @@ describe('personal assistant runtime', () => {
   test('executes image generation with trusted Core context and reports a Gallery mutation', async () => {
     let modelCalls = 0;
     const calls: unknown[][] = [];
-    const collectionKey = newId();
     const result = await runPersonalAssistant({ ...input, surface: 'media-workspace', message: 'Generate an image of Earth', requestKey: 'request-1' }, domain, {
       execute: async () => {
         modelCalls += 1;
-        if (modelCalls === 1) return response({ text: '', toolCalls: [{ id: 'generate-1', name: 'image.generate', arguments: { prompt: 'Earth from orbit', count: 1, collectionKey } }], stopReason: 'tool_use' });
+        if (modelCalls === 1) return response({ text: '', toolCalls: [{ id: 'generate-1', name: 'app.generate-image', arguments: { prompt: 'Earth from orbit', count: 1 } }], stopReason: 'tool_use' });
         return response({ text: 'Generated and saved the image.', toolCalls: [], stopReason: 'end_turn' });
       },
       images: { generate: async (...args: unknown[]) => { calls.push(args); return { images: [{ key: newId(), url: 'https://images.example/signed.png' }], provider: { durationMs: 10, costUsd: 0.1 } }; } } as any,
     });
-    expect(calls).toEqual([[{ prompt: 'Earth from orbit', count: 1, size: '1024x1024', quality: 'medium', mode: 'default', referenceImageKeys: [], collectionKey }, domain, expect.stringMatching(/^[a-f0-9]{64}$/)]]);
-    expect(calls[0]?.[2]).not.toBe('request-1');
+    expect(calls).toEqual([[{ prompt: 'Earth from orbit', count: 1, size: '1024x1024', quality: 'medium', mode: 'default' }, { kind: 'managed-gallery' }, domain, expect.stringMatching(/^[a-f0-9]{64}$/)]]);
+    expect(calls[0]?.[3]).not.toBe('request-1');
     expect(result).toEqual({ type: 'answer', message: 'Generated and saved the image.', sources: [], changes: [{ workspace: 'gallery' }] });
   });
 
@@ -135,10 +134,24 @@ describe('personal assistant runtime', () => {
       },
     });
 
-    expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual(['app.search', 'team.list', 'app.notify', 'notification.list', 'scope.list', 'pricing.read', 'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore', 'referral.summary.read', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote', 'place.reference.generate', 'place.reference.list', 'trip.guide.generate', 'trip.guide.list', 'trip.create', 'trip.update', 'trip.delete', 'trip.attachment.set', 'place.guide.find', 'place.find-city', 'place.find-children', 'place.create', 'place.update', 'place.delete', 'place.open', 'assistant.unsupported']);
+    expect(chatInput.tools.filter(({ name }: { name: string }) => !name.startsWith('profile.badge.')).map(({ name }: { name: string }) => name)).toEqual(['app.search', 'team.list', 'app.notify', 'app.history', 'communication.thread.read', 'communication.thread.mark-read', 'communication.message.send', 'scope.list', 'pricing.read', 'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore', 'referral.summary.read', 'referral.redeem', 'profile.update', 'ticket.create', 'feedback.create', 'place.reference.generate', 'place.reference.list', 'trip.guide.generate', 'trip.guide.list', 'trip.create', 'trip.update', 'trip.delete', 'trip.attachment.set', 'place.guide.find', 'place.find-city', 'place.find-children', 'place.create', 'place.update', 'place.delete', 'place.open', 'assistant.unsupported']);
     expect(chatInput.systemPrompt).toContain('operating inside Compass');
     expect(chatInput.messages[0].content[0].text).toContain('"workspace":"Compass"');
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Compass. Core can search your saved knowledge for travel context.', sources: [] });
+  });
+
+  test('describes Signal as the private communication inbox', async () => {
+    let chatInput: any;
+    const result = await runPersonalAssistant({ ...input, surface: 'signal-workspace' }, domain, {
+      execute: async (_request, nextInput) => {
+        chatInput = nextInput;
+        return response({ text: 'No action taken.', toolCalls: [], stopReason: 'end_turn' });
+      },
+    });
+
+    expect(chatInput.systemPrompt).toContain("private inbox for connected email and communication from Vorinthex apps and support");
+    expect(chatInput.systemPrompt).not.toMatch(/Gmail/i);
+    expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Signal. Core can help with your private inbox, connected email threads, and drafts.', sources: [] });
   });
 
   test('routes Gallery text search through app.search and answers from the result', async () => {
@@ -260,7 +273,7 @@ describe('personal assistant runtime', () => {
       execute: async (_request, nextInput) => {
         modelCalls += 1;
         if (modelCalls === 1) {
-          expect(nextInput.tools?.map(({ name }) => name)).toEqual(['app.search', 'team.list', 'app.notify', 'notification.list', 'scope.list', 'pricing.read', 'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore', 'referral.summary.read', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote', 'book.topic.suggest', 'book.goal.suggest', 'book.extend', 'book.chapter.progress', 'book.create', 'book.generation.retry', 'book.generation.cancel', 'book.favorite', 'book.delete', 'assistant.unsupported']);
+          expect(nextInput.tools?.filter(({ name }) => !name.startsWith('profile.badge.')).map(({ name }) => name)).toEqual(['app.search', 'team.list', 'app.notify', 'app.history', 'communication.thread.read', 'communication.thread.mark-read', 'communication.message.send', 'scope.list', 'pricing.read', 'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore', 'referral.summary.read', 'referral.redeem', 'profile.update', 'ticket.create', 'feedback.create', 'book.topic.suggest', 'book.goal.suggest', 'book.extend', 'book.chapter.progress', 'book.create', 'book.generation.retry', 'book.generation.cancel', 'book.favorite', 'book.delete', 'assistant.unsupported']);
           expect(nextInput.systemPrompt).toContain('Call book.create exactly once');
           return response({ text: '', toolCalls: [{ id: 'book-create-1', name: 'book.create', arguments: brief }], stopReason: 'tool_use' });
         }

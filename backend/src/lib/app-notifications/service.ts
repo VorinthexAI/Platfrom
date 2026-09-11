@@ -6,6 +6,7 @@ import { newId } from '@/lib/ids';
 import { appNotifyInputSchema, type AppNotifyInput, notificationListInputSchema, type NotificationListInput, pushRegistrationInputSchema, type PushRegistrationInput } from './contracts';
 import { appNotificationRepository, type AppNotificationRepository } from './repository';
 import { enqueueAppNotification } from './queue';
+import { createUserInboxService, type UserInboxService } from '@/lib/user-inbox/service';
 
 export class AppNotificationAccessError extends Error {}
 
@@ -29,7 +30,7 @@ export function storageRetentionWarningContent(monthlyCostSparks: string, wipeDu
   };
 }
 
-export function createAppNotificationService(dependencies: { repository?: AppNotificationRepository; enqueue?: typeof enqueueAppNotification; embed?: (text: string) => Promise<number[]> } = {}) {
+export function createAppNotificationService(dependencies: { repository?: AppNotificationRepository; inbox?: UserInboxService; enqueue?: typeof enqueueAppNotification; embed?: (text: string) => Promise<number[]> } = {}) {
   const repository = dependencies.repository ?? appNotificationRepository;
   const enqueue = dependencies.enqueue ?? enqueueAppNotification;
   const activeMember = (context: ToolContext) => {
@@ -69,13 +70,14 @@ export function createAppNotificationService(dependencies: { repository?: AppNot
         ...content,
         embedding,
         now: input.now,
-        cooldownCutoff: new Date(Date.parse(input.now) - DAY_MS).toISOString(),
+        warningDayStart: `${input.now.slice(0, 10)}T00:00:00.000Z`,
       });
       if (result && result.deliveries > 0) await enqueue(result.key);
       return result;
     },
     async list(rawInput: NotificationListInput, context: ToolContext) {
-      return repository.listNotifications(activeMember(context).user.key, context.teamKey, notificationListInputSchema.parse(rawInput));
+      activeMember(context);
+      return (dependencies.inbox ?? createUserInboxService()).list(notificationListInputSchema.parse(rawInput), context);
     },
   };
 }

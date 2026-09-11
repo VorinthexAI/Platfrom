@@ -72,9 +72,9 @@ const trips = [
 ] as const;
 const places = [{ ...stockholm, trips: [{ key: trips[0].key, name: trips[0].name }] }, kyoto];
 const books = [
-  { key: id(110), title: 'Systems Thinking', subtitle: 'Feedback Loops', description: 'A practical guide to systems and causal feedback loops.', status: 'ready', isFavorite: true, isExtending: false, estimatedMinutes: 45, chapterCount: 6, progressPercent: 50, createdAt: oldAt, updatedAt: at, score: 0.95 },
-  { key: id(111), title: 'Deep Focus', subtitle: 'Attention at Work', description: 'Methods for sustained attention.', status: 'ready', isFavorite: false, isExtending: false, estimatedMinutes: 30, chapterCount: 4, progressPercent: 0, createdAt: at, updatedAt: at, score: 0.8 },
-  { key: id(112), title: 'Draft Book', subtitle: 'Incomplete', description: 'An unsuccessful generation.', status: 'failed', isFavorite: false, isExtending: false, estimatedMinutes: 0, chapterCount: 0, progressPercent: 0, generationProgressPercent: 20, failureMessage: 'Generation failed.', createdAt: at, updatedAt: at, score: 0.1 },
+  { key: id(110), title: 'Systems Thinking', subtitle: 'Feedback Loops', description: 'A practical guide to systems and causal feedback loops.', status: 'ready', isFavorite: true, isExtending: false, canExtend: true, managed: false, estimatedMinutes: 45, chapterCount: 6, progressPercent: 50, createdAt: oldAt, updatedAt: at, score: 0.95 },
+  { key: id(111), title: 'Deep Focus', subtitle: 'Attention at Work', description: 'Methods for sustained attention.', status: 'ready', isFavorite: false, isExtending: false, canExtend: true, managed: false, estimatedMinutes: 30, chapterCount: 4, progressPercent: 0, createdAt: at, updatedAt: at, score: 0.8 },
+  { key: id(112), title: 'Draft Book', subtitle: 'Incomplete', description: 'An unsuccessful generation.', status: 'failed', isFavorite: false, isExtending: false, canExtend: true, managed: false, estimatedMinutes: 0, chapterCount: 0, progressPercent: 0, generationProgressPercent: 20, failureMessage: 'Generation failed.', createdAt: at, updatedAt: at, score: 0.1 },
 ] as const;
 const tagAssignmentRows = [
   { key: id(140), tag: workTag, target: { type: 'document' as const, key: documents[2]!.key, label: documents[2]!.name } },
@@ -405,14 +405,14 @@ describe('Core App Search deterministic evaluation', () => {
     } as never;
     const done: ProviderStreamChunk = { type: 'done' };
     const responses: ProviderStreamChunk[][] = evaluation.input ? [
-      [{ type: 'text-delta', text: '{"tools":["app.search"],"message":""}' }, done],
       [{ type: 'tool-call', toolCall: { id: evaluation.name, name: 'app.search', arguments: evaluation.input } }, done],
-      [{ type: 'text-delta', text: JSON.stringify({ tools: [], message: evaluation.answer }) }, done],
-    ] : [[{ type: 'text-delta', text: JSON.stringify({ tools: [], message: evaluation.answer }) }, done]];
+      [{ type: 'text-delta', text: evaluation.answer }, done],
+    ] : [[{ type: 'text-delta', text: evaluation.answer }, done]];
     const { repository, completed } = createRepositoryCapture();
     const events: ConversationTurnEvent[] = [];
-    const appSearchDefinition = TOOL_DEFINITIONS.find(({ name }) => name === 'app.search');
-    if (!appSearchDefinition) throw new Error('app.search is not registered.');
+    const coreToolNames = ['app.search', 'agent.guide', 'app.generate-image'];
+    const coreDefinitions = coreToolNames.map((name) => TOOL_DEFINITIONS.find((definition) => definition.name === name));
+    if (coreDefinitions.some((definition) => !definition)) throw new Error('A Core tool is not registered.');
     await createConversationService({
       repository,
       now: () => at,
@@ -420,7 +420,7 @@ describe('Core App Search deterministic evaluation', () => {
       embed: async () => embedding,
       agent: {
         stream: providerQueue(responses, inputs),
-        tools: { names: ['app.search'], definitions: [appSearchDefinition], dependencies: { appSearchService: wrappedAppSearch } },
+        tools: { names: coreToolNames, definitions: coreDefinitions as NonNullable<typeof coreDefinitions[number]>[], dependencies: { appSearchService: wrappedAppSearch } },
       },
     }).turn({ conversationKey, message: evaluation.prompt, requestKey: evaluation.name }, context, (event) => { events.push(event); });
 
@@ -429,7 +429,10 @@ describe('Core App Search deterministic evaluation', () => {
     const semanticAnswer = normalized(saved?.content ?? '');
     for (const fact of evaluation.answerFacts) expect(semanticAnswer).toContain(normalized(fact));
     for (const fragment of [...rawAnswerFragments, ...(evaluation.forbiddenAnswerFragments ?? [])]) expect(saved?.content).not.toContain(fragment);
-    expect(events.map(({ type }) => type)).toEqual(evaluation.input ? ['start', 'delta', 'done'] : ['start', 'delta', 'done']);
+    expect(events[0]?.type).toBe('start');
+    expect(events.at(-1)?.type).toBe('done');
+    expect(events.slice(1, -1).length).toBeGreaterThan(0);
+    expect(events.slice(1, -1).every(({ type }) => type === 'delta')).toBe(true);
     expect(responses).toHaveLength(0);
     if (!evaluation.input) {
       expect(calls).toEqual([]);
@@ -445,9 +448,9 @@ describe('Core App Search deterministic evaluation', () => {
     else {
       expect(saved?.retrievals?.every(({ limit, groups }) => limit === evaluation.input!.limit && groups.every(({ results }) => results.length <= limit))).toBe(true);
     }
-    expect(inputs).toHaveLength(3);
-    expect(inputs[2]!.messages.at(-1)?.content[0]).toMatchObject({ type: 'tool-result', result: { slug: 'app.search', status: 'succeeded' } });
-    const groundedContext = normalized(JSON.stringify(inputs[2]!.messages));
+    expect(inputs).toHaveLength(2);
+    expect(inputs[1]!.messages.at(-1)?.content[0]).toMatchObject({ type: 'tool-result', result: { slug: 'app.search', status: 'succeeded' } });
+    const groundedContext = normalized(JSON.stringify(inputs[1]!.messages));
     for (const fact of evaluation.facts) expect(groundedContext).toContain(normalized(fact));
   });
 });

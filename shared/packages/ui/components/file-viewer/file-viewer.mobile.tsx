@@ -28,9 +28,9 @@ export type FileViewerProps = {
 export function FileViewer({ error, htmlUri, loading = false, onAi, onBack, onEdit, onHistory, onMenu, onRenderError, pdfUri, title }: FileViewerProps) {
   return <View style={styles.root}>
     <View style={styles.header}>
-      <Button accessibilityLabel="Back" contentMode="raw" onPress={onBack} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button>
+      <Button accessibilityLabel="Back" contentMode="raw" onPress={onBack} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
       <Text numberOfLines={1} style={styles.headerTitle}>{title}</Text>
-      <Button accessibilityLabel={`Manage ${title}`} contentMode="raw" onPress={onMenu} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
+      <Button accessibilityLabel={`Manage ${title}`} contentMode="raw" onPress={onMenu} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
     </View>
     {onEdit || onAi || onHistory ? <View style={styles.headerActions}>
       {onEdit ? <Button accessibilityLabel="Edit extracted text" contentMode="raw" onPress={onEdit} size="sm" variant="icon"><EditIcon size="sm" /></Button> : null}
@@ -49,8 +49,8 @@ export function FileViewer({ error, htmlUri, loading = false, onAi, onBack, onEd
 
 const styles = StyleSheet.create({
   root: { flex: 1, minWidth: 0, gap: spacing.sm, paddingHorizontal: spacing.md, paddingTop: spacing.md, backgroundColor: colors.page },
-  header: { minHeight: 40, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.xs },
-  headerTitle: { flex: 1, minWidth: 0, color: colors.text, fontFamily: "Geist_500Medium", fontSize: 15, lineHeight: 20 },
+  header: { minHeight: 48, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  headerTitle: { flex: 1, minWidth: 0, color: colors.text, fontFamily: "Geist_500Medium", fontSize: 24 },
   headerActions: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: spacing.xs },
   documentArea: { flex: 1, minWidth: 0, minHeight: 0, borderRadius: radii.xl, borderColor: colors.hairline, borderWidth: 1, overflow: "hidden", backgroundColor: colors.page },
   loadingSkeleton: { flex: 1, backgroundColor: colors.hairlineBright, opacity: 0.72 },

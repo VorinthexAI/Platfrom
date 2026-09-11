@@ -23,6 +23,10 @@ export const variableSparkChargeSchema = chargeBaseSchema.extend({
 }).strict();
 
 export const publicSparkChargeSchema = z.discriminatedUnion('kind', [staticSparkChargeSchema, storageSparkChargeSchema, variableSparkChargeSchema]);
-export const publicSparkCostsSchema = z.object({ charges: z.array(publicSparkChargeSchema).max(100) }).strict();
+export const capabilitySparkCostSchema = z.object({ sparkCost: z.string().regex(/^[1-9]\d*(?:\.\d{1,6})?$/), microSparkCost: z.number().int().safe().positive(), unit: z.literal('invocation') }).strict();
+export const publicSparkCostsSchema = z.object({
+  charges: z.array(publicSparkChargeSchema).max(100),
+  capabilityCosts: z.record(z.string(), capabilitySparkCostSchema),
+}).strict();
 
 export type PublicSparkCosts = z.infer<typeof publicSparkCostsSchema>;

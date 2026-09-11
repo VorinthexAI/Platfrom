@@ -5,5 +5,6 @@ export const imageAction: ActionDefinition = {
   modelPolicy: 'required',
   models: [
     { slot: 'primary', provider: 'openrouter', model: 'google.gemini-3.1-flash-lite-image', priority: 100 },
+    { slot: 'secondary', provider: 'openrouter', model: 'google.gemini-3.1-flash-lite', priority: 90 },
   ],
 };

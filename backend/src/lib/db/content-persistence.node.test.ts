@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createContentPersistence, type ContentQueryExecutor } from './content-persistence.node';
 import { EMBEDDING_DIMENSIONS } from '../embeddings';
+import { initialWorkspaceDocumentKey, initialWorkspaceFolderKey } from '../initial-workspace-content-identifiers';
 
 const scopeKey = 'cm00000000000000000000001';
 const folderKey = 'cm00000000000000000000002';
@@ -8,6 +9,21 @@ const timestamp = '2026-07-22T10:00:00.000Z';
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0);
 
 describe('scoped Content persistence', () => {
+  test('permits conversation documents only in the exact managed assistant container', async () => {
+    const destinationKey = initialWorkspaceFolderKey(scopeKey, 'assistant');
+    const actorKey = 'cm00000000000000000000003';
+    const document = { key: 'cm00000000000000000000004', scopeKey, folderKey: destinationKey, name: 'Notes', extension: 'txt' as const, mimeType: 'text/plain', storageKey: 'content/notes', sizeBytes: 3, content: 'abc', embedding, mutationPolicy: 'user' as const, archiveVisibility: 'visible' as const, isFavorite: false, createdAt: timestamp, updatedAt: timestamp };
+    let call: { query: string; bindVars?: Record<string, unknown> } | undefined;
+    const executor: ContentQueryExecutor = { async query(query, bindVars) { call = { query, bindVars }; return { async next() { return { ...document, _key: document.key, key: undefined }; } }; } };
+    await expect(createContentPersistence(executor).insertConversationAttachmentDocument(document, actorKey)).resolves.toMatchObject({ key: document.key, folderKey: destinationKey, mutationPolicy: 'user' });
+    expect(call?.query).toContain('actor.status == "active"');
+    expect(call?.query).toContain('actor.teamKey == scope.teamKey');
+    expect(call?.query).toContain('folder._key == @expectedFolderKey');
+    expect(call?.query).toContain('folder.mutationPolicy == "system-container"');
+    expect(call?.bindVars).toMatchObject({ actorKey, scopeKey, folderKey: destinationKey, expectedFolderKey: destinationKey });
+    await expect(createContentPersistence(executor).insertConversationAttachmentDocument({ ...document, folderKey }, actorKey)).rejects.toThrow('canonical managed destination');
+  });
+
   test('ranks each semantic-neighbor category independently without a score threshold', async () => {
     let call: { query: string; bindVars?: Record<string, unknown> } | undefined;
     const executor: ContentQueryExecutor = {
@@ -169,6 +185,22 @@ describe('scoped Content persistence', () => {
     await createContentPersistence(executor).setFolderDeletion(scopeKey, folderKey, undefined, 'invocation-owner');
     expect(calls[0]?.query).toContain('current._internalDeletion.owner == @owner');
     expect(calls[0]?.bindVars).toMatchObject({ owner: 'invocation-owner', unset: ['_internalDeletion'] });
+  });
+
+  test('fences initial guide move and deletion at the persistence boundary', async () => {
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const executor: ContentQueryExecutor = { async query(query, bindVars) { calls.push({ query, bindVars }); return { async next() { return undefined; } }; } };
+    const persistence = createContentPersistence(executor);
+    const protectedFolderKey = initialWorkspaceFolderKey(scopeKey, 'platform');
+    const protectedDocumentKey = initialWorkspaceDocumentKey(scopeKey, 'platform-welcome');
+    await persistence.updateFolder(scopeKey, protectedFolderKey, { parentFolderKey: folderKey, updatedAt: timestamp });
+    await persistence.updateDocument(scopeKey, protectedDocumentKey, { folderKey, updatedAt: timestamp });
+    await persistence.setFolderDeletion(scopeKey, protectedFolderKey, { kind: 'folder', owner: 'owner', startedAt: timestamp });
+    await persistence.setDocumentDeletion(scopeKey, protectedDocumentKey, { kind: 'document', owner: 'owner', startedAt: timestamp });
+    await persistence.deleteFolder(scopeKey, protectedFolderKey);
+    await persistence.deleteDocument(scopeKey, protectedDocumentKey);
+    expect(calls.slice(0, 6).every(({ query }) => query.includes('!@structurallyProtected'))).toBe(true);
+    expect(calls.slice(0, 6).every(({ bindVars }) => bindVars?.structurallyProtected === true)).toBe(true);
   });
 
   test('guards every Content insert with its folder or document owner', async () => {

@@ -44,11 +44,17 @@ const imageGenerateActionInputSchema = imageGenerateInputSchema
   })
   .strict();
 
-export const imageGenerateModelInputSchema = imageGenerateActionInputSchema.extend({
-  referenceImageKeys: z.array(z.string().cuid()).max(MAX_IMAGE_GENERATION_REFERENCES).refine((keys) => new Set(keys).size === keys.length, 'Reference image keys must be distinct.').default([]),
-  collectionKey: z.string().cuid(),
-}).strict();
-export const managedImageGenerateInputSchema = imageGenerateModelInputSchema.omit({ collectionKey: true, count: true }).strict();
+export const appGenerateImageModelInputSchema = imageGenerateActionInputSchema;
+export const imageGenerationReferenceKeysSchema = z.array(z.string().cuid()).max(MAX_IMAGE_GENERATION_REFERENCES).refine((keys) => new Set(keys).size === keys.length, 'Reference image keys must be distinct.').default([]);
+// Durable conversation jobs retain trusted reference keys; this is never a
+// model-visible contract.
+export const managedImageGenerateInputSchema = appGenerateImageModelInputSchema.omit({ count: true }).extend({ referenceImageKeys: imageGenerationReferenceKeysSchema }).strict();
+export const imageDestinationSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('conversation'), conversationKey: z.string().cuid() }).strict(),
+  z.object({ kind: z.literal('gallery-collection'), collectionKey: z.string().cuid() }).strict(),
+  z.object({ kind: z.literal('managed-gallery') }).strict(),
+]);
+const resolvedImageGenerationReferenceSchema = z.object({ identity: z.string().trim().min(1).max(500), inputReference: z.string().min(1).refine((value) => /^data:image\/(?:gif|jpeg|png|webp);base64,/i.test(value), 'Resolved image references must be data URLs.') }).strict();
 
 export const imageGenerationHistoryListInputSchema = z.object({ limit: z.number().int().min(1).max(50).default(20) }).strict();
 export const imageGenerationHistoryDeleteInputSchema = z.object({ prompt }).strict();
@@ -74,7 +80,9 @@ export const imageGenerateOutputSchema = z.object({
 
 export type ImageIdeasInput = z.infer<typeof imageIdeasInputSchema>;
 export type ImageIdea = z.infer<typeof imageIdeaSchema>;
-export type ImageGenerateModelInput = z.infer<typeof imageGenerateModelInputSchema>;
+export type ImageGenerateModelInput = z.infer<typeof appGenerateImageModelInputSchema>;
+export type ImageDestination = z.infer<typeof imageDestinationSchema>;
+export type ResolvedImageGenerationReference = z.infer<typeof resolvedImageGenerationReferenceSchema>;
 export type ImageGenerateOutput = z.infer<typeof imageGenerateOutputSchema>;
 
 export class ImageGenerationIdempotencyError extends Error {
@@ -251,28 +259,41 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
     return imageIdeasOutputSchema.parse({ concepts: await createRawIdeas(rawInput, context.teamKey) });
   }
 
-  async function generateIntoCollection(rawInput: unknown, context: ToolContext, requestKey: string | undefined, managed = false): Promise<ImageGenerateOutput> {
-    const input = imageGenerateModelInputSchema.parse(rawInput);
+  async function generate(rawInput: unknown, rawDestination: ImageDestination, context: ToolContext, requestKey: string | undefined, rawReferenceImageKeys: readonly string[] = [], rawResolvedReferences: readonly ResolvedImageGenerationReference[] = []): Promise<ImageGenerateOutput> {
+    const input = appGenerateImageModelInputSchema.parse(rawInput);
+    const destination = imageDestinationSchema.parse(rawDestination);
+    if (destination.kind === 'conversation') throw new ImageGenerationAccessError('Conversation image generation must use the trusted conversation adapter.');
+    const referenceImageKeys = imageGenerationReferenceKeysSchema.parse(rawReferenceImageKeys);
+    const resolvedReferences = z.array(resolvedImageGenerationReferenceSchema).max(MAX_IMAGE_GENERATION_REFERENCES).parse(rawResolvedReferences);
+    const referenceIdentities = [...referenceImageKeys.map((key) => `gallery:${key}`), ...resolvedReferences.map(({ identity }) => identity)];
+    if (referenceIdentities.length > MAX_IMAGE_GENERATION_REFERENCES || new Set(referenceIdentities).size !== referenceIdentities.length) throw new ImageGenerationReferenceError(`Image generation accepts at most ${MAX_IMAGE_GENERATION_REFERENCES} distinct references.`);
     const { actorKey: ownerKey, userKey } = memberContext(context);
     const idempotencyKey = z.string().trim().min(1).max(256).parse(requestKey);
-    const collection = managed ? undefined : await gallery.getCollection(context.runtimeScopeKey, input.collectionKey);
-    const managedDestination = managed || (collection?.purpose === 'generated-media' && collection.mutationPolicy === 'system-only');
+    const managedDestination = destination.kind === 'managed-gallery';
+    const at = new Date(now()).toISOString();
+    const collectionKey = managedDestination
+      ? (await gallery.ensureGeneratedMediaCollection?.(context.runtimeScopeKey, ownerKey, await (dependencies.embedCollection ?? embedText)({ text: 'Core', purpose: 'document', signal: dependencies.signal, timeoutMs: dependencies.timeoutMs }), at))?.key
+      : destination.collectionKey;
+    if (!collectionKey) throw new ImageGenerationAccessError('Managed Gallery collection access denied.');
+    const collection = managedDestination ? undefined : await gallery.getCollection(context.runtimeScopeKey, collectionKey);
     if (!managedDestination && collection?.mutationPolicy === 'system-only') throw new ImageGenerationAccessError('Image generation cannot modify this managed Gallery collection.');
     if (!managedDestination) {
-      const role = await gallery.getCollectionRole(context.runtimeScopeKey, input.collectionKey, ownerKey);
+      const role = await gallery.getCollectionRole(context.runtimeScopeKey, collectionKey, ownerKey);
       if (!role || role === 'viewer') throw new ImageGenerationAccessError('Image generation requires ownership of the Gallery collection.');
     }
-    const references = await Promise.all(input.referenceImageKeys.map(async (imageKey) => {
+    const references = await Promise.all(referenceImageKeys.map(async (imageKey) => {
       const image = await gallery.getImage(imageKey);
       if (!image || image.scopeKey !== context.runtimeScopeKey || !await gallery.canAccessImage(context.runtimeScopeKey, imageKey, ownerKey)) throw new ImageGenerationAccessError('A reference image is unavailable.');
       return image;
     }));
     const maximumReferenceBytes = dependencies.maxReferenceDataUrlBytes ?? MAX_IMAGE_GENERATION_REFERENCE_DATA_URL_BYTES;
-    const projectedReferenceBytes = references.reduce((total, image) => total + Buffer.byteLength(`data:${image.mimeType};base64,`) + 4 * Math.ceil(image.sizeBytes / 3), 0);
+    const projectedReferenceBytes = references.reduce((total, image) => total + Buffer.byteLength(`data:${image.mimeType};base64,`) + 4 * Math.ceil(image.sizeBytes / 3), 0)
+      + resolvedReferences.reduce((total, reference) => total + Buffer.byteLength(reference.inputReference), 0);
     if (projectedReferenceBytes > maximumReferenceBytes) throw new ImageGenerationReferenceError(`Reference images must total at most ${maximumReferenceBytes} data-URL bytes.`);
-    const identity = { teamKey: context.teamKey, actorKey: ownerKey, tool: managed ? 'conversation.image' : 'image.generate', idempotencyKey };
+    const identity = { teamKey: context.teamKey, actorKey: ownerKey, tool: managedDestination ? 'conversation.image' : 'image.generate', idempotencyKey };
     const flightKey = `${context.teamKey}\0${ownerKey}\0${context.runtimeScopeKey}\0${idempotencyKey}`;
-    const requestHash = createHash('sha256').update(JSON.stringify({ scopeKey: context.runtimeScopeKey, input })).digest('hex');
+    // Reference identities are durable and safe to hash; data URLs are not.
+    const requestHash = createHash('sha256').update(JSON.stringify({ scopeKey: context.runtimeScopeKey, input: { ...input, referenceImageKeys, referenceIdentities, collectionKey } })).digest('hex');
     const existing = inFlight.get(flightKey);
     if (existing) {
       if (existing.hash !== requestHash) throw new ImageGenerationIdempotencyError('IMAGE_IDEMPOTENCY_CONFLICT', 'The image generation idempotency key is already processing a different request.', false);
@@ -312,8 +333,9 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
         }));
         const missingIndices = existing.map((image, index) => image ? -1 : index).filter((index) => index >= 0);
         const inputReferences: string[] = [];
-        let referenceBytes = 0;
+        let referenceBytes = resolvedReferences.reduce((total, reference) => total + Buffer.byteLength(reference.inputReference), 0);
         if (missingIndices.length > 0) {
+          inputReferences.push(...resolvedReferences.map(({ inputReference }) => inputReference));
           for (const { storageKey, mimeType } of references) {
             const reference = await (dependencies.resolveReference ?? storedImageDataUrl)(storageKey, mimeType);
             referenceBytes += Buffer.byteLength(reference);
@@ -347,8 +369,8 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
         if (saved.some((image) => !image)) throw new Error('Image persistence did not return every requested image.');
         try {
           const attached = managedDestination
-            ? Boolean(gallery.attachGeneratedMedia) && await gallery.attachGeneratedMedia!(context.runtimeScopeKey, input.collectionKey, saved.map((image) => image!.key), ownerKey, new Date(now()).toISOString())
-            : await gallery.attachGeneratedImages(context.runtimeScopeKey, input.collectionKey, saved.map((image) => image!.key), ownerKey, new Date(now()).toISOString());
+            ? Boolean(gallery.attachGeneratedMedia) && await gallery.attachGeneratedMedia!(context.runtimeScopeKey, collectionKey, saved.map((image) => image!.key), ownerKey, new Date(now()).toISOString())
+            : await gallery.attachGeneratedImages(context.runtimeScopeKey, collectionKey, saved.map((image) => image!.key), ownerKey, new Date(now()).toISOString());
           if (!attached) throw new GeneratedImageAttachmentError('Image generation collection access changed.');
         } catch (error) {
           if (error instanceof GeneratedImageAttachmentError) throw error;
@@ -364,7 +386,7 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
         executionSucceeded = true;
         await (dependencies.history ?? getDefaultUserGenerationService()).record(userKey, 'image', input.prompt).catch((error) => console.error('image generation history record failed', { error }));
         await idempotency.complete(identity, requestHash, leaseOwner, durable, new Date(now()).toISOString());
-         await (managedDestination ? publishManagedGeneratedImage(input.collectionKey, userKey) : publishGeneratedImages(input.collectionKey)).catch((error) => console.error('generated image publication failed', { error }));
+         await (managedDestination ? publishManagedGeneratedImage(collectionKey, userKey) : publishGeneratedImages(collectionKey)).catch((error) => console.error('generated image publication failed', { error }));
         return projectReplay(durable);
       } catch (error) {
         if (!executionSucceeded) {
@@ -386,18 +408,9 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
     try { return await promise; } finally { if (inFlight.get(flightKey) === flight) inFlight.delete(flightKey); }
   }
 
-  async function generate(rawInput: unknown, context: ToolContext, requestKey: string | undefined) {
-    return generateIntoCollection(rawInput, context, requestKey, false);
-  }
-
-  async function generateManaged(rawInput: unknown, context: ToolContext, requestKey: string | undefined) {
-    const input = managedImageGenerateInputSchema.parse(rawInput);
-    const { actorKey } = memberContext(context);
-    const at = new Date(now()).toISOString();
-    const embedding = await (dependencies.embedCollection ?? embedText)({ text: 'Core', purpose: 'document', signal: dependencies.signal, timeoutMs: dependencies.timeoutMs });
-    const collection = await gallery.ensureGeneratedMediaCollection?.(context.runtimeScopeKey, actorKey, embedding, at);
-    if (!collection) throw new ImageGenerationAccessError('Core collection access denied.');
-    return generateIntoCollection({ ...input, collectionKey: collection.key, count: 1 }, context, requestKey, true);
+  async function generateManaged(rawInput: unknown, context: ToolContext, requestKey: string | undefined, resolvedReferences: readonly ResolvedImageGenerationReference[] = []) {
+    const { referenceImageKeys, ...input } = managedImageGenerateInputSchema.parse(rawInput);
+    return generate({ ...input, count: 1 }, { kind: 'managed-gallery' }, context, requestKey, referenceImageKeys, resolvedReferences);
   }
 
   async function listHistory(rawInput: unknown, context: ToolContext) {

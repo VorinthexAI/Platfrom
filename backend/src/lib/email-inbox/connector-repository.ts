@@ -3,17 +3,17 @@ import { db } from '@/lib/db/client';
 import { isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { newId } from '@/lib/ids';
 import { decryptEmailConnectorCredentials, encryptEmailConnectorCredentials, tokenFingerprint } from './connector-crypto';
-import { TEAM_CONNECTORS_COLLECTION, teamConnectorSchema, type EmailConnectorCredentials, type EmailProvider, type TeamConnector } from './connector-schema';
+import { USER_CONNECTORS_COLLECTION, userConnectorSchema, type EmailConnectorCredentials, type EmailProvider, type UserConnector } from './connector-schema';
 import { emailInboxKey } from './inbox-key';
 import { inboxSchema, type Inbox } from './inbox-schema';
 import { EMAIL_INBOXES_COLLECTION } from '@/lib/db/email-inboxes.node';
 
 type Database = Pick<typeof db, 'query' | 'collection'>;
-export type ConnectorPublic = Pick<TeamConnector, 'key' | 'teamKey' | 'scopeKey' | 'provider' | 'email' | 'status' | 'syncEnabled' | 'initialSyncCompleted' | 'syncStatus' | 'lastSyncedAt' | 'createdAt' | 'updatedAt'> & { syncError?: string };
-type RevisionedConnector = TeamConnector & { revision: string };
+export type ConnectorPublic = Pick<UserConnector, 'key' | 'teamKey' | 'scopeKey' | 'provider' | 'email' | 'status' | 'syncEnabled' | 'initialSyncCompleted' | 'syncStatus' | 'lastSyncedAt' | 'createdAt' | 'updatedAt'> & { syncError?: string };
+type RevisionedConnector = UserConnector & { revision: string };
 
 function parse(raw: unknown) {
-  return teamConnectorSchema.parse(withArangoKey(raw as Record<string, unknown>));
+  return userConnectorSchema.parse(withArangoKey(raw as Record<string, unknown>));
 }
 
 function revision(raw: unknown) {
@@ -21,7 +21,7 @@ function revision(raw: unknown) {
   return z.string().min(1).parse(value._rev);
 }
 
-export function connectorPublic(connector: TeamConnector): ConnectorPublic {
+export function connectorPublic(connector: UserConnector): ConnectorPublic {
   return {
     key: connector.key, teamKey: connector.teamKey, scopeKey: connector.scopeKey, provider: connector.provider,
     email: connector.email, status: connector.status, syncEnabled: connector.syncEnabled, initialSyncCompleted: connector.initialSyncCompleted, syncStatus: connector.syncStatus,
@@ -31,71 +31,75 @@ export function connectorPublic(connector: TeamConnector): ConnectorPublic {
 }
 
 export function createConnectorRepository(database: Database = db) {
-  async function findExact(teamKey: string, scopeKey: string, providerAccountId: string, provider: EmailProvider = 'gmail'): Promise<RevisionedConnector | null> {
+  async function findExact(userKey: string, providerAccountId: string, provider?: EmailProvider): Promise<RevisionedConnector | null>;
+  async function findExact(_teamKey: string, legacyScopeKey: string, providerAccountId: string, provider?: EmailProvider): Promise<RevisionedConnector | null>;
+  async function findExact(userKey: string, providerAccountIdOrScopeKey: string, providerOrAccountId: EmailProvider | string = 'gmail', legacyProvider: EmailProvider = 'gmail'): Promise<RevisionedConnector | null> {
+    const legacy = providerOrAccountId !== 'gmail';
+    const providerAccountId = legacy ? providerOrAccountId : providerAccountIdOrScopeKey;
+    const provider = legacy ? legacyProvider : providerOrAccountId;
     const cursor = await database.query(`
       FOR connector IN @@collection
-        FILTER connector.teamKey == @teamKey && connector.scopeKey == @scopeKey
+        FILTER connector.userKey == @userKey
         FILTER connector.provider == @provider && connector.providerAccountId == @providerAccountId
         SORT connector.updatedAt DESC
         LIMIT 1
         RETURN connector
-    `, { '@collection': TEAM_CONNECTORS_COLLECTION, teamKey, scopeKey, providerAccountId, provider });
+    `, { '@collection': USER_CONNECTORS_COLLECTION, userKey, providerAccountId, provider });
     const raw = await cursor.next();
     return raw ? { ...parse(raw), revision: revision(raw) } : null;
   }
 
   return {
-    async listAuthorizedScope(teamKey: string, scopeKey: string): Promise<TeamConnector[]> {
-      const cursor = await database.query('FOR connector IN @@collection FILTER connector.teamKey == @teamKey && connector.scopeKey == @scopeKey && connector.provider == "gmail" && connector.status != "revoked" SORT connector.email ASC, connector._key ASC RETURN connector', { '@collection': TEAM_CONNECTORS_COLLECTION, teamKey, scopeKey });
+    async listAuthorizedUser(userKey: string): Promise<UserConnector[]> {
+      const cursor = await database.query('FOR connector IN @@collection FILTER connector.userKey == @userKey && connector.provider == "gmail" && connector.status != "revoked" SORT connector.email ASC, connector._key ASC RETURN connector', { '@collection': USER_CONNECTORS_COLLECTION, userKey });
       return (await cursor.all()).map(parse);
     },
     findExact,
-    async getExact(teamKey: string, scopeKey: string, key: string): Promise<TeamConnector | null> {
-      const raw = await (await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.provider == "gmail" LIMIT 1 RETURN connector', { '@collection': TEAM_CONNECTORS_COLLECTION, key })).next();
+    async getExact(userKey: string, key: string): Promise<UserConnector | null> {
+      const raw = await (await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.provider == "gmail" && (@system || connector.userKey == @userKey) LIMIT 1 RETURN connector', { '@collection': USER_CONNECTORS_COLLECTION, key, userKey, system: userKey === 'system' })).next();
       if (!raw) return null;
       const connector = parse(raw);
-      return connector.teamKey === teamKey && connector.scopeKey === scopeKey ? connector : null;
+      return connector;
     },
-    async getByKey(key: string): Promise<TeamConnector | null> {
-      const raw = await (await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.provider == "gmail" LIMIT 1 RETURN connector', { '@collection': TEAM_CONNECTORS_COLLECTION, key })).next();
+    async getByKey(key: string): Promise<UserConnector | null> {
+      const raw = await (await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.provider == "gmail" LIMIT 1 RETURN connector', { '@collection': USER_CONNECTORS_COLLECTION, key })).next();
       return raw ? parse(raw) : null;
     },
     async upsert(input: {
-       teamKey: string; scopeKey: string; provider?: EmailProvider; providerAccountId: string; email: string; scopes: string[];
-      createdByTeamMembershipKey: string; credentials: EmailConnectorCredentials;
-      billingUserKey?: string;
+       userKey: string; teamKey: string; scopeKey: string; provider?: EmailProvider; providerAccountId: string; email: string; scopes: string[];
+      credentials: EmailConnectorCredentials;
       initializeInactive?: boolean;
       expectedRevision?: string | null;
     }) {
       const timestamp = new Date().toISOString();
       const provider = input.provider ?? 'gmail';
+      const userKey = input.userKey;
       const binding = { teamKey: input.teamKey, scopeKey: input.scopeKey, providerAccountId: input.providerAccountId, provider };
       const encrypted = encryptEmailConnectorCredentials(input.credentials, binding);
       const { credentials: _credentials, initializeInactive = false, expectedRevision, ...persistedInput } = input;
       const fenceRevision = expectedRevision !== undefined;
-       const document = teamConnectorSchema.parse({
-         key: newId(), ...persistedInput, provider, ...encrypted,
+        const document = userConnectorSchema.parse({
+         key: newId(), ...persistedInput, userKey, provider, ...encrypted,
           accessTokenFingerprint: tokenFingerprint(input.credentials.accessToken), initialSyncChargeKey: newId(), status: initializeInactive ? 'error' : 'active', syncEnabled: !initializeInactive, syncStatus: 'idle',
-         ...(input.billingUserKey ? { billingUserKey: input.billingUserKey } : {}),
         ...(initializeInactive ? { lastError: 'Email connector initialization is incomplete' } : {}),
         lastRefreshedAt: timestamp, createdAt: timestamp, updatedAt: timestamp,
       });
       try {
         const cursor = await database.query(`
-          LET existing = FIRST(FOR connector IN @@collection FILTER connector.teamKey == @teamKey && connector.scopeKey == @scopeKey && connector.provider == @provider && connector.providerAccountId == @providerAccountId LIMIT 1 RETURN connector)
+          LET existing = FIRST(FOR connector IN @@collection FILTER connector.userKey == @userKey && connector.provider == @provider && connector.providerAccountId == @providerAccountId LIMIT 1 RETURN connector)
           FILTER !@fenceRevision || (existing == null ? @expectedRevision == null : existing._rev == @expectedRevision)
-            UPSERT { teamKey: @teamKey, scopeKey: @scopeKey, provider: @provider, providerAccountId: @providerAccountId }
+            UPSERT { userKey: @userKey, provider: @provider, providerAccountId: @providerAccountId }
             INSERT @document
-              UPDATE MERGE(@document, { _key: OLD._key, createdAt: OLD.createdAt, billingUserKey: OLD.billingUserKey == null ? @billingUserKey : OLD.billingUserKey, initialSyncCompleted: false, revokedAt: null, historyId: null, pendingNotificationHistoryId: null, lastSyncedAt: null, syncError: null, syncLeaseToken: null, syncLeaseExpiresAt: null, syncPendingHistoryId: null, syncPendingThreadIds: null, watchRegisteredAt: null, watchExpiresAt: null, lastError: null })
+              UPDATE MERGE(@document, { _key: OLD._key, createdAt: OLD.createdAt, initialSyncCompleted: false, revokedAt: null, historyId: null, pendingNotificationHistoryId: null, lastSyncedAt: null, syncError: null, syncLeaseToken: null, syncLeaseExpiresAt: null, syncPendingHistoryId: null, syncPendingThreadIds: null, watchRegisteredAt: null, watchExpiresAt: null, lastError: null })
             IN @@collection OPTIONS { keepNull: false }
             RETURN NEW
         `, {
-          '@collection': TEAM_CONNECTORS_COLLECTION,
+          '@collection': USER_CONNECTORS_COLLECTION,
+          userKey,
           teamKey: input.teamKey,
           scopeKey: input.scopeKey,
            providerAccountId: input.providerAccountId,
            provider,
-          billingUserKey: input.billingUserKey ?? null,
           initializeInactive,
           timestamp,
           fenceRevision,
@@ -107,33 +111,33 @@ export function createConnectorRepository(database: Database = db) {
         return { ...parse(raw), revision: revision(raw) };
       } catch (error) {
         if (!isArangoUniqueConstraintError(error) || fenceRevision) throw error;
-        const existing = await findExact(input.teamKey, input.scopeKey, input.providerAccountId, provider);
+        const existing = await findExact(userKey, input.providerAccountId, provider);
         if (!existing) throw error;
         return existing;
       }
     },
-    credentials(connector: TeamConnector) {
+    credentials(connector: UserConnector) {
       if (connector.status === 'revoked' || connector.encryptedCredentials === 'revoked') throw new Error('Revoked email credentials are unavailable');
       return decryptEmailConnectorCredentials(connector.encryptedCredentials, connector.encryptionKeyId, connector);
     },
-    async updateCredentials(connector: TeamConnector, credentials: EmailConnectorCredentials) {
+    async updateCredentials(connector: UserConnector, credentials: EmailConnectorCredentials) {
       const encrypted = encryptEmailConnectorCredentials(credentials, connector);
       const updatedAt = new Date().toISOString();
       const update = {
          ...encrypted, accessTokenFingerprint: tokenFingerprint(credentials.accessToken), status: 'active',
         lastRefreshedAt: updatedAt, lastError: null, updatedAt,
       };
-      const cursor = await database.query('FOR current IN @@collection FILTER current._key == @key && current.updatedAt == @expectedUpdatedAt && current.status != "revoked" && current.syncEnabled != false UPDATE current WITH @update IN @@collection OPTIONS { keepNull: false } RETURN NEW', { '@collection': TEAM_CONNECTORS_COLLECTION, key: connector.key, expectedUpdatedAt: connector.updatedAt, update });
+      const cursor = await database.query('FOR current IN @@collection FILTER current._key == @key && current.updatedAt == @expectedUpdatedAt && current.status != "revoked" && current.syncEnabled != false UPDATE current WITH @update IN @@collection OPTIONS { keepNull: false } RETURN NEW', { '@collection': USER_CONNECTORS_COLLECTION, key: connector.key, expectedUpdatedAt: connector.updatedAt, update });
       const raw = await cursor.next();
       return raw ? parse(raw) : null;
     },
     async activateInitialization(key: string, accessTokenFingerprint: string, expectedRevision?: string) {
       const updatedAt = new Date().toISOString();
-      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && (@expectedRevision == null || connector._rev == @expectedRevision) && connector.accessTokenFingerprint == @accessTokenFingerprint && connector.status == "error" && connector.syncEnabled == false && connector.billingUserKey != null UPDATE connector WITH { status: "active", syncEnabled: true, lastError: null, updatedAt: @updatedAt } IN @@collection OPTIONS { keepNull: false } RETURN NEW', { '@collection': TEAM_CONNECTORS_COLLECTION, key, expectedRevision: expectedRevision ?? null, accessTokenFingerprint, updatedAt });
+      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && (@expectedRevision == null || connector._rev == @expectedRevision) && connector.accessTokenFingerprint == @accessTokenFingerprint && connector.status == "error" && connector.syncEnabled == false && connector.userKey != null UPDATE connector WITH { status: "active", syncEnabled: true, lastError: null, updatedAt: @updatedAt } IN @@collection OPTIONS { keepNull: false } RETURN NEW', { '@collection': USER_CONNECTORS_COLLECTION, key, expectedRevision: expectedRevision ?? null, accessTokenFingerprint, updatedAt });
       const raw = await cursor.next();
       return raw ? { ...parse(raw), revision: revision(raw) } : null;
     },
-    async rollbackReconnect(input: { connectorKey: string; connectorRevision: string; previousConnector: TeamConnector | null; inboxKey?: string; inboxRevision?: string; previousInbox: Inbox | null }) {
+    async rollbackReconnect(input: { connectorKey: string; connectorRevision: string; previousConnector: UserConnector | null; inboxKey?: string; inboxRevision?: string; previousInbox: Inbox | null }) {
       const timestamp = new Date().toISOString();
       const connectorMutation = input.previousConnector
         ? 'REPLACE connector WITH @previousConnector IN @@collection'
@@ -151,16 +155,16 @@ export function createConnectorRepository(database: Database = db) {
         ${inboxMutation}
         RETURN true
       `, {
-        '@collection': TEAM_CONNECTORS_COLLECTION,
+        '@collection': USER_CONNECTORS_COLLECTION,
         '@inboxes': EMAIL_INBOXES_COLLECTION,
         connectorKey: input.connectorKey, connectorRevision: input.connectorRevision, inboxKey: input.inboxKey ?? previousInbox?.key ?? (input.previousConnector ? emailInboxKey(input.previousConnector.scopeKey, input.connectorKey) : null), inboxRevision: input.inboxRevision ?? null, timestamp,
-        previousConnector: input.previousConnector ? toArangoDoc(teamConnectorSchema.parse(input.previousConnector)) : null,
+        previousConnector: input.previousConnector ? toArangoDoc(userConnectorSchema.parse(input.previousConnector)) : null,
         previousInbox: previousInbox ? toArangoDoc(previousInbox) : null,
       });
       return (await cursor.next()) === true;
     },
     async listSyncTargetsByEmail(email: string) {
-      const cursor = await database.query(`FOR connector IN @@collection FILTER connector.provider == "gmail" && connector.status != "revoked" && connector.syncEnabled != false && LOWER(connector.email) == @email RETURN { teamKey: connector.teamKey, scopeKey: connector.scopeKey, connectorKey: connector._key }`, { '@collection': TEAM_CONNECTORS_COLLECTION, email: email.toLowerCase() });
+      const cursor = await database.query(`FOR connector IN @@collection FILTER connector.provider == "gmail" && connector.status != "revoked" && connector.syncEnabled != false && LOWER(connector.email) == @email RETURN { teamKey: connector.teamKey, scopeKey: connector.scopeKey, connectorKey: connector._key }`, { '@collection': USER_CONNECTORS_COLLECTION, email: email.toLowerCase() });
       return cursor.all() as Promise<Array<{ teamKey: string; scopeKey: string; connectorKey: string }>>;
     },
     async markNotificationPending(key: string, historyId: string) {
@@ -171,7 +175,7 @@ export function createConnectorRepository(database: Database = db) {
           LET newer = previous == null || LENGTH(@historyId) > LENGTH(previous) || (LENGTH(@historyId) == LENGTH(previous) && @historyId > previous)
           UPDATE connector WITH { pendingNotificationHistoryId: newer ? @historyId : previous } IN @@collection
           RETURN true
-      `, { '@collection': TEAM_CONNECTORS_COLLECTION, key, historyId: z.string().regex(/^\d+$/).parse(historyId) });
+      `, { '@collection': USER_CONNECTORS_COLLECTION, key, historyId: z.string().regex(/^\d+$/).parse(historyId) });
       return (await cursor.next()) === true;
     },
     async clearPendingNotification(key: string, historyId: string) {
@@ -182,7 +186,7 @@ export function createConnectorRepository(database: Database = db) {
           FILTER connector.historyId != null && (LENGTH(connector.historyId) > LENGTH(@historyId) || (LENGTH(connector.historyId) == LENGTH(@historyId) && connector.historyId >= @historyId))
           UPDATE connector WITH { pendingNotificationHistoryId: null } IN @@collection OPTIONS { keepNull: false }
           RETURN true
-      `, { '@collection': TEAM_CONNECTORS_COLLECTION, key, historyId: z.string().regex(/^\d+$/).parse(historyId) });
+      `, { '@collection': USER_CONNECTORS_COLLECTION, key, historyId: z.string().regex(/^\d+$/).parse(historyId) });
       return (await cursor.next()) === true;
     },
     async listSyncRecoveryTargets() {
@@ -198,40 +202,40 @@ export function createConnectorRepository(database: Database = db) {
             pendingNotificationHistoryId: connector.pendingNotificationHistoryId,
             pendingHistoryId: connector.syncPendingHistoryId
           }
-      `, { '@collection': TEAM_CONNECTORS_COLLECTION });
+      `, { '@collection': USER_CONNECTORS_COLLECTION });
       return cursor.all() as Promise<Array<{ teamKey: string; scopeKey: string; connectorKey: string; initialSyncCompleted: boolean; pendingNotificationHistoryId?: string; pendingHistoryId?: string }>>;
     },
     async listWatchRenewalTargets(before: string) {
-      const cursor = await database.query(`FOR connector IN @@collection FILTER connector.provider == "gmail" && connector.status != "revoked" && connector.syncEnabled != false && (connector.watchExpiresAt == null || connector.watchExpiresAt <= @before) RETURN { teamKey: connector.teamKey, scopeKey: connector.scopeKey, connectorKey: connector._key }`, { '@collection': TEAM_CONNECTORS_COLLECTION, before });
+      const cursor = await database.query(`FOR connector IN @@collection FILTER connector.provider == "gmail" && connector.status != "revoked" && connector.syncEnabled != false && (connector.watchExpiresAt == null || connector.watchExpiresAt <= @before) RETURN { teamKey: connector.teamKey, scopeKey: connector.scopeKey, connectorKey: connector._key }`, { '@collection': USER_CONNECTORS_COLLECTION, before });
       return cursor.all() as Promise<Array<{ teamKey: string; scopeKey: string; connectorKey: string }>>;
     },
     async claimSync(key: string, token: string, expiresAt: string) {
-      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.status != "revoked" && connector.syncEnabled != false && (connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now) && (connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now) UPDATE connector WITH { syncLeaseToken: @token, syncLeaseExpiresAt: @expiresAt } IN @@collection RETURN true', { '@collection': TEAM_CONNECTORS_COLLECTION, key, token, expiresAt, now: new Date().toISOString() });
+      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.status != "revoked" && connector.syncEnabled != false && (connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now) && (connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now) UPDATE connector WITH { syncLeaseToken: @token, syncLeaseExpiresAt: @expiresAt } IN @@collection RETURN true', { '@collection': USER_CONNECTORS_COLLECTION, key, token, expiresAt, now: new Date().toISOString() });
       return (await cursor.next()) === true;
     },
     async renewSync(key: string, token: string, expiresAt: string) {
       const now = new Date().toISOString();
-      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.status != "revoked" && connector.syncEnabled != false && connector.syncLeaseToken == @token && connector.syncLeaseExpiresAt > @now UPDATE connector WITH { syncLeaseExpiresAt: @expiresAt } IN @@collection RETURN true', { '@collection': TEAM_CONNECTORS_COLLECTION, key, token, expiresAt, now });
+      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.status != "revoked" && connector.syncEnabled != false && connector.syncLeaseToken == @token && connector.syncLeaseExpiresAt > @now UPDATE connector WITH { syncLeaseExpiresAt: @expiresAt } IN @@collection RETURN true', { '@collection': USER_CONNECTORS_COLLECTION, key, token, expiresAt, now });
       return (await cursor.next()) === true;
     },
     async releaseSync(key: string, token: string) {
-      await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.syncLeaseToken == @token UPDATE connector WITH { syncLeaseToken: null, syncLeaseExpiresAt: null } IN @@collection OPTIONS { keepNull: false }', { '@collection': TEAM_CONNECTORS_COLLECTION, key, token });
+      await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.syncLeaseToken == @token UPDATE connector WITH { syncLeaseToken: null, syncLeaseExpiresAt: null } IN @@collection OPTIONS { keepNull: false }', { '@collection': USER_CONNECTORS_COLLECTION, key, token });
     },
     async claimSend(key: string, token: string, expiresAt: string) {
-      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.status != "revoked" && connector.syncEnabled != false && (connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now) && (connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now) UPDATE connector WITH { sendLeaseToken: @token, sendLeaseExpiresAt: @expiresAt } IN @@collection RETURN true', { '@collection': TEAM_CONNECTORS_COLLECTION, key, token, expiresAt, now: new Date().toISOString() });
+      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.status != "revoked" && connector.syncEnabled != false && (connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now) && (connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now) UPDATE connector WITH { sendLeaseToken: @token, sendLeaseExpiresAt: @expiresAt } IN @@collection RETURN true', { '@collection': USER_CONNECTORS_COLLECTION, key, token, expiresAt, now: new Date().toISOString() });
       return (await cursor.next()) === true;
     },
     async renewSend(key: string, token: string, expiresAt: string) {
       const now = new Date().toISOString();
-      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.status == "active" && connector.syncEnabled != false && connector.sendLeaseToken == @token && connector.sendLeaseExpiresAt > @now UPDATE connector WITH { sendLeaseExpiresAt: @expiresAt } IN @@collection RETURN true', { '@collection': TEAM_CONNECTORS_COLLECTION, key, token, expiresAt, now });
+      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.status == "active" && connector.syncEnabled != false && connector.sendLeaseToken == @token && connector.sendLeaseExpiresAt > @now UPDATE connector WITH { sendLeaseExpiresAt: @expiresAt } IN @@collection RETURN true', { '@collection': USER_CONNECTORS_COLLECTION, key, token, expiresAt, now });
       return (await cursor.next()) === true;
     },
     async releaseSend(key: string, token: string) {
-      await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.sendLeaseToken == @token UPDATE connector WITH { sendLeaseToken: null, sendLeaseExpiresAt: null } IN @@collection OPTIONS { keepNull: false }', { '@collection': TEAM_CONNECTORS_COLLECTION, key, token });
+      await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.sendLeaseToken == @token UPDATE connector WITH { sendLeaseToken: null, sendLeaseExpiresAt: null } IN @@collection OPTIONS { keepNull: false }', { '@collection': USER_CONNECTORS_COLLECTION, key, token });
     },
     async claimDisconnect(key: string, expectedUpdatedAt: string) {
       const updatedAt = new Date().toISOString();
-      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.updatedAt == @expectedUpdatedAt && connector.status != "revoked" && (connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now) && (connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now) UPDATE connector WITH { status: "error", syncEnabled: false, syncStatus: "idle", lastError: "Email disconnect is pending", updatedAt: @updatedAt } IN @@collection RETURN NEW', { '@collection': TEAM_CONNECTORS_COLLECTION, key, expectedUpdatedAt, now: updatedAt, updatedAt });
+      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.updatedAt == @expectedUpdatedAt && connector.status != "revoked" && (connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now) && (connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now) UPDATE connector WITH { status: "error", syncEnabled: false, syncStatus: "idle", lastError: "Email disconnect is pending", updatedAt: @updatedAt } IN @@collection RETURN NEW', { '@collection': USER_CONNECTORS_COLLECTION, key, expectedUpdatedAt, now: updatedAt, updatedAt });
       const raw = await cursor.next();
       return raw ? parse(raw) : null;
     },
@@ -239,13 +243,13 @@ export function createConnectorRepository(database: Database = db) {
       if (input.completeInitialSync && (status !== 'idle' || input.pendingHistoryId != null || input.pendingThreadIds != null || input.pendingSubscriptionMessages != null)) throw new Error('Initial email synchronization can complete only in a final idle state');
       const updatedAt = new Date().toISOString();
       const update = { syncStatus: status, syncError: input.error?.slice(0, 500) ?? null, historyId: input.historyId, syncPendingHistoryId: input.pendingHistoryId, syncPendingThreadIds: input.pendingThreadIds, syncPendingSubscriptionMessages: input.pendingSubscriptionMessages, ...(input.resetLastSynced ? { lastSyncedAt: null } : {}), ...(status === 'syncing' ? { status: 'active', lastError: null } : {}), ...(status === 'idle' && input.markSynced !== false ? { status: 'active', lastError: null, lastSyncedAt: updatedAt } : {}), ...(input.completeInitialSync ? { initialSyncCompleted: true } : {}), ...(status === 'error' ? { status: 'error', lastError: input.error?.slice(0, 500) ?? 'Email synchronization failed' } : {}), updatedAt };
-      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && (@expectedRevision == null || connector._rev == @expectedRevision) && (@leaseToken == null || connector.syncLeaseToken == @leaseToken) UPDATE connector WITH @update IN @@collection OPTIONS { keepNull: false } RETURN NEW', { '@collection': TEAM_CONNECTORS_COLLECTION, key, expectedRevision: input.expectedRevision ?? null, leaseToken: input.leaseToken ?? null, update });
+      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && (@expectedRevision == null || connector._rev == @expectedRevision) && (@leaseToken == null || connector.syncLeaseToken == @leaseToken) UPDATE connector WITH @update IN @@collection OPTIONS { keepNull: false } RETURN NEW', { '@collection': USER_CONNECTORS_COLLECTION, key, expectedRevision: input.expectedRevision ?? null, leaseToken: input.leaseToken ?? null, update });
       const raw = await cursor.next();
       return raw ? revision(raw) : null;
     },
     async updateWatch(key: string, input: { historyId: string; expiration: string }, expectedRevision?: string, expectedUpdatedAt?: string) {
       const updatedAt = new Date().toISOString();
-      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.status != "revoked" && connector.syncEnabled != false && (@expectedRevision == null || connector._rev == @expectedRevision) && (@expectedUpdatedAt == null || connector.updatedAt == @expectedUpdatedAt) UPDATE connector WITH { watchRegisteredAt: @updatedAt, watchExpiresAt: @watchExpiresAt, updatedAt: @updatedAt } IN @@collection RETURN NEW', { '@collection': TEAM_CONNECTORS_COLLECTION, key, expectedRevision: expectedRevision ?? null, expectedUpdatedAt: expectedUpdatedAt ?? null, updatedAt, watchExpiresAt: new Date(Number(input.expiration)).toISOString() });
+      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.status != "revoked" && connector.syncEnabled != false && (@expectedRevision == null || connector._rev == @expectedRevision) && (@expectedUpdatedAt == null || connector.updatedAt == @expectedUpdatedAt) UPDATE connector WITH { watchRegisteredAt: @updatedAt, watchExpiresAt: @watchExpiresAt, updatedAt: @updatedAt } IN @@collection RETURN NEW', { '@collection': USER_CONNECTORS_COLLECTION, key, expectedRevision: expectedRevision ?? null, expectedUpdatedAt: expectedUpdatedAt ?? null, updatedAt, watchExpiresAt: new Date(Number(input.expiration)).toISOString() });
       const raw = await cursor.next();
       return raw ? revision(raw) : null;
     },
@@ -255,7 +259,7 @@ export function createConnectorRepository(database: Database = db) {
         status: 'revoked', syncEnabled: false, syncStatus: 'idle', revokedAt: timestamp, encryptedCredentials: 'revoked', accessTokenFingerprint: tokenFingerprint(`revoked:${key}:${timestamp}`),
         historyId: null, pendingNotificationHistoryId: null, syncError: null, syncLeaseToken: null, syncLeaseExpiresAt: null, sendLeaseToken: null, sendLeaseExpiresAt: null, syncPendingHistoryId: null, syncPendingThreadIds: null, syncPendingSubscriptionMessages: null, watchRegisteredAt: null, watchExpiresAt: null, lastError: null, updatedAt: timestamp,
       };
-       const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.updatedAt == @expectedUpdatedAt && connector.status != "revoked" && (connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now) && (connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now) UPDATE connector WITH @update IN @@collection OPTIONS { keepNull: false } RETURN true', { '@collection': TEAM_CONNECTORS_COLLECTION, key, expectedUpdatedAt, now: timestamp, update });
+       const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.updatedAt == @expectedUpdatedAt && connector.status != "revoked" && (connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now) && (connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now) UPDATE connector WITH @update IN @@collection OPTIONS { keepNull: false } RETURN true', { '@collection': USER_CONNECTORS_COLLECTION, key, expectedUpdatedAt, now: timestamp, update });
       return (await cursor.next()) === true;
     },
   };

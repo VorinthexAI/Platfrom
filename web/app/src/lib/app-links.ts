@@ -2,6 +2,7 @@ const APPLE_TEAM_ID = "3RMYX67679";
 const APP_IDENTIFIER = "app.vorinthex.com";
 
 export const APP_LINK_ROUTES = [
+  { associationPath: "/open", comment: "Open Vorinthex AI", fallback: "open" },
   { associationPath: "/public/auth/token", comment: "Mobile magic-link sign in", fallback: "magic" },
   { associationPath: "/auth/mfa", comment: "Team MFA recovery", fallback: "mfa" },
   { associationPath: "/capability/signal", comment: "Signal capability OAuth return", fallback: "signal" },

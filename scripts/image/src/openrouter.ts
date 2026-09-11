@@ -74,6 +74,7 @@ export class OpenRouterClient {
       n: 1,
       resolution: "1K",
       output_format: this.config.defaultOutputFormat,
+      ...(input.background ? { background: input.background } : {}),
       ...(aspectRatio(size) ? { aspect_ratio: aspectRatio(size) } : {}),
       ...(references.length ? { input_references: references.map((url) => ({ type: "image_url", image_url: { url } })) } : {})
     })), 1);

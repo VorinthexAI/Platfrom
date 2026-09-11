@@ -1,12 +1,11 @@
 import { expect, test } from "bun:test";
 
 const read = (path: string) => Bun.file(new URL(path, import.meta.url)).text();
-const [paywall, onboarding, intro, sandbox, sandboxClient, stages, delayed, checkout, callback, referral, referralRoute, vault, auth, oauth, layout, appConfig, registry, sharedMobile, sharedWeb, sharedPackage, onboardingState, onboardingEvents, authState] = await Promise.all([
+const [paywall, onboarding, conversation, intro, stages, delayed, checkout, callback, referral, referralRoute, vault, auth, oauth, layout, appConfig, registry, sharedMobile, sharedWeb, sharedPackage, onboardingState, onboardingEvents, authState] = await Promise.all([
   read("../components/PaywallSheet.tsx"),
   read("../app/onboarding.tsx"),
+  read("../components/onboarding/OnboardingCoreConversation.tsx"),
   read("../components/onboarding/OnboardingIntroSequence.tsx"),
-  read("../components/onboarding/OnboardingCoreSandbox.tsx"),
-  read("./onboarding-sandbox-client.ts"),
   read("../components/onboarding/onboarding-stages.ts"),
   read("../hooks/use-delayed-action.ts"),
   read("./checkout-client.ts"),
@@ -26,9 +25,8 @@ const [paywall, onboarding, intro, sandbox, sandboxClient, stages, delayed, chec
   read("./onboarding-events.ts"),
   read("../state/auth.ts"),
 ]);
-const [reward, permissions, stepLayout, bellIcon, galleryIcon, cameraIcon, referralIcon, mobileIcons] = await Promise.all([
+const [reward, stepLayout, bellIcon, galleryIcon, cameraIcon, referralIcon, mobileIcons] = await Promise.all([
   read("../components/onboarding/OnboardingReward.tsx"),
-  read("../components/onboarding/OnboardingPermissions.tsx"),
   read("../components/onboarding/OnboardingStepLayout.tsx"),
   read("../../../../shared/packages/ui/icons/bell/bell.mobile.tsx"),
   read("../../../../shared/packages/ui/icons/gallery/gallery.mobile.tsx"),
@@ -37,57 +35,47 @@ const [reward, permissions, stepLayout, bellIcon, galleryIcon, cameraIcon, refer
   read("../../../../shared/packages/ui/icons-mobile.ts"),
 ]);
 
-test("onboarding presents the mission and ordered server-registry apps before plans", () => {
+test("onboarding uses one scripted Core conversation before auth and plans", () => {
   expect(onboarding).toContain('mode="onboarding"');
   expect(onboarding).toContain("consumeOnboardingReferralEntry()");
   expect(onboarding).toContain('initialPage === "referral"');
-  expect(onboarding).toContain("<OnboardingIntroSequence");
-  expect(onboarding).toContain("<OnboardingCoreSandbox");
-  expect(onboarding).toContain('setPhase("sandbox")');
+  expect(onboarding).toContain("<OnboardingCoreConversation");
+  expect(onboarding).not.toContain("OnboardingIntroSequence");
+  expect(onboarding).not.toContain("OnboardingCoreSandbox");
+  expect(onboarding).not.toContain("OnboardingPermissions");
   expect(onboarding).not.toContain("useLocalSearchParams");
   expect(onboarding).toContain("completeOnboarding()");
   expect(onboarding).not.toMatch(/CardStack|OnboardingCard|ProgressDots|haptic/);
-  expect(intro).toContain("We’re building connected AI apps that share context, learn together, and make every part of your digital life more intelligent.");
-  expect(intro).toContain('"VORINTHEX AI"');
-  expect(intro).toContain("useReducedMotion()");
-  expect(intro).toContain("transitionLocked.current");
-  expect(intro).toContain("for (const app of apps)");
-  expect(intro).toContain('Image.prefetch(app.logoUrl, "memory-disk")');
-  expect(intro).toContain("LOCAL_APP_LOGOS[stage.app.slug]");
-  expect(intro).toContain("if (!mounted || !cached) return");
-  expect(intro).toContain("AccessibilityInfo.announceForAccessibility(announcement)");
+  expect(conversation).toContain("your personal AI agent");
+  expect(conversation).toContain("always accessible at the bottom of the screen");
+  expect(conversation).toContain("1_000 + (index % 3) * 250");
+  expect(conversation).toContain('text="Thinking..."');
+  expect(conversation.match(/>Explore<\/Button>/g)).toHaveLength(1);
+  expect(conversation).toContain('style={styles.title}>Your guide to Vorinthex AI</Text>');
+  expect(conversation).not.toContain('style={styles.eyebrow}>CORE</Text>');
+  expect(conversation).toContain("<OnboardingAppPreview");
+  expect(conversation).toContain('signal: "Signal is your private inbox for connected email and communication from Vorinthex apps and support.');
+  expect(conversation).not.toMatch(/Gmail/i);
+  expect(intro).toContain("export function OnboardingAppPreview");
   expect(intro).toContain("<NeuralBackdrop");
-  expect(intro).toContain("height * 0.4");
   expect(intro).toContain("<SheetSeparator");
-  expect(intro).toContain("onboarding-sheet-edge");
-  expect(intro).toContain("incomingY.value = 120");
-  expect(intro).toContain("incomingY.value = withTiming(50");
   expect(intro).toContain("STAGE_REVEAL_MS = 1_000");
-  expect(intro).toContain("incomingOpacity.value = 0.3");
-  expect(intro).toContain("titleOpacity.value = 0.3");
-  expect(intro).toContain("descriptionOpacity.value = 0.3");
-  expect(intro.match(/importantForAccessibility="no-hide-descendants"/g)?.length).toBe(3);
-  expect(intro).toContain("<ChromeIcon");
-  expect(intro).toContain('isFinalStage ? "Try Core" : "Next"');
-  expect(intro).toContain('accessibilityRole="progressbar"');
-  expect(intro).toContain("progress.value = withTiming((activeIndex + 1) / stages.length");
-  expect(intro).not.toContain('disabled={transitioning}');
-  expect(intro).not.toMatch(/Pressable|Touchable/);
-  expect(stages).toContain('[\n  "archive",\n  "gallery",\n  "compass",\n  "signal",\n  "ascend",\n  "core",');
-  expect(intro).toContain("currentStage.app.name");
-  expect(intro).toContain("currentStage.app.description");
+  expect(intro).toContain("logoY.value = withTiming(50");
+  expect(intro).toContain(">Done</Button>");
+  expect(conversation).toContain(">Skip</Button>");
+  expect(conversation).toContain("AccessibilityInfo.announceForAccessibility(text)");
+  expect(conversation).toContain('if (step.kind === "welcome") return "onboarding.welcome"');
+  expect(conversation).toContain('return "onboarding.sign-in"');
+  expect(conversation).toContain("That's everything I need. Create your free account.");
+  expect(conversation).toContain('variant="primary">Get started</Button>');
+  expect(conversation).toContain("void recordOnboardingEvent(event)");
+  expect(conversation).not.toMatch(/TextInput|CoreComposer|Pressable|Touchable/);
+  expect(stages).toContain('[\n  "vorinthex-ai",\n  "archive",\n  "gallery",\n  "compass",\n  "signal",\n  "ascend",\n  "core",');
   expect(layout).not.toContain("useOnboardingStore");
   expect(registry).not.toContain("onboardingDescription");
-  expect(sandbox).toContain("Ask 3 questions to continue");
-  expect(sandbox).toContain("<RichText");
-  expect(sandbox).toContain('text="Thinking..."');
-  expect(sandbox).toContain("progress.value = withTiming(answers.length / 3");
-  expect(sandbox).toContain(">Get started</Button>");
-  expect(sandbox).toContain("prompts.filter");
-  expect(sandbox).not.toContain("userMessage");
-  expect(sandbox).not.toMatch(/TextInput|CoreComposer|Pressable|Touchable/);
-  expect(sandboxClient).toContain('slice(0, 3)');
-  expect(sandboxClient).toContain('/onboarding/sandbox/answers');
+  expect(registry).toContain('tagline: "Your private inbox for email\\nand Vorinthex communication."');
+  expect(registry).toContain('sectionLabel: "Inbox"');
+  expect(onboarding).toContain('onFinished={() => void startAuth()}');
 });
 
 test("auth uses an unboxed action layout and includes the AI disclosure", () => {
@@ -95,35 +83,41 @@ test("auth uses an unboxed action layout and includes the AI disclosure", () => 
   expect(auth).not.toContain("styles.inputLabel");
   expect(auth).toContain("AI-powered features");
   expect(auth).toContain("Vorinthex AI uses artificial intelligence to generate and process text, images, audio and video.");
+  expect(auth).toContain('recordAnalyticsEvent(`auth.option.selected.${provider}`)');
+  expect(auth).toContain('recordAnalyticsEvent("auth.option.selected.email")');
+  for (const provider of ["google", "apple", "email"]) {
+    expect(onboardingEvents).toContain(`"auth.option.selected.${provider}"`);
+  }
 });
 
-test("referral leads through reward, notification, Gallery, and camera access", () => {
-  expect(onboarding).toContain('<OnboardingReward onFinished={() => setPhase("permissions")}');
-  expect(onboarding).toContain("<OnboardingPermissions");
+test("Core requests permissions conversationally without automatic Gallery imports", () => {
+  expect(layout).not.toContain("gallery-onboarding-import");
+  expect(onboarding).toContain('<OnboardingReward onFinished={() => setPhase("profile-badge")}');
+  expect(onboarding).toContain('<OnboardingProfileBadge onFinished={handleComplete}');
   expect(onboarding).toContain('onComplete={() => setPhase("reward")}');
   expect(reward).toContain('title="Free sparks"');
-  expect(reward).toContain("Your first 100 Sparks are ready. Use them anywhere in Vorinthex AI.");
+  expect(reward).toContain("You have been granted 100 Sparks.");
   expect(reward).toContain("<OnboardingStepLayout");
   expect(reward).toContain("<GiftIcon");
+  expect(reward).toContain('variant="primary">Next</Button>');
   expect(reward).toContain("onClose={onFinished}");
-  expect(reward).toContain('variant="secondary">Skip</Button>');
+  expect(reward).not.toContain('>Skip</Button>');
+  expect(reward).not.toContain("onboarding.reward.skipped");
+  expect(reward).toContain('closeLabel="Close reward introduction"');
   expect(reward).not.toContain("<Canvas");
   expect(reward).not.toMatch(/adjust|grantAccount|setQueryData/);
-  expect(permissions).toContain("BellIcon");
-  expect(permissions).toContain("Notifications.requestPermissionsAsync");
-  expect(permissions).toContain("GalleryIcon");
-  expect(permissions).toContain("ImagePicker.requestMediaLibraryPermissionsAsync");
-  expect(permissions).toContain("CameraIcon");
-  expect(permissions).toContain("ImagePicker.requestCameraPermissionsAsync");
-  expect(permissions).toContain('title: "Allow notifications"');
-  expect(permissions).toContain('title: "Allow Gallery"');
-  expect(permissions).toContain('title: "Allow camera"');
-  expect(permissions).toContain("Stay up to date with updates and never miss anything.");
-  expect(permissions).not.toContain("Directory.pickDirectoryAsync()");
-  expect(permissions).toContain("Linking.openSettings()");
-  expect(permissions).toContain("<OnboardingStepLayout");
-  expect(permissions).toContain('disabled={busy} onPress={() => void request()} size="md" variant="primary"');
-  expect(permissions).not.toContain("loading={busy}");
+  expect(conversation).toContain('permission: "photos"');
+  expect(conversation).toContain('permission: "camera"');
+  expect(conversation).toContain('permission: "notifications"');
+  expect(conversation.indexOf('permission: "photos"')).toBeLessThan(conversation.indexOf('permission: "camera"'));
+  expect(conversation.indexOf('permission: "camera"')).toBeLessThan(conversation.indexOf('permission: "notifications"'));
+  expect(conversation).toContain("ImagePicker.requestMediaLibraryPermissionsAsync");
+  expect(conversation).toContain("ImagePicker.requestCameraPermissionsAsync");
+  expect(conversation).toContain("Notifications.requestPermissionsAsync");
+  expect(conversation).toContain("Allow access to your phone's photo library to start managing your images smartly with Gallery.");
+  expect(conversation).toContain("Allow notifications so you never miss anything.");
+  expect(conversation).toContain("important connected email, Vorinthex app communication, or support replies arrive");
+  expect(conversation).not.toMatch(/up to 50 recent photos|skip screenshots|preparing and organizing your photos/);
   expect(stepLayout.indexOf("styles.header")).toBeLessThan(stepLayout.indexOf("styles.hero"));
   expect(stepLayout).toContain('accessibilityRole="header"');
   expect(stepLayout).toContain('textAlign: "left"');
@@ -139,18 +133,17 @@ test("referral leads through reward, notification, Gallery, and camera access", 
   expect(cameraIcon).not.toContain('d="M5 12h14"');
   expect(referralIcon).toContain("export function ReferralIcon");
   expect(mobileIcons).toContain('export * from "./icons/referral/referral.mobile"');
-  for (const source of [intro, sandbox, reward, permissions, stepLayout, paywall]) {
-    for (const button of source.replaceAll("=>", "ARROW").match(/<Button\b[^>]*>/g) ?? []) expect(button).toContain('size="md"');
+  for (const source of [conversation, reward, stepLayout, paywall]) {
+    for (const button of source.replaceAll("=>", "ARROW").match(/<Button\b[^>]*>/g) ?? []) expect(button).toContain(button.includes('accessibilityLabel="How Sparks are billed"') ? 'size="xs"' : 'size="md"');
   }
-  for (const source of [intro, sandbox, permissions]) expect(source).not.toContain('>Skip</Button>');
   expect(paywall.match(/>Skip<\/Button>/g)).toHaveLength(1);
   expect(appConfig).toContain('"expo-notifications"');
+  expect(appConfig).not.toContain('"expo-media-library"');
 });
 
-test("only paywall close is delayed and referral data starts loading after auth", () => {
+test("only paywall close is delayed and referral data loads only while reachable", () => {
   expect(delayed).toContain("DELAYED_ACTION_MS = 3_000");
-  expect(paywall).toContain("enabled: Boolean(userKey)");
-  expect(paywall).not.toContain('enabled: page === "referral"');
+  expect(paywall).toContain('enabled: Boolean(userKey && open && (mode === "onboarding" || page === "referral"))');
   expect(paywall).toContain('useDelayedAction(mode === "onboarding" && open && page === "plans", page)');
   expect(paywall).toContain('accessibilityLabel="Continue without a plan"');
   expect(paywall).toContain("top: Math.max(insets.top, spacing.md)");
@@ -176,6 +169,7 @@ test("checkout uses a strict authenticated handoff and confirms only by refetchi
 
 test("referral summary, recipient vault, sharing, and auth acquisition stay strict", () => {
   expect(referral).toContain('/^[A-F0-9]{12}$/');
+  expect(referral).toContain('params: { includeInvitees: "true" }');
   expect(referral).toContain('apiClient.get("/referrals/summary")');
   expect(referral).toContain("z.strictObject");
   expect(paywall).toContain("NativeShare.share");
@@ -199,9 +193,21 @@ test("onboarding completion is durable and step analytics use fixed dotted slugs
   expect(authState).toContain("markOnboardingComplete()");
   expect(layout).toContain("localOnboarding.complete");
   expect(onboardingEvents).toContain('"onboarding.vorinthex-ai"');
+  expect(onboardingEvents).toContain('"onboarding.welcome"');
+  expect(onboardingEvents).toContain('"onboarding.sign-in"');
   expect(onboardingEvents).toContain('"onboarding.gallery"');
   expect(onboardingEvents).toContain('"onboarding.referral"');
-  expect(intro).toContain("recordOnboardingEvent(eventSlug)");
+  expect(conversation).toContain("recordOnboardingEvent(event)");
+  expect(conversation).toContain('addUserMessage("Show me around")');
+  expect(conversation).toContain('>Show me around</Button>');
+  expect(conversation).toContain('import { RichText } from "@vorinthex/shared/ui/rich-text"');
+  expect(conversation).toContain('<RichText content={message.text} />');
+  expect(conversation).toContain('onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}');
+  expect(conversation).toContain('`onboarding.${permission}.${allowed ? "allowed" : "skipped"}`');
+  for (const permission of ["photos", "camera", "notifications"]) {
+    expect(onboardingEvents).toContain(`"onboarding.${permission}.allowed"`);
+    expect(onboardingEvents).toContain(`"onboarding.${permission}.skipped"`);
+  }
   expect(paywall).toContain('page === "plans" ? "onboarding.paywall" : "onboarding.referral"');
 });
 
@@ -209,8 +215,10 @@ test("production onboarding completion persists and uses the authenticated profi
   expect(onboardingState).not.toContain("TEST_ONBOARDING_EVERY_SIGN_IN");
   expect(onboardingState).toContain("clearOnboardingCompletion");
   expect(onboarding).toContain("const completion = completeOnboarding()");
-  expect(onboarding.indexOf('router.replace("/capability/archive")')).toBeLessThan(onboarding.indexOf("void completion.catch"));
-  expect(onboarding).toContain('completion.catch(() => router.replace("/onboarding"))');
+  const completion = onboarding.slice(onboarding.indexOf("const handleComplete"));
+  expect(completion.indexOf('requestAgentGreeting("onboarding")')).toBeLessThan(completion.indexOf('router.replace("/capability/archive")'));
+  expect(completion.indexOf('router.replace("/capability/archive")')).toBeLessThan(completion.indexOf("void completion.catch"));
+  expect(onboarding).toContain('.catch(() => router.replace("/onboarding"))');
   expect(authState.indexOf("set({ user: { ...previousUser, isOnboarded: true } })")).toBeLessThan(authState.indexOf('patchJson<{ isOnboarded: true }, unknown>("/auth/me"'));
   expect(layout).toContain("user?.isOnboarded === true");
 });

@@ -104,7 +104,7 @@ export async function processStorageChargingHour(rawWindow: unknown, dependencie
           hourEnd: prepared.hourEnd,
         });
       } catch (error) {
-        if (!(error instanceof SparkRepositoryError && error.code === 'INSUFFICIENT_BALANCE')) throw error;
+        if (!(error instanceof SparkRepositoryError && (error.code === 'INSUFFICIENT_BALANCE' || error.code === 'OUTSTANDING_DEBT'))) throw error;
         await dependencies.repository.markUserHourUnfunded(prepared, (dependencies.now ?? (() => new Date()))().toISOString());
         continue;
       }

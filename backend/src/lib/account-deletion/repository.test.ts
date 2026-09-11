@@ -8,7 +8,7 @@ const cursor = (value: unknown) => ({
   async next() { return value; },
   async all() { return Array.isArray(value) ? value : value == null ? [] : [value]; },
 });
-const plan = (overrides: Record<string, unknown> = {}) => ({ userKey, teamKeys: [teamKey], scopeKeys: [], presenceSessionKeys: ['session-1'], blocked: false, activeCheckout: false, recoverableCheckout: false, ...overrides });
+const plan = (overrides: Record<string, unknown> = {}) => ({ userKey, email: 'person@example.com', teamKeys: [teamKey], scopeKeys: [], presenceSessionKeys: ['session-1'], blocked: false, activeCheckout: false, recoverableCheckout: false, ...overrides });
 
 describe('account deletion repository', () => {
   test('writes a durable fence in a short transaction with deterministic user/session lock ordering', async () => {
@@ -17,7 +17,7 @@ describe('account deletion repository', () => {
       declaration = collections;
       return operation({ async query(query: string) { queries.push(query); return cursor(queries.length === 1 ? plan() : userKey); } });
     });
-    await expect(repository.fence(userKey, '2026-09-06T09:55:00.000Z', '2026-09-06T10:00:00.000Z')).resolves.toEqual({ status: 'fenced', presenceSessionKeys: ['session-1'] });
+    await expect(repository.fence(userKey, '2026-09-06T09:55:00.000Z', '2026-09-06T10:00:00.000Z')).resolves.toEqual({ status: 'fenced', presenceSessionKeys: ['session-1'], recipient: { email: 'person@example.com' } });
     expect(declaration).toEqual(expect.objectContaining({ write: ['users', 'userSessions'] }));
     expect(queries[0]).toContain('checkout.updatedAt < @pendingCutoff');
     expect(queries[1]).toContain('deletionRequestedAt');
@@ -44,7 +44,11 @@ describe('account deletion repository', () => {
     );
     await expect(repository.finalize(userKey)).resolves.toEqual({ status: 'deleted' });
     expect(outsideReads).toEqual([]);
-    expect(transactionQueries.some((query) => query.includes('REMOVE user IN users'))).toBe(true);
+    const teardown = transactionQueries.find((query) => query.includes('REMOVE user IN users')) ?? '';
+    expect(teardown).not.toBe('');
+    expect(teardown).toContain('item.userKey == @userKey REMOVE item IN userConnectors');
+    expect(teardown.indexOf('LET notificationThreadKeys')).toBeLessThan(teardown.indexOf('LET cleanupInboxThreads'));
+    expect(teardown).toContain('item.userKey == @userKey || item.threadKey IN notificationThreadKeys');
   });
 
   test('deletes Gallery uploads by membership key while retaining the storage object fallback', async () => {
@@ -95,6 +99,7 @@ describe('account deletion repository', () => {
     }
     expect(transactionQueries.filter(({ query }) => query.includes('REMOVE item IN @@collection'))).toHaveLength(scopeKeys.length * SCOPE_KEYED_REMOVAL_COLLECTIONS.length);
     expect(transactionQueries.some(({ query }) => query.includes('cleanupTicketVotes'))).toBe(false);
-    expect(transactionQueries.some(({ query }) => query.includes('UPDATE item WITH counts IN tickets'))).toBe(true);
+    expect(transactionQueries.some(({ query }) => query.includes('cleanupInboxMessages'))).toBe(true);
+    expect(transactionQueries.some(({ query }) => query.includes('cleanupInboxThreads'))).toBe(true);
   });
 });

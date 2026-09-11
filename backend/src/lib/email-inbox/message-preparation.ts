@@ -8,11 +8,11 @@ import { latestEmailMessage } from './message-order';
 import type { StagedEmailAttachment } from './attachment-ingestion';
 
 type StoredFields = 'key' | 'threadKey' | 'createdAt' | 'updatedAt';
-type PreparedMessageInput = Omit<EmailMessage, StoredFields | 'embedding' | 'embeddingContentVersion' | 'inboxCategory' | 'unread' | 'attachmentAvailability'> & Partial<Pick<EmailMessage, StoredFields | 'unread' | 'attachmentAvailability'>>;
-type PreparedThreadInput = Omit<EmailThread, 'key' | 'createdAt' | 'updatedAt' | 'embedding' | 'embeddingContentVersion' | 'inboxCategory' | 'priority' | 'state' | 'category' | 'intent' | 'action' | 'labels' | 'starred' | 'isFavorite' | 'inInbox' | 'latestFrom' | 'lastMessageAt' | 'subject' | 'summary' | 'snippet' | 'unread'>;
+type PreparedMessageInput = Omit<EmailMessage, StoredFields | 'embedding' | 'embeddingContentVersion' | 'inboxCategory' | 'unread' | 'attachmentAvailability'> & Partial<Pick<EmailMessage, StoredFields | 'unread' | 'attachmentAvailability'>> & { userKey?: string };
+type PreparedThreadInput = Omit<EmailThread, 'key' | 'createdAt' | 'updatedAt' | 'embedding' | 'embeddingContentVersion' | 'inboxCategory' | 'priority' | 'state' | 'category' | 'intent' | 'action' | 'labels' | 'starred' | 'isFavorite' | 'inInbox' | 'latestFrom' | 'lastMessageAt' | 'subject' | 'summary' | 'snippet' | 'unread'> & { userKey?: string };
 type SyncThreadInput = Parameters<EmailRepository['syncThread']>[0];
-type CurrentThreadInput = Omit<SyncThreadInput['thread'], 'embedding' | 'embeddingContentVersion' | 'archiveRepresentation'>;
-type CurrentMessageInput = Omit<SyncThreadInput['messages'][number], 'embedding' | 'embeddingContentVersion' | 'archiveRepresentation'>;
+type CurrentThreadInput = Omit<SyncThreadInput['thread'], 'userKey' | 'embedding' | 'embeddingContentVersion' | 'archiveRepresentation'> & { userKey?: string };
+type CurrentMessageInput = Omit<SyncThreadInput['messages'][number], 'userKey' | 'embedding' | 'embeddingContentVersion' | 'archiveRepresentation'> & { userKey?: string };
 
 function summary(value: string) { return value.replace(/\s+/g, ' ').trim().slice(0, 400) || '(Empty message)'; }
 const PREPARATION_CONCURRENCY = 8;
@@ -43,14 +43,15 @@ export async function prepareAndPersistEmailThread(input: {
   beforePersist: () => Promise<void>;
 }) {
   if (!input.messages.length) throw new Error('Email thread has no messages');
+  const userKey = input.thread.userKey ?? input.thread.scopeKey;
   const threadKey = emailThreadKey(input.thread.scopeKey, input.thread.accountKey, input.thread.providerThreadId);
   const messages = await mapConcurrent(input.messages, PREPARATION_CONCURRENCY, async (message) => {
-    const data = { ...message, embeddingContentVersion: 4 as const };
+    const data = { ...message, userKey: message.userKey ?? userKey, embeddingContentVersion: 4 as const };
     const content = emailMessageSemanticText(message);
     const archiveRepresentation = await input.prepareDocument({ name: message.subject, content, semanticSource: content });
     return { ...data, embedding: archiveRepresentation.embedding, archiveRepresentation };
   }) as SyncThreadInput['messages'];
-  const thread = { ...input.thread, embeddingContentVersion: 4 as const };
+  const thread = { ...input.thread, userKey, embeddingContentVersion: 4 as const };
   const latest = latestEmailMessage(input.messages)!;
   const content = emailMessageSemanticText(latest);
   const archiveRepresentation = await input.prepareDocument({ name: thread.subject, content, semanticSource: content });
@@ -77,6 +78,7 @@ export async function sortAndPersistInboxThread(input: {
   subscriptionBilling?: Parameters<EmailRepository['syncThread']>[0]['subscriptionBilling'];
 }) {
   if (!input.messages.length) throw new Error('Email thread has no messages');
+  const userKey = input.thread.userKey ?? input.thread.scopeKey;
   if (new Set(input.messages.map(({ providerMessageId }) => providerMessageId)).size !== input.messages.length) throw new Error('Email provider thread contains duplicate message IDs');
   const classified = await mapConcurrent(input.messages, PREPARATION_CONCURRENCY, async (message) => {
     const classification = await input.classify(input.teamKey, {
@@ -99,6 +101,7 @@ export async function sortAndPersistInboxThread(input: {
     const { providerThreadId: _providerThreadId, ...messageFields } = withoutStored(message as unknown as Record<string, unknown>);
     const data = {
       ...messageFields,
+      userKey: message.userKey ?? userKey,
       scopeKey: message.scopeKey,
       accountKey: message.accountKey,
       providerMessageId: message.providerMessageId,
@@ -110,9 +113,10 @@ export async function sortAndPersistInboxThread(input: {
     const content = emailMessageSemanticText(message);
     const archiveRepresentation = await input.prepareDocument({ name: message.subject, content, semanticSource: content });
     return { ...data, embedding: archiveRepresentation.embedding, archiveRepresentation };
-  }) as Parameters<EmailRepository['syncThread']>[0]['messages'];
+  }) as unknown as Parameters<EmailRepository['syncThread']>[0]['messages'];
   const thread = {
     ...input.thread,
+    userKey,
     subject: latest.message.subject,
     summary: summary(latest.message.body),
     snippet: summary(latest.message.body),

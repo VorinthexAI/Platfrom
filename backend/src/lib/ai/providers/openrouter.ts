@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { webInputSchema, webOutputSchema, type WebOutput } from '@/lib/ai/actions/web';
 import { speechInputSchema, speechOutputSchema, type SpeechInput, type SpeechOutput } from '@/lib/ai/actions/speech';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { tokenUsage, ZERO_TOKEN_USAGE } from '@/lib/ai/shared/usage';
@@ -24,6 +23,7 @@ import {
   type ProviderEmbedRequest,
   type ProviderEmbedResponse,
   type ProviderExecuteRequest,
+  type ProviderExecutionCapabilities,
   type ProviderExecuteResponse,
   type ProviderFactory,
   type ProviderId,
@@ -43,26 +43,27 @@ export type OpenRouterProviderConfig = z.input<typeof openRouterProviderConfigSc
 const PROVIDER_ID = 'openrouter' as ProviderId;
 const SPEECH_CHARACTER_LIMIT = 15_000;
 
-const UPSTREAM_PROVIDER_ROUTING: Readonly<Record<string, { order: readonly string[]; allow_fallbacks: boolean }>> = {
-  'google/gemini-3.1-flash-lite': { order: ['google-vertex/us'], allow_fallbacks: false },
+const UPSTREAM_PROVIDER_ROUTING: Readonly<Record<string, Record<string, unknown>>> = {
+  'google/gemini-3.1-flash-lite': {
+    sort: 'latency',
+    allow_fallbacks: true,
+    require_parameters: true,
+    preferred_max_latency: { p50: 1, p90: 3 },
+    preferred_min_throughput: { p50: 50 },
+  },
 };
 function upstreamRouting(model: string) {
-  return (UPSTREAM_PROVIDER_ROUTING as Record<string, { order: readonly string[]; allow_fallbacks: boolean } | undefined>)[model];
+  return UPSTREAM_PROVIDER_ROUTING[model];
 }
 
 const usageSchema = z.object({
   prompt_tokens: z.number().optional(), completion_tokens: z.number().optional(), total_tokens: z.number().optional(), cost: z.number().nullable().optional(),
-}).passthrough();
-const annotationSchema = z.object({
-  type: z.literal('url_citation'),
-  url_citation: z.object({ url: z.string(), title: z.string().optional() }).passthrough(),
 }).passthrough();
 const chatResponseSchema = z.object({
   choices: z.array(z.object({
     message: z.object({
       content: z.string().nullable().optional(),
       tool_calls: z.array(z.object({ id: z.string().min(1), function: z.object({ name: z.string().min(1), arguments: z.string() }).passthrough() }).passthrough()).optional(),
-      annotations: z.array(annotationSchema).optional(),
     }).passthrough(),
     finish_reason: z.string().nullable().optional(),
   }).passthrough()).min(1),
@@ -123,6 +124,7 @@ function normalizedContent(parts: ChatInput['messages'][number]['content']): unk
   const converted = parts.map((part) => {
     if (part.type === 'text') return { type: 'text', text: part.text };
     if (part.type === 'image') return { type: 'image_url', image_url: { url: `data:${part.mimeType};base64,${Buffer.from(part.bytes).toString('base64')}` } };
+    if (part.type === 'file') return { type: 'file', file: { filename: part.filename, file_data: `data:${part.mimeType};base64,${Buffer.from(part.bytes).toString('base64')}` } };
     return undefined;
   }).filter((part) => part !== undefined);
   return converted.length === 1 && (converted[0] as { type?: string }).type === 'text' ? (converted[0] as { text: string }).text : converted;
@@ -152,13 +154,18 @@ function chatMessages(chat: ChatInput) {
   return messages;
 }
 
-function chatBody(chat: ChatInput, model: string, stream = false) {
+function chatBody(chat: ChatInput, model: string, capabilities?: ProviderExecutionCapabilities, stream = false) {
   const routing = upstreamRouting(model);
+  const functionTools = chat.tools?.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.inputSchema } })) ?? [];
+  const webGrounding = capabilities?.webGrounding === 'model-selected';
+  const hasPdf = chat.messages.some((message) => message.content.some((part) => part.type === 'file' && part.mimeType === 'application/pdf'));
   return {
     model,
     messages: chatMessages(chat),
     ...(routing ? { provider: routing } : {}),
-    ...(chat.tools?.length ? { tools: chat.tools.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.inputSchema } })) } : {}),
+    ...(functionTools.length || webGrounding ? { tools: [...functionTools, ...(webGrounding ? [{ type: 'openrouter:web_search', parameters: { engine: 'native' } }] : [])] } : {}),
+    ...(webGrounding ? { max_tool_calls: 2 } : {}),
+    ...(hasPdf ? { plugins: [{ id: 'file-parser', pdf: { engine: 'cloudflare-ai' } }] } : {}),
     ...(chat.responseFormat ? { response_format: { type: 'json_schema', json_schema: { name: chat.responseFormat.name, strict: true, schema: chat.responseFormat.schema } } } : {}),
     ...(chat.options?.temperature !== undefined ? { temperature: chat.options.temperature } : {}),
     ...(chat.options?.maxTokens !== undefined ? { max_tokens: chat.options.maxTokens } : {}),
@@ -178,35 +185,10 @@ function normalizeChat(raw: z.infer<typeof chatResponseSchema>) {
 
 async function executeChat<TInput, TOutput>(fetcher: typeof fetch, config: z.output<typeof openRouterProviderConfigSchema>, request: ProviderExecuteRequest<TInput>) {
   const chat = input(chatInputSchema, request.input, 'text');
-  const result = await post(fetcher, config, '/chat/completions', chatBody(chat, request.externalModelId), request, 'text request');
+  const result = await post(fetcher, config, '/chat/completions', chatBody(chat, request.externalModelId, request.capabilities), request, 'text request');
   const raw = response(chatResponseSchema, await result.json().catch(() => undefined), 'text');
   const normalized = normalizeChat(raw);
   return { output: normalized.output as TOutput, usage: normalized.usage, ...(normalized.costUsd !== undefined ? { costUsd: normalized.costUsd } : {}), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: raw };
-}
-
-async function executeWeb<TInput, TOutput>(fetcher: typeof fetch, config: z.output<typeof openRouterProviderConfigSchema>, request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
-  const value = input(webInputSchema.omit({ mode: true }), request.input, 'web');
-  const result = await post(fetcher, config, '/chat/completions', {
-    model: request.externalModelId,
-    messages: [{ role: 'user', content: value.prompt }],
-    ...(upstreamRouting(request.externalModelId) ? { provider: upstreamRouting(request.externalModelId) } : {}),
-    tools: [{ type: 'openrouter:web_search', parameters: { engine: 'native', max_results: 5, max_uses: 2, max_total_results: 10 } }],
-    max_tool_calls: 2,
-    ...(value.responseFormat ? { response_format: { type: 'json_schema', json_schema: { name: value.responseFormat.name, strict: true, schema: value.responseFormat.schema } } } : {}),
-  }, request, 'web request');
-  const raw = response(chatResponseSchema, await result.json().catch(() => undefined), 'web');
-  const choice = raw.choices[0]!;
-  const text = choice.message.content?.trim() ?? '';
-  const seen = new Set<string>();
-  const citations = (choice.message.annotations ?? []).flatMap(({ url_citation: citation }) => {
-    let url: URL;
-    try { url = new URL(citation.url); } catch { return []; }
-    if (url.protocol !== 'https:' || seen.has(citation.url)) return [];
-    seen.add(citation.url);
-    return [{ title: citation.title?.trim() || url.hostname, url: citation.url }];
-  });
-  const output: WebOutput = webOutputSchema.parse({ text, citations, sources: citations.map(({ url }) => url) });
-  return { output: output as TOutput & WebOutput, usage: tokenUsage(raw.usage?.prompt_tokens, raw.usage?.completion_tokens, raw.usage?.total_tokens), ...(raw.usage?.cost != null ? { costUsd: raw.usage.cost } : {}), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: raw };
 }
 
 async function createEmbeddings(fetcher: typeof fetch, config: z.output<typeof openRouterProviderConfigSchema>, request: ProviderEmbedRequest): Promise<ProviderEmbedResponse> {
@@ -355,7 +337,7 @@ async function generateSpeech<TInput, TOutput>(fetcher: typeof fetch, config: z.
 async function* streamChat<TInput>(fetcher: typeof fetch, config: z.output<typeof openRouterProviderConfigSchema>, request: ProviderExecuteRequest<TInput>): AsyncIterable<ProviderStreamChunk> {
   try {
     const chat = input(chatInputSchema, request.input, 'text stream');
-    const result = await post(fetcher, config, '/chat/completions', chatBody(chat, request.externalModelId, true), request, 'text stream');
+    const result = await post(fetcher, config, '/chat/completions', chatBody(chat, request.externalModelId, request.capabilities, true), request, 'text stream');
     if (!result.body) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter returned no stream body');
     const reader = result.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let sawDone = false; let finishReason: string | null | undefined;
     const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
@@ -409,7 +391,6 @@ export function createOpenRouterProvider(config: OpenRouterProviderConfig, fetch
     async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) {
       try {
         if (request.actionId === 'text') return await executeChat<TInput, TOutput>(fetcher, parsed, request);
-        if (request.actionId === 'web') return await executeWeb<TInput, TOutput>(fetcher, parsed, request);
         if (request.actionId === 'image') {
           const imageInput = imageActionInputSchema.parse(request.input);
           const { operation, ...operationInput } = imageInput;

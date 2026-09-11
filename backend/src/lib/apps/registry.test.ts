@@ -23,6 +23,10 @@ describe('canonical apps registry', () => {
     const ascend = CANONICAL_APPS.find(({ slug }) => slug === 'ascend');
     expect(ascend?.description).toContain('audio books');
     expect(ascend?.detailedDescription).toContain('personalized audio book');
+    const signal = CANONICAL_APPS.find(({ slug }) => slug === 'signal');
+    expect(signal?.description).toContain('private inbox');
+    expect(signal?.detailedDescription).toContain('communication from Vorinthex apps and support');
+    expect(`${CANONICAL_APPS[0]?.detailedDescription} ${signal?.detailedDescription}`).not.toMatch(/Gmail/i);
     expect(APP_KEYS_BY_SLUG.signal).toBe(APP_KEYS.SIGNAL);
   });
 

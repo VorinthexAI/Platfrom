@@ -3,9 +3,9 @@ import { expect, test } from "bun:test";
 const core = await Bun.file(new URL("../components/PersistentCoreComposer.tsx", import.meta.url)).text();
 
 test("avoids a duplicate Core toast while retaining insufficient-balance rollback", () => {
-  expect(core).toContain('if (!isInsufficientBalanceError(error)) showToast({ title: message, duration: 2_000 })');
+  expect(core).toContain('if (!isSparkFundingError(error)) showToast({ title: message, duration: 2_000 })');
   expect(core).toContain("setPendingMessages((current) => current.filter");
-  expect(core).toContain("restoreSentAttachments(submittedAttachments)");
+  expect(core).toContain("restoreSentAttachments(requestKey, submittedAttachments)");
 });
 
 test("restores a failed submitted prompt only before the user edits a newer draft", () => {

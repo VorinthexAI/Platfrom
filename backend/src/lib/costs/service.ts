@@ -9,6 +9,11 @@ export function createCostService(): CostService {
   return Object.freeze({
     async listCharges() {
       return publicSparkCostsSchema.parse({
+        capabilityCosts: Object.fromEntries(Object.entries(TOOL_COST_RULES).filter(([, rule]) => rule.showInPricing === false).map(([key, rule]) => [key, {
+          sparkCost: formatMicroSparks(rule.microSparks),
+          microSparkCost: rule.microSparks,
+          unit: 'invocation' as const,
+        }])),
         charges: [
           ...Object.entries(TOOL_COST_RULES).filter(([, rule]) => rule.showInPricing !== false).map(([key, rule]) => ({
             key,
@@ -21,16 +26,16 @@ export function createCostService(): CostService {
           {
             key: 'inbox.sync',
             kind: 'static' as const,
-            name: 'Connect and initially sync an inbox',
-            description: 'Import a newly connected inbox once. Provider API calls and later manual refreshes are not charged.',
+            name: 'Connect and initially sync email',
+            description: 'Import connected email into your private Signal inbox once. Provider API calls and later manual refreshes are not charged.',
             sparkCost: String(INBOX_INITIAL_SYNC_SPARKS),
             unit: 'invocation' as const,
           },
           {
             key: 'inbox.subscribe',
             kind: 'static' as const,
-            name: 'Receive a new email',
-            description: 'Persist one genuinely new provider email received through the connected inbox subscription.',
+            name: 'Receive connected email',
+            description: 'Add one genuinely new message from connected email to your private Signal inbox.',
             sparkCost: String(INBOX_NEW_EMAIL_SPARKS),
             unit: 'new-email' as const,
           },

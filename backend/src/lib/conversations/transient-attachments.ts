@@ -4,19 +4,20 @@ import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { z, ZodError } from 'zod';
 import { CORE_CHAT_MAX_IMAGE_BYTES } from '@/lib/ai/actions/core-chat';
-import { DocumentInputError, documentExtract, documentValidate, type DocumentObjectStorage, documentStorage } from '@/lib/ai/document-processing';
+import { DocumentInputError, documentValidate, type DocumentObjectStorage, documentStorage } from '@/lib/ai/document-processing';
 import { newId } from '@/lib/ids';
 import { redisConnection } from '@/lib/redis';
 import { createPublicS3Client, s3, S3_BUCKET } from '@/lib/s3';
 import { GalleryImageInputError, sanitizeGalleryImage } from '@/lib/gallery/image-location';
 import { getDefaultConversationRepository, type ConversationRepository } from './repository';
+import { artifactSha256, CONVERSATION_ATTACHMENT_ARTIFACT_TTL_MS, conversationAttachmentArtifactSchema, getDefaultConversationAttachmentArtifactRepository, type ConversationAttachmentArtifactRepository } from './attachment-artifacts';
 
 export const TRANSIENT_ATTACHMENT_RESERVATION_TTL_SECONDS = 15 * 60;
 export const TRANSIENT_ATTACHMENT_SEALED_TTL_SECONDS = 60 * 60;
-export const TRANSIENT_ATTACHMENT_MAX_FILES = 10;
+export const TRANSIENT_ATTACHMENT_MAX_FILES = 12;
 export const TRANSIENT_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 export const TRANSIENT_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
-export const TRANSIENT_DOCUMENT_MAX_TEXT_BYTES = 250_000;
+export const CORE_ATTACHMENT_MAX_AGGREGATE_IMAGE_BYTES = 16 * 1024 * 1024;
 
 const imageMimeTypeSchema = z.enum(['image/jpeg', 'image/png', 'image/webp']);
 const documentMimeTypeSchema = z.enum(['text/plain', 'text/markdown', 'text/x-markdown', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
@@ -45,14 +46,13 @@ export const transientAttachmentCompleteInputSchema = z.object({
   conversationKey: z.string().cuid(), requestKey: z.string().trim().min(1).max(200),
   attachmentKeys: z.array(z.string().cuid()).min(1).max(TRANSIENT_ATTACHMENT_MAX_FILES),
 }).strict().refine(({ attachmentKeys }) => new Set(attachmentKeys).size === attachmentKeys.length, 'Attachment keys must be unique.');
-export const transientAttachmentClaimInputSchema = z.object({ conversationKey: z.string().cuid(), requestKey: z.string().trim().min(1).max(200), attachmentKey: z.string().cuid() }).strict();
 
 const imageResultSchema = z.object({ kind: z.literal('image'), filename: filenameSchema, mimeType: z.literal('image/png'), sizeBytes: z.number().int().positive().max(CORE_CHAT_MAX_IMAGE_BYTES), width: z.number().int().positive().max(4_096), height: z.number().int().positive().max(4_096), storageKey: z.string().min(1) }).strict();
-const documentResultSchema = z.object({ kind: z.literal('document'), filename: filenameSchema, mimeType: documentMimeTypeSchema, sizeBytes: z.number().int().positive().max(TRANSIENT_ATTACHMENT_MAX_BYTES), content: z.string().trim().min(1).refine((value) => Buffer.byteLength(value, 'utf8') <= TRANSIENT_DOCUMENT_MAX_TEXT_BYTES, `Extracted text must not exceed ${TRANSIENT_DOCUMENT_MAX_TEXT_BYTES} bytes.`), metadata: z.record(z.unknown()).optional() }).strict();
+const documentResultSchema = z.object({ kind: z.literal('document'), filename: filenameSchema, mimeType: documentMimeTypeSchema, sizeBytes: z.number().int().positive().max(TRANSIENT_ATTACHMENT_MAX_BYTES), storageKey: z.string().min(1) }).strict();
 export const transientAttachmentResultSchema = z.discriminatedUnion('kind', [imageResultSchema, documentResultSchema]);
 export const transientAttachmentRecordSchema = z.object({
   key: z.string().cuid(), binding: z.string().length(64), teamKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(), userKey: z.string().cuid(), conversationKey: z.string().cuid(), requestKey: z.string().trim().min(1).max(200),
-  filename: filenameSchema, mimeType: mimeTypeSchema, sizeBytes: z.number().int().positive().max(TRANSIENT_ATTACHMENT_MAX_BYTES), storageKey: z.string().min(1), status: z.enum(['reserved', 'processing', 'sealed', 'claimed']), result: transientAttachmentResultSchema.optional(), createdAt: z.string().datetime(), expiresAt: z.string().datetime(),
+  filename: filenameSchema, mimeType: mimeTypeSchema, sizeBytes: z.number().int().positive().max(TRANSIENT_ATTACHMENT_MAX_BYTES), storageKey: z.string().min(1), status: z.enum(['reserved', 'processing', 'sealed']), result: transientAttachmentResultSchema.optional(), createdAt: z.string().datetime(), expiresAt: z.string().datetime(),
 }).strict();
 export type TransientAttachmentRecord = z.infer<typeof transientAttachmentRecordSchema>;
 export type TransientAttachmentOwner = { teamKey: string; scopeKey: string; userKey: string };
@@ -80,11 +80,13 @@ export interface TransientAttachmentDependencies {
   signUpload?: SignUpload;
   sanitizeImage?: typeof sanitizeGalleryImage;
   validateDocument?: typeof documentValidate;
-  extractDocument?: typeof documentExtract;
   inspectObject?: (storageKey: string) => Promise<{ sizeBytes?: number; mimeType?: string }>;
   transition?: Transition;
   now?: () => Date;
   id?: () => string;
+  artifacts?: Pick<ConversationAttachmentArtifactRepository, 'insertPrepared' | 'readBound'>;
+  ownerKey?: string;
+  teamAssurance?: { teamMembershipKey: string; teamMfaVersion: number };
 }
 
 export class TransientAttachmentError extends Error {
@@ -124,8 +126,8 @@ async function transition(record: TransientAttachmentRecord, next: TransientAtta
 function descriptor(record: TransientAttachmentRecord) {
   const result = record.result!;
   return result.kind === 'image'
-    ? { attachmentKey: record.key, kind: result.kind, filename: result.filename, mimeType: result.mimeType, sizeBytes: result.sizeBytes, width: result.width, height: result.height, status: 'sealed' as const }
-    : { attachmentKey: record.key, kind: result.kind, filename: result.filename, mimeType: result.mimeType, sizeBytes: result.sizeBytes, extractedCharacters: result.content.length, status: 'sealed' as const };
+    ? { attachmentKey: record.key, kind: result.kind, filename: result.filename, mimeType: result.mimeType, sizeBytes: result.sizeBytes, width: result.width, height: result.height, status: 'prepared' as const }
+    : { attachmentKey: record.key, kind: result.kind, filename: result.filename, mimeType: result.mimeType, sizeBytes: result.sizeBytes, status: 'prepared' as const };
 }
 
 export async function reserveTransientAttachments(rawInput: unknown, owner: TransientAttachmentOwner, dependencies: TransientAttachmentDependencies = {}) {
@@ -166,17 +168,39 @@ async function processRecord(record: TransientAttachmentRecord, dependencies: Tr
   if (object.bytes.byteLength !== record.sizeBytes || object.sizeBytes !== undefined && object.sizeBytes !== record.sizeBytes || object.mimeType !== undefined && object.mimeType.toLowerCase() !== record.mimeType) throw new TransientAttachmentError(409, 'ATTACHMENT_UPLOAD_MISMATCH', 'Uploaded attachment does not match its reservation.');
   if (record.mimeType.startsWith('image/')) {
     const sanitized = await (dependencies.sanitizeImage ?? sanitizeGalleryImage)(object.bytes);
-    const canonical = await sharp(sanitized.bytes, { limitInputPixels: 100_000_000 }).resize({ width: 2_400, height: 2_400, fit: 'inside', withoutEnlargement: true }).png({ compressionLevel: 9 }).toBuffer();
+    let canonical = await sharp(sanitized.bytes, { limitInputPixels: 100_000_000 }).resize({ width: 2_400, height: 2_400, fit: 'inside', withoutEnlargement: true }).png({ compressionLevel: 9 }).toBuffer();
+    let metadata = await sharp(canonical, { limitInputPixels: 100_000_000 }).metadata();
+    while (canonical.byteLength > CORE_CHAT_MAX_IMAGE_BYTES && metadata.width && metadata.height && (metadata.width > 1 || metadata.height > 1)) {
+      const scale = Math.min(0.9, Math.sqrt(CORE_CHAT_MAX_IMAGE_BYTES / canonical.byteLength) * 0.95);
+      const width = Math.max(1, Math.floor(metadata.width * scale));
+      const height = Math.max(1, Math.floor(metadata.height * scale));
+      canonical = await sharp(canonical, { limitInputPixels: 100_000_000 }).resize({ width, height, fit: 'inside', withoutEnlargement: true }).png({ compressionLevel: 9 }).toBuffer();
+      metadata = await sharp(canonical, { limitInputPixels: 100_000_000 }).metadata();
+    }
     if (canonical.byteLength > CORE_CHAT_MAX_IMAGE_BYTES) throw new TransientAttachmentError(400, 'ATTACHMENT_IMAGE_TOO_LARGE', 'Canonical image exceeds the maximum model input size.');
-    const metadata = await sharp(canonical, { limitInputPixels: 100_000_000 }).metadata();
     if (!metadata.width || !metadata.height || metadata.width > 16_384 || metadata.height > 16_384) throw new TransientAttachmentError(400, 'ATTACHMENT_IMAGE_INVALID', 'Canonical image dimensions are invalid.');
     const storageKey = record.storageKey.replace(/\/original\.[^/]+$/, '/canonical.png');
     await storage.upload({ key: storageKey, bytes: canonical, mimeType: 'image/png', billingUserKey: record.userKey });
-    return imageResultSchema.parse({ kind: 'image', filename: `${record.filename.replace(/\.[^.]+$/, '').slice(0, 251) || 'image'}.png`, mimeType: 'image/png', sizeBytes: canonical.byteLength, width: metadata.width, height: metadata.height, storageKey });
+    return { result: imageResultSchema.parse({ kind: 'image', filename: `${record.filename.replace(/\.[^.]+$/, '').slice(0, 251) || 'image'}.png`, mimeType: 'image/png', sizeBytes: canonical.byteLength, width: metadata.width, height: metadata.height, storageKey }), sha256: artifactSha256(canonical) };
   }
-  const normalized = await (dependencies.validateDocument ?? documentValidate)({ file: { filename: record.filename, mimeType: record.mimeType, sizeBytes: record.sizeBytes, bytes: object.bytes }, scopeKey: record.scopeKey }, { maxBytes: TRANSIENT_ATTACHMENT_MAX_BYTES, logger: () => undefined });
-  const extracted = await (dependencies.extractDocument ?? documentExtract)({ ...normalized, storageKey: record.storageKey }, { logger: () => undefined });
-  return documentResultSchema.parse({ kind: 'document', filename: record.filename, mimeType: record.mimeType, sizeBytes: record.sizeBytes, content: extracted.extractedText, ...(extracted.metadata ? { metadata: extracted.metadata } : {}) });
+  await (dependencies.validateDocument ?? documentValidate)({ file: { filename: record.filename, mimeType: record.mimeType, sizeBytes: record.sizeBytes, bytes: object.bytes }, scopeKey: record.scopeKey }, { maxBytes: TRANSIENT_ATTACHMENT_MAX_BYTES, logger: () => undefined });
+  return { result: documentResultSchema.parse({ kind: 'document', filename: record.filename, mimeType: record.mimeType, sizeBytes: record.sizeBytes, storageKey: record.storageKey }), sha256: artifactSha256(object.bytes) };
+}
+
+async function mapConcurrent<T, R>(values: readonly T[], concurrency: number, operation: (value: T) => Promise<R>) {
+  const results = new Array<R>(values.length); let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+    while (cursor < values.length) { const index = cursor++; results[index] = await operation(values[index]!); }
+  });
+  const settled = await Promise.allSettled(workers);
+  const failure = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (failure) throw failure.reason;
+  return results;
+}
+
+export function validateCoreAttachmentImageBytes(results: readonly z.infer<typeof transientAttachmentResultSchema>[]) {
+  const imageBytes = results.reduce((total, result) => total + (result.kind === 'image' ? result.sizeBytes : 0), 0);
+  if (imageBytes > CORE_ATTACHMENT_MAX_AGGREGATE_IMAGE_BYTES) throw new TransientAttachmentError(400, 'ATTACHMENT_IMAGES_TOO_LARGE', 'Canonical images exceed the 16 MiB aggregate Core input limit.');
 }
 
 export async function completeTransientAttachments(rawInput: unknown, owner: TransientAttachmentOwner, dependencies: TransientAttachmentDependencies = {}) {
@@ -185,48 +209,52 @@ export async function completeTransientAttachments(rawInput: unknown, owner: Tra
   await requireConversation(owner, input.conversationKey, dependencies);
   const storage = dependencies.storage ?? documentStorage;
   const redis = dependencies.redis ?? redisConnection;
-  const attachments = [];
-  for (const attachmentKey of input.attachmentKeys) {
+  const artifactRepository = dependencies.artifacts ?? getDefaultConversationAttachmentArtifactRepository();
+  const existing = await artifactRepository.readBound(owner, input.conversationKey, input.requestKey, input.attachmentKeys);
+  if (existing.length === input.attachmentKeys.length && existing.every(({ status }) => status === 'PREPARED')) return { attachments: existing.map((artifact) => artifact.kind === 'image'
+    ? { attachmentKey: artifact.key, kind: artifact.kind, filename: artifact.filename, mimeType: 'image/png' as const, sizeBytes: artifact.sizeBytes, width: artifact.width!, height: artifact.height!, status: 'prepared' as const }
+    : { attachmentKey: artifact.key, kind: artifact.kind, filename: artifact.filename, mimeType: artifact.mimeType, sizeBytes: artifact.sizeBytes, status: 'prepared' as const }) };
+  if (existing.length) throw new TransientAttachmentError(409, 'ATTACHMENT_CHANGED', 'Only part of the attachment batch was already prepared.');
+  const records = await mapConcurrent(input.attachmentKeys, 2, async (attachmentKey) => {
     const record = await readRecord(attachmentKey, dependencies);
     if (!record || !bound(record, owner, input.conversationKey, input.requestKey)) throw new TransientAttachmentError(404, 'ATTACHMENT_NOT_FOUND', 'Attachment reservation not found.');
-    if (record.status === 'sealed') { attachments.push(descriptor(record)); continue; }
+    if (record.status === 'sealed' && record.result) {
+      const staged = await storage.download(record.result.storageKey);
+      if (staged.bytes.byteLength !== record.result.sizeBytes) throw new TransientAttachmentError(409, 'ATTACHMENT_CHANGED', 'Prepared attachment bytes changed before durable storage.');
+      return { record, result: record.result, sha256: artifactSha256(staged.bytes) };
+    }
     const now = dependencies.now?.() ?? new Date();
     if (record.status !== 'reserved' || Date.parse(record.expiresAt) <= now.getTime()) throw new TransientAttachmentError(409, 'ATTACHMENT_CHANGED', 'Attachment reservation is expired or no longer pending.');
     const processing = transientAttachmentRecordSchema.parse({ ...record, status: 'processing', expiresAt: new Date(now.getTime() + TRANSIENT_ATTACHMENT_SEALED_TTL_SECONDS * 1_000).toISOString() });
     if (!await transition(record, processing, TRANSIENT_ATTACHMENT_SEALED_TTL_SECONDS, dependencies)) throw new TransientAttachmentError(409, 'ATTACHMENT_CHANGED', 'Attachment reservation changed before processing.');
     let result: z.infer<typeof transientAttachmentResultSchema> | undefined;
     try {
-      result = await processRecord(processing, dependencies);
+      const processed = await processRecord(processing, dependencies); result = processed.result;
       const sealed = transientAttachmentRecordSchema.parse({ ...processing, status: 'sealed', result });
       if (!await transition(processing, sealed, TRANSIENT_ATTACHMENT_SEALED_TTL_SECONDS, dependencies)) throw new TransientAttachmentError(409, 'ATTACHMENT_CHANGED', 'Attachment reservation changed before sealing.');
-      await storage.delete(record.storageKey).catch(() => undefined);
-      attachments.push(descriptor(sealed));
+      return { record: sealed, result, sha256: processed.sha256 };
     } catch (error) {
       await Promise.all([record.storageKey, result?.kind === 'image' ? result.storageKey : undefined].filter((key): key is string => Boolean(key)).map((key) => storage.delete(key).catch(() => undefined)));
       await redis.del(keyFor(record.key));
       throw error;
     }
+  });
+  try { validateCoreAttachmentImageBytes(records.map(({ result }) => result)); } catch (error) {
+    await Promise.all(records.flatMap(({ record, result }) => [record.storageKey, result.kind === 'image' ? result.storageKey : undefined]).filter((key): key is string => Boolean(key)).map((key) => storage.delete(key).catch(() => undefined)));
+    await redis.del(...input.attachmentKeys.map(keyFor));
+    throw error;
   }
-  return { attachments };
-}
-
-export async function claimTransientAttachment(rawInput: unknown, owner: TransientAttachmentOwner, dependencies: TransientAttachmentDependencies = {}) {
-  assertOwner(owner);
-  const input = transientAttachmentClaimInputSchema.parse(rawInput);
-  const record = await readRecord(input.attachmentKey, dependencies);
-  if (!record || !bound(record, owner, input.conversationKey, input.requestKey)) throw new TransientAttachmentError(404, 'ATTACHMENT_NOT_FOUND', 'Sealed attachment not found.');
-  if (record.status !== 'sealed' || !record.result) throw new TransientAttachmentError(409, 'ATTACHMENT_NOT_CLAIMABLE', 'Attachment is not claimable.');
-  const claimed = transientAttachmentRecordSchema.parse({ ...record, status: 'claimed' });
-  if (!await transition(record, claimed, TRANSIENT_ATTACHMENT_SEALED_TTL_SECONDS, dependencies)) throw new TransientAttachmentError(409, 'ATTACHMENT_NOT_CLAIMABLE', 'Attachment was already claimed.');
-  return claimed;
-}
-
-export async function releaseTransientAttachment(record: TransientAttachmentRecord, dependencies: TransientAttachmentDependencies = {}) {
-  const parsed = transientAttachmentRecordSchema.parse(record);
-  if (parsed.status !== 'claimed') throw new TransientAttachmentError(409, 'ATTACHMENT_NOT_CLAIMED', 'Only a claimed attachment can be released.');
-  const current = await readRecord(parsed.key, dependencies);
-  if (!current || current.status !== 'claimed' || current.binding !== parsed.binding) throw new TransientAttachmentError(409, 'ATTACHMENT_CHANGED', 'Claimed attachment metadata changed before cleanup.');
-  const storage = dependencies.storage ?? documentStorage;
-  await Promise.all([parsed.storageKey, parsed.result?.kind === 'image' ? parsed.result.storageKey : undefined].filter((key): key is string => Boolean(key)).map((key) => storage.delete(key).catch(() => undefined)));
-  await (dependencies.redis ?? redisConnection).del(keyFor(parsed.key));
+  await Promise.all(records.filter(({ result }) => result.kind === 'image').map(({ record }) => storage.delete(record.storageKey)));
+  const createdAt = (dependencies.now?.() ?? new Date()).toISOString();
+  const expiresAt = new Date(Date.parse(createdAt) + CONVERSATION_ATTACHMENT_ARTIFACT_TTL_MS).toISOString();
+  const artifacts = records.map(({ record, result, sha256 }) => conversationAttachmentArtifactSchema.parse({
+    key: record.key, ownerKey: dependencies.ownerKey ?? owner.userKey, ...owner, conversationKey: record.conversationKey, requestKey: record.requestKey, ...(dependencies.teamAssurance ? { teamAssurance: dependencies.teamAssurance } : {}),
+    kind: result.kind, filename: result.filename, mimeType: result.mimeType, sizeBytes: result.sizeBytes, ...(result.kind === 'image' ? { width: result.width, height: result.height } : {}),
+    stagedStorageKey: result.storageKey, stagedSha256: sha256, status: 'PREPARED', attempts: 0, availableAt: createdAt, createdAt, expiresAt,
+  }));
+  const inserted = await artifactRepository.insertPrepared(artifacts);
+  const durable = inserted.length === artifacts.length ? inserted : await artifactRepository.readBound(owner, input.conversationKey, input.requestKey, input.attachmentKeys);
+  if (durable.length !== artifacts.length) throw new Error('Prepared attachment artifacts could not be durably recorded.');
+  await redis.del(...input.attachmentKeys.map(keyFor));
+  return { attachments: records.map(({ record }) => descriptor(record)) };
 }

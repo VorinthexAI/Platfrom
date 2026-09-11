@@ -46,12 +46,13 @@ export const emailOverviewInputSchema = z.strictObject({
   facets: z.array(emailFacetSchema).max(5).optional(),
   search: z.string().trim().max(200).optional(),
   cursor: z.string().min(1).max(2_000).optional(),
+  draftCursor: z.string().min(1).max(2_000).optional(),
   limit: z.number().int().min(1).max(50).optional(),
 }).superRefine((value, context) => {
   const hasCompositeField = value.readState !== undefined || value.facets !== undefined;
   if (value.filter !== undefined && hasCompositeField) context.addIssue({ code: "custom", message: "filter cannot be combined with composite overview fields" });
   if (hasCompositeField && (value.readState === undefined || value.facets === undefined)) context.addIssue({ code: "custom", message: "readState and facets must be provided together" });
-  if (!value.connectorKey && (value.filter !== undefined || hasCompositeField || value.search !== undefined || value.cursor !== undefined || value.limit !== undefined)) context.addIssue({ code: "custom", message: "connectorKey is required for an overview query" });
+  if (!value.connectorKey && (value.filter !== undefined || hasCompositeField || value.search !== undefined || value.cursor !== undefined || value.draftCursor !== undefined || value.limit !== undefined)) context.addIssue({ code: "custom", message: "connectorKey is required for an overview query" });
 }).transform((value) => {
   if (value.filter || !value.readState && !value.facets) return value;
   const normalized = normalizeEmailOverviewQuery(value);
@@ -197,6 +198,7 @@ const overviewSchema = z.strictObject({
   unassignedDrafts: z.array(emailDraftSchema).default([]),
   counts: z.strictObject({ all: z.number().int(), important: z.number().int(), urgent: z.number().int(), purchases: z.number().int(), needsAction: z.number().int(), filtered: z.number().int(), unread: z.number().int(), favorite: z.number().int(), trash: z.number().int() }),
   nextCursor: z.string().min(1).nullable(),
+  nextDraftCursor: z.string().min(1).nullable().default(null),
 });
 const threadDetailSchema = z.strictObject({ thread: emailThreadSchema, messages: z.array(emailMessageSchema.extend({ bodyTruncated: z.boolean() }).strict()), nextCursor: z.string().min(1).nullable(), truncated: z.boolean() });
 export const emailTranslationVersionSchema = z.strictObject({
@@ -250,11 +252,10 @@ export function getEmailContext() {
 
 export function getEmailPermissions() {
   const state = useAuthStore.getState();
-  const teamRole = typeof state.team?.role === "string" ? state.team.role : "viewer";
-  const scopeRole = typeof state.scope?.role === "string" ? state.scope.role : "viewer";
+  const ownsPrivateInbox = Boolean(state.user?.key);
   return {
-    canManageConnector: teamRole === "owner" || teamRole === "admin",
-    canMutate: teamRole === "owner" || teamRole === "admin" || scopeRole === "owner" || scopeRole === "admin" || scopeRole === "moderator",
+    canManageConnector: ownsPrivateInbox,
+    canMutate: ownsPrivateInbox,
   };
 }
 

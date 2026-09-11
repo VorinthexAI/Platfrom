@@ -14,19 +14,20 @@ const domain = {
 const tagToolNames = ['tag.list', 'tag.create', 'tag.update', 'tag.delete', 'tag.assignment.set'];
 const commerceToolNames = ['catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore'];
 const scopeToolNames = ['scope.list'];
-const platformToolNames = ['team.list', 'app.notify', 'notification.list', ...scopeToolNames, 'pricing.read', ...commerceToolNames];
+const platformToolNames = ['team.list', 'app.notify', 'app.history', 'communication.thread.read', 'communication.thread.mark-read', 'communication.message.send', ...scopeToolNames, 'pricing.read', ...commerceToolNames];
 
 const expected: Array<[AssistantSurface, string[]]> = [
-  ['knowledge-workspace', ['app.enhance', 'app.translate', 'app.speech', 'content.hidden.list', ...platformToolNames, 'referral.summary.read', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'note.write']],
-  ['travel-workspace', [...platformToolNames, 'referral.summary.read', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote', 'place.reference.generate', 'place.reference.list', 'trip.guide.generate', 'trip.guide.list', 'trip.create', 'trip.update', 'trip.delete', 'trip.attachment.set', 'place.guide.find', 'place.find-city', 'place.find-children', 'place.create', 'place.update', 'place.delete', 'place.open']],
-  ['signal-workspace', ['app.enhance', 'app.translate', ...platformToolNames, 'referral.summary.read', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote', 'inbox.refresh', 'inbox.sort', 'inbox.update', 'email.thread.read-state', 'email.thread.favorite', 'email.thread.trash', 'email.trash.clear', 'email.similar.find', 'email.message.translation.list', 'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.list', 'email.message.summary.delete', 'email.draft.create', 'email.draft.compose', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.list', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete', 'email.draft.update', 'email.draft.assign', 'email.draft.send', 'email.draft.delete']],
-  ['book-workspace', [...platformToolNames, 'referral.summary.read', 'profile.update', 'ticket.create', 'feedback.create', 'feedback.list', 'feedback.vote', 'book.topic.suggest', 'book.goal.suggest', 'book.extend', 'book.chapter.progress', 'book.create', 'book.generation.retry', 'book.generation.cancel', 'book.favorite', 'book.delete']],
+  ['knowledge-workspace', ['app.enhance', 'app.translate', 'app.speech', 'content.hidden.list', ...platformToolNames, 'referral.summary.read', 'referral.redeem', 'profile.update', 'ticket.create', 'feedback.create', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'note.write']],
+  ['travel-workspace', [...platformToolNames, 'referral.summary.read', 'referral.redeem', 'profile.update', 'ticket.create', 'feedback.create', 'place.reference.generate', 'place.reference.list', 'trip.guide.generate', 'trip.guide.list', 'trip.create', 'trip.update', 'trip.delete', 'trip.attachment.set', 'place.guide.find', 'place.find-city', 'place.find-children', 'place.create', 'place.update', 'place.delete', 'place.open']],
+  ['signal-workspace', ['app.enhance', 'app.translate', ...platformToolNames, 'referral.summary.read', 'referral.redeem', 'profile.update', 'ticket.create', 'feedback.create', 'inbox.refresh', 'inbox.sort', 'inbox.update', 'email.thread.read-state', 'email.thread.favorite', 'email.thread.trash', 'email.trash.clear', 'email.similar.find', 'email.message.translation.list', 'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.list', 'email.message.summary.delete', 'email.draft.create', 'email.draft.compose', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.list', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete', 'email.draft.update', 'email.draft.assign', 'email.draft.send', 'email.draft.delete']],
+  ['book-workspace', [...platformToolNames, 'referral.summary.read', 'referral.redeem', 'profile.update', 'ticket.create', 'feedback.create', 'book.topic.suggest', 'book.goal.suggest', 'book.extend', 'book.chapter.progress', 'book.create', 'book.generation.retry', 'book.generation.cancel', 'book.favorite', 'book.delete']],
 ];
 
 describe('personal assistant service capabilities', () => {
   test.each(expected)('registers the model-safe %s tool table', (surface, names) => {
     const capabilities = defaultAssistantCapabilityRegistry.resolve(surface);
-    expect(capabilities.map(({ definition }) => definition.name)).toEqual(['app.search', ...names]);
+    const expectedNames = names.flatMap((name) => name === 'profile.update' ? [name, 'profile.badge.generate', 'profile.badge.claim'] : [name]);
+    expect(capabilities.map(({ definition }) => definition.name)).toEqual(['app.search', ...expectedNames]);
     for (const { definition } of capabilities) {
       const properties = definition.inputSchema.properties as Record<string, unknown> | undefined;
       expect(properties).not.toHaveProperty('scopeKey');
@@ -46,18 +47,20 @@ describe('personal assistant service capabilities', () => {
   test('allowlists global referral, profile, and ticket capabilities on every workspace surface', async () => {
     const calls: unknown[][] = [];
     const accountProfile = { updateName: async (...args: unknown[]) => { calls.push(['profile', ...args]); return { profile: { key: userKey, name: 'Ada', profileStorageKey: `profiles/${userKey}/${newId()}.png`, updatedAt: '2026-09-03T10:00:00.000Z' } }; } } as any;
-    const tickets = { submit: async (...args: unknown[]) => { calls.push(['ticket', ...args]); return {}; }, createFeedback: async (...args: unknown[]) => { calls.push(['feedback-create', ...args]); return {}; }, listFeedback: async (...args: unknown[]) => { calls.push(['feedback-list', ...args]); return { items: [], nextCursor: null }; }, setFeedbackVote: async (...args: unknown[]) => { calls.push(['feedback-vote', ...args]); return {}; } } as any;
+    const tickets = { submit: async (...args: unknown[]) => { calls.push(['ticket', ...args]); return {}; }, createFeedback: async (...args: unknown[]) => { calls.push(['feedback-create', ...args]); return {}; } } as any;
     for (const surface of ['knowledge-workspace', 'media-workspace', 'book-workspace', 'travel-workspace', 'signal-workspace'] as const) {
       const capabilities = defaultAssistantCapabilityRegistry.resolve(surface);
       const profile = capabilities.find(({ definition }) => definition.name === 'profile.update')!;
       const referral = capabilities.find(({ definition }) => definition.name === 'referral.summary.read')!;
+      const redeem = capabilities.find(({ definition }) => definition.name === 'referral.redeem')!;
       const ticket = capabilities.find(({ definition }) => definition.name === 'ticket.create')!;
       const feedbackCreate = capabilities.find(({ definition }) => definition.name === 'feedback.create')!;
-      const feedbackList = capabilities.find(({ definition }) => definition.name === 'feedback.list')!;
-      const feedbackVote = capabilities.find(({ definition }) => definition.name === 'feedback.vote')!;
       expect(() => profile.inputSchema.parse({ name: 'Ada', userKey })).toThrow('Unrecognized key');
       expect(() => referral.inputSchema.parse({ userKey })).toThrow('Unrecognized key');
       expect(referral.executionEffect).toBe('read');
+      expect(redeem.executionEffect).toBe('write');
+      expect(() => redeem.inputSchema.parse({ code: '0123456789AB', userKey })).toThrow('Unrecognized key');
+      await expect(redeem.execute({ code: '0123456789AB' }, { domain, referrals: { redeem: async (...args: unknown[]) => { calls.push(['redeem', ...args]); return { status: 'applied', attributed: true, referrerName: 'Friend', signupRewardIssued: true, firstPaidRewardStatus: 'pending' }; } } } as any)).resolves.toMatchObject({ kind: 'continue', result: { status: 'applied', referrerName: 'Friend' } });
       expect(() => ticket.inputSchema.parse({ message: 'Help', teamKey })).toThrow('Unrecognized key');
       const result = await profile.execute({ name: 'Ada' }, { domain, accountProfile } as any);
       expect(result).toEqual({ kind: 'continue', result: { profile: { name: 'Ada' } } });
@@ -68,14 +71,31 @@ describe('personal assistant service capabilities', () => {
       expect(JSON.stringify(result)).not.toMatch(/profileStorageKey|updatedAt|profiles\//);
       await ticket.execute({ message: 'Help' }, { domain, tickets, requestKey: `request-${surface}` } as any);
       await feedbackCreate.execute({ message: 'Idea' }, { domain, tickets, requestKey: `request-${surface}` } as any);
-      await feedbackList.execute({}, { domain, tickets } as any);
-      await feedbackVote.execute({ ticketKey: userKey, vote: 'up' }, { domain, tickets, requestKey: `vote-${surface}` } as any);
     }
     expect(calls.filter(([kind]) => kind === 'profile')).toEqual(Array.from({ length: 5 }, () => ['profile', { name: 'Ada' }, userKey]));
     expect(calls.filter(([kind]) => kind === 'ticket').map((call) => call.slice(0, 3))).toEqual(Array.from({ length: 5 }, () => ['ticket', { message: 'Help' }, domain]));
     expect(calls.filter(([kind]) => kind === 'feedback-create').map((call) => call.slice(0, 3))).toEqual(Array.from({ length: 5 }, () => ['feedback-create', { message: 'Idea' }, domain]));
-    expect(calls.filter(([kind]) => kind === 'feedback-list')).toHaveLength(5);
-    expect(calls.filter(([kind]) => kind === 'feedback-vote')).toHaveLength(5);
+    expect(calls.filter(([kind]) => kind === 'redeem')).toEqual(Array.from({ length: 5 }, () => ['redeem', userKey, '0123456789AB']));
+  });
+
+  test('adapts profile badge tools to the canonical service with trusted context', async () => {
+    const calls: unknown[][] = [];
+    const profileBadges = {
+      generate: async (...args: unknown[]) => { calls.push(['generate', ...args]); return { candidateKey: newId(), avatarUrl: 'https://example.com/badge.png', expiresAt: '2026-09-09T10:10:00.000Z' }; },
+      claim: async (...args: unknown[]) => { calls.push(['claim', ...args]); return {}; },
+    } as any;
+    const capabilities = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace');
+    const generate = capabilities.find(({ definition }) => definition.name === 'profile.badge.generate')!;
+    const claim = capabilities.find(({ definition }) => definition.name === 'profile.badge.claim')!;
+    const candidateKey = newId();
+    expect(() => generate.inputSchema.parse({ userKey })).toThrow('Unrecognized key');
+    expect(() => claim.inputSchema.parse({ candidateKey, userKey })).toThrow('Unrecognized key');
+    await generate.execute({}, { domain, profileBadges, requestKey: 'badge-request-1' } as any);
+    await claim.execute({ candidateKey }, { domain, profileBadges } as any);
+    expect(calls).toEqual([
+      ['generate', {}, domain, 'badge-request-1'],
+      ['claim', { candidateKey }, userKey],
+    ]);
   });
 
   test('exposes no direct tag capabilities on any Core workspace surface', () => {
@@ -355,7 +375,7 @@ describe('personal assistant service capabilities', () => {
 
   test('marks Signal mutations, including permanent Trash clearing, as workspace changes', () => {
     const capabilities = defaultAssistantCapabilityRegistry.resolve('signal-workspace');
-    expect(capabilities).toHaveLength(45);
+    expect(capabilities).toHaveLength(49);
     expect(capabilities.find(({ definition }) => definition.name === 'email.reply-context.list')?.mutationWorkspace).toBeUndefined();
     for (const name of ['inbox.refresh', 'inbox.sort', 'inbox.update', 'email.thread.read-state', 'email.thread.favorite', 'email.thread.trash', 'email.trash.clear', 'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.delete', 'email.draft.create', 'email.draft.compose', 'email.draft.update', 'email.draft.assign', 'email.draft.send', 'email.draft.delete', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete']) expect(capabilities.find(({ definition }) => definition.name === name)?.mutationWorkspace).toBe('signal');
     const translateMutation = capabilities.find(({ definition }) => definition.name === 'app.translate')?.mutationWorkspace;

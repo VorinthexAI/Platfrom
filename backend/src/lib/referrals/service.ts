@@ -5,7 +5,7 @@ import { REFERRAL_PAID_REWARD_MICRO_SPARKS, REFERRAL_PROGRAM_VERSION, REFERRAL_S
 import { isArangoUniqueConstraintError } from '@/lib/db/base';
 import { referralCodeSchema, referralCodeValueSchema } from '@/lib/db/referral-codes.node';
 import { newId } from '@/lib/ids';
-import { qualifyingPaymentKeySchema, rawReferralCodeSchema, referralUserKeySchema } from './contracts';
+import { qualifyingPaymentKeySchema, rawReferralCodeSchema, referralRedeemResultSchema, referralRedemptionStatusSchema, referralUserKeySchema } from './contracts';
 import { createArangoReferralRepository, type ReferralRepository } from './repository';
 
 export function normalizeReferralCode(rawCode: unknown): string {
@@ -38,34 +38,47 @@ export function createReferralService({ repository, createKey = newId, createCod
     await publishReward(result.attribution.referrerUserKey, 'referral.reward.created').catch(() => undefined);
   }
 
+  async function completeVerifiedReferral(rawReferredUserKey: unknown, rawCode: unknown) {
+    const referredUserKey = referralUserKeySchema.parse(rawReferredUserKey);
+    const normalizedCode = normalizeReferralCode(rawCode);
+    const createdAt = now().toISOString();
+    const attributionKey = createKey();
+    const transactionKey = createKey();
+    const result = await repository.completeVerifiedReferral({
+      referredUserKey,
+      normalizedCode,
+      attribution: { key: attributionKey, referredUserKey, programVersion: REFERRAL_PROGRAM_VERSION, createdAt },
+      signup: { rewardKey: createKey(), transactionKey, microSparks: REFERRAL_SIGNUP_REWARD_MICRO_SPARKS, createdAt },
+      firstPaid: { rewardKey: createKey(), transactionKey: createKey(), microSparks: REFERRAL_PAID_REWARD_MICRO_SPARKS, createdAt },
+    });
+    await publish(result);
+    return result;
+  }
+
   return Object.freeze({
     ensurePersonalCode,
     async readSummary(rawUserKey: unknown) {
       const userKey = referralUserKeySchema.parse(rawUserKey);
       return repository.readSummary(userKey);
     },
-    async completeVerifiedReferral(rawReferredUserKey: unknown, rawCode: unknown) {
-      const referredUserKey = referralUserKeySchema.parse(rawReferredUserKey);
-      const normalizedCode = normalizeReferralCode(rawCode);
-      const createdAt = now().toISOString();
-      const attributionKey = createKey();
-      const transactionKey = createKey();
-      const result = await repository.completeVerifiedReferral({
-        referredUserKey,
-        normalizedCode,
-        attribution: { key: attributionKey, referredUserKey, programVersion: REFERRAL_PROGRAM_VERSION, createdAt },
-        signup: { rewardKey: createKey(), transactionKey, microSparks: REFERRAL_SIGNUP_REWARD_MICRO_SPARKS, createdAt },
-      });
-      await publish(result);
-      return result;
+    async readRedemptionStatus(rawUserKey: unknown) {
+      return referralRedemptionStatusSchema.parse(await repository.readRedemptionStatus(referralUserKeySchema.parse(rawUserKey)));
     },
+    async redeem(rawReferredUserKey: unknown, rawCode: unknown) {
+      const completion = await completeVerifiedReferral(rawReferredUserKey, rawCode);
+      const redemption = await repository.readRedemptionStatus(referralUserKeySchema.parse(rawReferredUserKey));
+      return referralRedeemResultSchema.parse({ status: completion.status, ...redemption });
+    },
+    completeVerifiedReferral,
     async applyFirstPaidReward(trustedReferredUserKey: unknown, rawQualifyingPaymentKey: unknown) {
       const result = await repository.applyFirstPaidReward({ referredUserKey: referralUserKeySchema.parse(trustedReferredUserKey), qualifyingPaymentKey: qualifyingPaymentKeySchema.parse(rawQualifyingPaymentKey), rewardKey: createKey(), transactionKey: createKey(), createdAt: now().toISOString(), microSparks: REFERRAL_PAID_REWARD_MICRO_SPARKS });
-      if (result.status !== 'not-attributed') await publish(result);
+      if (result.status === 'applied' || result.status === 'replayed') await publish(result);
       return result;
     },
     async reverseFirstPaidReward(rawQualifyingPaymentKey: unknown, rawReversedAt: unknown) {
-      return repository.reverseFirstPaidReward(qualifyingPaymentKeySchema.parse(rawQualifyingPaymentKey), z.string().datetime({ offset: true }).parse(rawReversedAt));
+      const result = await repository.reverseFirstPaidReward(qualifyingPaymentKeySchema.parse(rawQualifyingPaymentKey), z.string().datetime({ offset: true }).parse(rawReversedAt));
+      if (result.status !== 'not-found') await publishReward(result.referrerUserKey, 'referral.reward.created').catch(() => undefined);
+      return result;
     },
   });
 }

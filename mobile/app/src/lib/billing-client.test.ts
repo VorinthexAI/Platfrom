@@ -95,8 +95,8 @@ test("formats storage to two decimals and monthly Sparks as whole numbers", () =
   expect(formatMonthlyStorageSparks("30000")).toBe("less than 1");
   expect(formatMonthlyStorageSparks("3690000")).toBe("4");
   expect(formatMonthlyStorageSparks("0")).toBe("0");
-  expect(formatStorageSummary("0", "0")).toBe("0 MB");
-  expect(formatStorageSummary("123000000", "999999")).toBe("123 MB");
+  expect(formatStorageSummary("0", "0")).toBe("0 MB, approximately 0 Sparks per month");
+  expect(formatStorageSummary("123000000", "999999")).toBe("123 MB, approximately less than 1 Spark per month");
   expect(formatStorageSummary("123000000", "1000000")).toBe("123 MB, approximately 1 Spark per month");
 });
 

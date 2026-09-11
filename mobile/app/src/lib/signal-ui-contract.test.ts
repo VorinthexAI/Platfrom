@@ -212,7 +212,7 @@ test("Signal root puts shared search before tabs and uses a measured exact three
   expect(workspace).not.toContain("styles.favoriteBadge");
   expect(workspace).toContain("No connected inbox yet.");
   expect(workspace).toContain("No tones yet.");
-  expect(workspace).toContain('accessibilityLabel="Connect Gmail"');
+  expect(workspace).toContain('accessibilityLabel="Connect email"');
   expect(workspace).toContain('accessibilityLabel="Create email tone"');
   expect(workspace).toContain('emptyPlusButton: { width: 44, height: 44 }');
   expect(workspace).not.toContain('setSheet("tones")');
@@ -245,7 +245,9 @@ test("Signal exposes Core with the Archive root-search focus gate", () => {
 
 test("Signal routes exact connector keys and opens tones in their editor", () => {
   expect(route).toContain("connectorKey?: string");
-  expect(route).toContain('<EmailWorkspace initialConnectorKey={params.connectorKey} initialDraftKey={params.draftKey} initialMessageKey={params.signalMessageKey} initialThreadKey={params.signalThreadKey} initialToneKey={params.toneKey} navigatedFromRoot={params.signalReturn === "root"} openAttachments={params.openSignalAttachments === "1"}');
+  expect(route).toContain('initialConnectorKey={params.connectorKey}');
+  expect(route).toContain('initialCommunicationThreadKey={params.thread}');
+  expect(route).toContain('initialToneKey={params.toneKey}');
   expect(workspace).toContain('else router.push({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: account.connectorKey, signalReturn: "root" } })');
   expect(workspace).toContain("onPress={() => openToneEdit(record)}");
   expect(workspace).not.toContain('params: { slug: "archive", documentKey: record.key }');
@@ -309,7 +311,7 @@ test("Signal root inbox selection matches the Archive toolbar and disconnects on
   expect(workspace.indexOf("{rootBulkToolbar}")).toBeLessThan(workspace.indexOf('<View style={styles.rootActions}>', workspace.indexOf("{rootBulkToolbar}")));
   expect(workspace).toContain("updateEmailInboxForContext(context, { connectorKey: account.connectorKey, isFavorite }, randomUUID())");
   expect(workspace).toContain("disconnectEmailForContext(context, connectorKey)");
-  expect(workspace).toContain("It does not delete messages from Gmail.");
+  expect(workspace).toContain("It does not delete messages from your email provider.");
   expect(workspace).toContain('accessibilityActions={permissions.canMutate ? [{ name: "longpress"');
 });
 
@@ -338,13 +340,15 @@ test("inbox controls compose requested state while results remain latest-wins", 
   expect(workspace).toContain("changeInboxQuery(retryInboxQuery)");
 });
 
-test("cursor loads stay bounded at 50, dedupe, and stop repeated cursors", () => {
-  expect(workspace).toMatch(/const input = initialConnectorKey \? \{[\s\S]*?cursor: options\.cursor,\s*limit: 50,/);
+test("all inbox tabs load 25-item pages, dedupe, and stop repeated cursors", () => {
+  expect(workspace).toMatch(/const input = initialConnectorKey \? \{[\s\S]*?cursor: options\.cursor,\s*limit: 25,/);
   expect(workspace).toContain("fetchEmailOverviewForContext(emailContext, input)");
   expect(workspace).toContain("appendCursorItems(current.overview.threads, visibleValue.threads");
   expect(workspace).toContain("isNearScrollEnd({ offset: nativeEvent.contentOffset.y");
   expect(workspace).toContain("if (!cursor || loadingMore.current || loadingOverview.current || loading || loadError) return");
   expect(workspace).toContain("nextCursor: visibleValue.nextCursor === options.cursor ? null : visibleValue.nextCursor");
+  expect(workspace).toContain("draftCursor: cursor, limit: 25");
+  expect(workspace).toContain('accessibilityLabel="Loading more drafts"');
   expect(workspace).not.toContain("EventSource");
 });
 
@@ -422,23 +426,23 @@ test("root Filter and Plus expose filtering, history, utility, and creation acti
   const end = workspace.indexOf(') : sheet === "trashRoot"', start);
   const menu = workspace.slice(start, end);
   expect(menu.match(/<BottomSheetItem/g)).toHaveLength(3);
-  expect(menu).toContain('>Connect Gmail</BottomSheetItem>');
+  expect(menu).toContain('>Connect email</BottomSheetItem>');
   expect(menu).toContain('>Create email tone</BottomSheetItem>');
   expect(menu).toContain('>Reply context</BottomSheetItem>');
   expect(menu.indexOf('>Create email tone</BottomSheetItem>')).toBeLessThan(menu.indexOf('>Reply context</BottomSheetItem>'));
-  expect(menu.indexOf('>Reply context</BottomSheetItem>')).toBeLessThan(menu.indexOf('>Connect Gmail</BottomSheetItem>'));
+  expect(menu.indexOf('>Reply context</BottomSheetItem>')).toBeLessThan(menu.indexOf('>Connect email</BottomSheetItem>'));
   expect(menu).not.toContain('>Trash</BottomSheetItem>');
   expect(menu).not.toContain('icon={');
   expect(menu.match(/style=\{styles\.sheetAction\}/g)).toHaveLength(3);
   const plus = workspace.slice(workspace.indexOf('sheet === "plus" ? ('), workspace.indexOf(') : sheet === "bulkActions"'));
   expect(plus.match(/<BottomSheetItem/g)).toHaveLength(4);
   expect(plus).toContain("New email");
-  expect(plus).toContain(">Connect Gmail</BottomSheetItem>");
+  expect(plus).toContain(">Connect email</BottomSheetItem>");
   expect(plus).toContain(">Create email tone</BottomSheetItem>");
   expect(plus).toContain(">Reply context</BottomSheetItem>");
   expect(plus.indexOf("New email")).toBeLessThan(plus.indexOf(">Create email tone</BottomSheetItem>"));
   expect(plus.indexOf(">Create email tone</BottomSheetItem>")).toBeLessThan(plus.indexOf(">Reply context</BottomSheetItem>"));
-  expect(plus.indexOf(">Reply context</BottomSheetItem>")).toBeLessThan(plus.indexOf(">Connect Gmail</BottomSheetItem>"));
+  expect(plus.indexOf(">Reply context</BottomSheetItem>")).toBeLessThan(plus.indexOf(">Connect email</BottomSheetItem>"));
   expect(plus).not.toContain("icon={");
   expect(plus.match(/style=\{styles\.sheetAction\}/g)).toHaveLength(4);
   expect(plus.match(/variant="secondary"/g)).toHaveLength(4);
@@ -952,6 +956,11 @@ test("all Signal text inputs use the darker page background", () => {
   expect(workspace).toContain('signalComposer: { backgroundColor: palette.page }');
   expect(picker).toContain('rootSearch: { minHeight: 44, flex: 1, paddingLeft: 12, paddingRight: 8, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.page }');
   expect(picker).toContain('rootSearchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent"');
+});
+
+test("Signal uses the standard white Core send icon", () => {
+  expect(workspace).toContain('sendIcon={<SendIcon size="sm" />}');
+  expect(workspace).not.toContain('sendIcon={<SendIcon size="sm" variant="inverse" />}');
 });
 
 test("reply generation and post-send selection remain explicit", () => {

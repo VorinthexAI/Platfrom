@@ -5,13 +5,16 @@ const calls: { method: string; path: string; body?: unknown; config?: unknown }[
 const timestamp = "2026-09-01T10:00:00.000Z";
 const serverConversation = { key: "conversation-key", teamKey: "team", scopeKey: "scope", userKey: "user", name: "Planning", isFavorite: false, createdAt: timestamp, updatedAt: timestamp };
 const retrieval = { query: "roadmap", limit: 10, minimumScore: 0.55, groups: [{ collectionSlug: "documents", results: [{ key: "document-key", label: "Roadmap" }] }] };
-const serverMessage = { key: "assistant-key", conversationKey: serverConversation.key, turnKey: "request", type: "TEXT", role: "ASSISTANT", status: "COMPLETED", content: "Answer", retrievals: [retrieval], createdAt: timestamp, completedAt: timestamp };
+const serverMessage = { key: "assistant-key", conversationKey: serverConversation.key, turnKey: "request", type: "TEXT", role: "ASSISTANT", status: "COMPLETED", attachmentStatus: "NONE", content: "Answer", attachments: [], retrievals: [retrieval], createdAt: timestamp, completedAt: timestamp };
+const serverUserMessage = { ...serverMessage, key: "user-message", role: "USER", attachmentStatus: "PENDING", content: "Question", attachments: [] };
+const serverCompletedUserMessage = { ...serverUserMessage, attachmentStatus: "COMPLETED", attachments: [{ key: "cm123456789", kind: "document", filename: "brief.pdf", mimeType: "application/pdf", sizeBytes: 42 }] };
 let response: unknown;
 const responses = new Map<string, unknown>();
+const failures = new Map<string, unknown>();
 
 mock.module("./api-client", () => ({
   apiClient: {
-    post: async (path: string, body: unknown, config?: unknown) => { calls.push({ method: "POST", path, body, config }); return { data: responses.get(path) ?? response }; },
+    post: async (path: string, body: unknown, config?: unknown) => { calls.push({ method: "POST", path, body, config }); if (failures.has(path)) throw failures.get(path); return { data: responses.get(path) ?? response }; },
     patch: async (path: string, body: unknown, config?: unknown) => { calls.push({ method: "PATCH", path, body, config }); return { data: response }; },
     delete: async (path: string, config?: unknown) => { calls.push({ method: "DELETE", path, config }); return { data: response }; },
   },
@@ -19,11 +22,11 @@ mock.module("./api-client", () => ({
 mock.module("expo-file-system", () => ({ File: class { constructor(private uri: string) {} async arrayBuffer() { return new Uint8Array(Number(this.uri.split(":").at(-1))).buffer; } } }));
 const client = await import("./conversation-client");
 const context = { userKey: "user", teamKey: "team", scopeKey: "scope" };
-const start = { event: "start", id: "correlation", data: JSON.stringify({ type: "start", correlationKey: "correlation", conversationKey: serverConversation.key, userMessageKey: "user-message", assistantMessageKey: "assistant-key" }) };
+const start = { event: "start", id: "correlation", data: JSON.stringify({ type: "start", correlationKey: "correlation", conversationKey: serverConversation.key, userMessageKey: "user-message", assistantMessageKey: "assistant-key", userMessage: serverUserMessage }) };
 const delta = { event: "delta", id: "correlation", data: JSON.stringify({ type: "delta", correlationKey: "correlation", assistantMessageKey: "assistant-key", text: "Ans" }) };
 const done = { event: "done", id: "correlation", data: JSON.stringify({ type: "done", correlationKey: "correlation", conversationKey: serverConversation.key, message: serverMessage, name: "Named", replayed: false }) };
 
-beforeEach(() => { calls.length = 0; responses.clear(); response = undefined; });
+beforeEach(() => { calls.length = 0; responses.clear(); failures.clear(); response = undefined; });
 
 test("identifies only HTTP 404 responses as deleted conversation errors", () => {
   expect(client.isConversationNotFoundError({ isAxiosError: true, response: { status: 404 } })).toBe(true);
@@ -33,9 +36,18 @@ test("identifies only HTTP 404 responses as deleted conversation errors", () => 
 
 test("strictly parses owner-projected conversations and retains safe-message lifecycle fields", () => {
   expect(client.conversationSchema.parse(serverConversation)).toEqual({ key: serverConversation.key, name: "Planning", isFavorite: false, createdAt: timestamp, updatedAt: timestamp });
-  expect(client.conversationMessageSchema.parse(serverMessage)).toEqual({ key: "assistant-key", conversationKey: serverConversation.key, turnKey: "request", kind: "text", role: "assistant", status: "COMPLETED", content: "Answer", retrievals: [retrieval], createdAt: timestamp, completedAt: timestamp });
+  expect(client.conversationMessageSchema.parse(serverMessage)).toEqual({ key: "assistant-key", conversationKey: serverConversation.key, turnKey: "request", kind: "text", role: "assistant", status: "COMPLETED", attachmentStatus: "NONE", content: "Answer", attachments: [], retrievals: [retrieval], createdAt: timestamp, completedAt: timestamp });
   expect(() => client.conversationSchema.parse({ ...serverConversation, unknown: true })).toThrow();
   expect(() => client.conversationMessageSchema.parse({ ...serverMessage, role: "assistant" })).toThrow();
+});
+
+test("strictly retains public attachment lifecycle and canonical user references", () => {
+  expect(client.conversationMessageSchema.parse(serverUserMessage)).toMatchObject({ role: "user", attachmentStatus: "PENDING", attachments: [] });
+  expect(client.conversationMessageSchema.parse(serverCompletedUserMessage)).toMatchObject({ role: "user", attachmentStatus: "COMPLETED", attachments: [{ key: "cm123456789", kind: "document", filename: "brief.pdf" }] });
+  expect(() => client.conversationMessageSchema.parse({ ...serverCompletedUserMessage, attachments: [{ ...serverCompletedUserMessage.attachments[0], storageKey: "private/key" }] })).toThrow();
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, attachments: serverCompletedUserMessage.attachments })).toThrow("Attachments belong only");
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, attachmentStatus: "PROCESSING" })).toThrow();
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, attachmentStatus: undefined })).toThrow();
 });
 
 test("requires strict bounded retrievals on list messages and SSE completions", async () => {
@@ -124,7 +136,10 @@ function transport(frames: { event: string; data: string; id?: string }[], failu
 describe("strict conversation turn protocol", () => {
   test("accepts one start, matching deltas, and exactly one done", async () => {
     const events: string[] = [];
-    await client.streamConversationTurnWithTransport(transport([start, delta, done]), context, { conversationKey: serverConversation.key, message: "x".repeat(20_000), requestKey: "request" }, (event) => events.push(event.type));
+    await client.streamConversationTurnWithTransport(transport([start, delta, done]), context, { conversationKey: serverConversation.key, message: "x".repeat(20_000), requestKey: "request" }, (event) => {
+      events.push(event.type);
+      if (event.type === "start") expect(event.userMessage).toMatchObject({ key: event.userMessageKey, role: "user", attachmentStatus: "PENDING", attachments: [] });
+    });
     expect(events).toEqual(["start", "delta", "done"]);
     expect(calls[0]).toMatchObject({ path: `/conversations/${serverConversation.key}/turn/stream`, body: { message: "x".repeat(20_000), requestKey: "request" } });
   });
@@ -161,6 +176,8 @@ describe("strict conversation turn protocol", () => {
     await expect(client.streamConversationTurnWithTransport(transport([start, { ...delta, id: "other", data: JSON.stringify({ type: "delta", correlationKey: "other", assistantMessageKey: "assistant-key", text: "x" }) }]), context, input, () => undefined)).rejects.toThrow("active turn");
     await expect(client.streamConversationTurnWithTransport(transport([start, { ...done, data: JSON.stringify({ ...JSON.parse(done.data), conversationKey: "other" }) }]), context, input, () => undefined)).rejects.toThrow("active turn");
     await expect(client.streamConversationTurnWithTransport(transport([start, { ...done, data: JSON.stringify({ ...JSON.parse(done.data), message: { ...serverMessage, key: "other" } }) }]), context, input, () => undefined)).rejects.toThrow("active turn");
+    const mismatchedUser = { ...start, data: JSON.stringify({ ...JSON.parse(start.data), userMessage: { ...serverUserMessage, key: "other" } }) };
+    await expect(client.streamConversationTurnWithTransport(transport([mismatchedUser]), context, input, () => undefined)).rejects.toThrow("user message");
   });
 
   test("accepts a matching pre-start failure and validates terminal error correlation", async () => {
@@ -180,7 +197,7 @@ test("reserves, directly uploads, and completes transient attachments", async ()
   const presignPath = `/conversations/${serverConversation.key}/attachments/uploads/presign`;
   const completePath = `/conversations/${serverConversation.key}/attachments/uploads/complete`;
   responses.set(presignPath, { success: true, data: { uploads: [{ clientKey: "local-1", attachmentKey: "attachment-1", url: "https://uploads.example/attachment", headers: { "Content-Type": "image/png" }, expiresAt: timestamp }] } });
-  responses.set(completePath, { success: true, data: { attachments: [{ attachmentKey: "attachment-1", kind: "image", filename: "photo.png", mimeType: "image/png", sizeBytes: 4, width: 10, height: 20, status: "sealed" }] } });
+  responses.set(completePath, { success: true, data: { attachments: [{ attachmentKey: "attachment-1", kind: "image", filename: "photo.png", mimeType: "image/png", sizeBytes: 4, width: 10, height: 20, status: "prepared" }] } });
   const originalFetch = globalThis.fetch;
   const uploads: { url: string; init?: RequestInit }[] = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => { uploads.push({ url: String(input), init }); return new Response(null, { status: 200 }); }) as typeof fetch;
@@ -192,6 +209,22 @@ test("reserves, directly uploads, and completes transient attachments", async ()
   expect(calls[1]?.body).toEqual({ teamKey: "team", scopeKey: "scope", requestKey: "request", attachmentKeys: ["attachment-1"] });
   expect(uploads).toHaveLength(1);
   expect(uploads[0]).toMatchObject({ url: "https://uploads.example/attachment", init: { method: "PUT", headers: { "Content-Type": "image/png" } } });
+});
+
+test("identifies the failing attachment transport stage and preserves backend details", async () => {
+  const presignPath = `/conversations/${serverConversation.key}/attachments/uploads/presign`;
+  failures.set(presignPath, { response: { data: { success: false, error: { code: "ATTACHMENT_INVALID_INPUT", message: "Attachment request input was invalid." } }, status: 400 } });
+  await expect(client.uploadConversationAttachments(context, serverConversation.key, "request", [{ clientKey: "local-1", kind: "image", filename: "photo.png", mimeType: "image/png", sizeBytes: 4, uri: "bytes:4" }])).rejects.toThrow("Attachment reservation failed: Attachment request input was invalid.");
+});
+
+test("includes object-storage error details when the direct upload fails", async () => {
+  const presignPath = `/conversations/${serverConversation.key}/attachments/uploads/presign`;
+  responses.set(presignPath, { success: true, data: { uploads: [{ clientKey: "local-1", attachmentKey: "attachment-1", url: "https://uploads.example/attachment", headers: { "Content-Type": "image/png" }, expiresAt: timestamp }] } });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response("<Error><Code>SignatureDoesNotMatch</Code><Message>The request signature does not match.</Message></Error>", { status: 400 })) as typeof fetch;
+  try {
+    await expect(client.uploadConversationAttachments(context, serverConversation.key, "request", [{ clientKey: "local-1", kind: "image", filename: "photo.png", mimeType: "image/png", sizeBytes: 4, uri: "bytes:4" }])).rejects.toThrow("Attachment upload failed (400: SignatureDoesNotMatch: The request signature does not match.).");
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test("compares mutable full identities for stale async guards", () => {

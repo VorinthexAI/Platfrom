@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { ReferralRepositoryError } from '@/lib/referrals/repository';
 import { completeReferralForNewlyVerifiedUser } from './auth-referrals';
 
 describe('verified auth referral completion', () => {
@@ -28,6 +29,17 @@ describe('verified auth referral completion', () => {
     const calls: unknown[][] = [];
     await completeReferralForNewlyVerifiedUser({ userKey: 'user', wasVerified: true, referralCode: null }, { getUser: async () => ({ pendingReferralCode: '0123456789AB' }) as never, updateUser: async () => ({}) as never, completeReferral: async (...args) => { calls.push(args); return {} as never; } });
     expect(calls).toEqual([['user', '0123456789AB']]);
+  });
+
+  test('clears a stale pending code when another referral is already attributed', async () => {
+    const patches: Array<{ pendingReferralCode?: string | null }> = [];
+    await completeReferralForNewlyVerifiedUser({ userKey: 'user', wasVerified: true, referralCode: null }, {
+      getUser: async () => ({ pendingReferralCode: '0123456789AB' }) as never,
+      updateUser: async (_key, patch) => { patches.push(patch); return {} as never; },
+      completeReferral: async () => { throw new ReferralRepositoryError('ALREADY_ATTRIBUTED', 'already attributed'); },
+      warn: () => undefined,
+    });
+    expect(patches).toContainEqual(expect.objectContaining({ pendingReferralCode: null }));
   });
 
   test('does not fail verified authentication for a malformed referral code', async () => {

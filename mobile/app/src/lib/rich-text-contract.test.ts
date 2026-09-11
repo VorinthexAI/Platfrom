@@ -54,6 +54,6 @@ test("renders semantic web elements and horizontally scrollable native tables wi
   expect(web).not.toContain("dangerouslySetInnerHTML");
   expect(mobile).toContain("<ScrollView horizontal key={key} nestedScrollEnabled");
   expect(mobile).toContain('heading: { fontSize: 14, lineHeight: 20, fontWeight: "700" }');
-  expect(composer).toContain('import { RichText } from "@vorinthex/shared/ui/rich-text";');
-  expect(composer).toContain('<RichText content={message.content} />');
+  expect(composer).toContain('import { StreamingRichText } from "@vorinthex/shared/ui/rich-text";');
+  expect(composer).toContain('<StreamingRichText content={message.content} streaming={pending} />');
 });

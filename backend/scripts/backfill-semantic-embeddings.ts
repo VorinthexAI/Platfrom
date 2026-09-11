@@ -12,12 +12,12 @@ const MAX_CATCHUP_PASSES = 5;
 export const SEMANTIC_COLLECTION_ALLOWLIST = [
   'users', 'orchestrators', 'voices',
   'teams', 'scopes', 'channels', 'threads', 'messages', 'messageReactions', 'polls', 'pollOptions', 'folders',
-  'documents', 'documentVersions', 'places', 'trips', 'tickets', 'appNotifications',
+  'documents', 'documentVersions', 'places', 'trips', 'tickets', 'appNotifications', 'conversationMessages',
 ] as const;
 
 type SemanticSpec = { name: string; embedKeys: string[]; includeMetadata: boolean };
 const authoritative = new Map(collections.map((spec) => [spec.name, spec]));
-const semanticCollections: SemanticSpec[] = SEMANTIC_COLLECTION_ALLOWLIST.filter((name) => name !== 'documents' && name !== 'documentVersions').map((name) => {
+const semanticCollections: SemanticSpec[] = SEMANTIC_COLLECTION_ALLOWLIST.filter((name) => !['documents', 'documentVersions', 'conversationMessages'].includes(name)).map((name) => {
   const spec = authoritative.get(name);
   if (!spec || spec.skipEmbedding || !spec.embedKeys?.length) throw new Error(`Semantic allowlist entry ${name} is not an embedding collection in authoritative specs.`);
   return { name, embedKeys: [...spec.embedKeys], includeMetadata: !['folders', 'documents', 'documentVersions', 'places', 'trips'].includes(name) };
@@ -25,6 +25,44 @@ const semanticCollections: SemanticSpec[] = SEMANTIC_COLLECTION_ALLOWLIST.filter
 async function run() {
 await migrateContentDocuments(db);
 await migrateContentVersions(db);
+
+if (!await db.collection('conversationMessages').exists()) throw new Error('Semantic collection conversationMessages does not exist; run migrations before backfill.');
+let conversationMessagesComplete = false;
+for (let pass = 1; pass <= MAX_CATCHUP_PASSES; pass += 1) {
+  let after = '', updated = 0;
+  while (true) {
+    const cursor = await db.query<{ _key: string; _rev: string; content: string }>(`
+      FOR message IN conversationMessages
+        FILTER message._key > @after && message.type == "TEXT" && message.status == "COMPLETED" && IS_STRING(message.content) && LENGTH(TRIM(message.content)) > 0
+        FILTER message.embeddingProvider != @provider || message.embeddingModel != @model || message.embeddingDimensions != @dimensions
+          || !IS_ARRAY(message.embedding) || LENGTH(message.embedding) != @dimensions || LENGTH(message.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
+        SORT message._key ASC LIMIT @limit
+        RETURN { _key: message._key, _rev: message._rev, content: message.content }
+    `, { after, limit: BATCH_SIZE, provider: EMBEDDING_PROVIDER_ID, model: EMBEDDING_MODEL, dimensions: EMBEDDING_DIMENSIONS });
+    const rows = await cursor.all();
+    if (!rows.length) break;
+    for (const row of rows) {
+      const embedding = await embedText({ text: row.content, purpose: 'document' });
+      const write = await db.query<string>(`
+        FOR message IN conversationMessages
+          FILTER message._key == @key && message._rev == @revision && message.type == "TEXT" && message.status == "COMPLETED" && message.content == @content
+          UPDATE message WITH MERGE({ embedding: @embedding }, @metadata) IN conversationMessages RETURN NEW._key
+      `, { key: row._key, revision: row._rev, content: row.content, embedding, metadata: embeddingMetadata() });
+      if (await write.next()) updated += 1;
+      after = row._key;
+    }
+  }
+  const stale = await (await db.query<number>(`
+    RETURN LENGTH(FOR message IN conversationMessages
+      FILTER message.type == "TEXT" && message.status == "COMPLETED" && IS_STRING(message.content) && LENGTH(TRIM(message.content)) > 0
+      FILTER message.embeddingProvider != @provider || message.embeddingModel != @model || message.embeddingDimensions != @dimensions
+        || !IS_ARRAY(message.embedding) || LENGTH(message.embedding) != @dimensions || LENGTH(message.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
+      RETURN 1)
+  `, { provider: EMBEDDING_PROVIDER_ID, model: EMBEDDING_MODEL, dimensions: EMBEDDING_DIMENSIONS })).next() ?? 0;
+  console.log(`conversationMessages: pass=${pass}, updated=${updated}, stale=${stale}`);
+  if (stale === 0) { conversationMessagesComplete = true; break; }
+}
+if (!conversationMessagesComplete) throw new Error(`conversationMessages still has eligible stale semantic rows after ${MAX_CATCHUP_PASSES} catch-up passes; concurrent writes must settle before rerun.`);
 
 function inclusionFilter(_name: string): string {
   const active = 'FILTER !HAS(doc, "_internalDeletion") || doc._internalDeletion == null';

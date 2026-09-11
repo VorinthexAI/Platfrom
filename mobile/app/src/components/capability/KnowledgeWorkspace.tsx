@@ -206,7 +206,7 @@ const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout
 const MAX_SELECTED_CONTENT_RESOURCES = 100;
 const CONTENT_CONFLICT = "CONTENT_CONFLICT";
 
-function folderPresentation(folder: ContentFolder) { return folder.parentFolderKey ? undefined : folder.presentation; }
+function folderPresentation(folder: ContentFolder) { return folder.presentation; }
 function folderHasCover(folder: ContentFolder) { return Boolean(folderPresentation(folder) || folder.coverUrl); }
 function FolderCover({ folder }: { folder: ContentFolder }) {
   const presentation = folderPresentation(folder);
@@ -309,7 +309,7 @@ function ProcessingDocumentButton({ name }: { name: string }) {
   return <Skeleton accessibilityLabel={`Processing ${name}`} accessibilityRole="progressbar" style={styles.documentSkeleton} />;
 }
 
-export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, initialFolderKey, initialSearchQuery, returnSignalConnectorKey, returnSignalMessageKey, returnSignalThreadKey, returnTripKey, returnTripName }: { initialCollectionKind?: string; initialDocumentKey?: string; initialFolderKey?: string; initialSearchQuery?: string; returnSignalConnectorKey?: string; returnSignalMessageKey?: string; returnSignalThreadKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
+export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initialDocumentKey, initialDocumentTitle, initialFolderKey, initialSearchQuery, returnSignalConnectorKey, returnSignalMessageKey, returnSignalThreadKey, returnTripKey, returnTripName }: { initialAction?: "create" | "create-folder" | "create-document" | "upload-files" | "scan"; initialCollectionKind?: string; initialDocumentKey?: string; initialDocumentTitle?: string; initialFolderKey?: string; initialSearchQuery?: string; returnSignalConnectorKey?: string; returnSignalMessageKey?: string; returnSignalThreadKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -335,6 +335,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   const cachedInitialStack = cachedTargetFolderKey && cachedInitialTree ? contentFolderPath(cachedInitialTree, cachedTargetFolderKey) : [];
   const cachedInitialFolder = cachedInitialStack.at(-1);
   const cachedInitialLocation = cachedInitialFolder ? queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, cachedInitialFolder.key)) : undefined;
+  const initialDisplayTitle = cachedInitialDocument ? documentDisplayName(cachedInitialDocument) : initialDocumentTitle?.trim() || undefined;
   const userHiddensQuery = useQuery({ queryKey: contentQueryKeys.userHiddens(contentContext), queryFn: listUserHiddens, enabled: hasContentContext, staleTime: 0 });
   const narrationPlayer = useAudioPlayer(null, { updateInterval: 500, keepAudioSessionActive: true });
   const narrationAudio = useAudioPlayerStatus(narrationPlayer);
@@ -351,7 +352,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   const [editorEditing, setEditorEditing] = useState(false);
   const [editorContentHeight, setEditorContentHeight] = useState(280);
   const [aiInputFocused, setAiInputFocused] = useState(false);
-  const [title, setTitle] = useState("Untitled document");
+  const [title, setTitle] = useState(cachedInitialDocument?.name ?? initialDisplayTitle ?? "Untitled document");
   const [content, setContent] = useState("");
   const [aiInstruction, setAiInstruction] = useState("");
   const [aiInstructionError, setAiInstructionError] = useState<string>();
@@ -363,6 +364,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   const [scanError, setScanError] = useState<string>();
   const [scanFolderKey, setScanFolderKey] = useState<string>();
   const [processingScan, setProcessingScan] = useState<ProcessingScanItem>();
+  const initialActionHandled = useRef(false);
   const [uploadBatch, setUploadBatch] = useState<UploadBatchItem[]>([]);
   const [uploadFolderKey, setUploadFolderKey] = useState<string>();
   const [versions, setVersions] = useState<ContentDocumentVersion[]>([]);
@@ -381,14 +383,15 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   const [documents, setDocuments] = useState<ContentDocument[]>(cachedInitialLocation?.documents ?? []);
   const [rootDocuments, setRootDocuments] = useState<ContentDocument[]>([]);
   const [folderStack, setFolderStack] = useState<ContentFolder[]>(cachedInitialStack);
-  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(cachedInitialFolder ? "folder" : "folders");
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(initialDocumentKey && initialDisplayTitle ? "editor" : cachedInitialFolder ? "folder" : "folders");
   const [folderContentTab, setFolderContentTab] = useState<FolderContentTab>(initialCollectionKind === "documents" || initialCollectionKind === "files" ? initialCollectionKind : "folders");
   const [similarContentTab, setSimilarContentTab] = useState<FolderContentTab>("folders");
   const [similarResults, setSimilarResults] = useState<ContentNeighbors>();
   const [similarLoading, setSimilarLoading] = useState(false);
   const [query, setQuery] = useState(() => initialFolderKey ? initialSearchQuery?.slice(0, 500) ?? "" : "");
   const [locationLoading, setLocationLoading] = useState(!cachedInitialLocation);
-  const [openingDocumentKey, setOpeningDocumentKey] = useState<string>();
+  const [openingDocumentKey, setOpeningDocumentKey] = useState<string | undefined>(initialDocumentKey && initialDisplayTitle ? initialDocumentKey : undefined);
+  const [openingDocumentTitle, setOpeningDocumentTitle] = useState<string | undefined>(initialDisplayTitle);
   const initialDocumentOpened = useRef<string | undefined>(undefined);
   const [results, setResults] = useState<ContentSearchResponse>();
   const [history, setHistory] = useState<ContentSearchHistoryItem[]>([]);
@@ -483,7 +486,6 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   const rootSearchRequest = useRef<AbortController | undefined>(undefined);
   const librarySearchRequest = useRef<AbortController | undefined>(undefined);
   const rootSearchInputRef = useRef<ComponentRef<typeof TextInput>>(null);
-  const rootSearchFocusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const folderSearchRequest = useRef<AbortController | undefined>(undefined);
   const similarRequest = useRef<AbortController | undefined>(undefined);
   const similarGeneration = useRef(0);
@@ -552,7 +554,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     ? `Delete ${selectedDocument?.extension ? "file" : "document"}?`
     : `Delete ${selectedCount} ${bulkDeleteNoun}${selectedCount === 1 ? "" : "s"}?`;
   const allSelectedFavorite = selectionActive && [...selectedFolders, ...selectedDocuments].every((item) => Boolean(item.isFavorite));
-  const selectionHasManaged = [...selectedFolders, ...selectedDocuments].some((item) => item.managed);
+  const selectionHasStructuralProtection = [...selectedFolders, ...selectedDocuments].some((item) => item.managed || item.structuralProtection);
   const selectionMetadataLoading = hydratingFolderKeys.length > 0 || hydratingDocumentKeys.length > 0;
   const activeDocument = editorDocumentKey
     ? [...documents, ...rootDocuments].find((document) => document.key === editorDocumentKey)
@@ -893,7 +895,6 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
   useEffect(() => () => {
     narrationPlayerActive.current = false;
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
-    if (rootSearchFocusTimer.current) clearTimeout(rootSearchFocusTimer.current);
     instructionRequest.current?.abort();
     summaryRequest.current?.abort();
     similarRequest.current?.abort();
@@ -1186,7 +1187,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
         setDocuments(location.documents);
         setRootDocuments(initial.root.documents);
         setFolderStack(initialStack ?? (useInitialFolder && initial.initialFolder ? [initial.initialFolder] : []));
-        if (initialStack) {
+        if (initialStack && workspaceModeRef.current !== "editor" && workspaceModeRef.current !== "viewer") {
           workspaceModeRef.current = "folder";
           setWorkspaceMode("folder");
         } else if (workspaceModeRef.current === "auto") {
@@ -1862,6 +1863,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
     setAiInstructionError(undefined);
     setAiResponse(undefined);
     setOpeningDocumentKey(document.key);
+    setOpeningDocumentTitle(documentDisplayName(document));
     setEditorEditing(false);
     setEditorContentHeight(280);
     setError(undefined);
@@ -1908,7 +1910,10 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
       setWorkspaceMode(previousMode);
       return false;
     } finally {
-      if (generation === navigationGeneration.current) setOpeningDocumentKey(undefined);
+      if (generation === navigationGeneration.current) {
+        setOpeningDocumentKey(undefined);
+        setOpeningDocumentTitle(undefined);
+      }
     }
   };
 
@@ -2545,22 +2550,12 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
 
   const openSearchDocument = async (document: ContentSearchMatch) => {
     setError(undefined);
-    try {
-      const opened = await getContentDocument(queryClient, contentContext, document.documentKey);
-      await openArchiveDocument(opened, false, true);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The document could not be opened.");
-    }
+    await openArchiveDocument({ key: document.documentKey, name: document.name, ...(document.extension ? { extension: document.extension } : {}), ...(document.folderKey ? { folderKey: document.folderKey } : {}), isFavorite: document.isFavorite, managed: document.managed, structuralProtection: document.structuralProtection, updatedAt: "" }, false, true);
   };
 
   const openLibrarySearchDocument = async (document: ContentSearchMatch) => {
     setSheetError(undefined);
-    try {
-      const opened = await getContentDocument(queryClient, contentContext, document.documentKey);
-      await openArchiveDocument(opened, true, true);
-    } catch (cause) {
-      setSheetError(cause instanceof Error ? cause.message : "The document could not be opened.");
-    }
+    await openArchiveDocument({ key: document.documentKey, name: document.name, ...(document.extension ? { extension: document.extension } : {}), ...(document.folderKey ? { folderKey: document.folderKey } : {}), isFavorite: document.isFavorite, managed: document.managed, structuralProtection: document.structuralProtection, updatedAt: "" }, true, true);
   };
 
   const submitFolder = async () => {
@@ -2928,6 +2923,19 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
       if (generation === uploadGeneration.current) setUploading(false);
     }
   };
+
+  useEffect(() => {
+    if (!initialAction || initialActionHandled.current) return;
+    initialActionHandled.current = true;
+    const timeout = setTimeout(() => {
+      if (initialAction === "scan") setScanOpen(true);
+      else if (initialAction === "create") { setActiveSheet("create"); setSheetOpen(true); }
+      else if (initialAction === "create-folder") { setActiveSheet("folder"); setSheetOpen(true); }
+      else if (initialAction === "create-document") void startNewNote();
+      else if (initialAction === "upload-files") void pickAndUpload();
+    }, 0);
+    return () => clearTimeout(timeout);
+  }, [initialAction]);
 
   const startDocumentScan = () => {
     if (!hasContentContext || uploading || scanBusy) return;
@@ -4006,10 +4014,10 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
           </View>
         ) : (
         <View style={styles.editorScene}>
-          <View style={styles.editorHeader}>
-            <Button accessibilityLabel={`Back to ${currentFolder?.name ?? "folders"}`} contentMode="raw" onPress={leaveEditor} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button>
-            <Text numberOfLines={1} style={styles.editorHeaderTitle}>{activeDocument ? documentDisplayName(activeDocument) : title}</Text>
-            <Button accessibilityLabel="Manage document" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) showDocumentActions(activeDocument); }} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
+          <View style={styles.folderTitleRow}>
+            <Button accessibilityLabel={`Back to ${currentFolder?.name ?? "folders"}`} contentMode="raw" onPress={leaveEditor} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
+            <Text numberOfLines={1} style={styles.folderTitle}>{openingDocumentTitle ?? (activeDocument ? documentDisplayName(activeDocument) : title)}</Text>
+            <Button accessibilityLabel="Manage document" contentMode="raw" disabled={Boolean(openingDocumentKey) || !activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) showDocumentActions(activeDocument); }} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
           </View>
           <View style={styles.editorHeaderActions}>
             {!activeDocument?.managed && (editorEditing
@@ -4112,17 +4120,8 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
         </>}
         onChangeText={(value) => { setAiInstruction(value); if (aiInstructionError) setAiInstructionError(undefined); }}
         onFocusChange={(focused) => {
-          if (rootSearchFocusTimer.current) clearTimeout(rootSearchFocusTimer.current);
-          rootSearchInputRef.current?.blur();
-          Keyboard.dismiss();
-          setRootSearchFocusable(false);
-          if (!focused) {
-            rootSearchFocusTimer.current = setTimeout(() => {
-              rootSearchInputRef.current?.blur();
-              Keyboard.dismiss();
-              setRootSearchFocusable(true);
-            }, 300);
-          }
+          if (focused) { rootSearchInputRef.current?.blur(); Keyboard.dismiss(); setRootSearchFocusable(false); }
+          else setRootSearchFocusable(true);
           setAiInputFocused(focused);
           if (!focused) {
             setAiResponse(undefined);
@@ -4169,9 +4168,9 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
         {activeSheet === "bulkActions" ? <BottomSheetMenu>
           <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void updateSelectionFavorite()} size="md" variant="secondary">{allSelectedFavorite ? "Unfavorite" : "Favorite"}</Button>
           <Button disabled={bulkLoading} onPress={openResourceTags} size="md" variant="secondary">Tags</Button>
-          {!selectionHasManaged ? <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("move")} size="md" variant="secondary">Move to folder</Button> : null}
-          {!selectionHasManaged ? <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("copy")} size="md" variant="secondary">Copy to folder</Button> : null}
-          {!selectionHasManaged ? <Button disabled={bulkLoading} onPress={() => pushSheet("bulkDelete")} size="md" variant="secondary">Delete</Button> : null}
+          {!selectionHasStructuralProtection ? <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("move")} size="md" variant="secondary">Move to folder</Button> : null}
+          {!selectionHasStructuralProtection ? <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("copy")} size="md" variant="secondary">Copy to folder</Button> : null}
+          {!selectionHasStructuralProtection ? <Button disabled={bulkLoading} onPress={() => pushSheet("bulkDelete")} size="md" variant="secondary">Delete</Button> : null}
         </BottomSheetMenu> : null}
         {activeSheet === "historyChooser" ? (
           <BottomSheetMenu>
@@ -4228,7 +4227,7 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={downloadOriginal} style={styles.sheetAction}>{selectedDocument.originalAvailable ? "Download original" : "Download text"}</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openSimilarContent({ documentKey: selectedDocument.key }, selectedDocument.extension ? "files" : "documents")} style={styles.sheetAction}>Find similar</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => setHiddenOptimistically("document", selectedDocument.key, !hidden("document", selectedDocument.key), selectedDocument.extension ? "File" : "Document")} style={styles.sheetAction}>{hidden("document", selectedDocument.key) ? "Reveal" : "Hide"}</BottomSheetItem>
-            {!selectedDocument.managed ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => pushSheet("deleteDocument")} style={styles.sheetAction}>Delete {selectedDocument.extension ? "file" : "document"}</BottomSheetItem> : null}
+            {!selectedDocument.managed && !selectedDocument.structuralProtection ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => pushSheet("deleteDocument")} style={styles.sheetAction}>Delete {selectedDocument.extension ? "file" : "document"}</BottomSheetItem> : null}
           </BottomSheetMenu>
         ) : null}
         {activeSheet === "scanSources" ? (
@@ -4241,11 +4240,11 @@ export function KnowledgeWorkspace({ initialCollectionKind, initialDocumentKey, 
         {activeSheet === "folderActions" && selectedFolder ? (
           <BottomSheetMenu>
             {!selectedFolder.managed ? <BottomSheetItem onPress={openFolderDetails} style={styles.sheetAction}>Edit</BottomSheetItem> : null}
-            {!selectedFolder.managed ? <BottomSheetItem onPress={() => void openDestinationPicker("move", { folder: selectedFolder })} style={styles.sheetAction}>Move folder</BottomSheetItem> : null}
-            {!selectedFolder.managed ? <BottomSheetItem onPress={() => void openDestinationPicker("copy", { folder: selectedFolder })} style={styles.sheetAction}>Copy to folder</BottomSheetItem> : null}
+            {!selectedFolder.managed && !selectedFolder.structuralProtection ? <BottomSheetItem onPress={() => void openDestinationPicker("move", { folder: selectedFolder })} style={styles.sheetAction}>Move folder</BottomSheetItem> : null}
+            {!selectedFolder.managed && !selectedFolder.structuralProtection ? <BottomSheetItem onPress={() => void openDestinationPicker("copy", { folder: selectedFolder })} style={styles.sheetAction}>Copy to folder</BottomSheetItem> : null}
             <BottomSheetItem onPress={() => void openSimilarContent({ folderKey: selectedFolder.key }, "folders")} style={styles.sheetAction}>Find similar</BottomSheetItem>
             <BottomSheetItem onPress={() => setHiddenOptimistically("folder", selectedFolder.key, !hidden("folder", selectedFolder.key), "Folder")} style={styles.sheetAction}>{hidden("folder", selectedFolder.key) ? "Reveal" : "Hide"}</BottomSheetItem>
-            {!selectedFolder.managed ? <BottomSheetItem onPress={confirmSelectedFolderDelete} style={styles.sheetAction}>Delete folder</BottomSheetItem> : null}
+            {!selectedFolder.managed && !selectedFolder.structuralProtection ? <BottomSheetItem onPress={confirmSelectedFolderDelete} style={styles.sheetAction}>Delete folder</BottomSheetItem> : null}
           </BottomSheetMenu>
         ) : null}
         {activeSheet === "folderDetails" && selectedFolder ? (
@@ -4444,8 +4443,6 @@ const styles = StyleSheet.create({
   archiveFolder: { flexGrow: 1, gap: spacing.md },
   editorViewportContent: { flex: 1, minHeight: 0 },
   editorScene: { flex: 1, minHeight: 0, width: "100%", gap: spacing.sm },
-  editorHeader: { minHeight: 40, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.xs },
-  editorHeaderTitle: { flex: 1, minWidth: 0, color: palette.silver50, fontFamily: fonts.medium, fontSize: 15, lineHeight: 20 },
   editorHeaderActions: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 8 },
   rootActions: { minHeight: 52, marginTop: -spacing.xs, flexDirection: "row", alignItems: "center", gap: 8 },
   bulkToolbar: { minHeight: 40, padding: 5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, backgroundColor: palette.panel },

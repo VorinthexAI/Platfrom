@@ -9,6 +9,7 @@ import { createScopeRepository, SCOPE_REMOVAL_WRITE_COLLECTIONS } from './reposi
 import { reconcileTeamScopeMemberships, scopeRoleForTeamRole } from './membership-invariant';
 import { scopeMemberSchema, scopeSchema, type Scope, type ScopeMemberRole } from './schema';
 import type { ScopesDatabase } from './types';
+import { initialWorkspaceContentService } from '@/lib/initial-workspace-content';
 
 const scopeNameSchema = z.string().trim().min(1).max(160);
 const scopeDescriptionSchema = z.string().trim().min(1).max(10_000);
@@ -58,6 +59,7 @@ export interface ScopeServiceDependencies {
   deleteInTransaction?: (input: ScopeMutationActor & { targetScopeKey: string }) => Promise<void>;
   coverStorageKey?: (scopeKey: string, coverImageKey?: string | null) => Promise<string | undefined>;
   signImage?: (storageKey: string) => Promise<string>;
+  ensureInitialWorkspaceContent?: (scopeKey: string) => Promise<unknown>;
 }
 
 type ScopeMutationActor = {
@@ -330,6 +332,7 @@ export function createScopeService(dependencies: ScopeServiceDependencies = {}) 
         description: input.description ?? null,
         idempotencyKey: requestKey,
       });
+      await (dependencies.ensureInitialWorkspaceContent ?? initialWorkspaceContentService.ensure)(created.scope.key);
       return publicScope(created.scope, created.role, created.currentScopeKey);
     },
 

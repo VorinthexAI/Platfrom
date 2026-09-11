@@ -4,6 +4,7 @@ import { sparkHistoryInputSchema, sparkMetadataSchema, type SparkHistoryInput, t
 import type { ApplySparkResult, SparkRepository } from './repository';
 import { createArangoSparkRepository, SparkRepositoryError } from './repository';
 import { newId } from '@/lib/ids';
+import { publishUserEvent } from '@/api/events';
 
 type OperationIdentity = Readonly<{ idempotencyKey: string; requestHash: string; eventKey?: string; metadata?: SparkMetadata }>;
 type ChargeInput = OperationIdentity & Readonly<{ microSparks: number }>;
@@ -15,6 +16,7 @@ export interface SparkServiceDependencies {
   createKey?: () => string;
   now?: () => Date;
   getActiveStoredBytes?: (userKey: string) => Promise<string>;
+  publishBalance?: typeof publishUserEvent;
 }
 
 function positiveSafeInteger(value: number): number {
@@ -22,31 +24,36 @@ function positiveSafeInteger(value: number): number {
   return value;
 }
 
-export function createSparkService({ repository, createKey = newId, now = () => new Date(), getActiveStoredBytes = async () => '0' }: SparkServiceDependencies) {
-  const apply = (
+export function createSparkService({ repository, createKey = newId, now = () => new Date(), getActiveStoredBytes = async () => '0', publishBalance = async () => {} }: SparkServiceDependencies) {
+  const publish = (userKey: string) => publishBalance(userKey, 'spark.balance.changed').catch(() => undefined);
+  const apply = async (
     trustedUserKey: string,
     kind: SparkTransactionKind,
     deltaMicroSparks: number,
     input: OperationIdentity & Readonly<{ toolSlug?: string; actionSlug?: string }>,
-  ) => repository.apply({
-    key: createKey(),
-    userKey: trustedUserKey,
-    kind,
-    deltaMicroSparks,
-    idempotencyKey: input.idempotencyKey,
-    requestHash: input.requestHash,
-    ...(input.eventKey ? { eventKey: input.eventKey } : {}),
-    ...(input.toolSlug ? { toolSlug: input.toolSlug } : {}),
-    ...(input.actionSlug ? { actionSlug: input.actionSlug } : {}),
-    ...(input.metadata ? { metadata: sparkMetadataSchema.parse(input.metadata) } : {}),
-    createdAt: now().toISOString(),
-  });
+  ) => {
+    const result = await repository.apply({
+      key: createKey(),
+      userKey: trustedUserKey,
+      kind,
+      deltaMicroSparks,
+      idempotencyKey: input.idempotencyKey,
+      requestHash: input.requestHash,
+      ...(input.eventKey ? { eventKey: input.eventKey } : {}),
+      ...(input.toolSlug ? { toolSlug: input.toolSlug } : {}),
+      ...(input.actionSlug ? { actionSlug: input.actionSlug } : {}),
+      ...(input.metadata ? { metadata: sparkMetadataSchema.parse(input.metadata) } : {}),
+      createdAt: now().toISOString(),
+    });
+    if (result.status === 'applied' || result.status === 'replayed') await publish(trustedUserKey);
+    return result;
+  };
 
   return Object.freeze({
     charge(trustedUserKey: string, input: ChargeInput & Readonly<{ kind: 'tool' | 'action' | 'storage'; toolSlug?: string; actionSlug?: string }>) {
       return apply(trustedUserKey, input.kind, -positiveSafeInteger(input.microSparks), input);
     },
-    chargeExecution(trustedUserKey: string, input: ChargeInput & Readonly<{ kind: 'tool' | 'action'; toolSlug?: string; actionSlug?: string; executionIdentity: string }>) {
+    async chargeExecution(trustedUserKey: string, input: ChargeInput & Readonly<{ kind: 'tool' | 'action'; toolSlug?: string; actionSlug?: string; executionIdentity: string }>) {
       const { executionIdentity, ...charge } = input;
       const record = {
         key: createKey(), userKey: trustedUserKey, kind: charge.kind, deltaMicroSparks: -positiveSafeInteger(charge.microSparks),
@@ -57,7 +64,9 @@ export function createSparkService({ repository, createKey = newId, now = () => 
       } satisfies Parameters<SparkRepository['apply']>[0];
       const claimedAt = now();
       const owner = createKey();
-      return repository.applyExecutionCharge ? repository.applyExecutionCharge(record, executionIdentity, { owner, now: claimedAt.toISOString(), expiresAt: new Date(claimedAt.getTime() + 5 * 60_000).toISOString() }) : repository.apply(record);
+      const result = await (repository.applyExecutionCharge ? repository.applyExecutionCharge(record, executionIdentity, { owner, now: claimedAt.toISOString(), expiresAt: new Date(claimedAt.getTime() + 5 * 60_000).toISOString() }) : repository.apply(record));
+      if (result.status === 'applied' || result.status === 'replayed') await publish(trustedUserKey);
+      return result;
     },
     async completeExecution(trustedUserKey: string, executionIdentity: string, owner: string) {
       if (!repository.completeExecution) return true;
@@ -124,4 +133,4 @@ export function createSparkService({ repository, createKey = newId, now = () => 
 }
 
 const storageChargingRepository = getDefaultStorageChargingRepository();
-export const sparkService = createSparkService({ repository: createArangoSparkRepository(), getActiveStoredBytes: storageChargingRepository.getActiveStoredBytes });
+export const sparkService = createSparkService({ repository: createArangoSparkRepository(), getActiveStoredBytes: storageChargingRepository.getActiveStoredBytes, publishBalance: publishUserEvent });

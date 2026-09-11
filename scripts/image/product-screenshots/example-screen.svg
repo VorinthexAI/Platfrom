@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1950" viewBox="0 0 900 1950">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="28%" r="60%">
+      <stop offset="0" stop-color="#263039"/>
+      <stop offset="0.46" stop-color="#0c1116"/>
+      <stop offset="1" stop-color="#030507"/>
+    </radialGradient>
+    <linearGradient id="chrome" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#ffffff"/>
+      <stop offset="0.35" stop-color="#7b858c"/>
+      <stop offset="0.68" stop-color="#e8edef"/>
+      <stop offset="1" stop-color="#3c434a"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="1950" fill="url(#glow)"/>
+  <text x="70" y="145" fill="#7b858c" font-family="Arial, sans-serif" font-size="24" letter-spacing="8">VORINTHEX AI</text>
+  <text x="70" y="315" fill="#f5f7f8" font-family="Georgia, serif" font-size="68">One intelligent</text>
+  <text x="70" y="395" fill="#f5f7f8" font-family="Georgia, serif" font-size="68">workspace.</text>
+  <circle cx="450" cy="770" r="225" fill="none" stroke="url(#chrome)" stroke-width="5" opacity="0.86"/>
+  <path d="M278 680 L450 913 L622 680 L450 790 Z" fill="none" stroke="url(#chrome)" stroke-width="10" stroke-linejoin="round"/>
+  <rect x="70" y="1170" width="760" height="215" rx="38" fill="#11171d" stroke="#303940"/>
+  <rect x="105" y="1215" width="290" height="18" rx="9" fill="#dce2e5" opacity="0.8"/>
+  <rect x="105" y="1260" width="620" height="13" rx="7" fill="#66727a"/>
+  <rect x="105" y="1295" width="510" height="13" rx="7" fill="#3c474f"/>
+  <rect x="70" y="1425" width="365" height="300" rx="38" fill="#0c1116" stroke="#283138"/>
+  <rect x="465" y="1425" width="365" height="300" rx="38" fill="#0c1116" stroke="#283138"/>
+  <text x="450" y="1870" text-anchor="middle" fill="#6e7980" font-family="Arial, sans-serif" font-size="22" letter-spacing="5">REPLACE WITH YOUR APP SCREENSHOT</text>
+</svg>

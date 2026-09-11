@@ -17,9 +17,9 @@ async function main() {
   if (!context) throw new Error('The approved local development user has no personal scope.');
   const placeholder = `local-fixture:${context.scope.key}`;
   const manifest = buildMailDevSeedManifest({
+    userKey: user.key,
     teamKey: context.team.key,
     scopeKey: context.scope.key,
-    teamMembershipKey: context.membership.key,
     credentials: (_accountKey, providerAccountId) => ({
       ...encryptEmailConnectorCredentials({ accessToken: placeholder, tokenType: 'Fixture', expiresAt: MAIL_DEV_FIXTURE_AT }, { teamKey: context.team.key, scopeKey: context.scope.key, providerAccountId }),
       accessTokenFingerprint: tokenFingerprint(placeholder),

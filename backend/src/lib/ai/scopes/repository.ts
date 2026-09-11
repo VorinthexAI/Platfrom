@@ -28,7 +28,7 @@ import {
 } from './types';
 
 export const SCOPE_REMOVAL_WRITE_COLLECTIONS = [
-  'users', 'scopes', 'scopeScopes', 'scopeMembers', 'userTeams', 'conversations', 'conversationMessages', 'teamConnectors', 'folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'generatedDocumentBindings', 'emailAttachmentBindings', 'emailAttachments', 'emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'images', 'imageCaptions', 'visualIdentities', 'galleryUploads', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'placeImages', 'collections', 'places', 'trips', 'tripPlaces', 'tripAttachments', 'tripCreationReceipts', 'tripGuides', 'placeReferences', 'placeHeroMedia', 'books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'bookExtensions', 'bookRefundIntents', 'tags', 'tagAssignments', 'userHiddens', 'events', 'contentSearchQueries', 'appNotifications', 'appNotificationRecipients', 'pushDeliveries', 'channels', 'channelParticipants', 'threads', 'messages', 'messageMentions', 'messageReactions', 'polls', 'pollOptions', 'pollVotes', 'storageDeletionJobs', 'ticketVotes', 'tickets',
+  'users', 'scopes', 'scopeScopes', 'scopeMembers', 'userTeams', 'conversations', 'conversationMessages', 'folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'generatedDocumentBindings', 'emailAttachmentBindings', 'emailAttachments', 'emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'images', 'imageCaptions', 'visualIdentities', 'galleryUploads', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'placeImages', 'collections', 'places', 'trips', 'tripPlaces', 'tripAttachments', 'tripCreationReceipts', 'tripGuides', 'placeReferences', 'placeHeroMedia', 'books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'bookExtensions', 'bookRefundIntents', 'tags', 'tagAssignments', 'userHiddens', 'events', 'contentSearchQueries', 'appNotifications', 'appNotificationRecipients', 'pushDeliveries', 'userInboxThreads', 'userInboxMessages', 'channels', 'channelParticipants', 'threads', 'messages', 'messageMentions', 'messageReactions', 'polls', 'pollOptions', 'pollVotes', 'storageDeletionJobs', 'tickets',
 ] as const;
 
 const SCOPE_REMOVAL_SPECIAL_COLLECTIONS = new Set<string>(['users', 'scopes', 'scopeScopes', 'userTeams', 'storageDeletionJobs', 'bookRefundIntents', 'appNotifications', 'appNotificationRecipients', 'pushDeliveries']);
@@ -103,8 +103,6 @@ export function createScopeRepository(
         const result = await database.collection(SCOPES_COLLECTION).save(toArangoDoc({ ...scope, ...embeddingMetadata() }), { returnNew: true });
         const saved = (result as { new?: Record<string, unknown> }).new;
         const created = (saved ? scopeSchema.parse(withArangoKey(saved)) : scope) satisfies Scope;
-        const { createEmailRepository } = await import('@/lib/email-inbox/repository');
-         await createEmailRepository(database as never).initializeTones(created.key);
         return created;
       } catch (error) {
         if (isArangoUniqueConstraintError(error)) {
