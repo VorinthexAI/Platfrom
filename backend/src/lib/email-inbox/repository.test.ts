@@ -177,6 +177,22 @@ describe('canonical email persistence', () => {
     expect(call!.query.indexOf('tone.createdAt <= @createdTo')).toBeLessThan(call!.query.indexOf('LIMIT @limit'));
   });
 
+  test('initializes built-in tones by their unique scope and slug identity', async () => {
+    const calls: Array<{ query: string; bindVars: Record<string, unknown> }> = [];
+    const database = { query: async (query: string, bindVars: Record<string, unknown>) => {
+      calls.push({ query, bindVars });
+      return cursor(undefined, []);
+    } };
+
+    await createEmailRepository(database as never).initializeTones(userKey, scopeKey);
+
+    const upserts = calls.filter(({ query }) => query.includes('UPSERT'));
+    expect(upserts).toHaveLength(3);
+    expect(upserts.every(({ query }) => query.includes('UPSERT { scopeKey: @scopeKey, slug: @slug }'))).toBe(true);
+    expect(upserts.map(({ bindVars }) => bindVars.slug)).toEqual(['casual', 'formal', 'direct']);
+    expect(upserts.every(({ bindVars }) => bindVars.scopeKey === scopeKey)).toBe(true);
+  });
+
   test('deletes generated summaries only after queuing their audio storage', async () => {
     const calls: string[] = [];
     const database = { query: async (query: string) => {
