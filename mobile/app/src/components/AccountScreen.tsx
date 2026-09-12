@@ -15,7 +15,7 @@ import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
 
-import { updateProfileName, uploadProfileAvatar } from "@/lib/profile-client";
+import { claimProfileBadge, generateProfileBadge, updateProfileName, uploadProfileAvatar } from "@/lib/profile-client";
 import { profileInitial } from "@/lib/auth-helpers";
 import { createScope, deleteScope, listScopes, prioritizeScope, scheduleScopeOperation, scopeListQueryKey, scopeOperationIsPending, selectScope, updateScopeCover, type ScopeSummary } from "@/lib/scope-client";
 import { listTeams, queryBelongsToTeamScope, selectTeam, setPendingTeamMfa, teamListQueryKey } from "@/lib/team-client";
@@ -31,7 +31,7 @@ import { useBillingSummary, useCurrentSubscription } from "@/hooks/use-billing-s
 import { fetchReferralSummary, normalizeReferralCode, redeemReferralCode, referralCodeSchema, referralRedemptionErrorMessage, referralSummaryQueryKey, type ReferralRedeemResult } from "@/lib/referral-client";
 import { subscriptionPresentation } from "@/lib/subscription-presentation";
 
-type ProfileSheet = "name" | "faq" | "cancel-subscription" | "delete-account" | "referral" | "storage-help" | "scope-help" | "scope-create" | "scope-actions" | "scope-delete" | "teams";
+type ProfileSheet = "avatar-actions" | "badge-generate" | "name" | "faq" | "cancel-subscription" | "delete-account" | "referral" | "storage-help" | "scope-help" | "scope-create" | "scope-actions" | "scope-delete" | "teams";
 type ReferralMode = "share" | "redeem";
 export type AccountScreenInitialState = { sheet: "referral"; referralMode: ReferralMode };
 
@@ -85,6 +85,8 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const signOut = useAuthStore((state) => state.signOut);
   const deleteAccount = useAuthStore((state) => state.deleteAccount);
   const products = useAppsStore((state) => state.products);
+  const badgeCost = useAppsStore((state) => state.capabilityCosts["profile.badge.generate"]);
+  const refreshProducts = useAppsStore((state) => state.refreshProducts);
   const storageSparkCost = useAppsStore((state) => state.sparkCosts.find((charge) => charge.kind === "storage")?.sparkCost);
   const [sheet, setSheet] = useState<ProfileSheet | undefined>(initialState?.sheet);
   const [nameDraft, setNameDraft] = useState("");
@@ -92,6 +94,7 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const [scopeDescription, setScopeDescription] = useState("");
   const [faqQuestionIndex, setFaqQuestionIndex] = useState<number>();
   const [selectingTeam, setSelectingTeam] = useState(false);
+  const [generatingBadge, setGeneratingBadge] = useState(false);
   const [selectedScope, setSelectedScope] = useState<ScopeSummary>();
   const [deletingScope, setDeletingScope] = useState(false);
   const [sharingReferral, setSharingReferral] = useState(false);
@@ -181,6 +184,27 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
       update.rollback();
       showToast({ title: "Profile image could not be updated.", duration: 2_500 });
     });
+  };
+
+  const generateBadge = async () => {
+    if (!teamKey || !scopeKey || !badgeCost || generatingBadge) return;
+    setSheet(undefined);
+    setGeneratingBadge(true);
+    try {
+      const candidate = await generateProfileBadge(teamKey, scopeKey, randomUUID());
+      const update = optimisticProfile({ avatarUrl: candidate.avatarUrl });
+      try {
+        const profile = await claimProfileBadge(teamKey, scopeKey, candidate.candidateKey);
+        update.reconcile(profile.avatarUrl ? profile : { avatarUrl: candidate.avatarUrl });
+      } catch (error) {
+        update.rollback();
+        throw error;
+      }
+    } catch {
+      showToast({ title: "Your profile badge could not be generated. Please try again.", duration: 2_500 });
+    } finally {
+      setGeneratingBadge(false);
+    }
   };
 
   const openName = () => {
@@ -500,8 +524,10 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   return <>
     <AccountScreenShell rightAction={headerActions} title={page === "profile" ? "Profile" : "Settings"}>
       {page === "profile" ? <View style={styles.content}>
-        <Button accessibilityLabel="Change profile image" contentMode="raw" iconOnly onPress={() => void pickAvatar().catch(() => showToast({ title: "The image picker could not be opened.", duration: 2_500 }))} size="xl" style={styles.avatarButton} variant="ghost">
-          <Avatar fallback={profileInitial(user)} size={104} style={styles.avatar} uri={user?.avatarUrl} />
+        <Button accessibilityLabel={generatingBadge ? "Generating profile badge" : "Change profile image"} contentMode="raw" disabled={generatingBadge} iconOnly onPress={() => setSheet("avatar-actions")} size="xl" style={styles.avatarButton} variant="ghost">
+          <Avatar fallback={profileInitial(user)} size={104} style={styles.avatar} uri={user?.avatarUrl}>
+            {generatingBadge ? <Skeleton accessibilityLabel="Generating profile badge" accessibilityRole="progressbar" style={styles.avatarSkeleton} /> : undefined}
+          </Avatar>
         </Button>
         <View style={styles.identity}>
           <Button accessibilityLabel="Edit name" contentMode="raw" onPress={openName} size="xl" style={styles.nameButton} variant="ghost"><Text numberOfLines={2} style={styles.name}>{name}</Text></Button>
@@ -533,6 +559,20 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
         </View>
       </View>}
     </AccountScreenShell>
+
+    <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "avatar-actions"} title="Profile image actions">
+      <BottomSheetMenu>
+        <BottomSheetItem onPress={() => setSheet("badge-generate")}>Generate badge</BottomSheetItem>
+        <BottomSheetItem onPress={() => { setSheet(undefined); void pickAvatar().catch(() => showToast({ title: "The image picker could not be opened.", duration: 2_500 })); }}>Choose image</BottomSheetItem>
+      </BottomSheetMenu>
+    </BottomSheet>
+
+    <BottomSheet description={badgeCost ? `Generate a custom profile badge for ${badgeCost.sparkCost} Sparks.` : "Generate a custom profile badge."} footer={<><Button disabled={!badgeCost} onPress={() => void generateBadge()} size="md" variant="primary">Generate badge</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "badge-generate"} title="Your profile badge">
+      <View style={styles.badgeContent}>
+        <View style={styles.badgePreview}><Avatar fallback={profileInitial(user)} size={148} style={styles.badgeAvatar} /></View>
+        {!badgeCost ? <Button onPress={() => void refreshProducts()} size="md" variant="ghost">Refresh costs</Button> : null}
+      </View>
+    </BottomSheet>
 
     <BottomSheet footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "scope-help"} title="Scopes">
       <Text style={styles.scopeHelp}>Scopes are separate workspaces for different parts of your life. For example, you can create one for work and another for personal use, keeping their content, conversations, and tools organized independently.</Text>
@@ -612,6 +652,10 @@ const styles = StyleSheet.create({
   settingsCardLabelDanger: { color: palette.danger },
   avatarButton: { height: 112, width: 112 },
   avatar: { backgroundColor: palette.voidBlack, borderColor: palette.hairlineBright, borderWidth: 1 },
+  avatarSkeleton: { backgroundColor: palette.hairlineBright, borderColor: palette.hairline, borderRadius: 999, borderWidth: 1, height: 104, opacity: 0.72, overflow: "hidden", width: 104 },
+  badgeAvatar: { backgroundColor: palette.voidBlack },
+  badgeContent: { alignItems: "center", flex: 1, gap: spacing.md, justifyContent: "center" },
+  badgePreview: { alignSelf: "center", borderColor: palette.hairlineBright, borderRadius: 999, borderWidth: 1, overflow: "hidden" },
   identity: { alignItems: "center", gap: spacing.xs, marginTop: spacing.md },
   nameButton: { maxWidth: "100%", paddingHorizontal: spacing.sm },
   name: { color: palette.silver50, flexShrink: 1, fontFamily: fonts.medium, fontSize: 28, lineHeight: 34, textAlign: "center" },

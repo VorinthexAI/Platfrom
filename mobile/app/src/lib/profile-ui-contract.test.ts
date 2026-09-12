@@ -119,6 +119,20 @@ test("claiming an onboarding badge updates the profile and app header optimistic
   expect(onboardingBadge).toContain("update.rollback()");
 });
 
+test("profile avatar actions offer generated badges and image uploads", () => {
+  expect(profile).toContain('onPress={() => setSheet("avatar-actions")}');
+  expect(profile).toContain('open={sheet === "avatar-actions"}');
+  expect(profile).toContain('>Generate badge</BottomSheetItem>');
+  expect(profile).toContain('>Choose image</BottomSheetItem>');
+  expect(profile).toContain('open={sheet === "badge-generate"} title="Your profile badge"');
+  expect(profile).toContain('height="full"');
+  expectBefore(profile.slice(profile.indexOf("const generateBadge =")), "setSheet(undefined);", "await generateProfileBadge(teamKey, scopeKey, randomUUID())");
+  expectBefore(profile.slice(profile.indexOf("const generateBadge =")), "setGeneratingBadge(true);", "await generateProfileBadge(teamKey, scopeKey, randomUUID())");
+  expect(profile).toContain('claimProfileBadge(teamKey, scopeKey, candidate.candidateKey)');
+  expect(profile).toContain('accessibilityRole="progressbar" style={styles.avatarSkeleton}');
+  expect(profile).toContain('Generate a custom profile badge for ${badgeCost.sparkCost} Sparks.');
+});
+
 test("avatar header integration is reusable, outlined, and visible in Core", () => {
   expect(header).toContain("export function ProfileHeaderRight()");
   expect(header).toContain('router.push("/profile")');
