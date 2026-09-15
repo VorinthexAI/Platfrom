@@ -144,7 +144,7 @@ describe('app notifications', () => {
     const viewer = context('viewer');
     let created = 0;
     const ownRepository = { resolveRecipientUserKeys: async () => [viewer.userKey], createNotification: async () => { created += 1; return { key: newId(), recipients: 1, deliveries: 0, replayed: false }; } } as any;
-    await expect(createAppNotificationService({ repository: ownRepository, embed }).notify({ title: 'Ready', message: 'Body', userKeys: [viewer.userKey], notifyAll: false }, viewer.value, 'request')).resolves.toMatchObject({ recipients: 1 });
+    await expect(createAppNotificationService({ repository: ownRepository, embed, publishChanged: async () => {} }).notify({ title: 'Ready', message: 'Body', userKeys: [viewer.userKey], notifyAll: false }, viewer.value, 'request')).resolves.toMatchObject({ recipients: 1 });
     expect(created).toBe(1);
 
     const owner = context('owner');

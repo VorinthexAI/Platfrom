@@ -36,6 +36,7 @@ test("reserves managed-collection uploads through contribution authorization", a
     canContributeToCollection: async (_scopeKey, key) => { checked = key; return true; },
     signUpload: async () => "https://uploads.example/image.png",
     insertUploads: async (uploads) => uploads,
+    publishUserEvent: async () => {},
   });
   expect(checked).toBe(collectionKey);
   expect(result.uploads).toHaveLength(1);

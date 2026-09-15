@@ -35,7 +35,7 @@ describe('ticket service', () => {
   test('classifies feedback before creating its private thread', async () => {
     const calls: unknown[][] = [];
     const repository = { createOrReplay: async (...args: any[]) => { calls.push(args); return { state: 'created' as const, ticket: args[0] }; } } as TicketRepository;
-    const service = createTicketService({ repository, embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0), ask: (async () => askResult('{"valid":true}')) as typeof executeAsk, now: () => now });
+    const service = createTicketService({ repository, embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0), ask: (async () => askResult('{"valid":true}')) as typeof executeAsk, now: () => now, publishChanged: async () => {} });
     await expect(service.createFeedback({ message: 'Add keyboard shortcuts' }, context, 'feedback-1')).resolves.toMatchObject({ kind: 'feedback' });
     expect(calls[0]?.[1]).toMatchObject({ kind: 'feedback', subject: 'Product feedback' });
     const rejected = createTicketService({ repository, embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0), ask: (async () => askResult('{"valid":false}')) as typeof executeAsk });
