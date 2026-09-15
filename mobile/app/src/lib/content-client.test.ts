@@ -28,7 +28,7 @@ testRuntime.__archiveApiPost = async (url: string, body: Record<string, any>, co
   const tool = url === "/app/search" ? "app.search" : url === "/app/enhance" ? "app.enhance" : url === "/app/translate" ? "app.translate" : url === "/app/speech" ? "app.speech" : url.split("/").at(-1);
   const response = responseForTool?.(tool ?? "");
   if (response) return response;
-  if (tool === "document.create" || tool === "document.parse" || tool === "document.scan") {
+  if (tool === "document.create" || tool === "document.parse") {
     return { data: { success: true, data: { document: { key: "document", name: "Note", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z" } } } };
   }
   if (tool === "folder.create") {
@@ -130,8 +130,10 @@ test("generates persisted document audio through app.speech", async () => {
   expect(calls[0]).toMatchObject({
     url: "/app/speech",
     body: { teamKey: "team-authenticated", scopeKey: "scope-authenticated", input: { documentKey: "document", voice: "clear", pace: 1, includeTitle: true, includeCode: false } },
-    config: { timeout: 5 * 60_000 },
+    config: { headers: { "Idempotency-Key": expect.any(String) }, timeout: 5 * 60_000 },
   });
+  await generateContentDocumentAudio("document");
+  expect(calls[0]?.config.headers["Idempotency-Key"]).not.toBe(calls[1]?.config.headers["Idempotency-Key"]);
 });
 
 test("updates and clears persisted document audio playback state", async () => {
@@ -202,7 +204,7 @@ test("treats repeated selections of the same file as separate uploads", async ()
 
 test("submits ordered scan pages as one editable Archive document", async () => {
   await scanContentDocument([{ name: "one.png", size: 4, base64: "iVBORw==" }, { name: "two.png", size: 4, base64: "iVBORw==" }], "folder", getContentContext(), "Scanned report");
-  expect(calls[0]?.url).toBe("/api/v1/content/tools/document.scan");
+  expect(calls[0]?.url).toBe("/api/v1/content/tools/document.parse");
   expect(calls[0]?.body.input).toMatchObject({
     scopeKey: "scope-authenticated",
     folderKey: "folder",
@@ -212,7 +214,18 @@ test("submits ordered scan pages as one editable Archive document", async () => 
       { filename: "two.png", mimeType: "image/png", sizeBytes: 4, encoding: "base64", content: "iVBORw==" },
     ],
   });
-  expect(calls[0]?.body.input.idempotencyKey).toBe("scan-upload-digest-folder");
+  expect(calls[0]?.config.headers["Idempotency-Key"]).toBe(calls[0]?.body.input.idempotencyKey);
+});
+
+test("new scan submissions do not replay a prior failed scan; explicit transport retries retain their key", async () => {
+  const pages = [{ name: "page.png", size: 4, base64: "iVBORw==" }];
+  await scanContentDocument(pages, "folder");
+  await scanContentDocument(pages, "folder");
+  expect(calls[0]?.body.input.idempotencyKey).not.toBe(calls[1]?.body.input.idempotencyKey);
+  await scanContentDocument(pages, "folder", getContentContext(), "Scan", "retry-key");
+  await scanContentDocument(pages, "folder", getContentContext(), "Scan", "retry-key");
+  expect(calls[2]?.body).toEqual(calls[3]?.body);
+  expect(calls[2]?.config.headers["Idempotency-Key"]).toBe("retry-key");
 });
 
 test("reads authorized scanned source images without requesting storage keys", async () => {
@@ -429,7 +442,7 @@ test("can preserve the previous note as a version during an AI autosave", async 
 test("searches a folder while listing global user history", async () => {
   const documents = [{ documentKey: "document", scopeKey: "scope-authenticated", name: "Note", score: 0.9, folderKey: "folder", isFavorite: false }];
   responseForTool = (tool) => tool === "app.search"
-    ? { data: { success: true, data: { query: "roadmap", groups: [{ collectionSlug: "folders", results: [] }, { collectionSlug: "documents", results: [{ key: "document", scopeKey: "scope-authenticated", name: "Note", score: 0.9, folderKey: "folder", isFavorite: false }] }, { collectionSlug: "files", results: [] }] } } }
+    ? { data: { success: true, data: { query: "roadmap", groups: [{ collectionSlug: "folders", results: [] }, { collectionSlug: "documents", results: [{ key: "document", scopeKey: "scope-authenticated", name: "Note", score: 0.9, folderKey: "folder", isFavorite: false, content: "Matching excerpt" }] }, { collectionSlug: "files", results: [] }] } } }
     : { data: { success: true, data: { history: [{ query: "roadmap", normalizedQuery: "roadmap", searchedAt: "2026-08-10T00:00:00.000Z", usageCount: 2 }] } } };
 
   expect((await searchContent("roadmap", "folder", true)).documents).toEqual(documents);
@@ -541,8 +554,25 @@ test("generates topics and persists, lists, and opens summary versions", async (
   await expect(findContentDocumentSummary("summary")).resolves.toEqual(summary);
   expect(calls[0]?.body.input).toEqual({ documentKey: "document" });
   expect(calls[1]?.body.input).toMatchObject({ documentKeys: ["document"], topic: "Launch plan", style: "brief", persist: true, idempotencyKey: expect.any(String) });
+  expect(calls[1]?.config.headers).toEqual({ "Idempotency-Key": calls[1]?.body.input.idempotencyKey });
+  expect(calls[0]?.config.headers).toBeUndefined();
   expect(calls[2]?.body.input).toEqual({ documentKeys: ["document"], cursor: undefined, limit: 100 });
   expect(calls[3]?.body.input).toEqual({ summaryKeys: ["summary"] });
+});
+
+test("a one-word document uses matching body and header keys for each summary request", async () => {
+  const summary = { key: "summary", documentKey: "document", summary: "Hello", version: 1 };
+  responseForTool = (tool) => tool === "document.topics"
+    ? { data: { success: true, data: { documentKey: "document", topics: ["Hello"] } } }
+    : tool === "document.summarize" ? { data: { success: true, data: { results: [{ success: true, data: { summary } }] } } } : undefined;
+  const document = await createContentDocument("Note", "Hello");
+  const topics = await getContentDocumentTopics(document.key);
+  await summarizeContentDocument(document.key, topics[0]!);
+  await summarizeContentDocument(document.key, topics[0]!);
+  const mutations = calls.filter(({ body }) => body.input.idempotencyKey);
+  expect(mutations).toHaveLength(3);
+  for (const { body, config } of mutations) expect(config.headers["Idempotency-Key"]).toBe(body.input.idempotencyKey);
+  expect(new Set(mutations.map(({ body }) => body.input.idempotencyKey)).size).toBe(3);
 });
 
 test("scopes fast semantic search to a folder and its descendants", async () => {

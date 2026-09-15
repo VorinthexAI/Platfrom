@@ -18,7 +18,6 @@ import { documentMoveToolDefinition } from './document-move';
 import { documentParseToolDefinition } from './document-parse';
 import { documentReadToolDefinition } from './document-read';
 import { documentRenameToolDefinition } from './document-rename';
-import { documentScanToolDefinition } from './document-scan';
 import { documentRestoreVersionToolDefinition } from './document-restore-version';
 import { documentRewriteToolDefinition } from './document-rewrite';
 import { documentSummarizeToolDefinition } from './document-summarize';
@@ -57,7 +56,7 @@ export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   referralSummaryReadToolDefinition,
   agentGuideToolDefinition,
   contentNeighborsToolDefinition,
-  documentAudioPlaybackClearToolDefinition, documentAudioPlaybackUpdateToolDefinition, documentCreateToolDefinition, documentCopyToolDefinition, documentCreateVersionToolDefinition, documentDeleteToolDefinition, documentDeleteVersionToolDefinition, documentDownloadToolDefinition, documentExportToolDefinition, documentFindToolDefinition, documentFindSummaryToolDefinition, documentFindVersionToolDefinition, documentListToolDefinition, documentListAudioVersionsToolDefinition, documentListSummariesToolDefinition, documentListVersionsToolDefinition, documentMoveToolDefinition, documentParseToolDefinition, documentReadToolDefinition, documentRenameToolDefinition, documentScanToolDefinition, documentRestoreVersionToolDefinition, documentRewriteToolDefinition, documentSummarizeToolDefinition, documentTopicsToolDefinition, documentUpdateToolDefinition,
+  documentAudioPlaybackClearToolDefinition, documentAudioPlaybackUpdateToolDefinition, documentCreateToolDefinition, documentCopyToolDefinition, documentCreateVersionToolDefinition, documentDeleteToolDefinition, documentDeleteVersionToolDefinition, documentDownloadToolDefinition, documentExportToolDefinition, documentFindToolDefinition, documentFindSummaryToolDefinition, documentFindVersionToolDefinition, documentListToolDefinition, documentListAudioVersionsToolDefinition, documentListSummariesToolDefinition, documentListVersionsToolDefinition, documentMoveToolDefinition, documentParseToolDefinition, documentReadToolDefinition, documentRenameToolDefinition, documentRestoreVersionToolDefinition, documentRewriteToolDefinition, documentSummarizeToolDefinition, documentTopicsToolDefinition, documentUpdateToolDefinition,
   folderCopyToolDefinition, folderCreateToolDefinition, folderDeleteToolDefinition, folderFindToolDefinition, folderListToolDefinition, folderMoveToolDefinition, folderRenameToolDefinition, folderUpdateToolDefinition,
   documentSearchAllToolDefinition,
   contentSearchToolDefinition, contentSearchHistoryListToolDefinition, contentSearchHistoryDeleteToolDefinition, documentSearchToolDefinition,

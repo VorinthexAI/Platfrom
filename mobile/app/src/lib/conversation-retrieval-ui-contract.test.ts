@@ -62,7 +62,7 @@ test("opens retrieval results only from the completed-message pill", () => {
   expect(composer).not.toContain("setActiveRetrievals({ fresh:");
   expect(composer).not.toContain("!event.replayed && mergeConversationRetrievalResults");
   expect(sheet).not.toContain("fresh:");
-  expect(composer).toContain("editable={configured && !greetingPending && !turning && !sheet}");
+  expect(composer).toContain("editable={configured && !turning && !sheet}");
 });
 
 test("routes each persisted resource identity to its established workspace", () => {

@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
 import { Badge } from "@vorinthex/shared/ui/badge";
-import { Button } from "@vorinthex/shared/ui/button";
-import { CloseIcon, HelpIcon, ReferralIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { Button, ButtonSizeProvider } from "@vorinthex/shared/ui/button";
+import { CloseIcon, HelpIcon, ReferralIcon, SparksIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Tabs, TabsTrigger } from "@vorinthex/shared/ui/tabs";
 import { useToast } from "@vorinthex/shared/ui/toast";
 import * as Crypto from "expo-crypto";
@@ -55,12 +55,14 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
   const { height, width } = useWindowDimensions();
   const onboardingHeroHeight = Math.max(280, height * 0.4);
   const standardOpen = useUiStore((state) => state.paywallOpen);
+  const standardEntry = useUiStore((state) => state.paywallEntry);
   const closeStandard = useUiStore((state) => state.closePaywall);
   const open = mode === "onboarding" || standardOpen;
   const products = useAppsStore((state) => state.products);
   const productsStatus = useAppsStore((state) => state.productsStatus);
   const refreshProducts = useAppsStore((state) => state.refreshProducts);
   const userKey = useAuthStore((state) => state.user?.key);
+  const authReferralSummary = useAuthStore((state) => state.referralSummary);
   const balance = useWholeSparkBalance(userKey).data;
   const subscriptionQuery = useCurrentSubscription(userKey);
   const queryClient = useQueryClient();
@@ -77,6 +79,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
   const [completionError, setCompletionError] = useState<string>();
   const [sharing, setSharing] = useState(false);
   const [completing, setCompleting] = useState(false);
+  const costDetailsOpen = sparkCostsOpen || (mode === "standard" && standardOpen && standardEntry === "costs");
   const recordedOnboardingPages = useRef(new Set<Page>());
   const delayedClose = useDelayedAction(mode === "onboarding" && open && page === "plans", page);
   const preferred = offers.find(({ productId }) => productId === "nova.monthly.discounted") ?? offers[0];
@@ -94,20 +97,25 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
     },
     onError: () => showToast({ title: "Subscription could not be updated.", duration: 2_500 }),
   });
-  const referral = useQuery({ queryKey: referralSummaryQueryKey(userKey ?? "unauthenticated"), queryFn: fetchReferralSummary, enabled: Boolean(userKey && open && (mode === "onboarding" || page === "referral")), refetchOnMount: "always" });
+  const referral = useQuery({ queryKey: referralSummaryQueryKey(userKey ?? "unauthenticated"), queryFn: fetchReferralSummary, enabled: Boolean(userKey && open && (mode === "onboarding" || page === "referral")), initialData: authReferralSummary?.code.ownerUserKey === userKey ? authReferralSummary : undefined });
 
   useEffect(() => {
     if (!open) return;
     const reset = setTimeout(() => {
       setPage(initialPage);
       setOfferTab("plans");
-      setSparkCostsOpen(false);
+      setSparkCostsOpen(mode === "standard" && standardEntry === "costs");
       setCheckoutState("idle");
       setMessage(undefined);
       setCompletionError(undefined);
     }, 0);
     return () => clearTimeout(reset);
-  }, [initialPage, open]);
+  }, [initialPage, mode, open, standardEntry]);
+
+  const setCostDetailsOpen = (next: boolean) => {
+    setSparkCostsOpen(next);
+    if (!next && mode === "standard" && standardEntry === "costs") closeStandard();
+  };
 
   useEffect(() => {
     if (mode !== "onboarding" || !open) return;
@@ -216,7 +224,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
   </OnboardingStepLayout>;
 
   const content = page === "plans" ? <ScrollView contentContainerStyle={[styles.content, mode === "onboarding" && styles.onboardingContent]} showsVerticalScrollIndicator={false}>
-    {mode === "onboarding" ? <View style={styles.hero}><View style={styles.heroTitleRow}><Text style={styles.heroTitle}>One balance for everything you create and use</Text><Button accessibilityLabel="How Sparks are billed" contentMode="raw" iconOnly onPress={() => setSparkCostsOpen(true)} size="xs" variant="icon"><HelpIcon size="sm" /></Button></View><Text style={styles.heroCopy}>Sparks give you a simple way to use AI capabilities, store your work, and keep services connected across Vorinthex.</Text></View> : <View style={styles.balanceHero}><View><Text style={styles.balanceLabel}>Current balance</Text><Text accessibilityLabel={balance === undefined ? "Sparks balance unavailable. Showing 0 Sparks" : `Current balance: ${balance} Sparks`} style={styles.balance}>{formatWholeSparks(balance ?? 0)} <Text style={styles.balanceUnit}>Sparks</Text></Text></View><Button accessibilityLabel="How Sparks are billed" contentMode="raw" iconOnly onPress={() => setSparkCostsOpen(true)} size="xs" variant="icon"><HelpIcon size="sm" /></Button></View>}
+    {mode === "onboarding" ? <View style={styles.hero}><View style={styles.heroTitleRow}><Text style={styles.heroTitle}>One balance for everything you create and use</Text><ButtonSizeProvider overrideParent size="sm"><Button accessibilityLabel="How Sparks are billed" contentMode="raw" iconOnly onPress={() => setSparkCostsOpen(true)} size="sm" variant="icon"><HelpIcon size="sm" /></Button></ButtonSizeProvider></View><Text style={styles.heroCopy}>Sparks give you a simple way to use AI capabilities, store your work, and keep services connected across Vorinthex.</Text></View> : <View style={styles.balanceHero}><View style={styles.balanceHeading}><SparksIcon size="lg" /><View><Text style={styles.balanceLabel}>Current balance</Text><Text accessibilityLabel={balance === undefined ? "Sparks balance unavailable. Showing 0 Sparks" : `Current balance: ${balance} Sparks`} style={styles.balance}>{formatWholeSparks(balance ?? 0)} <Text style={styles.balanceUnit}>Sparks</Text></Text></View></View><ButtonSizeProvider overrideParent size="sm"><Button accessibilityLabel="How Sparks are billed" contentMode="raw" iconOnly onPress={() => setSparkCostsOpen(true)} size="sm" variant="icon"><HelpIcon size="sm" /></Button></ButtonSizeProvider></View>}
     {mode === "standard" && subscription ? <View style={styles.subscriptionCard}><View style={styles.subscriptionHeading}><Text style={styles.sectionLabel}>YOUR SUBSCRIPTION</Text><Badge><Text style={styles.subscriptionBadge}>{subscription.status.replace("_", " ").toUpperCase()}</Text></Badge></View><Text style={styles.subscriptionTitle}>{subscriptionView?.title}</Text><Text style={styles.subscriptionCopy}>{subscriptionView?.copy}</Text>{subscriptionView?.action ? <Button loading={updateSubscription.isPending} onPress={() => updateSubscription.mutate(subscriptionView.action === "cancel")} size="md" variant="secondary">{subscriptionView.action === "restore" ? "Restore renewal" : "Cancel renewal"}</Button> : null}</View> : mode === "standard" && subscriptionQuery.isError ? <View style={styles.state}><Text accessibilityRole="alert" style={styles.error}>Subscription status could not be loaded.</Text><Button onPress={() => void subscriptionQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : null}
     {mode === "standard" ? <><Tabs accessibilityLabel="Spark offers" accessibilityRole="tablist" onValueChange={(value) => setOfferTab(value as OfferTab)} style={styles.offerTabs} value={offerTab}><TabsTrigger style={styles.offerTab} value="plans">Plans</TabsTrigger><TabsTrigger style={styles.offerTab} value="topup">Top-up</TabsTrigger></Tabs><View style={styles.plans}>{offers.map((product) => <PlanCard current={currentSubscriptionProductKey === product.key} key={product.key} onSelect={() => setSelectedKey(product.key)} product={product} selected={effectiveSelectedKey === product.key} />)}</View></> : <View style={styles.plans}>{subscriptions.map((product) => <PlanCard current={currentSubscriptionProductKey === product.key} key={product.key} onSelect={() => setSelectedKey(product.key)} product={product} selected={effectiveSelectedKey === product.key} />)}</View>}
     {!offers.length ? <View style={styles.state}><Text style={styles.error}>{productsStatus === "loading" ? "Loading offers..." : "Offers are temporarily unavailable."}</Text>{productsStatus !== "loading" ? <Button onPress={() => void refreshProducts()} size="md" variant="secondary">Retry</Button> : null}</View> : null}
@@ -241,11 +249,11 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
     {delayedClose.visible ? <Animated.View style={[styles.close, { opacity: delayedClose.opacity, top: Math.max(insets.top, spacing.md) }]}><Button accessibilityLabel="Continue without a plan" contentMode="raw" iconOnly onPress={dismiss} size="md" variant="ghost"><CloseIcon size="sm" /></Button></Animated.View> : null}
     {content}
     <View style={styles.onboardingFooter}>{footer}{page === "plans" ? <Text style={styles.taxNote}>Taxes are calculated at checkout.</Text> : null}</View>
-  </View><SparkCostsSheet onOpenChange={setSparkCostsOpen} open={sparkCostsOpen} /></>;
+  </View><SparkCostsSheet onOpenChange={setCostDetailsOpen} open={costDetailsOpen} /></>;
 
   return <><BottomSheet description={page === "referral" ? "Invite friends and earn Sparks." : undefined} dismissible={!completing} footer={<>{footer}{page === "plans" ? <Text style={styles.taxNote}>Taxes are calculated at checkout.</Text> : null}</>} height="full" onDismissRequest={dismiss} onOpenChange={(next) => { if (!next) dismiss(); }} open={open} pageKey={page} title={page === "plans" ? "Sparks" : "Invite a friend"}>
     {content}
-  </BottomSheet><SparkCostsSheet onOpenChange={setSparkCostsOpen} open={sparkCostsOpen} /></>;
+  </BottomSheet><SparkCostsSheet onOpenChange={setCostDetailsOpen} open={costDetailsOpen} /></>;
 }
 
 const styles = StyleSheet.create({
@@ -259,6 +267,7 @@ const styles = StyleSheet.create({
   hero: { gap: spacing.xs, paddingBottom: spacing.md },
   heroTitleRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   balanceHero: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", paddingBottom: spacing.sm },
+  balanceHeading: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
   balanceLabel: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 13 },
   balance: { color: palette.text, fontFamily: fonts.medium, fontSize: 32, marginTop: spacing.xs },
   balanceUnit: { color: palette.silver500, fontSize: 15 },

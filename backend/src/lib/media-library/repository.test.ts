@@ -31,10 +31,10 @@ describe('MediaLibrary repository transactions', () => {
     const repository = createMediaLibraryRepository(database, async (operation) => operation(database));
     await repository.canAccessCollection(newId(), newId(), newId());
     await repository.canAccessImage(newId(), newId(), newId());
-    expect(queries[0]).toContain('collection.purpose IN ["email-media", "generated-media", "scope-directory"]');
+    expect(queries[0]).toContain('collection.purpose IN ["email-media","generated-media","place-media","scope-directory"]');
     expect(queries[0]).toContain('collection.mutationPolicy == "system-only" && scoped');
     expect(queries[0]).toContain('collection.mutationPolicy != "system-only" && collection.ownerKey == @actorKey');
-    expect(queries[1]).toContain('collection.purpose IN ["email-media", "generated-media", "scope-directory"]');
+    expect(queries[1]).toContain('collection.purpose IN ["email-media","generated-media","place-media","scope-directory"]');
     expect(queries[1]).toContain('? scoped : collection.mutationPolicy != "system-only"');
   });
 
@@ -80,7 +80,7 @@ describe('MediaLibrary image similarity search', () => {
     expect(query).toContain('actorScope.teamKey == @teamKey');
     expect(query).toContain('FILTER privileged || (image.createdByKey == @actorKey && relationCount == 0) || collectionAccess');
     expect(query).toContain('collectionImage.collectionKey == @collectionKey');
-    expect(query).toContain('LET managedViewer = collection.purpose IN ["email-media", "generated-media", "scope-directory"] && collection.mutationPolicy == "system-only" && scoped');
+    expect(query).toContain('LET managedViewer = collection.purpose IN ["email-media","generated-media","place-media","scope-directory"] && collection.mutationPolicy == "system-only" && scoped');
     expect(query).toContain('FILTER managedViewer || collection.ownerKey == @actorKey');
     expect(query).not.toContain('collectionMembers');
     expect(query).not.toContain('FILTER collection.purpose == "email-media" && collection.mutationPolicy == "system-only" ? scoped');

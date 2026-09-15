@@ -3,7 +3,7 @@ import { AxiosHeaders, create, isAxiosError, type AxiosInstance } from "axios";
 import { extractSessionTokens, normalizeApiPath } from "./auth-helpers";
 import { tokenVault } from "./token-vault";
 import { consumeServerSentEvents, isAuthenticatedBearerRejection, parseServerSentEvent, type ServerSentEvent } from "./sse";
-import { selectedAppKeyHeaders } from "./app-request-headers";
+import { appKeyHeaders, selectedAppKeyHeaders, VORINTHEX_APP_KEY_HEADER } from "./app-request-headers";
 import { createObservedHttpError, rejectObservedDomainError } from "./domain-error-observer";
 import { getInstallationEventIdentifier, INSTALLATION_EVENT_IDENTIFIER_HEADER } from "./installation-event-identifier-vault";
 import { getDeviceIdentifier, DEVICE_IDENTIFIER_HEADER } from "./device-identifier-vault";
@@ -26,6 +26,7 @@ export const apiClient: AxiosInstance = create({
 
 apiClient.interceptors.request.use(async (config) => {
   await ensureAppsReady();
+  const selectedAppHeaders = selectedAppKeyHeaders();
   const [eventIdentifier, device] = await Promise.all([getInstallationEventIdentifier(), getDeviceIdentifier()]);
   config.url = normalizeApiPath(config.url ?? "/");
   const { session, generation, invalidated } = await tokenVault.snapshot();
@@ -34,7 +35,9 @@ apiClient.interceptors.request.use(async (config) => {
   const headers = AxiosHeaders.from(config.headers);
   headers.set(INSTALLATION_EVENT_IDENTIFIER_HEADER, eventIdentifier);
   if (device) headers.set(DEVICE_IDENTIFIER_HEADER, device);
-  for (const [name, value] of Object.entries(selectedAppKeyHeaders())) headers.set(name, value);
+  if (!headers.has(VORINTHEX_APP_KEY_HEADER)) {
+    for (const [name, value] of Object.entries(selectedAppHeaders)) headers.set(name, value);
+  }
   if (BACKEND_API_KEY) headers.set("X-Vorinthex-API-Key", BACKEND_API_KEY);
   if (session) {
     if (session.accessExpiresAt > Date.now()) headers.set("Authorization", `Bearer ${session.accessToken}`);
@@ -75,8 +78,8 @@ export async function getJson<T>(path: string): Promise<T> {
   return (await apiClient.get<T>(path)).data;
 }
 
-export async function postJson<TBody, TResponse>(path: string, body: TBody): Promise<TResponse> {
-  return (await apiClient.post<TResponse>(path, body)).data;
+export async function postJson<TBody, TResponse>(path: string, body: TBody, options: { appKey?: string } = {}): Promise<TResponse> {
+  return (await apiClient.post<TResponse>(path, body, options.appKey ? { headers: appKeyHeaders(options.appKey) } : undefined)).data;
 }
 
 export async function deleteRemoteAccount(session: { accessToken: string; refreshToken: string }) {
@@ -99,6 +102,7 @@ async function authenticatedEventStream(
   onOpen?: () => void,
 ) {
   await ensureAppsReady();
+  const selectedAppHeaders = selectedAppKeyHeaders();
   const [eventIdentifier, device] = await Promise.all([getInstallationEventIdentifier(), getDeviceIdentifier()]);
   const { session, generation, invalidated } = await tokenVault.snapshot();
   if (invalidated) unauthorizedListener?.();
@@ -109,7 +113,7 @@ async function authenticatedEventStream(
     "X-Vorinthex-Session-Transport": "header",
     [INSTALLATION_EVENT_IDENTIFIER_HEADER]: eventIdentifier,
     ...(device ? { [DEVICE_IDENTIFIER_HEADER]: device } : {}),
-    ...selectedAppKeyHeaders(),
+    ...selectedAppHeaders,
     ...(BACKEND_API_KEY ? { "X-Vorinthex-API-Key": BACKEND_API_KEY } : {}),
     ...(session?.accessExpiresAt && session.accessExpiresAt > Date.now() ? { Authorization: `Bearer ${session.accessToken}` } : {}),
     ...(session?.refreshToken ? { "X-Refresh-Token": session.refreshToken } : {}),
@@ -185,13 +189,14 @@ export async function revokeRemoteSession(session: { accessToken: string; refres
 }
 
 export async function cleanupRemoteSession(session: { accessToken: string; refreshToken: string }) {
+  const selectedAppHeaders = selectedAppKeyHeaders();
   const [eventIdentifier, device] = await Promise.all([getInstallationEventIdentifier(), getDeviceIdentifier()]);
   const headers = {
     "Content-Type": "application/json",
     "X-Vorinthex-Session-Transport": "header",
     [INSTALLATION_EVENT_IDENTIFIER_HEADER]: eventIdentifier,
     ...(device ? { [DEVICE_IDENTIFIER_HEADER]: device } : {}),
-    ...selectedAppKeyHeaders(),
+    ...selectedAppHeaders,
     ...(BACKEND_API_KEY ? { "X-Vorinthex-API-Key": BACKEND_API_KEY } : {}),
     Authorization: `Bearer ${session.accessToken}`,
     "X-Refresh-Token": session.refreshToken,
@@ -206,16 +211,10 @@ export async function cleanupRemoteSession(session: { accessToken: string; refre
       clearTimeout(timeout);
     }
   };
-  let failure: unknown;
-  try {
-    await request("/auth/me/push-subscription", { method: "DELETE", body: "{}" });
-  } catch (error) {
-    failure = error;
-  }
-  try {
-    await request("/auth/logout", { method: "POST", body: "{}" });
-  } catch (error) {
-    failure ??= error;
-  }
-  if (failure) throw failure;
+  const cleanup = await Promise.allSettled([
+    request("/auth/me/push-subscription", { method: "DELETE", body: "{}" }),
+    request("/auth/logout", { method: "POST", body: "{}" }),
+  ]);
+  const failure = cleanup.find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failure) throw failure.reason;
 }

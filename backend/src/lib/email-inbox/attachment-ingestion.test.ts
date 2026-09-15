@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { createEmailAttachmentIngestionService, EmailAttachmentIngestionError, type EmailAttachmentRepository } from './attachment-ingestion';
 import type { EmailAttachmentBinding } from './attachment-binding-schema';
+import { GmailApiError, GmailPermanentAttachmentError } from './gmail';
+import { toArangoDoc } from '@/lib/db/base';
 
 const teamKey = 'team';
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
@@ -11,11 +13,12 @@ const common = { userKey: billingUserKey, teamKey, scopeKey, teamMembershipKey, 
 const at = new Date('2026-08-25T12:00:00.000Z');
 
 function fixture(options: { exportFailure?: boolean } = {}) {
-  const bindings = new Map<string, EmailAttachmentBinding & { userKey: string; storageKey?: string }>();
+  const bindings = new Map<string, EmailAttachmentBinding & { userKey: string; storageKey?: string; exportPending?: boolean }>();
   const events: string[] = [];
   const uploads: Array<{ key: string; billingUserKey?: string }> = [];
   const deleted: string[] = [];
   const repository: EmailAttachmentRepository = {
+    async markExported(key) { const value = bindings.get(key); if (value) bindings.set(key, { ...value, exportPending: false }); },
     async activeMembership(input) { return input.preferredTeamMembershipKey; },
     async completed(input) {
       const value = bindings.get(input.key);
@@ -27,7 +30,7 @@ function fixture(options: { exportFailure?: boolean } = {}) {
       const existing = bindings.get(input.key);
       if (existing && (existing.contentHash !== input.contentHash || existing.sourceFilename !== input.sourceFilename || existing.sourceMimeType !== input.sourceMimeType || existing.sourceSize !== input.sourceSize)) throw new EmailAttachmentIngestionError('ATTACHMENT_CONFLICT', 'changed source', false);
       if (existing?.status === 'completed') return { status: 'replay', binding: existing };
-      const binding = { ...input, status: 'processing' as const, leaseToken, leaseExpiresAt, createdAt: existing?.createdAt ?? now, updatedAt: now };
+      const binding = { ...input, exportPending: true, status: 'processing' as const, leaseToken, leaseExpiresAt, createdAt: existing?.createdAt ?? now, updatedAt: now };
       bindings.set(input.key, binding);
       events.push('claim');
       return { status: 'claimed', binding };
@@ -59,6 +62,7 @@ function fixture(options: { exportFailure?: boolean } = {}) {
   };
   const service = createEmailAttachmentIngestionService({
     repository,
+    publishScopeEvent: async () => undefined,
     storage: {
       async upload(input) { uploads.push({ key: input.key, billingUserKey: input.billingUserKey }); events.push('upload'); return { storageKey: input.key }; },
       async delete(key) { deleted.push(key); events.push('delete'); },
@@ -67,11 +71,9 @@ function fixture(options: { exportFailure?: boolean } = {}) {
     },
     exportDatabase: {
       async query(query) {
-        events.push('export');
+        if (String(query).startsWith('FOR inbox')) events.push('export');
         if (options.exportFailure) throw new Error('export unavailable');
-        expect(query).toContain('UPDATE {}');
-        expect(query).not.toContain('managedPurpose');
-        return { next: async () => undefined } as never;
+        return { next: async () => String(query).startsWith('FOR inbox') ? 'Inbox' : undefined } as never;
       },
     },
     parse: async () => ({ document: {} as never }),
@@ -83,30 +85,68 @@ function fixture(options: { exportFailure?: boolean } = {}) {
 }
 
 describe('canonical email attachment ingestion', () => {
+  test('recovers a persisted export and retries its event without reprocessing or losing the intent', async () => {
+    let published = 0, acknowledged = 0, parsed = 0;
+    const value = toArangoDoc({ key: connectorKey, userKey: billingUserKey, teamKey, scopeKey, connectorKey, providerMessageId: 'message', partPath: '0.1', contentHash: 'a'.repeat(64), kind: 'document', filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 5, storageKey: 'canonical/bytes', status: 'completed', exportPending: true, createdAt: at.toISOString(), updatedAt: at.toISOString() });
+    const service = createEmailAttachmentIngestionService({
+      repository: { activeMembership: async () => teamMembershipKey, markExported: async (key: string, owner: string) => { expect(key).toBe(connectorKey); expect(owner).toBe(billingUserKey); acknowledged += 1; } } as never,
+      exportDatabase: { query: async (query: string) => ({ next: async () => query.startsWith('LET attachment') ? value : true }) } as never,
+      storage: { download: async () => ({ bytes: new TextEncoder().encode('hello') }) } as never,
+      parse: async () => { parsed += 1; throw new Error('must reuse the existing export'); },
+      publishScopeEvent: async () => { published += 1; if (published === 1) throw new Error('event transport unavailable'); },
+    });
+    await expect(service.retryExport(connectorKey)).rejects.toThrow('remains pending');
+    expect(acknowledged).toBe(0);
+    await service.retryExport(connectorKey);
+    expect({ published, acknowledged, parsed }).toEqual({ published: 2, acknowledged: 1, parsed: 0 });
+  });
+  test('staging retains valid parts and records permanent failures without aborting the message', async () => {
+    const f = fixture();
+    const result = await f.service.stageMessage({
+      ...common, connectorLeaseToken: 'lease', heartbeat: async () => undefined,
+      message: { id: 'message', threadId: 'thread', payload: { mimeType: 'multipart/mixed', parts: [
+        { mimeType: 'image/png', filename: 'bad.png', body: { size: 4, attachmentId: 'bad' } },
+        { mimeType: 'text/plain', filename: 'good.txt', body: { size: 5, attachmentId: 'good' } },
+      ] } },
+      gmail: { attachment: async (_id: string, part: { filename: string }) => { if (part.filename === 'bad.png') throw new GmailPermanentAttachmentError('ATTACHMENT_MALFORMED_PAYLOAD', 'bad signature'); return new TextEncoder().encode('hello'); } } as never,
+    });
+    expect(result).toMatchObject({ availability: 'failed', unavailableCount: 1, refs: [{ type: 'document' }] });
+    expect(result.staged).toHaveLength(1);
+    expect(f.deleted).toEqual([]);
+  });
+
+  test('staging still retries transient provider errors', async () => {
+    const f = fixture();
+    await expect(f.service.stageMessage({ ...common, connectorLeaseToken: 'lease', heartbeat: async () => undefined,
+      message: { id: 'message', threadId: 'thread', payload: { mimeType: 'text/plain', filename: 'good.txt', body: { size: 5, attachmentId: 'good' } } },
+      gmail: { attachment: async () => { throw new GmailApiError(503); } } as never,
+    })).rejects.toThrow('503');
+  });
   test('persists canonical storage before running an independent export and completing', async () => {
     const f = fixture();
     const result = await f.service.ingest({ ...common, part: { path: '0.1', type: 'document', mimeType: 'text/plain', filename: 'notes.txt', size: 5, data: 'aGVsbG8' }, bytes: new TextEncoder().encode('hello') });
     expect(result).toEqual({ type: 'document', key: expect.any(String) });
     expect(f.events).toEqual(['claim', 'upload', 'persist', 'export', 'complete']);
     expect(f.uploads[0]).toEqual({ key: expect.stringMatching(new RegExp(`^email/${scopeKey}/${connectorKey}/`)), billingUserKey });
-    expect([...f.bindings.values()][0]).toMatchObject({ status: 'completed', storageKey: f.uploads[0]!.key });
+    expect([...f.bindings.values()][0]).toMatchObject({ status: 'completed', storageKey: f.uploads[0]!.key, exportPending: false });
   });
 
   test('does not let an export failure roll back canonical ingestion', async () => {
     const f = fixture({ exportFailure: true });
     await expect(f.service.ingest({ ...common, part: { path: '0.2', type: 'image', mimeType: 'image/png', filename: 'photo.png', size: 4, data: 'iVBORw' }, bytes: new Uint8Array([137, 80, 78, 71]) })).resolves.toMatchObject({ type: 'image' });
     expect([...f.bindings.values()][0]?.status).toBe('completed');
+    expect([...f.bindings.values()][0]?.exportPending).toBe(true);
     expect(f.deleted).toEqual([]);
   });
 
-  test('replays a completed source without uploading and repairs its independent export', async () => {
+  test('replays a completed source without uploading or recreating acknowledged exports', async () => {
     const f = fixture();
     const input = { ...common, part: { path: '0.3', type: 'document' as const, mimeType: 'text/plain', filename: 'same.txt', size: 4, data: 'c2FtZQ' }, bytes: new TextEncoder().encode('same') };
     const first = await f.service.ingest(input);
     const eventCount = f.events.length;
     expect(await f.service.ingest(input)).toEqual(first);
-    expect(f.events).toHaveLength(eventCount + 1);
-    expect(f.events.at(-1)).toBe('export');
+    expect(f.events).toHaveLength(eventCount);
+    expect(f.events.at(-1)).toBe('complete');
     expect(f.uploads).toHaveLength(1);
   });
 

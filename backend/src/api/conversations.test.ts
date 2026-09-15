@@ -114,6 +114,41 @@ describe('conversation HTTP contract', () => {
     expect(stream).not.toContain('event: error');
   });
 
+  test('closes the turn stream without waiting for change publication', async () => {
+    const teamKey = 'team', scopeKey = newId(), userKey = newId(), conversationKey = newId(), correlationKey = newId();
+    const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const handlers = createConversationHandlers({
+      getIdentity: async () => ({ identityType: 'user', key: userKey }) as never,
+      authorize: async () => ({ context }),
+      createTurnService: () => ({ turn: async (_input: unknown, _context: ToolContext, onEvent: (event: unknown) => Promise<void>) => onEvent({ type: 'done', correlationKey, conversationKey, message: { key: newId(), conversationKey, turnKey: 'request', role: 'ASSISTANT', status: 'COMPLETED', content: 'answer', retrievals: [], createdAt: '2026-09-01T00:00:00.000Z', completedAt: '2026-09-01T00:00:01.000Z' }, replayed: false }) }) as never,
+      publishChanged: () => new Promise<void>(() => {}),
+    });
+    const app = new Hono(); app.post('/conversations/:conversationKey/turn/stream', handlers.turn);
+    const response = await app.request(`/conversations/${conversationKey}/turn/stream`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, message: 'Find it', requestKey: 'request' }) });
+    const stream = await Promise.race([response.text(), Bun.sleep(100).then(() => 'timed-out')]);
+    expect(stream).not.toBe('timed-out');
+    expect(stream).toContain('event: done');
+  });
+
+  test('does not emit done when execution settlement fails after service completion', async () => {
+    const teamKey = 'team', scopeKey = newId(), userKey = newId(), conversationKey = newId(), correlationKey = newId();
+    const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const handlers = createConversationHandlers({
+      getIdentity: async () => ({ identityType: 'user', key: userKey }) as never,
+      authorize: async () => ({ context }),
+      createTurnService: () => ({ turn: async (_input: unknown, _context: ToolContext, onEvent: (event: unknown) => Promise<void>) => {
+        await onEvent({ type: 'done', correlationKey, conversationKey, message: { key: newId(), conversationKey, turnKey: 'request', role: 'ASSISTANT', status: 'COMPLETED', content: 'answer', retrievals: [], createdAt: '2026-09-01T00:00:00.000Z', completedAt: '2026-09-01T00:00:01.000Z' }, replayed: false });
+        throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'private');
+      } }) as never,
+    });
+    const app = new Hono(); app.post('/conversations/:conversationKey/turn/stream', handlers.turn);
+    const response = await app.request(`/conversations/${conversationKey}/turn/stream`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, message: 'Find it', requestKey: 'request' }) });
+    const stream = await response.text();
+    expect(stream).not.toContain('event: done');
+    expect(stream).toContain('event: error');
+    expect(stream).toContain('"code":"INSUFFICIENT_BALANCE"');
+  });
+
   test('preserves insufficient balance in JSON and turn SSE boundaries', async () => {
     const teamKey = 'team', scopeKey = newId(), userKey = newId(), conversationKey = newId();
     const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;

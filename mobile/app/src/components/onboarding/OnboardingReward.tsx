@@ -1,5 +1,5 @@
 import { Button } from "@vorinthex/shared/ui/button";
-import { GiftIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { SparksIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { useEffect } from "react";
 
 import { OnboardingStepLayout } from "@/components/onboarding/OnboardingStepLayout";
@@ -12,7 +12,7 @@ export function OnboardingReward({ onFinished }: { onFinished: () => void }) {
     action={<Button onPress={onFinished} size="md" variant="primary">Next</Button>}
     closeLabel="Close reward introduction"
     description="You have been granted 100 Sparks."
-    icon={<GiftIcon size="lg" />}
+    icon={<SparksIcon size="lg" />}
     onClose={onFinished}
     title="Free sparks"
   />;

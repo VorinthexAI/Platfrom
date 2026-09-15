@@ -60,12 +60,8 @@ export const TOOL_COST_RULES: Readonly<Record<string, PublicFixedCostRule>> = Ob
   'visual-identity.create': sparks(15, 'Create a visual identity', 'Create a visual identity from selected images.'),
   'email.tone.create': sparks(25, 'Create a Signal writing tone', 'Build a reusable writing tone from connected email examples.'),
   'trip.create': sparks(15, 'Create a trip', 'Create and save a generated trip plan.'),
-  'place.create': sparks(5, 'Save a place', 'Create a saved place with generated details.'),
-  'place.guide.find': sparks(5, 'Find a place guide', 'Find a guide for a place.'),
-  'place.find-city': sparks(5, 'Find a city', 'Find and prepare a city for exploration.'),
-  'place.find-children': sparks(5, 'Explore nearby places', 'Find places within a selected destination.'),
-  'document.parse': sparks(2, 'Upload a document', 'Upload a document and extract its readable content.', 'documents'),
-  'document.scan': sparks(5, 'Scan a document', 'Scan an uploaded document with optical character recognition.', 'documents'),
+  'place.guide.find': sparks(5, 'View country', 'Generate a country travel guide when it has not already been prepared.'),
+  'place.find-city': sparks(5, 'View city', 'Generate a city travel guide when it has not already been prepared.'),
   'profile.badge.generate': sparks(10, 'Generate a profile badge', 'Generate a custom profile badge for the authenticated user.', undefined, false),
 });
 export const ACTION_COST_RULES: Readonly<Record<string, FixedCostRule>> = Object.freeze({});
@@ -74,7 +70,7 @@ export const ACTION_PRICED_OPERATION_TOOL_SLUGS = Object.freeze([
   'agents.core', 'app.enhance', 'app.search', 'app.speech', 'app.translate',
   'book.goal.suggest', 'book.topic.suggest',
   'app.generate-image', 'conversation.message.send',
-  'document.rewrite', 'document.summarize', 'document.topics',
+  'document.parse', 'document.rewrite', 'document.summarize', 'document.topics',
   'email.draft.compose', 'email.draft.create', 'email.message.summarize',
   'feedback.create',
   'image.caption', 'image.create-visual-identity', 'image.ideas.create',
@@ -84,7 +80,7 @@ export const ACTION_PRICED_OPERATION_TOOL_SLUGS = Object.freeze([
 ] as const);
 
 export const OUTCOME_PRICED_OPERATION_TOOL_SLUGS = Object.freeze([
-  'place.find-children', 'place.find-city', 'place.guide.find',
+  'place.find-city', 'place.guide.find',
 ] as const);
 
 // This list is intentionally exhaustive rather than a fallback. Adding a public
@@ -102,10 +98,10 @@ export const FREE_TOOL_SLUGS = Object.freeze([
   'highlight.delete', 'highlight.list', 'highlight.read',
   'image.delete', 'image.favorite', 'image.generation-history.delete', 'image.generation-history.list', 'image.hide', 'image.memory.delete', 'image.memory.list', 'image.memory.read', 'image.reveal', 'image.search', 'image.update',
   'inbox.refresh', 'inbox.search', 'inbox.update',
-  'place.delete', 'place.list', 'place.open', 'place.reference.list', 'place.search', 'place.update',
+  'place.create', 'place.delete', 'place.find-children', 'place.list', 'place.open', 'place.reference.list', 'place.search', 'place.update',
   'profile.badge.claim', 'profile.update', 'subject.delete', 'subject.image.list', 'subject.list',
   'scope.create', 'scope.delete', 'scope.list', 'scope.prioritize', 'scope.select', 'scope.update',
-  'tag.assignment.set', 'tag.create', 'tag.delete', 'tag.list', 'tag.update', 'team.list', 'team.select', 'ticket.create',
+  'tag.assignment.set', 'tag.create', 'tag.delete', 'tag.list', 'tag.update', 'ticket.create',
   'trip.attachment.set', 'trip.delete', 'trip.guide.list', 'trip.list', 'trip.search', 'trip.update',
 ] as const);
 
@@ -118,6 +114,7 @@ export const TOOL_COST_POLICIES: Readonly<Record<string, ToolCostPolicy>> = Obje
 
 export function lookupToolCostPolicy(toolSlug: string, input?: unknown): ToolCostPolicy | null {
   const slug = assertDottedSlug(toolSlug);
+  if (slug === 'agent.guide' && typeof input === 'object' && input !== null && (input as Record<string, unknown>).mode === 'topics') return { mode: 'action' };
   if (slug === 'book.extend' && typeof input === 'object' && input !== null && (input as Record<string, unknown>).mode === 'preview') return { mode: 'action' };
   return TOOL_COST_POLICIES[slug] ?? null;
 }

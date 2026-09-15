@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
+import sharp from 'sharp';
 
 const live = process.env.CONTENT_E2E === 'true';
 const suite = live ? describe : describe.skip;
@@ -129,6 +130,7 @@ suite('Content live E2E', () => {
     const dependencies = {
       embed: async () => embedding,
       ingestion: {
+        transcribe: async () => ({ text: 'Scanned deterministic text.' }),
         embeddingDimensions: EMBEDDING_DIMENSIONS,
         embed: async () => embedding,
         embedBatch: async ({ texts }: { texts: string[] }) => { ingestionBatchSizes.push(texts.length); return texts.map(() => embedding); },
@@ -142,7 +144,6 @@ suite('Content live E2E', () => {
         if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS, logger: () => undefined });
         throw new Error(`Unexpected provider action: ${action}`);
       },
-      scanDocument: async () => ({ documentKey: newId(), content: 'Scanned deterministic text.', storageKeys: [] }),
       generateExport: (input: any) => generateDocumentExport(input, { pdfRenderer: async () => new TextEncoder().encode('%PDF-1.4\n%%EOF') }),
       random: (size: number) => Uint8Array.from({ length: size }, (_, index) => (teamKey.charCodeAt(index % teamKey.length) + randomSeed + index) % 255 + 1),
       clock: () => new Date(now),
@@ -197,7 +198,8 @@ suite('Content live E2E', () => {
     const destinationFolderKey = created.results[1].data.folder.key;
     const childResult = await call('folder.create', { folders: [{ scopeKey, parentFolderKey: rootFolderKey, name: 'Child' }] });
     const childFolderKey = childResult.results[0].data.folder.key;
-    await call('document.scan', { scopeKey, folderKey: childFolderKey, name: 'Scanned note', pages: [{ filename: 'page.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }] });
+    const page = new Uint8Array(await sharp({ create: { width: 16, height: 16, channels: 3, background: 'white' } }).png().toBuffer());
+    await call('document.parse', { scopeKey, folderKey: childFolderKey, name: 'Scanned note', pages: [{ filename: 'page.png', mimeType: 'image/png', sizeBytes: page.length, bytes: page }] });
     expect((await call('folder.find', { folderKeys: [rootFolderKey], includeChildrenCount: true, includeDocumentCount: true })).results[0].data.folder.childrenCount).toBe(1);
     expect((await call('folder.list', { scopeKey, includeDocuments: false })).folders.length).toBeGreaterThanOrEqual(2);
     const folderUpdate = await call('folder.update', { updates: [{ folderKey: rootFolderKey, description: 'Canonical root metadata', isFavorite: true }, { folderKey: destinationFolderKey, isFavorite: true }] });
@@ -214,6 +216,7 @@ suite('Content live E2E', () => {
     expect(cycle.results[0].error.code).toBe('FOLDER_CYCLE_DETECTED');
     await call('folder.move', { moves: [{ folderKey: childFolderKey, targetParentFolderKey: rootFolderKey }, { folderKey: rootFolderKey }] });
 
+    processingOrder.length = 0;
     const text = '# Content Roadmap\n\nDeterministic source body.\n\n```ts\nsecretCode()\n```\n\nFinal paragraph.';
     const processed = await call('document.parse', {
       file: { filename: 'roadmap.md', mimeType: 'text/markdown', sizeBytes: new TextEncoder().encode(text).byteLength, bytes: new TextEncoder().encode(text) },

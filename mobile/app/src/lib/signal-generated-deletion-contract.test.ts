@@ -32,12 +32,12 @@ test("generated selection is mutator-only, bounded, accessible, and suppresses s
   expect(workspace).toContain('onLongPress={permissions.canMutate ? () => handleGeneratedLongPress("translation", version.key) : undefined}');
   expect(workspace).toContain('onLongPress={permissions.canMutate ? () => handleGeneratedLongPress("summary", summary.key) : undefined}');
   expect(workspace).toContain('accessibilityActions={permissions.canMutate ? [{ name: "longpress"');
-  expect(workspace).toContain('if (nativeEvent.actionName === "longpress") toggleGeneratedSelection');
+  expect(workspace).toContain('if (nativeEvent.actionName === "longpress") handleGeneratedLongPress');
   expect(workspace).toContain('if (current.length >= 50)');
   expect(workspace).toContain('You can select up to 50 saved versions.');
   expect(workspace).toContain('setTimeout(() => { if (longPressedGenerated.current === `${kind}:${key}`) longPressedGenerated.current = undefined; }, 50)');
   expect(workspace).toContain('if (longPress === token) return;');
-  expect(workspace).toContain('void Haptics.selectionAsync()');
+  expect(workspace).toContain('if (enteringSelection) void Haptics.selectionAsync()');
   expect(workspace).toContain('if (selection.length && permissions.canMutate) toggleGeneratedSelection(kind, key)');
   expect(workspace).toContain('permissions.canMutate && selectedTranslationKeys.length ? <Tabs');
   expect(workspace).toContain('permissions.canMutate && selectedSummaryKeys.length ? <Tabs');

@@ -13,7 +13,6 @@ export type AuthContext = {
   user: AuthUser | null;
   team: Record<string, unknown> | null;
   teamMembership: Record<string, unknown> | null;
-  teamSelectionEnabled: boolean;
   scope: Record<string, unknown> | null;
 };
 
@@ -98,7 +97,6 @@ export function normalizeAuthContext(value: unknown): AuthContext {
     user,
     team: record(body?.team),
     teamMembership: record(body?.teamMembership),
-    teamSelectionEnabled: body?.teamSelectionEnabled === true,
     scope: record(body?.scope),
   };
 }

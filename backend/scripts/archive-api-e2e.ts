@@ -126,7 +126,7 @@ const uploaded = await tool('document.parse', {
 });
 const uploadedDocumentKey = string(object(uploaded.document).key, 'uploaded document key');
 
-const pdfPhrase = `PDF extraction verification ${suffix.slice(0, 8)} succeeded through AWS Textract.`;
+const pdfPhrase = `PDF transcription verification ${suffix.slice(0, 8)} succeeded through the text model.`;
 const pdfBytes = minimalPdf(pdfPhrase);
 const uploadedPdf = await tool('document.parse', {
   scopeKey,

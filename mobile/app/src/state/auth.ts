@@ -1,11 +1,13 @@
 import { isAxiosError } from "axios";
 import { create } from "zustand";
 
-import { cleanupRemoteSession, deleteRemoteAccount, getJson, onUnauthorized, patchJson, revokeRemoteSession } from "@/lib/api-client";
+import { cleanupRemoteSession, deleteRemoteAccount, fetchReferralSummary, getJson, onUnauthorized, patchJson, revokeRemoteSession } from "@/lib/auth-transport";
 import { clearAuthContext, readAuthContext, writeAuthContext } from "@/lib/auth-context-vault";
 import { hasCompleteAuthContext, normalizeAuthContext, type AuthUser } from "@/lib/auth-helpers";
+import { clearPendingReferralCode } from "@/lib/pending-referral-vault";
 import { tokenVault } from "@/lib/token-vault";
-import { clearOnboardingCompletion, markOnboardingComplete, resetOnboardingSession } from "@/lib/onboarding-state";
+import { markOnboardingComplete, markPostDeletionOnboarding, resetOnboardingSession } from "@/lib/onboarding-state";
+import type { ReferralSummary } from "@/lib/referral-client";
 import type { ScopeSummary } from "@/lib/scope-client";
 
 let authOperation = 0;
@@ -19,8 +21,8 @@ type AuthState = {
   user: AuthUser | null;
   team: Record<string, unknown> | null;
   teamMembership: Record<string, unknown> | null;
-  teamSelectionEnabled: boolean;
   scope: Record<string, unknown> | null;
+  referralSummary: ReferralSummary | null;
   bootstrap: () => Promise<void>;
   hydrate: () => Promise<void>;
   reconnectContentContext: () => Promise<void>;
@@ -52,9 +54,9 @@ function profileKeys(patch: ProfilePatch) {
   return Object.keys(patch) as (keyof ProfilePatch)[];
 }
 
-function queueProfileContextWrite(state: Pick<AuthState, "team" | "teamMembership" | "teamSelectionEnabled" | "scope" | "status" | "user">, operation: number) {
+function queueProfileContextWrite(state: Pick<AuthState, "team" | "teamMembership" | "scope" | "status" | "user">, operation: number) {
   if (state.status !== "authenticated" || !state.user) return Promise.resolve();
-  const context = { user: state.user, team: state.team, teamMembership: state.teamMembership, teamSelectionEnabled: state.teamSelectionEnabled, scope: confirmedScope ?? state.scope };
+  const context = { user: state.user, team: state.team, teamMembership: state.teamMembership, scope: confirmedScope ?? state.scope };
   profileVaultWrites = profileVaultWrites.then(async () => {
     if (operation === authOperation) await writeAuthContext(context);
   }).catch(() => undefined);
@@ -65,13 +67,19 @@ async function loadContext() {
   return normalizeAuthContext(await getJson<unknown>("/auth/me"));
 }
 
+async function loadReferralSummary(user: AuthUser | null, existing: ReferralSummary | null) {
+  if (!user?.key) return null;
+  if (existing?.code.ownerUserKey === user.key) return existing;
+  return fetchReferralSummary().catch(() => null);
+}
+
 const signedOutState = {
   status: "unauthenticated" as const,
   user: null,
   team: null,
   teamMembership: null,
-  teamSelectionEnabled: false,
   scope: null,
+  referralSummary: null,
 };
 
 function isGuest(user: AuthUser | null) {
@@ -83,8 +91,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   team: null,
   teamMembership: null,
-  teamSelectionEnabled: false,
   scope: null,
+  referralSummary: null,
   bootstrap: async () => {
     const operation = ++authOperation;
     const { session, generation } = await tokenVault.snapshot();
@@ -102,10 +110,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         if (guestSession) await revokeRemoteSession(guestSession).catch(() => undefined);
         return;
       }
+      const referralSummary = await loadReferralSummary(context.user, get().referralSummary);
       if (operation === authOperation) {
         confirmedScope = context.scope;
+        set({ status: "authenticated", ...context, referralSummary });
+        if (context.user?.isOnboarded) void markOnboardingComplete().catch(() => undefined);
         await writeAuthContext(context);
-        if (operation === authOperation) set({ status: "authenticated", ...context });
       }
     } catch (error) {
       if (isAxiosError(error) && error.response?.status === 401
@@ -124,17 +134,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
       if (operation === authOperation) {
         confirmedScope = cached && hasCompleteAuthContext(cached) ? cached.scope : null;
-        set(cached && hasCompleteAuthContext(cached) ? { status: "authenticated", ...cached } : signedOutState);
+        set(cached && hasCompleteAuthContext(cached) ? { status: "authenticated", ...cached, referralSummary: get().referralSummary?.code.ownerUserKey === cached.user?.key ? get().referralSummary : null } : signedOutState);
       }
     }
   },
   hydrate: async () => {
     const operation = ++authOperation;
     const context = await loadContext();
+    const referralSummary = await loadReferralSummary(context.user, get().referralSummary);
     if (operation === authOperation) {
       confirmedScope = context.scope;
+      set({ status: "authenticated", ...context, referralSummary });
+      if (context.user?.isOnboarded) void markOnboardingComplete().catch(() => undefined);
       await writeAuthContext(context);
-      if (operation === authOperation) set({ status: "authenticated", ...context });
     }
   },
   reconnectContentContext: async () => {
@@ -231,7 +243,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
   deleteAccount: async () => {
     const sessionSnapshot = tokenVault.snapshot();
-    const localCleanup = Promise.allSettled([clearAuthContext(), clearOnboardingCompletion()]);
+    const localCleanup = Promise.allSettled([clearAuthContext(), clearPendingReferralCode(), markPostDeletionOnboarding()]);
     authOperation += 1;
     confirmedScope = null;
     set(signedOutState);

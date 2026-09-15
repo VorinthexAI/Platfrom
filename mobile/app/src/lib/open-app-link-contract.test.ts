@@ -8,5 +8,5 @@ test("the welcome-email universal link opens the app with an authenticated and s
   expect(appConfig.expo.ios.associatedDomains).toContain("applinks:vorinthex.com");
   expect(appConfig.expo.android.intentFilters[0].data).toContainEqual({ scheme: "https", host: "vorinthex.com", path: "/open" });
   expect(route).toContain('router.replace(useAuthStore.getState().user?.isOnboarded ? "/capability/archive" : "/onboarding")');
-  expect(route).toContain('onboarding.complete || onboarding.previewComplete ? "/auth" : "/onboarding"');
+  expect(route).toContain('onboarding.introSeen || onboarding.previewComplete ? "/auth" : "/onboarding"');
 });

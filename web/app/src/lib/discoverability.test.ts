@@ -59,7 +59,7 @@ describe("public discoverability registry", () => {
     expect(sitemap().map(({ url }) => url).sort()).toEqual(
       PUBLIC_ROUTES.map(({ path }) => canonicalUrl(path)).sort(),
     );
-    expect(sitemap().every(({ lastModified }) => lastModified === "2026-09-09")).toBe(
+    expect(sitemap().every(({ lastModified }) => lastModified === "2026-09-12")).toBe(
       true,
     );
   });
@@ -122,6 +122,18 @@ describe("structured data", () => {
 });
 
 describe("generated answer-engine content", () => {
+  test("describes private, searchable Core chat continuity without immediacy guarantees", () => {
+    const archive = PRODUCT_FACTS.capabilities.find(({ id }) => id === "archive");
+    const copy = JSON.stringify(archive);
+
+    expect(copy).toContain("Vorinthex AI / Core / Chats");
+    expect(copy).toContain("organized automatically");
+    expect(copy).toContain("rolling summaries support continuity");
+    expect(copy).toContain("searched by meaning later");
+    expect(copy).toContain("private authorized scope");
+    expect(copy).not.toMatch(/sole authoritative|immediate(?:ly)? available/i);
+  });
+
   test("describes Signal as a provider-neutral private communication inbox", () => {
     const signal = PRODUCT_FACTS.capabilities.find(({ id }) => id === "signal");
     const copy = JSON.stringify(signal);
@@ -138,7 +150,7 @@ describe("generated answer-engine content", () => {
     for (const output of outputs) {
       expect(output).toContain("# Vorinthex AI");
       expect(output).toContain("> ");
-      expect(output).toContain("Last reviewed: 2026-09-09");
+      expect(output).toContain("Last reviewed: 2026-09-12");
       expect(output).toContain("personal AI");
       expect(output).toContain(PRICING_HERO_HEADING);
       expect(output).toContain(PRICING_HERO_BODY);
@@ -146,7 +158,7 @@ describe("generated answer-engine content", () => {
       expect(output).toContain("excludes VAT and other local taxes");
       expect(output).toContain("Prepaid Sparks remain available after subscription cancellation");
       expect(output).toContain("balances never go below zero");
-      expect(output).toContain("hard-deleted after 90 consecutive unfunded days");
+      expect(output).toContain("permanently deleted after 90 consecutive unfunded days");
       expect(output).toContain(canonicalUrl("/terms"));
       expect(output).not.toMatch(/Moon|Comet|On-Demand|unlimited|most popular|app store|google play/i);
       expect(output).toContain(formatSparkCount(NEWCOMER_FREE_SPARKS));
@@ -187,12 +199,15 @@ describe("legal policy copy", () => {
     const privacy = JSON.stringify(PRIVACY_COPY);
 
     for (const copy of [terms, privacy]) {
+      expect(copy).not.toMatch(/Effective September 4/i);
       expect(copy).toContain("prepaid Sparks");
       expect(copy).toContain("no debt or grace-period backcharges accrue");
       expect(copy).toContain("uploads can continue");
       expect(copy).toContain("export, deletion, and recovery");
       expect(copy).toContain("90 consecutive days");
       expect(copy).not.toContain("growth is blocked");
+      expect(copy).not.toContain("Vault");
+      expect(copy).not.toContain("S3");
       expect(copy).not.toMatch(/notice/i);
     }
 

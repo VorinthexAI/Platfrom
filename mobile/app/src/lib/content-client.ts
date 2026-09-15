@@ -301,7 +301,7 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>, 
       teamKey: contentContext.teamKey,
       scopeKey: contentContext.scopeKey,
       input,
-    }, { signal, timeout: tool === "document.parse" || tool === "document.scan" ? 5 * 60_000 : tool === "document.summarize" || tool === "document.topics" ? 4 * 60_000 : 60_000 });
+    }, { signal, ...(typeof input.idempotencyKey === "string" ? { headers: { "Idempotency-Key": input.idempotencyKey } } : {}), timeout: tool === "document.parse" ? 5 * 60_000 : tool === "document.summarize" || tool === "document.topics" ? 4 * 60_000 : 60_000 });
     if (!response.data.success) throw contentToolError(response.data.error);
     return response.data.data;
   } catch (error) {
@@ -398,7 +398,7 @@ export async function generateContentDocumentAudio(documentKey: string, voice: "
     teamKey: context.teamKey,
     scopeKey: context.scopeKey,
     input: { documentKey, voice, pace, includeTitle: true, includeCode: false },
-  }, { timeout: 5 * 60_000 });
+  }, { headers: { "Idempotency-Key": createContentMutationKey() }, timeout: 5 * 60_000 });
   if (!response.data.success) throw contentToolError(response.data.error);
   return response.data.data;
 }
@@ -687,11 +687,9 @@ export async function uploadContentDocument(file: { name: string; type: string; 
   }, undefined, contentContext);
 }
 
-export async function scanContentDocument(pages: { name: string; size: number; base64: string }[], folderKey?: string, contentContext = getContentContext(), name = `Scanned document ${new Date().toISOString().slice(0, 10)}`) {
+export async function scanContentDocument(pages: { name: string; size: number; base64: string }[], folderKey?: string, contentContext = getContentContext(), name = `Scanned document ${new Date().toISOString().slice(0, 10)}`, idempotencyKey = createContentMutationKey()) {
   if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
-  const contentDigest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, pages.map((page) => page.base64).join("\0"));
-  const idempotencyKey = `scan-${contentDigest}-${folderKey ?? "root"}`;
-  return callContentTool<{ document: ContentDocument }>("document.scan", {
+  return callContentTool<{ document: ContentDocument }>("document.parse", {
     scopeKey: contentContext.scopeKey,
     folderKey,
     name,
@@ -702,13 +700,13 @@ export async function scanContentDocument(pages: { name: string; size: number; b
 
 const appResultTagsSchema = z.array(z.strictObject({ key: z.string().min(1), name: z.string() })).optional();
 const appFolderResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), parentFolderKey: z.string().min(1).optional(), name: z.string().min(1), description: z.string().optional(), presentation: z.enum(["platform", "assistant", "knowledge", "media", "travel", "communication", "learning"]).optional(), managed: z.boolean().optional(), structuralProtection: z.literal(true).optional(), isFavorite: z.boolean(), createdAt: z.string().datetime().optional(), updatedAt: z.string().datetime().optional(), score: z.number().optional(), tags: appResultTagsSchema });
-const appDocumentResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), folderKey: z.string().min(1).optional(), folder: z.strictObject({ key: z.string().min(1), name: z.string().min(1) }).optional(), name: z.string().min(1), extension: z.string().optional(), mimeType: z.string().optional(), sizeBytes: z.number().int().positive().optional(), managed: z.boolean().optional(), structuralProtection: z.literal(true).optional(), isFavorite: z.boolean(), createdAt: z.string().datetime().optional(), updatedAt: z.string().datetime().optional(), score: z.number().optional(), tags: appResultTagsSchema });
+const appDocumentResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), folderKey: z.string().min(1).optional(), folder: z.strictObject({ key: z.string().min(1), name: z.string().min(1) }).optional(), name: z.string().min(1), extension: z.string().optional(), mimeType: z.string().optional(), sizeBytes: z.number().int().positive().optional(), managed: z.boolean().optional(), structuralProtection: z.literal(true).optional(), isFavorite: z.boolean(), content: z.string().optional(), createdAt: z.string().datetime().optional(), updatedAt: z.string().datetime().optional(), score: z.number().optional(), tags: appResultTagsSchema });
 
 async function searchAppContent(query: string, signal: AbortSignal | undefined, folderKey: string | undefined, includeDescendants: boolean, recordHistory: boolean, limit = 50, tagKeys: string[] = []): Promise<ContentSearchResponse> {
   const filters = { ...(folderKey ? { folderKey, includeDescendants } : {}), ...(tagKeys.length ? { tagKeys, tagMatch: "all" as const } : {}) };
   const output = await searchApp({ ...(query ? { query } : { operation: "list" as const }), collectionSlugs: ["folders", "documents", "files"], recordHistory, limit, ...(Object.keys(filters).length ? { filters } : {}) }, signal);
   const folders = appSearchResults(output, "folders", appFolderResultSchema).map(({ scopeKey: _scopeKey, createdAt: _createdAt, updatedAt: _updatedAt, tags: _tags, score = 0, ...folder }) => ({ ...folder, score }));
-  const documents = [...appSearchResults(output, "documents", appDocumentResultSchema), ...appSearchResults(output, "files", appDocumentResultSchema)].map(({ key, createdAt: _createdAt, updatedAt: _updatedAt, tags: _tags, score = 0, ...document }) => ({ documentKey: key, ...document, score }));
+  const documents = [...appSearchResults(output, "documents", appDocumentResultSchema), ...appSearchResults(output, "files", appDocumentResultSchema)].map(({ key, content: _content, createdAt: _createdAt, updatedAt: _updatedAt, tags: _tags, score = 0, ...document }) => ({ documentKey: key, ...document, score }));
   return { query: output.query ?? query, folders, documents, cached: false };
 }
 

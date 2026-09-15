@@ -16,11 +16,13 @@ describe('ticket service', () => {
     let stored: Parameters<TicketRepository['createOrReplay']> | undefined;
     const repository = { createOrReplay: async (...args: Parameters<TicketRepository['createOrReplay']>) => { stored = args; return { state: 'created' as const, ticket: args[0] }; } } as TicketRepository;
     const ids = [newId(), newId(), newId()]; let index = 0;
-    const result = await createTicketService({ repository, embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0), id: () => ids[index++]!, now: () => now }).submit({ message: '  Please help  ' }, context, 'request-1');
+    const published: unknown[] = [];
+    const result = await createTicketService({ repository, embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0), id: () => ids[index++]!, now: () => now, publishChanged: async (...args) => { published.push(args); } }).submit({ message: '  Please help  ' }, context, 'request-1');
     expect(result).toEqual({ key: ids[0], threadKey: ids[1], initialMessageKey: ids[2], message: 'Please help', kind: 'issue', createdAt: now });
     expect(stored?.[1]).toMatchObject({ key: ids[1], ticketKey: ids[0], kind: 'issue', userKey });
     expect(stored?.[2]).toMatchObject({ key: ids[2], threadKey: ids[1], sender: 'user', body: 'Please help' });
     expect(stored?.[3]).toBe(teamMembershipKey);
+    expect(published).toEqual([[userKey, 'communication.changed']]);
   });
 
   test('rejects forged principals and maps repository outcomes', async () => {
@@ -33,10 +35,21 @@ describe('ticket service', () => {
   test('classifies feedback before creating its private thread', async () => {
     const calls: unknown[][] = [];
     const repository = { createOrReplay: async (...args: any[]) => { calls.push(args); return { state: 'created' as const, ticket: args[0] }; } } as TicketRepository;
-    const service = createTicketService({ repository, embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0), ask: (async () => askResult('{"valid":true}')) as typeof executeAsk, now: () => now });
+    const service = createTicketService({ repository, embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0), ask: (async () => askResult('{"valid":true}')) as typeof executeAsk, now: () => now, publishChanged: async () => {} });
     await expect(service.createFeedback({ message: 'Add keyboard shortcuts' }, context, 'feedback-1')).resolves.toMatchObject({ kind: 'feedback' });
     expect(calls[0]?.[1]).toMatchObject({ kind: 'feedback', subject: 'Product feedback' });
     const rejected = createTicketService({ repository, embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0), ask: (async () => askResult('{"valid":false}')) as typeof executeAsk });
     await expect(rejected.createFeedback({ message: 'asdf' }, context, 'feedback-2')).rejects.toBeInstanceOf(TicketFeedbackRejectedError);
+  });
+
+  test('publishes created feedback but not replays and preserves durable success on publication failure', async () => {
+    let state: 'created' | 'replay' = 'created';
+    const repository = { createOrReplay: async (...args: any[]) => ({ state, ticket: args[0] }) } as TicketRepository;
+    const published: string[] = [];
+    const service = createTicketService({ repository, embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0), ask: (async () => askResult('{"valid":true}')) as typeof executeAsk, publishChanged: async (key) => { published.push(key); throw new Error('SSE unavailable'); } });
+    await expect(service.createFeedback({ message: 'Add keyboard shortcuts' }, context, 'feedback-1')).resolves.toMatchObject({ kind: 'feedback' });
+    state = 'replay';
+    await expect(service.createFeedback({ message: 'Add keyboard shortcuts' }, context, 'feedback-1')).resolves.toMatchObject({ kind: 'feedback' });
+    expect(published).toEqual([userKey]);
   });
 });

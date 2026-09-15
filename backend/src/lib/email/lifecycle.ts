@@ -55,6 +55,26 @@ export function welcomeEmailInput(to: string): BrandedEmailInput {
   };
 }
 
+export function signInEmailInput(input: { email: string; magicLink: string; expiresAt: Date }): BrandedEmailInput {
+  return {
+    to: input.email,
+    subject: 'Your Vorinthex sign in link',
+    preheader: 'Sign in to access your galaxy.',
+    label: 'Sign in',
+    eyebrow: 'Secure access',
+    headline: 'Your galaxy awaits',
+    bodyHtml: 'Sign in to access your galaxy.',
+    actionUrl: input.magicLink,
+    actionLabel: 'Sign in',
+    supportingHtml: 'If you did not request this, you can ignore this email.',
+    footerHtml: 'You received this because someone requested Vorinthex access for this email.',
+    extraPayload: {
+      magic_link: input.magicLink,
+      expires_at: input.expiresAt.toISOString(),
+    },
+  };
+}
+
 export function accountDeletedEmailInput(to: string): BrandedEmailInput {
   return {
     to,

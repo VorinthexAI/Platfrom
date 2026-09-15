@@ -26,23 +26,14 @@ const selected = {
 
 describe('team selection service', () => {
   test('enables selection only from durable environment-seeded eligibility', async () => {
-    const disabled = createTeamService({ list: async () => ({ enabled: false, teams: [option(false)] }) });
-    await expect(disabled.list({}, context())).rejects.toBeInstanceOf(TeamServiceError);
+    const disabled = createTeamService({ resolveTarget: async () => ({ enabled: false, target: option(false) }) });
     await expect(disabled.select({ targetTeamKey: 'team-1' }, context())).rejects.toMatchObject({ code: 'FORBIDDEN' });
-  });
-
-  test('lists all active options without provenance or email data', async () => {
-    const service = createTeamService({ list: async () => ({ enabled: true, teams: [option(false)] }) });
-    const result = await service.list({}, context());
-    expect(result.teams).toHaveLength(1);
-    expect(JSON.stringify(result)).not.toContain('environmentSeeded');
-    expect(JSON.stringify(result)).not.toContain('@');
   });
 
   test('selects an MFA-disabled team and its authorized default scope immediately', async () => {
     const calls: unknown[] = [];
     const service = createTeamService({
-      list: async () => ({ enabled: true, teams: [option(false)] }),
+      resolveTarget: async () => ({ enabled: true, target: option(false) }),
       select: async (...input) => { calls.push(input); return selected; },
     });
     await expect(service.select({ targetTeamKey: 'team-1' }, context())).resolves.toMatchObject({ status: 'selected', scope: { slug: 'main' } });
@@ -51,7 +42,7 @@ describe('team selection service', () => {
 
   test('returns a membership- and scope-bound setup challenge when exact assurance is absent', async () => {
     const service = createTeamService({
-      list: async () => ({ enabled: true, teams: [option(true)] }),
+      resolveTarget: async () => ({ enabled: true, target: option(true) }),
       challenge: async (_type, userKey, teamMembershipKey, kind, scopeKey) => {
         expect({ userKey, teamMembershipKey, kind, scopeKey }).toEqual({ userKey: 'user-1', teamMembershipKey: 'membership-1', kind: 'totp', scopeKey: 'cm1234567890123456789012345' });
         return { status: 'totp_setup_required', totpChallengeToken: 'a'.repeat(64), expiresAt: new Date('2026-09-06T00:15:00.000Z') };
@@ -63,14 +54,14 @@ describe('team selection service', () => {
   test('accepts only exact membership and MFA-version assurance', async () => {
     let selectedCount = 0;
     const service = createTeamService({
-      list: async () => ({ enabled: true, teams: [option(true)] }),
+      resolveTarget: async () => ({ enabled: true, target: option(true) }),
       select: async () => { selectedCount += 1; return selected; },
       challenge: async () => { throw new Error('challenge should not be created'); },
     });
     await expect(service.select({ targetTeamKey: 'team-1' }, context(true))).resolves.toMatchObject({ status: 'selected' });
     expect(selectedCount).toBe(1);
     const stale = { ...context(true), teamAssurance: { teamMembershipKey: membership.key, teamMfaVersion: 2 } };
-    const challenged = createTeamService({ list: async () => ({ enabled: true, teams: [option(true)] }), challenge: async () => ({ status: 'totp_required', totpChallengeToken: 'b'.repeat(64), expiresAt: new Date() }) });
+    const challenged = createTeamService({ resolveTarget: async () => ({ enabled: true, target: option(true) }), challenge: async () => ({ status: 'totp_required', totpChallengeToken: 'b'.repeat(64), expiresAt: new Date() }) });
     await expect(challenged.select({ targetTeamKey: 'team-1' }, stale)).resolves.toMatchObject({ status: 'totp_required' });
   });
 });

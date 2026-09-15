@@ -476,7 +476,7 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
           LET folder = attachment.targetType == "folder" ? DOCUMENT(folders, attachment.targetKey) : null
           LET collection = attachment.targetType == "collection" ? DOCUMENT(collections, attachment.targetKey) : null
           LET collectionAccess = collection != null && (elevated || collection.ownerKey == membership._key)
-          FILTER (attachment.targetType == "folder" && folder != null && folder.scopeKey == @scopeKey && (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null))
+          FILTER (attachment.targetType == "folder" && folder != null && folder.scopeKey == @scopeKey && (!HAS(folder, "privateOwnerUserKey") || folder.privateOwnerUserKey == null || folder.privateOwnerUserKey == @userKey) && (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null))
             || (attachment.targetType == "collection" && collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only" && collection.purpose == null && collectionAccess)
           RETURN attachment)
         FILTER LENGTH(validatedTargets) == LENGTH(@attachments)
@@ -536,7 +536,7 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
             LET folder = attachment.targetType == "folder" ? DOCUMENT(folders, attachment.targetKey) : null
             LET collection = attachment.targetType == "collection" ? DOCUMENT(collections, attachment.targetKey) : null
             LET collectionAccess = collection != null && (elevated || collection.ownerKey == membership._key)
-            FILTER (attachment.targetType == "folder" && folder != null && folder.scopeKey == @scopeKey && (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null))
+            FILTER (attachment.targetType == "folder" && folder != null && folder.scopeKey == @scopeKey && (!HAS(folder, "privateOwnerUserKey") || folder.privateOwnerUserKey == null || folder.privateOwnerUserKey == @userKey) && (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null))
               || (attachment.targetType == "collection" && collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy != "system-only" && collection.purpose == null && collectionAccess)
             RETURN attachment)
           RETURN { trip, places, attachments, accessibleCoverImageKey: customCoverAccessible ? customCover._key : null, coverStorageKey: customCoverAccessible ? customCover.storageKey : FIRST(places).heroStorageKey }

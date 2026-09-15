@@ -13,7 +13,8 @@ import {
 } from './actions';
 import { DocumentProcessingError } from './errors';
 import { documentStorage, type DocumentStorage } from './storage';
-import type { FileActionClient } from './file';
+import type { DocumentTranscriber } from '@/lib/ai/actions/document-transcription';
+import { parseDocumentPages } from './pages';
 import type { embedText } from '@/lib/embeddings';
 import type { embedTexts } from '@/lib/embeddings';
 import { acknowledgeStorageUploadReservation, releaseStorageUploadReservation, renewStorageUploadReservation, reserveStorageKeyForUpload, type StorageUploadReservation } from '@/lib/db/storage-deletion-jobs.node';
@@ -21,7 +22,9 @@ import { startStorageUploadHeartbeat } from '@/lib/storage-upload-reservation';
 
 export interface DocumentParseDependencies extends DocumentInsertDependencies {
   storage?: DocumentStorage;
-  fileAction?: FileActionClient;
+  transcribe?: DocumentTranscriber;
+  teamKey?: string;
+  signal?: AbortSignal;
   embed?: typeof embedText;
   embedBatch?: typeof embedTexts;
   embeddingDimensions?: number;
@@ -67,6 +70,8 @@ async function deleteWithRetry(storage: DocumentStorage, storageKey: string): Pr
 export async function parseDocument(rawInput: DocumentParseInput, dependencies: DocumentParseDependencies = {}): Promise<DocumentParseResult> {
   const started = performance.now();
   const input = documentParseInputSchema.parse(rawInput);
+  dependencies.signal?.throwIfAborted();
+  if (input.pages) return parseDocumentPages({ ...input, pages: input.pages }, dependencies);
   const logger = dependencies.logger ?? ((event) => console.info(JSON.stringify(event)));
   const actions: DocumentPipelineActions = {
     validate: dependencies.actions?.validate ?? documentValidate,
@@ -78,7 +83,7 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
   };
   logger({ action: 'document.parse', status: 'started', scopeKey: input.scopeKey, folderKey: input.folderKey });
 
-  const normalized = await actions.validate(input, { maxBytes: dependencies.maxBytes, logger });
+  const normalized = await actions.validate({ ...input, file: input.file! }, { maxBytes: dependencies.maxBytes, logger });
   if (normalized.folderKey) {
     const folder = await (dependencies.getFolder ?? (await import('@/lib/db/folders.node')).getFolderById)(normalized.folderKey);
     if (!folder || folder.scopeKey !== normalized.scopeKey) {
@@ -104,11 +109,13 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
   const reservation = uploaded.reservation ?? customReservation(uploaded.storageKey);
   const heartbeat = uploaded.reservationHeartbeat ?? startStorageUploadHeartbeat(reservation, renewReservation, dependencies.reservationHeartbeatMs);
   try {
-    const extraction = await actions.extract({ ...normalized, storageKey: uploaded.storageKey }, { fileAction: dependencies.fileAction, logger });
+    const extraction = await actions.extract({ ...normalized, storageKey: uploaded.storageKey }, { transcribe: dependencies.transcribe, teamKey: dependencies.teamKey, signal: dependencies.signal, logger });
+    dependencies.signal?.throwIfAborted();
     await heartbeat.checkpoint();
     if (!extraction.extractedText.trim()) throw new DocumentProcessingError('DOCUMENT_EXTRACTION_FAILED', 'No text could be extracted from the document.', 'document-extract');
     const { content } = await actions.cleanup({ text: extraction.extractedText }, { clean: dependencies.cleanText, logger });
     const semantics = await actions.embed({ name: normalized.name, content }, { embed: dependencies.embed, embedBatch: dependencies.embedBatch, dimensions: dependencies.embeddingDimensions, logger });
+    dependencies.signal?.throwIfAborted();
     await heartbeat.checkpoint();
     const timestamp = new Date().toISOString();
     const result = await actions.insert({
@@ -177,10 +184,8 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
 export * from './actions';
 export * from './chunking';
 export * from './errors';
-export * from './file';
 export * from './exports';
 export * from './preview';
 export * from './representation';
 export * from './schemas';
 export * from './storage';
-export * from './textract';

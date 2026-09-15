@@ -17,11 +17,11 @@ describe('action registry', () => {
 
   test('contains only generic runtime primitives with explicit model policies', () => {
     expect(ACTION_SLUGS).toEqual([
-      'text', 'image', 'speech', 'embed', 'file', 'upload', 'queue',
+      'text', 'image', 'speech', 'embed', 'upload', 'queue',
       'traverse', 'read', 'insert', 'upsert', 'update', 'delete',
     ]);
     expect(ACTION_DEFINITIONS.filter((action) => action.modelPolicy === 'none').map((action) => action.id))
-      .toEqual(['file', 'upload', 'queue', 'traverse', 'read', 'insert', 'upsert', 'update', 'delete']);
+      .toEqual(['upload', 'queue', 'traverse', 'read', 'insert', 'upsert', 'update', 'delete']);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'text')?.models)
       .toEqual([{ slot: 'primary', provider: 'openrouter', model: 'google.gemini-3.1-flash-lite', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'image')?.models)
@@ -33,8 +33,6 @@ describe('action registry', () => {
       .toEqual([{ slot: 'primary', provider: 'openrouter', model: 'xai.grok-voice-tts-1.0', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'embed')?.models)
       .toEqual([{ slot: 'primary', provider: 'openrouter', model: 'openai.text-embedding-3-small', priority: 100 }]);
-    expect(ACTION_DEFINITIONS.find((action) => action.id === 'file')?.models)
-      .toEqual([]);
   });
 
   test('delegates generic data primitives to the node helper implementation', async () => {

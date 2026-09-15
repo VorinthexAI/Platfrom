@@ -35,12 +35,10 @@ describe("mobile auth helpers", () => {
       user: { display_name: "Ada Lovelace", country_code: "SE" },
       team: { key: "team" },
       teamMembership: { key: "membership", role: "owner" },
-      teamSelectionEnabled: true,
       scope: { key: "scope" },
     });
     expect(context.team).toEqual({ key: "team" });
     expect(context.scope).toEqual({ key: "scope" });
-    expect(context.teamSelectionEnabled).toBe(true);
     expect(context.user?.countryCode).toBe("SE");
     expect(hasCompleteAuthContext(context)).toBe(true);
     expect(hasCompleteAuthContext({ ...context, scope: null })).toBe(false);

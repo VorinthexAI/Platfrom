@@ -684,8 +684,9 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   }
 
   function handleTablePlaceLongPress(key: string) {
-    void Haptics.selectionAsync();
+    const enteringSelection = selectedTablePlaceKeys.length === 0 && !selectedTablePlaceKeys.includes(key);
     toggleTablePlaceSelection(key);
+    if (enteringSelection) void Haptics.selectionAsync();
   }
 
   function updateSelectedPlaces(patch: Partial<Pick<Place, "status" | "isFavorite">>) {
@@ -1051,8 +1052,9 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   }
 
   function handleOrderLongPress(key: string) {
-    void Haptics.selectionAsync();
+    const enteringSelection = selectedOrderPlaceKeys.length === 0 && !selectedOrderPlaceKeys.includes(key);
     setSelectedOrderPlaceKeys((current) => current.includes(key) ? current.filter((candidate) => candidate !== key) : [...current, key]);
+    if (enteringSelection) void Haptics.selectionAsync();
   }
 
   function removeSelectedOrderPlaces() {
@@ -1067,8 +1069,9 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   }
 
   function handleTripPlaceLongPress(key: string) {
-    void Haptics.selectionAsync();
+    const enteringSelection = selectedTripPlaceKeys.length === 0 && !selectedTripPlaceKeys.includes(key);
     setSelectedTripPlaceKeys((current) => current.includes(key) ? current.filter((candidate) => candidate !== key) : [...current, key]);
+    if (enteringSelection) void Haptics.selectionAsync();
   }
 
   function handleTripPlacePress(place: Place) {
@@ -1239,12 +1242,15 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
       : [...current, attachment]);
   }
 
-  function handleAssetLongPress(attachment: TripAttachment) {
+  function handleAssetLongPress(attachment: TripAttachment, suppressPress = true) {
     const id = `${attachment.type}:${attachment.key}`;
-    assetLongPress.current = id;
-    setTimeout(() => { if (assetLongPress.current === id) assetLongPress.current = undefined; }, 50);
+    if (suppressPress) {
+      assetLongPress.current = id;
+      setTimeout(() => { if (assetLongPress.current === id) assetLongPress.current = undefined; }, 50);
+    }
+    const enteringSelection = selectedAssetAttachments.length === 0 && !selectedAssetAttachments.some(({ type, key }) => type === attachment.type && key === attachment.key);
     toggleAssetAttachment(attachment);
-    void Haptics.selectionAsync();
+    if (enteringSelection) void Haptics.selectionAsync();
   }
 
   function openAsset(attachment: TripAttachment) {
@@ -1377,7 +1383,7 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     <BottomSheet footer={<View style={styles.sheetFooter}><Button disabled={placeDeleting} onPress={() => void confirmDeletePlace()} size="md" variant="primary">Delete</Button><Button disabled={placeDeleting} onPress={() => setPlaceDeleteOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} onOpenChange={setPlaceDeleteOpen} open={placeDeleteOpen} title="Delete place?" />
     <BottomSheet hideHeading onOpenChange={setTableFilterOpen} open={tableFilterOpen} title=""><View style={styles.filterSheet}>{tableTab === "places" ? <><View style={styles.filterSwitchRow}><Switch accessibilityLabel="Filter by favorite places" checked={placeFavoritesOnly} onCheckedChange={(checked) => { setPlaceFavoritesOnly(checked); setTableFilterOpen(false); }} /><Text style={styles.filterSwitchLabel}>Favorites</Text></View><View style={styles.filterSwitchRow}><Switch accessibilityLabel="Filter by places you want to go" checked={placeStatusFilter === "wishlist"} onCheckedChange={(checked) => { setPlaceStatusFilter(checked ? "wishlist" : "all"); setTableFilterOpen(false); }} /><Text style={styles.filterSwitchLabel}>Want to go</Text></View><View style={styles.filterSwitchRow}><Switch accessibilityLabel="Filter by visited places" checked={placeStatusFilter === "visited"} onCheckedChange={(checked) => { setPlaceStatusFilter(checked ? "visited" : "all"); setTableFilterOpen(false); }} /><Text style={styles.filterSwitchLabel}>Visited</Text></View></> : <><View style={styles.filterSwitchRow}><Switch accessibilityLabel="Filter by favorite trips" checked={tripFavoritesOnly} onCheckedChange={(checked) => { setTripFavoritesOnly(checked); setTableFilterOpen(false); }} /><Text style={styles.filterSwitchLabel}>Favorites</Text></View><View style={styles.filterSwitchRow}><Switch accessibilityLabel="Filter by completed trips" checked={tripCompletedOnly} onCheckedChange={(checked) => { setTripCompletedOnly(checked); setTableFilterOpen(false); }} /><Text style={styles.filterSwitchLabel}>Completed trips</Text></View></>}<BottomSheetItem onPress={openTagFilters} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem><Button onPress={() => void openPlaceSearchHistory()} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button></View></BottomSheet>
     <TagFilterSheet context={contentContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />
-    <ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />
+    <ResourceTagsSheet context={contentContext} onApply={() => { setSelectedTablePlaceKeys([]); setSelectedOrderPlaceKeys([]); setSelectedTripPlaceKeys([]); }} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />
     <SearchHistorySheet history={placeSearchHistory} loading={placeHistoryLoading} onClose={closePlaceSearchHistory} onOpenChange={(open) => { if (!open) closePlaceSearchHistory(); }} onRemove={(item) => void removePlaceHistoryQuery(item)} onSelect={applyPlaceHistoryQuery} open={placeHistoryOpen} removingQuery={removingPlaceHistoryQuery} />
     <BottomSheet focusKey="findPlace" footer={<Button onPress={() => setFindPlaceOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button>} height="full" onOpenChange={setFindPlaceOpen} open={createPlaceOpen} title="Find place">
       <View style={styles.createPlaceContent}><View style={styles.workspaceSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search places" maxLength={500} onChangeText={updatePlaceSearch} placeholder="Search any country or city..." ref={placeSearchInput} style={styles.workspaceSearchInput} value={placeSearchQuery} />{placeSearchQuery.trim() ? <Button accessibilityLabel="Clear place search" contentMode="raw" iconOnly onPress={() => updatePlaceSearch("")} size="md" style={[styles.sheetSearchClear, styles.sheetSecondary]} variant="secondary"><CloseIcon size="sm" /></Button> : null}</View><ScrollView accessibilityLabel={placeSearchLoading ? "Searching places" : `${placeSearchResults.length} places found`} accessibilityLiveRegion="polite" accessibilityState={{ busy: placeSearchLoading }} contentContainerStyle={[styles.cityList, !placeSearchLoading && placeSearchQuery.trim().length >= 2 && placeSearchResults.length === 0 && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}>{placeSearchLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.cityPillSkeleton} />) : placeSearchResults.map((result) => <Button accessibilityLabel={`Open ${result.name}, ${result.country}`} contentMode="raw" key={`${result.kind}-${result.countryCode}-${normalizePlaceName(result.name)}`} onPress={() => openSearchResult(result)} size="md" style={[styles.cityPill, styles.sheetSecondary]} variant="secondary"><Text numberOfLines={1} style={styles.cityName}>{result.name}</Text><ChevronRightIcon size="sm" /></Button>)}{!placeSearchLoading && placeSearchQuery.trim().length >= 2 && placeSearchResults.length === 0 ? <Text style={styles.emptyText}>No places found.</Text> : null}</ScrollView></View>
@@ -1500,13 +1506,18 @@ function GeneratedDocumentSheets<T extends GeneratedDocument>({ appendGeneration
   const closeDetail = selected ? onDetailClose : onClose;
   const visibleDocuments = documents?.filter(({ key }) => !removedDocumentKeys.includes(key));
   const activeSelectedKeys = selectedDocumentKeys.filter((key) => visibleDocuments?.some((document) => document.key === key));
-  const toggleSelection = (key: string) => setSelectedDocumentKeys((current) => current.includes(key) ? current.filter((candidate) => candidate !== key) : [...current, key]);
-  const handleLongPress = (key: string) => {
+  const toggleSelection = (key: string) => {
+    const enteringSelection = activeSelectedKeys.length === 0 && !activeSelectedKeys.includes(key);
+    setSelectedDocumentKeys((current) => current.includes(key) ? current.filter((candidate) => candidate !== key) : [...current, key]);
+    if (enteringSelection) void Haptics.selectionAsync();
+  };
+  const handleLongPress = (key: string, suppressPress = true) => {
     if (!appendGeneration) return;
-    longPressedDocument.current = key;
-    setTimeout(() => { if (longPressedDocument.current === key) longPressedDocument.current = undefined; }, 50);
+    if (suppressPress) {
+      longPressedDocument.current = key;
+      setTimeout(() => { if (longPressedDocument.current === key) longPressedDocument.current = undefined; }, 50);
+    }
     toggleSelection(key);
-    void Haptics.selectionAsync();
   };
   const handlePress = (document: T) => {
     const longPress = longPressedDocument.current;
@@ -1541,7 +1552,7 @@ function GeneratedDocumentSheets<T extends GeneratedDocument>({ appendGeneration
     <BottomSheet footer={<Button onPress={closeDetail} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button>} height="full" onOpenChange={(nextOpen) => { if (!nextOpen && open && ((!appendGeneration && generating) || selected)) closeDetail(); }} open={open && ((!appendGeneration && generating) || Boolean(selected))} title={generating && !appendGeneration ? `Creating ${singular.toLocaleLowerCase()}` : selected?.name ?? singular}>
       {generating && !appendGeneration ? <View accessibilityLabel={`Generating ${singular.toLocaleLowerCase()}`} accessibilityRole="progressbar" style={styles.tripGuideGenerationLoading}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.tripGuidePillSkeleton} />)}</View> : children}
     </BottomSheet>
-    <ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={open && resourceTagsOpen} targets={activeSelectedKeys.map((key) => ({ type: "document", key }))} />
+    <ResourceTagsSheet context={contentContext} onApply={() => setSelectedDocumentKeys([])} onClose={() => setResourceTagsOpen(false)} open={open && resourceTagsOpen} targets={activeSelectedKeys.map((key) => ({ type: "document", key }))} />
     <BottomSheet hideHeading onOpenChange={setDocumentActionsOpen} open={open && appendGeneration && activeSelectedKeys.length > 0 && documentActionsOpen} title=""><BottomSheetMenu><BottomSheetItem onPress={() => { setDocumentActionsOpen(false); requestAnimationFrame(() => setResourceTagsOpen(true)); }} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem><BottomSheetItem disabled={removing} onPress={() => { setDocumentActionsOpen(false); requestAnimationFrame(() => setRemoveConfirmOpen(true)); }} style={styles.sheetAction} variant="secondary">Remove</BottomSheetItem></BottomSheetMenu></BottomSheet>
     <BottomSheet dismissible={!removing} onOpenChange={(nextOpen) => { if (!nextOpen) setRemoveConfirmOpen(false); }} open={open && appendGeneration && activeSelectedKeys.length > 0 && removeConfirmOpen} title={`Remove ${activeSelectedKeys.length === 1 ? singular.toLocaleLowerCase() : `${activeSelectedKeys.length} ${label.toLocaleLowerCase()}`}?`}><View style={styles.sheetFooter}><Button disabled={removing} loading={removing} onPress={() => void removeSelected()} size="md" variant="primary">Remove</Button><Button disabled={removing} onPress={() => setRemoveConfirmOpen(false)} size="md" variant="secondary">Close</Button></View></BottomSheet>
   </>;

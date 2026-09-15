@@ -32,7 +32,7 @@ export async function claimStorageDeletionJobs(limit = 100): Promise<StorageDele
   const claimToken = randomUUID();
   const claimedAt = new Date().toISOString();
   const staleBefore = new Date(Date.now() - STORAGE_DELETION_CLAIM_MS).toISOString();
-  const cursor = await db.query('FOR job IN storageDeletionJobs FILTER job.status == null || job.status == "pending" || (job.status == "reserved" && job.reservationExpiresAt <= @claimedAt) || (job.status == "deleting" && job.claimedAt <= @staleBefore) SORT job.createdAt ASC, job._key ASC LIMIT @limit UPDATE job WITH { status: "deleting", claimToken: @claimToken, claimedAt: @claimedAt, reservationExpiresAt: null } IN storageDeletionJobs OPTIONS { keepNull: false } RETURN NEW', { limit: z.number().int().min(1).max(1000).parse(limit), claimToken, claimedAt, staleBefore });
+  const cursor = await db.query('FOR job IN storageDeletionJobs FILTER job.status == null || job.status == "pending" || (job.status == "reserved" && job.reservationExpiresAt <= @claimedAt) || (job.status == "deleting" && job.claimedAt <= @staleBefore) SORT job.createdAt ASC, job._key ASC LIMIT @limit UPDATE job WITH { status: "deleting", claimToken: @claimToken, claimedAt: @claimedAt, reservationExpiresAt: null } IN storageDeletionJobs OPTIONS { keepNull: false } RETURN NEW', { limit: z.number().int().min(1).max(1000).parse(limit), claimToken, claimedAt, staleBefore }, { maxRuntime: 30 });
   return (await cursor.all()).map((job) => storageDeletionJobSchema.parse(withArangoKey(job)));
 }
 

@@ -31,7 +31,7 @@ const styles = StyleSheet.create({
   selected: { borderColor: "#F5F7F8" },
   mixed: { borderColor: "#9CA7AD", borderStyle: "dashed", backgroundColor: "rgba(245, 247, 248, 0.07)" },
   labelButton: { minWidth: 0, minHeight: 32, height: 32, paddingHorizontal: 10, paddingVertical: 0, overflow: "hidden" },
-  grow: { flex: 1 },
+  grow: { flex: 1, justifyContent: "flex-start" },
   label: { color: "#F5F7F8", fontFamily: "Geist_500Medium", fontSize: 13 },
   remove: { width: 24, height: 24, minHeight: 24, marginRight: 4, paddingHorizontal: 0, paddingVertical: 0 },
 });

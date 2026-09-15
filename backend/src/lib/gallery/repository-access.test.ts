@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { CONTRIBUTABLE_MANAGED_COLLECTION_PURPOSES, READABLE_MANAGED_COLLECTION_PURPOSES } from '@/lib/db/collections.node';
 import { newId } from '@/lib/ids';
 import { createGalleryRepository } from './repository';
 
@@ -18,10 +19,77 @@ describe('Gallery repository collection access', () => {
     expect(query).toContain('membership.status == "active"');
     expect(query).toContain('membership.teamKey == scope.teamKey');
     expect(query).toContain('membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"]');
+    expect(query).toContain('collection.purpose IN ["email-media","generated-media","place-media","scope-directory"]');
     expect(query).toContain('collection.mutationPolicy == "system-only" && scoped');
     expect(query).toContain('collection.ownerKey == @actorKey');
     expect(query).not.toContain('collectionMembers');
     expect(query).not.toContain('collaborator');
+  });
+
+  test('separates approved managed contribution from container management', async () => {
+    let query = '';
+    const database = { async query(value: string) { query = value; return { async all() { return []; } }; } };
+    const repository = createGalleryRepository(database as never);
+
+    await expect(repository.canContributeToCollection(newId(), newId(), newId())).resolves.toBe(false);
+    expect(query).toContain('collection.purpose IN ["email-media","generated-media","place-media"]');
+    expect(query).toContain('collection.mutationPolicy == "system-only" ?');
+    expect(query).not.toContain('scope-directory');
+  });
+
+  test('keeps every contributable managed purpose readable while scope-directory remains read-only', async () => {
+    expect(CONTRIBUTABLE_MANAGED_COLLECTION_PURPOSES).toEqual(['email-media', 'generated-media', 'place-media']);
+    expect(READABLE_MANAGED_COLLECTION_PURPOSES).toEqual(['email-media', 'generated-media', 'place-media', 'scope-directory']);
+
+    const queries: string[] = [];
+    const database = { async query(value: string) { queries.push(value); return { async all() { return []; } }; } };
+    const repository = createGalleryRepository(database as never);
+    const scopeKey = newId(), actorKey = newId();
+    await repository.getCollectionRole(scopeKey, newId(), actorKey);
+    await repository.listOverview({ scopeKey, actorKey, limit: 10 });
+    await repository.searchAccessibleCollections({ scopeKey, actorKey, embedding: [], minimumScore: 0, limit: 10 });
+
+    const readablePolicy = 'collection.purpose IN ["email-media","generated-media","place-media","scope-directory"]';
+    expect(queries).toHaveLength(4);
+    for (const query of queries) expect(query).toContain(readablePolicy);
+  });
+
+  test('keeps approved managed upload queue and finalization actor-owned and rejects system children', async () => {
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    const queue = source.slice(source.indexOf('    queueUploads(input)'), source.indexOf('    claimUploads(', source.indexOf('    queueUploads(input)')));
+    const finalize = source.slice(source.indexOf('    finalizeUpload('), source.indexOf('    compensateUpload(', source.indexOf('    finalizeUpload(')));
+    const canFinalize = source.slice(source.indexOf('    async canFinalizeUpload('), source.indexOf('    searchAccessibleImages:', source.indexOf('    async canFinalizeUpload(')));
+    for (const policy of [queue, finalize, canFinalize]) {
+      expect(policy).toContain('collection.purpose IN ${CONTRIBUTABLE_MANAGED_COLLECTION_PURPOSES}');
+      expect(policy).not.toContain('scope-directory');
+    }
+    expect(finalize).toContain('image.createdByKey == @actorKey && image.mutationPolicy != "system-only"');
+  });
+
+  test('limits managed highlight and memory flows to actor-owned mutable artifacts', async () => {
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    const intelligence = source.slice(source.indexOf('    async listHighlightCandidates('));
+    expect(intelligence).toContain('image.createdByKey == @actorKey && image.mutationPolicy != "system-only"');
+    expect(intelligence).toContain('highlight.createdByKey == @actorKey');
+    expect(intelligence).toContain('memory.createdByKey == @actorKey');
+    expect(intelligence).toContain('collection.purpose IN ${CONTRIBUTABLE_MANAGED_COLLECTION_PURPOSES}');
+  });
+
+  test('authorizes favorite separately for readable managed and system images', async () => {
+    const queries: string[] = [];
+    const database = { async query(query: string) { queries.push(query); return { async all() { return []; } }; } };
+    const repository = createGalleryRepository(database as never);
+
+    await repository.canFavoriteImage(newId(), newId(), newId());
+    await repository.setImageFavorite(newId(), newId(), newId(), true, new Date().toISOString());
+
+    for (const query of queries) {
+      expect(query).toContain('collection.purpose IN ["email-media","generated-media","place-media","scope-directory"]');
+      expect(query).toContain('readableManaged');
+      expect(query).not.toContain('image.mutationPolicy != "system-only" FILTER');
+    }
+    expect(queries[0]).toContain('FILTER elevated || readableManaged || mutable');
+    expect(queries[1]).toContain('FILTER elevated || readableManaged || mutable UPDATE image');
   });
 
   test('clears scope cover references inside both image deletion transactions', async () => {

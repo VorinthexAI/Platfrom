@@ -33,13 +33,20 @@ describe('user inbox service', () => {
     await expect(service.read({ threadKey }, context)).rejects.toBeInstanceOf(UserInboxNotFoundError);
   });
 
-  test('enqueues an idempotent trusted staff reply', async () => {
-    const notificationKey = newId(), messageKey = newId(), enqueued: string[] = [];
+  test('publishes and enqueues an idempotent trusted staff reply', async () => {
+    const notificationKey = newId(), messageKey = newId(), enqueued: string[] = [], published: unknown[] = [];
     const message = { key: messageKey, threadKey, teamKey, scopeKey, userKey, sender: 'staff' as const, senderUserKey: newId(), body: 'We are looking into it.', createdAt: '2026-09-09T10:00:00.000Z' };
     const repository = { staffReply: async (...args: unknown[]) => ({ state: 'ok', value: { message, notificationKey, deliveries: 1, args } }) } as any;
-    const result = await createUserInboxService({ repository, enqueue: async (key) => { enqueued.push(key); } }).staffReply({ threadKey, message: 'We are looking into it.' }, newId(), 'reply-1');
+    const result = await createUserInboxService({ repository, enqueue: async (key) => { enqueued.push(key); }, publishChanged: async (...args) => { published.push(args); } }).staffReply({ threadKey, message: 'We are looking into it.' }, newId(), 'reply-1');
     expect(result).toEqual(message);
     expect(enqueued).toEqual([notificationKey]);
+    expect(published).toEqual([[userKey, 'communication.changed']]);
     await expect(createUserInboxService({ repository: { staffReply: async () => ({ state: 'conflict' }) } as any }).staffReply({ threadKey, message: 'Different' }, newId(), 'reply-1')).rejects.toBeInstanceOf(UserInboxIdempotencyError);
+  });
+
+  test('publishes a pushless staff reply and preserves its durable success when publication fails', async () => {
+    const message = { key: newId(), threadKey, teamKey, scopeKey, userKey, sender: 'staff' as const, senderUserKey: newId(), body: 'Reply', createdAt: '2026-09-09T10:00:00.000Z' };
+    const repository = { staffReply: async () => ({ state: 'ok', value: { message, notificationKey: newId(), deliveries: 0 } }) } as any;
+    await expect(createUserInboxService({ repository, publishChanged: async () => { throw new Error('SSE unavailable'); } }).staffReply({ threadKey, message: 'Reply' }, newId(), 'reply-2')).resolves.toEqual(message);
   });
 });

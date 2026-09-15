@@ -166,6 +166,14 @@ export function reconcileOptimisticUploads<TOptimistic extends { clientKey: stri
   return { remaining: optimistic.filter(({ clientKey }) => !promotedClients.has(clientKey)), promoted };
 }
 
+export function bindPersistedGalleryGridKeys(current: Record<string, string>, jobs: { clientKey: string; imageKey: string }[]) {
+  return { ...current, ...Object.fromEntries(jobs.map(({ clientKey, imageKey }) => [imageKey, clientKey])) };
+}
+
+export function galleryPersistedGridKey(imageKey: string, persistedKeys: Record<string, string>) {
+  return persistedKeys[imageKey] ?? imageKey;
+}
+
 export function reconcileUploadJobRegistry<TJob extends { uploadKey: string }, TStatus extends { key: string; status: string }>(jobs: TJob[], statuses: TStatus[]) {
   const byKey = new Map(statuses.map((status) => [status.key, status]));
   const completed: { job: TJob; status: TStatus }[] = [];

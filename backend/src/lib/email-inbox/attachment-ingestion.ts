@@ -87,6 +87,7 @@ type AttachmentView = AttachmentSource & {
   createdAt: string;
   updatedAt: string;
   storageKey?: string;
+  exportPending?: boolean;
 };
 const view = (attachment: EmailAttachment): AttachmentView => ({
   key: attachment.key,
@@ -108,6 +109,7 @@ const view = (attachment: EmailAttachment): AttachmentView => ({
     ? { leaseExpiresAt: attachment.leaseExpiresAt }
     : {}),
   ...(attachment.storageKey ? { storageKey: attachment.storageKey } : {}),
+  ...(attachment.exportPending !== undefined ? { exportPending: attachment.exportPending } : {}),
   createdAt: attachment.createdAt,
   updatedAt: attachment.updatedAt,
 });
@@ -115,6 +117,7 @@ const parse = (value: unknown) =>
   emailAttachmentSchema.parse(withArangoKey(value as Record<string, unknown>));
 
 export interface EmailAttachmentRepository {
+  markExported(key: string, userKey: string): Promise<void>;
   activeMembership(input: {
     teamKey: string;
     scopeKey: string;
@@ -185,6 +188,9 @@ export function createEmailAttachmentRepository(
 ): EmailAttachmentRepository {
   const authorize = `LET connector = DOCUMENT(userConnectors, @connectorKey) FILTER connector != null && connector.userKey == @userKey && connector.status != "revoked"`;
   return {
+    async markExported(key, userKey) {
+      await database.query('FOR attachment IN emailAttachments FILTER attachment._key == @key && attachment.userKey == @userKey UPDATE attachment WITH { exportPending: false } IN emailAttachments', { key, userKey });
+    },
     async activeMembership(input) {
       const cursor = await database.query(
         'LET scope = DOCUMENT(scopes, @scopeKey) FILTER scope != null && scope.teamKey == @teamKey FOR member IN userTeams FILTER member.teamKey == @teamKey && member.status == "active" LET scopeMember = FIRST(FOR item IN scopeMembers FILTER item.scopeKey == @scopeKey && item.userTeamKey == member._key && item.status == "active" LIMIT 1 RETURN item) FILTER member.teamRole IN ["owner", "admin"] || scopeMember != null SORT member._key == @preferredTeamMembershipKey DESC, member._key ASC LIMIT 1 RETURN member._key',
@@ -199,13 +205,14 @@ export function createEmailAttachmentRepository(
         );
       return key;
     },
-    async completed(input, teamMembershipKey) {
+    async completed(input, _teamMembershipKey) {
       const cursor = await database.query(
         `${authorize} LET attachment = DOCUMENT(@@attachments, @key) FILTER attachment == null || attachment.status == "completed" RETURN attachment`,
         {
           "@attachments": EMAIL_ATTACHMENTS_COLLECTION,
-          ...input,
-          teamMembershipKey,
+          key: input.key,
+          connectorKey: input.connectorKey,
+          userKey: input.userKey,
         },
       );
       const raw = await cursor.next();
@@ -234,13 +241,14 @@ export function createEmailAttachmentRepository(
         );
       return view(value);
     },
-    async claim(input, teamMembershipKey, leaseToken, now, leaseExpiresAt) {
+    async claim(input, _teamMembershipKey, leaseToken, now, leaseExpiresAt) {
       const existingCursor = await database.query(
         `${authorize} RETURN DOCUMENT(@@attachments, @key)`,
         {
           "@attachments": EMAIL_ATTACHMENTS_COLLECTION,
-          ...input,
-          teamMembershipKey,
+          key: input.key,
+          connectorKey: input.connectorKey,
+          userKey: input.userKey,
         },
       );
       const existingRaw = await existingCursor.next();
@@ -287,6 +295,7 @@ export function createEmailAttachmentRepository(
         mimeType: input.sourceMimeType,
         sizeBytes: input.sourceSize,
         status: "processing",
+        exportPending: true,
         leaseToken,
         leaseExpiresAt,
         ...(existing?.storageKey ? { storageKey: existing.storageKey } : {}),
@@ -429,20 +438,14 @@ async function ensureExportContainers(
     connectorKey,
   );
   const embedding = zeroEmbedding();
-  await database.query(
-    `LET inboxName = FIRST(FOR inbox IN emailInboxes FILTER inbox.scopeKey == @scopeKey && inbox.connectorKey == @connectorKey LIMIT 1 RETURN inbox.name) FILTER inboxName != null UPSERT { _key: @rootKey } INSERT { _key: @rootKey, scopeKey: @scopeKey, parentFolderKey: @platformKey, name: "Signal", presentation: "communication", mutationPolicy: "system-container", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE { parentFolderKey: @platformKey, presentation: "communication", mutationPolicy: "system-container" } IN folders UPSERT { _key: @inboxKey } INSERT { _key: @inboxKey, scopeKey: @scopeKey, parentFolderKey: @rootKey, name: inboxName, mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE { parentFolderKey: @rootKey, presentation: null } IN folders OPTIONS { keepNull: false } UPSERT { _key: @collectionKey } INSERT { _key: @collectionKey, scopeKey: @scopeKey, ownerKey: @teamMembershipKey, name: "Signal", presentation: "communication", mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE { ownerKey: @teamMembershipKey, presentation: "communication" } IN collections`,
-    {
-      rootKey,
-      platformKey: initialWorkspaceFolderKey(scopeKey, "platform"),
-      inboxKey,
-      collectionKey,
-      teamMembershipKey,
-      scopeKey,
-      connectorKey,
-      embedding,
-      now,
-    },
-  );
+  const source = await database.query('FOR inbox IN emailInboxes FILTER inbox.scopeKey == @scopeKey && inbox.connectorKey == @connectorKey LIMIT 1 RETURN inbox.name', { scopeKey, connectorKey });
+  const inboxName = await source.next();
+  if (typeof inboxName !== 'string') throw new Error('Attachment export inbox is unavailable');
+  // ArangoDB forbids reading a collection again after modifying it in one AQL
+  // query. Separate idempotent UPSERTs also make partial container setup retryable.
+  await database.query('UPSERT { _key: @rootKey } INSERT { _key: @rootKey, scopeKey: @scopeKey, parentFolderKey: @platformKey, name: "Signal", presentation: "communication", mutationPolicy: "system-container", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE { parentFolderKey: @platformKey, presentation: "communication", mutationPolicy: "system-container" } IN folders', { rootKey, scopeKey, platformKey: initialWorkspaceFolderKey(scopeKey, 'platform'), embedding, now });
+  await database.query('UPSERT { _key: @inboxKey } INSERT { _key: @inboxKey, scopeKey: @scopeKey, parentFolderKey: @rootKey, name: @inboxName, mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE { parentFolderKey: @rootKey, presentation: null } IN folders OPTIONS { keepNull: false }', { inboxKey, scopeKey, rootKey, inboxName, embedding, now });
+  await database.query('UPSERT { _key: @collectionKey } INSERT { _key: @collectionKey, scopeKey: @scopeKey, ownerKey: @teamMembershipKey, name: "Signal", presentation: "communication", mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE { ownerKey: @teamMembershipKey, presentation: "communication" } IN collections', { collectionKey, scopeKey, teamMembershipKey, embedding, now });
   return { inboxKey, collectionKey };
 }
 
@@ -459,6 +462,8 @@ export function createEmailAttachmentIngestionService(
   const exportDatabase = dependencies.exportDatabase ?? db;
   const now = dependencies.now ?? (() => new Date());
   const bestEffortExport = async (input: {
+    userKey: string;
+    teamKey: string;
     scopeKey: string;
     connectorKey: string;
     teamMembershipKey: string;
@@ -468,6 +473,17 @@ export function createEmailAttachmentIngestionService(
     bytes: Uint8Array;
   }) => {
     try {
+      const finish = async () => {
+        const publish = dependencies.publishScopeEvent ?? (await import('@/api/events')).publishScopeEvent;
+        await publish(input.scopeKey, input.part.type === 'document' ? 'content.changed' : 'image.changed');
+        await repository.markExported(input.bindingKey, input.userKey);
+        return true;
+      };
+      const existing = await exportDatabase.query('LET item = DOCUMENT(@@collection, @key) FILTER item != null && item.scopeKey == @scopeKey RETURN true', {
+        '@collection': input.part.type === 'document' ? 'documents' : 'images',
+        key: stableKey(input.part.type === 'document' ? 'email-archive-export' : 'email-gallery-export', input.bindingKey), scopeKey: input.scopeKey,
+      });
+      if (await existing.next() === true) return await finish();
       const containers = await ensureExportContainers(
         exportDatabase,
         input.scopeKey,
@@ -501,6 +517,7 @@ export function createEmailAttachmentIngestionService(
           },
           {
             ...dependencies.documentDependencies,
+            teamKey: input.teamKey,
             storage: exportStorage,
             insert: async (document: Document) => {
               const value = documentSchema.parse({
@@ -580,8 +597,12 @@ export function createEmailAttachmentIngestionService(
           },
         );
       }
-    } catch {
-      /* Exports are independent convenience copies. */
+      // Publish before acknowledging the durable export intent. Failed publication
+      // is retried too, so an open Archive/Gallery view eventually refreshes.
+      return await finish();
+    } catch (error) {
+      console.error('email attachment export pending retry', { attachmentKey: input.bindingKey, error });
+      return false;
     }
   };
   const compensate = async (
@@ -656,7 +677,7 @@ export function createEmailAttachmentIngestionService(
       new Date(now().getTime() + PROCESSING_LEASE_MS).toISOString(),
     );
     if (claim.status === "replay") {
-      await bestEffortExport({ ...input, bindingKey });
+      if (claim.binding.exportPending !== false) await bestEffortExport({ ...input, bindingKey });
       return input.deferCompletion
         ? { ref: { type: claim.binding.targetType, key: bindingKey } }
         : { type: claim.binding.targetType, key: bindingKey };
@@ -749,6 +770,20 @@ export function createEmailAttachmentIngestionService(
   };
   return {
     ingest,
+    async retryExport(attachmentKey: string) {
+      const cursor = await exportDatabase.query('LET attachment = DOCUMENT(emailAttachments, @key) LET connector = attachment == null ? null : DOCUMENT(userConnectors, attachment.connectorKey) FILTER attachment != null && attachment.status == "completed" && attachment.exportPending == true && connector != null && connector.userKey == attachment.userKey && connector.status != "revoked" && connector.syncEnabled != false RETURN attachment', { key: attachmentKey });
+      const value = await cursor.next();
+      if (!value) return;
+      const attachment = parse(value);
+      const teamMembershipKey = await repository.activeMembership({ teamKey: attachment.teamKey, scopeKey: attachment.scopeKey, preferredTeamMembershipKey: '' });
+      const { bytes } = await (dependencies.storage ?? documentStorage).download(attachment.storageKey!);
+      const exported = await bestEffortExport({
+        userKey: attachment.userKey, teamKey: attachment.teamKey, scopeKey: attachment.scopeKey, connectorKey: attachment.connectorKey,
+        teamMembershipKey, billingUserKey: attachment.userKey, bindingKey: attachment.key, bytes,
+        part: { path: attachment.partPath, type: attachment.kind, mimeType: attachment.mimeType, filename: attachment.filename, size: attachment.sizeBytes },
+      });
+      if (!exported) throw new Error('Email attachment export remains pending');
+    },
     async ingestMessage(input: {
       userKey: string;
       teamKey: string;
@@ -844,16 +879,22 @@ export function createEmailAttachmentIngestionService(
       });
       try {
         for (const part of discovery.parts) {
-          const value = await ingest({
-            ...input,
-            teamMembershipKey,
-            providerMessageId: input.message.id,
-            part,
-            bytes: await input.gmail.attachment(input.message.id, part),
-            deferCompletion: true,
-          });
-          result.refs.push(value.ref);
-          if (value.staged) result.staged.push(value.staged);
+          try {
+            const value = await ingest({
+              ...input,
+              teamMembershipKey,
+              providerMessageId: input.message.id,
+              part,
+              bytes: await input.gmail.attachment(input.message.id, part),
+              deferCompletion: true,
+            });
+            result.refs.push(value.ref);
+            if (value.staged) result.staged.push(value.staged);
+          } catch (caught) {
+            if (!(caught instanceof GmailPermanentAttachmentError)) throw caught;
+            result.availability = 'failed';
+            result.unavailableCount = (result.unavailableCount ?? 0) + 1;
+          }
         }
         return result;
       } catch (caught) {

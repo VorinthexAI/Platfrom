@@ -8,10 +8,10 @@ import { CloseIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import { BrandedCameraModal } from "@/components/capability/BrandedCameraModal";
 import { normalizeCapturedPng } from "@/lib/captured-image";
-import type { PreparedGalleryUpload } from "@/lib/gallery-client";
+import { MAX_GALLERY_UPLOAD_IMAGES, type PreparedGalleryUpload } from "@/lib/gallery-client";
 import { fonts, palette, radii, spacing } from "@/theme/tokens";
 
-export const MAX_GALLERY_CAPTURES = 12;
+export const MAX_GALLERY_CAPTURES = MAX_GALLERY_UPLOAD_IMAGES;
 
 type Props = {
   onClose: () => void;

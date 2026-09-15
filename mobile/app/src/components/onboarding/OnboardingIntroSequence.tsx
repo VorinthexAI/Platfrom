@@ -77,6 +77,7 @@ export function OnboardingIntroSequence({ apps, onFinished }: { apps: readonly S
   const progress = useSharedValue(1 / stages.length);
   const announcement = currentStage.kind === "mission" ? `VORINTHEX AI. ${MISSION}` : `${currentStage.app.name}. ${currentStage.app.description}`;
   const eventSlug: OnboardingEventSlug = currentStage.kind === "mission" ? "onboarding.vorinthex-ai" : `onboarding.${currentStage.app.slug}`;
+  const eventAppKey = currentStage.kind === "mission" ? apps.find(({ slug }) => slug === "vorinthex-ai")?.key : currentStage.app.key;
   const heroHeight = Math.max(280, height * 0.4);
 
   useLayoutEffect(() => {
@@ -100,8 +101,8 @@ export function OnboardingIntroSequence({ apps, onFinished }: { apps: readonly S
     AccessibilityInfo.announceForAccessibility(announcement);
     if (recordedEvents.current.has(eventSlug)) return;
     recordedEvents.current.add(eventSlug);
-    void recordOnboardingEvent(eventSlug).catch(() => undefined);
-  }, [announcement, eventSlug]);
+    void recordOnboardingEvent(eventSlug, eventAppKey).catch(() => undefined);
+  }, [announcement, eventAppKey, eventSlug]);
 
   useEffect(() => {
     progress.value = withTiming((activeIndex + 1) / stages.length, { duration: 550, easing: easings.luxury });

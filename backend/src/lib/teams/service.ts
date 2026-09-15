@@ -7,7 +7,6 @@ import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { createTotpChallengeForIdentity, loginIdentityTypeForMembership } from '@/api/auth';
 
 const keySchema = z.string().trim().min(1).max(160);
-export const teamListInputSchema = z.object({}).strict();
 export const teamSelectInputSchema = z.object({
   targetTeamKey: keySchema,
   targetScopeKey: z.string().cuid().optional(),
@@ -20,7 +19,7 @@ export class TeamServiceError extends Error {
   }
 }
 
-type TeamOption = {
+type TeamSelectionTarget = {
   key: string;
   name: string;
   slug: string | null;
@@ -42,7 +41,7 @@ type Selection = {
 };
 
 export interface TeamServiceDependencies {
-  list?: (userKey: string) => Promise<{ enabled: boolean; teams: TeamOption[] }>;
+  resolveTarget?: (userKey: string, teamKey: string) => Promise<{ enabled: boolean; target: TeamSelectionTarget | null }>;
   select?: (userKey: string, teamKey: string, scopeKey?: string) => Promise<Selection>;
   challenge?: typeof createTotpChallengeForIdentity;
 }
@@ -54,56 +53,57 @@ function actor(context: ToolContext) {
   return context.principal.user;
 }
 
-async function defaultList(userKey: string): Promise<{ enabled: boolean; teams: TeamOption[] }> {
+async function defaultResolveTarget(userKey: string, teamKey: string): Promise<{ enabled: boolean; target: TeamSelectionTarget | null }> {
   const cursor = await db.query<Record<string, unknown>>(`
     LET user = DOCUMENT(users, @userKey)
-    LET memberships = user == null ? [] : (
-      FOR membership IN userTeams
-        FILTER membership.userId == @userKey && membership.status == "active"
-        LET team = DOCUMENT(teams, membership.teamKey)
-        FILTER team != null && team.isActive == true
-        LET accessibleScopes = (
-          FOR scope IN scopes
-            FILTER scope.teamKey == team._key
-            LET direct = FIRST(FOR item IN scopeMembers FILTER item.scopeKey == scope._key && item.userTeamKey == membership._key && item.status == "active" LIMIT 1 RETURN item)
-            FILTER membership.teamRole IN ["owner", "admin"] || direct != null
-            SORT scope.slug == "main" DESC, scope.position ASC, scope.name ASC, scope._key ASC
-            RETURN scope
-        )
-        LET current = FIRST(FOR scope IN accessibleScopes FILTER scope._key == user.currentScopeKey LIMIT 1 RETURN scope._key)
-        RETURN { team, membership, scopes: accessibleScopes, currentScopeKey: current }
+    LET enabled = user != null && LENGTH(
+      FOR seeded IN userTeams
+        FILTER seeded.userId == @userKey && seeded.status == "active" && seeded.environmentSeeded == true
+        LET seededTeam = DOCUMENT(teams, seeded.teamKey)
+        FILTER seededTeam != null && seededTeam.isActive == true
+        LIMIT 1 RETURN 1
+    ) > 0
+    LET membership = user == null ? null : FIRST(FOR item IN userTeams FILTER item.userId == @userKey && item.teamKey == @teamKey && item.status == "active" LIMIT 1 RETURN item)
+    LET team = membership == null ? null : DOCUMENT(teams, membership.teamKey)
+    LET accessibleScopes = team == null || team.isActive != true ? [] : (
+      FOR scope IN scopes
+        FILTER scope.teamKey == team._key
+        LET direct = FIRST(FOR item IN scopeMembers FILTER item.scopeKey == scope._key && item.userTeamKey == membership._key && item.status == "active" LIMIT 1 RETURN item)
+        FILTER membership.teamRole IN ["owner", "admin"] || direct != null
+        SORT scope.slug == "main" DESC, scope.position ASC, scope.name ASC, scope._key ASC
+        RETURN scope
     )
+    LET current = FIRST(FOR scope IN accessibleScopes FILTER scope._key == user.currentScopeKey LIMIT 1 RETURN scope._key)
     RETURN {
-      enabled: LENGTH(FOR membership IN memberships FILTER membership.membership.environmentSeeded == true LIMIT 1 RETURN 1) > 0,
-      memberships
+      enabled,
+      target: team == null || team.isActive != true ? null : { team, membership, scopes: accessibleScopes, currentScopeKey: current }
     }
-  `, { userKey });
-  const result = await cursor.next() as { enabled?: boolean; memberships?: Array<any> } | undefined;
-  const teams = (result?.memberships ?? []).map(({ team, membership, scopes, currentScopeKey }) => {
-    const defaultScopeKey = (scopes[0]?._key as string | undefined) ?? null;
-    return {
-      key: team._key,
-      name: team.name,
-      slug: team.slug ?? null,
-      role: membership.teamRole,
-      teamMembershipKey: membership._key,
-      mfaEnabled: team.mfa_enabled === true,
-      membershipMfaEnabled: membership.isMfaEnabled === true,
-      teamMfaVersion: Number(membership.teamMfaVersion ?? 0),
-      isRoot: team.is_root === true,
-      currentScopeKey: currentScopeKey ?? null,
-      defaultScopeKey,
-      scopes: scopes.map((scope: any) => ({
-        key: scope._key,
-        name: scope.name,
-        slug: scope.slug,
-        isCurrent: scope._key === currentScopeKey,
-        isDefault: scope._key === defaultScopeKey,
-      })),
-    };
-  });
-  teams.sort((left, right) => left.name.localeCompare(right.name) || left.key.localeCompare(right.key));
-  return { enabled: result?.enabled === true, teams };
+  `, { userKey, teamKey });
+  const result = await cursor.next() as { enabled?: boolean; target?: { team: any; membership: any; scopes: any[]; currentScopeKey?: string } | null } | undefined;
+  const raw = result?.target;
+  if (!raw) return { enabled: result?.enabled === true, target: null };
+  const { team, membership, scopes, currentScopeKey } = raw;
+  const defaultScopeKey = (scopes[0]?._key as string | undefined) ?? null;
+  return { enabled: result?.enabled === true, target: {
+    key: team._key,
+    name: team.name,
+    slug: team.slug ?? null,
+    role: membership.teamRole,
+    teamMembershipKey: membership._key,
+    mfaEnabled: team.mfa_enabled === true,
+    membershipMfaEnabled: membership.isMfaEnabled === true,
+    teamMfaVersion: Number(membership.teamMfaVersion ?? 0),
+    isRoot: team.is_root === true,
+    currentScopeKey: currentScopeKey ?? null,
+    defaultScopeKey,
+    scopes: scopes.map((scope: any) => ({
+      key: scope._key,
+      name: scope.name,
+      slug: scope.slug,
+      isCurrent: scope._key === currentScopeKey,
+      isDefault: scope._key === defaultScopeKey,
+    })),
+  } };
 }
 
 async function defaultSelect(userKey: string, teamKey: string, scopeKey?: string): Promise<Selection> {
@@ -143,23 +143,16 @@ async function defaultSelect(userKey: string, teamKey: string, scopeKey?: string
 }
 
 export function createTeamService(dependencies: TeamServiceDependencies = {}) {
-  const list = dependencies.list ?? defaultList;
+  const resolveTarget = dependencies.resolveTarget ?? defaultResolveTarget;
   const select = dependencies.select ?? defaultSelect;
   const challenge = dependencies.challenge ?? createTotpChallengeForIdentity;
   return {
-    async list(rawInput: unknown, context: ToolContext) {
-      teamListInputSchema.parse(rawInput);
-      const result = await list(actor(context).key);
-      if (!result.enabled) throw new TeamServiceError('FORBIDDEN', 'Team selection is not enabled for this account.');
-      return { teams: result.teams.map(({ membershipMfaEnabled: _membershipMfaEnabled, teamMfaVersion: _teamMfaVersion, isRoot: _isRoot, ...team }) => team) };
-    },
-
     async select(rawInput: unknown, context: ToolContext) {
       const input = teamSelectInputSchema.parse(rawInput);
       const user = actor(context);
-      const listed = await list(user.key);
-      if (!listed.enabled) throw new TeamServiceError('FORBIDDEN', 'Team selection is not enabled for this account.');
-      const option = listed.teams.find(({ key }) => key === input.targetTeamKey);
+      const resolved = await resolveTarget(user.key, input.targetTeamKey);
+      if (!resolved.enabled) throw new TeamServiceError('FORBIDDEN', 'Team selection is not enabled for this account.');
+      const option = resolved.target;
       if (!option) throw new TeamServiceError('FORBIDDEN', 'Active team membership is required.');
       const targetScopeKey = input.targetScopeKey ?? option.currentScopeKey ?? option.defaultScopeKey;
       if (!targetScopeKey) throw new TeamServiceError('FORBIDDEN', 'Active target scope membership is required.');

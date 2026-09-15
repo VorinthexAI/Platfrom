@@ -18,10 +18,11 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(192);
-    expect(MODEL_TOOL_NAMES).toHaveLength(187);
-    expect(TOOL_DEFINITIONS).toHaveLength(187);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 145);
+    expect(TOOL_NAMES).toHaveLength(189);
+    expect(MODEL_TOOL_NAMES).toHaveLength(184);
+    expect(TOOL_DEFINITIONS).toHaveLength(184);
+    expect(TOOL_NAMES).not.toContain('document.scan');
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 143);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...MODEL_TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -63,6 +64,8 @@ describe('unified tool registry', () => {
     expect(toolInputSchemas['app.search'].parse({ operation: 'get', collectionSlugs: ['books'], key: newId(), limit: 1 })).toMatchObject({ operation: 'get' });
     expect(toolInputSchemas['app.search'].parse({ operation: 'count', collectionSlugs: ['images'], limit: 10 })).toMatchObject({ operation: 'count', collectionSlugs: ['images'] });
     expect(toolInputSchemas['app.search'].parse({ operation: 'sum', collectionSlugs: ['images'], field: 'sizeBytes', limit: 10 })).toMatchObject({ operation: 'sum', collectionSlugs: ['images'], field: 'sizeBytes' });
+    expect(toolInputSchemas['app.search'].parse({ operation: 'sum', scope: 'account', field: 'sizeBytes', limit: 10 })).toMatchObject({ operation: 'sum', scope: 'account', field: 'sizeBytes' });
+    expect(() => toolInputSchemas['app.search'].parse({ operation: 'sum', scope: 'account', collectionSlugs: ['images'], field: 'sizeBytes', limit: 10 })).toThrow();
     expect(() => toolInputSchemas['app.search'].parse({ operation: 'sum', collectionSlugs: ['images'], field: 'width' })).toThrow();
     expect(() => toolInputSchemas['app.search'].parse({ operation: 'list', collectionSlugs: ['books'], query: 'unexpected' })).toThrow();
     expect(() => toolInputSchemas['app.search'].parse({ query: 'roadmap', collectionSlugs: ['folders'], minimumScore: 0.55 })).toThrow('Unrecognized key');
@@ -159,10 +162,8 @@ describe('unified tool registry', () => {
     expect(TOOL_NAMES).not.toContain('user.settings.update');
     for (const name of ['access.agent.evaluate', 'agent.member.list', 'artifact.create', 'project.create', 'milestone.create', 'task.create', 'team.member.list']) expect(TOOL_NAMES).not.toContain(name);
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['scope.list', 'scope.create', 'scope.select', 'scope.prioritize', 'scope.update', 'scope.delete']));
-    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['team.list', 'team.select']));
-    expect(toolInputSchemas['team.list'].parse({})).toEqual({});
-    expect(() => toolInputSchemas['team.list'].parse({ userKey: newId() })).toThrow('Unrecognized key');
-    expect(() => toolInputSchemas['team.select'].parse({ targetTeamKey: newId(), teamMembershipKey: newId() })).toThrow('Unrecognized key');
+    expect(TOOL_NAMES).not.toContain('team.list');
+    expect(TOOL_NAMES).not.toContain('team.select');
     expect(toolInputSchemas['scope.list'].parse({})).toEqual({});
     expect(toolInputSchemas['scope.create'].parse({ name: 'Plans' })).toEqual({ name: 'Plans' });
     expect(toolInputSchemas['scope.select'].parse({ targetScopeKey: newId() })).toHaveProperty('targetScopeKey');
@@ -295,6 +296,15 @@ describe('unified tool registry', () => {
     await runTool('app.generate-image', '', { prompt: 'draw this' }, { contentContext, conversationService: conversations, currentConversationKey: conversationKey, currentUserMessageContent: 'make a picture', currentReferenceImageKeys: [referenceImageKey], currentStagedImageArtifactKeys: [stagedImageArtifactKey], requestKey: 'trusted-image-request' });
     const messageKey = newId(); await runTool('conversation.message.delete', '', { conversationKey, messageKey }, { contentContext, conversationService: conversations });
     expect(calls).toEqual([{ conversationKey, message: 'hello', requestKey: 'trusted-request' }, [{ conversationKey, prompt: 'draw this', referenceImageKeys: [referenceImageKey], size: '1024x1024', quality: 'medium', mode: 'default', requestKey: 'trusted-image-request', userMessage: 'make a picture' }, [stagedImageArtifactKey]], { conversationKey, messageKey }]);
+  });
+
+  test('forwards the trusted conversation service to public tool definitions', async () => {
+    const failure = new Error('forwarded conversation service');
+    const contentContext = { teamKey: newId(), runtimeScopeKey: newId(), principal: { kind: 'member', user: { key: newId() }, userTeam: { key: newId(), status: 'active' } } } as unknown as ToolContext;
+    await expect(runTool('agent.guide', '', { mode: 'greet', occasion: 'returning' }, {
+      contentContext,
+      conversationService: { list: async () => { throw failure; } } as any,
+    })).rejects.toBe(failure);
   });
 
   test('dispatches the unique agents.core tool through the canonical lazy agent adapter', async () => {

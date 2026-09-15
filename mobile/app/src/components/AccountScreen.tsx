@@ -4,21 +4,21 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
-import { Linking, ScrollView, Share as NativeShare, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { ScrollView, Share as NativeShare, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Avatar } from "@vorinthex/shared/ui/avatar";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
-import { BellIcon, CheckIcon, DeleteAccountIcon, FaqIcon, FeedbackIcon, FolderIcon, HelpIcon, IssueIcon, PlusIcon, PrivacyIcon, ReferralIcon, SettingsIcon, SignOutIcon, SwitchTeamIcon, TermsIcon, WarningIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { BellIcon, CheckIcon, DeleteAccountIcon, FaqIcon, FeedbackIcon, FolderIcon, HelpIcon, IssueIcon, PlusIcon, PrivacyIcon, ReferralIcon, SettingsIcon, SignOutIcon, SparksIcon, TermsIcon, WarningIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
+import { PRIVACY_COPY, TERMS_COPY, type VaultCopy } from "@vorinthex/shared/lib/legal-copy";
 
-import { updateProfileName, uploadProfileAvatar } from "@/lib/profile-client";
+import { claimProfileBadge, generateProfileBadge, updateProfileName, uploadProfileAvatar } from "@/lib/profile-client";
 import { profileInitial } from "@/lib/auth-helpers";
 import { createScope, deleteScope, listScopes, prioritizeScope, scheduleScopeOperation, scopeListQueryKey, scopeOperationIsPending, selectScope, updateScopeCover, type ScopeSummary } from "@/lib/scope-client";
-import { listTeams, queryBelongsToTeamScope, selectTeam, setPendingTeamMfa, teamListQueryKey } from "@/lib/team-client";
 import { useAuthStore } from "@/state/auth";
 import { useAppsStore } from "@/state/apps";
 import { extractDomainErrorMessage } from "@/lib/domain-error-observer";
@@ -30,18 +30,33 @@ import { currentSubscriptionQueryKey, formatStorageSummary, setSubscriptionCance
 import { useBillingSummary, useCurrentSubscription } from "@/hooks/use-billing-summary";
 import { fetchReferralSummary, normalizeReferralCode, redeemReferralCode, referralCodeSchema, referralRedemptionErrorMessage, referralSummaryQueryKey, type ReferralRedeemResult } from "@/lib/referral-client";
 import { subscriptionPresentation } from "@/lib/subscription-presentation";
+import { useUiStore } from "@/state/ui";
 
-type ProfileSheet = "name" | "faq" | "cancel-subscription" | "delete-account" | "referral" | "storage-help" | "scope-help" | "scope-create" | "scope-actions" | "scope-delete" | "teams";
+type ProfileSheet = "avatar-actions" | "badge-generate" | "name" | "faq" | "privacy" | "terms" | "cancel-subscription" | "delete-account" | "referral" | "storage-help" | "scope-help" | "scope-create" | "scope-actions" | "scope-delete";
 type ReferralMode = "share" | "redeem";
 export type AccountScreenInitialState = { sheet: "referral"; referralMode: ReferralMode };
 
 const FAQ = [
-  ["What are Sparks?", "Sparks power AI actions across Vorinthex. Your balance is shared across every capability."],
-  ["How do plan grants work?", "Weekly plans grant 200 Sparks each week. Monthly plans grant 1,000 Sparks each month when the billing period renews."],
-  ["Do top-ups expire?", "A top-up adds 200 Sparks without changing your subscription. Product terms will be shown before purchases become available."],
-  ["How do referral rewards work?", "You receive 50 Sparks once when a new user signs up with your code, then 100 more once when they first subscribe."],
-  ["Can I cancel or renew?", "Subscription controls will show your status and renewal date. Cancellation stops future renewal; your current period remains available under the terms shown at purchase."],
-  ["How do I restore renewal?", "If you scheduled cancellation for a Polar subscription, Restore renewal keeps that subscription renewing at the end of its current period."],
+  ["What is Vorinthex AI, and where should I start?", "Vorinthex AI is one connected workspace for knowledge, images, communication, travel, learning, and conversation. Start in Core with a question, or open the focused app that matches what you want to do."],
+  ["What can Core help me do?", "Core can answer general questions, discuss ideas, and search the workspace information available to your request. It can take you to matching items in their apps, while app-specific controls keep changes deliberate."],
+  ["How do Core, Archive, Gallery, Signal, Compass, and Ascend work together?", "Each app has a focused purpose but shares your account and authorized workspace context. Core can surface connected results, and the focused apps remain where you organize content and control actions."],
+  ["What should I save and organize in Archive?", "Use Archive for notes, documents, uploaded files, research, plans, references, project material, and ideas you may want to find again. Folders, tags, editing, and semantic search keep that knowledge useful."],
+  ["How can I find something without remembering its title or filename?", "Search with the subject, meaning, people, place, or details you remember. Semantic search can find relevant authorized documents, images, messages, places, trips, and audio books without requiring an exact title."],
+  ["Where are my Core chats saved?", "Core chats are organized automatically in Archive under Vorinthex AI / Core / Chats. Rolling summaries support continuity, and processed chat content can later be found by meaning within its private authorized scope."],
+  ["What can I organize and search for in Gallery?", "Gallery keeps uploaded pictures, generated images, collections, memories, and highlights together. You can use collections, covers, favorites, tags, visible content, and available place information to organize and rediscover images."],
+  ["How do Gallery collections, memories, and highlights work?", "Collections group related images around an idea, place, project, event, or story. Memories create a written reflection around an image, while highlights turn a selected or random set of collection images into a visual sequence."],
+  ["Can Core help me find images, documents, messages, trips, and books?", "Yes. Core can search authorized information across the connected apps and show matching results. Selecting a result opens the responsible app so you can review it and use that app's controls."],
+  ["How does Signal work with my connected email?", "Signal brings connected email together with communication from Vorinthex AI apps and support in one private inbox. You can synchronize conversations, search by meaning, review threads, and prepare replies."],
+  ["Will Signal ever send an email without my approval?", "No. You choose connected accounts, review generated drafts, and explicitly decide what is sent. Core may help you find communication, but Signal remains responsible for email actions and keeps their controls visible."],
+  ["Where can I open and organize attachments from Signal?", "Supported attachments can open in Archive or Gallery, depending on their type. This lets documents and images remain useful in their focused workspace instead of staying buried in an email thread."],
+  ["What can I explore, save, and plan in Compass?", "Compass lets you explore countries and cities, save places you want to visit, record places you have visited, and arrange destinations into trips. You can begin with curiosity and build a structured plan gradually."],
+  ["Can I connect Archive folders and Gallery collections to a trip?", "Yes. Compass can keep relevant Archive folders and Gallery collections attached to a trip, so research, documents, and images remain close to the journey they support."],
+  ["How does Ascend create a personalized audio book?", "You choose a topic, learning goal, current knowledge, tone, narrator, and pace. Ascend reviews the brief, then builds the cover, chapters, and narration in the background for reading and listening."],
+  ["Can Ascend use my Archive documents as source material?", "Yes. You can select Archive documents when you want an audio book grounded in material you already trust. Ascend keeps the resulting chapters, narration, cover, and listening progress together."],
+  ["How do scopes and permissions keep my information private?", "Scopes keep workspace context separated, and connected searches only use information authorized for the current request. You decide what to save, connect, edit, move, send, or delete in each app."],
+  ["What are Sparks, and what uses them?", "Sparks are your shared prepaid balance for AI capabilities, stored work, and connected services across Vorinthex AI. Some actions have a fixed Spark cost while other AI usage varies; current charge categories appear on the Sparks screen."],
+  ["How do weekly plans, monthly plans, and top-ups work?", "The weekly plan grants 200 Sparks each week for $7.99. The launch monthly plan grants 1,000 Sparks each month for $19.99. A $9.99 top-up adds 200 Sparks without changing your subscription; applicable taxes are added at checkout."],
+  ["What happens to my Sparks and stored work if I cancel or run out of Sparks?", "Canceling stops renewal after the current period, and prepaid Sparks remain available. Unfunded storage creates no debt or backcharges, but stored data is permanently deleted after 90 consecutive unfunded days. Adding enough Sparks before deletion begins restores prospective charging."],
 ] as const;
 
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -70,6 +85,17 @@ function SettingsActionCard({ danger = false, icon, label, onPress, size }: { da
   </View>;
 }
 
+function LegalSheetContent({ copy }: { copy: VaultCopy }) {
+  return <ScrollView contentContainerStyle={styles.legalContent} showsVerticalScrollIndicator={false}>
+    {copy.paragraphs.map((paragraph, index) => <Text key={`intro-${index}`} style={styles.legalParagraph}>{paragraph}</Text>)}
+    {copy.sections?.map((section) => <View key={section.title} style={styles.legalSection}>
+      <Text style={styles.legalParagraph}>{section.title}</Text>
+      {section.paragraphs.map((paragraph, index) => <Text key={`${section.title}-${index}`} style={styles.legalParagraph}>{paragraph}</Text>)}
+    </View>)}
+    <Text style={styles.legalFootnote}>{copy.footnote}</Text>
+  </ScrollView>;
+}
+
 export function AccountScreen({ initialState, onReferralSheetClose, page }: { initialState?: AccountScreenInitialState; onReferralSheetClose?: () => void; page: "profile" | "settings" }) {
   const router = useRouter();
   const { width } = useWindowDimensions();
@@ -77,21 +103,24 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const { showToast } = useToast();
   const user = useAuthStore((state) => state.user);
   const teamKey = useAuthStore((state) => String(state.team?.key ?? ""));
-  const teamSelectionEnabled = useAuthStore((state) => state.teamSelectionEnabled);
   const scopeKey = useAuthStore((state) => String(state.scope?.key ?? ""));
+  const authReferralSummary = useAuthStore((state) => state.referralSummary);
   const optimisticProfile = useAuthStore((state) => state.optimisticProfile);
   const optimisticScope = useAuthStore((state) => state.optimisticScope);
   const hydrate = useAuthStore((state) => state.hydrate);
   const signOut = useAuthStore((state) => state.signOut);
   const deleteAccount = useAuthStore((state) => state.deleteAccount);
+  const openCostDetails = useUiStore((state) => state.openCostDetails);
   const products = useAppsStore((state) => state.products);
+  const badgeCost = useAppsStore((state) => state.capabilityCosts["profile.badge.generate"]);
+  const refreshProducts = useAppsStore((state) => state.refreshProducts);
   const storageSparkCost = useAppsStore((state) => state.sparkCosts.find((charge) => charge.kind === "storage")?.sparkCost);
   const [sheet, setSheet] = useState<ProfileSheet | undefined>(initialState?.sheet);
   const [nameDraft, setNameDraft] = useState("");
   const [scopeName, setScopeName] = useState("");
   const [scopeDescription, setScopeDescription] = useState("");
   const [faqQuestionIndex, setFaqQuestionIndex] = useState<number>();
-  const [selectingTeam, setSelectingTeam] = useState(false);
+  const [generatingBadge, setGeneratingBadge] = useState(false);
   const [selectedScope, setSelectedScope] = useState<ScopeSummary>();
   const [deletingScope, setDeletingScope] = useState(false);
   const [sharingReferral, setSharingReferral] = useState(false);
@@ -110,9 +139,8 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const settingsCardSize = scopeCardSize;
   const billingSummaryQuery = useBillingSummary(user?.key);
   const subscriptionQuery = useCurrentSubscription(page === "settings" ? user?.key : undefined);
-  const referralQuery = useQuery({ queryKey: referralSummaryQueryKey(String(user?.key ?? "")), queryFn: fetchReferralSummary, enabled: Boolean(user?.key && sheet === "referral"), refetchOnMount: "always" });
+  const referralQuery = useQuery({ queryKey: referralSummaryQueryKey(String(user?.key ?? "")), queryFn: fetchReferralSummary, enabled: Boolean(user?.key && sheet === "referral"), initialData: authReferralSummary?.code.ownerUserKey === user?.key ? authReferralSummary : undefined });
   const scopesQuery = useQuery({ queryKey: scopeQueryKey, queryFn: ({ signal }) => listScopes(teamKey, signal), enabled: Boolean(user?.key && teamKey), refetchOnMount: "always" });
-  const teamsQuery = useQuery({ queryKey: teamListQueryKey(String(user?.key ?? "")), queryFn: ({ signal }) => listTeams(signal), enabled: teamSelectionEnabled && sheet === "teams" });
   const scopes = scopesQuery.data ?? [];
   const sortedScopes = [...scopes].sort((left, right) => left.position - right.position);
   const selectedFaq = faqQuestionIndex === undefined ? undefined : FAQ[faqQuestionIndex];
@@ -157,11 +185,6 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   }, [referralMode, sheet]);
 
   const pickAvatar = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      showToast({ title: "Photo access is required to update your profile image.", duration: 2_500 });
-      return;
-    }
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, aspect: [1, 1], quality: 0.9 });
     if (result.canceled) return;
     const asset = result.assets[0];
@@ -181,6 +204,27 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
       update.rollback();
       showToast({ title: "Profile image could not be updated.", duration: 2_500 });
     });
+  };
+
+  const generateBadge = async () => {
+    if (!teamKey || !scopeKey || !badgeCost || generatingBadge) return;
+    setSheet(undefined);
+    setGeneratingBadge(true);
+    try {
+      const candidate = await generateProfileBadge(teamKey, scopeKey, randomUUID());
+      const update = optimisticProfile({ avatarUrl: candidate.avatarUrl });
+      try {
+        const profile = await claimProfileBadge(teamKey, scopeKey, candidate.candidateKey);
+        update.reconcile(profile.avatarUrl ? profile : { avatarUrl: candidate.avatarUrl });
+      } catch (error) {
+        update.rollback();
+        throw error;
+      }
+    } catch {
+      showToast({ title: "Your profile badge could not be generated. Please try again.", duration: 2_500 });
+    } finally {
+      setGeneratingBadge(false);
+    }
   };
 
   const openName = () => {
@@ -203,7 +247,7 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
     setSheet(undefined);
     const deletion = deleteAccount();
     queryClient.clear();
-    router.replace("/onboarding");
+    router.replace("/auth");
     void deletion.then(() => {
       showToast({ title: "Your account has been deleted.", duration: 3_000 });
     }).catch((error) => {
@@ -211,11 +255,12 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
     });
   };
 
-  const logOut = async () => {
+  const logOut = () => {
     setSheet(undefined);
-    await signOut();
+    const cleanup = signOut();
     queryClient.clear();
     router.replace("/auth");
+    void cleanup.catch(() => undefined);
   };
 
   const openScopeCreate = () => {
@@ -356,11 +401,6 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
     const target = selectedScope;
     try {
       setSheet(undefined);
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        showToast({ title: "Photo access is required to change the scope cover.", duration: 2_500 });
-        return;
-      }
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, aspect: [1, 1], quality: 1 });
       if (result.canceled) return;
       const asset = result.assets[0];
@@ -439,28 +479,6 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
     });
   };
 
-  const chooseTeamScope = async (targetTeamKey: string, targetScopeKey: string) => {
-    if (selectingTeam) return;
-    const previousTeamKey = teamKey;
-    const previousScopeKey = scopeKey;
-    setSelectingTeam(true);
-    try {
-      const result = await selectTeam(targetTeamKey, targetScopeKey);
-      if (result.status !== "selected") {
-        setPendingTeamMfa(result);
-        setSheet(undefined);
-        router.push("/auth/mfa");
-        return;
-      }
-      await hydrate();
-      await queryClient.cancelQueries({ predicate: ({ queryKey }) => queryBelongsToTeamScope(queryKey, previousTeamKey, previousScopeKey) });
-      queryClient.removeQueries({ predicate: ({ queryKey }) => queryBelongsToTeamScope(queryKey, previousTeamKey, previousScopeKey) });
-      setSheet(undefined);
-    } catch {
-      showToast({ title: "Team could not be switched.", duration: 2_500 });
-    } finally { setSelectingTeam(false); }
-  };
-
   const headerActions = page === "profile" ? <>
     <Button accessibilityLabel="Open notifications in Signal" contentMode="raw" iconOnly onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "inbox", inbox: "internal" } })} size="xs" variant="icon"><BellIcon size="sm" /></Button>
     <Button accessibilityLabel="Open settings" contentMode="raw" iconOnly onPress={() => router.push("/settings")} size="xs" variant="icon"><SettingsIcon size="sm" /></Button>
@@ -500,8 +518,10 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   return <>
     <AccountScreenShell rightAction={headerActions} title={page === "profile" ? "Profile" : "Settings"}>
       {page === "profile" ? <View style={styles.content}>
-        <Button accessibilityLabel="Change profile image" contentMode="raw" iconOnly onPress={() => void pickAvatar().catch(() => showToast({ title: "The image picker could not be opened.", duration: 2_500 }))} size="xl" style={styles.avatarButton} variant="ghost">
-          <Avatar fallback={profileInitial(user)} size={104} style={styles.avatar} uri={user?.avatarUrl} />
+        <Button accessibilityLabel={generatingBadge ? "Generating profile badge" : "Change profile image"} contentMode="raw" disabled={generatingBadge} iconOnly onPress={() => setSheet("avatar-actions")} size="xl" style={styles.avatarButton} variant="ghost">
+          <Avatar fallback={profileInitial(user)} size={104} style={styles.avatar} uri={user?.avatarUrl}>
+            {generatingBadge ? <Skeleton accessibilityLabel="Generating profile badge" accessibilityRole="progressbar" style={styles.avatarSkeleton} /> : undefined}
+          </Avatar>
         </Button>
         <View style={styles.identity}>
           <Button accessibilityLabel="Edit name" contentMode="raw" onPress={openName} size="xl" style={styles.nameButton} variant="ghost"><Text numberOfLines={2} style={styles.name}>{name}</Text></Button>
@@ -520,13 +540,13 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
         </View>
       </View> : <View style={styles.settingsContent}>
         <View style={styles.settingsGrid}>
-          {teamSelectionEnabled ? <SettingsActionCard icon={<SwitchTeamIcon size="lg" />} label="Switch team" onPress={() => setSheet("teams")} size={settingsCardSize} /> : null}
           <SettingsActionCard icon={<IssueIcon size="lg" />} label="Report issue" onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "inbox", inbox: "internal", compose: "issue" } })} size={settingsCardSize} />
           <SettingsActionCard icon={<FeedbackIcon size="lg" />} label="Feedback" onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "inbox", inbox: "internal", compose: "feedback" } })} size={settingsCardSize} />
           <SettingsActionCard icon={<FaqIcon size="lg" />} label="FAQ" onPress={() => { setFaqQuestionIndex(undefined); setSheet("faq"); }} size={settingsCardSize} />
-          <SettingsActionCard icon={<TermsIcon size="lg" />} label="Terms" onPress={() => void Linking.openURL("https://vorinthex.com/terms")} size={settingsCardSize} />
-          <SettingsActionCard icon={<PrivacyIcon size="lg" />} label="Privacy" onPress={() => void Linking.openURL("https://vorinthex.com/privacy")} size={settingsCardSize} />
+          <SettingsActionCard icon={<TermsIcon size="lg" />} label="Terms" onPress={() => setSheet("terms")} size={settingsCardSize} />
+          <SettingsActionCard icon={<PrivacyIcon size="lg" />} label="Privacy" onPress={() => setSheet("privacy")} size={settingsCardSize} />
           <SettingsActionCard icon={<ReferralIcon size="lg" />} label="Referral" onPress={() => { setReferralMode("share"); setSheet("referral"); }} size={settingsCardSize} />
+          <SettingsActionCard icon={<SparksIcon size="lg" />} label="Sparks" onPress={openCostDetails} size={settingsCardSize} />
           {subscriptionView?.action === "cancel" ? <SettingsActionCard danger icon={<WarningIcon size="lg" variant="danger" />} label="Cancel subscription" onPress={() => setSheet("cancel-subscription")} size={settingsCardSize} /> : null}
           <SettingsActionCard danger icon={<DeleteAccountIcon size="lg" variant="danger" />} label="Delete account" onPress={() => setSheet("delete-account")} size={settingsCardSize} />
           <SettingsActionCard danger icon={<SignOutIcon size="lg" variant="danger" />} label="Log out" onPress={() => void logOut()} size={settingsCardSize} />
@@ -534,12 +554,34 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
       </View>}
     </AccountScreenShell>
 
+    <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "avatar-actions"} title="Profile image actions">
+      <BottomSheetMenu>
+        <BottomSheetItem onPress={() => setSheet("badge-generate")} style={styles.profileImageAction} textStyle={styles.profileImageActionText}>Generate badge</BottomSheetItem>
+        <BottomSheetItem onPress={() => { setSheet(undefined); void pickAvatar().catch(() => showToast({ title: "The image picker could not be opened.", duration: 2_500 })); }} style={styles.profileImageAction} textStyle={styles.profileImageActionText}>Choose image</BottomSheetItem>
+      </BottomSheetMenu>
+    </BottomSheet>
+
+    <BottomSheet description={badgeCost ? `Generate a custom profile badge for ${badgeCost.sparkCost} Sparks.` : "Generate a custom profile badge."} footer={<><Button disabled={!badgeCost} onPress={() => void generateBadge()} size="md" variant="primary">Generate badge</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "badge-generate"} title="Your profile badge">
+      <View style={styles.badgeContent}>
+        <View style={styles.badgePreview}><Avatar fallback={profileInitial(user)} size={148} style={styles.badgeAvatar} /></View>
+        {!badgeCost ? <Button onPress={() => void refreshProducts()} size="md" variant="ghost">Refresh costs</Button> : null}
+      </View>
+    </BottomSheet>
+
     <BottomSheet footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "scope-help"} title="Scopes">
       <Text style={styles.scopeHelp}>Scopes are separate workspaces for different parts of your life. For example, you can create one for work and another for personal use, keeping their content, conversations, and tools organized independently.</Text>
     </BottomSheet>
 
     <BottomSheet footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "storage-help"} title="Storage">
       <Text style={styles.scopeHelp}>Storage reflects tracked files and media across your apps. Usage is measured continuously and charged in Sparks each hour. The monthly amount shown is an estimate at your current usage. If storage remains unfunded for 90 days, your tracked stored data becomes eligible for deletion.</Text>
+    </BottomSheet>
+
+    <BottomSheet footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "terms"} title="Terms of service">
+      <LegalSheetContent copy={TERMS_COPY} />
+    </BottomSheet>
+
+    <BottomSheet footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "privacy"} title="Privacy policy">
+      <LegalSheetContent copy={PRIVACY_COPY} />
     </BottomSheet>
 
     <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "scope-actions" && canManageScope(selectedScope)} title="Scope actions">
@@ -561,12 +603,6 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
         <Text style={styles.inputLabel}>Description (Optional)</Text>
         <TextInput accessibilityLabel="New scope description" maxLength={10_000} multiline onChangeText={setScopeDescription} placeholder="What belongs in this scope?" style={styles.reportInput} textAlignVertical="top" value={scopeDescription} />
       </View>
-    </BottomSheet>
-
-    <BottomSheet description="Choose an active team and scope." focusKey="profile-teams" footer={<Button disabled={selectingTeam} onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "teams"} title="Teams">
-      <BottomSheetMenu>
-        {teamsQuery.isPending ? <Text style={styles.scopeHelp}>Loading teams...</Text> : teamsQuery.isError ? <><Text accessibilityRole="alert" style={styles.deleteError}>Teams could not be loaded.</Text><Button onPress={() => void teamsQuery.refetch()} size="md" variant="secondary">Retry</Button></> : teamsQuery.data?.flatMap((team) => team.scopes.map((scope) => <BottomSheetItem disabled={selectingTeam} key={`${team.key}:${scope.key}`} onPress={() => void chooseTeamScope(team.key, scope.key)}>{team.name} / {scope.name}{team.key === teamKey && scope.key === scopeKey ? " (Current)" : ""}</BottomSheetItem>))}
-      </BottomSheetMenu>
     </BottomSheet>
 
     <BottomSheet dismissible={!cancelSubscription.isPending} focusKey="profile-cancel-subscription" footer={<><Button disabled={cancelSubscription.isPending} loading={cancelSubscription.isPending} onPress={() => cancelSubscription.mutate()} size="md" variant="primary">Cancel subscription</Button><Button disabled={cancelSubscription.isPending} onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open && !cancelSubscription.isPending) setSheet(undefined); }} open={sheet === "cancel-subscription"} title="Cancel subscription?">
@@ -591,8 +627,12 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
       </ScrollView>
     </BottomSheet>
 
-    <BottomSheet description={selectedFaq ? undefined : "Quick answers about plans and Sparks."} focusKey="profile-faq" footer={<Button onPress={() => { if (selectedFaq) setFaqQuestionIndex(undefined); else setSheet(undefined); }} size="md" variant="secondary">{selectedFaq ? "Back" : "Close"}</Button>} height="full" onOpenChange={(open) => { if (!open) { setFaqQuestionIndex(undefined); setSheet(undefined); } }} open={sheet === "faq"} pageKey={selectedFaq ? `answer-${faqQuestionIndex}` : "questions"} title={selectedFaq?.[0] ?? "FAQ"}>
-      {selectedFaq ? <Text style={styles.faqAnswer}>{selectedFaq[1]}</Text> : <ScrollView contentContainerStyle={styles.faqList}>{FAQ.map(([question], index) => <Button accessibilityLabel={`Read ${question}`} contentMode="raw" key={question} onPress={() => setFaqQuestionIndex(index)} shape="pill" size="md" style={styles.faqPill} variant="secondary"><Text numberOfLines={2} style={styles.faqQuestion}>{question}</Text></Button>)}</ScrollView>}
+    <BottomSheet description="Quick answers about using Core and its connected apps, plus Sparks and plans." focusKey="profile-faq" footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) { setFaqQuestionIndex(undefined); setSheet(undefined); } }} open={sheet === "faq"} title="FAQ">
+      <ScrollView contentContainerStyle={styles.faqList}>{FAQ.map(([question], index) => <Button accessibilityLabel={`Read ${question}`} contentMode="raw" key={question} onPress={() => setFaqQuestionIndex(index)} shape="pill" size="md" style={styles.faqPill} variant="secondary"><Text numberOfLines={2} style={styles.faqQuestion}>{question}</Text></Button>)}</ScrollView>
+    </BottomSheet>
+
+    <BottomSheet focusKey="profile-faq-answer" footer={<Button onPress={() => setFaqQuestionIndex(undefined)} size="md" variant="secondary">Close</Button>} onOpenChange={(open) => { if (!open) setFaqQuestionIndex(undefined); }} open={sheet === "faq" && Boolean(selectedFaq)} title={selectedFaq?.[0] ?? "FAQ answer"}>
+      {selectedFaq ? <Text style={styles.faqAnswer}>{selectedFaq[1]}</Text> : null}
     </BottomSheet>
 
     <BottomSheet focusKey="profile-name" footer={<><Button disabled={!nameDraft.trim()} onPress={saveName} size="md" variant="primary">Save</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "name"} title="Edit name">
@@ -612,6 +652,12 @@ const styles = StyleSheet.create({
   settingsCardLabelDanger: { color: palette.danger },
   avatarButton: { height: 112, width: 112 },
   avatar: { backgroundColor: palette.voidBlack, borderColor: palette.hairlineBright, borderWidth: 1 },
+  avatarSkeleton: { backgroundColor: palette.hairlineBright, borderColor: palette.hairline, borderRadius: 999, borderWidth: 1, height: 104, opacity: 0.72, overflow: "hidden", width: 104 },
+  profileImageAction: { justifyContent: "center" },
+  profileImageActionText: { textAlign: "center", width: "100%" },
+  badgeAvatar: { backgroundColor: palette.voidBlack },
+  badgeContent: { alignItems: "center", flex: 1, gap: spacing.md, justifyContent: "center" },
+  badgePreview: { alignSelf: "center", borderColor: palette.hairlineBright, borderRadius: 999, borderWidth: 1, overflow: "hidden" },
   identity: { alignItems: "center", gap: spacing.xs, marginTop: spacing.md },
   nameButton: { maxWidth: "100%", paddingHorizontal: spacing.sm },
   name: { color: palette.silver50, flexShrink: 1, fontFamily: fonts.medium, fontSize: 28, lineHeight: 34, textAlign: "center" },
@@ -623,6 +669,10 @@ const styles = StyleSheet.create({
   faqPill: { justifyContent: "flex-start", minHeight: 40, paddingHorizontal: spacing.md, width: "100%" },
   faqQuestion: { color: palette.silver100, flexShrink: 1, fontFamily: fonts.regular, fontSize: 13, lineHeight: 17, textAlign: "left" },
   faqAnswer: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, lineHeight: 23, paddingBottom: spacing.md },
+  legalContent: { gap: spacing.md, paddingBottom: spacing.lg },
+  legalSection: { gap: spacing.sm, paddingTop: spacing.sm },
+  legalParagraph: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, lineHeight: 23 },
+  legalFootnote: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 13, lineHeight: 20, paddingTop: spacing.sm },
   referralContent: { flexGrow: 1, gap: spacing.xl, paddingBottom: spacing.lg },
   referralTabs: { alignSelf: "stretch", width: "100%" },
   referralTab: { flex: 1 },

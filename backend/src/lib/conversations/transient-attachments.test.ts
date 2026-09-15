@@ -1,18 +1,18 @@
 import { describe, expect, test } from 'bun:test';
-import { randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { newId } from '@/lib/ids';
 import {
   completeTransientAttachments,
   reserveTransientAttachments,
   transientAttachmentReserveInputSchema,
+  TRANSIENT_ATTACHMENT_MAX_AGGREGATE_RAW_BYTES,
   validateCoreAttachmentImageBytes,
   type TransientAttachmentDependencies,
   type TransientAttachmentOwner,
   type TransientAttachmentRecord,
 } from './transient-attachments';
 import { CORE_CHAT_MAX_IMAGE_BYTES } from '@/lib/ai/actions/core-chat';
-import { documentValidate } from '@/lib/ai/document-processing';
 
 const teamKey = 'team';
 const scopeKey = newId();
@@ -63,10 +63,10 @@ function harness() {
 }
 
 describe('transient conversation attachments', () => {
-  test('enforces the aggregate 16 MiB canonical image limit', () => {
+  test('enforces the aggregate 50 MiB image limit', () => {
     const image = (sizeBytes: number) => ({ kind: 'image' as const, filename: 'a.png', mimeType: 'image/png' as const, sizeBytes, width: 1, height: 1, storageKey: 'pending/a' });
-    expect(() => validateCoreAttachmentImageBytes([image(8 * 1024 * 1024), image(8 * 1024 * 1024)])).not.toThrow();
-    expect(() => validateCoreAttachmentImageBytes([image(8 * 1024 * 1024), image(8 * 1024 * 1024 + 1)])).toThrow('16 MiB');
+    expect(() => validateCoreAttachmentImageBytes([image(20 * 1024 * 1024), image(20 * 1024 * 1024), image(10 * 1024 * 1024)])).not.toThrow();
+    expect(() => validateCoreAttachmentImageBytes([image(20 * 1024 * 1024), image(20 * 1024 * 1024), image(10 * 1024 * 1024 + 1)])).toThrow('50 MiB');
   });
   test('strictly accepts only supported extension and MIME pairs', () => {
     expect(() => transientAttachmentReserveInputSchema.parse({ conversationKey, requestKey: 'request-1', files: [{ clientKey: 'a', filename: 'photo.gif', mimeType: 'image/gif', sizeBytes: 10 }] })).toThrow();
@@ -74,7 +74,14 @@ describe('transient conversation attachments', () => {
     expect(transientAttachmentReserveInputSchema.parse({ conversationKey, requestKey: 'request-1', files: [{ clientKey: 'a', filename: 'notes.md', mimeType: 'text/plain', sizeBytes: 10 }] }).files[0]!.filename).toBe('notes.md');
   });
 
-  test('binds reservations to the owner, conversation, and request and prepares sanitized images plus validated documents', async () => {
+  test('rejects the aggregate raw attachment bound', () => {
+    expect(() => transientAttachmentReserveInputSchema.parse({ conversationKey, requestKey: 'raw-limit', files: [
+      { clientKey: 'a', filename: 'a.txt', mimeType: 'text/plain', sizeBytes: TRANSIENT_ATTACHMENT_MAX_AGGREGATE_RAW_BYTES / 2 + 1 },
+      { clientKey: 'b', filename: 'b.txt', mimeType: 'text/plain', sizeBytes: TRANSIENT_ATTACHMENT_MAX_AGGREGATE_RAW_BYTES / 2 },
+    ] })).toThrow('Attachment bytes');
+  });
+
+  test('binds reservations and prepares original image and document bytes', async () => {
     const context = harness();
     const png = new Uint8Array(await sharp({ create: { width: 2, height: 3, channels: 4, background: '#336699' } }).png().toBuffer());
     const text = new TextEncoder().encode('First\r\n\r\nSecond');
@@ -86,7 +93,7 @@ describe('transient conversation attachments', () => {
     expect(reserved.uploads[0]).toMatchObject({ clientKey: 'image', headers: { 'Content-Type': 'image/png' } });
     for (const [index, upload] of reserved.uploads.entries()) {
       const record = JSON.parse(context.values.get(`conversation-attachment:${upload.attachmentKey}`)!) as TransientAttachmentRecord;
-      expect(record).toMatchObject({ teamKey, scopeKey, userKey, conversationKey, requestKey: 'request-1', status: 'reserved' });
+      expect(record).toMatchObject({ teamKey, scopeKey, userKey, conversationKey, requestKey: 'request-1', displayKey: index === 0 ? 'image' : 'document', displayOrder: index, status: 'reserved' });
       context.objects.set(record.storageKey, index === 0 ? { bytes: png, mimeType: 'image/png' } : { bytes: text, mimeType: 'text/plain' });
     }
     const completed = await completeTransientAttachments({ conversationKey, requestKey: 'request-1', attachmentKeys: reserved.uploads.map(({ attachmentKey }) => attachmentKey) }, owner, context.dependencies);
@@ -99,34 +106,62 @@ describe('transient conversation attachments', () => {
     const document = context.artifacts.get(reserved.uploads[1]!.attachmentKey);
     expect(document.kind).toBe('document');
     expect(typeof document.stagedStorageKey).toBe('string');
-    expect(document).not.toHaveProperty('documentContent');
-    expect(context.deleted.filter((key) => key.includes('/original.'))).toHaveLength(1);
+    expect(document.documentContent).toBeUndefined();
+    expect(document.stagedSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(context.deleted).toHaveLength(0);
+    const image = context.artifacts.get(reserved.uploads[0]!.attachmentKey);
+    expect(image).toMatchObject({ displayKey: 'image', displayOrder: 0, filename: 'photo.png', mimeType: 'image/png', stagedStorageKey: expect.stringContaining('/original.png') });
+    expect(image.stagedSha256).toBe(createHash('sha256').update(png).digest('hex'));
     expect([...context.objects.keys()]).toContain(document.stagedStorageKey);
   });
 
-  test('prepares twelve uploads with bounded concurrency two', async () => {
+  test('prepares twelve uploads with bounded concurrency four', async () => {
     const context = harness(); const text = new TextEncoder().encode('bounded'); let active = 0; let maximum = 0;
     const files = Array.from({ length: 12 }, (_, index) => ({ clientKey: `document-${index}`, filename: `notes-${index}.txt`, mimeType: 'text/plain' as const, sizeBytes: text.byteLength }));
     const reserved = await reserveTransientAttachments({ conversationKey, requestKey: 'bounded', files }, owner, context.dependencies);
     for (const upload of reserved.uploads) { const record = JSON.parse(context.values.get(`conversation-attachment:${upload.attachmentKey}`)!) as TransientAttachmentRecord; context.objects.set(record.storageKey, { bytes: text, mimeType: 'text/plain' }); }
-    const completed = await completeTransientAttachments({ conversationKey, requestKey: 'bounded', attachmentKeys: reserved.uploads.map(({ attachmentKey }) => attachmentKey) }, owner, { ...context.dependencies, validateDocument: async (...args) => { active += 1; maximum = Math.max(maximum, active); try { await new Promise((resolve) => setTimeout(resolve, 3)); return await documentValidate(...args); } finally { active -= 1; } } });
-    expect(maximum).toBe(2);
+    const storage = context.dependencies.storage!;
+    const completed = await completeTransientAttachments({ conversationKey, requestKey: 'bounded', attachmentKeys: reserved.uploads.map(({ attachmentKey }) => attachmentKey) }, owner, { ...context.dependencies, storage: { ...storage, download: async (key) => { active += 1; maximum = Math.max(maximum, active); try { await new Promise((resolve) => setTimeout(resolve, 3)); return await storage.download(key); } finally { active -= 1; } } } });
+    expect(maximum).toBe(4);
     expect(completed.attachments).toHaveLength(12);
   });
 
-  test('downscales canonical PNG images to the Core model byte limit', async () => {
+  test('prepares TXT, Markdown, DOC, DOCX, and PDF without extracting them', async () => {
     const context = harness();
-    const input = new Uint8Array(await sharp({ create: { width: 2, height: 2, channels: 4, background: '#336699' } }).png().toBuffer());
-    const noisy = randomBytes(1_400 * 1_400 * 3);
-    const oversized = new Uint8Array(await sharp(noisy, { raw: { width: 1_400, height: 1_400, channels: 3 } }).png({ compressionLevel: 9 }).toBuffer());
-    expect(oversized.byteLength).toBeGreaterThan(CORE_CHAT_MAX_IMAGE_BYTES);
-    const reserved = await reserveTransientAttachments({ conversationKey, requestKey: 'large-image', files: [{ clientKey: 'image', filename: 'photo.png', mimeType: 'image/png', sizeBytes: input.byteLength }] }, owner, context.dependencies);
+    const formats = [
+      ['txt', 'text/plain'],
+      ['md', 'text/markdown'],
+      ['doc', 'application/msword'],
+      ['docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+      ['pdf', 'application/pdf'],
+    ] as const;
+    const files = formats.map(([extension, mimeType], index) => ({ clientKey: extension, filename: `${index + 1}.${extension}`, mimeType, sizeBytes: 1 }));
+    const reserved = await reserveTransientAttachments({ conversationKey, requestKey: 'mixed-documents', files }, owner, context.dependencies);
+    for (const upload of reserved.uploads) {
+      const record = JSON.parse(context.values.get(`conversation-attachment:${upload.attachmentKey}`)!) as TransientAttachmentRecord;
+      context.objects.set(record.storageKey, { bytes: new Uint8Array([1]), mimeType: record.mimeType });
+    }
+    await completeTransientAttachments({ conversationKey, requestKey: 'mixed-documents', attachmentKeys: reserved.uploads.map(({ attachmentKey }) => attachmentKey) }, owner, context.dependencies);
+    const artifacts = reserved.uploads.map(({ attachmentKey }) => context.artifacts.get(attachmentKey));
+    expect(artifacts.map(({ filename, mimeType, sizeBytes }) => ({ filename, mimeType, sizeBytes }))).toEqual(formats.map(([extension, mimeType], index) => ({ filename: `${index + 1}.${extension}`, mimeType, sizeBytes: 1 })));
+    expect(artifacts.every((artifact) => !('documentContent' in artifact))).toBe(true);
+  });
+
+  test('rejects images above the 20 MiB provider limit at reservation', () => {
+    expect(() => transientAttachmentReserveInputSchema.parse({ conversationKey, requestKey: 'large-image', files: [{ clientKey: 'image', filename: 'photo.png', mimeType: 'image/png', sizeBytes: CORE_CHAT_MAX_IMAGE_BYTES + 1 }] })).toThrow('maximum allowed size');
+  });
+
+  test('passes JPEG bytes through without creating a converted object', async () => {
+    const context = harness();
+    const jpeg = new Uint8Array(await sharp({ create: { width: 7, height: 5, channels: 3, background: '#336699' } }).jpeg().toBuffer());
+    const reserved = await reserveTransientAttachments({ conversationKey, requestKey: 'jpeg', files: [{ clientKey: 'image', filename: 'photo.jpg', mimeType: 'image/jpeg', sizeBytes: jpeg.byteLength }] }, owner, context.dependencies);
     const key = reserved.uploads[0]!.attachmentKey;
     const record = JSON.parse(context.values.get(`conversation-attachment:${key}`)!) as TransientAttachmentRecord;
-    context.objects.set(record.storageKey, { bytes: input, mimeType: 'image/png' });
-    const completed = await completeTransientAttachments({ conversationKey, requestKey: 'large-image', attachmentKeys: [key] }, owner, { ...context.dependencies, sanitizeImage: async () => ({ bytes: oversized, coordinates: undefined }) });
-    expect(completed.attachments[0]).toMatchObject({ kind: 'image', mimeType: 'image/png', status: 'prepared' });
-    expect(completed.attachments[0]!.sizeBytes).toBeLessThanOrEqual(CORE_CHAT_MAX_IMAGE_BYTES);
+    context.objects.set(record.storageKey, { bytes: jpeg, mimeType: 'image/jpeg' });
+    const completed = await completeTransientAttachments({ conversationKey, requestKey: 'jpeg', attachmentKeys: [key] }, owner, context.dependencies);
+    expect(completed.attachments[0]).toMatchObject({ kind: 'image', filename: 'photo.jpg', mimeType: 'image/jpeg', sizeBytes: jpeg.byteLength, width: 7, height: 5, status: 'prepared' });
+    expect(context.objects.size).toBe(1);
+    expect(context.deleted).toHaveLength(0);
   });
 
   test('rejects cross-owner completion and removes Redis coordination after durable preparation', async () => {
@@ -155,15 +190,33 @@ describe('transient conversation attachments', () => {
     expect(replay.attachments[0]).toMatchObject({ attachmentKey: key, status: 'prepared' });
   });
 
-  test('cleans staging and Redis metadata when validation fails', async () => {
+  test('accepts opaque PDF bytes for native model input and asynchronous parsing', async () => {
     const context = harness();
     const invalid = new TextEncoder().encode('not a pdf');
     const reserved = await reserveTransientAttachments({ conversationKey, requestKey: 'request-3', files: [{ clientKey: 'document', filename: 'bad.pdf', mimeType: 'application/pdf', sizeBytes: invalid.byteLength }] }, owner, context.dependencies);
     const key = reserved.uploads[0]!.attachmentKey;
     const record = JSON.parse(context.values.get(`conversation-attachment:${key}`)!) as TransientAttachmentRecord;
     context.objects.set(record.storageKey, { bytes: invalid, mimeType: 'application/pdf' });
-    await expect(completeTransientAttachments({ conversationKey, requestKey: 'request-3', attachmentKeys: [key] }, owner, context.dependencies)).rejects.toThrow();
+    await expect(completeTransientAttachments({ conversationKey, requestKey: 'request-3', attachmentKeys: [key] }, owner, context.dependencies)).resolves.toMatchObject({ attachments: [expect.objectContaining({ kind: 'document', mimeType: 'application/pdf' })] });
     expect(context.values.has(`conversation-attachment:${key}`)).toBe(false);
-    expect(context.objects.has(record.storageKey)).toBe(false);
+    expect(context.objects.has(record.storageKey)).toBe(true);
+  });
+
+  test('keeps arbitrary document bytes opaque during mixed batch preparation', async () => {
+    const context = harness();
+    const good = new TextEncoder().encode('Good document');
+    const bad = new Uint8Array([0xff, 0xfe]);
+    const reserved = await reserveTransientAttachments({ conversationKey, requestKey: 'one-bad', files: [
+      { clientKey: 'good', filename: 'good.txt', mimeType: 'text/plain', sizeBytes: good.byteLength },
+      { clientKey: 'bad', filename: 'bad.md', mimeType: 'text/markdown', sizeBytes: bad.byteLength },
+    ] }, owner, context.dependencies);
+    for (const [index, upload] of reserved.uploads.entries()) {
+      const record = JSON.parse(context.values.get(`conversation-attachment:${upload.attachmentKey}`)!) as TransientAttachmentRecord;
+      context.objects.set(record.storageKey, { bytes: index === 0 ? good : bad, mimeType: record.mimeType });
+    }
+    await expect(completeTransientAttachments({ conversationKey, requestKey: 'one-bad', attachmentKeys: reserved.uploads.map(({ attachmentKey }) => attachmentKey) }, owner, context.dependencies)).resolves.toMatchObject({ attachments: [expect.objectContaining({ filename: 'good.txt' }), expect.objectContaining({ filename: 'bad.md' })] });
+    expect(context.artifacts.size).toBe(2);
+    expect(context.values.size).toBe(0);
+    expect(context.objects.size).toBe(2);
   });
 });

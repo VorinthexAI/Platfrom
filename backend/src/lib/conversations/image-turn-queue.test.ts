@@ -30,16 +30,40 @@ describe('conversation image turn queue', () => {
     expect(events).toEqual([[userKey, 'conversation.changed']]);
   });
 
-  test('resolves an owned canonical staged PNG as a trusted provider reference', async () => {
-    const artifact = stagedArtifact(); let generated: any[] = [];
+  test('stores the complete generated image caption as its display summary', async () => {
+    const caption = Array.from({ length: 30 }, (_, index) => `detail${index + 1}`).join(' ');
+    const completed: unknown[][] = [];
+    const output = { images: [{ key: 'c123456789', caption }] };
+    await processConversationImageTurn(job(), {
+      repository: { completeImageTurn: async (...args: unknown[]) => { completed.push(args); return {} as never; }, failTurn: async () => false } as unknown as ConversationRepository,
+      images: { generateManaged: async () => output } as never,
+      publishChanged: async () => {},
+    });
+    expect(output.images[0]!.caption).toBe(caption);
+    expect(completed[0]![4]).toBe(caption);
+    expect(completed[0]![4]).not.toEndWith('...');
+  });
+
+  test.each(['A moonlit observatory...', 'A moonlit observatory…'])('replaces a trailing caption ellipsis before displaying the summary: %s', async (caption) => {
+    const completed: unknown[][] = [];
+    await processConversationImageTurn(job(), {
+      repository: { completeImageTurn: async (...args: unknown[]) => { completed.push(args); return {} as never; }, failTurn: async () => false } as unknown as ConversationRepository,
+      images: { generateManaged: async () => ({ images: [{ key: 'c123456789', caption }] }) } as never,
+      publishChanged: async () => {},
+    });
+    expect(completed[0]![4]).toBe('A moonlit observatory.');
+  });
+
+  test('resolves an owned staged image as a trusted provider reference', async () => {
+    const artifact = stagedArtifact({ filename: 'upload.jpg', mimeType: 'image/jpeg', stagedStorageKey: 'pending/original.jpg' }); let generated: any[] = [];
     const repository = { completeImageTurn: async () => ({} as never), failTurn: async () => false } as unknown as ConversationRepository;
     const result = await processConversationImageTurn({ ...job(), stagedImageArtifactKeys: [artifact.key] }, {
-      repository, artifacts: { read: async () => artifact }, storage: { download: async () => ({ bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/png', sizeBytes: 3 }) },
-      images: { generateManaged: async (...args: any[]) => { generated = args; return { images: [{ key: 'c123456789' }] }; } } as never, publishChanged: async () => {}, now: () => '2026-09-02T00:00:00.000Z',
+      repository, artifacts: { read: async () => artifact }, storage: { download: async () => ({ bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/jpeg', sizeBytes: 3 }) },
+      images: { generateManaged: async (...args: any[]) => { generated = args; return { images: [{ key: 'c123456789', caption: 'Uploaded reference transformed into a new image.' }] }; } } as never, publishChanged: async () => {}, now: () => '2026-09-02T00:00:00.000Z',
     });
     expect(result.imageKey).toBe('c123456789');
     expect(generated[0].referenceImageKeys).toEqual([]);
-    expect(generated[3]).toEqual([{ identity: `artifact:${artifact.key}:${artifact.stagedSha256}`, inputReference: 'data:image/png;base64,AQID' }]);
+    expect(generated[3]).toEqual([{ identity: `artifact:${artifact.key}:${artifact.stagedSha256}`, inputReference: 'data:image/jpeg;base64,AQID' }]);
   });
 
   test('rereads a staged reference when persistence wins the download race', async () => {
@@ -48,7 +72,7 @@ describe('conversation image turn queue', () => {
     await processConversationImageTurn({ ...job(), stagedImageArtifactKeys: [artifact.key] }, {
       repository: { completeImageTurn: async () => ({} as never), failTurn: async () => false } as unknown as ConversationRepository,
       artifacts: { read: async () => ++reads === 1 ? artifact : completed }, storage: { download: async () => { throw new Error('object deleted after persistence'); } },
-      images: { generateManaged: async (value: any) => { generatedInput = value; return { images: [{ key: 'c123456789' }] }; } } as never, publishChanged: async () => {}, now: () => '2026-09-02T00:00:00.000Z',
+      images: { generateManaged: async (value: any) => { generatedInput = value; return { images: [{ key: 'c123456789', caption: 'Persisted reference transformed into a new image.' }] }; } } as never, publishChanged: async () => {}, now: () => '2026-09-02T00:00:00.000Z',
     });
     expect(reads).toBe(2); expect(generatedInput.referenceImageKeys).toEqual([finalKey]);
   });
@@ -67,7 +91,7 @@ describe('conversation image turn queue', () => {
     const repository = { completeImageTurn: async () => ({} as never), failTurn: async () => {} } as unknown as ConversationRepository;
     await processConversationImageTurn(job(), {
       repository,
-      images: { generateManaged: async () => { await recordActionCost('image', { operation: 'generate', count: 1 }); await recordActionUsage('image', { operation: 'generate', count: 1 }, { inputTokens: 0, outputTokens: 0, totalTokens: 0 }); return { images: [{ key: 'c123456789' }] }; } } as never,
+      images: { generateManaged: async () => { await recordActionCost('image', { operation: 'generate', count: 1 }); await recordActionUsage('image', { operation: 'generate', count: 1 }, { inputTokens: 0, outputTokens: 0, totalTokens: 0 }); return { images: [{ key: 'c123456789', caption: 'A generated image.' }] }; } } as never,
       publishChanged: async () => {}, recordEvent: async () => {}, appScopeKey: newId(),
       billing: { getBalance: async () => 100_000_000, charge: async (_key, input) => { charges.push(input); return { status: 'applied', transaction: { key: newId() } } as never; } },
     });
@@ -85,7 +109,7 @@ describe('conversation image turn queue', () => {
     expect(failures).toBe(1);
 
   const recoveryArtifactKey = newId();
-  const pending = { key: assistantMessageKey, conversationKey, teamKey, scopeKey, userKey, turnKey: 'image-turn', requestHash: 'a'.repeat(64), type: 'IMAGE', role: 'ASSISTANT', status: 'PENDING', content: JSON.stringify(input), imageReferenceArtifactKeys: [recoveryArtifactKey], attachments: [], attachmentStatus: 'NONE', retrievals: [], createdAt: '2026-09-03T00:00:00.000Z' } satisfies ConversationMessage;
+  const pending = { key: assistantMessageKey, conversationKey, teamKey, scopeKey, userKey, turnKey: 'image-turn', requestHash: 'a'.repeat(64), type: 'IMAGE', role: 'ASSISTANT', status: 'PENDING', content: JSON.stringify(input), imageReferenceArtifactKeys: [recoveryArtifactKey], attachments: [], attachmentStatus: 'NONE', retrievals: [], guideTopics: { status: 'NONE' }, createdAt: '2026-09-03T00:00:00.000Z' } satisfies ConversationMessage;
     const added: unknown[] = [];
     const queue = { getJobs: async () => [], getJob: async () => undefined, add: async (...args: unknown[]) => { added.push(args); return { id: assistantMessageKey }; } };
     const recoveryRepository = { listPendingImageTurns: async () => [{ message: pending, actorKey }] } as unknown as ConversationRepository;

@@ -52,9 +52,11 @@ test("mounts one catalog-driven shared-control paywall with checkout and referra
   expect(paywall).toContain("Sparks give you a simple way to use AI capabilities, store your work, and keep services connected across Vorinthex.");
   expect(paywall).not.toMatch(/Choose an offer\.|Choose your plan\.|Usage-based pricing|Pay only for what you use/i);
   expect(paywall).toContain('accessibilityLabel="How Sparks are billed"');
-  expect(paywall.match(/size="xs" variant="icon"><HelpIcon size="sm" \/><\/Button>/g)).toHaveLength(2);
+  expect(paywall.match(/<ButtonSizeProvider overrideParent size="sm">/g)).toHaveLength(2);
+  expect(paywall.match(/size="sm" variant="icon"><HelpIcon size="sm" \/><\/Button><\/ButtonSizeProvider>/g)).toHaveLength(2);
   expect(paywall).not.toContain("Share a referral");
   expect(paywall).toContain('enabled: Boolean(userKey && open && (mode === "onboarding" || page === "referral"))');
+  expect(paywall).toContain('initialData: authReferralSummary?.code.ownerUserKey === userKey ? authReferralSummary : undefined');
   expect(paywall).toContain("<SparkCostsSheet");
   expect(sparkCosts).toContain("charges.map((charge)");
   expect(sparkCosts).not.toContain("charges.filter(");
@@ -63,6 +65,7 @@ test("mounts one catalog-driven shared-control paywall with checkout and referra
   expect(sparkCosts).toContain('variant="secondary">Close</Button>');
   expect(sparkCosts).not.toContain("Sparks are the shared usage unit across Vorinthex");
   expect(sparkCosts).not.toMatch(/borderColor|borderWidth|borderRadius/);
+  expect(sparkCosts).toContain("paddingHorizontal: spacing.xxs");
   expect(paywall).not.toMatch(/Pressable|TouchableOpacity|<button/);
   expect(sparkCosts).not.toMatch(/Pressable|TouchableOpacity|<button/);
 });
@@ -82,7 +85,7 @@ test("Profile routes to Settings while account actions remain available", () => 
   expect(profile).toContain('label="FAQ"');
   expect(profile).toContain('label="Log out"');
   expect(profile).not.toContain('focusKey="profile-settings"');
-  for (const text of ["What are Sparks?", "How do plan grants work?", "Do top-ups expire?", "How do referral rewards work?", "Can I cancel or renew?", "How do I restore renewal?"]) expect(profile).toContain(text);
+  for (const text of ["What are Sparks, and what uses them?", "How do weekly plans, monthly plans, and top-ups work?", "What happens to my Sparks and stored work if I cancel or run out of Sparks?"]) expect(profile).toContain(text);
 });
 
 test("all ordinary paywall and profile sheet controls resolve to md", () => {

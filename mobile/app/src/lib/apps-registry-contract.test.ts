@@ -14,7 +14,10 @@ const switcher = read("../components/capability/WorkspaceAppSwitcher.tsx");
 
 test("the registry bootstrap is direct and omits the selected app header", () => {
   expect(registry).toContain("/api/v1/apps");
-  expect(registry).toContain("headers: appsBootstrapHeaders()");
+  expect(registry).toContain("headers: await appsBootstrapHeaders()");
+  expect(registry).toContain("[INSTALLATION_EVENT_IDENTIFIER_HEADER]: eventIdentifier");
+  expect(registry).toContain("[DEVICE_IDENTIFIER_HEADER]: device");
+  expect(registry).toContain("...await requestIdentityHeaders()");
   expect(registry).not.toContain("selectedAppKeyHeaders");
   expect(registry).not.toContain("X-Vorinthex-App-Key");
 });
@@ -27,7 +30,7 @@ test("the mobile registry requires a strict server-hosted app logo URL", () => {
 test("health and products use a direct concurrent public bootstrap", () => {
   expect(products).toContain('Promise.all([fetchPublic("health"), fetchProducts()])');
   expect(products).toContain('fetchPublic("products")');
-  expect(products).toContain("headers: appsBootstrapHeaders()");
+  expect(products).toContain("headers: await appsBootstrapHeaders()");
   expect(products).not.toContain("selectedAppKeyHeaders");
 });
 
@@ -39,7 +42,9 @@ test("plans and Spark costs begin loading during app bootstrap", () => {
 
 test("every normal native transport injects the exact selected app key header", () => {
   expect(headers).toContain('VORINTHEX_APP_KEY_HEADER = "X-Vorinthex-App-Key"');
+  expect(headers).toContain("appKeyHeaders(appKey: string)");
   expect(authenticated.match(/selectedAppKeyHeaders\(\)/g)).toHaveLength(3);
+  expect(authenticated).toContain("if (!headers.has(VORINTHEX_APP_KEY_HEADER))");
   expect(authenticated).toContain("await ensureAppsReady()");
   for (const source of [headers, authenticated]) expect(source).not.toContain("X-Vorinthex-Domain");
 });

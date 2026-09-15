@@ -89,13 +89,16 @@ const targetAccessRulesQuery = `
   LET ownsCollection = directCollection != null && directCollection.ownerKey == @teamMembershipKey
   LET managedCollection = directCollection != null && directCollection.mutationPolicy == "system-only" && directCollection.purpose IN ["email-media", "generated-media", "place-media"]
   LET imageKey = @sourceType == "image" ? @sourceKey : @sourceType == "image-memory" && target != null ? target.imageKey : null
+  LET image = imageKey == null ? null : DOCUMENT(images, imageKey)
   LET imageRelations = imageKey == null ? [] : (FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == imageKey RETURN relation.collectionKey)
   LET imageOwnerAccess = LENGTH(FOR relatedCollectionKey IN imageRelations LET collection = DOCUMENT(collections, relatedCollectionKey) FILTER collection != null && collection.ownerKey == @teamMembershipKey LIMIT 1 RETURN 1) > 0
   LET managedImageAccess = LENGTH(FOR relatedCollectionKey IN imageRelations LET collection = DOCUMENT(collections, relatedCollectionKey) FILTER collection != null && collection.mutationPolicy == "system-only" && collection.purpose IN ["email-media", "generated-media", "place-media"] LIMIT 1 RETURN 1) > 0
   LET privateTarget = @sourceType IN ["place", "trip"]
   LET collectionTarget = @sourceType IN ["image-collection", "image-highlight"]
   LET imageTarget = @sourceType IN ["image", "image-memory"]
-  LET readable = active && target != null && target.scopeKey == @scopeKey && (privateTarget ? target.userKey == @userKey && (scoped || elevated) : collectionTarget ? elevated || ownsCollection || (managedCollection && scoped) : imageTarget ? elevated || imageOwnerAccess || (managedImageAccess && scoped) || (@sourceType == "image" && target.createdByKey == @teamMembershipKey && LENGTH(imageRelations) == 0) : scoped || elevated)
+  LET privateArchiveTarget = @sourceType IN ["folder", "document"] && target != null && HAS(target, "privateOwnerUserKey") && target.privateOwnerUserKey != null
+  LET managedArtifactOwner = target.createdByKey == @teamMembershipKey && image != null && image.createdByKey == @teamMembershipKey && image.mutationPolicy != "system-only"
+  LET readable = active && target != null && target.scopeKey == @scopeKey && (!privateArchiveTarget || target.privateOwnerUserKey == @userKey) && (privateTarget ? target.userKey == @userKey && (scoped || elevated) : collectionTarget ? (directCollection.mutationPolicy == "system-only" ? @sourceType == "image-highlight" && managedCollection && (scoped || elevated) && target.createdByKey == @teamMembershipKey : elevated || ownsCollection) : imageTarget ? (managedImageAccess ? (scoped || elevated) && (@sourceType == "image" ? image.createdByKey == @teamMembershipKey && image.mutationPolicy != "system-only" : managedArtifactOwner) : elevated || imageOwnerAccess || (@sourceType == "image" && target.createdByKey == @teamMembershipKey && LENGTH(imageRelations) == 0)) : scoped || elevated)
 `;
 const targetAccessQuery = targetAccessPreludeQuery + targetAccessRulesQuery;
 const batchTargetAccessRulesQuery = targetAccessRulesQuery.replaceAll('@sourceType', 'requestedTarget.type').replaceAll('@sourceKey', 'requestedTarget.key');
@@ -130,7 +133,9 @@ const assignmentProjectionQuery = `
     LET privateTarget = assignment.sourceType IN ["place", "trip"]
     LET collectionTarget = assignment.sourceType IN ["image-collection", "image-highlight"]
     LET imageTarget = assignment.sourceType IN ["image", "image-memory"]
-    LET readable = target != null && target.scopeKey == @scopeKey && (privateTarget ? target.userKey == @userKey : collectionTarget ? elevated || ownsCollection || (managedCollection && scoped) : imageTarget ? elevated || imageOwnerAccess || (managedImageAccess && scoped) || (assignment.sourceType == "image" && target.createdByKey == @teamMembershipKey && LENGTH(imageRelations) == 0) : scoped || elevated)
+    LET privateArchiveTarget = assignment.sourceType IN ["folder", "document"] && target != null && HAS(target, "privateOwnerUserKey") && target.privateOwnerUserKey != null
+    LET managedArtifactOwner = target.createdByKey == @teamMembershipKey && image != null && image.createdByKey == @teamMembershipKey && image.mutationPolicy != "system-only"
+    LET readable = target != null && target.scopeKey == @scopeKey && (!privateArchiveTarget || target.privateOwnerUserKey == @userKey) && (privateTarget ? target.userKey == @userKey : collectionTarget ? (directCollection.mutationPolicy == "system-only" ? assignment.sourceType == "image-highlight" && managedCollection && (scoped || elevated) && target.createdByKey == @teamMembershipKey : elevated || ownsCollection) : imageTarget ? (managedImageAccess ? (scoped || elevated) && (assignment.sourceType == "image" ? image.createdByKey == @teamMembershipKey && image.mutationPolicy != "system-only" : managedArtifactOwner) : elevated || imageOwnerAccess || (assignment.sourceType == "image" && target.createdByKey == @teamMembershipKey && LENGTH(imageRelations) == 0)) : scoped || elevated)
     FILTER readable
     LET label = ${fixedTargetLabelExpression}
     FILTER IS_STRING(label) && LENGTH(TRIM(label)) > 0

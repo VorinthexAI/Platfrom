@@ -11,7 +11,7 @@ describe('initial workspace content', () => {
     expect(INITIAL_WORKSPACE_FOLDERS.map(({ name }) => name)).toEqual(['Vorinthex AI', 'Core', 'Archive', 'Gallery', 'Signal', 'Compass', 'Ascend']);
     expect(INITIAL_WORKSPACE_FOLDERS.map(({ presentation }) => presentation)).toEqual(['platform', 'assistant', 'knowledge', 'media', 'communication', 'travel', 'learning']);
     expect(INITIAL_WORKSPACE_FOLDERS.map(({ id }) => id)).toEqual([...INITIAL_WORKSPACE_FOLDER_IDS]);
-    expect(INITIAL_WORKSPACE_DOCUMENTS).toHaveLength(21);
+    expect(INITIAL_WORKSPACE_DOCUMENTS).toHaveLength(22);
     expect(INITIAL_WORKSPACE_DOCUMENTS.map(({ id }) => id)).toEqual([...INITIAL_WORKSPACE_DOCUMENT_IDS]);
     for (const document of INITIAL_WORKSPACE_DOCUMENTS) {
       const words = document.content.trim().split(/\s+/).length;
@@ -29,13 +29,21 @@ describe('initial workspace content', () => {
     expect(INITIAL_WORKSPACE_DOCUMENTS.find(({ id }) => id === 'learning-start')?.content).toContain('using the documents in this guide tree as sources');
     const signalFolder = INITIAL_WORKSPACE_FOLDERS.find(({ id }) => id === 'communication');
     const signalDocuments = INITIAL_WORKSPACE_DOCUMENTS.filter(({ folderId }) => folderId === 'communication');
-    expect(INITIAL_WORKSPACE_CONTENT_VERSION).toBe(7);
+    expect(INITIAL_WORKSPACE_CONTENT_VERSION).toBe(8);
     expect(signalFolder?.introducedInVersion).toBe(7);
     expect(signalFolder?.description).toContain('private inbox');
     expect(signalDocuments).toHaveLength(3);
     expect(signalDocuments.every(({ introducedInVersion }) => introducedInVersion === 7)).toBe(true);
     expect(signalDocuments.map(({ content }) => content).join(' ')).toContain('communication from Vorinthex AI apps and support');
     expect(signalDocuments.map(({ content }) => content).join(' ')).not.toMatch(/Gmail/i);
+    const chatGuide = INITIAL_WORKSPACE_DOCUMENTS.find(({ id }) => id === 'conversation-history');
+    expect(chatGuide).toMatchObject({ folderId: 'assistant', name: 'How Core Chats Work with Archive', introducedInVersion: 8 });
+    expect(chatGuide?.content).toContain('Vorinthex AI / Core / Chats');
+    expect(chatGuide?.content).toContain('organized there automatically');
+    expect(chatGuide?.content).toContain('Rolling summaries');
+    expect(chatGuide?.content).toContain('semantic search');
+    expect(chatGuide?.content).toContain('limited to the authorized workspace scope');
+    expect(chatGuide?.content).not.toMatch(/sole authoritative|immediate(?:ly)? available/i);
   });
 
   test('prepares the complete immutable file tree once and preserves it after initialization', async () => {
@@ -44,7 +52,7 @@ describe('initial workspace content', () => {
     let persisted: { folders: Array<{ value: { key: string; name: string; presentation?: string } & Record<string, unknown> }>; documents: Array<{ value: { key: string } & Record<string, unknown> }>; books: Array<{ introducedInVersion: number; value: { key: string; chapterCount: number } }>; bookChapters: Array<{ value: { title: string; content?: string; audioStorageKey?: string } }> } | undefined;
     const service = createInitialWorkspaceContentService({
       repository: {
-        currentVersion: async () => initialized ? 7 : 0,
+        currentVersion: async () => initialized ? 8 : 0,
         publish: async (input) => { persisted = input; initialized = true; return true; },
       },
       embed: async ({ texts }) => { embeddingCalls += 1; return texts.map(() => Array(EMBEDDING_DIMENSIONS).fill(0)); },
@@ -55,11 +63,11 @@ describe('initial workspace content', () => {
     expect(await service.ensure(scopeKey)).toBe(false);
     expect(embeddingCalls).toBe(1);
     expect(persisted?.folders).toHaveLength(7);
-    expect(persisted?.documents).toHaveLength(21);
+    expect(persisted?.documents).toHaveLength(22);
     expect(persisted?.folders[0]?.value.name).toBe('Vorinthex AI');
     expect(persisted?.folders.map(({ value }) => value.presentation)).toEqual(['platform', 'assistant', 'knowledge', 'media', 'communication', 'travel', 'learning']);
     expect(new Set(persisted?.folders.map(({ value }) => value.key))).toHaveLength(7);
-    expect(new Set(persisted?.documents.map(({ value }) => value.key))).toHaveLength(21);
+    expect(new Set(persisted?.documents.map(({ value }) => value.key))).toHaveLength(22);
     expect(persisted?.folders.every(({ value }) => isInitialWorkspaceFolderKey(scopeKey, value.key))).toBe(true);
     expect(persisted?.documents.every(({ value }) => isInitialWorkspaceDocumentKey(scopeKey, value.key))).toBe(true);
     expect(persisted?.folders.every(({ value }) => value.mutationPolicy === 'system-container')).toBe(true);
@@ -72,7 +80,27 @@ describe('initial workspace content', () => {
     expect(persisted?.bookChapters.every(({ value }) => value.audioStorageKey?.endsWith('.mp3'))).toBe(true);
   });
 
-  test('adds the canonical audio book and refreshed Signal guides when upgrading version 3', async () => {
+  test('publishes only the protected chat guide when upgrading version 7', async () => {
+    let persisted: { version: number; folders: unknown[]; documents: Array<{ introducedInVersion: number; value: { name: string; content?: string; mutationPolicy?: string } }>; books: unknown[]; bookChapters: unknown[] } | undefined;
+    const service = createInitialWorkspaceContentService({
+      repository: { currentVersion: async () => 7, publish: async (input) => { persisted = input; return true; } },
+      embed: async ({ texts }) => texts.map(() => Array(EMBEDDING_DIMENSIONS).fill(0)),
+    });
+
+    expect(await service.ensure(scopeKey)).toBe(true);
+    expect(persisted?.version).toBe(8);
+    expect(persisted?.folders).toEqual([]);
+    expect(persisted?.documents).toHaveLength(1);
+    expect(persisted?.documents[0]).toMatchObject({
+      introducedInVersion: 8,
+      value: { name: 'How Core Chats Work with Archive', mutationPolicy: 'system-only' },
+    });
+    expect(persisted?.documents[0]?.value.content).toContain('Vorinthex AI / Core / Chats');
+    expect(persisted?.books).toEqual([]);
+    expect(persisted?.bookChapters).toEqual([]);
+  });
+
+  test('adds the canonical audio book and all later guides when upgrading version 3', async () => {
     let persisted: { folders: unknown[]; documents: unknown[]; books: unknown[]; bookChapters: unknown[] } | undefined;
     let embedded = false;
     const service = createInitialWorkspaceContentService({
@@ -82,12 +110,12 @@ describe('initial workspace content', () => {
     expect(await service.ensure(scopeKey)).toBe(true);
     expect(embedded).toBe(true);
     expect(persisted?.folders).toHaveLength(1);
-    expect(persisted?.documents).toHaveLength(3);
+    expect(persisted?.documents).toHaveLength(4);
     expect(persisted?.books).toHaveLength(1);
     expect(persisted?.bookChapters).toHaveLength(6);
   });
 
-  test('publishes only refreshed Signal guides when upgrading version 6', async () => {
+  test('publishes refreshed Signal guides and the chat guide when upgrading version 6', async () => {
     let persisted: { folders: Array<{ value: { name: string } }>; documents: Array<{ value: { name: string; content?: string } }>; books: unknown[]; bookChapters: unknown[] } | undefined;
     const service = createInitialWorkspaceContentService({
       repository: { currentVersion: async () => 6, publish: async (input) => { persisted = input; return true; } },
@@ -96,8 +124,8 @@ describe('initial workspace content', () => {
 
     expect(await service.ensure(scopeKey)).toBe(true);
     expect(persisted?.folders.map(({ value }) => value.name)).toEqual(['Signal']);
-    expect(persisted?.documents.map(({ value }) => value.name)).toEqual(['What Signal Is', 'Why We Built Signal', 'Your First Steps in Signal']);
-    expect(persisted?.documents[0]?.value.content).toContain('communication from Vorinthex AI apps and support');
+    expect(persisted?.documents.map(({ value }) => value.name)).toEqual(['How Core Chats Work with Archive', 'What Signal Is', 'Why We Built Signal', 'Your First Steps in Signal']);
+    expect(persisted?.documents[1]?.value.content).toContain('communication from Vorinthex AI apps and support');
     expect(persisted?.books).toEqual([]);
     expect(persisted?.bookChapters).toEqual([]);
   });
@@ -120,7 +148,7 @@ describe('initial workspace content', () => {
 
     expect(await service.ensure(scopeKey)).toBe(true);
     expect(persisted?.folders).toHaveLength(7);
-    expect(persisted?.documents).toHaveLength(21);
+    expect(persisted?.documents).toHaveLength(22);
     const repositorySource = await Bun.file(new URL('./initial-workspace-content-repository.ts', import.meta.url)).text();
     expect(repositorySource).toContain('FILTER item.introducedInVersion > previousVersion');
     expect(repositorySource).toContain('UPDATE MERGE(UNSET(item.value');
@@ -130,7 +158,7 @@ describe('initial workspace content', () => {
   test('does not publish when the current guide version is present', async () => {
     let embedded = false;
     const service = createInitialWorkspaceContentService({
-      repository: { currentVersion: async () => 7, publish: async () => { throw new Error('current content must not publish'); } },
+      repository: { currentVersion: async () => 8, publish: async () => { throw new Error('current content must not publish'); } },
       embed: async () => { embedded = true; return []; },
     });
     await expect(service.ensure(scopeKey)).resolves.toBe(false);

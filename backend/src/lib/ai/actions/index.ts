@@ -9,7 +9,6 @@ import { upsertAction } from './upsert';
 import { textAction } from './text';
 import { imageAction } from './image';
 import { speechAction } from './speech';
-import { fileAction } from './file';
 import { uploadAction } from './upload';
 import { queueAction } from './queue';
 
@@ -24,7 +23,6 @@ export { upsertAction } from './upsert';
 export { textAction } from './text';
 export { imageAction } from './image';
 export { speechAction, speechInputSchema, speechOutputSchema, type SpeechInput, type SpeechOutput } from './speech';
-export { fileAction, fileInputSchema, fileOutputSchema, MAX_FILE_ACTION_BYTES, MAX_FILE_ACTION_TEXT_CHARACTERS, type FileInput, type FileOutput } from './file';
 export { uploadAction } from './upload';
 export { queueAction, executeQueueAction, type QueueActionInput } from './queue';
 export { ACTION_ROUTE_SUFFIXES, ACTION_SLUGS, actionIdSchema, isValidActionIdFormat } from './types';
@@ -33,7 +31,7 @@ export { coreChatContentSchema, coreChatMessageSchema, coreChatToolDefinitionSch
 
 /** Stable, provider- and domain-neutral runtime primitives. */
 export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
-  textAction, imageAction, speechAction, embedAction, fileAction, uploadAction, queueAction,
+  textAction, imageAction, speechAction, embedAction, uploadAction, queueAction,
   traverseAction, readAction, insertActionDefinition, upsertAction, updateActionDefinition, deleteActionDefinition,
 ];
 export const getActionDefinition = (id: ActionId): ActionDefinition | undefined => ACTION_DEFINITIONS.find((definition) => definition.id === id);

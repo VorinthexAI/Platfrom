@@ -5,7 +5,7 @@ import { SCOPE_KEYED_REMOVAL_COLLECTIONS } from '@/lib/ai/scopes/repository';
 describe('conversation persistence migration', () => {
   test('creates private collections and ownership/idempotency indexes', () => {
     expect(collections.find(({ name }) => name === 'conversations')).toEqual({ name: 'conversations', skipEmbedding: true, indexes: [{ fields: ['teamKey', 'scopeKey', 'userKey', 'isFavorite', 'updatedAt'] }, { fields: ['teamKey', 'scopeKey', 'userKey', 'updatedAt'] }] });
-    expect(collections.find(({ name }) => name === 'conversationMessages')).toEqual({ name: 'conversationMessages', skipEmbedding: true, indexes: [{ fields: ['conversationKey', 'userKey', 'turnKey', 'role'], unique: true }, { fields: ['teamKey', 'scopeKey', 'userKey', 'conversationKey', 'createdAt'] }, { fields: ['conversationKey', 'role', 'status'] }] });
+    expect(collections.find(({ name }) => name === 'conversationMessages')).toEqual({ name: 'conversationMessages', skipEmbedding: true, indexes: [{ fields: ['conversationKey', 'userKey', 'turnKey', 'role'], unique: true }, { fields: ['teamKey', 'scopeKey', 'userKey', 'conversationKey', 'createdAt'] }, { fields: ['conversationKey', 'role', 'status'] }, { fields: ['guideTopics.status', 'guideTopicGeneration'] }] });
   });
 
   test('backfills deterministic request hashes before strict reads', async () => {

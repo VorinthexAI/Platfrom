@@ -1,5 +1,5 @@
-import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { AccessibilityInfo, Animated, Linking, ScrollView, StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewProps, type ViewStyle } from "react-native";
+import { Fragment, memo, useRef, type ReactNode } from "react";
+import { Linking, ScrollView, StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewProps, type ViewStyle } from "react-native";
 import { colors, radii, spacing } from "../../tokens";
 import { advanceStreamingRichText, isSafeRichTextUrl, parseRichText, type RichTextBlock, type RichTextInline, type StreamingRichTextState } from "./rich-text-parser";
 
@@ -86,30 +86,12 @@ const StableRichText = memo(function StableRichText({ content, onLinkPress, over
   return <><Blocks blocks={parseRichText(content)} overrides={overrides} onLinkPress={onLinkPress} prefix="stream-stable" /></>;
 });
 
-function useReducedMotion() {
-  const [reduced, setReduced] = useState(false);
-  useEffect(() => {
-    void AccessibilityInfo.isReduceMotionEnabled().then(setReduced);
-    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduced);
-    return () => subscription.remove();
-  }, []);
-  return reduced;
-}
-
-export function StreamingRichText({ content, streaming, styles: overrides = EMPTY_RICH_TEXT_STYLES, onLinkPress, style, ...props }: StreamingRichTextProps) {
+export function StreamingRichText({ content, streaming: _streaming, styles: overrides = EMPTY_RICH_TEXT_STYLES, onLinkPress, style, ...props }: StreamingRichTextProps) {
   const state = useRef<StreamingRichTextState | undefined>(undefined);
   state.current = advanceStreamingRichText(state.current, content);
-  const opacity = useRef(new Animated.Value(1)).current;
-  const reducedMotion = useReducedMotion();
-  useLayoutEffect(() => {
-    opacity.stopAnimation();
-    if (!streaming || reducedMotion) { opacity.setValue(1); return; }
-    opacity.setValue(0.82);
-    Animated.timing(opacity, { duration: 90, toValue: 1, useNativeDriver: true }).start();
-  }, [content, opacity, reducedMotion, streaming]);
   return <View style={[defaultStyles.root, overrides.root, style]} {...props}>
     {state.current.stableSegments.map((segment) => <StableRichText content={segment.content} key={segment.key} onLinkPress={onLinkPress} overrides={overrides} />)}
-    {state.current.tail ? <Animated.View style={{ opacity }}><Blocks blocks={parseRichText(state.current.tail)} overrides={overrides} onLinkPress={onLinkPress} prefix="stream-tail" /></Animated.View> : null}
+    {state.current.tail ? <View><Blocks blocks={parseRichText(state.current.tail)} overrides={overrides} onLinkPress={onLinkPress} prefix="stream-tail" /></View> : null}
   </View>;
 }
 

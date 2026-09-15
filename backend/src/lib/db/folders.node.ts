@@ -16,7 +16,8 @@ export const folderSchema = z.object({
   coverImageKey: z.string().cuid().optional(),
   presentation: contentPresentationSchema.optional(),
   purpose: z.enum(['generated-documents-root', 'generated-documents-guide', 'generated-documents-brief', 'generated-documents-accommodations', 'generated-documents-restaurants', 'generated-documents-activities', 'communication-mail-root', 'communication-mail-inboxes', 'communication-mail-threads', 'communication-mail-drafts', 'communication-mail-tones', 'communication-mail-reply-context', 'communication-mail-settings']).optional(),
-  managedPurpose: z.enum(['mail-attachment', 'mail-inbox', 'mail-inbox-files', 'mail-thread', 'scope-directory']).optional(), managedOwnerKey: z.string().cuid().optional(),
+  managedPurpose: z.enum(['mail-attachment', 'mail-inbox', 'mail-inbox-files', 'mail-thread', 'scope-directory', 'conversation-root', 'conversation', 'conversation-summaries']).optional(), managedOwnerKey: z.string().cuid().optional(),
+  privateOwnerUserKey: z.string().cuid().optional(),
   mutationPolicy: z.enum(['user', 'system-container']).optional(),
   archiveVisibility: z.enum(['visible', 'domain-only']).default('visible'),
   embedding: currentEmbeddingSchema,
@@ -68,10 +69,11 @@ export async function deleteFolder(folderKey: string): Promise<void> {
   if (!current || !await deleteFolderInScope(current.scopeKey, folderKey)) throw new Error(`Folder ${folderKey} was not found.`);
 }
 
-export async function getFolderInScope(scopeKey: string, folderKey: string): Promise<Folder | null> {
+export async function getFolderInScope(scopeKey: string, folderKey: string, privateOwnerUserKey?: string): Promise<Folder | null> {
   const cursor = await db.query(aql`
     FOR folder IN ${db.collection(FOLDERS_COLLECTION)}
       FILTER folder._key == ${folderKey} && folder.scopeKey == ${scopeKey}
+      FILTER !HAS(folder, "privateOwnerUserKey") || folder.privateOwnerUserKey == null || folder.privateOwnerUserKey == ${privateOwnerUserKey ?? null}
       FILTER !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
       FILTER (folder.archiveVisibility || "visible") == "visible"
       LIMIT 1
@@ -79,11 +81,11 @@ export async function getFolderInScope(scopeKey: string, folderKey: string): Pro
   `);
   const folder = await cursor.next();
   if (!folder) return null;
-  return (await archiveVisibleFolderKeys(scopeKey)).has(folderKey) ? folderSchema.parse(withArangoKey(folder)) : null;
+  return (await archiveVisibleFolderKeys(scopeKey, privateOwnerUserKey)).has(folderKey) ? folderSchema.parse(withArangoKey(folder)) : null;
 }
 
-export async function archiveVisibleFolderKeys(scopeKey: string): Promise<Set<string>> {
-  const cursor = await db.query(aql`FOR folder IN ${db.collection(FOLDERS_COLLECTION)} FILTER folder.scopeKey == ${scopeKey} RETURN { key: folder._key, parentFolderKey: folder.parentFolderKey, archiveVisibility: folder.archiveVisibility }`);
+export async function archiveVisibleFolderKeys(scopeKey: string, privateOwnerUserKey?: string): Promise<Set<string>> {
+  const cursor = await db.query(aql`FOR folder IN ${db.collection(FOLDERS_COLLECTION)} FILTER folder.scopeKey == ${scopeKey} FILTER !HAS(folder, "privateOwnerUserKey") || folder.privateOwnerUserKey == null || folder.privateOwnerUserKey == ${privateOwnerUserKey ?? null} RETURN { key: folder._key, parentFolderKey: folder.parentFolderKey, archiveVisibility: folder.archiveVisibility }`);
   const folders = await cursor.all() as Array<{ key: string; parentFolderKey?: string; archiveVisibility?: string }>;
   const byKey = new Map(folders.map((folder) => [folder.key, folder]));
   const visible = new Set<string>();
@@ -100,12 +102,13 @@ export async function archiveVisibleFolderKeys(scopeKey: string): Promise<Set<st
 }
 
 /** Scope authorization is applied before semantic scoring. */
-export async function semanticSearchFolders(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; createdFrom?: string; createdTo?: string; minScore: number; limit: number }): Promise<Array<{ score: number; folder: Folder }>> {
+export async function semanticSearchFolders(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; createdFrom?: string; createdTo?: string; minScore: number; limit: number; privateOwnerUserKey?: string }): Promise<Array<{ score: number; folder: Folder }>> {
   const embedding = currentEmbeddingSchema.parse(input.embedding);
   if (input.authorizedScopeKeys.length === 0 || input.folderKeys?.length === 0) return [];
   const cursor = await db.query(aql`
     FOR folder IN ${db.collection(FOLDERS_COLLECTION)}
       FILTER folder.scopeKey IN ${input.authorizedScopeKeys}
+      FILTER !HAS(folder, "privateOwnerUserKey") || folder.privateOwnerUserKey == null || folder.privateOwnerUserKey == ${input.privateOwnerUserKey ?? null}
       FILTER ${input.folderKeys === undefined} || folder._key IN ${input.folderKeys ?? []}
       FILTER ${input.createdFrom ?? null} == null || folder.createdAt >= ${input.createdFrom ?? null}
       FILTER ${input.createdTo ?? null} == null || folder.createdAt <= ${input.createdTo ?? null}
@@ -118,7 +121,7 @@ export async function semanticSearchFolders(input: { embedding: number[]; author
       LIMIT ${Math.min(Math.max(input.limit, 1), 40)}
       RETURN { score, folder }
   `);
-  const visibleByScope = new Map(await Promise.all(input.authorizedScopeKeys.map(async (scopeKey) => [scopeKey, await archiveVisibleFolderKeys(scopeKey)] as const)));
+  const visibleByScope = new Map(await Promise.all(input.authorizedScopeKeys.map(async (scopeKey) => [scopeKey, await archiveVisibleFolderKeys(scopeKey, input.privateOwnerUserKey)] as const)));
   return (await cursor.all()).map((match: Record<string, unknown>) => ({
     score: Number(match.score),
     folder: folderSchema.parse(withArangoKey(match.folder as Record<string, unknown>)),

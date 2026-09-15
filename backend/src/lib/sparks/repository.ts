@@ -15,7 +15,7 @@ export interface SparkDatabase {
 }
 
 export type SparkTransactionRunner = <T>(
-  collections: { read?: string[]; write: string[] },
+  collections: { read?: string[]; write: string[]; exclusive?: string[] },
   operation: (transaction: SparkDatabase) => Promise<T>,
 ) => Promise<T>;
 
@@ -132,7 +132,7 @@ export function createArangoSparkRepository(
       const { key: _key, createdAt: _createdAt, ...transactionFields } = input;
       const transactionInput = sparkTransactionInputSchema.parse(transactionFields);
       const record = sparkTransactionSchema.omit({ balanceAfterMicroSparks: true }).parse(input);
-      return transact({ write: [USERS_COLLECTION, SPARK_TRANSACTIONS_COLLECTION, 'billingExecutions'] }, async (transaction) => {
+      return transact({ write: [USERS_COLLECTION, SPARK_TRANSACTIONS_COLLECTION, 'billingExecutions'], exclusive: [] }, async (transaction) => {
         const executionCursor = await transaction.query(
           'FOR item IN billingExecutions FILTER item.userKey == @userKey && item.executionIdentity == @executionIdentity LIMIT 1 RETURN item',
           { userKey: input.userKey, executionIdentity },
@@ -203,27 +203,23 @@ export function createArangoSparkRepository(
     },
 
     async completeExecution(userKey, executionIdentity, owner, completedAt) {
-      return transact({ write: ['billingExecutions'] }, async (transaction) => {
-        const cursor = await transaction.query(`
-          FOR item IN billingExecutions
-            FILTER item.userKey == @userKey && item.executionIdentity == @executionIdentity && item.status == "pending" && item.leaseOwner == @owner
-            UPDATE item WITH { status: "completed", completedAt: @completedAt, updatedAt: @completedAt, leaseOwner: null, leaseExpiresAt: null } IN billingExecutions OPTIONS { keepNull: false }
-            RETURN true
-        `, { userKey, executionIdentity, owner, completedAt });
-        return Boolean(await cursor.next());
-      });
+      const cursor = await database.query(`
+        FOR item IN billingExecutions
+          FILTER item.userKey == @userKey && item.executionIdentity == @executionIdentity && item.status == "pending" && item.leaseOwner == @owner
+          UPDATE item WITH { status: "completed", completedAt: @completedAt, updatedAt: @completedAt, leaseOwner: null, leaseExpiresAt: null } IN billingExecutions OPTIONS { keepNull: false }
+          RETURN true
+      `, { userKey, executionIdentity, owner, completedAt });
+      return Boolean(await cursor.next());
     },
 
     async renewExecution(userKey, executionIdentity, owner, now, expiresAt) {
-      return transact({ write: ['billingExecutions'] }, async (transaction) => {
-        const cursor = await transaction.query(`
-          FOR item IN billingExecutions
-            FILTER item.userKey == @userKey && item.executionIdentity == @executionIdentity && item.status == "pending" && item.leaseOwner == @owner
-            UPDATE item WITH { leaseExpiresAt: @expiresAt, updatedAt: @now } IN billingExecutions
-            RETURN true
-        `, { userKey, executionIdentity, owner, now, expiresAt });
-        return Boolean(await cursor.next());
-      });
+      const cursor = await database.query(`
+        FOR item IN billingExecutions
+          FILTER item.userKey == @userKey && item.executionIdentity == @executionIdentity && item.status == "pending" && item.leaseOwner == @owner
+          UPDATE item WITH { leaseExpiresAt: @expiresAt, updatedAt: @now } IN billingExecutions
+          RETURN true
+      `, { userKey, executionIdentity, owner, now, expiresAt });
+      return Boolean(await cursor.next());
     },
 
     async getBalance(userKey) {

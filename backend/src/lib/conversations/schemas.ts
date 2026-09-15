@@ -1,5 +1,8 @@
 import { z } from 'zod';
 import { appSearchRetrievalSchema } from '@/lib/app-search/service';
+import { CORE_CHAT_MAX_DOCUMENT_CONTEXT_BYTES } from '@/lib/ai/actions/core-chat';
+
+export const DEFAULT_CONVERSATION_NAME = 'New chat';
 
 export const conversationSchema = z.object({
   key: z.string().cuid(), teamKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(),
@@ -9,7 +12,7 @@ export const conversationSchema = z.object({
 export type Conversation = z.infer<typeof conversationSchema>;
 
 const attachmentFilenameSchema = z.string().trim().min(1).max(255).refine((value) => !/[\\/\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/.test(value), 'Filename is invalid.');
-const attachmentBaseSchema = z.object({ key: z.string().cuid(), filename: attachmentFilenameSchema, sizeBytes: z.number().int().positive().max(25 * 1024 * 1024) });
+const attachmentBaseSchema = z.object({ key: z.string().cuid(), displayKey: z.string().trim().min(1).max(120).optional(), filename: attachmentFilenameSchema, sizeBytes: z.number().int().positive().max(25 * 1024 * 1024) });
 export const conversationAttachmentReferenceSchema = z.discriminatedUnion('kind', [
   attachmentBaseSchema.extend({ kind: z.literal('document'), mimeType: z.enum(['text/plain', 'text/markdown', 'text/x-markdown', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']) }).strict(),
   attachmentBaseSchema.extend({ kind: z.literal('image'), mimeType: z.literal('image/png'), width: z.number().int().positive().max(16_384), height: z.number().int().positive().max(16_384) }).strict(),
@@ -17,6 +20,32 @@ export const conversationAttachmentReferenceSchema = z.discriminatedUnion('kind'
 export const conversationAttachmentReferencesSchema = z.array(conversationAttachmentReferenceSchema).max(12).refine((references) => new Set(references.map(({ key }) => key)).size === references.length, 'Attachment resource keys must be unique.');
 export type ConversationAttachmentReference = z.infer<typeof conversationAttachmentReferenceSchema>;
 export const conversationAttachmentStatusSchema = z.enum(['NONE', 'PENDING', 'COMPLETED', 'PARTIAL', 'FAILED']);
+export const CONVERSATION_ATTACHMENT_CONTEXT_MAX_BYTES = CORE_CHAT_MAX_DOCUMENT_CONTEXT_BYTES;
+export const conversationAttachmentContextSchema = z.array(z.object({
+  filename: attachmentFilenameSchema,
+  content: z.string().trim().min(1).max(CONVERSATION_ATTACHMENT_CONTEXT_MAX_BYTES),
+}).strict()).max(12).superRefine((attachments, context) => {
+  if (Buffer.byteLength(JSON.stringify(attachments), 'utf8') > CONVERSATION_ATTACHMENT_CONTEXT_MAX_BYTES) context.addIssue({ code: 'custom', message: `Serialized attachment context exceeds ${CONVERSATION_ATTACHMENT_CONTEXT_MAX_BYTES} bytes.` });
+});
+export type ConversationAttachmentContext = z.infer<typeof conversationAttachmentContextSchema>;
+
+export const guideTopicSchema = z.object({
+  key: z.string().trim().min(1).max(180),
+  label: z.string().trim().min(1).max(120),
+  question: z.string().trim().min(1).max(2_000),
+}).strict();
+const uniqueGuideTopics = (topics: Array<z.infer<typeof guideTopicSchema>>) => {
+  return new Set(topics.map(({ key }) => key)).size === topics.length
+    && new Set(topics.map(({ label }) => label.toLocaleLowerCase())).size === topics.length
+    && new Set(topics.map(({ question }) => question.toLocaleLowerCase())).size === topics.length;
+};
+export const guideTopicsSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.enum(['NONE', 'PENDING', 'FAILED']) }).strict(),
+  z.object({ status: z.literal('READY'), topics: z.array(guideTopicSchema).length(3).refine(uniqueGuideTopics, 'Guide topic keys, labels, and questions must be unique.') }).strict(),
+]);
+export const guideTopicSelectionSchema = z.object({ sourceAssistantMessageKey: z.string().trim().min(1).max(180), topicKey: z.string().trim().min(1).max(180) }).strict();
+export const guideModeSchema = z.enum(['recommend', 'explain']);
+export type GuideTopic = z.infer<typeof guideTopicSchema>;
 
 export const conversationMessageBaseSchema = z.object({
   key: z.string().cuid(), conversationKey: z.string().cuid(), teamKey: z.string().trim().min(1).max(160),
@@ -29,10 +58,19 @@ export const conversationMessageBaseSchema = z.object({
   attachments: conversationAttachmentReferencesSchema.default([]),
   attachmentStatus: conversationAttachmentStatusSchema.optional(),
   pendingAttachmentKeys: z.array(z.string().cuid()).max(12).refine((keys) => new Set(keys).size === keys.length, 'Pending attachment keys must be unique.').optional(),
+  attachmentContext: conversationAttachmentContextSchema.optional(),
   imageReferenceArtifactKeys: z.array(z.string().cuid()).max(8).refine((keys) => new Set(keys).size === keys.length, 'Image reference artifact keys must be unique.').optional(),
   imageStatusText: z.string().trim().min(1).max(100_000).optional(),
   imageSummaryText: z.string().trim().min(1).max(20_000).optional(),
   retrievals: z.array(appSearchRetrievalSchema).max(4).default([]),
+  guideTopics: guideTopicsSchema.default({ status: 'NONE' }),
+  guideMode: guideModeSchema.optional(),
+  guideContext: z.unknown().refine((value) => value === undefined || Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8') <= 150_000, 'Guide context exceeds 150000 bytes.').optional(),
+  selectedGuideMode: guideModeSchema.optional(),
+  guideTopicMode: guideModeSchema.optional(),
+  guideTopicGeneration: z.number().int().positive().optional(),
+  guideTopicFailureCode: z.string().trim().min(1).max(100).optional(),
+  guideTopicFundingRequiredCode: z.enum(['INSUFFICIENT_BALANCE', 'OUTSTANDING_DEBT']).optional(),
   createdAt: z.string().datetime(), completedAt: z.string().datetime().optional(),
   fundingRequiredCode: z.enum(['INSUFFICIENT_BALANCE', 'OUTSTANDING_DEBT']).optional(), fundingRequiredAcknowledgedAt: z.string().datetime().optional(),
 }).strict();
@@ -47,6 +85,7 @@ function validateConversationMessage(message: z.infer<typeof conversationMessage
   if (message.type === 'TEXT' && message.imageKey) context.addIssue({ code: 'custom', path: ['imageKey'], message: 'Text messages cannot reference an image.' });
   if (message.attachments.length && (message.type !== 'TEXT' || message.role !== 'USER')) context.addIssue({ code: 'custom', path: ['attachments'], message: 'Attachments belong only to text user messages.' });
   if (message.pendingAttachmentKeys?.length && (message.type !== 'TEXT' || message.role !== 'USER' || message.attachments.length)) context.addIssue({ code: 'custom', path: ['pendingAttachmentKeys'], message: 'Pending attachments belong only to text user messages without durable attachments.' });
+  if (message.attachmentContext?.length && (message.type !== 'TEXT' || message.role !== 'USER')) context.addIssue({ code: 'custom', path: ['attachmentContext'], message: 'Attachment context belongs only to text user messages.' });
   if (message.imageReferenceArtifactKeys?.length && (message.type !== 'IMAGE' || message.role !== 'ASSISTANT')) context.addIssue({ code: 'custom', path: ['imageReferenceArtifactKeys'], message: 'Staged image references belong only to image responses.' });
   if (message.imageStatusText && (message.type !== 'IMAGE' || message.role !== 'ASSISTANT')) context.addIssue({ code: 'custom', path: ['imageStatusText'], message: 'Image status text belongs only to image responses.' });
   if (message.imageSummaryText && (message.type !== 'IMAGE' || message.role !== 'ASSISTANT' || message.status !== 'COMPLETED')) context.addIssue({ code: 'custom', path: ['imageSummaryText'], message: 'Image summaries belong only to completed image responses.' });
@@ -64,16 +103,22 @@ function validateConversationMessage(message: z.infer<typeof conversationMessage
     if (message.role === 'ASSISTANT' && (message.status === 'COMPLETED') !== Boolean(message.imageKey)) context.addIssue({ code: 'custom', path: ['imageKey'], message: 'Only completed image responses require an image reference.' });
   }
   if (message.fundingRequiredCode && (message.type !== 'IMAGE' || message.role !== 'ASSISTANT' || message.status !== 'FAILED')) context.addIssue({ code: 'custom', path: ['fundingRequiredCode'], message: 'Funding requirements belong only to failed assistant image responses.' });
-  if (message.fundingRequiredAcknowledgedAt && !message.fundingRequiredCode) context.addIssue({ code: 'custom', path: ['fundingRequiredAcknowledgedAt'], message: 'Funding acknowledgment requires a funding reason.' });
+  if (message.fundingRequiredAcknowledgedAt && !message.fundingRequiredCode && !message.guideTopicFundingRequiredCode) context.addIssue({ code: 'custom', path: ['fundingRequiredAcknowledgedAt'], message: 'Funding acknowledgment requires a funding reason.' });
+  if (message.guideTopics.status !== 'NONE' && (message.type !== 'TEXT' || message.role !== 'ASSISTANT' || message.status !== 'COMPLETED')) context.addIssue({ code: 'custom', path: ['guideTopics'], message: 'Guide topics belong only to completed text assistant messages.' });
+  if ((message.guideMode || message.guideContext !== undefined) && (message.type !== 'TEXT' || message.role !== 'ASSISTANT')) context.addIssue({ code: 'custom', path: ['guideMode'], message: 'Guide provenance belongs only to text assistant messages.' });
+  if (message.selectedGuideMode && (message.type !== 'TEXT' || message.role !== 'USER')) context.addIssue({ code: 'custom', path: ['selectedGuideMode'], message: 'Selected guide mode belongs only to text user messages.' });
+  if ((message.guideTopicMode || message.guideTopicGeneration || message.guideTopicFailureCode || message.guideTopicFundingRequiredCode) && (message.type !== 'TEXT' || message.role !== 'ASSISTANT')) context.addIssue({ code: 'custom', path: ['guideTopicGeneration'], message: 'Guide topic generation state belongs only to text assistant messages.' });
+  if (message.guideTopics.status === 'PENDING' && (!message.guideMode || message.guideContext === undefined || !message.guideTopicGeneration)) context.addIssue({ code: 'custom', path: ['guideTopics'], message: 'Pending guide topics require durable guide provenance and a generation fence.' });
 }
 export const conversationMessageSchema = conversationMessageBaseSchema.superRefine(validateConversationMessage).transform((message) => ({ ...message, attachmentStatus: resolvedAttachmentStatus(message) }));
 export type ConversationMessage = z.infer<typeof conversationMessageSchema>;
 
 export const conversationCreateInputSchema = z.object({ name: z.string().trim().min(1).max(200).optional() }).strict();
+export const conversationCreateServiceInputSchema = conversationCreateInputSchema.extend({ openingGreetingToken: z.string().trim().min(1).max(20_000).optional() }).strict();
 export const conversationListInputSchema = z.object({ cursor: z.string().min(1).max(1_000).optional(), limit: z.number().int().min(1).max(100).default(25), favoriteOnly: z.boolean().default(false) }).strict();
 export const conversationSearchInputSchema = conversationListInputSchema.extend({ query: z.string().trim().min(1).max(500), recordHistory: z.boolean().default(true) }).strict();
 export const conversationKeyInputSchema = z.object({ conversationKey: z.string().cuid() }).strict();
-export const conversationRenameInputSchema = conversationKeyInputSchema.extend({ name: z.string().trim().min(1).max(200) }).strict();
+export const conversationRenameInputSchema = conversationKeyInputSchema.extend({ name: z.string().trim().min(1).max(200).refine((name) => name !== DEFAULT_CONVERSATION_NAME, 'Choose a descriptive chat name.') }).strict();
 export const conversationFavoriteInputSchema = conversationKeyInputSchema.extend({ isFavorite: z.boolean() }).strict();
 export const conversationMessageListInputSchema = conversationKeyInputSchema.extend({ cursor: z.string().min(1).max(1_000).optional(), limit: z.number().int().min(1).max(100).default(10) }).strict();
 export const conversationMessageDeleteInputSchema = conversationKeyInputSchema.extend({ messageKey: z.string().cuid() }).strict();
@@ -83,6 +128,7 @@ export const conversationSendInputSchema = conversationModelSendInputSchema.exte
   requestKey: z.string().trim().min(1).max(180),
   attachmentKeys: z.array(z.string().cuid()).max(12).default([]),
   referenceImageKeys: z.array(z.string().cuid()).max(1).default([]),
+  guideTopicSelection: guideTopicSelectionSchema.optional(),
 }).strict().refine(({ attachmentKeys }) => new Set(attachmentKeys).size === attachmentKeys.length, { path: ['attachmentKeys'], message: 'Attachment keys must be unique.' });
 export const conversationImageTurnShape = {
   ...conversationKeyInputSchema.shape,
@@ -95,7 +141,7 @@ export const conversationImageTurnShape = {
 export const conversationImageTurnRequestKeySchema = z.string().trim().min(1).max(180);
 const uniqueImageReferences = ({ referenceImageKeys }: { referenceImageKeys: string[] }) => new Set(referenceImageKeys).size === referenceImageKeys.length;
 export const conversationImageTurnInputSchema = z.object({ ...conversationImageTurnShape, requestKey: conversationImageTurnRequestKeySchema, userMessage: conversationModelSendInputSchema.shape.message.optional() }).strict().refine(uniqueImageReferences, { path: ['referenceImageKeys'], message: 'Reference image keys must be unique.' });
-const conversationSafeMessageBaseSchema = conversationMessageBaseSchema.omit({ embedding: true, embeddingProvider: true, embeddingModel: true, embeddingDimensions: true, pendingAttachmentKeys: true, imageReferenceArtifactKeys: true, imageStatusText: true, teamKey: true, scopeKey: true, userKey: true, requestHash: true, fundingRequiredCode: true, fundingRequiredAcknowledgedAt: true });
+const conversationSafeMessageBaseSchema = conversationMessageBaseSchema.omit({ embedding: true, embeddingProvider: true, embeddingModel: true, embeddingDimensions: true, pendingAttachmentKeys: true, attachmentContext: true, imageReferenceArtifactKeys: true, imageStatusText: true, teamKey: true, scopeKey: true, userKey: true, requestHash: true, fundingRequiredCode: true, fundingRequiredAcknowledgedAt: true, guideMode: true, guideContext: true, selectedGuideMode: true, guideTopicMode: true, guideTopicGeneration: true, guideTopicFailureCode: true, guideTopicFundingRequiredCode: true });
 export const conversationSafeMessageSchema = conversationSafeMessageBaseSchema.superRefine((message, context) => {
   const attachmentStatus = message.attachmentStatus ?? (message.attachments.length ? 'COMPLETED' : 'NONE');
   if (attachmentStatus !== 'NONE' && (message.type !== 'TEXT' || message.role !== 'USER')) context.addIssue({ code: 'custom', path: ['attachmentStatus'], message: 'Attachment persistence status belongs only to text user messages.' });
@@ -106,7 +152,7 @@ export const conversationSafeMessageSchema = conversationSafeMessageBaseSchema.s
 }).transform((message) => ({ ...message, attachmentStatus: message.attachmentStatus ?? (message.attachments.length ? 'COMPLETED' as const : 'NONE' as const) }));
 export const conversationImageTurnResultSchema = z.object({ user: conversationSafeMessageSchema, assistant: conversationSafeMessageSchema, replayed: z.boolean() }).strict();
 export function projectConversationMessage(message: ConversationMessage) {
-  const { embedding: _embedding, embeddingProvider: _embeddingProvider, embeddingModel: _embeddingModel, embeddingDimensions: _embeddingDimensions, pendingAttachmentKeys: _pendingAttachmentKeys, imageReferenceArtifactKeys: _imageReferenceArtifactKeys, imageStatusText: _imageStatusText, teamKey: _teamKey, scopeKey: _scopeKey, userKey: _userKey, requestHash: _requestHash, fundingRequiredCode: _fundingRequiredCode, fundingRequiredAcknowledgedAt: _fundingRequiredAcknowledgedAt, ...safe } = message;
+  const { embedding: _embedding, embeddingProvider: _embeddingProvider, embeddingModel: _embeddingModel, embeddingDimensions: _embeddingDimensions, pendingAttachmentKeys: _pendingAttachmentKeys, attachmentContext: _attachmentContext, imageReferenceArtifactKeys: _imageReferenceArtifactKeys, imageStatusText: _imageStatusText, teamKey: _teamKey, scopeKey: _scopeKey, userKey: _userKey, requestHash: _requestHash, fundingRequiredCode: _fundingRequiredCode, fundingRequiredAcknowledgedAt: _fundingRequiredAcknowledgedAt, guideMode: _guideMode, guideContext: _guideContext, selectedGuideMode: _selectedGuideMode, guideTopicMode: _guideTopicMode, guideTopicGeneration: _guideTopicGeneration, guideTopicFailureCode: _guideTopicFailureCode, guideTopicFundingRequiredCode: _guideTopicFundingRequiredCode, ...safe } = message;
   return conversationSafeMessageSchema.parse(message.type === 'IMAGE' && message.role === 'ASSISTANT' ? { ...safe, content: message.imageStatusText ?? 'Image generation is in progress.' } : safe);
 }
 export function encodeCursor(value: Record<string, unknown>) { return Buffer.from(JSON.stringify(value)).toString('base64url'); }

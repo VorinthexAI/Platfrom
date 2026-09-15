@@ -95,13 +95,15 @@ function webpDimensions(bytes: Uint8Array) {
   return null;
 }
 
-function validateGalleryImageInput(bytes: Uint8Array) {
+export function inspectGalleryImageInput(bytes: Uint8Array) {
   let dimensions: { width: number; height: number } | null;
-  if (bytes[0] === 0xff && bytes[1] === 0xd8) dimensions = jpegDimensions(bytes);
-  else if (ascii(bytes, 0, 6) === 'GIF87a' || ascii(bytes, 0, 6) === 'GIF89a') dimensions = bytes.length >= 14 && bytes.at(-1) === 0x3b ? { width: u16le(bytes, 6), height: u16le(bytes, 8) } : null;
-  else if (ascii(bytes, 0, 4) === 'RIFF') dimensions = webpDimensions(bytes);
-  else dimensions = pngDimensions(bytes);
+  let mimeType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) { dimensions = jpegDimensions(bytes); mimeType = 'image/jpeg'; }
+  else if (ascii(bytes, 0, 6) === 'GIF87a' || ascii(bytes, 0, 6) === 'GIF89a') { dimensions = bytes.length >= 14 && bytes.at(-1) === 0x3b ? { width: u16le(bytes, 6), height: u16le(bytes, 8) } : null; mimeType = 'image/gif'; }
+  else if (ascii(bytes, 0, 4) === 'RIFF') { dimensions = webpDimensions(bytes); mimeType = 'image/webp'; }
+  else { dimensions = pngDimensions(bytes); mimeType = 'image/png'; }
   if (!dimensions || dimensions.width <= 0 || dimensions.height <= 0 || dimensions.width * dimensions.height > 100_000_000) throw new GalleryImageInputError('The image payload is malformed or exceeds the supported dimensions.');
+  return { ...dimensions, mimeType };
 }
 
 function validCoordinates(value: ImageCoordinates | undefined): value is ImageCoordinates {
@@ -128,7 +130,7 @@ export function extractExifCoordinates(exif: Buffer | undefined): ImageCoordinat
 }
 
 export async function sanitizeGalleryImage(bytes: Uint8Array, suppliedCoordinates?: ImageCoordinates) {
-  validateGalleryImageInput(bytes);
+  inspectGalleryImageInput(bytes);
   try {
     const pipeline = sharp(bytes, { animated: false, failOn: 'error', limitInputPixels: 100_000_000 });
     const metadata = await pipeline.metadata();

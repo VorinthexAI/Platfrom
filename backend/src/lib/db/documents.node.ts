@@ -34,7 +34,8 @@ export const documentSchema = z.object({
   sourceStorageKeys: z.array(z.string().trim().min(1)).max(12).optional(),
   currentVersionKey: z.string().cuid().nullable().optional(),
   mutationPolicy: z.enum(['user', 'system-only']).default('user'),
-  managedPurpose: z.enum(['mail-attachment', 'scope-directory']).optional(), managedOwnerKey: z.string().cuid().optional(),
+  managedPurpose: z.enum(['mail-attachment', 'scope-directory', 'conversation-message', 'conversation-summary']).optional(), managedOwnerKey: z.string().cuid().optional(),
+  privateOwnerUserKey: z.string().cuid().optional(),
   archiveVisibility: z.enum(['visible', 'domain-only']).default('visible'),
   isFavorite: z.boolean().default(false),
   _internalDeletion: z.object({
@@ -109,10 +110,11 @@ export async function insertPreparedDocument(input: Document): Promise<Document>
   return contentPersistence.insertDocument(document);
 }
 
-export async function getDocumentInScope(scopeKey: string, documentKey: string): Promise<Document | null> {
+export async function getDocumentInScope(scopeKey: string, documentKey: string, privateOwnerUserKey?: string): Promise<Document | null> {
   const cursor = await db.query(aql`
     FOR document IN ${db.collection(DOCUMENTS_COLLECTION)}
       FILTER document._key == ${documentKey} && document.scopeKey == ${scopeKey}
+      FILTER !HAS(document, "privateOwnerUserKey") || document.privateOwnerUserKey == null || document.privateOwnerUserKey == ${privateOwnerUserKey ?? null}
       FILTER (document.archiveVisibility || "visible") == "visible"
       FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
       LIMIT 1
@@ -121,7 +123,7 @@ export async function getDocumentInScope(scopeKey: string, documentKey: string):
   const document = await cursor.next();
   if (!document) return null;
   const parsed = documentSchema.parse(withArangoKey(document));
-  return !parsed.folderKey || (await archiveVisibleFolderKeys(scopeKey)).has(parsed.folderKey) ? parsed : null;
+  return !parsed.folderKey || (await archiveVisibleFolderKeys(scopeKey, privateOwnerUserKey)).has(parsed.folderKey) ? parsed : null;
 }
 
 export async function listDocumentsByScope(
@@ -181,6 +183,7 @@ export interface ContentSemanticSearchInput {
   updatedBefore?: string;
   minScore?: number;
   limit?: number;
+  privateOwnerUserKey?: string;
 }
 
 export interface ContentSemanticMatch {
@@ -209,6 +212,7 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
     LET documentMatches = ${sources.includes('document')} ? (
       FOR document IN ${db.collection(DOCUMENTS_COLLECTION)}
         FILTER document.scopeKey IN ${input.authorizedScopeKeys}
+        FILTER !HAS(document, "privateOwnerUserKey") || document.privateOwnerUserKey == null || document.privateOwnerUserKey == ${input.privateOwnerUserKey ?? null}
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
         FILTER (document.archiveVisibility || "visible") == "visible"
         LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(${db.collection('folders')}, document.folderKey) : null
@@ -246,6 +250,7 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
         FILTER score != null
         LET document = DOCUMENT(${db.collection(DOCUMENTS_COLLECTION)}, version.documentKey)
         FILTER document != null && document.scopeKey == version.scopeKey
+        FILTER !HAS(document, "privateOwnerUserKey") || document.privateOwnerUserKey == null || document.privateOwnerUserKey == ${input.privateOwnerUserKey ?? null}
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
         FILTER (document.archiveVisibility || "visible") == "visible"
         LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(${db.collection('folders')}, document.folderKey) : null
@@ -263,7 +268,7 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
       RETURN match
   `);
   const { documentVersionSchema } = await import('./document-versions.node');
-  const visibleByScope = new Map(await Promise.all(input.authorizedScopeKeys.map(async (scopeKey) => [scopeKey, await archiveVisibleFolderKeys(scopeKey)] as const)));
+  const visibleByScope = new Map(await Promise.all(input.authorizedScopeKeys.map(async (scopeKey) => [scopeKey, await archiveVisibleFolderKeys(scopeKey, input.privateOwnerUserKey)] as const)));
   return (await cursor.all()).map((match: Record<string, unknown>) => {
     const source: ContentSemanticMatch['source'] = match.source === 'version' ? 'version' : 'document';
     return {

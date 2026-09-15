@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 export const INITIAL_WORKSPACE_FOLDER_IDS = ['platform', 'assistant', 'knowledge', 'media', 'communication', 'travel', 'learning'] as const;
 export const INITIAL_WORKSPACE_DOCUMENT_IDS = [
   'platform-welcome', 'platform-purpose', 'platform-connections',
-  'assistant-overview', 'assistant-purpose', 'assistant-start',
+  'assistant-overview', 'assistant-purpose', 'assistant-start', 'conversation-history',
   'knowledge-overview', 'knowledge-purpose', 'knowledge-start',
   'media-overview', 'media-purpose', 'media-start',
   'communication-overview', 'communication-purpose', 'communication-start',

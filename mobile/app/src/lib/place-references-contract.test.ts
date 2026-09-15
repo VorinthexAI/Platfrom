@@ -68,7 +68,7 @@ test("keeps place generation in the listing as one appended skeleton before open
   ]);
 });
 
-test("offers tags for every managed place selection without clearing selections on apply", () => {
+test("offers tags for every managed place selection and clears selections on apply", () => {
   expect(workspace).toContain('import { ResourceTagsSheet } from "@/components/ResourceTagsSheet";');
   expect(workspace).toContain('setResourceTagTargets(keys.map((key) => ({ type: "place", key })))');
   expect(workspace).toContain('openPlaceTags(selectedTablePlaceKeys, () => setPlaceBulkMenuOpen(false))');
@@ -76,7 +76,7 @@ test("offers tags for every managed place selection without clearing selections 
   expect(workspace).toContain('openPlaceTags(selectedOrderPlaceKeys, () => setOrderBulkMenuOpen(false))');
   expect(workspace).toContain('<OrderBulkToolbar count={selectedOrderPlaceKeys.length} onClear={() => setSelectedOrderPlaceKeys([])} onMore={() => setOrderBulkMenuOpen(true)} />');
   expect(workspace).toContain('accessibilityLabel="Selected trip place actions"');
-  expect(workspace).toContain('<ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />');
+  expect(workspace).toContain('<ResourceTagsSheet context={contentContext} onApply={() => { setSelectedTablePlaceKeys([]); setSelectedOrderPlaceKeys([]); setSelectedTripPlaceKeys([]); }} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />');
   expect(workspace).not.toContain('openPlaceTags(selectedPlaceKeys');
   expect(workspace).not.toContain('openPlaceTags(selectedTripAddPlaceKeys');
   expect(workspace).not.toContain('openPlaceTags(selectedAssetAttachments');

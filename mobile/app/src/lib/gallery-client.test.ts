@@ -87,9 +87,11 @@ test("accepts neutral app presentation metadata on collection projections", () =
 test("strictly parses managed collection and image policies with geo metadata", () => {
   const managedCollection = { ...collection("Compass", "managed"), purpose: "place-media" as const, mutationPolicy: "system-only" as const };
   const emailCollection = { ...collection("Signal", "email-managed"), purpose: "email-media" as const, mutationPolicy: "system-only" as const };
+  const scopeDirectory = { ...collection("Scopes", "scope-directory"), purpose: "scope-directory" as const, mutationPolicy: "system-only" as const, access: { canRead: true, canContribute: false, canManage: false } };
   const managedImage = { ...image("managed", "managed.jpg", "Managed place"), latitude: 59.33, longitude: 18.07, locationSource: "place" as const, mutationPolicy: "system-only" as const };
   expect(galleryCollectionSchema.parse(managedCollection).mutationPolicy).toBe("system-only");
   expect(galleryCollectionSchema.parse(emailCollection).purpose).toBe("email-media");
+  expect(galleryCollectionSchema.parse(scopeDirectory).purpose).toBe("scope-directory");
   expect(galleryCollectionSchema.parse({ ...emailCollection, purpose: null }).purpose).toBeNull();
   expect(galleryImageSchema.parse(managedImage)).toMatchObject({ latitude: 59.33, longitude: 18.07, locationSource: "place", mutationPolicy: "system-only" });
   expect(galleryImageSchema.safeParse({ ...managedImage, forbidden: true }).success).toBe(false);
@@ -479,4 +481,13 @@ test("rejects non-PNG names before reserving and non-PNG bytes before PUT", asyn
   localFiles.set("file://image", new TextEncoder().encode("jpeg"));
   await expect(uploadGalleryImages([{ clientKey: "local-image", filename: "image.png", uri: "file://image", sizeBytes: 4 }], "collection")).rejects.toThrow("valid PNG data");
   expect(calls.map(({ path }) => path)).toEqual(["/gallery/uploads/presign"]);
+});
+
+test("rejects invalid upload batches before reservation without imposing an aggregate byte cap", async () => {
+  const file = (index: number, sizeBytes = 20 * 1024 * 1024) => ({ clientKey: `image-${index}`, filename: `image-${index}.png`, uri: `file://image-${index}`, sizeBytes });
+  await expect(uploadGalleryImages([], "collection")).rejects.toThrow("between 1 and 20 images");
+  await expect(uploadGalleryImages(Array.from({ length: 21 }, (_, index) => file(index)), "collection")).rejects.toThrow("between 1 and 20 images");
+  await expect(uploadGalleryImages([file(1), file(1)], "collection")).rejects.toThrow("must be unique");
+  await expect(uploadGalleryImages([file(1, 20 * 1024 * 1024 + 1)], "collection")).rejects.toThrow("20 MiB");
+  expect(calls).toHaveLength(0);
 });

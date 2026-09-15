@@ -5,6 +5,11 @@ import { galleryUploadSchema } from '@/lib/db/gallery-uploads.node';
 import { insertPreparedImageWithCaption } from '@/lib/db/images.node';
 import { ImageProcessingError, processImages, type GeneratedImageCaption, type ImageProcessingMetrics } from '@/lib/ai/image-processing';
 import { imageCaptionTool } from '@/lib/ai/tools/image-caption';
+import type { ImageCaptionToolDependencies } from '@/lib/ai/tools/image-caption';
+import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
+import { toolEventService, type ToolEventRecorder } from '@/lib/ai/events/service';
+import type { ToolContext } from '@/lib/ai/tools/tool-context';
+import { APP_KEYS } from '@/lib/apps/registry';
 import { documentStorage, type DocumentObjectStorage } from '@/lib/ai/document-processing/storage';
 import { EMBEDDING_DIMENSIONS, embedText } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
@@ -25,6 +30,7 @@ export interface GalleryUploadProcessingDependencies {
   storage?: DocumentObjectStorage;
   processBatch?: typeof processImages;
   captionBatch?: (teamKey: string, imageUrls: string[]) => Promise<GeneratedImageCaption[]>;
+  captionExecution?: GalleryCaptionExecutionDependencies;
   resolveImageReference?: (bytes: Uint8Array) => Promise<string>;
   sanitizeImage?: typeof sanitizeGalleryImage;
   reverseGeocode?: (coordinates: ImageCoordinates) => Promise<ImageLocation | undefined>;
@@ -34,6 +40,41 @@ export interface GalleryUploadProcessingDependencies {
   leaseRefreshIntervalMs?: number;
   publishCollectionEvent?: typeof publishCollectionEvent;
   publishUserEvent?: typeof publishUserEvent;
+}
+
+export interface GalleryCaptionExecutionDependencies extends ImageCaptionToolDependencies {
+  appScopeKey?: string;
+  billing?: ToolBillingDependencies;
+  recordEvent?: ToolEventRecorder;
+}
+
+export async function executeGalleryCaptionBatch(input: {
+  actorKey: string;
+  imageUrls: string[];
+  requestKey: string;
+  scopeKey: string;
+  teamKey: string;
+  userKey: string;
+}, dependencies: GalleryCaptionExecutionDependencies = {}) {
+  const { appScopeKey, billing, recordEvent, ...actionDependencies } = dependencies;
+  const context = {
+    teamKey: input.teamKey,
+    runtimeScopeKey: input.scopeKey,
+    principal: {
+      kind: 'member' as const,
+      user: { key: input.userKey },
+      userTeam: { key: input.actorKey, teamKey: input.teamKey, userId: input.userKey, status: 'active' as const },
+      scopeMember: null,
+    },
+  } as unknown as ToolContext;
+  return observeToolExecution(imageCaptionTool.name, context, () => imageCaptionTool.execute({ imageUrls: input.imageUrls }, { teamKey: input.teamKey, ...actionDependencies }), {
+    appKey: APP_KEYS.GALLERY,
+    appScopeKey,
+    recorder: recordEvent ?? toolEventService.record,
+    idempotencyKey: input.requestKey,
+    input: { imageUrls: input.imageUrls },
+    ...billing,
+  }).then(({ results }) => results);
 }
 
 async function classifyImageSubjects(repository: GalleryRepository, image: Awaited<ReturnType<typeof processImages>>[number]) {
@@ -107,7 +148,14 @@ export async function processGalleryUploadBatch(uploadKeys: readonly string[], d
     const captionableBytes = new Set(uploads.flatMap((upload, index) => upload.processingMode === 'library' ? [bytesHash(stored[index]!.bytes)] : []));
     const teamKey = uploads[0]!.teamKey;
     if (uploads.some((upload) => upload.teamKey !== teamKey)) throw new Error('Gallery upload batches must belong to one team.');
-    const captionBatch = dependencies.captionBatch ?? (async (team, imageUrls) => (await imageCaptionTool.execute({ imageUrls }, { teamKey: team })).results);
+    const scopeKey = uploads[0]!.scopeKey;
+    if (uploads.some((upload) => upload.scopeKey !== scopeKey)) throw new Error('Gallery upload batches must belong to one scope.');
+    const actorKey = uploads[0]!.actorKey;
+    if (uploads.some((upload) => upload.actorKey !== actorKey)) throw new Error('Gallery upload batches must belong to one actor.');
+    const userKey = actorUsers.get(actorKey);
+    if (!userKey) throw new Error('Gallery upload actor was not found.');
+    const requestKey = `gallery-upload-caption:${createHash('sha256').update([...claimedKeys].sort().join('\0')).digest('hex')}`;
+    const captionBatch = dependencies.captionBatch ?? ((team, imageUrls) => executeGalleryCaptionBatch({ actorKey, imageUrls, requestKey, scopeKey, teamKey: team, userKey }, dependencies.captionExecution));
     await renewLease();
     const images = await processBatch(uploads.map((upload, index) => ({
       scopeKey: upload.scopeKey,

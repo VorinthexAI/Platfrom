@@ -13,6 +13,7 @@ export const APP_EVENT_SLUGS = [
   'inbox.changed',
   'book.changed',
   'conversation.changed',
+  'communication.changed',
   'referral.reward.created',
   'spark.balance.changed',
   'spark.balance.required',

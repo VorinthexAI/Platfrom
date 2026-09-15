@@ -17,7 +17,7 @@ import { fonts, palette, spacing } from "@/theme/tokens";
 import { OnboardingAppPreview } from "./OnboardingIntroSequence";
 import { selectOnboardingAppStages, type OnboardingAppSlug, type OnboardingAppStage } from "./onboarding-stages";
 
-type PermissionStep = "photos" | "camera" | "notifications";
+type PermissionStep = "camera" | "notifications";
 type ConversationStep =
   | { kind: "welcome" }
   | { kind: "app"; app: OnboardingAppStage }
@@ -36,7 +36,6 @@ const APP_COPY: Record<OnboardingAppSlug, string> = {
 };
 
 const PERMISSION_COPY: Record<PermissionStep, string> = {
-  photos: "Allow access to your phone's photo library to start managing your images smartly with Gallery.",
   camera: "Allow camera access to scan documents and capture photos directly into Vorinthex AI.",
   notifications: "Allow notifications so you never miss anything. Signal can let you know when important connected email, Vorinthex app communication, or support replies arrive.",
 };
@@ -55,6 +54,11 @@ function eventForStep(step: ConversationStep): OnboardingEventSlug {
   return "onboarding.sign-in";
 }
 
+function appKeyForStep(step: ConversationStep, apps: readonly ServerApp[]) {
+  const slug = step.kind === "app" ? step.app.slug : step.kind === "permission" && step.permission === "notifications" ? "signal" : "core";
+  return apps.find((app) => app.slug === slug)?.key;
+}
+
 export function OnboardingCoreConversation({ apps, onFinished }: { apps: readonly ServerApp[]; onFinished: () => void }) {
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
@@ -64,7 +68,6 @@ export function OnboardingCoreConversation({ apps, onFinished }: { apps: readonl
   const steps = useMemo<ConversationStep[]>(() => [
     { kind: "welcome" },
     ...selectOnboardingAppStages(apps).map((app) => ({ kind: "app" as const, app })),
-    { kind: "permission", permission: "photos" },
     { kind: "permission", permission: "camera" },
     { kind: "permission", permission: "notifications" },
     { kind: "finish" },
@@ -78,7 +81,7 @@ export function OnboardingCoreConversation({ apps, onFinished }: { apps: readonl
 
   useEffect(() => {
     const event = eventForStep(step);
-    void recordOnboardingEvent(event).catch(() => undefined);
+    void recordOnboardingEvent(event, appKeyForStep(step, apps)).catch(() => undefined);
     const timer = setTimeout(() => {
       const text = stepMessage(step);
       setMessages((current) => [...current, { key: `assistant-${keyRef.current++}`, role: "assistant", text }]);
@@ -89,7 +92,7 @@ export function OnboardingCoreConversation({ apps, onFinished }: { apps: readonl
       requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
     }, 1_000 + (index % 3) * 250);
     return () => clearTimeout(timer);
-  }, [index, step]);
+  }, [apps, index, step]);
 
   function addUserMessage(text: string) {
     setMessages((current) => [...current, { key: `user-${keyRef.current++}`, role: "user", text }]);
@@ -132,9 +135,7 @@ export function OnboardingCoreConversation({ apps, onFinished }: { apps: readonl
     setBusy(true);
     let allowed = false;
     try {
-      if (permission === "photos") {
-        if (allow) allowed = (await ImagePicker.requestMediaLibraryPermissionsAsync()).granted;
-      } else if (permission === "camera" && allow) {
+      if (permission === "camera" && allow) {
         allowed = (await ImagePicker.requestCameraPermissionsAsync()).granted;
       } else if (permission === "notifications" && allow) {
         if (Platform.OS === "android") await Notifications.setNotificationChannelAsync("default", { importance: Notifications.AndroidImportance.DEFAULT, name: "Notifications" });
@@ -145,7 +146,7 @@ export function OnboardingCoreConversation({ apps, onFinished }: { apps: readonl
     } catch {
       // Permission request failures follow the same analytics path as skipped access.
     } finally {
-      void recordOnboardingEvent(`onboarding.${permission}.${allowed ? "allowed" : "skipped"}`).catch(() => undefined);
+      void recordOnboardingEvent(`onboarding.${permission}.${allowed ? "allowed" : "skipped"}`, appKeyForStep({ kind: "permission", permission }, apps)).catch(() => undefined);
       setBusy(false);
       advance();
     }
@@ -162,7 +163,7 @@ export function OnboardingCoreConversation({ apps, onFinished }: { apps: readonl
     <ScrollView contentContainerStyle={styles.conversation} onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })} ref={scrollRef} showsVerticalScrollIndicator={false}>
       {messages.map((message) => message.role === "assistant"
         ? <View key={message.key} style={[styles.messageRow, styles.assistantRow]}><ChromeIcon glow={0.35} size={20} source={assistantIconSource} style={styles.assistantMark} /><View style={[styles.messageContent, styles.assistantMessage]}><RichText content={message.text} /></View></View>
-        : <View key={message.key} style={[styles.messageRow, styles.userRow]}><View style={[styles.messageContent, styles.userMessage]}><RichText content={message.text} /></View></View>)}
+        : <View key={message.key} style={[styles.messageRow, styles.userRow]}><View style={[styles.messageContent, styles.userMessage]}><RichText content={message.text} styles={{ paragraph: styles.userMessageText, heading: styles.userMessageText }} /></View></View>)}
       {thinking ? <View style={[styles.messageRow, styles.assistantRow]}><ChromeIcon glow={0.35} size={20} source={assistantIconSource} style={styles.assistantMark} /><LoadingText style={styles.loading} text="Thinking..." /></View> : null}
     </ScrollView>
     {!thinking ? <View style={styles.actions}>
@@ -187,7 +188,8 @@ const styles = StyleSheet.create({
   assistantMark: { marginTop: 4 },
   messageContent: { gap: spacing.xs, minWidth: 0 },
   assistantMessage: { backgroundColor: "transparent", flex: 1, minWidth: 0 },
-  userMessage: { backgroundColor: "transparent" },
+  userMessage: { alignItems: "flex-end", backgroundColor: "transparent" },
+  userMessageText: { textAlign: "right" },
   loading: { flex: 1, marginTop: 3 },
   actions: { gap: spacing.xs, paddingTop: spacing.sm },
 });

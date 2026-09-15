@@ -26,9 +26,9 @@ import type { AgentToolDependencies } from './agent-tool-definitions';
 import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
 import { APP_KEYS } from '@/lib/apps/registry';
 import type { ToolEventRecorder } from '@/lib/ai/events/service';
-import type { TeamService } from '@/lib/teams';
 import type { CostService } from '@/lib/costs/service';
 import { appGenerateImageModelInputSchema, imageGenerationReferenceKeysSchema, type ImageDestination } from '@/lib/image-generation/service';
+import type { GuideTopic } from '@/lib/conversations/schemas';
 
 /** A tool name has exactly one registry entry. */
 export const TOOL_NAMES = UNIFIED_TOOL_DEFINITIONS.map(({ name }) => name) as [string, ...string[]];
@@ -85,7 +85,6 @@ export interface ToolDependencies extends RouterDependencies, DocumentParseDepen
   userInboxService?: WorkspaceToolDependencies['userInbox'];
   scopeService?: WorkspaceToolDependencies['scopes'];
   referralService?: WorkspaceToolDependencies['referrals'];
-  teamService?: TeamService;
   conversationService?: AgentToolDependencies['conversations'];
   currentConversationKey?: string;
   currentUserMessageContent?: string;
@@ -95,6 +94,8 @@ export interface ToolDependencies extends RouterDependencies, DocumentParseDepen
   recordEvent?: ToolEventRecorder;
   appScopeKey?: string;
   billing?: ToolBillingDependencies;
+  onGreetingDelta?: (text: string) => void | Promise<void>;
+  onGuideTopic?: (topic: GuideTopic) => void | Promise<void>;
 }
 
 /** Executes one of the capabilities exposed by the unified tool registry. */
@@ -166,9 +167,11 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
     return (definition.execute as (input: unknown, dependencies: PublicToolDependencies) => Promise<unknown>)(rawInput, {
       context: dependencies.contentContext,
       requestKey: dependencies.requestKey,
-      teamService: dependencies.teamService,
+      conversationService: dependencies.conversationService,
       signal: dependencies.signal,
       timeoutMs: dependencies.timeoutMs,
+      onGreetingDelta: dependencies.onGreetingDelta,
+      onGuideTopic: dependencies.onGuideTopic,
       executeContent: dependencies.executeWorkspaceContent,
       content: {
         adapters: dependencies.adapters,

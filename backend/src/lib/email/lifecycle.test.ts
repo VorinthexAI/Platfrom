@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { renderBrandedEmail } from './service';
-import { accountDeletedEmailInput, OPEN_APP_URL, subscriptionCancellationEmailInput, subscriptionPurchaseEmailInput, subscriptionRenewalEmailInput, topUpPurchaseEmailInput, welcomeEmailInput } from './lifecycle';
+import { accountDeletedEmailInput, OPEN_APP_URL, signInEmailInput, subscriptionCancellationEmailInput, subscriptionPurchaseEmailInput, subscriptionRenewalEmailInput, topUpPurchaseEmailInput, welcomeEmailInput } from './lifecycle';
 
 describe('account lifecycle emails', () => {
   test('renders a thin welcome email with the universal app link', () => {
@@ -13,6 +13,18 @@ describe('account lifecycle emails', () => {
     expect(html).toContain('vtx-button');
     expect(html).not.toContain('Core is available from the bottom');
     expect(html).not.toContain('supporting:start');
+  });
+
+  test('renders magic-link authentication through the same branded template as welcome email', () => {
+    const magicLink = 'https://vorinthex.com/public/auth/token?token_hash=abc&flow=user';
+    const signInHtml = renderBrandedEmail(signInEmailInput({ email: 'person@example.com', magicLink, expiresAt: new Date('2026-09-13T12:15:00.000Z') }));
+    const welcomeHtml = renderBrandedEmail(welcomeEmailInput('person@example.com'));
+
+    for (const sharedTemplateElement of ['vtx-shell', 'vtx-button-wrap', 'vtx-button']) {
+      expect(signInHtml).toContain(sharedTemplateElement);
+      expect(welcomeHtml).toContain(sharedTemplateElement);
+    }
+    expect(signInHtml).toContain(magicLink);
   });
 
   test('renders deletion confirmation without any CTA or fallback action link', () => {

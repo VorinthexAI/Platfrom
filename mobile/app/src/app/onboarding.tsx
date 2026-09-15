@@ -6,7 +6,7 @@ import { OnboardingCoreConversation } from "@/components/onboarding/OnboardingCo
 import { OnboardingReward } from "@/components/onboarding/OnboardingReward";
 import { OnboardingProfileBadge } from "@/components/onboarding/OnboardingProfileBadge";
 import { PaywallSheet } from "@/components/PaywallSheet";
-import { markOnboardingPreviewComplete } from "@/lib/onboarding-state";
+import { getLocalOnboardingState, markOnboardingPreviewComplete } from "@/lib/onboarding-state";
 import { useAppsStore } from "@/state/apps";
 import { useAuthStore } from "@/state/auth";
 import { useUiStore } from "@/state/ui";
@@ -17,6 +17,7 @@ export default function OnboardingRoute() {
   const completeOnboarding = useAuthStore((state) => state.completeOnboarding);
   const authStatus = useAuthStore((state) => state.status);
   const [initialPage] = useState<"plans" | "referral">(() => useUiStore.getState().consumeOnboardingReferralEntry() ? "referral" : "plans");
+  const [postDeletion] = useState(() => getLocalOnboardingState().postDeletion);
   const [phase, setPhase] = useState<"conversation" | "paywall" | "reward" | "profile-badge">(initialPage === "referral" || authStatus === "authenticated" ? "paywall" : "conversation");
   const apps = useAppsStore((state) => state.apps);
   const alreadyOnboarded = useRef(useAuthStore.getState().user?.isOnboarded === true);
@@ -39,7 +40,7 @@ export default function OnboardingRoute() {
       : phase === "reward"
       ? <OnboardingReward onFinished={() => setPhase("profile-badge")} />
       : phase === "paywall"
-        ? <PaywallSheet initialPage={initialPage} mode="onboarding" onComplete={() => setPhase("reward")} />
+        ? <PaywallSheet initialPage={initialPage} mode="onboarding" onComplete={() => setPhase(postDeletion ? "profile-badge" : "reward")} />
         : <OnboardingCoreConversation apps={apps} onFinished={() => void startAuth()} />}
   </View>;
 }

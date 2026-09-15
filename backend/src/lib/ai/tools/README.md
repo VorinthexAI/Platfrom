@@ -66,6 +66,15 @@ selectors and never reads S3 directly. Recommend mode returns first-step guides;
 explain mode returns platform and app overview/purpose guides. Its `greet` mode
 generates a short non-persisting opening through the provider-neutral text action
 from one of two server-owned occasions; callers cannot supply the hidden prompt.
+Its trusted-only `topics` mode is absent from the provider schema. It generates
+three strict exploration topics through the same text action and is action-metered;
+ordinary guide reads remain free, while generated greetings and topics fall back
+to text-action metering. Conversation topic jobs reload
+their guide context from durable messages and use generation fencing before commit.
+The opening-greeting HTTP boundaries pass trusted observers through `runTool` so
+greeting prose uses real text-action deltas and each complete validated topic is
+emitted over SSE. Final tool output remains authoritative and fully validated;
+ordinary callers that do not provide observers retain buffered execution.
 
 Generated travel references use the same canonical travel service from HTTP
 and Core. `trip.guide.generate/list` and the parameterized
@@ -83,6 +92,15 @@ do not control Compass lifecycle.
 5. Register the capability in the applicable Core surface and mutation metadata.
 6. Add strict-input, authorization, registry uniqueness, and HTTP/Core parity
    tests.
+
+## Document Ingestion
+
+`document.parse` is the sole public ingestion capability for uploaded files and
+ordered scanned-page images. Both input forms share the same canonical parser,
+source ownership, rollback, and embedding persistence. PDF/image transcription
+calls the existing `text` AI action with Core's native file/image transport and a
+server-owned faithful-transcription prompt. Ingestion is action-token priced;
+there is no fixed upload or scan charge and no separate public scan tool.
 
 ## Calling Actions
 

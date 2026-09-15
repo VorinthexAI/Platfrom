@@ -11,7 +11,7 @@ import { BOOK_CHAPTER_WORD_MAX, BOOK_CHAPTER_WORD_MIN, bookChapterSchema } from 
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { INITIAL_AUDIOBOOK_ASSET_MANIFEST, INITIAL_AUDIOBOOK_CHAPTER_GUIDE_IDS } from '@/lib/initial-audiobook-assets';
 
-export const INITIAL_WORKSPACE_CONTENT_VERSION = 7;
+export const INITIAL_WORKSPACE_CONTENT_VERSION = 8;
 
 type GuideDocument = { id: string; folderId: string; name: string; content: string; introducedInVersion: number };
 type GuideFolder = { id: string; parentId?: string; name: string; description: string; presentation: NonNullable<Folder['presentation']>; introducedInVersion: number };
@@ -75,6 +75,14 @@ The separation is intentional. Core supports conversation, search, and navigatio
 Try searching for a document by its subject rather than its exact title. You can also look for an image, message, place, trip, or audio book using the details you remember.
 
 Review the returned information and select a result when you want to continue in its app. Keep requests specific when context matters, and confirm that the relevant workspace sources are available. Core is most useful as a clear conversational guide to information you control.`,
+  },
+  {
+    id: 'conversation-history', folderId: 'assistant', name: 'How Core Chats Work with Archive',
+    content: `Core chats appear in Archive under Vorinthex AI / Core / Chats. Your messages and Core replies are organized there automatically, giving each conversation a clear place in the private workspace without requiring you to create or sort documents by hand.
+
+Rolling summaries help Core carry useful context forward as a conversation grows. They support continuity without replacing recent messages, and they may take time to reflect the latest exchange as chat processing completes.
+
+Archived chat content is prepared for semantic search so it can be found by meaning later, without requiring an exact title or phrase. Availability is not guaranteed to be immediate. Chat content and its summaries remain private and limited to the authorized workspace scope.`,
   },
   {
     id: 'knowledge-overview', folderId: 'knowledge', name: 'What Archive Is',
@@ -197,7 +205,10 @@ Describe your current knowledge, select a writing tone and narrator, and choose 
 Review the brief before starting generation. Ascend builds the book in the background and keeps its chapters together for reading and listening. A useful first project could be an introduction to Vorinthex AI using the documents in this guide tree as sources.`,
   },
 ] as const;
-export const INITIAL_WORKSPACE_DOCUMENTS: readonly GuideDocument[] = documentDefinitions.map((item) => ({ ...item, introducedInVersion: item.folderId === 'communication' ? 7 : 3 }));
+export const INITIAL_WORKSPACE_DOCUMENTS: readonly GuideDocument[] = documentDefinitions.map((item) => ({
+  ...item,
+  introducedInVersion: item.id === 'conversation-history' ? 8 : item.folderId === 'communication' ? 7 : 3,
+}));
 
 export function initialWorkspaceBookRecords(scopeKey: string, timestamp: string) {
   const embedding = Array(EMBEDDING_DIMENSIONS).fill(0);

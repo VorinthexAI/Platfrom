@@ -36,8 +36,8 @@ export function AuthenticatedEventBridge() {
     const previous = previousIdentity.current;
     const changed = previous !== undefined && (previous?.userKey !== identity?.userKey || previous?.teamKey !== identity?.teamKey || previous?.scopeKey !== identity?.scopeKey);
     if (changed && previous && identity && previous.userKey === identity.userKey && previous.teamKey === identity.teamKey) {
-      void queryClient.cancelQueries({ predicate: ({ queryKey }) => queryKey[0] !== "scope-list" });
-      queryClient.removeQueries({ predicate: ({ queryKey }) => queryKey[0] !== "scope-list" });
+      void queryClient.cancelQueries({ predicate: ({ queryKey }) => !["referral-summary", "scope-list"].includes(String(queryKey[0])) });
+      queryClient.removeQueries({ predicate: ({ queryKey }) => !["referral-summary", "scope-list"].includes(String(queryKey[0])) });
     } else if (changed) queryClient.clear();
     if (changed) {
       handledFundingRequirementKeys.current.clear();
@@ -123,7 +123,7 @@ export function AuthenticatedEventBridge() {
           invalidateArchive();
           publishAppEvent({ type: "inbox.changed" });
         }
-        if (event.event === "communication.changed" || event.event === "notification.changed" || event.event === "support.thread.changed") {
+        if (event.event === "communication.changed") {
           void queryClient.invalidateQueries({ queryKey: communicationQueryKeys.all(communicationContext), refetchType: "active" });
           publishAppEvent({ type: "communication.changed" });
         }
@@ -137,6 +137,7 @@ export function AuthenticatedEventBridge() {
         }
         if (event.event === "content.changed") {
           invalidateArchive();
+          publishAppEvent({ type: "content.changed" });
           void queryClient.invalidateQueries({ queryKey: signalQueryKeys.overview(compassContext), refetchType: "active" });
           void queryClient.invalidateQueries({ queryKey: signalQueryKeys.replyContexts(compassContext), refetchType: "active" });
           invalidateCompassTrips();

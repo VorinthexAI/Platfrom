@@ -4,6 +4,8 @@ import { publishUserEvent } from '@/api/events';
 import { createRedisConnection } from '@/lib/redis';
 import { documentStorage, type DocumentObjectStorage } from '@/lib/ai/document-processing';
 import { persistConversationAttachment, type ConversationAttachmentPersistenceDependencies } from './attachment-persistence';
+import { observeToolExecution } from '@/lib/ai/events/runtime';
+import { toolEventService } from '@/lib/ai/events/service';
 import { cleanupExpiredConversationAttachmentArtifacts, CONVERSATION_ATTACHMENT_LEASE_MS, CONVERSATION_ATTACHMENT_MAX_ATTEMPTS, getDefaultConversationAttachmentArtifactRepository, newAttachmentLeaseToken, type ConversationAttachmentArtifactRepository } from './attachment-artifacts';
 
 const QUEUE_NAME = 'conversation-attachment-persistence';
@@ -25,10 +27,17 @@ export async function processConversationAttachmentPersistence(raw: unknown, dep
   artifacts?: ConversationAttachmentArtifactRepository; persist?: typeof persistConversationAttachment; persistence?: ConversationAttachmentPersistenceDependencies;
   storage?: Pick<DocumentObjectStorage, 'delete'>; publishChanged?: typeof publishUserEvent; now?: () => Date; token?: () => string;
   leaseRenewalMs?: number; scheduleLeaseRenewal?: (renew: () => void, milliseconds: number) => () => void;
+  observe?: typeof observeToolExecution;
 } = {}) {
   const job = conversationAttachmentPersistenceJobSchema.parse(raw); const artifacts = dependencies.artifacts ?? getDefaultConversationAttachmentArtifactRepository(); const now = dependencies.now?.() ?? new Date(); const token = (dependencies.token ?? newAttachmentLeaseToken)();
   const leased = await artifacts.lease(job.artifactKey, token, now.toISOString(), new Date(now.getTime() + CONVERSATION_ATTACHMENT_LEASE_MS).toISOString());
-  if (!leased) return { references: 0 };
+  if (!leased) {
+    // A stalled BullMQ retry can arrive after artifact completion but before
+    // the parent message was settled. Reconcile the message idempotently.
+    const settled = await artifacts.settleMessage(job.userMessageKey);
+    if (settled) await (dependencies.publishChanged ?? publishUserEvent)(settled.userKey, 'conversation.changed').catch(() => undefined);
+    return { references: 0 };
+  }
   if (leased.userMessageKey !== job.userMessageKey) throw new Error('Attachment job does not match its durable message binding.');
   const context = { teamKey: leased.teamKey, runtimeScopeKey: leased.scopeKey, principal: { kind: 'member' as const, user: { key: leased.userKey }, userTeam: { key: leased.ownerKey, teamKey: leased.teamKey, userId: leased.userKey, status: 'active' as const }, scopeMember: null }, ...(leased.teamAssurance ? { teamAssurance: leased.teamAssurance } : {}) };
   const controller = new AbortController();
@@ -40,7 +49,10 @@ export async function processConversationAttachmentPersistence(raw: unknown, dep
   const schedule = dependencies.scheduleLeaseRenewal ?? ((callback: () => void, milliseconds: number) => { const timer = setInterval(callback, milliseconds); timer.unref?.(); return () => clearInterval(timer); });
   const stopRenewal = schedule(renew, dependencies.leaseRenewalMs ?? Math.floor(CONVERSATION_ATTACHMENT_LEASE_MS / 3));
   try {
-    const reference = await (dependencies.persist ?? persistConversationAttachment)(leased, context as never, { ...dependencies.persistence, signal: controller.signal });
+    const persist = () => (dependencies.persist ?? persistConversationAttachment)(leased, context as never, { ...dependencies.persistence, signal: controller.signal });
+    const reference = leased.kind === 'document'
+      ? await (dependencies.observe ?? observeToolExecution)('document.parse', context as never, persist, { recorder: toolEventService.record, idempotencyKey: `attachment:${leased.userKey}:${leased.key}`, input: { attachmentKey: leased.key } })
+      : await persist();
     renew(); await renewal;
     if (leaseError) throw leaseError;
     if (!await artifacts.complete(leased.key, token, reference)) throw new Error('Conversation attachment lease fence was lost before completion.');

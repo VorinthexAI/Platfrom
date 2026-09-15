@@ -27,6 +27,7 @@ function accessFilters(source: string, sourceKey: string) {
   return `
     LET target = ${source} == "folder" ? DOCUMENT(folders, ${sourceKey}) : ${source} == "document" ? DOCUMENT(documents, ${sourceKey}) : ${source} == "collection" ? DOCUMENT(collections, ${sourceKey}) : ${source} == "image" ? DOCUMENT(images, ${sourceKey}) : null
     FILTER target != null && (!HAS(target, "_internalDeletion") || target._internalDeletion == null)
+    FILTER !HAS(target, "privateOwnerUserKey") || target.privateOwnerUserKey == null || target.privateOwnerUserKey == @userKey
     LET scope = DOCUMENT(scopes, target.scopeKey)
     FILTER scope != null && scope.teamKey == @teamKey
     LET privileged = membership.teamRole IN ["owner", "admin"]

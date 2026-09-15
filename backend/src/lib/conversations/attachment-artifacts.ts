@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { CORE_CHAT_IMAGE_MIME_TYPES, CORE_CHAT_MAX_DOCUMENT_CONTEXT_BYTES } from '@/lib/ai/actions/core-chat';
 import { db } from '@/lib/db/client';
 import { toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { documentStorage, type DocumentObjectStorage } from '@/lib/ai/document-processing';
@@ -16,14 +17,14 @@ export const conversationAttachmentArtifactSchema = z.object({
   key: z.string().cuid(), ownerKey: z.string().cuid(), teamKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(), userKey: z.string().cuid(),
   conversationKey: z.string().cuid(), requestKey: z.string().trim().min(1).max(200), userMessageKey: z.string().cuid().optional(),
   teamAssurance: z.object({ teamMembershipKey: z.string().cuid(), teamMfaVersion: z.number().int().nonnegative() }).strict().optional(),
-  kind: z.enum(['document', 'image']), filename: filenameSchema, mimeType: z.union([documentMimeSchema, z.literal('image/png')]), sizeBytes: z.number().int().positive().max(25 * 1024 * 1024),
+  kind: z.enum(['document', 'image']), displayKey: z.string().trim().min(1).max(120).optional(), displayOrder: z.number().int().min(0).max(11).optional(), filename: filenameSchema, mimeType: z.union([documentMimeSchema, z.enum(CORE_CHAT_IMAGE_MIME_TYPES)]), sizeBytes: z.number().int().positive().max(25 * 1024 * 1024),
   width: z.number().int().positive().max(16_384).optional(), height: z.number().int().positive().max(16_384).optional(),
-  stagedStorageKey: z.string().trim().min(1), stagedSha256: z.string().regex(/^[a-f0-9]{64}$/), documentContent: z.string().trim().min(1).optional(), documentMetadata: z.record(z.unknown()).optional(),
+  stagedStorageKey: z.string().trim().min(1), stagedSha256: z.string().regex(/^[a-f0-9]{64}$/), documentContent: z.string().trim().min(1).max(CORE_CHAT_MAX_DOCUMENT_CONTEXT_BYTES).refine((value) => Buffer.byteLength(value, 'utf8') <= CORE_CHAT_MAX_DOCUMENT_CONTEXT_BYTES, 'Extracted document content exceeds the conversation attachment limit.').optional(), documentMetadata: z.record(z.unknown()).optional(),
   status: z.enum(['PREPARED', 'CLAIMED', 'PROCESSING', 'COMPLETED', 'FAILED']), finalReference: conversationAttachmentReferenceSchema.optional(),
   attempts: z.number().int().nonnegative(), availableAt: z.string().datetime(), leaseToken: z.string().trim().min(1).optional(), leaseExpiresAt: z.string().datetime().optional(), error: z.string().trim().min(1).max(4_000).optional(),
   createdAt: z.string().datetime(), expiresAt: z.string().datetime(),
 }).strict().superRefine((artifact, context) => {
-  if (artifact.kind === 'image' && (artifact.mimeType !== 'image/png' || !artifact.width || !artifact.height || artifact.documentContent)) context.addIssue({ code: 'custom', path: ['kind'], message: 'Image artifacts require canonical PNG metadata.' });
+  if (artifact.kind === 'image' && (!z.enum(CORE_CHAT_IMAGE_MIME_TYPES).safeParse(artifact.mimeType).success || !artifact.width || !artifact.height || artifact.documentContent)) context.addIssue({ code: 'custom', path: ['kind'], message: 'Image artifacts require supported image metadata.' });
   if (artifact.kind === 'document' && (!documentMimeSchema.safeParse(artifact.mimeType).success || artifact.width || artifact.height)) context.addIssue({ code: 'custom', path: ['kind'], message: 'Document artifacts require a supported document MIME type.' });
   if ((artifact.status === 'PROCESSING') !== Boolean(artifact.leaseToken && artifact.leaseExpiresAt)) context.addIssue({ code: 'custom', path: ['leaseToken'], message: 'Only processing artifacts require a complete lease.' });
   if ((artifact.status === 'COMPLETED') !== Boolean(artifact.finalReference)) context.addIssue({ code: 'custom', path: ['finalReference'], message: 'Only completed artifacts require a final reference.' });
@@ -37,6 +38,7 @@ export interface ConversationAttachmentArtifactRepository {
   insertPrepared(records: ConversationAttachmentArtifact[]): Promise<ConversationAttachmentArtifact[]>;
   readBound(owner: AttachmentOwner, conversationKey: string, requestKey: string, keys: string[]): Promise<ConversationAttachmentArtifact[]>;
   readClaimed(owner: AttachmentOwner, userMessageKey: string, keys: string[]): Promise<ConversationAttachmentArtifact[]>;
+  releaseClaimed(owner: AttachmentOwner, userMessageKey: string, keys: string[], availableAt: string): Promise<number>;
   read(key: string): Promise<ConversationAttachmentArtifact | null>;
   lease(key: string, token: string, now: string, leaseExpiresAt: string): Promise<ConversationAttachmentArtifact | null>;
   renew(key: string, token: string, leaseExpiresAt: string): Promise<boolean>;
@@ -63,6 +65,10 @@ export function createConversationAttachmentArtifactRepository(database: Databas
       const cursor = await database.query('FOR artifact IN @@artifacts FILTER artifact._key IN @keys && artifact.teamKey == @teamKey && artifact.scopeKey == @scopeKey && artifact.userKey == @userKey && artifact.userMessageKey == @userMessageKey && artifact.status IN ["CLAIMED", "PROCESSING", "COMPLETED", "FAILED"] SORT POSITION(@keys, artifact._key) RETURN artifact', { '@artifacts': CONVERSATION_ATTACHMENT_ARTIFACTS_COLLECTION, ...owner, userMessageKey, keys });
       return (await cursor.all()).map(parse);
     },
+    async releaseClaimed(owner, userMessageKey, keys, availableAt) {
+      const cursor = await database.query('FOR artifact IN @@artifacts FILTER artifact._key IN @keys && artifact.teamKey == @teamKey && artifact.scopeKey == @scopeKey && artifact.userKey == @userKey && artifact.userMessageKey == @userMessageKey && artifact.status == "CLAIMED" UPDATE artifact WITH { availableAt: @availableAt } IN @@artifacts RETURN 1', { '@artifacts': CONVERSATION_ATTACHMENT_ARTIFACTS_COLLECTION, ...owner, userMessageKey, keys, availableAt });
+      return (await cursor.all()).length;
+    },
     async read(key) { const cursor = await database.query('FOR artifact IN @@artifacts FILTER artifact._key == @key LIMIT 1 RETURN artifact', { '@artifacts': CONVERSATION_ATTACHMENT_ARTIFACTS_COLLECTION, key }); const row = await cursor.next(); return row ? parse(row) : null; },
     async lease(key, token, now, leaseExpiresAt) {
       const cursor = await database.query('FOR artifact IN @@artifacts FILTER artifact._key == @key && artifact.attempts < @maximumAttempts && artifact.availableAt <= @now && (artifact.status IN ["CLAIMED", "FAILED"] || (artifact.status == "PROCESSING" && artifact.leaseExpiresAt <= @now)) UPDATE artifact WITH { status: "PROCESSING", attempts: artifact.attempts + 1, leaseToken: @token, leaseExpiresAt: @leaseExpiresAt, error: null } IN @@artifacts OPTIONS { keepNull: false } RETURN NEW', { '@artifacts': CONVERSATION_ATTACHMENT_ARTIFACTS_COLLECTION, key, token, now, leaseExpiresAt, maximumAttempts: CONVERSATION_ATTACHMENT_MAX_ATTEMPTS });
@@ -85,7 +91,7 @@ export function createConversationAttachmentArtifactRepository(database: Databas
       return (await cursor.all()).map(parse);
     },
     async settleMessage(userMessageKey) {
-      const cursor = await database.query('LET artifacts = (FOR artifact IN @@artifacts FILTER artifact.userMessageKey == @userMessageKey RETURN artifact) FILTER LENGTH(artifacts) > 0 LET active = LENGTH(FOR artifact IN artifacts FILTER artifact.status IN ["CLAIMED", "PROCESSING"] || (artifact.status == "FAILED" && artifact.attempts < @maximumAttempts) RETURN 1) LET references = (FOR artifact IN artifacts FILTER artifact.status == "COMPLETED" SORT artifact.createdAt, artifact._key RETURN artifact.finalReference) LET status = active > 0 ? "PENDING" : LENGTH(references) == LENGTH(artifacts) ? "COMPLETED" : LENGTH(references) > 0 ? "PARTIAL" : "FAILED" LET visibleReferences = active > 0 ? [] : references LET message = DOCUMENT(@@messages, @userMessageKey) FILTER message != null UPDATE message WITH { attachments: visibleReferences, attachmentStatus: status, pendingAttachmentKeys: active > 0 ? message.pendingAttachmentKeys : null } IN @@messages OPTIONS { keepNull: false } RETURN { userKey: message.userKey, conversationKey: message.conversationKey, status, references: visibleReferences }', { '@artifacts': CONVERSATION_ATTACHMENT_ARTIFACTS_COLLECTION, '@messages': 'conversationMessages', userMessageKey, maximumAttempts: CONVERSATION_ATTACHMENT_MAX_ATTEMPTS });
+      const cursor = await database.query('LET artifacts = (FOR artifact IN @@artifacts FILTER artifact.userMessageKey == @userMessageKey RETURN artifact) FILTER LENGTH(artifacts) > 0 LET active = LENGTH(FOR artifact IN artifacts FILTER artifact.status IN ["CLAIMED", "PROCESSING"] || (artifact.status == "FAILED" && artifact.attempts < @maximumAttempts) RETURN 1) LET references = (FOR artifact IN artifacts FILTER artifact.status == "COMPLETED" SORT artifact.createdAt, artifact.displayOrder == null ? 999 : artifact.displayOrder, artifact._key RETURN artifact.finalReference) LET status = active > 0 ? "PENDING" : LENGTH(references) == LENGTH(artifacts) ? "COMPLETED" : LENGTH(references) > 0 ? "PARTIAL" : "FAILED" LET visibleReferences = active > 0 ? [] : references LET message = DOCUMENT(@@messages, @userMessageKey) FILTER message != null UPDATE message WITH { attachments: visibleReferences, attachmentStatus: status, pendingAttachmentKeys: active > 0 ? message.pendingAttachmentKeys : null } IN @@messages OPTIONS { keepNull: false } RETURN { userKey: message.userKey, conversationKey: message.conversationKey, status, references: visibleReferences }', { '@artifacts': CONVERSATION_ATTACHMENT_ARTIFACTS_COLLECTION, '@messages': 'conversationMessages', userMessageKey, maximumAttempts: CONVERSATION_ATTACHMENT_MAX_ATTEMPTS });
       const row = await cursor.next();
       return row ? row as { userKey: string; conversationKey: string; status: 'PENDING' | 'COMPLETED' | 'PARTIAL' | 'FAILED'; references: ConversationAttachmentReference[] } : null;
     },

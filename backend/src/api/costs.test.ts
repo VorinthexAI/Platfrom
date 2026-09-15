@@ -9,7 +9,7 @@ import { createListCostsHandler } from './costs';
 const schedule = {
   capabilityCosts: { 'profile.badge.generate': { sparkCost: '10', microSparkCost: 10_000_000, unit: 'invocation' as const } },
   charges: [
-    { key: 'document.parse', kind: 'static' as const, name: 'Parse a document', description: 'Extract readable content.', sparkCost: '2', unit: 'documents' as const },
+    { key: 'trip.create', kind: 'static' as const, name: 'Create a trip', description: 'Create a trip plan.', sparkCost: '15', unit: 'invocation' as const },
     { key: 'storage', kind: 'storage' as const, name: 'Storage', description: 'Charged hourly.', sparkCost: '30', unit: 'gb-month' as const },
     { key: 'ai-usage', kind: 'variable' as const, name: 'AI actions', description: 'Consumes Sparks based on usage.' },
   ],

@@ -5,7 +5,7 @@ const calls: { method: string; path: string; body?: unknown; config?: unknown }[
 const timestamp = "2026-09-01T10:00:00.000Z";
 const serverConversation = { key: "conversation-key", teamKey: "team", scopeKey: "scope", userKey: "user", name: "Planning", isFavorite: false, createdAt: timestamp, updatedAt: timestamp };
 const retrieval = { query: "roadmap", limit: 10, minimumScore: 0.55, groups: [{ collectionSlug: "documents", results: [{ key: "document-key", label: "Roadmap" }] }] };
-const serverMessage = { key: "assistant-key", conversationKey: serverConversation.key, turnKey: "request", type: "TEXT", role: "ASSISTANT", status: "COMPLETED", attachmentStatus: "NONE", content: "Answer", attachments: [], retrievals: [retrieval], createdAt: timestamp, completedAt: timestamp };
+const serverMessage = { key: "assistant-key", conversationKey: serverConversation.key, turnKey: "request", type: "TEXT", role: "ASSISTANT", status: "COMPLETED", attachmentStatus: "NONE", content: "Answer", attachments: [], retrievals: [retrieval], guideTopics: { status: "NONE" }, createdAt: timestamp, completedAt: timestamp };
 const serverUserMessage = { ...serverMessage, key: "user-message", role: "USER", attachmentStatus: "PENDING", content: "Question", attachments: [] };
 const serverCompletedUserMessage = { ...serverUserMessage, attachmentStatus: "COMPLETED", attachments: [{ key: "cm123456789", kind: "document", filename: "brief.pdf", mimeType: "application/pdf", sizeBytes: 42 }] };
 let response: unknown;
@@ -36,16 +36,37 @@ test("identifies only HTTP 404 responses as deleted conversation errors", () => 
 
 test("strictly parses owner-projected conversations and retains safe-message lifecycle fields", () => {
   expect(client.conversationSchema.parse(serverConversation)).toEqual({ key: serverConversation.key, name: "Planning", isFavorite: false, createdAt: timestamp, updatedAt: timestamp });
-  expect(client.conversationMessageSchema.parse(serverMessage)).toEqual({ key: "assistant-key", conversationKey: serverConversation.key, turnKey: "request", kind: "text", role: "assistant", status: "COMPLETED", attachmentStatus: "NONE", content: "Answer", attachments: [], retrievals: [retrieval], createdAt: timestamp, completedAt: timestamp });
+  expect(client.conversationMessageSchema.parse(serverMessage)).toEqual({ key: "assistant-key", conversationKey: serverConversation.key, turnKey: "request", kind: "text", role: "assistant", status: "COMPLETED", attachmentStatus: "NONE", content: "Answer", attachments: [], retrievals: [retrieval], guideTopics: { status: "NONE" }, createdAt: timestamp, completedAt: timestamp });
   expect(() => client.conversationSchema.parse({ ...serverConversation, unknown: true })).toThrow();
   expect(() => client.conversationMessageSchema.parse({ ...serverMessage, role: "assistant" })).toThrow();
+});
+
+test("strictly parses asynchronous guide topic lifecycle states", () => {
+  const topics = [
+    { key: "one", label: "First topic", question: "Tell me about the first topic" },
+    { key: "two", label: "Second topic", question: "Tell me about the second topic" },
+    { key: "three", label: "Third topic", question: "Tell me about the third topic" },
+  ];
+  for (const status of ["NONE", "PENDING", "FAILED"] as const) expect(client.conversationMessageSchema.parse({ ...serverMessage, guideTopics: { status } }).guideTopics).toEqual({ status });
+  expect(client.conversationMessageSchema.parse({ ...serverMessage, guideTopics: { status: "READY", topics } }).guideTopics).toEqual({ status: "READY", topics });
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, guideTopics: { status: "READY", topics: topics.slice(0, 2) } })).toThrow();
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, guideTopics: { status: "READY", topics: [topics[0], topics[0], topics[2]] } })).toThrow("unique");
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, guideTopics: { status: "READY", topics: [topics[0], { ...topics[1], label: topics[0].label.toUpperCase() }, topics[2]] } })).toThrow("unique");
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, guideTopics: { status: "READY", topics: [topics[0], { ...topics[1], question: topics[0].question.toUpperCase() }, topics[2]] } })).toThrow("unique");
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, guideTopics: { status: "PENDING", topics } })).toThrow();
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, guideTopics: { status: "READY", topics: [{ ...topics[0], extra: true }, topics[1], topics[2]] } })).toThrow();
 });
 
 test("strictly retains public attachment lifecycle and canonical user references", () => {
   expect(client.conversationMessageSchema.parse(serverUserMessage)).toMatchObject({ role: "user", attachmentStatus: "PENDING", attachments: [] });
   expect(client.conversationMessageSchema.parse(serverCompletedUserMessage)).toMatchObject({ role: "user", attachmentStatus: "COMPLETED", attachments: [{ key: "cm123456789", kind: "document", filename: "brief.pdf" }] });
   expect(() => client.conversationMessageSchema.parse({ ...serverCompletedUserMessage, attachments: [{ ...serverCompletedUserMessage.attachments[0], storageKey: "private/key" }] })).toThrow();
-  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, attachments: serverCompletedUserMessage.attachments })).toThrow("Attachments belong only");
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, attachments: serverCompletedUserMessage.attachments })).toThrow("NONE attachment status");
+  expect(() => client.conversationMessageSchema.parse({ ...serverMessage, attachmentStatus: "PENDING" })).toThrow("only to text user messages");
+  expect(() => client.conversationMessageSchema.parse({ ...serverCompletedUserMessage, attachments: [] })).toThrow("requires durable attachments");
+  expect(() => client.conversationMessageSchema.parse({ ...serverCompletedUserMessage, attachmentStatus: "PARTIAL", attachments: [] })).toThrow("requires durable attachments");
+  expect(() => client.conversationMessageSchema.parse({ ...serverCompletedUserMessage, attachmentStatus: "PENDING" })).toThrow("cannot expose durable attachments");
+  expect(() => client.conversationMessageSchema.parse({ ...serverCompletedUserMessage, attachmentStatus: "FAILED" })).toThrow("cannot expose durable attachments");
   expect(() => client.conversationMessageSchema.parse({ ...serverMessage, attachmentStatus: "PROCESSING" })).toThrow();
   expect(() => client.conversationMessageSchema.parse({ ...serverMessage, attachmentStatus: undefined })).toThrow();
 });
@@ -61,6 +82,17 @@ test("requires strict bounded retrievals on list messages and SSE completions", 
   expect(() => client.conversationMessageSchema.parse({ ...serverMessage, retrievals: [{ ...retrieval, groups: [] }] })).toThrow();
   expect(() => client.conversationMessageSchema.parse({ ...serverMessage, retrievals: [{ ...retrieval, limit: 51 }] })).toThrow();
   expect(() => client.conversationMessageSchema.parse({ ...serverMessage, retrievals: Array.from({ length: 5 }, () => retrieval) })).toThrow();
+});
+
+test("accepts the complete canonical retrieval slug and filter contract", () => {
+  const tagged = {
+    query: "priority",
+    limit: 10,
+    filters: { status: "ready", isFavorite: true, tagNames: ["Priority"], tagMatch: "all", targetTypes: ["book"] },
+    searchCollectionSlugs: ["tags"],
+    groups: [{ collectionSlug: "tag-assignments", results: [{ key: "assignment-key", label: "Priority book" }] }],
+  };
+  expect(client.conversationMessageSchema.parse({ ...serverMessage, retrievals: [tagged] })).toMatchObject({ retrievals: [tagged] });
 });
 
 test("accepts query-free tool result retrievals but rejects query-free search retrievals", () => {
@@ -95,7 +127,7 @@ test("publishes canonical history only after a successful recordHistory search",
 test("passes abort signals through create, update, favorite, and delete mutations", async () => {
   const controller = new AbortController();
   response = { success: true, data: serverConversation };
-  await client.createConversation(context, "New chat", controller.signal);
+  await client.createConversation(context, "New chat", controller.signal, "signed-greeting");
   await client.updateConversation(context, serverConversation.key, { name: "Renamed" }, controller.signal);
   await client.updateConversation(context, serverConversation.key, { isFavorite: true }, controller.signal);
   response = { success: true, data: { deletedKey: serverConversation.key } };
@@ -103,6 +135,7 @@ test("passes abort signals through create, update, favorite, and delete mutation
   response = { success: true, data: { deletedKeys: [serverMessage.key, "user-message"] } };
   await expect(client.deleteConversationMessage(context, serverConversation.key, serverMessage.key, controller.signal)).resolves.toEqual({ deletedKeys: [serverMessage.key, "user-message"] });
   expect(calls.map(({ method, path }) => `${method} ${path}`)).toEqual(["POST /conversations", `PATCH /conversations/${serverConversation.key}`, `POST /conversations/${serverConversation.key}/favorite`, `DELETE /conversations/${serverConversation.key}`, `DELETE /conversations/${serverConversation.key}/messages/${serverMessage.key}`]);
+  expect(calls[0]?.body).toEqual({ teamKey: "team", scopeKey: "scope", name: "New chat", openingGreetingToken: "signed-greeting" });
   for (const call of calls) expect(call.config).toMatchObject({ signal: controller.signal });
   expect(calls.at(-1)?.config).toMatchObject({ data: { teamKey: "team", scopeKey: "scope" } });
 });
@@ -147,7 +180,16 @@ describe("strict conversation turn protocol", () => {
   test("sends bounded attachment keys with the conversation turn", async () => {
     await client.streamConversationTurnWithTransport(transport([start, done]), context, { conversationKey: serverConversation.key, message: "Use these", requestKey: "request", attachmentKeys: ["attachment-1", "attachment-2"] }, () => undefined);
     expect(calls[0]?.body).toEqual({ teamKey: "team", scopeKey: "scope", message: "Use these", requestKey: "request", attachmentKeys: ["attachment-1", "attachment-2"], referenceImageKeys: [] });
-    await expect(client.streamConversationTurnWithTransport(transport([]), context, { conversationKey: serverConversation.key, message: "Too many", requestKey: "request", attachmentKeys: Array.from({ length: 11 }, (_, index) => `attachment-${index}`) }, () => undefined)).rejects.toThrow();
+    let invoked = false;
+    await expect(client.streamConversationTurnWithTransport(async () => { invoked = true; }, context, { conversationKey: serverConversation.key, message: "Too many", requestKey: "request", attachmentKeys: Array.from({ length: client.CONVERSATION_ATTACHMENT_MAX_FILES + 1 }, (_, index) => `attachment-${index}`) }, () => undefined)).rejects.toThrow();
+    expect(invoked).toBe(false);
+  });
+
+  test("sends strict guide-topic provenance with a real turn", async () => {
+    const guideTopicSelection = { sourceAssistantMessageKey: "assistant-source", topicKey: "next-step" };
+    await client.streamConversationTurnWithTransport(transport([start, done]), context, { conversationKey: serverConversation.key, message: "What should I do next?", requestKey: "request", guideTopicSelection }, () => undefined);
+    expect(calls[0]?.body).toMatchObject({ message: "What should I do next?", guideTopicSelection });
+    await expect(client.streamConversationTurnWithTransport(transport([]), context, { conversationKey: serverConversation.key, message: "Question", requestKey: "request", guideTopicSelection: { ...guideTopicSelection, extra: true } as never }, () => undefined)).rejects.toThrow();
   });
 
   test("rejects messages above the exact 20k backend bound before transport", async () => {
@@ -196,19 +238,19 @@ describe("strict conversation turn protocol", () => {
 test("reserves, directly uploads, and completes transient attachments", async () => {
   const presignPath = `/conversations/${serverConversation.key}/attachments/uploads/presign`;
   const completePath = `/conversations/${serverConversation.key}/attachments/uploads/complete`;
-  responses.set(presignPath, { success: true, data: { uploads: [{ clientKey: "local-1", attachmentKey: "attachment-1", url: "https://uploads.example/attachment", headers: { "Content-Type": "image/png" }, expiresAt: timestamp }] } });
-  responses.set(completePath, { success: true, data: { attachments: [{ attachmentKey: "attachment-1", kind: "image", filename: "photo.png", mimeType: "image/png", sizeBytes: 4, width: 10, height: 20, status: "prepared" }] } });
+  responses.set(presignPath, { success: true, data: { uploads: [{ clientKey: "local-1", attachmentKey: "attachment-1", url: "https://uploads.example/attachment", headers: { "Content-Type": "image/jpeg" }, expiresAt: timestamp }] } });
+  responses.set(completePath, { success: true, data: { attachments: [{ attachmentKey: "attachment-1", kind: "image", filename: "photo.jpg", mimeType: "image/jpeg", sizeBytes: 4, width: 10, height: 20, status: "prepared" }] } });
   const originalFetch = globalThis.fetch;
   const uploads: { url: string; init?: RequestInit }[] = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => { uploads.push({ url: String(input), init }); return new Response(null, { status: 200 }); }) as typeof fetch;
   try {
-    await expect(client.uploadConversationAttachments(context, serverConversation.key, "request", [{ clientKey: "local-1", kind: "image", filename: "photo.png", mimeType: "image/png", sizeBytes: 4, uri: "bytes:4" }])).resolves.toMatchObject({ attachmentKeys: ["attachment-1"] });
+    await expect(client.uploadConversationAttachments(context, serverConversation.key, "request", [{ clientKey: "local-1", kind: "image", filename: "photo.jpg", mimeType: "image/jpeg", sizeBytes: 4, uri: "bytes:4" }])).resolves.toMatchObject({ attachmentKeys: ["attachment-1"], attachments: [{ mimeType: "image/jpeg", filename: "photo.jpg" }] });
   } finally { globalThis.fetch = originalFetch; }
   expect(calls.map(({ path }) => path)).toEqual([presignPath, completePath]);
-  expect(calls[0]?.body).toEqual({ teamKey: "team", scopeKey: "scope", requestKey: "request", files: [{ clientKey: "local-1", filename: "photo.png", mimeType: "image/png", sizeBytes: 4 }] });
+  expect(calls[0]?.body).toEqual({ teamKey: "team", scopeKey: "scope", requestKey: "request", files: [{ clientKey: "local-1", filename: "photo.jpg", mimeType: "image/jpeg", sizeBytes: 4 }] });
   expect(calls[1]?.body).toEqual({ teamKey: "team", scopeKey: "scope", requestKey: "request", attachmentKeys: ["attachment-1"] });
   expect(uploads).toHaveLength(1);
-  expect(uploads[0]).toMatchObject({ url: "https://uploads.example/attachment", init: { method: "PUT", headers: { "Content-Type": "image/png" } } });
+  expect(uploads[0]).toMatchObject({ url: "https://uploads.example/attachment", init: { method: "PUT", headers: { "Content-Type": "image/jpeg" } } });
 });
 
 test("identifies the failing attachment transport stage and preserves backend details", async () => {

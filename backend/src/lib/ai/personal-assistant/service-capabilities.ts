@@ -14,7 +14,7 @@ import { newId } from '@/lib/ids';
 import { userHiddenOperations } from '@/lib/user-hiddens/operations';
 import type { AssistantCapability, AssistantCapabilityContext } from './capabilities';
 import { ASSISTANT_RAW_RESULT } from './capability-result';
-import { APP_SEARCH_COLLECTION_ADAPTERS, appSearchModelInputSchema, createAppSearchService, projectAppSearchModelResult } from '@/lib/app-search/service';
+import { APP_SEARCH_COLLECTION_ADAPTERS, appSearchModelInputSchema, createAppSearchService, describeAppSearchAccountAggregates, projectAppSearchModelResult } from '@/lib/app-search/service';
 import { appTextEnhanceInputSchema, appTextTranslateInputSchema, createAppTransformationService } from '@/lib/app-transformation/service';
 import { appSpeechInputSchema, createAppSpeechService } from '@/lib/app-speech/service';
 import { accountProfileService, profileNameUpdateInputSchema, safeProfileUpdateResultSchema } from '@/lib/account-profile/service';
@@ -30,7 +30,6 @@ import { appNotifyInputSchema, notificationListInputSchema } from '@/lib/app-not
 import { communicationMarkReadInputSchema, communicationSendInputSchema, communicationThreadInputSchema } from '@/lib/user-inbox/schemas';
 import { userInboxService } from '@/lib/user-inbox/service';
 import { appNotificationService } from '@/lib/app-notifications/service';
-import { teamListInputSchema, teamSelectInputSchema, teamService } from '@/lib/teams';
 import { costService } from '@/lib/costs/service';
 
 const key = z.string().cuid();
@@ -149,6 +148,7 @@ appSearchCapability.definition.description = appSearchCapability.definition.desc
   'Set limit to the requested quantity: grammatical singular or one/single in the user\'s language means 1, an explicit number means that number up to 50, and an unspecified plural uses the default.',
   'Always set limit to the requested quantity: grammatical singular or one/single in the user\'s language means 1, an explicit number means that number up to 50, and an unspecified plural requires a reasonable bounded limit, usually 10.',
 );
+appSearchCapability.definition.description += ` For an account-wide total, omit collectionSlugs and use operation sum with scope account; this is distinct from current-scope resource sums. Account-wide summable fields: ${describeAppSearchAccountAggregates()}.`;
 
 export const appEnhanceCapability = capability('app.enhance', 'Improve spelling, grammar, punctuation, and wording while preserving the source meaning.', appEnhanceInputSchema, async ({ text, documentKey, instruction, save }, context) => {
   if (text) return (context.appTransformation ?? createAppTransformationService()).enhance({ text, instruction }, context.domain.teamKey, { signal: context.signal, timeoutMs: context.timeoutMs });
@@ -182,9 +182,8 @@ export const hiddenListCapability = capability('content.hidden.list', 'List cont
 });
 
 export const platformCapabilities = [
-  capability('team.list', 'List teams and scopes available to the authenticated account when team selection is enabled.', teamListInputSchema, async (input, context) => teamService.list(input, context.domain), undefined, 'read'),
   capability('app.notify', 'Send a notification with a dynamic title and message to specific eligible users by user key, or to every eligible user in the current team. Set notifyAll true only when every team user should be notified.', appNotifyInputSchema, async (input, context) => (context.appNotifications ?? appNotificationService).notify(input, context.domain, `${context.requestKey ?? newId()}:app.notify`), undefined, 'write'),
-  capability('app.history', "List the authenticated user's internal communication Inbox or Sent history.", notificationListInputSchema, async (input, context) => context.userInbox ? context.userInbox.list(input, context.domain) : (context.appNotifications ?? appNotificationService).list(input, context.domain), undefined, 'read'),
+  capability('app.history', "List and search the authenticated user's internal communication Messages or Sent history, optionally filtered by read state.", notificationListInputSchema, async (input, context) => context.userInbox ? context.userInbox.list(input, context.domain) : (context.appNotifications ?? appNotificationService).list(input, context.domain), undefined, 'read'),
   capability('communication.thread.read', 'Read one internal communication thread and its messages.', communicationThreadInputSchema, async (input, context) => (context.userInbox ?? userInboxService).read(input, context.domain), undefined, 'read'),
   capability('communication.thread.mark-read', 'Mark one internal communication thread read or unread.', communicationMarkReadInputSchema, async (input, context) => (context.userInbox ?? userInboxService).markRead(input, context.domain), undefined, 'write'),
   capability('communication.message.send', 'Send a user follow-up in an internal communication thread.', communicationSendInputSchema, async (input, context) => (context.userInbox ?? userInboxService).send(input, context.domain, context.requestKey ?? newId()), undefined, 'write'),
@@ -248,7 +247,6 @@ export const platformCapabilities = [
 // Trusted adapters can dispatch these unified tools, but Core must not select a
 // new scope and then continue the same turn with its original ToolContext.
 export const scopeMutationCapabilities = [
-  capability('team.select', 'Select an authorized team and scope, requiring exact team MFA assurance when enabled.', teamSelectInputSchema, async (input, context) => teamService.select(input, context.domain), undefined, 'write'),
   capability('scope.create', 'Create a scope in the current team. Only team owners and admins may create scopes.', scopeCreateInputSchema, async (input, context) => (context.scopes ?? scopeService).create(input, context.domain, context.requestKey ?? newId()), undefined, 'write'),
   capability('scope.select', 'Select the authenticated user\'s current scope by its target scope key.', scopeSelectInputSchema, async (input, context) => (context.scopes ?? scopeService).select(input, context.domain), undefined, 'write'),
   capability('scope.prioritize', 'Move a scope to the first position while preserving the relative order of its siblings.', scopePrioritizeInputSchema, async (input, context) => (context.scopes ?? scopeService).prioritize(input, context.domain), undefined, 'write'),

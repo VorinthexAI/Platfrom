@@ -44,8 +44,12 @@ describe("app open event lifecycle", () => {
     expect(bridge).toContain("handleState(AppState.currentState)");
     expect(bridge).toContain('AppState.addEventListener("change", handleState)');
     expect(provider).toContain("<AppOpenEventBridge />");
-    expect(bridge).toContain('requestAgentGreeting("returning")');
-    expect(bridge).toContain("if (firstOpen && auth.status");
-    expect(bridge).toContain('auth.user?.isOnboarded === true');
+    expect(bridge).toContain('requestAgentGreeting("returning", "restore-or-greet")');
+    expect(bridge).toContain("coldSessionGreetingRequested");
+    expect(bridge).toContain('auth.status !== "authenticated"');
+    expect(bridge).toContain('auth.user?.isOnboarded !== true');
+    expect(bridge).toContain("useAuthStore.subscribe");
+    expect(bridge.slice(bridge.indexOf("const handleState"), bridge.indexOf("const requestAuthenticatedGreeting"))).not.toContain("requestAgentGreeting");
+    expect(bridge.slice(bridge.indexOf('AppState.addEventListener("change", handleState)'))).not.toContain('requestAgentGreeting("returning"');
   });
 });

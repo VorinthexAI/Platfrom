@@ -18,7 +18,9 @@ import {
   type UploadedDocumentFile,
 } from './schemas';
 import { documentStorage, type DocumentStorage } from './storage';
-import { awsFileAction, type FileActionClient } from './file';
+import { transcribeDocument, type DocumentTranscriber } from '@/lib/ai/actions/document-transcription';
+import { SparkRepositoryError } from '@/lib/sparks/repository';
+import { SparkExecutionPendingError } from '@/lib/ai/events/runtime';
 import { chunkDocumentContent, chunkDocumentText, documentEmbeddingTexts, documentSemanticHash } from './chunking';
 
 export const DEFAULT_MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
@@ -199,7 +201,9 @@ async function localExtraction<T>(run: () => Promise<T>, code: string): Promise<
 }
 
 export async function documentExtract(input: NormalizedDocument & { storageKey: string }, options: {
-  fileAction?: FileActionClient;
+  transcribe?: DocumentTranscriber;
+  teamKey?: string;
+  signal?: AbortSignal;
   extractDoc?: (bytes: Uint8Array) => Promise<string>;
   extractDocx?: (bytes: Uint8Array) => Promise<string>;
   logger?: DocumentActionLogger;
@@ -207,8 +211,8 @@ export async function documentExtract(input: NormalizedDocument & { storageKey: 
   return observed('document-extract', { scopeKey: input.scopeKey, folderKey: input.folderKey, extension: input.extension, mimeType: input.mimeType, sizeBytes: input.sizeBytes }, options.logger ?? defaultLogger, async () => {
     try {
       if (input.extension === 'pdf') {
-        const output = await (options.fileAction ?? awsFileAction).execute({ operation: 'document', storageKey: input.storageKey, filename: `${input.name}.pdf`, mimeType: 'application/pdf', bytes: input.fileInput }, input.scopeKey);
-        const result = extractionResultSchema.parse({ extractedText: output.text, metadata: output.metadata });
+        const output = await (options.transcribe ?? transcribeDocument)({ type: 'file', filename: `${input.name}.pdf`, mimeType: 'application/pdf', bytes: input.fileInput }, { teamKey: options.teamKey ?? '', signal: options.signal });
+        const result = extractionResultSchema.parse({ extractedText: output.text, metadata: { method: 'model-transcription' } });
         if (result.extractedText.length > maxExtractedCharacters()) throw new DocumentInputError('DOCUMENT_EXTRACTED_CONTENT_TOO_LARGE', 'Extracted document content exceeds the configured limit.', 'document-extract');
         if (!result.extractedText.trim()) throw new DocumentInputError('DOCUMENT_EMPTY_CONTENT', 'The document contains no extractable text.', 'document-extract');
         return result;
@@ -236,6 +240,7 @@ export async function documentExtract(input: NormalizedDocument & { storageKey: 
       const message = process.env.NODE_ENV === 'development' && error instanceof Error
         ? `The document could not be extracted: ${error.message}`
         : 'The document could not be extracted.';
+      if (error instanceof SparkRepositoryError || error instanceof SparkExecutionPendingError) throw error;
       throw documentActionError(error, 'DOCUMENT_EXTRACTION_FAILED', message, 'document-extract', true);
     }
   });

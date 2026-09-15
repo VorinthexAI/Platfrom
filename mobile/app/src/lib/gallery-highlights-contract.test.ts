@@ -62,7 +62,7 @@ test("uses separate full-height grid and player sheets with footer actions", () 
 });
 
 test("uses owner-only creation and selected-highlight tag and delete actions from the grid", () => {
-  expect(highlights).toContain("const owner = true");
+  expect(highlights).toContain("const owner = collection.access.canContribute");
   expect(highlights).toContain('owner ? <Button disabled={creating || listLoading || opening}');
   expect(highlights).toContain('onLongPress={owner ? () => handleHighlightLongPress(highlight.key) : undefined}');
   expect(highlights).toContain('accessibilityActions={owner ? [{ name: "longpress"');
@@ -73,7 +73,7 @@ test("uses owner-only creation and selected-highlight tag and delete actions fro
   expect(highlights).toContain('bulkToolbar: { width: "100%", minHeight: 36, marginBottom: spacing.xs, padding: 3');
   expect(highlights).toContain('activeSheet === "actions"');
   expect(highlights).toContain('type: "image-highlight" as const, key');
-  expect(highlights).toContain('<ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={open && resourceTagsOpen} targets={resourceTagTargets} />');
+  expect(highlights).toContain('<ResourceTagsSheet context={contentContext} onApply={() => setSelectedHighlightKeys([])} onClose={() => setResourceTagsOpen(false)} open={open && resourceTagsOpen} targets={resourceTagTargets} />');
   expect(highlights).toContain('>Tags</BottomSheetItem>');
   expect(highlights).toContain('>Delete</BottomSheetItem>');
   expect(highlights).toContain('open={open && !detail && selectedHighlightKeys.length > 0 && activeSheet === "actions"}');

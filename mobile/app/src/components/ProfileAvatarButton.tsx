@@ -2,6 +2,7 @@ import { useRouter } from "expo-router";
 import { Avatar } from "@vorinthex/shared/ui/avatar";
 import { Badge } from "@vorinthex/shared/ui/badge";
 import { Button } from "@vorinthex/shared/ui/button";
+import { SparksIcon } from "@vorinthex/shared/ui/icons-mobile";
 import type { ComponentProps } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
@@ -42,7 +43,7 @@ export function SparksBalanceButton() {
   const balance = useWholeSparkBalance(userKey).data;
   const openPaywall = useUiStore((state) => state.openPaywall);
   const displayBalance = formatWholeSparks(balance ?? 0);
-  return <Button accessibilityLabel={balance === undefined ? "Sparks balance unavailable. Showing 0 Sparks. Open Sparks" : `Sparks balance: ${balance} Sparks. Open Sparks`} hitSlop={8} onPress={openPaywall} size="xs" textStyle={styles.balanceText} variant="secondary">{displayBalance} Sparks</Button>;
+  return <Button accessibilityLabel={balance === undefined ? "Sparks balance unavailable. Showing 0 Sparks. Open Sparks" : `Sparks balance: ${balance} Sparks. Open Sparks`} hitSlop={8} icon={<SparksIcon size="sm" />} onPress={openPaywall} size="xs" textStyle={styles.balanceText} variant="secondary">{displayBalance} Sparks</Button>;
 }
 
 export function ProfileHeaderRight() {

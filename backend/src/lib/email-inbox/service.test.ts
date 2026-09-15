@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { createEmailService as createEmailServiceImplementation, emailDraftComposeInputSchema, emailDraftCreateInputSchema, emailDraftUpdateInputSchema, emailOverviewInputSchema, emailToneCreateInputSchema, emailToneUpdateInputSchema, publishEmailAttachmentDeletionEvents, rawEmail, validateDraftIdentity } from './service';
 import { GmailApiError } from './gmail';
-import { decodeEmailCursor, emailMessageKey } from './repository';
+import { createEmailRepository, decodeEmailCursor, emailMessageKey } from './repository';
 import { newId } from '@/lib/ids';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { ProviderExecutionError } from '@/lib/ai/router/errors';
@@ -74,6 +74,8 @@ function createEmailService(options: Parameters<typeof createEmailServiceImpleme
   return createEmailServiceImplementation({
     getUser: async () => ({ name: 'Alice Example', alias: 'Alice' }),
     publishInboxChanged: async () => undefined,
+    publishAttachmentChanged: async () => undefined,
+    enqueueSyncContinuation: async () => undefined,
     enqueueRepair: async () => ({ jobId: 'test-repair' }),
     completeRepair: async () => undefined,
     enqueueWatchRepair: async () => ({ jobId: 'test-watch-repair' }),
@@ -84,6 +86,33 @@ function createEmailService(options: Parameters<typeof createEmailServiceImpleme
     ...options,
   });
 }
+
+test('subscription commits sent-only and archived threads without an inbox-only draft lookup', async () => {
+  for (const labels of [['SENT'], []]) {
+    const states: any[] = [];
+    const raw = { ...providerMessage('changed', 'thread-1'), labelIds: labels };
+    const service = createEmailService({
+      authorize: async () => ({ teamMembershipKey: 'system', role: 'owner' }),
+      connectors: {
+        getExact: async () => ({ ...connector, initialSyncCompleted: true, historyId: '10', lastSyncedAt: now }),
+        credentials: () => ({ accessToken: 'token', expiresAt: '2099-01-01T00:00:00.000Z' }),
+        claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined,
+        setSyncState: async (_key: string, status: string, input: unknown) => { states.push({ status, input }); return true; },
+        markNotificationPending: async () => true, clearPendingNotification: async () => true,
+      } as never,
+      client: () => ({ profile: async () => ({ historyId: '11' }), history: async () => ({ historyId: '11', history: [{ messagesAdded: [{ message: { id: raw.id, threadId: raw.threadId } }] }] }), threadMetadata: async () => ({ id: raw.threadId, messages: [raw] }), message: async () => raw }) as never,
+      repository: {
+        syncThread: async (input: any) => ({ ...thread, ...input.thread }),
+        thread: async () => { throw new Error('non-inbox thread must not enter the draft precheck'); },
+      } as never,
+      attachmentIngestion: { ingest: async () => ({ type: 'document', key: scopeKey }), ingestMessage: async () => [] },
+      classify: async () => ({ priority: 'normal', state: 'waiting', category: 'primary', isPurchase: false, intent: 'Waiting' }),
+      embed: async () => embedding,
+    });
+    await expect(service.ingestSubscriptionNotification({ ...actor, userKey: 'system' }, connector.key, '11')).resolves.toMatchObject({ synced: 1 });
+    expect(states.at(-1)).toMatchObject({ status: 'idle', input: { historyId: '11' } });
+  }
+});
 
 function serviceFor(sendRaw: () => Promise<{ id: string; threadId: string }>, existing: { id: string; threadId: string } | null = null, role: 'owner' | 'admin' | 'moderator' | 'viewer' = 'owner', subject: string = thread.subject, messages: unknown[] = [message], claimedDraft: any = draft, attachmentResources: any[] = []) {
   const finishes: unknown[][] = [];
@@ -1739,7 +1768,7 @@ describe('canonical inbox intelligence operations', () => {
       'thread-b': { documentKeys: ['document-a', 'document-b'], imageKeys: ['image-a'], collectionKeys: [collectionA] },
     };
     const repository = {
-      syncThread: async (input: any) => Object.assign(thread, { attachmentMutation: mutations[input.thread.providerThreadId] }),
+      syncThread: async (input: any) => ({ ...thread, attachmentMutation: mutations[input.thread.providerThreadId] }),
       deleteProviderThread: async () => undefined,
       clearTrash: async () => ({ threadsDeleted: 0, documentsDeleted: 2, attachmentMutation: { documentKeys: ['document-b'], imageKeys: ['image-b'], collectionKeys: [collectionA, collectionB] } }),
     };
@@ -1775,7 +1804,7 @@ describe('canonical inbox intelligence operations', () => {
     const repository = {
       syncThread: async (input: any) => {
         if (input.thread.providerThreadId === 'thread-b') throw new Error('database unavailable');
-        return Object.assign(thread, { attachmentMutation: { documentKeys: ['document-a', 'document-a'], imageKeys: [], collectionKeys: [] } });
+        return { ...thread, attachmentMutation: { documentKeys: ['document-a', 'document-a'], imageKeys: [], collectionKeys: [] } };
       },
       deleteProviderThread: async () => undefined,
       clearTrash: async () => { clearCalls += 1; return { threadsDeleted: 0, documentsDeleted: 0 }; },
@@ -2022,12 +2051,13 @@ describe('new email drafting', () => {
   test('creates one subscription reply draft from a strict combined decision and generation', async () => {
     const created: any[] = [];
     const requests: any[] = [];
+    const canonical = createEmailRepository({ query: async (_query: string, vars: any) => ({ next: async () => vars.value }) } as never);
     const repository = {
       subscriptionDraftForMessage: async () => null,
       thread: async () => ({ thread, messages: [message] }),
-      writingProfile: async () => ({ key: userKey, name: 'Direct', tone: 'Be direct.', style: '', structure: '', vocabulary: '', conventions: '' }),
-      listReplyContext: async () => [{ name: 'Availability', text: 'Weekdays are preferred.' }],
-      createSubscriptionDraft: async (input: any) => { created.push(input); return { key: newId(), createdAt: now, updatedAt: now, ...input }; },
+      writingProfile: async (owner: string) => { expect(owner).toBe(userKey); return { key: userKey, name: 'Direct', tone: 'Be direct.', style: '', structure: '', vocabulary: '', conventions: '' }; },
+      listReplyContext: async (owner: string) => { expect(owner).toBe(userKey); return [{ name: 'Availability', text: 'Weekdays are preferred.' }]; },
+      createSubscriptionDraft: async (input: any) => { created.push(input); return canonical.createSubscriptionDraft(input); },
     };
     const service = createEmailService({
       repository: repository as never,
@@ -2038,14 +2068,14 @@ describe('new email drafting', () => {
       publishInboxChanged: async () => undefined,
     });
 
-    const result = await service.createDraftIfNeeded(actor, { connectorKey: connector.key, threadKey: thread.key, messageKey: message.key });
+    const result = await service.createDraftIfNeeded({ ...actor, userKey: 'system' }, { connectorKey: connector.key, threadKey: thread.key, messageKey: message.key });
 
     expect(result).toMatchObject({ decision: 'draft', existing: false, draft: { generatedContent: 'I can review this on a weekday.' } });
     expect(requests).toHaveLength(1);
     expect(requests[0].systemPrompt).toContain('verification codes');
     expect(JSON.parse(requests[0].messages[0].content[0].text)).toMatchObject({ replyContextNotes: { items: [{ name: 'Availability' }] } });
     expect(created).toHaveLength(1);
-    expect(created[0]).toMatchObject({ creationSource: 'subscription', variant: 'reply', messageKey: message.key, status: 'generated' });
+    expect(created[0]).toMatchObject({ userKey, scopeKey: userKey, creationSource: 'subscription', variant: 'reply', messageKey: message.key, status: 'generated' });
   });
 
   test('skips automatic drafting without persistence and rejects non-strict AI output', async () => {

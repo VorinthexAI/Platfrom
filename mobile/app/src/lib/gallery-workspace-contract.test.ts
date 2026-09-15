@@ -75,6 +75,28 @@ test("uses one origin-neutral collection image stream", () => {
   expect(source).toContain("fetchGalleryOverview(collectionKey, cursor, 100)");
 });
 
+test("hydrates collection navigation from exact cached overviews without forced skeletons", () => {
+  const rootNavigation = sourceSection(source, "function showCollectionsOverview()", "function showCollection(");
+  const collectionNavigation = sourceSection(source, "function showCollection(", "async function replayOverviewWindow");
+  expect(rootNavigation).toContain("queryClient.getQueryData<GalleryOverview>(galleryQueryKeys.overview(galleryContext, undefined))");
+  expect(collectionNavigation).toContain("queryClient.getQueryData<GalleryOverview>(galleryQueryKeys.overview(galleryContext, collection.key))");
+  for (const navigation of [rootNavigation, collectionNavigation]) {
+    expect(navigation).toContain("setImages(cached.images)");
+    expect(navigation).toContain("setNextCursor(cached.nextCursor)");
+    expect(navigation).toContain("setLoading(!cached)");
+    expect(navigation).not.toContain("setLoading(true)");
+  }
+  expect(source).toContain("onPress={() => showCollection(collection)}");
+  expect(sourceSection(source, "function exitSubject()", "function toggleImageSelection")).toContain("showCollectionsOverview()");
+});
+
+test("keeps persisted Gallery images stable across collection remounts", () => {
+  expect(source).toContain('cachePolicy="memory-disk" contentFit="cover" source={{ uri: collection.coverUrl, cacheKey: `gallery-collection-cover:${collection.key}:${collection.updatedAt}` }}');
+  expect(source).toContain('cachePolicy="memory-disk" source={{ uri: entry.image.url, cacheKey: `gallery-image:${entry.image.key}` }}');
+  expect(source).toContain('cachePolicy="memory-disk" source={{ uri: image.url, cacheKey: `gallery-image:${image.key}` }}');
+  expect(source).not.toContain('source={entry.image.url} contentFit="cover" style={styles.image} transition={150}');
+});
+
 test("provides edit and confirmed delete flows for images and collections", () => {
   expect(source).toContain('pushSheet("confirmDeleteImage")');
   expect(source).toContain('pushSheet("confirmDeleteCollection")');
@@ -170,7 +192,8 @@ test("keeps Gallery favorites, hidden items, and search history in the root filt
 test("integrates session tag filters into primary Gallery collection and image views", () => {
   expect(source).toContain("const tagContextKey = tagFilterContextKey(contentContext)");
   expect(source).toContain("state.selectedTagsByContext[tagContextKey] ?? EMPTY_SELECTED_TAGS");
-  expect(source.match(/<TagFilterLane context=\{contentContext\} \/>/g)).toHaveLength(2);
+  expect(source.match(/<TagFilterLane context=\{contentContext\} \/>/g)).toHaveLength(1);
+  expect(source.indexOf('<TagFilterLane context={contentContext} />')).toBeGreaterThan(source.indexOf('<View style={styles.filterBadgeRow}>'));
   expect(source).toContain('<TagFilterSheet context={contentContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />');
   expect(source).toContain("searchGalleryCollections(normalized, false, controller.signal, selectedTagKeys)");
   expect(source).toContain("collectionKey: collection.key");
@@ -184,7 +207,7 @@ test("integrates session tag filters into primary Gallery collection and image v
 });
 
 test("opens resource tags for selected main images without adding tags to cleanup or picker flows", () => {
-  expect(source).toContain('<ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />');
+  expect(source).toContain('<ResourceTagsSheet context={contentContext} onApply={() => setSelectedImageKeys([])} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />');
   expect(source).toContain('const resourceTagTargets = selectedImageKeys.map((key) => ({ type: "image" as const, key }))');
   const bulkActions = sourceSection(source, '{activeSheet === "bulkActions" ? <BottomSheetMenu>', '{activeSheet === "bulkDelete" ? <View');
   expect(bulkActions).toContain('onPress={openResourceTags}');
@@ -201,24 +224,58 @@ test("presents managed media with its persisted app identity and creator-owned C
   expect(source).toContain("contentPresentationIconSource[collection.presentation]");
   expect(source).toContain('`${collection.name} app collection`');
   expect(source).toContain("style={styles.managedCollectionLogo}");
-  expect(source).toContain('collection?.purpose === "generated-media"');
+  expect(source).toContain("collection?.access.canContribute && isManagedGalleryCollection(collection)");
+  expect(source).toContain("!isManagedGalleryImage(image)");
   expect(source).toContain('image.createdByKey === collection.actorKey');
   expect(source).toContain('source={assistantIconSource}');
-  expect(source).toContain("activeCollection && !managedCollection ? <GalleryHighlights");
-  expect(source).toContain("activeCollection && !managedCollection ? <GalleryMemories");
-  expect(source).toContain("!managedCollection ? <View style={styles.intelligenceRow}");
+  expect(source).toContain("activeCollection?.access.canContribute ? <GalleryHighlights");
+  expect(source).toContain("activeCollection?.access.canContribute ? <GalleryMemories");
+  expect(source).toContain("activeCollection.access.canContribute ?");
+  const collectionTitle = sourceSection(source, 'accessibilityLabel="Back to Gallery collections"', "{normalCollectionView ? <View");
+  expect(collectionTitle).toContain('onPress={showCollectionsOverview} size="xs"');
+  expect(collectionTitle).toContain('accessibilityLabel={`Manage ${activeCollection.name}`} contentMode="raw" hitSlop={5} onPress={() => openSheet("collectionMenu")} size="xs"');
+  expect(collectionTitle).toContain('accessibilityLabel={`Add images to ${activeCollection.name}`} contentMode="raw" disabled={busy} hitSlop={5} onPress={() => openSheet("actions")} size="xs"');
   const collectionMenuStart = source.indexOf('{activeSheet === "collectionMenu" ? <BottomSheetMenu>');
   const collectionMenu = source.slice(collectionMenuStart, source.indexOf('activeSheet === "cleanupMenu"', collectionMenuStart));
   expect(collectionMenu).toContain('!managedCollection');
+  expect(source).toContain("const isCollectionOwner = Boolean(activeCollection?.access.canManage)");
+  expect(source).toContain("isCollectionOwner && !managedCollection");
   expect(collectionMenu).toContain('setHiddenOptimistically("collection"');
   expect(collectionMenu).not.toContain("Select images");
   expect(collectionMenu).not.toContain("Find duplicates");
   const imageMenuStart = source.indexOf('activeSheet === "imageActions" && selectedImage');
   const imageMenu = source.slice(imageMenuStart, source.indexOf('activeSheet === "imageEdit"', imageMenuStart));
   expect(imageMenu).toContain("Find similar");
-  expect(imageMenu).toContain("canMutateImage(selectedImage)");
+  expect(imageMenu).toContain("managedCollection && activeCollection?.access.canRead");
   for (const action of ["Edit", "Find similar", "Hide", "Delete image"]) expect(imageMenu).toContain(action);
   expect(source).toContain("selectedImage && (activeCollection || !isManagedGalleryImage(selectedImage))");
+});
+
+test("limits managed bulk actions and managed image edit to non-structural favorite behavior", () => {
+  const bulkActions = sourceSection(source, '{activeSheet === "bulkActions" ? <BottomSheetMenu>', '{activeSheet === "bulkDelete" ? <View');
+  expect(bulkActions).toContain('{!managedCollection ? <Button disabled={busy || !activeCollection} onPress={() => openTransfer("move")}');
+  expect(bulkActions).toContain('{!managedCollection ? <Button disabled={busy} onPress={() => pushSheet("bulkDelete")}');
+  expect(bulkActions).toContain('>Copy to collection</Button>');
+  expect(bulkActions).toContain('>Tags</Button>');
+  expect(bulkActions).toContain('allSelectedFavorite ? "Unfavorite" : "Favorite"');
+
+  const edit = sourceSection(source, 'activeSheet === "imageEdit" && selectedImage', 'activeSheet === "collectionEdit"');
+  expect(edit).toContain('{!managedCollection ? <TextInput accessibilityLabel="Image name"');
+  expect(edit).toContain('accessibilityLabel="Favorite image"');
+  const submit = sourceSection(source, "async function submitImageEdit()", "function downloadSelectedImage");
+  expect(submit).toContain('favoriteOnly ? await setGalleryImageFavorite(previous.key, editFavorite) : await updateGalleryImage');
+  expect(submit).toContain('managedCollection && activeCollection?.access.canRead');
+});
+
+test("downloads persisted normal and managed images immediately above delete without busy state", () => {
+  const imageMenu = sourceSection(source, 'activeSheet === "imageActions" && selectedImage', 'activeSheet === "imageEdit"');
+  expectBefore(imageMenu, '>Download image</Text>', '>Delete image</BottomSheetItem>');
+  const download = sourceSection(source, "function downloadSelectedImage()", "function openCollectionEdit");
+  expectBefore(download, "closeSheet()", "saveUrlDownload(image.url, image.filename, image.mimeType)");
+  expectBefore(download, 'notify("Image saved to Downloads")', "saveUrlDownload(image.url, image.filename, image.mimeType)");
+  expect(download).toContain('notify("Image saved to Downloads")');
+  expect(download).toContain('notify("Image download failed")');
+  expect(imageMenu.slice(imageMenu.indexOf("Download image") - 300, imageMenu.indexOf("Download image") + 100)).not.toContain("loading=");
 });
 
 test("leaves Core keyboard movement to its composer and uses distinct image sheet presentations", () => {
@@ -251,7 +308,7 @@ test("leaves Core keyboard movement to its composer and uses distinct image shee
 test("uses the rounded whole-sheet swipe pager for opened collection images", () => {
   expect(source).toContain('onSwipeLeft={collectionViewerImages.length > 1 ? () => focusCollectionImage(1) : undefined}');
   expect(source).toContain('onSwipeRight={collectionViewerImages.length > 1 ? () => focusCollectionImage(-1) : undefined}');
-  expect(source).toContain('pageKey={selectedImage?.key ?? selectedOptimisticItem?.clientKey}');
+  expect(source).toContain('pageKey={selectedOptimisticItem?.clientKey ?? selectedImage?.key}');
   expect(source).not.toContain("imageViewerRef");
   expect(source).toContain("fitContainedMediaSize(image, viewport)");
   expect(source).toContain("detailImage: { borderRadius: radii.lg }");
@@ -261,12 +318,19 @@ test("uses the rounded whole-sheet swipe pager for opened collection images", ()
 test("keeps new collection creation to a required name", () => {
   const start = source.indexOf('{activeSheet === "newCollection" ? <View');
   const form = source.slice(start, source.indexOf('activeSheet === "collectionMenu"', start));
+  const creation = sourceSection(source, "async function createCollectionAndUpload()", "function updateCollectionSearch");
   expect(form).toContain('accessibilityLabel="Collection name"');
   expect(form).toContain('placeholder="Name"');
+  expect(form).not.toContain('loading={busy} onPress={() => void createCollectionAndUpload()}');
   expect(form).not.toContain('Favorite collection');
   expect(source).not.toContain('newCollectionFavorite');
   expect(source).toContain('createGalleryCollection(name, false)');
   expect(source).not.toContain('accessibilityLabel="Collection description"');
+  expectBefore(creation, "updateCollectionSingleton((current) => [...current, optimisticCollection])", "createGalleryCollection(name, false)");
+  expectBefore(creation, "closeSheet()", "createGalleryCollection(name, false)");
+  expect(creation).toContain("current.map((item) => (item.key === optimisticKey ? collection : item))");
+  expect(creation).toContain("current.filter(({ key }) => key !== optimisticKey)");
+  expect(creation).toContain('load(undefined, true)');
 });
 
 test("provides the full visual identity library and image picker workflow", () => {
@@ -337,11 +401,12 @@ test("uses separate image-selection and naming steps for visual identities", () 
   expect(source.indexOf('accessibilityLabel="Back to collections"')).toBeLessThan(source.indexOf('accessibilityLabel="Search images for visual identity"'));
 });
 
-test("supports direct empty-state upload and twelve removable camera captures", () => {
+test("supports direct empty-state upload and twenty removable camera captures", () => {
   expect(source).toContain('accessibilityLabel={`Upload images to ${activeCollection.name}`}');
   expect(source).toContain("<GalleryCaptureModal");
   expect(source).toContain('refetchType: "none"');
-  expect(captureSource).toContain("MAX_GALLERY_CAPTURES = 12");
+  expect(captureSource).toContain("MAX_GALLERY_CAPTURES = MAX_GALLERY_UPLOAD_IMAGES");
+  expect(source).toContain("selectionLimit: MAX_GALLERY_UPLOAD_IMAGES");
   expect(captureSource).toContain("normalizeCapturedPng");
   expect(captureSource).toContain('filename: `gallery-${timestamp}.png`');
   expect(source).toContain('filename: `gallery-${currentTimestamp()}-${index + 1}.png`');
@@ -356,10 +421,23 @@ test("supports direct empty-state upload and twelve removable camera captures", 
   expect(source).toContain("showOptimisticImage(entry.item)");
   expect(source).toContain("Image.prefetch(image.url)");
   expect(source).toContain("!optimisticImageKeys.has(key)");
-  expect(source).toContain("key: item.imageKey ?? item.clientKey");
+  expect(source).toContain("galleryPersistedGridKey(image.key, persistedGridKeys)");
+  expect(source).toContain("bindPersistedGalleryGridKeys(current, result.jobs)");
   expect(source).toContain("current?.key === selected.clientKey && updated.imageKey");
   expect(source).not.toContain('accessibilityLabel="Processing image"');
   expect(source).not.toContain('`${matches.length} image${matches.length === 1 ? "" : "s"}${collection ? ` in ${collection.name}` : ""}.`');
+});
+
+test("inserts picker assets in selection order before normalization and reconciles by client key", () => {
+  const preparation = sourceSection(source, "async function prepareAssets", "async function choosePhotos");
+  expectBefore(preparation, "setOptimisticMediaItems((current) => [", "normalizeCapturedPng(asset");
+  expect(preparation).toContain("...selectedAssets.map((asset, index)");
+  expect(preparation).toContain("uri: asset.uri");
+  expect(preparation).toContain("clientKey: clientKeys[index]!");
+  expect(preparation).toContain("files.find(({ clientKey }) => clientKey === item.clientKey)");
+  expect(preparation).toContain("rollbackPlaceholders()");
+  expect(source).not.toContain('notify("Upload started")');
+  expect(source).not.toContain("Collection created and upload started");
 });
 
 test("selects returned duplicates for deletion and lets each image be preserved", () => {
@@ -519,6 +597,15 @@ test("direct image routes resolve exact keys beyond the loaded page and at Galle
   expect(directRoute).toContain('activeSheetRef.current = "image"');
   expect(directRoute).toContain('setActiveSheet("image")');
   expect(directRoute).toContain("setSheetOpen(true)");
+});
+
+test("hydrates routed collections and images from prefetched canonical caches", () => {
+  expect(source).toContain("const cachedInitialOverview = initialCollectionKey ? queryClient.getQueryData<GalleryOverview>(galleryQueryKeys.overview(galleryContext, initialCollectionKey))");
+  expect(source).toContain("const cachedInitialImage = initialImageKey ? queryClient.getQueryData<{ images: GalleryImage[] }>(galleryQueryKeys.image(galleryContext, initialCollectionKey, initialImageKey))");
+  expect(source).toContain("useState<GalleryCollection[]>(cachedInitialOverview?.collections ?? [])");
+  expect(source).toContain("useState<GalleryImage[]>(cachedInitialOverview?.images ?? (cachedInitialImage ? [cachedInitialImage] : []))");
+  expect(source).toContain("useState<GalleryCollection | undefined>(cachedInitialCollection)");
+  expect(source).toContain("useState(!cachedInitialOverview)");
 });
 
 test("settles duplicate and similar loading when event refresh supersedes the opening request", () => {

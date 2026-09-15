@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { createRedisConnection } from '@/lib/redis';
 import { createConnectorRepository } from './connector-repository';
 import { createSystemEmailService } from './service';
+import { startAttachmentExportWorker } from './attachment-export-queue';
 import { runTrustedTool } from '@/lib/ai/tools';
 import { toolEventService, type ToolEventRecorder } from '@/lib/ai/events/service';
 import type { TrustedEmailToolDependencies, TrustedEmailToolName } from '@/lib/ai/tools/email-ingestion-tool-definitions';
@@ -289,13 +290,14 @@ export async function processEmailSyncJob(raw: unknown, dependencies: {
 }
 
 export function startEmailSyncWorker() {
+  const attachmentExports = startAttachmentExportWorker();
   const syncWorker = new Worker<EmailSyncJob, EmailSyncResult>(SYNC_QUEUE_NAME, (job) => processEmailSyncJob(job.data), { connection: connection(), concurrency: 4 });
   const initialSyncWorker = new Worker<EmailSyncJob, EmailSyncResult>(INITIAL_SYNC_QUEUE_NAME, (job) => processEmailSyncJob(job.data), { connection: connection(), concurrency: 2 });
   const renewalWorker = new Worker<EmailSyncJob, EmailSyncResult>(RENEWAL_QUEUE_NAME, (job) => processEmailSyncJob(job.data), { connection: connection(), concurrency: 1 });
   syncWorker.on('error', () => console.error('email synchronization worker error'));
   initialSyncWorker.on('error', () => console.error('email initial synchronization worker error'));
   renewalWorker.on('error', () => console.error('email watch renewal worker error'));
-  return { close: async () => { await Promise.all([syncWorker.close(), initialSyncWorker.close(), renewalWorker.close()]); } };
+  return { close: async () => { await Promise.all([syncWorker.close(), initialSyncWorker.close(), renewalWorker.close(), attachmentExports.close()]); } };
 }
 
 export async function closeEmailSyncQueue() {

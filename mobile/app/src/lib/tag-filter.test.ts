@@ -69,7 +69,7 @@ test("keeps selected filters in session memory and isolates contexts", async () 
   useUiStore.getState().setSelectedTags("second", []);
 });
 
-test("uses the full-screen refreshed tag sheet and removable horizontal lane", async () => {
+test("uses the full-screen refreshed tag sheet and compact removable tag lane", async () => {
   const sheet = await Bun.file(new URL("../components/TagFilterSheet.tsx", import.meta.url)).text();
   const lane = await Bun.file(new URL("../components/TagFilterLane.tsx", import.meta.url)).text();
   expect(sheet).toContain("refreshScopeTags(queryClient,");
@@ -77,9 +77,13 @@ test("uses the full-screen refreshed tag sheet and removable horizontal lane", a
   expect(sheet).toContain('height="full" onOpenChange');
   expect(sheet).not.toContain("hideCloseButton");
   expect(sheet).toContain("Array.from({ length: 3 }");
-  expect(sheet).toContain('variant="primary">Filter</Button>');
+  expect(sheet).toContain('tags.length === 0 ? "Create tag" : "Filter"');
   expect(sheet).toContain('variant="secondary">Close</Button>');
-  expect(lane).toContain("horizontal");
+  expect(sheet).toContain('<TagSheetEmptyState onCreate={() => setCreateOpen(true)} />');
+  expect(sheet).toContain('<TagCreateSheet creating={creating}');
+  expect(lane).toContain('content: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing.xs }');
+  expect(lane).toContain('height: 32');
+  expect(lane).toContain('borderColor: palette.hairline');
   expect(lane).toContain("removeSelectedTag(contextKey, tag.key)");
 });
 
@@ -224,22 +228,32 @@ test("applies multiple tag changes across heterogeneous targets without changing
 test("resource tags sheet has optimistic close and tri-state UI contracts", async () => {
   const sheet = await Bun.file(new URL("../components/ResourceTagsSheet.tsx", import.meta.url)).text();
   expect(sheet).toContain("queryClient.setQueryData(queryKey, optimistic);\n    onClose();");
+  expect(sheet).toContain("onApply?.();");
   expect(sheet.indexOf("onClose();")).toBeLessThan(sheet.indexOf("await persistResourceTagAssignments"));
   expect(sheet).toContain("let baseline = resolved.failedKeys.reduce(removeResourceTag, previous);");
   expect(sheet).toContain('height="full" onOpenChange');
   expect(sheet).not.toContain("hideCloseButton");
   expect(sheet).toContain("Array.from({ length: 3 }");
   expect(sheet).toContain('mixed={tagState === "some"}');
-  expect(sheet).toContain(">No tags yet.</Text>");
+  expect(sheet).toContain('<TagSheetEmptyState onCreate={openCreate} />');
   expect(sheet).toContain('onPress={draftChanged ? apply : openCreate} size="md" variant="primary">{draftChanged ? "Apply" : "Create tag"}</Button>');
-  expect(sheet).toContain('open={open && createOpen} title="Create tag"');
-  expect(sheet).toContain('autoFocusInBottomSheet={false}');
+  expect(sheet).toContain('<TagCreateSheet inputRef={createInputRef}');
   expect(sheet).toContain('setTimeout(() => createInputRef.current?.focus(), 300)');
-  expect(sheet).toContain('placeholder="Tag name"');
   expect(sheet).toContain('closeCreate();\n    setState((current) => current ? appendResourceTag(current, optimisticTag) : current);');
   expect(sheet.indexOf("await resolvePendingResourceTagDraft")).toBeLessThan(sheet.indexOf("persistResourceTagAssignments(context, requests)"));
+  expect(sheet).toContain('showToast({ title: "Tags updated", duration: 2_000 });');
   expect(sheet).not.toContain("isPending");
   expect(sheet).not.toContain("loading={");
+});
+
+test("shares the tag empty state and create sheet across filter and bulk flows", async () => {
+  const shared = await Bun.file(new URL("../components/TagSheetShared.tsx", import.meta.url)).text();
+  expect(shared).toContain('<Text style={styles.empty}>No tags yet.</Text>');
+  expect(shared).toContain('accessibilityLabel="Create tag"');
+  expect(shared).toContain('height="full" onOpenChange');
+  expect(shared).toContain('open={open} title="Create tag"');
+  expect(shared).toContain('autoFocusInBottomSheet={false}');
+  expect(shared).toContain('placeholder="Tag name"');
 });
 
 test("pending creates settle before assignment drafts and failed tags are removed cleanly", async () => {

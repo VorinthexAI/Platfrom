@@ -47,16 +47,22 @@ export const conversationSchema = z.strictObject({
 }).transform(({ teamKey: _teamKey, scopeKey: _scopeKey, userKey: _userKey, ...conversation }) => conversation);
 export type Conversation = z.infer<typeof conversationSchema>;
 
-export const conversationRetrievalCollectionSlugSchema = z.enum(["folders", "documents", "files", "collections", "images", "inboxes", "email-tones", "email-messages", "email-drafts", "places", "trips", "countries", "books"]);
+export const conversationRetrievalCollectionSlugSchema = z.enum(["folders", "documents", "files", "collections", "images", "inboxes", "email-tones", "email-messages", "email-drafts", "places", "trips", "countries", "books", "tags", "tag-assignments"]);
 export const conversationRetrievalFiltersSchema = z.strictObject({
   folderKey: z.string().cuid().optional(),
   includeDescendants: z.boolean().optional(),
   collectionKey: z.string().cuid().optional(),
   connectorKey: z.string().cuid().optional(),
   readState: z.enum(["read", "unread"]).optional(),
-  emailFacets: z.array(z.enum(["urgent", "important", "purchases", "filtered", "favorite"])).max(5).optional(),
+  emailFacets: z.array(z.enum(["urgent", "important", "purchases", "filtered", "favorite"])).min(1).max(5).optional(),
+  status: z.enum(["active", "error", "revoked", "generated", "edited", "sending", "sent", "discarded", "wishlist", "visited", "planned", "completed", "queued", "researching", "planning", "writing", "narrating", "finalizing", "failed", "ready", "cancelled"]).optional(),
+  isFavorite: z.boolean().optional(),
   createdFrom: z.string().datetime().optional(),
   createdTo: z.string().datetime().optional(),
+  tagNames: z.array(z.string().trim().min(1).max(120)).min(1).max(20).optional(),
+  tagKeys: z.array(z.string().cuid()).min(1).max(20).optional(),
+  tagMatch: z.enum(["any", "all"]).optional(),
+  targetTypes: z.array(z.enum(["folder", "document", "image-collection", "image", "image-highlight", "image-memory", "place", "trip", "email-inbox", "email-tone", "email-thread", "email-message", "email-draft", "book"])).min(1).max(14).optional(),
 });
 export const conversationRetrievalSchema = z.strictObject({
   query: z.string().trim().max(500).optional(),
@@ -75,10 +81,34 @@ export type ConversationRetrieval = z.infer<typeof conversationRetrievalSchema>;
 export type ConversationRetrievalCollectionSlug = z.infer<typeof conversationRetrievalCollectionSlugSchema>;
 
 export const conversationAttachmentReferenceSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ key: z.string().min(1), kind: z.literal("document"), filename: z.string().min(1).max(255), mimeType: z.string().min(1), sizeBytes: z.number().int().positive() }),
-  z.strictObject({ key: z.string().min(1), kind: z.literal("image"), filename: z.string().min(1).max(255), mimeType: z.literal("image/png"), sizeBytes: z.number().int().positive(), width: z.number().int().positive(), height: z.number().int().positive() }),
+  z.strictObject({ key: z.string().min(1), displayKey: z.string().trim().min(1).max(120).optional(), kind: z.literal("document"), filename: z.string().min(1).max(255), mimeType: z.string().min(1), sizeBytes: z.number().int().positive() }),
+  z.strictObject({ key: z.string().min(1), displayKey: z.string().trim().min(1).max(120).optional(), kind: z.literal("image"), filename: z.string().min(1).max(255), mimeType: z.literal("image/png"), sizeBytes: z.number().int().positive(), width: z.number().int().positive(), height: z.number().int().positive() }),
 ]);
 export type ConversationAttachmentReference = z.infer<typeof conversationAttachmentReferenceSchema>;
+
+export const guideTopicSchema = z.strictObject({
+  key: z.string().trim().min(1).max(180),
+  label: z.string().trim().min(1).max(120),
+  question: z.string().trim().min(1).max(CONVERSATION_MESSAGE_MAX_LENGTH),
+});
+const readyGuideTopicsSchema = z.array(guideTopicSchema).length(3)
+  .refine((topics) => new Set(topics.map(({ key }) => key)).size === topics.length
+    && new Set(topics.map(({ label }) => label.toLocaleLowerCase())).size === topics.length
+    && new Set(topics.map(({ question }) => question.toLocaleLowerCase())).size === topics.length,
+  "Guide topic keys, labels, and questions must be unique.");
+export const guideTopicsSchema = z.discriminatedUnion("status", [
+  z.strictObject({ status: z.literal("NONE") }),
+  z.strictObject({ status: z.literal("PENDING") }),
+  z.strictObject({ status: z.literal("READY"), topics: readyGuideTopicsSchema }),
+  z.strictObject({ status: z.literal("FAILED") }),
+]);
+export type GuideTopic = z.infer<typeof guideTopicSchema>;
+export type GuideTopics = z.infer<typeof guideTopicsSchema>;
+export const guideTopicSelectionSchema = z.strictObject({
+  sourceAssistantMessageKey: z.string().trim().min(1).max(180),
+  topicKey: z.string().trim().min(1).max(180),
+});
+export type GuideTopicSelection = z.infer<typeof guideTopicSelectionSchema>;
 
 const serverConversationMessageSchema = z.strictObject({
   key: z.string().min(1),
@@ -93,6 +123,7 @@ const serverConversationMessageSchema = z.strictObject({
   imageSummaryText: z.string().trim().min(1).max(20_000).optional(),
   attachments: z.array(conversationAttachmentReferenceSchema).max(CONVERSATION_ATTACHMENT_MAX_FILES).default([]),
   retrievals: z.array(conversationRetrievalSchema).max(4),
+  guideTopics: guideTopicsSchema,
   createdAt: z.string().datetime(),
   completedAt: z.string().datetime().optional(),
 }).superRefine((message, context) => {
@@ -100,7 +131,10 @@ const serverConversationMessageSchema = z.strictObject({
   if (message.status === "PENDING" && message.completedAt) context.addIssue({ code: "custom", path: ["completedAt"], message: "Pending messages cannot have a completion time." });
   if (message.status !== "PENDING" && !message.completedAt) context.addIssue({ code: "custom", path: ["completedAt"], message: "Terminal messages require a completion time." });
   if (message.type === "TEXT" && message.imageKey) context.addIssue({ code: "custom", path: ["imageKey"], message: "Text messages cannot reference an image." });
-  if (message.attachments.length && (message.type !== "TEXT" || message.role !== "USER")) context.addIssue({ code: "custom", path: ["attachments"], message: "Attachments belong only to text user messages." });
+  if (message.attachmentStatus !== "NONE" && (message.type !== "TEXT" || message.role !== "USER")) context.addIssue({ code: "custom", path: ["attachmentStatus"], message: "Attachment persistence status belongs only to text user messages." });
+  if (message.attachmentStatus === "NONE" && message.attachments.length) context.addIssue({ code: "custom", path: ["attachmentStatus"], message: "Messages with durable attachments cannot have NONE attachment status." });
+  if ((message.attachmentStatus === "COMPLETED" || message.attachmentStatus === "PARTIAL") && !message.attachments.length) context.addIssue({ code: "custom", path: ["attachmentStatus"], message: `${message.attachmentStatus} attachment status requires durable attachments.` });
+  if ((message.attachmentStatus === "PENDING" || message.attachmentStatus === "FAILED") && message.attachments.length) context.addIssue({ code: "custom", path: ["attachmentStatus"], message: `${message.attachmentStatus} attachment status cannot expose durable attachments.` });
   if (message.type === "IMAGE" && message.role === "USER" && message.imageKey) context.addIssue({ code: "custom", path: ["imageKey"], message: "Image prompts cannot reference their generated image." });
   if (message.type === "IMAGE" && message.role === "ASSISTANT" && (message.status === "COMPLETED") !== Boolean(message.imageKey)) context.addIssue({ code: "custom", path: ["imageKey"], message: "Only completed image responses require an image reference." });
   if (message.type === "IMAGE" && message.retrievals.length) context.addIssue({ code: "custom", path: ["retrievals"], message: "Image messages cannot have retrievals." });
@@ -132,7 +166,7 @@ const attachmentFileSchema = z.strictObject({
 export type ConversationAttachmentFile = z.infer<typeof attachmentFileSchema>;
 const attachmentUploadSchema = z.strictObject({ clientKey: z.string().min(1), attachmentKey: z.string().min(1), url: z.string().url(), headers: z.record(z.string(), z.string()), expiresAt: z.string().datetime() });
 const attachmentDescriptorSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ attachmentKey: z.string().min(1), kind: z.literal("image"), filename: z.string().min(1), mimeType: z.literal("image/png"), sizeBytes: z.number().int().positive(), width: z.number().int().positive(), height: z.number().int().positive(), status: z.literal("prepared") }),
+  z.strictObject({ attachmentKey: z.string().min(1), kind: z.literal("image"), filename: z.string().min(1), mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]), sizeBytes: z.number().int().positive(), width: z.number().int().positive(), height: z.number().int().positive(), status: z.literal("prepared") }),
   z.strictObject({ attachmentKey: z.string().min(1), kind: z.literal("document"), filename: z.string().min(1), mimeType: z.string().min(1), sizeBytes: z.number().int().positive(), status: z.literal("prepared") }),
 ]);
 
@@ -169,7 +203,7 @@ export async function uploadConversationAttachments(context: ConversationContext
   return { attachmentKeys: completed.attachments.map(({ attachmentKey }) => attachmentKey), attachments: completed.attachments };
 }
 
-export type ConversationListInput = { cursor?: string; query?: string; favoriteOnly?: boolean; recordHistory?: boolean };
+export type ConversationListInput = { cursor?: string; query?: string; favoriteOnly?: boolean; recordHistory?: boolean; limit?: number };
 
 export async function listConversations(context: ConversationContext, input: ConversationListInput = {}, signal?: AbortSignal) {
   const parsed = z.strictObject({
@@ -177,11 +211,12 @@ export async function listConversations(context: ConversationContext, input: Con
     query: z.string().trim().min(1).max(500).optional(),
     favoriteOnly: z.boolean().default(false),
     recordHistory: z.boolean().default(false),
+    limit: z.number().int().min(1).max(100).default(CONVERSATION_PAGE_SIZE),
   }).parse(input);
   const path = parsed.query ? "/conversations/search" : "/conversations/list";
   const body = parsed.query
-    ? { ...selectors(context), query: parsed.query, favoriteOnly: parsed.favoriteOnly, recordHistory: parsed.recordHistory, ...(parsed.cursor ? { cursor: parsed.cursor } : {}), limit: CONVERSATION_PAGE_SIZE }
-    : { ...selectors(context), favoriteOnly: parsed.favoriteOnly, ...(parsed.cursor ? { cursor: parsed.cursor } : {}), limit: CONVERSATION_PAGE_SIZE };
+    ? { ...selectors(context), query: parsed.query, favoriteOnly: parsed.favoriteOnly, recordHistory: parsed.recordHistory, ...(parsed.cursor ? { cursor: parsed.cursor } : {}), limit: parsed.limit }
+    : { ...selectors(context), favoriteOnly: parsed.favoriteOnly, ...(parsed.cursor ? { cursor: parsed.cursor } : {}), limit: parsed.limit };
   const response = await apiClient.post(path, body, { signal });
   const page = unwrap(conversationEnvelope(conversationPageSchema).parse(response.data));
   if (parsed.query && parsed.recordHistory) publishUserSearchHistoryAppend(context.userKey);
@@ -195,8 +230,8 @@ export async function listConversationMessages(context: ConversationContext, con
   return unwrap(conversationEnvelope(conversationMessagePageSchema).parse(response.data));
 }
 
-export async function createConversation(context: ConversationContext, name = "New chat", signal?: AbortSignal) {
-  const body = z.strictObject({ teamKey: z.string().min(1), scopeKey: z.string().min(1), name: z.string().trim().min(1).max(CONVERSATION_NAME_MAX_LENGTH).optional() }).parse({ ...selectors(context), name });
+export async function createConversation(context: ConversationContext, name = "New chat", signal?: AbortSignal, openingGreetingToken?: string) {
+  const body = z.strictObject({ teamKey: z.string().min(1), scopeKey: z.string().min(1), name: z.string().trim().min(1).max(CONVERSATION_NAME_MAX_LENGTH).optional(), openingGreetingToken: z.string().trim().min(1).max(20_000).optional() }).parse({ ...selectors(context), name, openingGreetingToken });
   return unwrap(conversationEnvelope(conversationSchema).parse((await apiClient.post("/conversations", body, { signal })).data));
 }
 
@@ -256,8 +291,8 @@ export function parseConversationTurnEvent(event: ServerSentEvent) {
 
 export type ConversationEventTransport = (path: string, body: unknown, onEvent: (event: ServerSentEvent) => void, signal?: AbortSignal) => Promise<void>;
 
-export async function streamConversationTurnWithTransport(transport: ConversationEventTransport, context: ConversationContext, input: { conversationKey: string; message: string; requestKey: string; attachmentKeys?: string[]; referenceImageKeys?: string[] }, onEvent: (event: ConversationTurnEvent) => void, signal?: AbortSignal) {
-  const body = z.strictObject({ teamKey: z.string().min(1), scopeKey: z.string().min(1), conversationKey: z.string().min(1), message: z.string().trim().min(1).max(CONVERSATION_MESSAGE_MAX_LENGTH), requestKey: z.string().min(1).max(180), attachmentKeys: z.array(z.string().min(1)).max(CONVERSATION_ATTACHMENT_MAX_FILES).default([]), referenceImageKeys: z.array(z.string().min(1)).max(1).default([]) }).parse({ ...selectors(context), ...input });
+export async function streamConversationTurnWithTransport(transport: ConversationEventTransport, context: ConversationContext, input: { conversationKey: string; message: string; requestKey: string; attachmentKeys?: string[]; referenceImageKeys?: string[]; guideTopicSelection?: GuideTopicSelection }, onEvent: (event: ConversationTurnEvent) => void, signal?: AbortSignal) {
+  const body = z.strictObject({ teamKey: z.string().min(1), scopeKey: z.string().min(1), conversationKey: z.string().min(1), message: z.string().trim().min(1).max(CONVERSATION_MESSAGE_MAX_LENGTH), requestKey: z.string().min(1).max(180), attachmentKeys: z.array(z.string().min(1)).max(CONVERSATION_ATTACHMENT_MAX_FILES).default([]), referenceImageKeys: z.array(z.string().min(1)).max(1).default([]), guideTopicSelection: guideTopicSelectionSchema.optional() }).parse({ ...selectors(context), ...input });
   const { conversationKey, ...request } = body;
   let started: Extract<ConversationTurnEvent, { type: "start" }> | undefined;
   let terminal: Extract<ConversationTurnEvent, { type: "done" | "error" }> | undefined;
@@ -293,6 +328,6 @@ export async function streamConversationTurnWithTransport(transport: Conversatio
   if (terminal.type === "error") throw observeDomainError(Object.assign(new Error(terminal.message), { code: terminal.code }));
 }
 
-export function streamConversationTurn(context: ConversationContext, input: { conversationKey: string; message: string; requestKey: string; attachmentKeys?: string[]; referenceImageKeys?: string[] }, onEvent: (event: ConversationTurnEvent) => void, signal?: AbortSignal) {
+export function streamConversationTurn(context: ConversationContext, input: { conversationKey: string; message: string; requestKey: string; attachmentKeys?: string[]; referenceImageKeys?: string[]; guideTopicSelection?: GuideTopicSelection }, onEvent: (event: ConversationTurnEvent) => void, signal?: AbortSignal) {
   return streamConversationTurnWithTransport(apiTransport.postEventStream, context, input, onEvent, signal);
 }

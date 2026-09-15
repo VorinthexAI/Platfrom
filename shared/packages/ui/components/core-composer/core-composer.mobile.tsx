@@ -22,7 +22,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Reanimated, { KeyboardState, useAnimatedKeyboard, useAnimatedStyle } from "react-native-reanimated";
+import Reanimated, { KeyboardState, useAnimatedKeyboard, useAnimatedStyle, useDerivedValue } from "react-native-reanimated";
 import Svg, { Defs, LinearGradient, Stop, Text as SvgText } from "react-native-svg";
 
 import { Button } from "../button/button.mobile";
@@ -39,6 +39,7 @@ export type CoreComposerProps = {
   expandedAccessory?: ReactNode;
   expandedPrompts?: readonly string[];
   focusRequest?: number;
+  focusOnOpenRequest?: boolean;
   expandedLeading?: ReactNode;
   expandedLeadingAccessibilityLabel?: string;
   expandedLeadingDisabled?: boolean;
@@ -173,6 +174,7 @@ type CorePageProps = {
   closePage: () => void;
   composer: ReactNode;
   focusInput: () => number | undefined;
+  focusInputOnMount: boolean;
   leftInset: number;
   message?: ReactNode;
   pageActions?: ReactNode;
@@ -183,15 +185,18 @@ type CorePageProps = {
   topInset: number;
 };
 
-function CorePage({ bottomInset, closePage, composer, focusInput, leftInset, message, pageActions, pageBackdrop, pageIdentity, rightInset, style, topInset }: CorePageProps) {
+function CorePage({ bottomInset, closePage, composer, focusInput, focusInputOnMount, leftInset, message, pageActions, pageBackdrop, pageIdentity, rightInset, style, topInset }: CorePageProps) {
   const keyboard = useAnimatedKeyboard();
-  const keyboardLiftStyle = useAnimatedStyle(() => {
+  const keyboardLift = useDerivedValue(() => {
     const keyboardMoving = [KeyboardState.OPENING, KeyboardState.OPEN, KeyboardState.CLOSING].includes(keyboard.state.value);
-    const keyboardLift = Math.max(0, keyboard.height.value - bottomInset);
-    return { transform: [{ translateY: keyboardMoving ? -keyboardLift - Math.min(spacing.md, keyboardLift) : 0 }] };
+    const lift = Math.max(0, keyboard.height.value - bottomInset);
+    return keyboardMoving ? lift + Math.min(spacing.md, lift) : 0;
   }, [bottomInset]);
+  const keyboardLiftStyle = useAnimatedStyle(() => ({ transform: [{ translateY: -keyboardLift.value }] }));
+  const keyboardConversationStyle = useAnimatedStyle(() => ({ paddingBottom: keyboardLift.value }));
 
   useEffect(() => {
+    if (!focusInputOnMount) return;
     let selectionFrame: number | undefined;
     const focusTimeout = setTimeout(() => {
       selectionFrame = focusInput();
@@ -200,7 +205,7 @@ function CorePage({ bottomInset, closePage, composer, focusInput, leftInset, mes
       clearTimeout(focusTimeout);
       if (selectionFrame !== undefined) cancelAnimationFrame(selectionFrame);
     };
-  }, [focusInput]);
+  }, [focusInput, focusInputOnMount]);
 
   useEffect(() => BackHandler.addEventListener("hardwareBackPress", () => {
     closePage();
@@ -225,7 +230,7 @@ function CorePage({ bottomInset, closePage, composer, focusInput, leftInset, mes
           <Text numberOfLines={1} style={styles.pageTitle}>Core</Text>
           {pageActions ?? <View style={styles.pageTitleSpacer} />}
         </View>
-        <View style={styles.pageConversation}>{message}</View>
+        <Reanimated.View style={[styles.pageConversation, keyboardConversationStyle]}>{message}</Reanimated.View>
         <Reanimated.View style={keyboardLiftStyle}>{composer}</Reanimated.View>
       </View>
     </View>
@@ -241,6 +246,7 @@ export function CoreComposer({
   expandedAccessory,
   expandedPrompts = CORE_PAGE_PROMPTS,
   focusRequest = 0,
+  focusOnOpenRequest = true,
   expandedLeading,
   expandedLeadingAccessibilityLabel,
   expandedLeadingDisabled,
@@ -267,6 +273,7 @@ export function CoreComposer({
 }: CoreComposerProps) {
   const insets = useSafeAreaInsets();
   const [pageOpen, setPageOpen] = useState(openRequest > 0);
+  const [focusInputOnPageMount, setFocusInputOnPageMount] = useState(openRequest <= 0 || focusOnOpenRequest);
   const [inputHeight, setInputHeight] = useState(COLLAPSED_INPUT_HEIGHT);
   const [inputLineCount, setInputLineCount] = useState(1);
   const closeFallbackRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -275,6 +282,7 @@ export function CoreComposer({
   const inputRef = useRef<NativeTextInput>(null);
   const intentionalFocus = useRef(false);
   const handledFocusRequestRef = useRef(0);
+  const handledOpenRequestRef = useRef(0);
   const onFocusChangeRef = useRef(onFocusChange);
   const pageWasOpenRef = useRef(false);
   const valueRef = useRef(value);
@@ -293,6 +301,7 @@ export function CoreComposer({
     setPageOpen(false);
     setInputHeight(COLLAPSED_INPUT_HEIGHT);
     setInputLineCount(1);
+    setFocusInputOnPageMount(true);
     onFocusChangeRef.current?.(false);
   }, []);
 
@@ -337,12 +346,19 @@ export function CoreComposer({
   }, [pageOpen]);
 
   useLayoutEffect(() => {
-    if (openRequest <= 0) return;
+    if (openRequest <= handledOpenRequestRef.current) return;
+    handledOpenRequestRef.current = openRequest;
     setInputHeight(COLLAPSED_INPUT_HEIGHT);
     setInputLineCount(1);
+    setFocusInputOnPageMount(focusOnOpenRequest);
+    if (!focusOnOpenRequest) {
+      intentionalFocus.current = false;
+      inputRef.current?.blur();
+      Keyboard.dismiss();
+    }
     onFocusChangeRef.current?.(true);
     setPageOpen(true);
-  }, [openRequest]);
+  }, [focusOnOpenRequest, openRequest]);
 
   useEffect(() => {
     if (focusRequest <= handledFocusRequestRef.current || !pageOpen || !editable) return;
@@ -387,8 +403,9 @@ export function CoreComposer({
     const activeLeadingPress = expanded ? onExpandedLeadingPress : onLeadingPress;
     const activeLeadingLabel = expanded ? expandedLeadingAccessibilityLabel : leadingAccessibilityLabel;
     const activeLeadingDisabled = expanded ? expandedLeadingDisabled : leadingDisabled;
-    return <View style={expanded && (expandedAccessory || expandedFooter) ? styles.expandedComposer : undefined}>
-      {expanded ? expandedAccessory : null}
+    return <>
+      {expanded && expandedAccessory ? <View style={styles.expandedAccessory}>{expandedAccessory}</View> : null}
+      <View style={expanded && expandedFooter ? styles.expandedComposer : undefined}>
       <View style={[styles.composer, multiline && styles.composerOpen]}>
     {activeLeadingPress ? (
       <Button
@@ -478,7 +495,8 @@ export function CoreComposer({
     </Button>
       </View>
       {expanded ? expandedFooter : null}
-    </View>;
+      </View>
+    </>;
   };
 
   return (
@@ -491,7 +509,7 @@ export function CoreComposer({
       }]}>
         {accessory}{composer(false)}
       </View> : null}
-      {pageOpen ? <CorePage bottomInset={insets.bottom} closePage={closePage} composer={composer(true)} focusInput={focusInput} leftInset={insets.left} message={message} pageActions={pageActions} pageBackdrop={pageBackdrop} pageIdentity={pageIdentity} rightInset={insets.right} style={style} topInset={insets.top} /> : null}
+      {pageOpen ? <CorePage bottomInset={insets.bottom} closePage={closePage} composer={composer(true)} focusInput={focusInput} focusInputOnMount={focusInputOnPageMount} leftInset={insets.left} message={message} pageActions={pageActions} pageBackdrop={pageBackdrop} pageIdentity={pageIdentity} rightInset={insets.right} style={style} topInset={insets.top} /> : null}
     </>
   );
 }
@@ -502,6 +520,7 @@ const styles = StyleSheet.create({
     zIndex: 20,
   },
   expandedComposer: { gap: 6 },
+  expandedAccessory: { alignSelf: "stretch", flexShrink: 0, marginBottom: 6, zIndex: 1 },
   page: {
     bottom: 0,
     backgroundColor: colors.page,

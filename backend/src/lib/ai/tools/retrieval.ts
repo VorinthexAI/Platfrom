@@ -103,7 +103,9 @@ export async function retrieveNodeDocuments(node: string, embedding: number[] | 
       FILTER membershipActive
       FILTER !@hasArchivedAt || document.archivedAt == null
       FILTER !@hasInternalDeletion || document._internalDeletion == null
-      FILTER !@hasFolderKey || ((!HAS(document, "folderKey") || document.folderKey == null) ? document.scopeKey IN authorizedScopeKeys : (parentFolder != null && parentFolder.scopeKey IN authorizedScopeKeys && parentFolder._internalDeletion == null))
+      FILTER !@hasArchiveVisibility || (document.archiveVisibility || "visible") == "visible"
+      FILTER !@hasPrivateOwner || !HAS(document, "privateOwnerUserKey") || document.privateOwnerUserKey == null || document.privateOwnerUserKey == viewerUserKey
+      FILTER !@hasFolderKey || ((!HAS(document, "folderKey") || document.folderKey == null) ? document.scopeKey IN authorizedScopeKeys : (parentFolder != null && parentFolder.scopeKey IN authorizedScopeKeys && parentFolder._internalDeletion == null && (parentFolder.archiveVisibility || "visible") == "visible" && (!HAS(parentFolder, "privateOwnerUserKey") || parentFolder.privateOwnerUserKey == null || parentFolder.privateOwnerUserKey == viewerUserKey)))
       FILTER @access != "channel" || document.channelKey IN authorizedChannelKeys
       FILTER @access != "channel-self" || document._key IN authorizedChannelKeys
       FILTER @access != "scope" || document.scopeKey IN authorizedScopeKeys
@@ -146,6 +148,8 @@ export async function retrieveNodeDocuments(node: string, embedding: number[] | 
     limit,
     hasArchivedAt: has('archivedAt'),
     hasInternalDeletion: has('_internalDeletion'),
+    hasArchiveVisibility: has('archiveVisibility'),
+    hasPrivateOwner: has('privateOwnerUserKey'),
     hasFolderKey: has('folderKey'),
   };
   const cursor = dependencies.queryRetrieval

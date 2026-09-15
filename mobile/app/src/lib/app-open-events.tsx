@@ -6,23 +6,33 @@ import { recordAnalyticsEvent } from "./onboarding-events";
 import { useAuthStore } from "@/state/auth";
 import { useUiStore } from "@/state/ui";
 
+let coldSessionGreetingRequested = false;
+
 export function AppOpenEventBridge() {
   useLayoutEffect(() => {
     let state: AppOpenEventState = { opened: false, backgrounded: false };
     const handleState = (nextState: AppStateStatus) => {
-      const firstOpen = !state.opened;
       const transition = transitionAppOpenEvent(state, nextState);
       state = transition.state;
       if (transition.record) {
         void recordAnalyticsEvent("app.opened").catch(() => undefined);
-        const auth = useAuthStore.getState();
-        if (firstOpen && auth.status === "authenticated" && auth.user?.isOnboarded === true) useUiStore.getState().requestAgentGreeting("returning");
       }
     };
 
+    const requestAuthenticatedGreeting = () => {
+      const auth = useAuthStore.getState();
+      if (coldSessionGreetingRequested || auth.status !== "authenticated" || auth.user?.isOnboarded !== true) return;
+      coldSessionGreetingRequested = true;
+      useUiStore.getState().requestAgentGreeting("returning", "restore-or-greet");
+    };
+
     handleState(AppState.currentState);
+    requestAuthenticatedGreeting();
     const subscription = AppState.addEventListener("change", handleState);
-    return () => subscription.remove();
+    const unsubscribeAuth = useAuthStore.subscribe((current, previous) => {
+      if (previous.status !== "authenticated" && current.status === "authenticated") requestAuthenticatedGreeting();
+    });
+    return () => { subscription.remove(); unsubscribeAuth(); };
   }, []);
 
   return null;

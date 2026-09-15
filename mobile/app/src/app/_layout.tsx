@@ -43,7 +43,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     const unsubscribe = subscribeLocalOnboardingState(setLocalOnboarding);
-    void readLocalOnboardingState().catch(() => setLocalOnboarding({ complete: false, previewComplete: false }));
+    void readLocalOnboardingState().catch(() => setLocalOnboarding({ complete: false, introSeen: false, postDeletion: false, previewComplete: false }));
     return unsubscribe;
   }, []);
 
@@ -73,7 +73,7 @@ export default function RootLayout() {
     const isPublic = root === "auth" || root === "public" || root === "referral" || root === "checkout" || root === undefined;
     const isOnboarded = useAuthStore.getState().user?.isOnboarded === true;
     if (status === "unauthenticated") {
-      if (!localOnboarding.complete && !localOnboarding.previewComplete) {
+      if (!localOnboarding.introSeen && !localOnboarding.previewComplete) {
         if (root === "auth" || root === undefined || (!isPublic && root !== "onboarding")) router.replace("/onboarding");
       } else if (root === undefined || (!isPublic && root !== "auth")) router.replace("/auth" as Href);
       return;

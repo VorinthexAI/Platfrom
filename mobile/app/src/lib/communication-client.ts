@@ -5,13 +5,17 @@ import { apiClient } from "./api-client";
 const keySchema = z.string().trim().min(1).max(200);
 const dateSchema = z.iso.datetime();
 
-export const communicationTabSchema = z.enum(["inbox", "sent", "drafts"]);
+export const communicationTabSchema = z.enum(["inbox", "sent"]);
 export type CommunicationTab = z.infer<typeof communicationTabSchema>;
+export const communicationReadStateSchema = z.enum(["all", "read", "unread"]);
+export type CommunicationReadState = z.infer<typeof communicationReadStateSchema>;
 
 export const communicationListInputSchema = z.strictObject({
   tab: communicationTabSchema,
   cursor: keySchema.optional(),
   limit: z.number().int().min(1).max(50).optional(),
+  query: z.string().trim().max(500).optional(),
+  readState: communicationReadStateSchema.optional(),
 });
 
 export const communicationSourceSchema = z.discriminatedUnion("kind", [
@@ -101,15 +105,14 @@ function projectDetail(data: z.infer<typeof storedDetailResponseSchema>["data"])
 export const communicationQueryKeys = {
   all: (context: CommunicationContext) => ["communication", ...contextKey(context)] as const,
   lists: (context: CommunicationContext) => [...communicationQueryKeys.all(context), "lists"] as const,
-  list: (context: CommunicationContext, tab: CommunicationTab) => [...communicationQueryKeys.lists(context), tab] as const,
+  list: (context: CommunicationContext, tab: CommunicationTab, query = "", readState: CommunicationReadState = "all") => [...communicationQueryKeys.lists(context), tab, query, readState] as const,
   details: (context: CommunicationContext) => [...communicationQueryKeys.all(context), "details"] as const,
   detail: (context: CommunicationContext, threadKey: string) => [...communicationQueryKeys.details(context), threadKey] as const,
 };
 
 export async function listCommunicationThreads(rawInput: z.input<typeof communicationListInputSchema>, context: CommunicationContext) {
   const input = communicationListInputSchema.parse(rawInput);
-  if (input.tab === "drafts") return communicationListResponseSchema.shape.data.parse({ items: [], unreadCount: 0, nextCursor: null });
-  const response = await apiClient.post("/auth/me/communications/list", { ...requestContext(context), mailbox: input.tab, ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit ? { limit: input.limit } : {}) });
+  const response = await apiClient.post("/auth/me/communications/list", { ...requestContext(context), mailbox: input.tab, ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit ? { limit: input.limit } : {}), ...(input.query ? { query: input.query } : {}), ...(input.readState && input.readState !== "all" ? { readState: input.readState } : {}) });
   const data = storedListResponseSchema.parse(response.data).data;
   return communicationListResponseSchema.shape.data.parse({ items: data.items.map(projectThread), unreadCount: data.unreadCount, nextCursor: data.nextCursor });
 }
@@ -120,9 +123,9 @@ export async function readCommunicationThread(threadKey: string, context: Commun
   return projectDetail(storedDetailResponseSchema.parse(response.data).data);
 }
 
-export async function markCommunicationThreadRead(threadKey: string, context: CommunicationContext) {
+export async function markCommunicationThreadRead(threadKey: string, context: CommunicationContext, read = true) {
   const key = keySchema.parse(threadKey);
-  await apiClient.put(`/auth/me/communications/${encodeURIComponent(key)}/read-state`, { ...requestContext(context), read: true });
+  await apiClient.put(`/auth/me/communications/${encodeURIComponent(key)}/read-state`, { ...requestContext(context), read });
   return readCommunicationThread(key, context);
 }
 

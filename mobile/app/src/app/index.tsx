@@ -44,7 +44,7 @@ export default function SplashRoute() {
     const timer = setTimeout(() => {
       void readLocalOnboardingState().then((onboarding) => router.replace((status === "authenticated"
         ? !useAuthStore.getState().user?.isOnboarded ? "/onboarding" : "/capability/archive"
-        : onboarding.complete || onboarding.previewComplete ? "/auth" : "/onboarding") as Href));
+        : onboarding.introSeen || onboarding.previewComplete ? "/auth" : "/onboarding") as Href));
     }, durations.splashHold + 300);
     return () => clearTimeout(timer);
   }, [logoOpacity, logoScale, router, status, sweepX, taglineOpacity, wordmarkOpacity]);

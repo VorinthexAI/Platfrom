@@ -14,7 +14,7 @@ const domain = {
 const tagToolNames = ['tag.list', 'tag.create', 'tag.update', 'tag.delete', 'tag.assignment.set'];
 const commerceToolNames = ['catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore'];
 const scopeToolNames = ['scope.list'];
-const platformToolNames = ['team.list', 'app.notify', 'app.history', 'communication.thread.read', 'communication.thread.mark-read', 'communication.message.send', ...scopeToolNames, 'pricing.read', ...commerceToolNames];
+const platformToolNames = ['app.notify', 'app.history', 'communication.thread.read', 'communication.thread.mark-read', 'communication.message.send', ...scopeToolNames, 'pricing.read', ...commerceToolNames];
 
 const expected: Array<[AssistantSurface, string[]]> = [
   ['knowledge-workspace', ['app.enhance', 'app.translate', 'app.speech', 'content.hidden.list', ...platformToolNames, 'referral.summary.read', 'referral.redeem', 'profile.update', 'ticket.create', 'feedback.create', 'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal', 'folder.create', 'folder.update', 'folder.move', 'folder.copy', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-versions', 'document.restore-version', 'document.download', 'content.neighbors', 'content.search-history.delete', 'note.write']],
@@ -114,6 +114,8 @@ describe('personal assistant service capabilities', () => {
     expect(description).not.toContain('uses the default');
     expect(providerSchema.required).toContain('limit');
     expect(providerSchema.properties.limit?.description).toContain('singular answer target even when plural evidence identifies it');
+    expect(description).toContain('omit collectionSlugs and use operation sum with scope account');
+    expect(description).toContain('Current bytes used by all active tracked storage objects');
   });
 
   test('publishes understandable app.search tag filters to providers', () => {
@@ -137,6 +139,16 @@ describe('personal assistant service capabilities', () => {
     } as any);
     expect(result).toMatchObject({ kind: 'continue', result: { groups: [{ examples: [{ label: 'Plan', content: 'Private roadmap evidence' }] }] } });
     expect(JSON.stringify(result)).not.toMatch(/signed\.example|embedding/);
+  });
+
+  test('returns exact account aggregate evidence through app.search', async () => {
+    const capability = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'app.search')!;
+    const aggregate = { operation: 'sum', scope: 'account', field: 'sizeBytes', sum: '90071992547410000', unit: 'bytes' } as const;
+    const result = await capability.execute({ operation: 'sum', scope: 'account', field: 'sizeBytes', limit: 10 }, {
+      domain,
+      appSearch: { search: async () => aggregate },
+    } as any);
+    expect(result).toMatchObject({ kind: 'continue', result: aggregate });
   });
 
   test('keeps inbox and tone mutation model inputs strict and non-empty', () => {
@@ -375,7 +387,7 @@ describe('personal assistant service capabilities', () => {
 
   test('marks Signal mutations, including permanent Trash clearing, as workspace changes', () => {
     const capabilities = defaultAssistantCapabilityRegistry.resolve('signal-workspace');
-    expect(capabilities).toHaveLength(49);
+    expect(capabilities).toHaveLength(48);
     expect(capabilities.find(({ definition }) => definition.name === 'email.reply-context.list')?.mutationWorkspace).toBeUndefined();
     for (const name of ['inbox.refresh', 'inbox.sort', 'inbox.update', 'email.thread.read-state', 'email.thread.favorite', 'email.thread.trash', 'email.trash.clear', 'email.message.translation.delete', 'email.message.summarize', 'email.message.summary.delete', 'email.draft.create', 'email.draft.compose', 'email.draft.update', 'email.draft.assign', 'email.draft.send', 'email.draft.delete', 'email.tone.create', 'email.tone.update', 'email.tone.delete', 'email.reply-context.create', 'email.reply-context.update', 'email.reply-context.delete']) expect(capabilities.find(({ definition }) => definition.name === name)?.mutationWorkspace).toBe('signal');
     const translateMutation = capabilities.find(({ definition }) => definition.name === 'app.translate')?.mutationWorkspace;

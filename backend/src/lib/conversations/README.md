@@ -6,9 +6,9 @@ and unified tools call this service directly. AI orchestration delegates to the
 canonical Core agent in `../ai/agents`; conversations do not own a second tool
 loop.
 
-Every model turn receives the latest 50 completed messages created before the
+Every model turn receives the latest 10 completed messages created before the
 current user message from the owned current conversation, in chronological
-order, plus up to 20 automatically recalled older messages in a separate
+order, plus up to 5 automatically recalled older messages in a separate
 internal field. Recall searches completed text messages only across the same
 trusted team, scope, and user, excludes the current and recent keys in AQL and
 again in service code, and never appears in HTTP or message retrieval output.
@@ -47,19 +47,23 @@ Old messages parse with an empty array, while assistant and image-turn messages
 cannot carry attachment references.
 
 The upload endpoints use Redis only to reserve uploads and coordinate bounded
-preparation transitions. Completion canonicalizes and hashes images, validates
-documents without extracting them, enforces the aggregate Core image-byte limit, and writes private
+preparation transitions. Completion canonicalizes and hashes images, hashes
+supported documents without parsing their contents, enforces aggregate raw and
+Core image-byte limits, and writes private
 `conversationAttachmentArtifacts` rows before responding. These rows are both
 the prepared manifest and durable outbox. `beginTurn` validates and claims every
 selected `PREPARED` row in the same Arango transaction that inserts the user and
 assistant messages; a replay returns its existing messages without reclaiming.
-Core downloads each claimed original document or canonical image once and sends
-its private bytes directly as model input.
+Core receives each claimed document as ordered native file bytes and each
+canonical image as private image bytes. Legacy messages may retain private
+extracted attachment context for historical compatibility, but new turns do not
+extract or store document text before model execution.
 
 BullMQ jobs contain only the artifact and user-message identities. The worker
 uses per-artifact leases and fencing, deterministic idempotency keys, and the
 same canonical document and image persistence paths after Core execution has
-started; document extraction is therefore fire-and-forget relative to chat. Trusted canonical PNGs
+started; durable Content persistence remains fire-and-forget relative to chat,
+and the Archive worker parses original document bytes. Trusted canonical PNGs
 skip duplicate Sharp canonicalization. Durable recovery republishes claimable
 or expired-lease artifacts without Redis. Each artifact settles independently;
 the message remains `PENDING` while work is retryable and ends as `COMPLETED`,
@@ -67,3 +71,9 @@ the message remains `PENDING` while work is retryable and ends as `COMPLETED`,
 results. Settlement publishes `conversation.changed`. Expiry cleanup deletes
 staged objects and then hard-deletes artifact rows; the 30-day artifact lifetime
 exceeds the BullMQ retry retention window.
+
+Document persistence uses the unified `document.parse` service. PDF transcription
+reuses the text action's file transport with a faithful-transcription prompt.
+Background document imports run inside an action-metered execution identified by
+the user and artifact; they have no fixed parsing charge and bill actual text
+action usage. A persisted replay does not regenerate or charge for transcription.

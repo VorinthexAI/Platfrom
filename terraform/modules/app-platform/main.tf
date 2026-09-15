@@ -541,11 +541,6 @@ resource "aws_iam_role_policy" "api_runtime" {
       },
       {
         Effect   = "Allow"
-        Action   = ["textract:StartDocumentTextDetection", "textract:GetDocumentTextDetection", "textract:DetectDocumentText"]
-        Resource = ["*"]
-      },
-      {
-        Effect   = "Allow"
         Action   = ["geo-places:ReverseGeocode"]
         Resource = ["*"]
       }

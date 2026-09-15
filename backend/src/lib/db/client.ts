@@ -17,7 +17,7 @@ export async function closeDb() {
 }
 
 export async function withTransaction<T>(
-  collections: string[] | { read?: string[]; write: string[] },
+  collections: string[] | { read?: string[]; write: string[]; exclusive?: string[] },
   fn: (trx: Awaited<ReturnType<typeof db.beginTransaction>> & { collection: typeof db.collection; query: typeof db.query }) => Promise<T>,
 ): Promise<T> {
   return withDatabaseTransaction(db, collections, fn);
@@ -25,12 +25,12 @@ export async function withTransaction<T>(
 
 export async function withDatabaseTransaction<T>(
   database: Database,
-  collections: string[] | { read?: string[]; write: string[] },
+  collections: string[] | { read?: string[]; write: string[]; exclusive?: string[] },
   fn: (trx: Awaited<ReturnType<typeof database.beginTransaction>> & { collection: typeof database.collection; query: typeof database.query }) => Promise<T>,
 ): Promise<T> {
   const declaration = Array.isArray(collections)
     ? { write: collections, exclusive: collections }
-    : { read: collections.read, write: collections.write, exclusive: collections.write };
+    : { read: collections.read, write: collections.write, exclusive: collections.exclusive ?? collections.write };
   const trx = await database.beginTransaction(declaration);
   try {
     const transaction = Object.assign(trx, {

@@ -53,7 +53,7 @@ export async function fetchPublic(path: string): Promise<unknown> {
   const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
     const response = await fetch(`${API_BASE_URL.replace(/\/$/, "")}/api/v1/${path}`, {
-      headers: appsBootstrapHeaders(),
+      headers: await appsBootstrapHeaders(),
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`Public ${path} request failed with status ${response.status}.`);

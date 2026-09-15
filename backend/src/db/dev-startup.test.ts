@@ -13,6 +13,6 @@ test('migrates before every local API server entry point', () => {
     expect(command.indexOf('src/db/migration-runner.ts')).toBeLessThan(command.indexOf('src/api/index.ts'));
   }
   for (const source of [compose, deployCompose]) {
-    expect(source).toContain('bun run src/db/migration-runner.ts && exec bun run --hot src/api/index.ts');
+    expect(source).toContain('bun run src/db/migration-runner.ts && exec bun run --watch src/api/index.ts');
   }
 });

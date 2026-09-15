@@ -5,6 +5,22 @@ const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
 const connectorKey = 'cmrnlzf650002qc7k4p5zem5w';
 
 describe('canonical mail preparation', () => {
+  test('keeps a newer sent reply as the conversation preview and waiting state', async () => {
+    const base = { scopeKey, accountKey: connectorKey, summary: 'old', hasAttachments: false, replyDepth: 0 };
+    let saved: any;
+    await sortAndPersistInboxThread({
+      teamKey: 'team-1', thread: { scopeKey, accountKey: connectorKey, providerThreadId: 'thread' },
+      messages: [
+        { ...base, providerMessageId: 'incoming', from: 'other@example.com', to: ['me@example.com'], subject: 'Review', body: 'Can you review?', direction: 'inbound', labels: ['INBOX', 'UNREAD'], sentAt: '2026-08-23T10:00:00.000Z' },
+        { ...base, providerMessageId: 'reply', from: 'me@example.com', to: ['other@example.com'], subject: 'Re: Review', body: 'Reviewed, please confirm.', direction: 'outbound', labels: ['SENT'], sentAt: '2026-08-23T11:00:00.000Z' },
+      ],
+      classify: async (_team, input) => ({ priority: 'normal', state: input.direction === 'outbound' ? 'waiting' : 'needs_action', category: 'primary', isPurchase: false, intent: input.direction === 'outbound' ? 'Awaiting response' : 'Review' }),
+      prepareDocument: async ({ content, semanticSource }) => ({ content, embedding: [1], contentChunks: [semanticSource], chunkEmbeddings: [[1]], semanticChunkCount: 1, semanticContentHash: 'hash' }),
+      repository: { syncThread: async (input: unknown) => { saved = input; return input; } } as never,
+      beforePersist: async () => undefined, lease: { kind: 'sync', connectorKey, token: 'lease' },
+    });
+    expect(saved.thread).toMatchObject({ state: 'waiting', summary: 'Reviewed, please confirm.', lastMessageAt: '2026-08-23T11:00:00.000Z', latestFrom: 'me@example.com', inInbox: true, unread: true });
+  });
   test('gives initial and incremental sync identical exactly-once classification, embeddings, and persistence', async () => {
     const messages = [
       { scopeKey, accountKey: connectorKey, providerMessageId: 'urgent', from: 'lead@example.com', to: ['me@example.com'], subject: 'Review', body: 'Urgent body', summary: 'old', labels: ['INBOX'], direction: 'inbound' as const, sentAt: '2026-08-23T10:00:00.000Z', hasAttachments: false, replyDepth: 0 },

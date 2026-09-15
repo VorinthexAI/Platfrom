@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { contentToolContracts, validateCreationDateRange, type ContentToolName } from './content-schemas';
 import { contentZodToJsonSchema } from './content-json-schema';
+import { validateDocumentParseSource } from '@/lib/ai/document-processing/schemas';
 
 export const CONTENT_TOOL_NAMES = Object.freeze(Object.keys(contentToolContracts) as ContentToolName[]);
 export const contentToolNameSchema = z.enum(CONTENT_TOOL_NAMES as [ContentToolName, ...ContentToolName[]]);
@@ -16,7 +17,6 @@ export const contentToolOutputSchemas = Object.fromEntries(
 const PRIMARY_SCOPE_TOOLS = new Set<ContentToolName>([
   'folder.list',
   'document.parse',
-  'document.scan',
   'document.create',
   'document.list',
   'document.search',
@@ -46,6 +46,7 @@ function modelInputSchema(name: ContentToolName): z.ZodTypeAny {
     const canonical: z.ZodTypeAny = contentToolContracts[name].input;
     const object = canonical instanceof z.ZodEffects ? canonical.innerType() : canonical;
     const model = (object as z.AnyZodObject).omit({ scopeKey: true });
+    if (name === 'document.parse') return model.superRefine(validateDocumentParseSource);
     return ['folder.list', 'document.list', 'content.search'].includes(name)
       ? model.superRefine((value, context) => validateCreationDateRange(value, context))
       : model;
@@ -60,14 +61,15 @@ export const contentToolModelInputSchemas = Object.fromEntries(
 
 function providerInputSchema(name: ContentToolName) {
   const schema = contentZodToJsonSchema(contentToolModelInputSchemas[name]);
-  if (name === 'document.parse' || name === 'document.scan') {
+  if (name === 'document.parse') {
     const properties = schema.properties as Record<string, unknown>;
     const fileHandle = {
       type: 'object',
       description: 'Server-side file handle with name, type, size, and arrayBuffer(). Provider clients cannot send raw file bytes through JSON.',
     };
-    if (name === 'document.parse') properties.file = fileHandle;
-    else properties.pages = { type: 'array', minItems: 1, maxItems: 12, items: fileHandle };
+    properties.file = fileHandle;
+    properties.pages = { type: 'array', minItems: 1, maxItems: 12, items: fileHandle };
+    schema.oneOf = [{ required: ['file'], not: { required: ['pages'] } }, { required: ['pages'], not: { required: ['file'] } }];
   }
   if (name === 'document.update') {
     const properties = schema.properties as Record<string, any>;

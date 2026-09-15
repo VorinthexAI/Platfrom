@@ -6,6 +6,7 @@ import { createContentToolHandler } from './content-tools';
 import { registerRoutes } from './routes';
 import { validateQueryParams } from './middleware';
 import { SparkRepositoryError } from '@/lib/sparks/repository';
+import { recordActionCost, recordActionUsage } from '@/lib/ai/events/runtime';
 
 const teamKey = newId(), scopeKey = newId(), folderKey = newId();
 function request(dependencies: Parameters<typeof createContentToolHandler>[0], tool = 'folder.list', body: unknown = { teamKey, scopeKey, input: { scopeKey } }, headers: Record<string, string> = {}) {
@@ -14,6 +15,41 @@ function request(dependencies: Parameters<typeof createContentToolHandler>[0], t
 }
 
 describe('Content tool API', () => {
+  test('accepts valid multi-megabyte upload and scan base64 without regex backtracking limits', async () => {
+    const bytes = new Uint8Array(4 * 1024 * 1024).fill(1);
+    bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
+    const content = Buffer.from(bytes).toString('base64');
+    const calls: any[] = [];
+    const dependencies = { getIdentity: async () => ({ key: newId(), identityType: 'user' as const }), run: async (input: any) => { calls.push(input); return {}; } };
+    const file = { filename: 'large.txt', mimeType: 'text/plain', sizeBytes: bytes.length, encoding: 'base64', content };
+    const upload = await request(dependencies, 'document.parse', { teamKey, scopeKey, input: { scopeKey, file, idempotencyKey: 'large-upload' } }, { 'idempotency-key': 'large-upload' });
+    expect(upload.status).toBe(200);
+    const scan = await request(dependencies, 'document.parse', { teamKey, scopeKey, input: { scopeKey, pages: [{ ...file, filename: 'page.png', mimeType: 'image/png' }], idempotencyKey: 'large-scan' } }, { 'idempotency-key': 'large-scan' });
+    expect(scan.status).toBe(200);
+    expect(calls[0].input.file.bytes.byteLength).toBe(bytes.length);
+    expect(calls[1].input.pages[0].bytes.byteLength).toBe(bytes.length);
+  });
+  test('preserves the body key when a topic summary is requested without an idempotency header', async () => {
+    const dispatched: any[] = [];
+    const documentKey = newId();
+    const deps = { getIdentity: async () => ({ key: newId(), identityType: 'user' as const }), run: async (input: unknown, options: unknown) => { dispatched.push({ input, options }); return { results: [] }; } };
+    const body = { teamKey, scopeKey, input: { documentKeys: [documentKey], topic: 'Hello', style: 'brief', persist: true, idempotencyKey: 'summary-click-1' } };
+    expect((await request(deps, 'document.summarize', body)).status).toBe(200);
+    expect(dispatched[0]).toMatchObject({ input: { input: { idempotencyKey: 'summary-click-1', topic: 'Hello' } }, options: { requestKey: 'summary-click-1' } });
+    expect((await request(deps, 'document.summarize', body, { 'idempotency-key': 'summary-click-1' })).status).toBe(200);
+    expect((await request(deps, 'document.summarize', body, { 'idempotency-key': 'different-click' })).status).toBe(409);
+    expect(dispatched).toHaveLength(2);
+  });
+
+  test('derives a stable summary execution key only when neither transport location supplies one', async () => {
+    const keys: string[] = [];
+    const deps = { getIdentity: async () => ({ key: newId(), identityType: 'user' as const }), run: async (_input: unknown, options: any) => { keys.push(options.requestKey); return { results: [] }; } };
+    const body = { teamKey, scopeKey, input: { documentKeys: [newId()], topic: 'Hello', persist: true } };
+    for (const value of [body, body, { ...body, input: { ...body.input, topic: 'Another topic' } }]) expect((await request(deps, 'document.summarize', value)).status).toBe(200);
+    expect(keys[0]).toMatch(/^[a-f0-9]{64}$/);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[0]);
+  });
   test('requires an authenticated user identity', async () => {
     const unauthenticated = await request({ getIdentity: async () => null });
     expect(unauthenticated.status).toBe(401);
@@ -82,7 +118,7 @@ describe('Content tool API', () => {
     expect(await tooLarge.json()).toMatchObject({ error: { code: 'DOCUMENT_TOO_LARGE' } });
   });
 
-  test('coordinates fixed Content HTTP debits, full refunds, and insufficient balance', async () => {
+  test('charges document parsing by actual text action usage without a fixed tool debit', async () => {
     const userKey = newId();
     const charges: Record<string, unknown>[] = [], refunds: Record<string, unknown>[] = [];
     let executions = 0;
@@ -90,7 +126,7 @@ describe('Content tool API', () => {
       resolveMembership: async () => ({ key: newId(), teamKey: teamKey, userId: userKey, status: 'active' }),
       resolveUser: async () => ({ key: userKey, currentScopeKey: scopeKey }),
       authorizeScope: async () => ({ allowed: true }),
-      execute: async () => { executions += 1; return { results: [] }; },
+      execute: async () => { await recordActionCost('text'); await recordActionUsage('text', {}, { inputTokens: 100, outputTokens: 20, totalTokens: 120 }); executions += 1; return { results: [] }; },
       recordEvent: async () => {},
       appScopeKey: newId(),
       billing: {
@@ -100,9 +136,11 @@ describe('Content tool API', () => {
     } as never;
     const body = { teamKey, scopeKey, input: { scopeKey, folderKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 3, encoding: 'base64', content: 'YWJj' } } };
     expect((await request({ getIdentity: async () => ({ key: userKey, identityType: 'user' }), serviceOptions }, 'document.parse', body, { 'idempotency-key': 'parse-billed' })).status).toBe(200);
-    expect(charges[0]).toMatchObject({ kind: 'tool', toolSlug: 'document.parse', microSparks: 2_000_000 });
+    expect(charges).toHaveLength(1);
+    expect(charges[0]).toMatchObject({ kind: 'action', actionSlug: 'text', metadata: { inputTokens: 100, outputTokens: 20 } });
+    expect(charges[0]).not.toHaveProperty('toolSlug');
 
-    const failedOptions = { ...(serviceOptions as any), execute: async () => { throw new Error('parse failed'); } };
+    const failedOptions = { ...(serviceOptions as any), execute: async () => { await recordActionCost('text'); await recordActionUsage('text', {}, { inputTokens: 100, outputTokens: 20, totalTokens: 120 }); throw new Error('parse failed'); } };
     expect((await request({ getIdentity: async () => ({ key: userKey, identityType: 'user' }), serviceOptions: failedOptions }, 'document.parse', body, { 'idempotency-key': 'parse-failed' })).status).toBe(500);
     expect(refunds).toHaveLength(1);
 

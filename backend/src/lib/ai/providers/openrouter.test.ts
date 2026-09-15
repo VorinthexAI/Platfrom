@@ -49,7 +49,7 @@ describe('OpenRouter provider', () => {
     let body: any;
     const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
       body = JSON.parse(String(init?.body));
-      return Response.json({ choices: [{ message: { content: 'seen' }, finish_reason: 'stop' }] });
+      return Response.json({ choices: [{ message: { content: 'seen' }, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 } });
     }) as typeof fetch);
     await provider.execute(request('text', { messages: [{ role: 'user', content: [
       { type: 'text', text: 'Describe this image.' },
@@ -65,7 +65,7 @@ describe('OpenRouter provider', () => {
     let body: any;
     const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
       body = JSON.parse(String(init?.body));
-      return Response.json({ choices: [{ message: { content: 'read' }, finish_reason: 'stop' }] });
+      return Response.json({ choices: [{ message: { content: 'read' }, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 } });
     }) as typeof fetch);
     await provider.execute(request('text', { messages: [{ role: 'user', content: [
       { type: 'text', text: 'Read this file.' },
@@ -97,7 +97,7 @@ describe('OpenRouter provider', () => {
     let body: any;
     const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
       body = JSON.parse(String(init?.body));
-      return Response.json({ choices: [{ message: { content: 'Answer with citation text', annotations: [{ type: 'url_citation', url: 'https://example.com' }] }, finish_reason: 'stop' }] });
+      return Response.json({ choices: [{ message: { content: 'Answer with citation text', annotations: [{ type: 'url_citation', url: 'https://example.com' }] }, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 } });
     }) as typeof fetch);
     const grounded = request('text', { ...chatInput, tools: [{ name: 'weather', description: 'Weather', inputSchema: { type: 'object' } }] });
     grounded.capabilities = { webGrounding: 'model-selected' };
@@ -145,8 +145,9 @@ describe('OpenRouter provider', () => {
       expect(body.model).toBe('google/image');
       expect(body).toMatchObject({ max_tokens: 2_048, temperature: 0 });
       expect(body.messages[0].content[0].text).toContain('Respond with only valid JSON');
+      expect(body.messages[0].content[0].text).toContain('never end one with an ellipsis');
       expect(body.messages[0].content).toContainEqual({ type: 'image_url', image_url: { url: 'https://example.com/image.png' } });
-      return Response.json({ choices: [{ message: { content: '```json\n{"results":[{"caption":"A red square","score":90}]}\n```' }, finish_reason: 'stop' }] });
+      return Response.json({ choices: [{ message: { content: '```json\n{"results":[{"caption":"A red square","score":90}]}\n```' }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } });
     }) as typeof fetch);
     const result = await provider.execute(request('image', { operation: 'caption', imageUrls: ['https://example.com/image.png'], purpose: 'caption' }, 'google/image'));
     expect(result.output).toEqual({ results: [{ caption: 'A red square', score: 90 }] });
@@ -163,6 +164,14 @@ describe('OpenRouter provider', () => {
     }) as typeof fetch);
     const chunks = []; for await (const chunk of provider.stream!(request('text', chatInput))) chunks.push(chunk);
     expect(chunks).toEqual([{ type: 'text-delta', text: 'Hel' }, { type: 'text-delta', text: 'lo' }, { type: 'usage', usage: { inputTokens: 2, outputTokens: 1, totalTokens: 3 } }, { type: 'done' }]);
+  });
+
+  test('rejects paid text and image analysis responses without authoritative usage', async () => {
+    const text = createOpenRouterProvider({ apiKey: 'key' }, (async () => Response.json({ choices: [{ message: { content: 'unmetered' }, finish_reason: 'stop' }] })) as unknown as typeof fetch);
+    await expect(text.execute(request('text', chatInput))).rejects.toMatchObject({ code: 'response_invalid' });
+
+    const image = createOpenRouterProvider({ apiKey: 'key' }, (async () => Response.json({ choices: [{ message: { content: '{"results":[{"caption":"x","score":90}]}' }, finish_reason: 'stop' }] })) as unknown as typeof fetch);
+    await expect(image.execute(request('image', { operation: 'caption', imageUrls: ['https://example.com/image.png'], purpose: 'caption' }, 'google/image'))).rejects.toMatchObject({ code: 'response_invalid' });
   });
 
   test('preserves mixed text and ordered fragmented function calls through usage and completion', async () => {
@@ -193,10 +202,11 @@ describe('OpenRouter provider', () => {
     const responseStream = (body: string) => new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(body)); controller.close(); } });
     const providerFor = (body: string) => createOpenRouterProvider({ apiKey: 'key' }, (async () => new Response(responseStream(body), { headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch);
     const collect = async (body: string) => { const chunks = []; for await (const chunk of providerFor(body).stream!(request('text', chatInput))) chunks.push(chunk); return chunks; };
-    const ordered = []; for await (const chunk of providerFor('data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"b","function":{"name":"second","arguments":"{}"}},{"index":0,"id":"a","function":{"name":"first","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]').stream!(request('text', chatInput))) ordered.push(chunk);
-    expect(ordered).toEqual([{ type: 'tool-call', toolCall: { id: 'a', name: 'first', arguments: {} } }, { type: 'tool-call', toolCall: { id: 'b', name: 'second', arguments: {} } }, { type: 'done' }]);
+    const ordered = []; for await (const chunk of providerFor('data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"b","function":{"name":"second","arguments":"{}"}},{"index":0,"id":"a","function":{"name":"first","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}\n\ndata: {"choices":[],"usage":{"prompt_tokens":8,"completion_tokens":5,"total_tokens":13}}\n\ndata: [DONE]').stream!(request('text', chatInput))) ordered.push(chunk);
+    expect(ordered).toEqual([{ type: 'usage', usage: { inputTokens: 8, outputTokens: 5, totalTokens: 13 } }, { type: 'tool-call', toolCall: { id: 'a', name: 'first', arguments: {} } }, { type: 'tool-call', toolCall: { id: 'b', name: 'second', arguments: {} } }, { type: 'done' }]);
     await expect(collect('data: {"choices":[{"delta":{"content":"x"},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]')).rejects.toThrow('finish reason');
     await expect(collect('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]')).rejects.toThrow('incomplete streamed tool call');
+    await expect(collect('data: {"choices":[{"delta":{"content":"x"},"finish_reason":"stop"}]}\n\ndata: [DONE]')).rejects.toThrow('did not include token usage');
     await expect(collect('data: {bad}\n\ndata: [DONE]')).rejects.toThrow('malformed stream JSON');
   });
 
@@ -212,6 +222,7 @@ describe('OpenRouter provider', () => {
     expect(bodies.length).toBe(3);
     expect(bodies[0]).toEqual({ model: 'x-ai/grok-voice', input: 'First.', voice: 'eve', response_format: 'mp3' });
     expect(Buffer.from((result.output as { base64: string }).base64, 'base64').length).toBe(frame.length * 3);
+    expect(result.usage).toEqual({ inputTokens: 0, outputTokens: 1, totalTokens: 1 });
     expect(splitOpenRouterSpeechText('x'.repeat(30_001))).toHaveLength(3);
   });
 

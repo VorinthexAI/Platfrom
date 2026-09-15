@@ -1,10 +1,11 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as DocumentPicker from "expo-document-picker";
 import { File } from "expo-file-system";
+import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
 import { useFocusEffect, useRouter } from "expo-router";
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ComponentRef } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ComponentRef } from "react";
 import { FlatList, Keyboard, ScrollView, Share as NativeShare, StyleSheet, Text, View, type ListRenderItem, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { ActionPill } from "@vorinthex/shared/ui/action-pill";
@@ -18,7 +19,7 @@ import { Switch } from "@vorinthex/shared/ui/switch";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
-import { ChatBubbleIcon, CloseIcon, FileIcon, FilterIcon, ImageIcon, PlusIcon, SearchIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { ChatBubbleIcon, CloseIcon, FileIcon, FilterIcon, ImageIcon, MoreHorizontalIcon, PlusIcon, SearchIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import { BrandedCameraModal } from "@/components/capability/BrandedCameraModal";
 import { SearchHistorySheet } from "@/components/SearchHistorySheet";
@@ -26,14 +27,20 @@ import { ConversationRetrievalSheet } from "@/components/ConversationRetrievalSh
 import { ProfileHeaderRight } from "@/components/ProfileAvatarButton";
 import {
   addConversationToUnfilteredLists,
+  conversationAttachmentsForRender,
+  conversationListMembershipKeys,
+  conversationAttachmentDisplayKey,
   conversationMessages,
   conversationQueryKeys,
   createLocalConversationAttachments,
   invalidateConversationSearches,
   mergeConversationMessages,
   removeConversationFromLists,
+  removeConversationMessages,
   replaceConversationInMatchingLists,
   replaceTurnMessages,
+  restoreConversationMessages,
+  restoreConversationToLists,
   settlePendingAttachmentOverlays,
   type ConversationDisplayAttachment,
   type OptimisticMessage,
@@ -58,9 +65,12 @@ import {
   type ConversationMessage,
   type ConversationRetrieval,
   type ConversationAttachmentFile,
+  type GuideTopic,
+  type GuideTopicSelection,
 } from "@/lib/conversation-client";
-import { searchGalleryImages } from "@/lib/gallery-client";
-import { normalizeCapturedPng } from "@/lib/captured-image";
+import { fetchGalleryOverview, searchGalleryImages, type GalleryImage } from "@/lib/gallery-client";
+import { galleryQueryKeys } from "@/lib/workspace-query-cache";
+import { normalizeCapturedJpeg } from "@/lib/captured-image";
 import { formatConversationRetrievalSummary, mergeConversationRetrievalResults, type ConversationRetrievalResult } from "@/lib/conversation-retrievals";
 import { deleteContentSearchHistory, type ContentSearchHistoryItem } from "@/lib/content-client";
 import { readConversationSelection, writeConversationSelection } from "@/lib/conversation-selection-vault";
@@ -71,18 +81,26 @@ import { useAppsStore } from "@/state/apps";
 import { useUiStore } from "@/state/ui";
 import { assistantIconSource } from "@/data/capability-icons";
 import { palette, radii, spacing } from "@/theme/tokens";
-import { requestAgentGreeting } from "@/lib/agent-greeting-client";
+import { requestAgentGreeting, requestAgentGreetingTopics } from "@/lib/agent-greeting-client";
 import { mapWithConcurrency } from "@/lib/bounded-concurrency";
 
+const USER_MESSAGE_RICH_TEXT_STYLES = {
+  root: { alignItems: "flex-end" as const },
+  paragraph: { textAlign: "right" as const },
+  heading: { textAlign: "right" as const },
+};
+
 type CoreComposerProps = ComponentProps<typeof CoreComposer>;
-type Sheet = "attachments" | "chats" | "filter" | "history" | "current" | "edit" | "delete" | "retrievals" | "messageActions" | "deleteMessage" | "imageActions";
+type Sheet = "attachments" | "attachmentActions" | "chats" | "filter" | "history" | "current" | "edit" | "delete" | "bulkActions" | "bulkDelete" | "retrievals" | "messageActions" | "deleteMessage" | "imageActions";
 type CreateOperation = { identity: string; optimistic: Conversation; promise: Promise<Conversation> };
 type DraftAttachment = ConversationAttachmentFile & { kind: "image" | "document"; preparing?: true };
 type ComposerMode = "chat" | "image";
-type DisplayMessage = OptimisticMessage & { showReferralCodeAction?: boolean };
+type DisplayMessage = OptimisticMessage & { renderKey?: string; showReferralCodeAction?: boolean; persistenceToken?: string; streamingGuideTopics?: GuideTopic[] };
+type ConversationRestoreResult = "restored" | "empty" | "suppressed";
 
 const now = () => new Date().toISOString();
 const clientKey = (kind: string) => `optimistic-${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const PRESERVE_MESSAGE_POSITION = { minIndexForVisible: 0 } as const;
 const DOCUMENT_MIME_TYPES = ["text/plain", "text/markdown", "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"] as const;
 const documentMimeType = (filename: string) => {
   const extension = filename.split(".").at(-1)?.toLowerCase();
@@ -99,6 +117,7 @@ function imageProgressText(content: string) {
 function deleteTemporaryFile(uri: string) {
   try { const file = new File(uri); if (file.exists) file.delete(); } catch { /* Picker and camera cache files may already be gone. */ }
 }
+function notifyCoreOutput() { void Haptics.selectionAsync(); }
 
 function GeneratedConversationImage({ contextIdentity, imageKey, onOpen }: { contextIdentity: string; imageKey?: string; onOpen: (collectionKey?: string) => void }) {
   const [loadedUrl, setLoadedUrl] = useState<string>();
@@ -107,10 +126,9 @@ function GeneratedConversationImage({ contextIdentity, imageKey, onOpen }: { con
     queryFn: async () => (await searchGalleryImages({ imageKey: imageKey! })).images.find(({ key }) => key === imageKey) ?? null,
     enabled: Boolean(imageKey),
   });
-  if (!imageKey || isPending) return <View style={styles.generatedImageFrame}><Skeleton accessibilityLabel={imageKey ? "Loading generated image" : "Generating image"} accessibilityRole="progressbar" style={[styles.generatedImage, styles.skeletonCard]} /></View>;
-  if (isError || !image) return <View style={styles.generatedImageFrame}><Button onPress={() => void refetch()} size="sm" variant="secondary">Retry generated image</Button></View>;
-  const loaded = loadedUrl === image.url;
-  return <View style={styles.generatedImageFrame}><Button accessibilityLabel="Open generated image actions" contentMode="raw" onPress={() => onOpen(image.collections?.find(({ name }) => name === "Core")?.key ?? image.collections?.[0]?.key)} shape="rounded" size="xl" style={styles.generatedImageButton} variant="ghost"><Image cachePolicy="memory-disk" contentFit="cover" onError={() => { setLoadedUrl(undefined); void refetch(); }} onLoad={() => setLoadedUrl(image.url)} recyclingKey={imageKey} source={image.url} style={[styles.generatedImage, !loaded && styles.generatedImageLoading]} />{!loaded ? <Skeleton accessibilityLabel="Loading generated image" accessibilityRole="progressbar" style={[styles.generatedImageOverlay, styles.skeletonCard]} /> : null}</Button></View>;
+  const loaded = Boolean(image?.url && loadedUrl === image.url);
+  const failed = Boolean(imageKey) && !isPending && (isError || !image);
+  return <View style={styles.generatedImageFrame}>{image ? <Button accessibilityLabel="Open generated image actions" contentMode="raw" onPress={() => onOpen(image.collections?.find(({ name }) => name === "Core")?.key ?? image.collections?.[0]?.key)} shape="rounded" size="xl" style={styles.generatedImageButton} variant="ghost"><Image cachePolicy="memory-disk" contentFit="cover" onError={() => { setLoadedUrl(undefined); void refetch(); }} onLoad={() => setLoadedUrl(image.url)} recyclingKey={imageKey} source={image.url} style={styles.generatedImage} /></Button> : null}{!loaded && !failed ? <Skeleton accessibilityLabel={imageKey ? "Loading generated image" : "Generating image"} accessibilityRole="progressbar" pointerEvents="none" style={[styles.generatedImageOverlay, styles.skeletonCard]} /> : null}{failed ? <View style={[styles.generatedImageOverlay, styles.generatedImageFailure]}><Button onPress={() => void refetch()} size="sm" variant="secondary">Retry generated image</Button></View> : null}</View>;
 }
 
 const attachmentImageQueryKey = (contextIdentity: string, imageKey: string) => ["conversation-attachment-image-v2", contextIdentity, imageKey] as const;
@@ -119,40 +137,65 @@ const attachmentImageQuery = (contextIdentity: string, imageKey: string) => ({
   queryFn: async () => (await searchGalleryImages({ imageKey })).images.find(({ key }) => key === imageKey) ?? null,
   staleTime: 10 * 60 * 1_000,
 });
+const galleryImageCollectionKey = (image: GalleryImage) => image.collections?.find(({ name }) => name === "Core")?.key ?? image.collections?.[0]?.key;
 
-function ConversationImageAttachment({ attachment, contextIdentity, onOpen }: { attachment: Extract<ConversationAttachmentReference, { kind: "image" }>; contextIdentity: string; onOpen: () => void }) {
+function ConversationImageAttachment({ attachment, contextIdentity, onOpen }: { attachment: ConversationDisplayAttachment; contextIdentity: string; onOpen: (image: GalleryImage) => void }) {
+  const queryClient = useQueryClient();
+  const local = "local" in attachment;
+  const imageKey = local ? undefined : attachment.key;
+  const displayKey = local ? attachment.clientKey : attachment.displayKey ?? attachment.key;
+  const localUri = useRef<string | undefined>(undefined);
+  if (local) localUri.current = attachment.uri;
   const { data: image, isPending, refetch } = useQuery({
-    ...attachmentImageQuery(contextIdentity, attachment.key),
+    ...attachmentImageQuery(contextIdentity, imageKey ?? "pending"),
+    enabled: Boolean(imageKey),
   });
-  if (isPending) return <View style={styles.messageAttachmentLocalImage}><Skeleton accessibilityLabel={`Loading ${displayAttachmentFilename(attachment.filename)}`} accessibilityRole="progressbar" style={[styles.messageAttachmentImage, styles.skeletonCard]} /></View>;
-  if (!image) return <View style={styles.messageAttachmentFallback}><ImageIcon size="sm" variant="muted" /><Text numberOfLines={1} style={styles.messageAttachmentName}>{displayAttachmentFilename(attachment.filename)}</Text></View>;
-  return <Button accessibilityLabel={`Open image ${displayAttachmentFilename(attachment.filename)}`} contentMode="raw" onPress={onOpen} shape="rounded" size="md" style={styles.messageAttachmentImageButton} variant="ghost"><Image cachePolicy="memory-disk" contentFit="cover" onError={() => void refetch()} source={image.url} style={styles.messageAttachmentImage} /></Button>;
+  const source = local ? attachment.uri : image?.url ?? localUri.current;
+  useEffect(() => {
+    if (local || !image) return;
+    const collectionKey = galleryImageCollectionKey(image);
+    const galleryContext = { teamKey: contextIdentity.split(":")[1] ?? "", scopeKey: contextIdentity.split(":")[2] ?? "" };
+    queryClient.setQueryData(galleryQueryKeys.image(galleryContext, collectionKey, image.key), { images: [image] });
+    if (collectionKey) void queryClient.prefetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, collectionKey), queryFn: () => fetchGalleryOverview(collectionKey, undefined, 100) });
+  }, [contextIdentity, image, local, queryClient]);
+  return <Button accessibilityLabel={!local && image ? `Open image ${displayAttachmentFilename(attachment.filename)}` : undefined} accessible={!local && Boolean(image)} contentMode="raw" onPress={!local && image ? () => onOpen(image) : undefined} shape="rounded" size="md" style={styles.messageAttachmentImageButton} variant="ghost">{source ? <Image cachePolicy="memory-disk" contentFit="cover" onError={() => { if (!local) void refetch(); }} recyclingKey={displayKey} source={source} style={styles.messageAttachmentImage} /> : isPending ? <Skeleton accessibilityLabel={`Loading ${displayAttachmentFilename(attachment.filename)}`} accessibilityRole="progressbar" style={[styles.messageAttachmentImage, styles.skeletonCard]} /> : <View style={styles.messageAttachmentFallback}><ImageIcon size="sm" variant="muted" /><Text numberOfLines={1} style={styles.messageAttachmentName}>{displayAttachmentFilename(attachment.filename)}</Text></View>}</Button>;
 }
 
-function MessageAttachment({ attachment, contextIdentity, onOpen }: { attachment: ConversationDisplayAttachment; contextIdentity: string; onOpen: (attachment: ConversationAttachmentReference) => void }) {
-  if ("local" in attachment) return attachment.kind === "image"
-    ? <View style={styles.messageAttachmentLocalImage}><Image cachePolicy="memory-disk" contentFit="cover" recyclingKey={attachment.clientKey} source={attachment.uri} style={styles.messageAttachmentImage} /></View>
-    : <View style={styles.messageAttachmentFallback}><FileIcon size="sm" variant="muted" /><Text numberOfLines={1} style={styles.messageAttachmentName}>{displayAttachmentFilename(attachment.filename)}</Text></View>;
-  if (attachment.kind === "image") return <ConversationImageAttachment attachment={attachment} contextIdentity={contextIdentity} onOpen={() => onOpen(attachment)} />;
-  return <Button accessibilityLabel={`Open ${attachment.kind} ${displayAttachmentFilename(attachment.filename)}`} contentMode="raw" onPress={() => onOpen(attachment)} shape="rounded" size="sm" style={styles.messageAttachmentFile} variant="secondary"><FileIcon size="sm" variant="muted" /><Text numberOfLines={1} style={styles.messageAttachmentName}>{displayAttachmentFilename(attachment.filename)}</Text></Button>;
+function MessageAttachment({ attachment, contextIdentity, onOpen }: { attachment: ConversationDisplayAttachment; contextIdentity: string; onOpen: (attachment: ConversationAttachmentReference, image?: GalleryImage) => void }) {
+  if (attachment.kind === "image") return <ConversationImageAttachment attachment={attachment} contextIdentity={contextIdentity} onOpen={(image) => { if (!("local" in attachment)) onOpen(attachment, image); }} />;
+  if ("local" in attachment) return <ActionPill compact dense fitContent style={[styles.attachmentPill, styles.messageAttachmentPill]}><View style={styles.attachmentPillContent}><FileIcon size="sm" variant="muted" /><Text numberOfLines={1} style={styles.attachmentName}>{displayAttachmentFilename(attachment.filename)}</Text></View></ActionPill>;
+  return <ActionPill compact dense fitContent onPress={() => onOpen(attachment)} pressLabel={`Open actions for ${displayAttachmentFilename(attachment.filename)}`} style={[styles.attachmentPill, styles.messageAttachmentPill]}><View style={styles.attachmentPillContent}><FileIcon size="sm" variant="muted" /><Text numberOfLines={1} style={styles.attachmentName}>{displayAttachmentFilename(attachment.filename)}</Text></View></ActionPill>;
 }
 
-const attachmentDisplayKey = (attachment: ConversationDisplayAttachment) => "local" in attachment ? attachment.clientKey : attachment.key;
+function MessageAttachments({ contextIdentity, message, onOpen }: { contextIdentity: string; message: DisplayMessage; onOpen: (attachment: ConversationAttachmentReference, image?: GalleryImage) => void }) {
+  const retained = useRef<ConversationDisplayAttachment[]>([]);
+  retained.current = conversationAttachmentsForRender(retained.current, message);
+  if (!retained.current.length) return null;
+  return <View accessibilityLabel="Message attachments" style={styles.messageAttachments}>{retained.current.map((attachment) => <MessageAttachment attachment={attachment} contextIdentity={contextIdentity} key={conversationAttachmentDisplayKey(attachment)} onOpen={onOpen} />)}</View>;
+}
 
-const MessageRow = memo(function MessageRow({ contextIdentity, message, onOpenActions, onOpenAttachment, onOpenImage, onOpenReferralCode, onOpenRetrievals }: { contextIdentity: string; message: DisplayMessage; onOpenActions: (message: OptimisticMessage) => void; onOpenAttachment: (attachment: ConversationAttachmentReference) => void; onOpenImage: (imageKey: string, collectionKey?: string) => void; onOpenReferralCode: () => void; onOpenRetrievals: (message: OptimisticMessage) => void }) {
+function isExpectedCancellation(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  const code = (error as Error & { code?: string }).code;
+  return error.name === "AbortError" || error.name === "CanceledError" || error.name === "CancelledError" || code === "ERR_CANCELED";
+}
+
+const MessageRow = memo(function MessageRow({ contextIdentity, message, onGuideTopic, onOpenActions, onOpenAttachment, onOpenImage, onOpenReferralCode, onOpenRetrievals, showGuideTopics }: { contextIdentity: string; message: DisplayMessage; onGuideTopic: (message: DisplayMessage, topic: GuideTopic) => void; onOpenActions: (message: OptimisticMessage) => void; onOpenAttachment: (attachment: ConversationAttachmentReference) => void; onOpenImage: (imageKey: string, collectionKey?: string) => void; onOpenReferralCode: () => void; onOpenRetrievals: (message: OptimisticMessage) => void; showGuideTopics: boolean }) {
   const user = message.role === "user";
   const image = message.kind === "image";
   const pending = message.status === "PENDING";
   const failed = message.status === "FAILED";
+  const interactive = !message.optimistic && !pending;
   const retrievalResults = useMemo(() => !user && message.status === "COMPLETED" ? mergeConversationRetrievalResults(message.retrievals) : [], [message.retrievals, message.status, user]);
   return <View style={[styles.messageRow, user ? styles.userRow : styles.assistantRow]}>
     {!user ? <ChromeIcon glow={0.35} size={20} source={assistantIconSource} style={styles.assistantMark} /> : null}
-    <View style={[styles.messageContent, user ? styles.userMessage : styles.assistantMessage]}>{image && !user && !failed ? <View style={styles.generatedImageResponse}><StreamingRichText content={imageProgressText(message.content)} streaming={false} /><GeneratedConversationImage contextIdentity={contextIdentity} imageKey={message.imageKey} onOpen={(collectionKey) => message.imageKey && onOpenImage(message.imageKey, collectionKey)} />{message.status === "COMPLETED" && message.imageSummaryText ? <StreamingRichText content={message.imageSummaryText} streaming={false} /> : null}</View> : pending && !message.content ? <LoadingText style={styles.thinkingText} text="Thinking..." /> : message.optimistic ? <View style={[styles.messageBox, failed && styles.failedMessage]}>
-      {failed ? <Text style={styles.messageText}>{image ? "Image generation failed." : "This response could not be completed."}</Text> : <StreamingRichText content={message.content} streaming={pending} />}
-    </View> : <Button accessibilityLabel={`Open actions for ${user ? "your message" : "Core response"}`} contentMode="raw" onPress={() => onOpenActions(message)} pressFeedback="opacity" shape="rounded" size="xs" style={[styles.messageBox, styles.messageButton, failed && styles.failedMessage]} variant="ghost">{failed ? <Text style={styles.messageText}>{image ? "Image generation failed." : "This response could not be completed."}</Text> : <StreamingRichText content={message.content} streaming={false} />}</Button>}
-    {message.attachments.length ? <View accessibilityLabel="Message attachments" style={styles.messageAttachments}>{message.attachments.map((attachment) => <MessageAttachment attachment={attachment} contextIdentity={contextIdentity} key={attachmentDisplayKey(attachment)} onOpen={onOpenAttachment} />)}</View> : null}
+    <View style={[styles.messageContent, user ? styles.userMessage : styles.assistantMessage]}>{image && !user && !failed ? <View style={styles.generatedImageResponse}><StreamingRichText content={imageProgressText(message.content)} streaming={false} style={pending ? styles.loadingTextRaised : undefined} /><GeneratedConversationImage contextIdentity={contextIdentity} imageKey={message.imageKey} onOpen={(collectionKey) => message.imageKey && onOpenImage(message.imageKey, collectionKey)} />{message.status === "COMPLETED" && message.imageSummaryText ? <StreamingRichText content={message.imageSummaryText} streaming={false} /> : null}</View> : <Button accessibilityLabel={interactive ? `Open actions for ${user ? "your message" : "Core response"}` : undefined} accessible={interactive} contentMode="raw" onPress={interactive ? () => onOpenActions(message) : undefined} pressFeedback="opacity" shape="rounded" size="xs" style={[styles.messageBox, styles.messageButton, user && styles.userMessageButton, failed && styles.failedMessage]} variant="ghost">{pending && !message.content ? <LoadingText style={[styles.thinkingText, styles.loadingTextRaised]} text="Thinking..." /> : failed ? <Text style={[styles.messageText, user && styles.userMessageText]}>{image ? "Image generation failed." : "This response could not be completed."}</Text> : <StreamingRichText content={message.content} streaming={pending} styles={user ? USER_MESSAGE_RICH_TEXT_STYLES : undefined} />}</Button>}
+    <MessageAttachments contextIdentity={contextIdentity} message={message} onOpen={onOpenAttachment} />
     {retrievalResults.length ? <ActionPill compact onPress={() => onOpenRetrievals(message)} pressLabel="Open search results"><Text numberOfLines={1} style={styles.retrievalSummary}>{formatConversationRetrievalSummary(retrievalResults)}</Text></ActionPill> : null}
-    {!user && message.status === "COMPLETED" && message.showReferralCodeAction ? <ActionPill compact onPress={onOpenReferralCode} pressLabel="Use referral code"><Text numberOfLines={1} style={styles.retrievalSummary}>Use code</Text></ActionPill> : null}</View>
+    {!user && message.status === "COMPLETED" && message.showReferralCodeAction ? <ActionPill compact onPress={onOpenReferralCode} pressLabel="Use referral code"><Text numberOfLines={1} style={styles.retrievalSummary}>Use code</Text></ActionPill> : null}
+    {showGuideTopics && (message.guideTopics.status === "READY" || message.streamingGuideTopics?.length) ? <View accessibilityLabel="Suggested topics" accessibilityLiveRegion="polite" style={styles.guideTopics}>{(message.guideTopics.status === "READY" ? message.guideTopics.topics : message.streamingGuideTopics ?? []).map((topic) => <ActionPill compact disabled={message.guideTopics.status !== "READY"} key={topic.key} onPress={() => onGuideTopic(message, topic)} pressLabel={`Ask: ${topic.label}`}><Text style={styles.guideTopicLabel}>{topic.label}</Text></ActionPill>)}</View> : null}
+    {showGuideTopics && message.guideTopics.status === "PENDING" ? <View accessibilityLabel="Loading suggested topics" accessibilityLiveRegion="polite" accessibilityRole="progressbar" style={styles.guideTopicsLoading}><LoadingText style={styles.loadingTextRaised} text="Finding topics..." /></View> : null}
+    </View>
   </View>;
 });
 
@@ -175,7 +218,7 @@ function ConversationWatermark() {
   return <View pointerEvents="none" style={styles.coreWatermark}><Text style={styles.coreWatermarkText}>Core</Text><View style={styles.coreWatermarkMark}><ChromeIcon glow={0.5} size={104} source={assistantIconSource} /></View><Text style={styles.coreWatermarkText}>Your personal AI for finding answers, natural conversation, and image creation across Vorinthex AI</Text></View>;
 }
 
-const messageKey = ({ key, role, turnKey }: OptimisticMessage) => turnKey ? `${turnKey}:${role}` : key;
+const messageKey = ({ key, renderKey, role, turnKey }: OptimisticMessage & { renderKey?: string }) => renderKey ?? (turnKey ? `${turnKey}:${role}` : key);
 const conversationKey = ({ key }: Conversation) => key;
 const MessageSeparator = () => <View style={styles.messageSeparator} />;
 
@@ -197,6 +240,8 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
   const [query, setQuery] = useState("");
   const [committedQuery, setCommittedQuery] = useState("");
   const [favoriteOnly, setFavoriteOnly] = useState(false);
+  const [selectedConversationKeys, setSelectedConversationKeys] = useState<string[]>([]);
+  const [actionConversation, setActionConversation] = useState<Conversation>();
   const [searchPending, setSearchPending] = useState(false);
   const [pendingMessages, setPendingMessages] = useState<OptimisticMessage[]>([]);
   const [turnError, setTurnError] = useState<string>();
@@ -206,6 +251,7 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
   const [greetingMessage, setGreetingMessage] = useState<DisplayMessage>();
   const [coreOpenRequest, setCoreOpenRequest] = useState(0);
   const [routeFocused, setRouteFocused] = useState(false);
+  const [coreFocused, setCoreFocused] = useState(false);
   const [creating, setCreating] = useState(false);
   const [history, setHistory] = useState<ContentSearchHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -213,12 +259,14 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
   const [removingHistoryQuery, setRemovingHistoryQuery] = useState<string>();
   const [activeRetrievals, setActiveRetrievals] = useState<readonly ConversationRetrieval[]>();
   const [selectedMessage, setSelectedMessage] = useState<OptimisticMessage>();
+  const [selectedAttachment, setSelectedAttachment] = useState<Extract<ConversationAttachmentReference, { kind: "document" }>>();
   const [selectedGeneratedImageKey, setSelectedGeneratedImageKey] = useState<string>();
   const [selectedGeneratedImageCollectionKey, setSelectedGeneratedImageCollectionKey] = useState<string>();
   const [editReferenceImageKey, setEditReferenceImageKey] = useState<string>();
   const [draftAttachments, setDraftAttachments] = useState<DraftAttachment[]>([]);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [composerFocusRequest, setComposerFocusRequest] = useState(0);
+  const [turnScrollRequest, setTurnScrollRequest] = useState(0);
   const contextRef = useRef(context);
   const identityRef = useRef(identity);
   const selectedRef = useRef<Conversation | undefined>(undefined);
@@ -226,26 +274,34 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
   const listRef = useRef<FlatList<OptimisticMessage>>(null);
   const nearBottom = useRef(true);
   const followLatest = useRef(false);
-  const initialScrollPending = useRef(true);
   const turnController = useRef<AbortController | undefined>(undefined);
   const greetingController = useRef<AbortController | undefined>(undefined);
   const greetingGeneration = useRef(0);
+  const greetingMessageRef = useRef<DisplayMessage | undefined>(undefined);
   const turnGeneration = useRef(0);
   const turnBusy = useRef(false);
   const createOperation = useRef<CreateOperation | undefined>(undefined);
   const historyController = useRef<AbortController | undefined>(undefined);
   const operationControllers = useRef(new Set<AbortController>());
   const mutationKeys = useRef(new Set<string>());
-  const selectionRestoreIdentity = useRef("");
+  const longPressedConversation = useRef<string | undefined>(undefined);
   const selectionRestoreGeneration = useRef(0);
+  const ephemeralDraft = useRef(false);
+  const coreFocusGeneration = useRef(0);
+  const coreFocusedRef = useRef(false);
   const scrollFrame = useRef<number | undefined>(undefined);
   const scrollSettleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const followReleaseFrame = useRef<number | undefined>(undefined);
   const pendingScroll = useRef<{ animated: boolean } | undefined>(undefined);
+  const deltaBuffer = useRef(new Map<string, string>());
+  const deltaFrame = useRef<number | undefined>(undefined);
   const draftAttachmentsRef = useRef<DraftAttachment[]>([]);
   const submittedAttachmentTurns = useRef(new Map<string, readonly DraftAttachment[]>());
   const settlingAttachmentTurns = useRef(new Set<string>());
+  const pendingImageHapticKeys = useRef(new Set<string>());
+  const pendingTopicHapticKeys = useRef(new Set<string>());
   const draftRevision = useRef(0);
+  const submitGuideTopicRef = useRef<(message: DisplayMessage, topic: GuideTopic) => void>(() => undefined);
+  const olderFetchBusy = useRef(false);
 
   const openMessageRetrievals = useCallback((message: OptimisticMessage) => {
     if (!mergeConversationRetrievalResults(message.retrievals).length) return;
@@ -290,6 +346,8 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
     enabled: configured && sheet === "chats" && !searchPending,
   });
   const conversations = useMemo(() => (chatsQuery.data?.pages.flatMap(({ conversations: page }) => page) ?? []).filter((conversation) => !favoriteOnly || conversation.isFavorite), [chatsQuery.data, favoriteOnly]);
+  const selectedConversations = useMemo(() => conversations.filter(({ key }) => selectedConversationKeys.includes(key)), [conversations, selectedConversationKeys]);
+  const allSelectedConversationsFavorite = selectedConversations.length > 0 && selectedConversations.every(({ isFavorite }) => isFavorite);
   const openReferralCode = useCallback(() => {
     Keyboard.dismiss();
     setSheet(undefined);
@@ -309,6 +367,8 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
     const current = visible(mergeConversationMessages(persistedMessages, pendingMessages));
     return greetingMessage ? [greetingMessage, ...current] : current;
   }, [greetingMessage, pendingMessages, persistedMessages]);
+  const timelineMessages = useMemo(() => [...messages].reverse(), [messages]);
+  useEffect(() => { greetingMessageRef.current = greetingMessage; }, [greetingMessage]);
   useEffect(() => {
     const settled = settlePendingAttachmentOverlays(persistedMessages, pendingMessages);
     if (!settled.settledTurnKeys.length) return;
@@ -330,15 +390,30 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
       });
     }
   }, [identity, pendingMessages, persistedMessages, queryClient]);
+  useEffect(() => {
+    for (const message of persistedMessages) {
+      if (!pendingImageHapticKeys.current.has(message.key) || message.kind !== "image" || message.role !== "assistant" || message.status === "PENDING") continue;
+      pendingImageHapticKeys.current.delete(message.key);
+      if (message.status === "COMPLETED") notifyCoreOutput();
+    }
+  }, [persistedMessages]);
+  useEffect(() => {
+    for (const message of persistedMessages) {
+      if (!pendingTopicHapticKeys.current.has(message.key) || message.guideTopics.status === "PENDING") continue;
+      pendingTopicHapticKeys.current.delete(message.key);
+      if (message.guideTopics.status === "READY") notifyCoreOutput();
+    }
+  }, [persistedMessages]);
   const latestMessageKey = messages.at(-1)?.key;
   const openGeneratedImage = useCallback((imageKey: string, collectionKey?: string) => { Keyboard.dismiss(); setSelectedGeneratedImageKey(imageKey); setSelectedGeneratedImageCollectionKey(collectionKey); setSheet("imageActions"); }, []);
-  const openMessageAttachment = useCallback((attachment: ConversationAttachmentReference) => {
+  const openMessageAttachment = useCallback((attachment: ConversationAttachmentReference, image?: GalleryImage) => {
     Keyboard.dismiss();
-    if (attachment.kind === "document") router.push({ pathname: "/capability/[slug]", params: { slug: "archive", documentKey: attachment.key, documentTitle: attachment.filename } });
-    else router.push({ pathname: "/capability/[slug]", params: { slug: "gallery", imageKey: attachment.key } });
+    if (attachment.kind === "document") { setSelectedAttachment(attachment); setSheet("attachmentActions"); }
+    else {
+      const collectionKey = image ? galleryImageCollectionKey(image) : undefined;
+      router.push({ pathname: "/capability/[slug]", params: { slug: "gallery", imageKey: attachment.key, ...(collectionKey ? { assetKey: collectionKey } : {}) } });
+    }
   }, [router]);
-  const renderMessage = useCallback<ListRenderItem<DisplayMessage>>(({ item }) => <MessageRow contextIdentity={identity} message={item} onOpenActions={openMessageActions} onOpenAttachment={openMessageAttachment} onOpenImage={openGeneratedImage} onOpenReferralCode={openReferralCode} onOpenRetrievals={openMessageRetrievals} />, [identity, openGeneratedImage, openMessageActions, openMessageAttachment, openMessageRetrievals, openReferralCode]);
-
   useEffect(() => {
     const stale = selected;
     if (!stale || !messagesQuery.isError || !isConversationNotFoundError(messagesQuery.error)) return;
@@ -351,6 +426,7 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
       setSelected(undefined); selectedRef.current = undefined;
       setActiveRetrievals(undefined); setSheet(undefined);
       void writeConversationSelection(context, undefined).catch(() => undefined);
+      if (coreFocusedRef.current) useUiStore.getState().requestAgentGreeting("returning");
     });
   }, [context, identity, messagesQuery.error, messagesQuery.isError, queryClient, selected]);
 
@@ -380,18 +456,18 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
       historyController.current = undefined;
       createOperation.current = undefined;
       turnBusy.current = false;
-      void queryClient.cancelQueries({ queryKey: conversationQueryKeys.all(previousContext) });
+      void queryClient.cancelQueries({ queryKey: conversationQueryKeys.all(previousContext) }).catch(() => undefined);
       queueMicrotask(() => {
         if (identityRef.current !== identity) return;
         for (const attachment of draftAttachmentsRef.current) deleteTemporaryFile(attachment.uri);
         clearSubmittedAttachmentFiles();
         draftAttachmentsRef.current = [];
-        setSheet(undefined); setSelected(undefined); setInput(""); setMode("chat"); setQuery(""); setCommittedQuery(""); setFavoriteOnly(false);
+        setSheet(undefined); setSelected(undefined); setInput(""); setMode("chat"); setQuery(""); setCommittedQuery(""); setFavoriteOnly(false); setSelectedConversationKeys([]); setActionConversation(undefined);
         setSearchPending(false); setPendingMessages([]); setGreetingMessage(undefined); setCoreOpenRequest(0); setTurnError(undefined); setEditName(""); setEditFavorite(false); setTurning(false); setCreating(false);
         setHistory([]); setHistoryLoading(false); setHistoryError(undefined); setRemovingHistoryQuery(undefined);
         setActiveRetrievals(undefined); setSelectedMessage(undefined); setSelectedGeneratedImageKey(undefined); setSelectedGeneratedImageCollectionKey(undefined); setEditReferenceImageKey(undefined);
         setDraftAttachments([]); setCameraOpen(false);
-        selectedRef.current = undefined; nearBottom.current = true; initialScrollPending.current = true; selectionRestoreIdentity.current = "";
+        selectedRef.current = undefined; nearBottom.current = true; ephemeralDraft.current = false;
       });
     }
     return () => {
@@ -410,7 +486,7 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
   useEffect(() => () => {
     if (scrollFrame.current !== undefined) cancelAnimationFrame(scrollFrame.current);
     if (scrollSettleTimer.current !== undefined) clearTimeout(scrollSettleTimer.current);
-    if (followReleaseFrame.current !== undefined) cancelAnimationFrame(followReleaseFrame.current);
+    if (deltaFrame.current !== undefined) cancelAnimationFrame(deltaFrame.current);
     for (const attachment of draftAttachmentsRef.current) deleteTemporaryFile(attachment.uri);
     clearSubmittedAttachmentFiles();
     greetingController.current?.abort();
@@ -439,32 +515,56 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
   }, [sheet]);
 
   function rememberConversation(conversation?: Conversation, capturedContext = context) { void writeConversationSelection(capturedContext, conversation).catch(() => undefined); }
-  async function restoreConversationSelection() {
-    if (!configured || selectedRef.current || selectionRestoreIdentity.current === identity) return;
-    selectionRestoreIdentity.current = identity;
+  async function restoreConversationSelection(): Promise<ConversationRestoreResult> {
+    if (!configured) return "suppressed";
+    if (selectedRef.current) return "restored";
     const restoreGeneration = ++selectionRestoreGeneration.current;
     const capturedIdentity = identity; const capturedContext = context;
-    try {
-      const stored = await readConversationSelection(capturedContext);
-      if (restoreGeneration !== selectionRestoreGeneration.current || !isConversationContextCurrent(capturedIdentity, identityRef) || selectedRef.current) return;
-      if (stored) { clearConversationState(); setSelected(stored); selectedRef.current = stored; return; }
-      const page = await listConversations(capturedContext, { favoriteOnly: false, recordHistory: false });
-      if (restoreGeneration !== selectionRestoreGeneration.current || !isConversationContextCurrent(capturedIdentity, identityRef) || selectedRef.current) return;
-      const latest = page.conversations.reduce<Conversation | undefined>((current, candidate) => !current || candidate.updatedAt > current.updatedAt ? candidate : current, undefined);
-      if (latest) { clearConversationState(); setSelected(latest); selectedRef.current = latest; rememberConversation(latest, capturedContext); }
-    } catch { if (restoreGeneration === selectionRestoreGeneration.current && isConversationContextCurrent(capturedIdentity, identityRef)) selectionRestoreIdentity.current = ""; }
+    const cached = await readConversationSelection(capturedContext);
+    if (restoreGeneration !== selectionRestoreGeneration.current || !isConversationContextCurrent(capturedIdentity, identityRef)) return "suppressed";
+    // A manually selected/created conversation always wins over an in-flight cache read.
+    if (selectedRef.current) return "restored";
+    if (!cached) return "empty";
+    clearConversationState(); setSelected(cached); selectedRef.current = cached;
+    return "restored";
   }
   function openSheet(next?: Sheet) { Keyboard.dismiss(); setSheet(next); }
+  function stopGreetingGeneration() {
+    greetingGeneration.current += 1;
+    greetingController.current?.abort();
+    greetingController.current = undefined;
+  }
+  function clearGreetingState() {
+    stopGreetingGeneration();
+    greetingMessageRef.current = undefined;
+    setGreetingMessage(undefined);
+  }
   function clearConversationState() {
     if (scrollFrame.current !== undefined) cancelAnimationFrame(scrollFrame.current);
     if (scrollSettleTimer.current !== undefined) clearTimeout(scrollSettleTimer.current);
-    if (followReleaseFrame.current !== undefined) cancelAnimationFrame(followReleaseFrame.current);
-    scrollFrame.current = undefined; scrollSettleTimer.current = undefined; followReleaseFrame.current = undefined; pendingScroll.current = undefined;
-    clearSubmittedAttachmentFiles(); setPendingMessages([]); setGreetingMessage(undefined); setTurnError(undefined); setSelectedMessage(undefined); setSelectedGeneratedImageKey(undefined); setSelectedGeneratedImageCollectionKey(undefined); setEditReferenceImageKey(undefined); nearBottom.current = true; followLatest.current = false; initialScrollPending.current = true;
+    scrollFrame.current = undefined; scrollSettleTimer.current = undefined; pendingScroll.current = undefined;
+    if (deltaFrame.current !== undefined) cancelAnimationFrame(deltaFrame.current);
+    deltaFrame.current = undefined; deltaBuffer.current.clear();
+    clearSubmittedAttachmentFiles(); pendingImageHapticKeys.current.clear(); pendingTopicHapticKeys.current.clear(); setPendingMessages([]); clearGreetingState(); setTurnError(undefined); setSelectedMessage(undefined); setSelectedGeneratedImageKey(undefined); setSelectedGeneratedImageCollectionKey(undefined); setEditReferenceImageKey(undefined); nearBottom.current = true; followLatest.current = false;
   }
   function operationController() { const controller = new AbortController(); operationControllers.current.add(controller); return controller; }
   function appendDelta(key: string, text: string) {
-    setPendingMessages((current) => current.map((message) => message.key === key ? { ...message, content: message.content + text } : message));
+    deltaBuffer.current.set(key, (deltaBuffer.current.get(key) ?? "") + text);
+    if (deltaFrame.current !== undefined) return;
+    deltaFrame.current = requestAnimationFrame(() => {
+      deltaFrame.current = undefined;
+      const buffered = new Map(deltaBuffer.current);
+      deltaBuffer.current.clear();
+      setPendingMessages((current) => current.map((message) => {
+        const delta = buffered.get(message.key);
+        return delta ? { ...message, content: message.content + delta } : message;
+      }));
+    });
+  }
+  function clearBufferedDeltas() {
+    if (deltaFrame.current !== undefined) cancelAnimationFrame(deltaFrame.current);
+    deltaFrame.current = undefined;
+    deltaBuffer.current.clear();
   }
   const scheduleScrollToEnd = useCallback((animated: boolean, settle = !animated) => {
     pendingScroll.current = { animated };
@@ -472,9 +572,9 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
       scrollFrame.current = requestAnimationFrame(() => {
         scrollFrame.current = undefined;
         const request = pendingScroll.current;
-        pendingScroll.current = undefined;
         if (!request || !listRef.current) return;
-        listRef.current.scrollToEnd({ animated: request.animated });
+        pendingScroll.current = undefined;
+        listRef.current.scrollToOffset({ animated: request.animated, offset: 0 });
       });
     }
     if (scrollSettleTimer.current !== undefined) {
@@ -484,72 +584,107 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
     if (settle) {
       scrollSettleTimer.current = setTimeout(() => {
         scrollSettleTimer.current = undefined;
-        listRef.current?.scrollToEnd({ animated: false });
+        listRef.current?.scrollToOffset({ animated: false, offset: 0 });
       }, 120);
     }
   }, []);
+  useLayoutEffect(() => {
+    if (!turnScrollRequest) return;
+    scheduleScrollToEnd(false);
+  }, [scheduleScrollToEnd, turnScrollRequest]);
+  const submitGuideTopic = useCallback((message: DisplayMessage, topic: GuideTopic) => submitGuideTopicRef.current(message, topic), []);
+  const renderMessage = useCallback<ListRenderItem<DisplayMessage>>(({ item }) => <MessageRow contextIdentity={identity} message={item} onGuideTopic={submitGuideTopic} onOpenActions={openMessageActions} onOpenAttachment={openMessageAttachment} onOpenImage={openGeneratedImage} onOpenReferralCode={openReferralCode} onOpenRetrievals={openMessageRetrievals} showGuideTopics={item.role === "assistant" && item.status === "COMPLETED"} />, [identity, openGeneratedImage, openMessageActions, openMessageAttachment, openMessageRetrievals, openReferralCode, submitGuideTopic]);
   useEffect(() => {
     if (!latestMessageKey) return;
     if (!followLatest.current && !nearBottom.current) return;
     nearBottom.current = true;
-    scheduleScrollToEnd(true);
+    scheduleScrollToEnd(false);
   }, [latestMessageKey, scheduleScrollToEnd]);
-  const releaseFollowLatest = useCallback(() => {
-    if (followReleaseFrame.current !== undefined) cancelAnimationFrame(followReleaseFrame.current);
-    followReleaseFrame.current = requestAnimationFrame(() => {
-      followReleaseFrame.current = requestAnimationFrame(() => {
-        followReleaseFrame.current = undefined;
-        if (!followLatest.current) return;
-        scheduleScrollToEnd(true);
-        followLatest.current = false;
-        nearBottom.current = true;
-      });
-    });
-  }, [scheduleScrollToEnd]);
   useEffect(() => {
-    if (!configured || !routeFocused || !greetingRequest) return;
+    if (!configured || !routeFocused || !coreFocused || !greetingRequest) return;
     const frame = requestAnimationFrame(() => {
       const request = useUiStore.getState().consumeAgentGreeting(greetingRequest.id);
       if (!request) return;
-      const generation = ++greetingGeneration.current;
-      greetingController.current?.abort();
-      const controller = new AbortController();
-      greetingController.current = controller;
-      const capturedIdentity = identity;
-      clearConversationState();
-      setSelected(undefined); selectedRef.current = undefined;
-      selectionRestoreGeneration.current += 1;
-      selectionRestoreIdentity.current = identity;
-      setSheet(undefined);
       useAppsStore.getState().enterCore();
       setCoreOpenRequest((current) => current + 1);
-      const createdAt = now();
-      const key = `agent-greeting-${request.id}`;
-      setGreetingMessage({ key, conversationKey: "ephemeral", turnKey: key, kind: "text", role: "assistant", status: "PENDING", attachmentStatus: "NONE", content: "", attachments: [], retrievals: [], createdAt, optimistic: true });
-      void requestAgentGreeting(context, request.occasion, controller.signal).then(({ message, showReferralCodeAction }) => {
-        if (generation !== greetingGeneration.current || !isConversationContextCurrent(capturedIdentity, identityRef)) return;
-        setGreetingMessage({ key, conversationKey: "ephemeral", turnKey: key, kind: "text", role: "assistant", status: "COMPLETED", attachmentStatus: "NONE", content: message, attachments: [], retrievals: [], showReferralCodeAction, createdAt, completedAt: now(), optimistic: true });
-        scheduleScrollToEnd(true);
-      }).catch((error) => {
-        if (generation !== greetingGeneration.current || !isConversationContextCurrent(capturedIdentity, identityRef) || (error instanceof Error && error.name === "AbortError")) return;
-        setGreetingMessage(undefined);
+      const focusGeneration = coreFocusGeneration.current;
+      const capturedIdentity = identity;
+      const loadingKey = `agent-greeting-${request.id}`;
+      let activeGreetingGeneration: number | undefined;
+      void (async () => {
+        const restoreResult = request.policy === "restore-or-greet" ? await restoreConversationSelection() : "empty";
+        if (focusGeneration !== coreFocusGeneration.current || !coreFocusedRef.current || !isConversationContextCurrent(capturedIdentity, identityRef)) return;
+        if (restoreResult === "restored" || restoreResult === "suppressed") { setGreetingMessage(undefined); return; }
+        clearConversationState();
+        setSelected(undefined); selectedRef.current = undefined;
+        ephemeralDraft.current = true;
+        selectionRestoreGeneration.current += 1;
+        setSheet(undefined);
+        const generation = ++greetingGeneration.current;
+        activeGreetingGeneration = generation;
+        const controller = new AbortController();
+        greetingController.current = controller;
+        const createdAt = now();
+        setGreetingMessage({ key: loadingKey, renderKey: loadingKey, conversationKey: "ephemeral", turnKey: loadingKey, kind: "text", role: "assistant", status: "PENDING", attachmentStatus: "NONE", content: "", attachments: [], retrievals: [], guideTopics: { status: "NONE" }, createdAt, optimistic: true });
+        const { messageKey, message, showReferralCodeAction, topicsPending, persistenceToken } = await requestAgentGreeting(context, request.occasion, (event) => {
+          if (generation !== greetingGeneration.current || focusGeneration !== coreFocusGeneration.current || !coreFocusedRef.current || !isConversationContextCurrent(capturedIdentity, identityRef)) return;
+          setGreetingMessage((current) => current?.key === loadingKey ? { ...current, content: current.content + event.text } : current);
+          scheduleScrollToEnd(false);
+        }, controller.signal);
+        if (generation !== greetingGeneration.current || focusGeneration !== coreFocusGeneration.current || !coreFocusedRef.current || !isConversationContextCurrent(capturedIdentity, identityRef)) return;
+        notifyCoreOutput();
+        const completed: DisplayMessage = { key: messageKey, renderKey: loadingKey, conversationKey: "ephemeral", turnKey: `opening:${messageKey}`, kind: "text", role: "assistant", status: "COMPLETED", attachmentStatus: "NONE", content: message, attachments: [], retrievals: [], guideTopics: topicsPending ? { status: "PENDING" } : { status: "NONE" }, persistenceToken, showReferralCodeAction, createdAt, completedAt: now(), optimistic: true };
+        greetingMessageRef.current = completed;
+        setGreetingMessage(completed);
+        scheduleScrollToEnd(false);
+        if (!topicsPending) return;
+        try {
+          const generated = await requestAgentGreetingTopics(context, persistenceToken, (event) => {
+            if (generation !== greetingGeneration.current || focusGeneration !== coreFocusGeneration.current || !coreFocusedRef.current || !isConversationContextCurrent(capturedIdentity, identityRef)) return;
+            setGreetingMessage((current) => current?.key === messageKey ? { ...current, streamingGuideTopics: [...(current.streamingGuideTopics ?? []), event.topic] } : current);
+            scheduleScrollToEnd(false);
+          }, controller.signal);
+          if (generation !== greetingGeneration.current || focusGeneration !== coreFocusGeneration.current || !coreFocusedRef.current || !isConversationContextCurrent(capturedIdentity, identityRef)) return;
+          notifyCoreOutput();
+          const ready: DisplayMessage = { ...completed, guideTopics: { status: "READY", topics: generated.topics }, persistenceToken: generated.persistenceToken };
+          greetingMessageRef.current = ready;
+          setGreetingMessage(ready);
+          scheduleScrollToEnd(false);
+        } catch (error) {
+          if (generation !== greetingGeneration.current || focusGeneration !== coreFocusGeneration.current || !coreFocusedRef.current || !isConversationContextCurrent(capturedIdentity, identityRef) || isExpectedCancellation(error)) return;
+          const failed: DisplayMessage = { ...completed, guideTopics: { status: "FAILED" } };
+          greetingMessageRef.current = failed;
+          setGreetingMessage(failed);
+        }
+      })().catch((error) => {
+        if (activeGreetingGeneration !== greetingGeneration.current || focusGeneration !== coreFocusGeneration.current || !coreFocusedRef.current || !isConversationContextCurrent(capturedIdentity, identityRef) || isExpectedCancellation(error)) return;
+        clearGreetingState();
         setTurnError("Core could not load an opening greeting.");
-      }).finally(() => {
-        if (generation === greetingGeneration.current) greetingController.current = undefined;
       });
     });
     return () => cancelAnimationFrame(frame);
-  }, [configured, context, greetingRequest, identity, routeFocused, scheduleScrollToEnd]);
+  }, [configured, context, coreFocused, greetingRequest, identity, routeFocused, scheduleScrollToEnd]);
   function handleCoreFocusChange(focused: boolean) {
     const apps = useAppsStore.getState();
+    coreFocusedRef.current = focused;
+    const focusGeneration = ++coreFocusGeneration.current;
+    setCoreFocused(focused);
     if (focused) apps.enterCore();
     else apps.leaveCore();
     props.onFocusChange?.(focused);
     if (!focused) {
+      clearGreetingState();
       followLatest.current = false;
       return;
     }
-    void restoreConversationSelection();
+    if (useUiStore.getState().agentGreetingRequest || greetingMessageRef.current) return;
+    if (ephemeralDraft.current) {
+      useUiStore.getState().requestAgentGreeting("returning");
+      return;
+    }
+    void restoreConversationSelection().then((result) => {
+      if (result === "empty" && focusGeneration === coreFocusGeneration.current && coreFocusedRef.current) useUiStore.getState().requestAgentGreeting("returning");
+    });
   }
 
   function addDraftAttachments(files: DraftAttachment[]) {
@@ -602,21 +737,19 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
 
   async function pickImages() {
     openSheet(undefined);
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return;
     const remaining = CONVERSATION_ATTACHMENT_MAX_FILES - draftAttachmentsRef.current.length;
     if (remaining <= 0) return;
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: true, selectionLimit: remaining, quality: 1, exif: true });
     if (result.canceled) return;
     const selected = result.assets.map((asset, index) => {
       const stem = (asset.fileName ?? `image-${index + 1}`).replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9._ -]/g, "_").slice(0, 240) || "image";
-      return { asset, draft: { clientKey: clientKey("attachment"), filename: `${stem}.png`, mimeType: "image/png" as const, sizeBytes: 1, uri: asset.uri, kind: "image" as const, preparing: true as const } };
+      return { asset, draft: { clientKey: clientKey("attachment"), filename: `${stem}.jpg`, mimeType: "image/jpeg" as const, sizeBytes: 1, uri: asset.uri, kind: "image" as const, preparing: true as const } };
     });
     const acceptedKeys = new Set(addDraftAttachments(selected.map(({ draft }) => draft)).map(({ clientKey: key }) => key));
     let failures = 0;
     await mapWithConcurrency(selected.filter(({ draft }) => acceptedKeys.has(draft.clientKey)), 3, async ({ asset, draft }) => {
       try {
-        const normalized = await normalizeCapturedPng(asset, { maxSide: 2400, compress: 0.88 });
+        const normalized = await normalizeCapturedJpeg(asset, { maxSide: 1600, compress: 0.82 });
         const { preparing: _preparing, ...placeholder } = draft;
         const prepared = { ...placeholder, sizeBytes: normalized.sizeBytes, uri: normalized.uri };
         if (!replaceDraftAttachment(draft.clientKey, prepared)) deleteTemporaryFile(normalized.uri);
@@ -648,10 +781,10 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
 
   function captureImage(picture: Parameters<NonNullable<ComponentProps<typeof BrandedCameraModal>["onCapture"]>>[0]) {
     const key = clientKey("attachment");
-    const draft: DraftAttachment = { clientKey: key, filename: `capture-${Date.now()}.png`, mimeType: "image/png", sizeBytes: 1, uri: picture.uri, kind: "image", preparing: true };
+    const draft: DraftAttachment = { clientKey: key, filename: `capture-${Date.now()}.jpg`, mimeType: "image/jpeg", sizeBytes: 1, uri: picture.uri, kind: "image", preparing: true };
     setCameraOpen(false);
     if (!addDraftAttachments([draft]).length) return;
-    void normalizeCapturedPng(picture, { maxSide: 2400, compress: 0.88 }).then((normalized) => {
+    void normalizeCapturedJpeg(picture, { maxSide: 1600, compress: 0.82 }).then((normalized) => {
       if (normalized.uri !== picture.uri) deleteTemporaryFile(picture.uri);
       const { preparing: _preparing, ...placeholder } = draft;
       if (!replaceDraftAttachment(key, { ...placeholder, sizeBytes: normalized.sizeBytes, uri: normalized.uri })) deleteTemporaryFile(normalized.uri);
@@ -660,37 +793,70 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
       showToast({ title: error instanceof Error ? error.message : "The photo could not be prepared.", duration: 2_000 });
     });
   }
-  const mountMessageList = useCallback((list: FlatList<OptimisticMessage> | null) => {
-    listRef.current = list;
-    if (!list) return;
-    initialScrollPending.current = true;
-    nearBottom.current = true;
-  }, []);
+  const mountMessageList = useCallback((list: FlatList<OptimisticMessage> | null) => { listRef.current = list; }, []);
+
+  function toggleConversationSelection(conversationKey: string) {
+    setSelectedConversationKeys((current) => current.includes(conversationKey) ? current.filter((key) => key !== conversationKey) : [...current, conversationKey]);
+  }
+
+  function handleConversationLongPress(conversation: Conversation, suppressPress = true) {
+    if (conversation.key.startsWith("optimistic-") || mutationKeys.current.has(conversation.key)) return;
+    if (suppressPress) {
+      longPressedConversation.current = conversation.key;
+      setTimeout(() => { if (longPressedConversation.current === conversation.key) longPressedConversation.current = undefined; }, 50);
+    }
+    const enteringSelection = selectedConversationKeys.length === 0 && !selectedConversationKeys.includes(conversation.key);
+    toggleConversationSelection(conversation.key);
+    if (enteringSelection) void Haptics.selectionAsync();
+  }
+
+  function handleConversationPress(conversation: Conversation) {
+    if (longPressedConversation.current === conversation.key) { longPressedConversation.current = undefined; return; }
+    if (selectedConversationKeys.length) { if (!conversation.key.startsWith("optimistic-") && !mutationKeys.current.has(conversation.key)) toggleConversationSelection(conversation.key); return; }
+    selectConversation(conversation);
+  }
+
+  function openConversationActions(conversation: Conversation) {
+    if (conversation.key.startsWith("optimistic-") || mutationKeys.current.has(conversation.key)) return;
+    setActionConversation(conversation);
+    openSheet("current");
+  }
+
+  function openConversationEdit() {
+    if (!actionConversation) return;
+    setEditName(actionConversation.name);
+    setEditFavorite(actionConversation.isFavorite);
+    openSheet("edit");
+  }
+
+  function closeConversationAction() {
+    setActionConversation(undefined);
+    openSheet(undefined);
+  }
 
   function selectConversation(conversation?: Conversation) {
+    selectionRestoreGeneration.current += 1;
     turnGeneration.current += 1; turnController.current?.abort(); turnController.current = undefined; turnBusy.current = false;
+    ephemeralDraft.current = false;
     setTurning(false); clearConversationState(); setSelected(conversation); selectedRef.current = conversation; rememberConversation(conversation); setActiveRetrievals(undefined); openSheet(undefined);
   }
 
-  function beginConversationCreation() {
+  function beginConversationCreation(openingGreeting?: DisplayMessage) {
     const current = createOperation.current;
     if (current?.identity === identity) return current;
     const capturedIdentity = identity;
     const capturedContext = context;
     const controller = operationController();
     const optimistic: Conversation = { key: clientKey("conversation"), name: "New chat", isFavorite: false, createdAt: now(), updatedAt: now() };
-    addConversationToUnfilteredLists(queryClient, capturedContext, optimistic);
     setCreating(true);
     setSelected(optimistic); selectedRef.current = optimistic;
     const operation: CreateOperation = { identity: capturedIdentity, optimistic, promise: Promise.resolve(undefined as never) };
-    operation.promise = createConversation(capturedContext, "New chat", controller.signal).then((created) => {
+    operation.promise = createConversation(capturedContext, "New chat", controller.signal, openingGreeting?.persistenceToken).then((created) => {
       if (!isConversationContextCurrent(capturedIdentity, identityRef)) throw new DOMException("Stale identity", "AbortError");
-      removeConversationFromLists(queryClient, capturedContext, optimistic.key);
-      addConversationToUnfilteredLists(queryClient, capturedContext, created);
-      queryClient.setQueryData(conversationQueryKeys.messages(capturedContext, created.key), { pages: [{ messages: [], cursor: undefined }], pageParams: [undefined] });
-      void invalidateConversationSearches(queryClient, capturedContext);
+      const openingMessage: ConversationMessage | undefined = openingGreeting ? { key: openingGreeting.key, conversationKey: created.key, turnKey: openingGreeting.turnKey ?? `opening:${openingGreeting.key}`, kind: "text", role: "assistant", status: "COMPLETED", attachmentStatus: "NONE", content: openingGreeting.content, attachments: [], retrievals: [], guideTopics: openingGreeting.guideTopics.status === "READY" ? openingGreeting.guideTopics : { status: "NONE" }, createdAt: openingGreeting.createdAt, completedAt: openingGreeting.completedAt ?? openingGreeting.createdAt } : undefined;
+      queryClient.setQueryData(conversationQueryKeys.messages(capturedContext, created.key), { pages: [{ messages: openingMessage ? [openingMessage] : [], cursor: undefined }], pageParams: [undefined] });
+      if (openingGreeting && greetingMessageRef.current?.key === openingGreeting.key) { greetingMessageRef.current = undefined; setGreetingMessage(undefined); }
       setSelected((value) => value?.key === optimistic.key ? created : value); selectedRef.current = selectedRef.current?.key === optimistic.key ? created : selectedRef.current;
-      rememberConversation(created, capturedContext);
       return created;
     }).catch((error) => {
       removeConversationFromLists(queryClient, capturedContext, optimistic.key);
@@ -703,9 +869,14 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
   }
 
   function openNewChat() {
-    if (!configured || createOperation.current) return;
-    clearConversationState(); const operation = beginConversationCreation(); openSheet(undefined);
-    void operation.promise.catch((error) => { if (isConversationContextCurrent(operation.identity, identityRef) && (!(error instanceof Error) || error.name !== "AbortError")) showToast({ title: error instanceof Error ? error.message : "Chat could not be created.", duration: 2_000 }); });
+    if (!configured) return;
+    clearConversationState();
+    setSelected(undefined); selectedRef.current = undefined;
+    ephemeralDraft.current = true;
+    selectionRestoreGeneration.current += 1;
+    rememberConversation(undefined);
+    openSheet(undefined);
+    useUiStore.getState().requestAgentGreeting("returning");
   }
 
   function dismissFailedMessages() {
@@ -715,31 +886,37 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
     setPendingMessages((current) => current.filter(({ status }) => status !== "FAILED"));
   }
 
-  async function submit() {
-    const content = input.trim();
+  async function submit(direct?: { content: string; guideTopicSelection: GuideTopicSelection }) {
+    const content = (direct?.content ?? input).trim();
     if (!content || !configured) return;
-    if (draftAttachmentsRef.current.some(({ preparing }) => preparing)) return;
+    if (!direct && draftAttachmentsRef.current.some(({ preparing }) => preparing)) return;
     if (turnBusy.current) return;
+    const openingGreeting = greetingMessageRef.current?.status === "COMPLETED" && greetingMessageRef.current.persistenceToken ? greetingMessageRef.current : undefined;
+    if (openingGreeting) stopGreetingGeneration();
+    else clearGreetingState();
+    ephemeralDraft.current = false;
     const submittedDraftRevision = draftRevision.current;
-    turnBusy.current = true; followLatest.current = true; setTurning(true); setInput(""); setTurnError(undefined); nearBottom.current = true;
+    turnBusy.current = true; followLatest.current = false; setTurning(true); if (!direct) setInput(""); setTurnError(undefined); nearBottom.current = false;
     dismissFailedMessages();
     const capturedIdentity = identity; const capturedContext = context; const generation = ++turnGeneration.current;
     const requestKey = clientKey("turn"); const optimisticUserKey = clientKey("user"); const optimisticAssistantKey = clientKey("assistant");
-    const submittedAttachments = [...draftAttachmentsRef.current];
-    const submittedReferenceImageKey = editReferenceImageKey;
-    draftAttachmentsRef.current = [];
-    setDraftAttachments([]);
-    setEditReferenceImageKey(undefined);
+    const submittedAttachments = direct ? [] : [...draftAttachmentsRef.current];
+    const submittedReferenceImageKey = direct ? undefined : editReferenceImageKey;
+    if (!direct) {
+      draftAttachmentsRef.current = [];
+      setDraftAttachments([]);
+      setEditReferenceImageKey(undefined);
+    }
     const existing = selectedRef.current;
-    const operation = !existing || existing.key.startsWith("optimistic-") ? beginConversationCreation() : undefined;
+    const operation = !existing || existing.key.startsWith("optimistic-") ? beginConversationCreation(openingGreeting) : undefined;
     const pendingConversationKey = existing?.key ?? operation?.optimistic.key ?? "pending";
     const optimisticAttachments = createLocalConversationAttachments(submittedAttachments);
     setPendingMessages((current) => [...current,
-      { key: optimisticUserKey, conversationKey: pendingConversationKey, turnKey: requestKey, kind: "text", role: "user", status: "COMPLETED", attachmentStatus: submittedAttachments.length ? "PENDING" : "NONE", content, attachments: optimisticAttachments, retrievals: [], createdAt: now(), optimistic: true },
-      { key: optimisticAssistantKey, conversationKey: pendingConversationKey, turnKey: requestKey, kind: "text", role: "assistant", status: "PENDING", attachmentStatus: "NONE", content: "", attachments: [], retrievals: [], createdAt: now(), optimistic: true },
+      { key: optimisticUserKey, conversationKey: pendingConversationKey, turnKey: requestKey, kind: "text", role: "user", status: "COMPLETED", attachmentStatus: submittedAttachments.length ? "PENDING" : "NONE", content, attachments: optimisticAttachments, retrievals: [], guideTopics: { status: "NONE" }, createdAt: now(), optimistic: true },
+      { key: optimisticAssistantKey, conversationKey: pendingConversationKey, turnKey: requestKey, kind: "text", role: "assistant", status: "PENDING", attachmentStatus: "NONE", content: "", attachments: [], retrievals: [], guideTopics: { status: "NONE" }, createdAt: now(), optimistic: true },
     ]);
     if (submittedAttachments.length) submittedAttachmentTurns.current.set(requestKey, submittedAttachments);
-    scheduleScrollToEnd(true);
+    setTurnScrollRequest((current) => current + 1);
     let userMessageKey = optimisticUserKey; let assistantMessageKey = optimisticAssistantKey; let activeConversation: Conversation | undefined;
     try {
       activeConversation = operation ? await operation.promise : existing;
@@ -750,50 +927,136 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
       const uploaded = submittedAttachments.length ? await uploadConversationAttachments(capturedContext, active.key, requestKey, submittedAttachments, controller.signal) : undefined;
       const attachmentKeys = uploaded?.attachmentKeys ?? [];
       let authoritativeUser: ConversationMessage | undefined;
-      await streamConversationTurn(capturedContext, { conversationKey: active.key, message: content, requestKey, attachmentKeys, referenceImageKeys: submittedReferenceImageKey ? [submittedReferenceImageKey] : [] }, (event) => {
+      await streamConversationTurn(capturedContext, { conversationKey: active.key, message: content, requestKey, attachmentKeys, referenceImageKeys: submittedReferenceImageKey ? [submittedReferenceImageKey] : [], ...(direct ? { guideTopicSelection: direct.guideTopicSelection } : {}) }, (event) => {
         if (generation !== turnGeneration.current || controller.signal.aborted || !isConversationContextCurrent(capturedIdentity, identityRef)) return;
         if (event.type === "start") {
           userMessageKey = event.userMessageKey; assistantMessageKey = event.assistantMessageKey;
           authoritativeUser = event.userMessage;
+          addConversationToUnfilteredLists(queryClient, capturedContext, active);
+          rememberConversation(active, capturedContext);
           setPendingMessages((current) => current.map((message) => message.turnKey === requestKey && message.role === "assistant" ? { ...message, key: assistantMessageKey } : message));
         } else if (event.type === "delta") {
           appendDelta(assistantMessageKey, event.text);
         } else if (event.type === "done") {
+          clearBufferedDeltas();
+          followLatest.current = false;
+          nearBottom.current = false;
+          if (event.message.guideTopics.status === "PENDING") pendingTopicHapticKeys.current.add(event.message.key);
+          if (event.message.kind === "image" && event.message.role === "assistant") {
+            if (event.message.status === "PENDING") pendingImageHapticKeys.current.add(event.message.key);
+            else if (event.message.status === "COMPLETED") notifyCoreOutput();
+          } else notifyCoreOutput();
           const currentConversation = selectedRef.current?.key === active.key ? selectedRef.current : active;
           const updated = { ...currentConversation, ...(event.name ? { name: event.name } : {}), updatedAt: event.message.completedAt ?? event.message.createdAt };
-           const completedUser: OptimisticMessage = authoritativeUser ?? { key: userMessageKey, conversationKey: active.key, turnKey: requestKey, kind: "text", role: "user", status: "COMPLETED", attachmentStatus: submittedAttachments.length ? "PENDING" : "NONE", content, attachments: [], retrievals: [], createdAt: now(), completedAt: now() };
+           const completedUser: OptimisticMessage = authoritativeUser ?? { key: userMessageKey, conversationKey: active.key, turnKey: requestKey, kind: "text", role: "user", status: "COMPLETED", attachmentStatus: submittedAttachments.length ? "PENDING" : "NONE", content, attachments: [], retrievals: [], guideTopics: { status: "NONE" }, createdAt: now(), completedAt: now() };
           setSelected(updated); selectedRef.current = updated; replaceConversationInMatchingLists(queryClient, capturedContext, updated);
           rememberConversation(updated, capturedContext);
-            queryClient.setQueryData(conversationQueryKeys.messages(capturedContext, active.key), (data: typeof messagesQuery.data) => data ? { ...data, pages: data.pages.map((page, index) => index === 0 ? { ...page, messages: replaceTurnMessages(page.messages, completedUser, event.message, [optimisticUserKey, optimisticAssistantKey, userMessageKey, assistantMessageKey]) as ConversationMessage[] } : { ...page, messages: page.messages.filter((message) => message.turnKey !== requestKey) }) } : { pages: [{ messages: [completedUser, event.message] as ConversationMessage[], cursor: undefined }], pageParams: [undefined] });
-            setPendingMessages((current) => current.filter((message) => message.turnKey !== requestKey || (submittedAttachments.length > 0 && message.role === "user")));
-           scheduleScrollToEnd(true);
+              queryClient.setQueryData(conversationQueryKeys.messages(capturedContext, active.key), (data: typeof messagesQuery.data) => data ? { ...data, pages: data.pages.map((page, index) => index === 0 ? { ...page, messages: replaceTurnMessages(page.messages, completedUser, event.message, [optimisticUserKey, optimisticAssistantKey, userMessageKey, assistantMessageKey]) as ConversationMessage[] } : { ...page, messages: page.messages.filter((message) => message.turnKey !== requestKey) }) } : { pages: [{ messages: [completedUser, event.message] as ConversationMessage[], cursor: undefined }], pageParams: [undefined] });
+              setPendingMessages((current) => current.filter((message) => message.turnKey !== requestKey || (submittedAttachments.length > 0 && message.role === "user")));
+              turnBusy.current = false; setTurning(false);
         }
       }, controller.signal);
       if (generation === turnGeneration.current && isConversationContextCurrent(capturedIdentity, identityRef)) { await invalidateConversationSearches(queryClient, capturedContext); void queryClient.invalidateQueries({ queryKey: conversationQueryKeys.messages(capturedContext, active.key), refetchType: "none" }); }
     } catch (error) {
-      if (generation !== turnGeneration.current || !isConversationContextCurrent(capturedIdentity, identityRef) || (error instanceof Error && error.name === "AbortError")) { deleteSubmittedAttachmentFiles(requestKey); return; }
-      restoreSentAttachments(requestKey, submittedAttachments);
-      if (submittedReferenceImageKey) setEditReferenceImageKey((current) => current ?? submittedReferenceImageKey);
+      clearBufferedDeltas();
+      if (generation !== turnGeneration.current || !isConversationContextCurrent(capturedIdentity, identityRef) || isExpectedCancellation(error)) { deleteSubmittedAttachmentFiles(requestKey); return; }
+      followLatest.current = false;
+      nearBottom.current = false;
+      pendingScroll.current = undefined;
+      if (scrollFrame.current !== undefined) cancelAnimationFrame(scrollFrame.current);
+      if (scrollSettleTimer.current !== undefined) clearTimeout(scrollSettleTimer.current);
+      scrollFrame.current = undefined;
+      scrollSettleTimer.current = undefined;
+      if (!direct) restoreSentAttachments(requestKey, submittedAttachments);
+      if (!direct && submittedReferenceImageKey) setEditReferenceImageKey((current) => current ?? submittedReferenceImageKey);
       const message = extractDomainErrorMessage(error) ?? "Core could not complete this response.";
-      if (draftRevision.current === submittedDraftRevision) setInput(content);
+      if (!direct && draftRevision.current === submittedDraftRevision) setInput(content);
       setTurnError(message);
       setPendingMessages((current) => current.filter(({ key }) => ![optimisticUserKey, optimisticAssistantKey, userMessageKey, assistantMessageKey].includes(key)));
       if (activeConversation) void queryClient.invalidateQueries({ queryKey: conversationQueryKeys.messages(capturedContext, activeConversation.key) });
       if (!isSparkFundingError(error)) showToast({ title: message, duration: 2_000 });
-      scheduleScrollToEnd(true);
     } finally {
-      if (generation === turnGeneration.current && isConversationContextCurrent(capturedIdentity, identityRef)) { scheduleScrollToEnd(true); releaseFollowLatest(); turnBusy.current = false; setTurning(false); turnController.current = undefined; }
+      if (generation === turnGeneration.current && isConversationContextCurrent(capturedIdentity, identityRef)) { turnBusy.current = false; setTurning(false); setTurnScrollRequest((current) => current + 1); turnController.current = undefined; followLatest.current = false; nearBottom.current = false; }
     }
   }
+  submitGuideTopicRef.current = (message, topic) => void submit({ content: topic.question, guideTopicSelection: { sourceAssistantMessageKey: message.key, topicKey: topic.key } });
 
-  function mutateConversation(action: "favorite" | "edit") {
-    const current = selectedRef.current; if (!current || current.key.startsWith("optimistic-") || mutationKeys.current.has(current.key)) return;
+  function updateSelectedConversationsFavorite() {
+    const targets = selectedConversations.filter(({ key }) => !key.startsWith("optimistic-") && !mutationKeys.current.has(key));
+    if (!targets.length) return;
+    const capturedIdentity = identity; const capturedContext = context;
+    const isFavorite = !targets.every((conversation) => conversation.isFavorite);
+    const memberships = new Map(targets.map((conversation) => [conversation.key, conversationListMembershipKeys(queryClient, capturedContext, conversation.key)]));
+    for (const conversation of targets) {
+      mutationKeys.current.add(conversation.key);
+      const optimistic = { ...conversation, isFavorite, updatedAt: now() };
+      replaceConversationInMatchingLists(queryClient, capturedContext, optimistic);
+      if (selectedRef.current?.key === conversation.key) { setSelected(optimistic); selectedRef.current = optimistic; rememberConversation(optimistic, capturedContext); }
+    }
+    setSelectedConversationKeys([]); openSheet("chats");
+    showToast({ title: `${targets.length} ${targets.length === 1 ? "chat" : "chats"} ${isFavorite ? "favorited" : "unfavorited"}`, duration: 2_000 });
+    void Promise.all(targets.map(async (conversation) => {
+      const controller = operationController();
+      try { return { conversation, updated: await updateConversation(capturedContext, conversation.key, { isFavorite }, controller.signal), succeeded: true as const }; }
+      catch (error) { return { conversation, error, succeeded: false as const }; }
+      finally { mutationKeys.current.delete(conversation.key); operationControllers.current.delete(controller); }
+    })).then((outcomes) => {
+      if (!isConversationContextCurrent(capturedIdentity, identityRef)) return;
+      let failures = 0;
+      for (const outcome of outcomes) {
+        const result = outcome.succeeded ? outcome.updated : outcome.conversation;
+        replaceConversationInMatchingLists(queryClient, capturedContext, result);
+        if (!outcome.succeeded) { failures += 1; restoreConversationToLists(queryClient, outcome.conversation, memberships.get(outcome.conversation.key) ?? []); }
+        if (selectedRef.current?.key === outcome.conversation.key) { setSelected(result); selectedRef.current = result; rememberConversation(result, capturedContext); }
+      }
+      if (failures) showToast({ title: failures === 1 ? "A chat could not be updated." : `${failures} chats could not be updated.`, duration: 2_500 });
+      void invalidateConversationSearches(queryClient, capturedContext);
+    });
+  }
+
+  function deleteSelectedConversations() {
+    const targets = selectedConversations.filter(({ key }) => !key.startsWith("optimistic-") && !mutationKeys.current.has(key));
+    if (!targets.length) return;
+    const capturedIdentity = identity; const capturedContext = context;
+    const deletedKeys = new Set(targets.map(({ key }) => key));
+    const memberships = new Map(targets.map((conversation) => [conversation.key, conversationListMembershipKeys(queryClient, capturedContext, conversation.key)]));
+    for (const conversation of targets) { mutationKeys.current.add(conversation.key); removeConversationFromLists(queryClient, capturedContext, conversation.key); }
+    const deletingCurrent = selectedRef.current && deletedKeys.has(selectedRef.current.key);
+    if (deletingCurrent) {
+      turnGeneration.current += 1; turnController.current?.abort(); turnController.current = undefined; turnBusy.current = false; setTurning(false); clearConversationState();
+      const fallback = conversations.find(({ key }) => !deletedKeys.has(key));
+      setSelected(fallback); selectedRef.current = fallback; rememberConversation(fallback, capturedContext);
+    }
+    setSelectedConversationKeys([]); openSheet("chats");
+    showToast({ title: `${targets.length} ${targets.length === 1 ? "chat" : "chats"} deleted`, duration: 2_000 });
+    void Promise.all(targets.map(async (conversation) => {
+      const controller = operationController();
+      try { await deleteConversation(capturedContext, conversation.key, controller.signal); return { conversation, deleted: true as const }; }
+      catch (error) { return { conversation, error }; }
+      finally { mutationKeys.current.delete(conversation.key); operationControllers.current.delete(controller); }
+    })).then(async (outcomes) => {
+      if (!isConversationContextCurrent(capturedIdentity, identityRef)) return;
+      const failures = outcomes.filter((outcome) => !("deleted" in outcome));
+      for (const { conversation } of failures) restoreConversationToLists(queryClient, conversation, memberships.get(conversation.key) ?? []);
+      if (failures.length) showToast({ title: failures.length === 1 ? "A chat could not be deleted." : `${failures.length} chats could not be deleted.`, duration: 2_500 });
+      if (deletingCurrent) {
+        const result = await restoreConversationSelection();
+        if (result === "empty" && coreFocusedRef.current) useUiStore.getState().requestAgentGreeting("returning");
+      }
+      void invalidateConversationSearches(queryClient, capturedContext);
+    });
+  }
+
+  function saveConversationEdit() {
+    const current = actionConversation; if (!current || current.key.startsWith("optimistic-") || mutationKeys.current.has(current.key)) return;
     const capturedIdentity = identity; const capturedContext = context; const controller = operationController();
-    const nextName = action === "edit" ? editName.trim() : current.name;
-    const nextFavorite = action === "favorite" ? !current.isFavorite : editFavorite;
+    const nextName = editName.trim();
+    const nextFavorite = editFavorite;
     const optimistic = { ...current, name: nextName, isFavorite: nextFavorite, updatedAt: now() };
     mutationKeys.current.add(current.key);
-    setSelected(optimistic); selectedRef.current = optimistic; replaceConversationInMatchingLists(queryClient, capturedContext, optimistic); rememberConversation(optimistic, capturedContext); openSheet(undefined);
+    replaceConversationInMatchingLists(queryClient, capturedContext, optimistic);
+    if (selectedRef.current?.key === current.key) { setSelected(optimistic); selectedRef.current = optimistic; rememberConversation(optimistic, capturedContext); }
+    setActionConversation(undefined); openSheet(undefined);
     void (async () => {
       let canonical = current;
       try {
@@ -801,46 +1064,49 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
         if (nextFavorite !== current.isFavorite) canonical = await updateConversation(capturedContext, current.key, { isFavorite: nextFavorite }, controller.signal);
         if (!isConversationContextCurrent(capturedIdentity, identityRef)) return;
         setSelected((value) => value?.key === current.key ? canonical : value);
-        if (selectedRef.current?.key === current.key) selectedRef.current = canonical;
-        replaceConversationInMatchingLists(queryClient, capturedContext, canonical); rememberConversation(canonical, capturedContext);
+        if (selectedRef.current?.key === current.key) { selectedRef.current = canonical; rememberConversation(canonical, capturedContext); }
+        replaceConversationInMatchingLists(queryClient, capturedContext, canonical);
         await invalidateConversationSearches(queryClient, capturedContext);
         await queryClient.invalidateQueries({ queryKey: conversationQueryKeys.lists(capturedContext), refetchType: "active" });
       } catch (error) {
         if (!isConversationContextCurrent(capturedIdentity, identityRef)) return;
         setSelected((value) => value?.key === current.key ? canonical : value);
-        if (selectedRef.current?.key === current.key) selectedRef.current = canonical;
-        replaceConversationInMatchingLists(queryClient, capturedContext, canonical); rememberConversation(canonical, capturedContext);
+        if (selectedRef.current?.key === current.key) { selectedRef.current = canonical; rememberConversation(canonical, capturedContext); }
+        replaceConversationInMatchingLists(queryClient, capturedContext, canonical);
         showToast({ title: error instanceof Error ? error.message : "Chat could not be updated.", duration: 2_000 });
       } finally { mutationKeys.current.delete(current.key); operationControllers.current.delete(controller); }
     })();
   }
 
   function confirmDelete() {
-    const deleted = selectedRef.current; if (!deleted || mutationKeys.current.has(deleted.key)) return;
+    const deleted = actionConversation; if (!deleted || mutationKeys.current.has(deleted.key)) return;
     const capturedIdentity = identity; const capturedContext = context;
     const controller = operationController();
+    const memberships = conversationListMembershipKeys(queryClient, capturedContext, deleted.key);
     mutationKeys.current.add(deleted.key);
-    turnGeneration.current += 1; turnController.current?.abort(); turnController.current = undefined; turnBusy.current = false; setTurning(false);
-    removeConversationFromLists(queryClient, capturedContext, deleted.key); setSelected(undefined); selectedRef.current = undefined; rememberConversation(undefined, capturedContext); setActiveRetrievals(undefined); openSheet(undefined);
+    const deletingCurrent = selectedRef.current?.key === deleted.key;
+    if (deletingCurrent) { turnGeneration.current += 1; turnController.current?.abort(); turnController.current = undefined; turnBusy.current = false; setTurning(false); }
+    removeConversationFromLists(queryClient, capturedContext, deleted.key);
+    if (deletingCurrent) { const fallback = conversations.find(({ key }) => key !== deleted.key); setSelected(fallback); selectedRef.current = fallback; rememberConversation(fallback, capturedContext); setActiveRetrievals(undefined); }
+    setActionConversation(undefined); openSheet(undefined);
     void (async () => {
       let deletedPersisted = false;
       try {
         await deleteConversation(capturedContext, deleted.key, controller.signal);
         deletedPersisted = true;
-        const fallbackPage = await listConversations(capturedContext, { favoriteOnly: false, recordHistory: false });
-        if (!isConversationContextCurrent(capturedIdentity, identityRef)) return;
-        queryClient.setQueryData(conversationQueryKeys.list(capturedContext, { query: "", favoriteOnly: false }), { pages: [fallbackPage], pageParams: [undefined] });
-        const fallback = fallbackPage.conversations.reduce<Conversation | undefined>((current, candidate) => !current || candidate.updatedAt > current.updatedAt ? candidate : current, undefined);
-        setSelected(fallback); selectedRef.current = fallback; rememberConversation(fallback, capturedContext);
+        if (!deletingCurrent) { await invalidateConversationSearches(queryClient, capturedContext); return; }
+        const result = await restoreConversationSelection();
+        if (result === "empty" && coreFocusedRef.current) useUiStore.getState().requestAgentGreeting("returning");
         await invalidateConversationSearches(queryClient, capturedContext);
       } catch (error) {
         if (!isConversationContextCurrent(capturedIdentity, identityRef)) return;
         if (!deletedPersisted) {
-          addConversationToUnfilteredLists(queryClient, capturedContext, deleted); setSelected(deleted); selectedRef.current = deleted; rememberConversation(deleted, capturedContext);
+          restoreConversationToLists(queryClient, deleted, memberships);
+          if (deletingCurrent) { setSelected(deleted); selectedRef.current = deleted; rememberConversation(deleted, capturedContext); }
         } else {
           void queryClient.invalidateQueries({ queryKey: conversationQueryKeys.lists(capturedContext), refetchType: "active" });
         }
-        if (!(error instanceof Error) || error.name !== "AbortError") showToast({ title: deletedPersisted ? `Chat deleted, but refresh failed: ${error instanceof Error ? error.message : "unknown error"}` : error instanceof Error ? error.message : "Chat could not be deleted.", duration: 2_000 });
+        if (!isExpectedCancellation(error)) showToast({ title: deletedPersisted ? `Chat deleted, but refresh failed: ${error instanceof Error ? error.message : "unknown error"}` : error instanceof Error ? error.message : "Chat could not be deleted.", duration: 2_000 });
       } finally { mutationKeys.current.delete(deleted.key); operationControllers.current.delete(controller); }
     })();
   }
@@ -850,20 +1116,19 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
     if (!conversation || !message || turning || message.optimistic || message.status === "PENDING") return;
     const capturedIdentity = identity; const capturedContext = context; const controller = operationController();
     const queryKey = conversationQueryKeys.messages(capturedContext, conversation.key);
-    const previous = queryClient.getQueryData<typeof messagesQuery.data>(queryKey);
-    void queryClient.cancelQueries({ queryKey, exact: true });
-    queryClient.setQueryData(queryKey, (data: typeof messagesQuery.data) => data ? { ...data, pages: data.pages.map((page) => ({ ...page, messages: page.messages.filter((candidate) => message.turnKey ? candidate.turnKey !== message.turnKey : candidate.key !== message.key) })) } : data);
     setSelectedMessage(undefined); openSheet(undefined);
     void (async () => {
+      await queryClient.cancelQueries({ queryKey, exact: true });
+      const optimistic = removeConversationMessages(queryClient.getQueryData(queryKey), (candidate) => message.turnKey ? candidate.turnKey === message.turnKey : candidate.key === message.key);
+      queryClient.setQueryData(queryKey, optimistic.data);
       try {
         const { deletedKeys } = await deleteConversationMessage(capturedContext, conversation.key, message.key, controller.signal);
         if (!isConversationContextCurrent(capturedIdentity, identityRef) || selectedRef.current?.key !== conversation.key) return;
         const deleted = new Set(deletedKeys);
-        queryClient.setQueryData(queryKey, (data: typeof messagesQuery.data) => data ? { ...data, pages: data.pages.map((page) => ({ ...page, messages: page.messages.filter(({ key }) => !deleted.has(key)) })) } : data);
-        void queryClient.invalidateQueries({ queryKey, exact: true });
+        queryClient.setQueryData(queryKey, (data: typeof messagesQuery.data) => removeConversationMessages(data, ({ key }) => deleted.has(key)).data);
       } catch (error) {
-        if (isConversationContextCurrent(capturedIdentity, identityRef) && (!(error instanceof Error) || error.name !== "AbortError")) {
-          queryClient.setQueryData(queryKey, previous);
+        if (isConversationContextCurrent(capturedIdentity, identityRef) && !isExpectedCancellation(error)) {
+          queryClient.setQueryData(queryKey, (data: typeof messagesQuery.data) => restoreConversationMessages(data, optimistic.removed));
           showToast({ title: error instanceof Error ? error.message : "Message could not be deleted.", duration: 2_000 });
         }
       } finally {
@@ -897,33 +1162,30 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
 
   const { fetchNextPage: fetchOlderMessagesPage, hasNextPage: hasOlderMessages, isFetchNextPageError, isFetchingNextPage: isFetchingOlderMessages, refetch: refetchMessages } = messagesQuery;
   const fetchOlderMessages = useCallback(() => {
-    if (hasOlderMessages && !isFetchingOlderMessages) void fetchOlderMessagesPage();
+    if (!hasOlderMessages || isFetchingOlderMessages || olderFetchBusy.current) return;
+    olderFetchBusy.current = true;
+    void fetchOlderMessagesPage().finally(() => { olderFetchBusy.current = false; });
   }, [fetchOlderMessagesPage, hasOlderMessages, isFetchingOlderMessages]);
   const handleMessageScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (initialScrollPending.current) return;
-    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    nearBottom.current = contentSize.height - layoutMeasurement.height - contentOffset.y < 80;
-    if (contentOffset.y < 180) fetchOlderMessages();
-  }, [fetchOlderMessages]);
+    nearBottom.current = event.nativeEvent.contentOffset.y < 80;
+  }, []);
   const handleMessageScrollBeginDrag = useCallback(() => {
     followLatest.current = false;
     nearBottom.current = false;
     pendingScroll.current = undefined;
     if (scrollFrame.current !== undefined) cancelAnimationFrame(scrollFrame.current);
     if (scrollSettleTimer.current !== undefined) clearTimeout(scrollSettleTimer.current);
-    if (followReleaseFrame.current !== undefined) cancelAnimationFrame(followReleaseFrame.current);
     scrollFrame.current = undefined;
     scrollSettleTimer.current = undefined;
-    followReleaseFrame.current = undefined;
   }, []);
   const retryMessages = useCallback(() => void refetchMessages(), [refetchMessages]);
   const handleListContentSizeChange = useCallback(() => {
-    if (initialScrollPending.current) { initialScrollPending.current = false; scheduleScrollToEnd(false); }
-    else if (followLatest.current || nearBottom.current) scheduleScrollToEnd(!turning);
-  }, [scheduleScrollToEnd, turning]);
-  function changeQuery(value: string) { setQuery(value); setSearchPending(true); }
+    if (turnBusy.current) return;
+    if (followLatest.current) scheduleScrollToEnd(false);
+  }, [scheduleScrollToEnd]);
+  function changeQuery(value: string) { setSelectedConversationKeys([]); setQuery(value); setSearchPending(true); }
 
-  const pageActions = <View style={styles.headerActions}><Button accessibilityLabel="Open chats" contentMode="raw" onPress={() => openSheet("chats")} size="xs" variant="icon"><ChatBubbleIcon size="sm" /></Button></View>;
+  const pageActions = <View style={styles.headerActions}><Button accessibilityLabel="Open chats" contentMode="raw" onPress={() => openSheet("chats")} size="xs" variant="icon"><ChatBubbleIcon size="sm" /></Button>{selected && !selected.key.startsWith("optimistic-") ? <Button accessibilityLabel="Current chat menu" contentMode="raw" disabled={turning || mutationKeys.current.has(selected.key)} onPress={() => openConversationActions(selected)} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : null}</View>;
   const chatsInitialError = chatsQuery.isError && !chatsQuery.data;
   const chatsMoreError = chatsQuery.isError && Boolean(chatsQuery.data);
   const chatsLoading = searchPending || (configured && chatsQuery.isPending && chatsQuery.isFetching);
@@ -931,45 +1193,50 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
   const messagesLoading = persistedSelection && messagesQuery.isPending && messagesQuery.isFetching;
   const messagesInitialError = persistedSelection && messagesQuery.isError && !messagesQuery.data;
   const messageEmpty = !messagesLoading && !messagesInitialError && messages.length === 0;
-  const greetingPending = Boolean(greetingRequest) || greetingMessage?.status === "PENDING";
   const attachmentsPreparing = draftAttachments.some(({ preparing }) => preparing);
   const olderMessagesHeader = useMemo(() => isFetchingOlderMessages ? <OlderMessageSkeletons /> : isFetchNextPageError ? <Button onPress={fetchOlderMessages} size="sm" variant="secondary">Retry older messages</Button> : null, [fetchOlderMessages, isFetchNextPageError, isFetchingOlderMessages]);
-  const conversation = useMemo(() => <View style={styles.conversation}>
+  const conversation = <View style={styles.conversation}>
     {turnError ? <Text accessibilityRole="alert" style={styles.error}>{turnError}</Text> : null}
-    {messagesLoading ? <InitialMessageSkeletons /> : messagesInitialError ? <View style={styles.centerError}><Text accessibilityRole="alert" style={styles.error}>Messages could not be loaded.</Text><Button onPress={retryMessages} size="sm" variant="secondary">Retry</Button></View> : messageEmpty ? null : <FlatList contentContainerStyle={styles.messageList} data={messages} initialNumToRender={10} ItemSeparatorComponent={MessageSeparator} keyExtractor={messageKey} ListFooterComponent={<View style={styles.messageListFooter} />} ListHeaderComponent={olderMessagesHeader} maintainVisibleContentPosition={{ minIndexForVisible: 0 }} maxToRenderPerBatch={10} onContentSizeChange={handleListContentSizeChange} onScroll={handleMessageScroll} onScrollBeginDrag={handleMessageScrollBeginDrag} ref={mountMessageList} removeClippedSubviews={false} renderItem={renderMessage} scrollEventThrottle={80} showsVerticalScrollIndicator={false} updateCellsBatchingPeriod={50} windowSize={5} />}
-  </View>, [handleMessageScroll, handleMessageScrollBeginDrag, handleListContentSizeChange, messageEmpty, messages, messagesInitialError, messagesLoading, mountMessageList, olderMessagesHeader, renderMessage, retryMessages, turnError]);
-  const attachmentPills = draftAttachments.length || editReferenceImageKey ? <ScrollView accessibilityLabel="Draft attachments" contentContainerStyle={styles.attachmentPills} horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false}>{editReferenceImageKey ? <View style={styles.attachmentPill}><ImageIcon size="sm" variant="muted" /><Text numberOfLines={1} style={styles.attachmentName}>Image to edit</Text><Button accessibilityLabel="Remove image to edit" contentMode="raw" disabled={turning} onPress={() => setEditReferenceImageKey(undefined)} size="xs" style={styles.attachmentRemove} variant="icon"><CloseIcon size="sm" /></Button></View> : null}{draftAttachments.map((attachment) => <View key={attachment.clientKey} style={styles.attachmentPill}>{attachment.kind === "image" ? <ImageIcon size="sm" variant="muted" /> : <FileIcon size="sm" variant="muted" />}<Text numberOfLines={1} style={styles.attachmentName}>{displayAttachmentFilename(attachment.filename)}</Text><Button accessibilityLabel={`Remove ${displayAttachmentFilename(attachment.filename)}`} contentMode="raw" disabled={turning} onPress={() => removeDraftAttachment(attachment.clientKey)} size="xs" style={styles.attachmentRemove} variant="icon"><CloseIcon size="sm" /></Button></View>)}</ScrollView> : undefined;
-  const modeSelector = <View style={styles.modeRow}><Tabs accessibilityLabel="Core mode" accessibilityRole="tablist" style={styles.modeTabs}><Button accessibilityRole="tab" accessibilityState={{ selected: mode === "chat" }} onPress={() => setMode("chat")} size="xs" style={styles.modeTab} variant={mode === "chat" ? "secondary" : "ghost"}>Chat</Button><Button accessibilityRole="tab" accessibilityState={{ selected: mode === "image" }} onPress={() => setMode("image")} size="xs" style={styles.modeTab} variant={mode === "image" ? "secondary" : "ghost"}>Images</Button></Tabs></View>;
+    {messagesLoading ? <InitialMessageSkeletons /> : messagesInitialError ? <View style={styles.centerError}><Text accessibilityRole="alert" style={styles.error}>Messages could not be loaded.</Text><Button onPress={retryMessages} size="sm" variant="secondary">Retry</Button></View> : messageEmpty ? null : <FlatList contentContainerStyle={styles.messageList} data={timelineMessages} initialNumToRender={10} inverted ItemSeparatorComponent={MessageSeparator} keyExtractor={messageKey} ListFooterComponent={olderMessagesHeader} ListHeaderComponent={<View style={styles.messageListFooter} />} maintainVisibleContentPosition={PRESERVE_MESSAGE_POSITION} maxToRenderPerBatch={10} onContentSizeChange={handleListContentSizeChange} onEndReached={fetchOlderMessages} onEndReachedThreshold={0.25} onScroll={handleMessageScroll} onScrollBeginDrag={handleMessageScrollBeginDrag} ref={mountMessageList} removeClippedSubviews={false} renderItem={renderMessage} scrollEventThrottle={80} showsVerticalScrollIndicator={false} style={styles.messageListViewport} updateCellsBatchingPeriod={50} windowSize={7} />}
+  </View>;
+  const attachmentPills = draftAttachments.length || editReferenceImageKey ? <ScrollView accessibilityLabel="Draft attachments" alwaysBounceHorizontal={false} contentContainerStyle={styles.attachmentPills} horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false} style={styles.attachmentPillsScroll}>{editReferenceImageKey ? <ActionPill action={<CloseIcon size="sm" />} actionLabel="Remove image to edit" compact dense disabled={turning} fitContent onAction={() => setEditReferenceImageKey(undefined)} style={styles.attachmentPill}><View style={styles.attachmentPillContent}><ImageIcon size="sm" variant="muted" /><Text numberOfLines={1} style={styles.attachmentName}>Image to edit</Text></View></ActionPill> : null}{draftAttachments.map((attachment) => <ActionPill action={<CloseIcon size="sm" />} actionLabel={`Remove ${displayAttachmentFilename(attachment.filename)}`} compact dense disabled={turning} fitContent key={attachment.clientKey} onAction={() => removeDraftAttachment(attachment.clientKey)} style={styles.attachmentPill}><View style={styles.attachmentPillContent}>{attachment.kind === "image" ? <ImageIcon size="sm" variant="muted" /> : <FileIcon size="sm" variant="muted" />}<Text numberOfLines={1} style={styles.attachmentName}>{displayAttachmentFilename(attachment.filename)}</Text></View></ActionPill>)}</ScrollView> : undefined;
+  const modeSelector = <View style={styles.modeRow}><Tabs accessibilityLabel="Core mode" accessibilityRole="tablist" style={styles.modeTabs}><Button accessibilityRole="tab" accessibilityState={{ selected: mode === "chat" }} onPress={() => setMode("chat")} size="xs" style={styles.modeTab} variant={mode === "chat" ? "secondary" : "ghost"}>Chat</Button><Button accessibilityRole="tab" accessibilityState={{ selected: mode === "image" }} onPress={() => setMode("image")} size="xs" style={styles.modeTab} variant={mode === "image" ? "secondary" : "ghost"}>Image</Button></Tabs></View>;
+  const chatBulkToolbar = selectedConversations.length ? <Tabs accessibilityLabel="Selected chat toolbar" style={styles.bulkToolbar}><View style={styles.bulkToolbarSelection}><Button accessibilityLabel="Clear chat selection" contentMode="raw" onPress={() => setSelectedConversationKeys([])} size="xs" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text accessibilityLiveRegion="polite" style={styles.bulkSelectionText}>{selectedConversations.length} selected</Text></View><Button accessibilityLabel="Selected chat actions" contentMode="raw" onPress={() => openSheet("bulkActions")} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button></Tabs> : null;
 
   return <>
-    <CoreComposer {...props} disabled={!configured || greetingPending || attachmentsPreparing || turning} editable={configured && !greetingPending && !turning && !sheet} expandedAccessory={attachmentPills} expandedFooter={modeSelector} expandedLeading={<PlusIcon size="sm" />} expandedLeadingAccessibilityLabel="Add attachment" expandedLeadingDisabled={!configured || greetingPending || turning} expandedPrompts={editReferenceImageKey ? ["Edit this image..."] : mode === "image" ? ["Generate image..."] : undefined} focusRequest={composerFocusRequest} loading={greetingPending || turning} maxLength={CONVERSATION_MESSAGE_MAX_LENGTH} message={conversation} onChangeText={(value) => { draftRevision.current += 1; setInput(value); }} onExpandedLeadingPress={() => openSheet("attachments")} onFocusChange={handleCoreFocusChange} onSubmit={() => void submit()} openRequest={greetingRequest?.id ?? coreOpenRequest} pageActions={pageActions} pageBackdrop={<ConversationWatermark />} pageIdentity={(closePage) => <View style={styles.coreIdentity}><View style={styles.coreIdentityApp}>{props.pageIdentity(closePage)}</View><ProfileHeaderRight /></View>} value={input} />
+    <CoreComposer {...props} disabled={!configured || attachmentsPreparing || turning} editable={configured && !turning && !sheet} expandedAccessory={attachmentPills} expandedFooter={modeSelector} expandedLeading={<PlusIcon size="sm" />} expandedLeadingAccessibilityLabel="Add attachment" expandedLeadingDisabled={!configured || turning} expandedPrompts={editReferenceImageKey ? ["Edit this image..."] : mode === "image" ? ["Generate image..."] : undefined} focusOnOpenRequest={false} focusRequest={composerFocusRequest} loading={turning} maxLength={CONVERSATION_MESSAGE_MAX_LENGTH} message={conversation} onChangeText={(value) => { draftRevision.current += 1; setInput(value); }} onExpandedLeadingPress={() => openSheet("attachments")} onFocusChange={handleCoreFocusChange} onSubmit={() => void submit()} openRequest={greetingRequest?.id ?? coreOpenRequest} pageActions={pageActions} pageBackdrop={<ConversationWatermark />} pageIdentity={(closePage) => <View style={styles.coreIdentity}><View style={styles.coreIdentityApp}>{props.pageIdentity(closePage)}</View><ProfileHeaderRight /></View>} value={input} />
     <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "attachments"} title=""><BottomSheetMenu><BottomSheetItem onPress={() => void pickImages()} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Upload images</BottomSheetItem><BottomSheetItem onPress={() => void pickFiles()} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Upload files</BottomSheetItem><BottomSheetItem onPress={() => { openSheet(undefined); setCameraOpen(true); }} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Capture image</BottomSheetItem></BottomSheetMenu></BottomSheet>
     {cameraOpen ? <BrandedCameraModal count={0} maximum={1} onCapture={captureImage} onClose={() => setCameraOpen(false)} showCaptureLoading={false} title="Capture for Core" /> : null}
-    <BottomSheet footer={<><Button disabled={creating} onPress={openNewChat} size="md" variant="primary">New chat</Button><Button onPress={() => openSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open && sheet === "chats") setSheet(undefined); }} open={sheet === "chats" || sheet === "filter"} title="Chats">
+    <BottomSheet footer={<><Button disabled={creating} onPress={openNewChat} size="md" variant="primary">New chat</Button><Button onPress={() => openSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open && sheet === "chats") setSheet(undefined); }} open={sheet === "chats" || sheet === "filter" || sheet === "bulkActions" || sheet === "bulkDelete"} title="Chats">
       <View style={styles.searchActions}><View style={styles.search}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search chats" autoFocusInBottomSheet={false} maxLength={500} onChangeText={changeQuery} placeholder="Search..." style={styles.searchInput} value={query} />{query ? <ButtonSizeProvider overrideParent size="xs"><Button accessibilityLabel="Clear chat search" contentMode="raw" iconOnly onPress={() => changeQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button></ButtonSizeProvider> : null}</View><Button accessibilityLabel="Filter chats" contentMode="raw" onPress={() => openSheet("filter")} size="md" variant="icon"><FilterIcon size="sm" variant={favoriteOnly ? "accent" : "default"} /></Button></View>
-      <Tabs accessibilityLabel="Chat group" accessibilityRole="tablist" style={styles.chatGroupTabs}><Button accessibilityRole="tab" accessibilityState={{ selected: !favoriteOnly }} onPress={() => setFavoriteOnly(false)} size="xs" style={styles.modeTab} variant={!favoriteOnly ? "secondary" : "ghost"}>Chats</Button><Button accessibilityRole="tab" accessibilityState={{ selected: favoriteOnly }} onPress={() => setFavoriteOnly(true)} size="xs" style={styles.modeTab} variant={favoriteOnly ? "secondary" : "ghost"}>Favorites</Button></Tabs>
-      {chatsLoading ? <View accessibilityLabel={query ? "Searching chats" : "Loading chats"} accessibilityRole="progressbar" style={styles.chatList}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.chatSkeleton, styles.skeletonCard]} />)}</View> : chatsInitialError ? <View style={styles.centerError}><Text accessibilityRole="alert" style={styles.error}>Chats could not be loaded.</Text><Button onPress={() => void chatsQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : <FlatList contentContainerStyle={[styles.chatList, conversations.length === 0 && styles.emptyChatList]} data={conversations} keyExtractor={conversationKey} ListEmptyComponent={<Text style={styles.emptyText}>{committedQuery ? "No chats matched this search." : favoriteOnly ? "No favorite chats." : "No chats yet."}</Text>} ListFooterComponent={chatsMoreError ? <Button onPress={() => void chatsQuery.fetchNextPage()} size="md" variant="secondary">Retry more chats</Button> : null} onEndReached={() => { if (chatsQuery.hasNextPage && !chatsQuery.isFetchingNextPage) void chatsQuery.fetchNextPage(); }} onEndReachedThreshold={0.4} renderItem={({ item }) => <ActionPill compact onPress={() => selectConversation(item)} pressLabel={`Open ${item.name}`}><View style={styles.chatPillContent}><Text numberOfLines={1} style={styles.chatName}>{item.name}</Text></View></ActionPill>} />}
+      {chatBulkToolbar}
+      {chatsLoading ? <View accessibilityLabel={query ? "Searching chats" : "Loading chats"} accessibilityRole="progressbar" style={styles.chatList}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.chatSkeleton, styles.skeletonCard]} />)}</View> : chatsInitialError ? <View style={styles.centerError}><Text accessibilityRole="alert" style={styles.error}>Chats could not be loaded.</Text><Button onPress={() => void chatsQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : <FlatList contentContainerStyle={[styles.chatList, conversations.length === 0 && styles.emptyChatList]} data={conversations} keyExtractor={conversationKey} ListEmptyComponent={<Text style={styles.emptyText}>{committedQuery ? "No chats matched this search." : favoriteOnly ? "No favorite chats." : "No chats yet."}</Text>} ListFooterComponent={chatsMoreError ? <Button onPress={() => void chatsQuery.fetchNextPage()} size="md" variant="secondary">Retry more chats</Button> : null} onEndReached={() => { if (chatsQuery.hasNextPage && !chatsQuery.isFetchingNextPage) void chatsQuery.fetchNextPage(); }} onEndReachedThreshold={0.4} renderItem={({ item }) => { const selectedChat = selectedConversationKeys.includes(item.key); return <ActionPill accessibilityActions={[{ name: "longpress", label: selectedChat ? `Deselect ${item.name}` : `Select ${item.name}` }]} accessibilityState={{ selected: selectedChat }} compact onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleConversationLongPress(item, false); }} onLongPress={() => handleConversationLongPress(item)} onPress={() => handleConversationPress(item)} pressLabel={selectedConversationKeys.length ? `${selectedChat ? "Deselect" : "Select"} ${item.name}` : `Open ${item.name}`} style={selectedChat ? styles.chatPillSelected : undefined}><View style={styles.chatPillContent}><Text numberOfLines={1} style={styles.chatName}>{item.name}</Text></View></ActionPill>; }} />}
     </BottomSheet>
+    <BottomSheet hideHeading onOpenChange={(open) => { if (!open) openSheet("chats"); }} open={sheet === "bulkActions" && selectedConversations.length > 0} title=""><BottomSheetMenu><Button onPress={updateSelectedConversationsFavorite} size="md" variant="secondary">{allSelectedConversationsFavorite ? "Unfavorite" : "Favorite"}</Button><Button onPress={() => openSheet("bulkDelete")} size="md" variant="secondary">Delete</Button></BottomSheetMenu></BottomSheet>
+    <BottomSheet footer={<><Button onPress={deleteSelectedConversations} size="md" variant="primary">Delete</Button><Button onPress={() => openSheet("chats")} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open) openSheet("chats"); }} open={sheet === "bulkDelete" && selectedConversations.length > 0} title={`Delete ${selectedConversations.length} ${selectedConversations.length === 1 ? "chat" : "chats"}?`} />
     <BottomSheet hideHeading onOpenChange={(open) => { if (!open) openSheet("chats"); }} open={sheet === "filter"} title=""><View style={styles.filterContent}><View style={styles.filterRow}><Switch accessibilityLabel="Show favorite chats only" checked={favoriteOnly} onCheckedChange={(checked) => { setFavoriteOnly(checked); openSheet("chats"); }} /><Text style={styles.filterLabel}>Favorites</Text></View><Button onPress={() => void openSearchHistory()} size="md" variant="secondary">Search history</Button></View></BottomSheet>
     <SearchHistorySheet error={historyError} history={history} loading={historyLoading} onClose={() => openSheet("chats")} onRemove={(item) => void removeHistoryQuery(item)} onSelect={useHistoryQuery} open={sheet === "history"} removingQuery={removingHistoryQuery} />
     <ConversationRetrievalSheet contextIdentity={identity} onClose={closeRetrievals} onNavigate={navigateRetrievalResult} open={sheet === "retrievals" && Boolean(activeRetrievals)} retrievals={activeRetrievals ?? []} />
-    <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "current"} title=""><BottomSheetMenu><BottomSheetItem onPress={() => { setEditName(selected?.name ?? ""); setEditFavorite(Boolean(selected?.isFavorite)); openSheet("edit"); }} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Edit</BottomSheetItem><BottomSheetItem onPress={() => mutateConversation("favorite")} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">{selected?.isFavorite ? "Unfavorite" : "Favorite"}</BottomSheetItem><BottomSheetItem onPress={() => openSheet("delete")} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Delete</BottomSheetItem></BottomSheetMenu></BottomSheet>
-    <BottomSheet focusKey="editConversation" footer={<><Button disabled={!editName.trim()} onPress={() => mutateConversation("edit")} size="md" variant="primary">Save</Button><Button onPress={() => openSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "edit"} title="Edit chat"><View style={styles.editForm}><TextInput accessibilityLabel="Chat name" maxLength={CONVERSATION_NAME_MAX_LENGTH} onChangeText={setEditName} placeholder="Chat name" ref={editInput} value={editName} /><View style={styles.favoriteRow}><Switch accessibilityLabel="Favorite chat" checked={editFavorite} onCheckedChange={setEditFavorite} /><Text style={styles.favoriteLabel}>Favorite</Text></View></View></BottomSheet>
-    <BottomSheet footer={<><Button onPress={confirmDelete} size="md" variant="primary">Delete</Button><Button onPress={() => openSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "delete"} title="Delete chat?" />
+    <BottomSheet hideHeading onOpenChange={(open) => { if (!open && sheet === "current") closeConversationAction(); }} open={sheet === "current" && Boolean(actionConversation)} title=""><BottomSheetMenu><BottomSheetItem onPress={openConversationEdit} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Edit</BottomSheetItem><BottomSheetItem onPress={() => openSheet("delete")} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Delete</BottomSheetItem></BottomSheetMenu></BottomSheet>
+    <BottomSheet focusKey="editConversation" footer={<><Button disabled={!editName.trim()} onPress={saveConversationEdit} size="md" variant="primary">Save</Button><Button onPress={closeConversationAction} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open && sheet === "edit") closeConversationAction(); }} open={sheet === "edit" && Boolean(actionConversation)} title="Edit chat"><View style={styles.editForm}><TextInput accessibilityLabel="Chat name" maxLength={CONVERSATION_NAME_MAX_LENGTH} onChangeText={setEditName} placeholder="Chat name" ref={editInput} value={editName} /><View style={styles.favoriteRow}><Switch accessibilityLabel="Favorite chat" checked={editFavorite} onCheckedChange={setEditFavorite} /><Text style={styles.favoriteLabel}>Favorite</Text></View></View></BottomSheet>
+    <BottomSheet footer={<><Button onPress={confirmDelete} size="md" variant="primary">Delete</Button><Button onPress={closeConversationAction} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open && sheet === "delete") closeConversationAction(); }} open={sheet === "delete" && Boolean(actionConversation)} title="Delete chat?" />
     <BottomSheet hideHeading onOpenChange={(open) => { if (!open) { setSheet(undefined); setSelectedMessage(undefined); } }} open={sheet === "messageActions"} title=""><BottomSheetMenu><BottomSheetItem onPress={shareSelectedMessage} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Share message</BottomSheetItem><BottomSheetItem onPress={() => openSheet("deleteMessage")} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Delete message</BottomSheetItem></BottomSheetMenu></BottomSheet>
     <BottomSheet footer={<><Button onPress={confirmMessageDelete} size="md" variant="primary">Delete</Button><Button onPress={() => openSheet("messageActions")} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open) { setSheet(undefined); setSelectedMessage(undefined); } }} open={sheet === "deleteMessage" && Boolean(selectedMessage)} title="Delete message?" />
+    <BottomSheet hideHeading onOpenChange={(open) => { if (!open) { setSheet(undefined); setSelectedAttachment(undefined); } }} open={sheet === "attachmentActions" && Boolean(selectedAttachment)} title=""><BottomSheetMenu><BottomSheetItem onPress={() => { const attachment = selectedAttachment; setSheet(undefined); setSelectedAttachment(undefined); if (attachment) router.push({ pathname: "/capability/[slug]", params: { slug: "archive", documentKey: attachment.key, documentTitle: attachment.filename } }); }} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Open file</BottomSheetItem></BottomSheetMenu></BottomSheet>
     <BottomSheet hideHeading onOpenChange={(open) => { if (!open) { setSheet(undefined); setSelectedGeneratedImageKey(undefined); setSelectedGeneratedImageCollectionKey(undefined); } }} open={sheet === "imageActions" && Boolean(selectedGeneratedImageKey)} title=""><BottomSheetMenu><BottomSheetItem onPress={() => { if (selectedGeneratedImageKey) setEditReferenceImageKey(selectedGeneratedImageKey); openSheet(undefined); setSelectedGeneratedImageKey(undefined); setSelectedGeneratedImageCollectionKey(undefined); setComposerFocusRequest((current) => current + 1); }} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Edit image</BottomSheetItem><BottomSheetItem onPress={() => { const imageKey = selectedGeneratedImageKey; const assetKey = selectedGeneratedImageCollectionKey; openSheet(undefined); setSelectedGeneratedImageKey(undefined); setSelectedGeneratedImageCollectionKey(undefined); if (imageKey) router.push({ pathname: "/capability/[slug]", params: { slug: "gallery", imageKey, ...(assetKey ? { assetKey } : {}) } }); }} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Open image</BottomSheetItem></BottomSheetMenu></BottomSheet>
   </>;
 }
 
 const styles = StyleSheet.create({
   coreIdentity: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", width: "100%" }, coreIdentityApp: { minWidth: 0, flex: 1 }, headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.xs }, conversation: { flex: 1, minHeight: 0, position: "relative" }, coreWatermark: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm, paddingHorizontal: spacing.xl, transform: [{ translateY: -spacing.xxl }] }, coreWatermarkMark: { marginVertical: spacing.xs, opacity: 0.3 }, coreWatermarkText: { color: palette.muted, fontSize: 13, lineHeight: 19, maxWidth: 320, opacity: 0.3, textAlign: "center" }, messageList: { flexGrow: 1, zIndex: 1 }, messageSeparator: { height: spacing.md }, messageListFooter: { height: 24 },
-  messageRow: { width: "100%", flexDirection: "row", alignItems: "flex-start" }, assistantRow: { justifyContent: "flex-start", paddingRight: spacing.lg, gap: spacing.sm }, userRow: { justifyContent: "flex-end", paddingLeft: 52 }, assistantMark: { marginTop: 4 }, messageContent: { minWidth: 0, gap: spacing.xs }, messageBox: { maxWidth: "100%", borderRadius: radii.md, paddingVertical: 4 }, messageButton: { minHeight: 0, alignItems: "stretch", borderWidth: 0, justifyContent: "flex-start" }, assistantMessage: { minWidth: 0, flex: 1, backgroundColor: "transparent" }, userMessage: { backgroundColor: "transparent" }, failedMessage: { borderWidth: 1, borderColor: palette.danger, paddingHorizontal: spacing.sm }, messageText: { color: palette.text, fontSize: 14, lineHeight: 20 }, messageAttachments: { alignItems: "flex-end", gap: spacing.xs, marginTop: spacing.xs }, messageAttachmentFile: { maxWidth: 260, flexDirection: "row", gap: spacing.xs }, messageAttachmentFallback: { maxWidth: 260, flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs }, messageAttachmentName: { minWidth: 0, flexShrink: 1, color: palette.text, fontSize: 12 }, messageAttachmentImageButton: { minHeight: 0, width: 144, alignItems: "stretch", padding: 4 }, messageAttachmentLocalImage: { width: 144, alignItems: "stretch", padding: 4 }, messageAttachmentImage: { width: "100%", height: 88, borderRadius: radii.sm }, retrievalSummary: { minWidth: 0, flex: 1, color: palette.muted, fontSize: 12 },
-  olderSkeletons: { gap: spacing.md }, messageSkeleton: { height: 18, marginTop: 3, borderRadius: radii.sm }, assistantSkeleton: { width: "76%" }, userSkeleton: { width: "62%" }, thinkingText: { flex: 1, marginTop: 3 }, skeletonCard: { borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.hairlineBright, opacity: 0.72, overflow: "hidden" }, error: { color: palette.danger, fontSize: 12, marginBottom: spacing.xs }, centerError: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm }, emptyText: { color: palette.muted, fontSize: 13, textAlign: "center" },
+  messageListViewport: { flex: 1 },
+  messageRow: { width: "100%", flexDirection: "row", alignItems: "flex-start" }, assistantRow: { justifyContent: "flex-start", paddingRight: spacing.lg, gap: spacing.sm }, userRow: { justifyContent: "flex-end", paddingLeft: 52 }, assistantMark: { marginTop: 4 }, messageContent: { minWidth: 0, gap: spacing.xs }, messageBox: { maxWidth: "100%", borderRadius: radii.md, paddingVertical: 4 }, messageButton: { minHeight: 0, alignItems: "stretch", borderWidth: 0, justifyContent: "flex-start" }, userMessageButton: { alignItems: "flex-end" }, assistantMessage: { minWidth: 0, flex: 1, backgroundColor: "transparent" }, userMessage: { alignItems: "flex-end", backgroundColor: "transparent" }, failedMessage: { borderWidth: 1, borderColor: palette.danger, paddingHorizontal: spacing.sm }, messageText: { color: palette.text, fontSize: 14, lineHeight: 20 }, userMessageText: { textAlign: "right" }, messageAttachments: { alignItems: "flex-end", gap: spacing.xs, marginTop: spacing.xs }, messageAttachmentFallback: { maxWidth: 260, flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs }, messageAttachmentName: { minWidth: 0, flexShrink: 1, color: palette.text, fontSize: 12 }, messageAttachmentImageButton: { minHeight: 0, width: 144, alignItems: "stretch", padding: 4 }, messageAttachmentLocalImage: { width: 144, alignItems: "stretch", padding: 4 }, messageAttachmentImage: { width: "100%", height: 88, borderRadius: radii.sm }, retrievalSummary: { minWidth: 0, flex: 1, color: palette.muted, fontSize: 12 }, guideTopics: { gap: spacing.xs, marginTop: spacing.xs }, guideTopicLabel: { color: palette.text, flex: 1, fontSize: 13, lineHeight: 18, textAlign: "left" }, guideTopicsLoading: { marginTop: 2, opacity: 0.62 },
+  olderSkeletons: { gap: spacing.md }, messageSkeleton: { height: 18, marginTop: 3, borderRadius: radii.sm }, assistantSkeleton: { width: "76%" }, userSkeleton: { width: "62%" }, thinkingText: { flex: 1 }, loadingTextRaised: { transform: [{ translateY: -3 }] }, skeletonCard: { borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.hairlineBright, opacity: 0.72, overflow: "hidden" }, error: { color: palette.danger, fontSize: 12, marginBottom: spacing.xs }, centerError: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm }, emptyText: { color: palette.muted, fontSize: 13, textAlign: "center" },
   searchActions: { flexDirection: "row", alignItems: "center", gap: spacing.xs }, search: { minHeight: 44, flex: 1, flexDirection: "row", alignItems: "center", gap: 7, paddingLeft: 12, paddingRight: 8, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.page }, searchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 13 },
-  chatGroupTabs: { marginTop: spacing.sm, width: "100%", backgroundColor: palette.panel, borderColor: palette.hairline, borderWidth: 1, flexDirection: "row", gap: 4, padding: 3 }, chatList: { flexGrow: 1, gap: spacing.xs, paddingTop: spacing.md, paddingBottom: spacing.lg }, emptyChatList: { justifyContent: "center" }, chatPillContent: { minWidth: 0, minHeight: 32, flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm }, chatName: { minWidth: 0, flex: 1, color: palette.text, lineHeight: 18, textAlign: "left", textAlignVertical: "center" }, chatSkeleton: { width: "100%", height: 38, borderRadius: 999 }, sheetAction: { justifyContent: "center" }, sheetActionText: { width: "100%", textAlign: "center" },
+  bulkToolbar: { minHeight: 40, marginTop: spacing.sm, padding: 5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, backgroundColor: palette.panel }, bulkToolbarSelection: { flexDirection: "row", alignItems: "center", gap: 8 }, bulkToolbarClose: { height: 28, width: 28, paddingHorizontal: 0, paddingVertical: 0 }, bulkSelectionText: { color: palette.silver100, fontSize: 12 },
+  chatList: { flexGrow: 1, gap: spacing.xs, paddingTop: spacing.md, paddingBottom: spacing.lg }, emptyChatList: { justifyContent: "center" }, chatPillSelected: { borderColor: palette.silver50 }, chatPillContent: { minWidth: 0, minHeight: 32, flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm }, chatName: { minWidth: 0, flex: 1, color: palette.text, lineHeight: 18, textAlign: "left", textAlignVertical: "center" }, chatSkeleton: { width: "100%", height: 38, borderRadius: 999 }, sheetAction: { justifyContent: "center" }, sheetActionText: { width: "100%", textAlign: "center" },
   filterContent: { gap: spacing.md }, filterRow: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: spacing.sm }, filterLabel: { color: palette.text, fontSize: 13 }, editForm: { paddingTop: spacing.sm, gap: spacing.md }, favoriteRow: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: spacing.sm }, favoriteLabel: { color: palette.muted, fontSize: 13 },
-  attachmentPills: { alignItems: "center", gap: spacing.xs, paddingHorizontal: 2 }, attachmentPill: { alignItems: "center", backgroundColor: palette.surface, borderColor: palette.hairline, borderRadius: 999, borderWidth: 1, flexDirection: "row", gap: 5, height: 30, maxWidth: 210, paddingLeft: spacing.sm, paddingRight: 2 }, attachmentName: { color: palette.text, flexShrink: 1, fontSize: 11, maxWidth: 140 }, attachmentRemove: { height: 24, minHeight: 24, minWidth: 24, paddingHorizontal: 0, paddingVertical: 0, width: 24 },
+  attachmentPillsScroll: { flexGrow: 0, flexShrink: 0, height: 28 }, attachmentPills: { alignItems: "center", gap: 6, paddingHorizontal: 2 }, attachmentPill: { backgroundColor: palette.page, flexShrink: 0, maxWidth: 158 }, messageAttachmentPill: { alignSelf: "flex-end" }, attachmentPillContent: { alignItems: "center", alignSelf: "flex-start", flexDirection: "row", flexShrink: 1, gap: 5 }, attachmentName: { color: palette.text, flexShrink: 1, fontSize: 11, maxWidth: 88 },
   modeRow: { alignItems: "center" }, modeTabs: { width: "100%", backgroundColor: palette.panel, borderColor: palette.hairline, borderWidth: 1, flexDirection: "row", gap: 4, padding: 3 }, modeTab: { flex: 1 },
-  generatedImageResponse: { gap: spacing.sm, maxWidth: 320, width: "100%" }, generatedImageFrame: { alignItems: "center", height: 220, justifyContent: "center", maxWidth: 320, width: "100%" }, generatedImageButton: { borderWidth: 0, height: 220, maxWidth: 320, overflow: "hidden", padding: 0, width: "100%" }, generatedImage: { borderRadius: radii.md, height: 220, width: "100%" }, generatedImageLoading: { opacity: 0 }, generatedImageOverlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, borderRadius: radii.md },
+  generatedImageResponse: { gap: spacing.sm, maxWidth: 320, width: "100%" }, generatedImageFrame: { alignItems: "center", height: 220, justifyContent: "center", maxWidth: 320, overflow: "hidden", width: "100%" }, generatedImageButton: { borderWidth: 0, height: 220, maxWidth: 320, overflow: "hidden", padding: 0, width: "100%" }, generatedImage: { borderRadius: radii.md, height: 220, width: "100%" }, generatedImageOverlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, borderRadius: radii.md }, generatedImageFailure: { alignItems: "center", backgroundColor: palette.page, justifyContent: "center" },
 });

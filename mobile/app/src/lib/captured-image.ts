@@ -14,3 +14,14 @@ export async function normalizeCapturedPng(image: CapturedImage, options: { maxS
   const file = new File(output.uri);
   return { uri: output.uri, width: output.width, height: output.height, sizeBytes: file.size, mimeType: "image/png" as const, extension: "png" as const, ...coordinates };
 }
+
+export async function normalizeCapturedJpeg(image: CapturedImage, options: { maxSide: number; compress: number }) {
+  const coordinates = capturedImageCoordinates(image);
+  const longestSide = Math.max(image.width, image.height);
+  const actions: ImageManipulator.Action[] = longestSide > options.maxSide
+    ? [{ resize: image.width >= image.height ? { width: options.maxSide } : { height: options.maxSide } }]
+    : [];
+  const output = await ImageManipulator.manipulateAsync(image.uri, actions, { compress: options.compress, format: ImageManipulator.SaveFormat.JPEG });
+  const file = new File(output.uri);
+  return { uri: output.uri, width: output.width, height: output.height, sizeBytes: file.size, mimeType: "image/jpeg" as const, extension: "jpg" as const, ...coordinates };
+}

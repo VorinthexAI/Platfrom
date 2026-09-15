@@ -24,7 +24,9 @@
       "package": "app.vorinthex.com",
       "googleServicesFile": "./google-services.json",
       "blockedPermissions": [
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#030507",
@@ -94,7 +96,7 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Vorinthex access to your photo library so you can upload images to the app.",
+          "photosPermission": false,
           "cameraPermission": "Allow Vorinthex to scan documents and take photos for Gallery."
         }
       ],
