@@ -74,6 +74,8 @@ function createEmailService(options: Parameters<typeof createEmailServiceImpleme
   return createEmailServiceImplementation({
     getUser: async () => ({ name: 'Alice Example', alias: 'Alice' }),
     publishInboxChanged: async () => undefined,
+    publishAttachmentChanged: async () => undefined,
+    enqueueSyncContinuation: async () => undefined,
     enqueueRepair: async () => ({ jobId: 'test-repair' }),
     completeRepair: async () => undefined,
     enqueueWatchRepair: async () => ({ jobId: 'test-watch-repair' }),
@@ -1766,7 +1768,7 @@ describe('canonical inbox intelligence operations', () => {
       'thread-b': { documentKeys: ['document-a', 'document-b'], imageKeys: ['image-a'], collectionKeys: [collectionA] },
     };
     const repository = {
-      syncThread: async (input: any) => Object.assign(thread, { attachmentMutation: mutations[input.thread.providerThreadId] }),
+      syncThread: async (input: any) => ({ ...thread, attachmentMutation: mutations[input.thread.providerThreadId] }),
       deleteProviderThread: async () => undefined,
       clearTrash: async () => ({ threadsDeleted: 0, documentsDeleted: 2, attachmentMutation: { documentKeys: ['document-b'], imageKeys: ['image-b'], collectionKeys: [collectionA, collectionB] } }),
     };
@@ -1802,7 +1804,7 @@ describe('canonical inbox intelligence operations', () => {
     const repository = {
       syncThread: async (input: any) => {
         if (input.thread.providerThreadId === 'thread-b') throw new Error('database unavailable');
-        return Object.assign(thread, { attachmentMutation: { documentKeys: ['document-a', 'document-a'], imageKeys: [], collectionKeys: [] } });
+        return { ...thread, attachmentMutation: { documentKeys: ['document-a', 'document-a'], imageKeys: [], collectionKeys: [] } };
       },
       deleteProviderThread: async () => undefined,
       clearTrash: async () => { clearCalls += 1; return { threadsDeleted: 0, documentsDeleted: 0 }; },
