@@ -81,13 +81,39 @@ describe('tool events', () => {
   test('charges successful tools once and gives tool pricing precedence over enclosed actions', async () => {
     const events: unknown[] = [], charges: Array<{ userKey: string; input: Record<string, unknown> }> = [];
     const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
-    await observeToolExecution('document.summarize', context, async () => { await recordActionCost('text.generate'); return 'ok'; }, {
+    await observeToolExecution('document.summarize', context, async () => { await recordActionCost('text.generate'); await recordActionUsage('text.generate', {}, { inputTokens: 10, outputTokens: 5, totalTokens: 15 }); return 'ok'; }, {
       recorder: async (input) => { events.push(input); }, idempotencyKey: 'request-1', id: () => 'event-1', hash: async () => 'a'.repeat(64),
       lookupCost: (input) => input.toolSlug ? { source: 'tool', slug: input.toolSlug, rule: { type: 'fixed', microSparks: 300 } } : { source: 'action', slug: input.actionSlug!, rule: { type: 'fixed', microSparks: 200 } },
       charge: async (userKey, input) => { charges.push({ userKey, input }); return { status: 'applied', transaction: { key: 'transaction-1', eventKey: input.eventKey } } as never; },
     });
     expect(charges).toEqual([{ userKey: 'user-1', input: { kind: 'tool', microSparks: 300, idempotencyKey: `execution:${'a'.repeat(64)}`, executionIdentity: 'a'.repeat(64), requestHash: 'a'.repeat(64), eventKey: 'event-1', toolSlug: 'document.summarize', metadata: { paidOutcome: 'operation-completed' } } }]);
     expect(events).toEqual([expect.objectContaining({ status: 'completed', microSparks: 300, sparkTransactionKey: 'transaction-1' })]);
+  });
+
+  test('falls back to paid actions for tools without a static price while embeddings remain free', async () => {
+    const charges: Record<string, unknown>[] = [];
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
+    const options = {
+      recorder: async () => {}, idempotencyKey: 'fallback-request', getBalance: async () => 1_000_000,
+      charge: async (_userKey: string, input: Record<string, unknown>) => { charges.push(input); return { status: 'applied', transaction: { key: `charge-${charges.length}`, eventKey: input.eventKey } } as never; },
+    };
+
+    await observeToolExecution('document.read', context, async () => {
+      await recordActionCost('text');
+      await recordActionUsage('text', { messages: ['hello'] }, { inputTokens: 10, outputTokens: 5, totalTokens: 15 });
+      await recordActionCost('embed');
+      await recordActionUsage('embed', { text: 'hello' }, { inputTokens: 1_000, outputTokens: 0, totalTokens: 1_000 });
+    }, options);
+
+    expect(charges).toHaveLength(1);
+    expect(charges[0]).toMatchObject({ kind: 'action', actionSlug: 'text', microSparks: 2_400 });
+
+    charges.length = 0;
+    await observeToolExecution('document.read', context, async () => {
+      await recordActionCost('embed');
+      await recordActionUsage('embed', { text: 'embedding only' }, { inputTokens: 1_000, outputTokens: 0, totalTokens: 1_000 });
+    }, { ...options, idempotencyKey: undefined });
+    expect(charges).toEqual([]);
   });
 
   test('never charges failed work even when an enclosed action is priced', async () => {
@@ -136,6 +162,22 @@ describe('tool events', () => {
     expect(charges[0]?.requestHash).toBe(charges[1]?.requestHash);
     expect(charges[0]?.metadata).not.toEqual(charges[1]?.metadata);
     expect(refunds).toEqual([expect.objectContaining({ microSparks: 1_280, chargeTransactionKey: 'charge-2' })]);
+  });
+
+  test('does not serialize attachment bytes into action billing identities', async () => {
+    const hashed: string[] = [];
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
+    await observeToolExecution('document.read', context, async () => {
+      await recordActionUsage('text', { attachments: [{ bytes: new Uint8Array(100_000).fill(7) }] }, { inputTokens: 10, outputTokens: 5, totalTokens: 15 });
+    }, {
+      recorder: async () => {}, idempotencyKey: 'attachment-request',
+      hash: async (value) => { hashed.push(value); return 'a'.repeat(64); },
+      charge: async (_userKey, input) => ({ status: 'applied', transaction: { key: 'charge-1', eventKey: input.eventKey } }) as never,
+    });
+
+    expect(hashed).toHaveLength(3);
+    expect(hashed.every((value) => value.length < 300)).toBe(true);
+    expect(hashed.join('')).not.toContain('attachments');
   });
 
   test('reuses the original event key from a replayed charge', async () => {
@@ -320,7 +362,7 @@ describe('tool events', () => {
     const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
     const completed: string[] = [], refunded: string[] = [];
     let sequence = 0;
-    await expect(observeToolExecution('place.find-children', context, async () => {
+    await expect(observeToolExecution('place.find-city', context, async () => {
       const accepted = await chargeToolOutcome('JP:tokyo');
       if (accepted) await markToolOutcomeAccepted(accepted);
       await chargeToolOutcome('JP:osaka');

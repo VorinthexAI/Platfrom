@@ -6,7 +6,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { z, ZodError } from "zod";
 import { USER_VISIBLE_AI_PROSE_POLICY } from "@/lib/ai/prose-style";
-import { collectionSchema } from "@/lib/db/collections.node";
+import { collectionSchema, isManagedCollectionContributable } from "@/lib/db/collections.node";
 import { galleryUploadSchema } from "@/lib/db/gallery-uploads.node";
 import { imageSchema } from "@/lib/db/images.node";
 import { visualIdentitySchema } from "@/lib/db/visual-identities.node";
@@ -122,7 +122,7 @@ const uploadFileSchema = strictObject({
       message: "Image coordinates require both latitude and longitude.",
     });
 });
-const presignSchema = strictObject({
+export const galleryUploadPresignInputSchema = strictObject({
   collectionKey: z.string().cuid().nullable().optional(),
   files: z.array(uploadFileSchema).min(1).max(20),
 }).refine(
@@ -249,9 +249,12 @@ export interface GalleryOperationContext {
   insertUploads?: typeof repository.insertUploads;
   signUpload?: (upload: z.infer<typeof galleryUploadSchema>) => Promise<string>;
   canManageScope?: typeof repository.canManageScope;
+  canContributeToCollection?: typeof repository.canContributeToCollection;
   listOverview?: typeof repository.listOverview;
   searchAccessibleCollections?: typeof repository.searchAccessibleCollections;
   canMutateImage?: typeof repository.canMutateImage;
+  canFavoriteImage?: typeof repository.canFavoriteImage;
+  setImageFavorite?: typeof repository.setImageFavorite;
   getCollectionRole?: typeof repository.getCollectionRole;
   deleteCollection?: typeof repository.deleteCollection;
   deleteImages?: typeof repository.deleteImages;
@@ -322,6 +325,20 @@ async function requireOwner(
       "Collection ownership required.",
     );
   return access.membership;
+}
+
+async function requireContribution(
+  context: GalleryOperationContext,
+  collectionKey: string,
+) {
+  const membership = await authorize(context);
+  if (!(await (context.canContributeToCollection ?? repository.canContributeToCollection)(context.scopeKey, collectionKey, membership.key)))
+    throw new GalleryOperationError(
+      403,
+      "GALLERY_COLLECTION_READ_ONLY",
+      "Collection is read-only.",
+    );
+  return membership;
 }
 
 function requestIdentity(operation: string, context: GalleryOperationContext) {
@@ -407,6 +424,7 @@ export function projectGalleryCollection(
   isOwned = true,
 ) {
   const managed = collection.mutationPolicy === "system-only";
+  const managedContribution = isManagedCollectionContributable(collection);
   return {
     key: collection.key,
     name: collection.name,
@@ -424,7 +442,7 @@ export function projectGalleryCollection(
     isOwned,
     access: {
       canRead: true,
-      canContribute: !managed && role !== "viewer",
+      canContribute: managedContribution || (!managed && role !== "viewer"),
       canManage: !managed && role === "owner",
     },
     createdAt: collection.createdAt,
@@ -761,7 +779,7 @@ async function updateImageDetails(
   const input = { ...imageUpdateSchema.parse(rawInput), ...context };
   const membership = await authorize(context);
   if (
-    !(await repository.canMutateImage(
+    !(await (context.canMutateImage ?? repository.canMutateImage)(
       input.scopeKey,
       input.imageKey,
       membership.key,
@@ -815,16 +833,10 @@ async function reserveUploads(
   rawInput: unknown,
   context: GalleryOperationContext,
 ) {
-  const input = { ...presignSchema.parse(rawInput), ...context };
+  const input = { ...galleryUploadPresignInputSchema.parse(rawInput), ...context };
   const membership = await authorize(context);
   if (input.collectionKey) {
-    const { role } = await collectionRole(context, input.collectionKey);
-    if (role === "viewer")
-      throw new GalleryOperationError(
-        403,
-        "GALLERY_COLLECTION_READ_ONLY",
-        "Collection is read-only.",
-      );
+    await requireContribution(context, input.collectionKey);
   } else if (
     !(await (context.canManageScope ?? repository.canManageScope)(
       input.scopeKey,
@@ -1250,7 +1262,7 @@ async function setFavorite(
   const input = { ...favoriteSchema.parse(rawInput), ...context };
   const membership = await authorize(context);
   if (
-    !(await repository.canMutateImage(
+    !(await (context.canFavoriteImage ?? repository.canFavoriteImage)(
       input.scopeKey,
       input.imageKey,
       membership.key,
@@ -1261,7 +1273,7 @@ async function setFavorite(
       "GALLERY_IMAGE_READ_ONLY",
       "Image is read-only.",
     );
-  const updated = await repository.setImageFavorite(
+  const updated = await (context.setImageFavorite ?? repository.setImageFavorite)(
     input.scopeKey,
     input.imageKey,
     membership.key,
@@ -1422,12 +1434,7 @@ async function transferCollectionImages(
       "Source collection is read-only.",
     );
   for (const destination of input.destinationCollectionKeys)
-    if ((await collectionRole(context, destination)).role === "viewer")
-      throw new GalleryOperationError(
-        403,
-        "GALLERY_COLLECTION_READ_ONLY",
-        "Destination collection is read-only.",
-      );
+    await requireContribution(context, destination);
   if (
     (
       await Promise.all(
@@ -1686,7 +1693,7 @@ async function createHighlight(
   context: GalleryOperationContext,
 ) {
   const input = { ...highlightCreateSchema.parse(rawInput), ...context };
-  const membership = await requireOwner(context, input.collectionKey);
+  const membership = await requireContribution(context, input.collectionKey);
   let imageKeys = input.imageKeys;
   if (imageKeys === undefined) {
     const candidates = await (
@@ -1800,7 +1807,6 @@ async function deleteHighlight(
       "GALLERY_HIGHLIGHT_NOT_FOUND",
       "Highlight not found.",
     );
-  await requireOwner(context, row.highlight.collectionKey);
   const highlight = await (
     context.deleteHighlight ?? repository.deleteHighlight
   )(input.scopeKey, input.highlightKey, membership.key);
@@ -1826,7 +1832,7 @@ async function createMemory(
     `image-memory-create:${input.collectionKey}`,
     context,
   );
-  const membership = await requireOwner(context, input.collectionKey);
+  const membership = await requireContribution(context, input.collectionKey);
   if (context.idempotencyKey) {
     const replay = await (context.getMemory ?? repository.getAccessibleMemory)(
       input.scopeKey,
@@ -1897,8 +1903,8 @@ async function createMemory(
   if (result.status === "forbidden")
     throw new GalleryOperationError(
       403,
-      "GALLERY_OWNER_REQUIRED",
-      "Collection ownership required.",
+      "GALLERY_COLLECTION_READ_ONLY",
+      "Collection contribution required.",
     );
   if (result.status === "exhausted")
     throw new GalleryOperationError(
@@ -1996,8 +2002,8 @@ async function deleteMemory(
   if (!deleted)
     throw new GalleryOperationError(
       403,
-      "GALLERY_OWNER_REQUIRED",
-      "Collection ownership required.",
+      "GALLERY_COLLECTION_READ_ONLY",
+      "Collection contribution or artifact ownership required.",
     );
   await publish(context, "memoryDeleted", {
     collections: deleted.collectionKeys,
@@ -2010,7 +2016,7 @@ export const galleryOperationInputSchemas = {
   createCollection: collectionCreateSchema,
   updateCollection: collectionUpdateSchema,
   deleteCollection: collectionDeleteSchema,
-  reserveUploads: presignSchema,
+  reserveUploads: galleryUploadPresignInputSchema,
   completeUploads: completeSchema,
   uploadStatus: statusSchema,
   search: searchSchema,

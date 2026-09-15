@@ -196,6 +196,9 @@ test("Skip defers preserve composition until Send and review attachments use tha
 });
 
 test("Signal root puts shared search before tabs and uses a measured exact three-column grid", () => {
+  expect(workspace).toContain('if (!initialConnectorKey && (initialInbox === "internal" || initialCommunicationThreadKey || initialCompose)) return <SignalWorkspace');
+  expect(workspace).toContain('accessibilityLabel="Open Vorinthex AI inbox"');
+  expect(workspace).toContain('params: { slug: "signal", tab: "inbox", inbox: "internal" }');
   expect(workspace).toContain("const toneRecords = metadataOverview?.tones ?? []");
   expect(workspace.indexOf('accessibilityLabel="Search Signal inboxes and tones"')).toBeLessThan(workspace.indexOf('accessibilityLabel="Signal root categories"'));
   expect(workspace).toContain("setRootGridWidth(nativeEvent.layout.width)");
@@ -615,7 +618,7 @@ test("root and inbox keep controls while rendering only compact local loading an
 
 test("Signal scopes root and tone states without pairing errors with empty states", () => {
   expect(workspace).toMatch(/rootTab === "inboxes" \? loading \|\| rootFilterActive[\s\S]*?loadError \? <View accessibilityRole="alert"/);
-  expect(workspace).toContain('!loadError && !visibleAccounts.length && !rootFilterActive');
+  expect(workspace).toContain('!loadError && !managedInboxVisible && !visibleAccounts.length && !rootFilterActive');
   expect(workspace).toContain('!loading && !inboxQueryPending && !initialSyncPending && !loadError && !overview?.threads.length');
   expect(workspace).toContain('!tonesLoading && !toneError && !visibleTones.length');
   expect(workspace).toContain('<View accessibilityRole="alert" style={styles.rootToneError}>');
@@ -1295,14 +1298,14 @@ test("root inbox bulk actions reconcile authoritative snapshots and never restor
   expect(workspace).toContain('accessibilityLabel="Remove all reply attachments" contentMode="raw" disabled={replySending || Boolean(replyTransformation)} hitSlop={10}');
 });
 
-test("Signal bulk tag actions use only canonical inbox and thread targets and preserve selection", () => {
+test("Signal bulk tag actions use only canonical inbox and thread targets and clear selection on apply", () => {
   expect(workspace).toContain('import { ResourceTagsSheet } from "@/components/ResourceTagsSheet";');
   expect(workspace).toContain('selectedInboxes.map((account) => ({ type: "email-inbox", key: account.key }))');
   expect(workspace).not.toContain('type: "email-inbox", key: account.connectorKey');
   expect(workspace).toContain('selectedThreads.map(({ key }) => ({ type: "email-thread", key }))');
   expect(workspace).toContain('<BottomSheetItem disabled={rootBulkBusy || !permissions.canMutate} onPress={openSelectedInboxTags} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem>');
   expect(workspace).toContain('<BottomSheetItem disabled={bulkBusy} onPress={openSelectedThreadTags} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem>');
-  expect(workspace).toContain('<ResourceTagsSheet context={historyContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />');
+  expect(workspace).toContain('<ResourceTagsSheet context={historyContext} onApply={() => { setSelectedInboxes([]); setSelectedThreads([]); }} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />');
   const inboxTags = workspace.slice(workspace.indexOf("function openSelectedInboxTags"), workspace.indexOf("function openSelectedThreadTags"));
   const threadTags = workspace.slice(workspace.indexOf("function openSelectedThreadTags"), workspace.indexOf("function closeSearchHistory"));
   for (const operation of [inboxTags, threadTags]) {
@@ -1345,8 +1348,8 @@ test("bulk action labels hydrate hidden selections without marking mail read", (
 });
 
 test("touch and accessibility longpress paths do not share synthetic press suppression", () => {
-  expect(workspace).toMatch(/function handleThreadLongPress[\s\S]*?longPressedThread\.current = thread\.key;[\s\S]*?toggleThreadSelection/);
-  expect(workspace).toContain('onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") { toggleThreadSelection(thread); void Haptics.selectionAsync(); } }}');
+  expect(workspace).toMatch(/function handleThreadLongPress\(thread: EmailThread, suppressPress = true\)[\s\S]*?if \(suppressPress\) longPressedThread\.current = thread\.key;[\s\S]*?toggleThreadSelection/);
+  expect(workspace).toContain('onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleThreadLongPress(thread, false); }}');
 });
 
 test("provider-duration operations capture context and guard every continuation", () => {

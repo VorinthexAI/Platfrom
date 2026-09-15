@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const userInboxKindSchema = z.enum(['notification', 'issue', 'feedback']);
 export const userInboxSenderSchema = z.enum(['user', 'system', 'staff']);
 export const userInboxMailboxSchema = z.enum(['inbox', 'sent']);
+export const userInboxReadStateSchema = z.enum(['all', 'read', 'unread']);
 
 export const userInboxThreadSchema = z.object({
   key: z.string().cuid(),
@@ -40,6 +41,8 @@ export const communicationHistoryInputSchema = z.object({
   mailbox: userInboxMailboxSchema.default('inbox'),
   cursor: z.string().cuid().optional(),
   limit: z.number().int().min(1).max(100).default(25),
+  query: z.string().trim().max(500).optional(),
+  readState: userInboxReadStateSchema.optional(),
 }).strict();
 export const communicationThreadInputSchema = z.object({ threadKey: z.string().cuid() }).strict();
 export const communicationMarkReadInputSchema = z.object({ threadKey: z.string().cuid(), read: z.boolean().default(true) }).strict();

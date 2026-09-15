@@ -83,7 +83,10 @@ describe('Spark costs', () => {
     expect(Object.isFrozen(TOOL_COST_RULES)).toBe(true);
     expect(Object.isFrozen(ACTION_COST_RULES)).toBe(true);
     expect(TOOL_COST_RULES['book.create']?.microSparks).toBe(100_000_000);
-    expect(TOOL_COST_RULES['document.parse']?.microSparks).toBe(2_000_000);
+    expect(TOOL_COST_RULES['document.parse']).toBeUndefined();
+    expect(TOOL_COST_RULES['document.scan']).toBeUndefined();
+    expect(lookupToolCostPolicy('document.parse')).toEqual({ mode: 'action' });
+    expect(lookupToolCostPolicy('document.scan')).toBeNull();
     expect({ initialSync: INBOX_INITIAL_SYNC_SPARKS, newEmail: INBOX_NEW_EMAIL_SPARKS }).toEqual({ initialSync: 100, newEmail: 1 });
     expect(Object.keys(ACTION_COST_RULES)).toEqual([]);
     expect(COST_RULE_PRECEDENCE).toEqual(['tool', 'action']);
@@ -95,8 +98,8 @@ describe('Spark costs', () => {
   });
 
   test('calculates fixed quantities and provider fallback prices', () => {
-    expect(calculateToolCostMicroSparks('document.parse', { documents: [{}, {}, {}] })).toBe(6_000_000);
-    expect(calculateToolCostMicroSparks('document.scan', { pages: [{}, {}] })).toBe(5_000_000);
+    expect(calculateToolCostMicroSparks('document.parse', { documents: [{}, {}, {}] })).toBe(0);
+    expect(calculateToolCostMicroSparks('document.parse', { pages: [{}, {}] })).toBe(0);
     expect(calculateToolCostMicroSparks('image.caption', { images: ['a', 'b'] })).toBe(0);
     expect(calculateActionCostMicroSparks('text', { inputTokens: 1, outputTokens: 1 })).toBe(440);
     expect(calculateActionCostMicroSparks('text', { inputTokens: 0, outputTokens: 0 })).toBe(0);
@@ -122,7 +125,10 @@ describe('Spark costs', () => {
     for (const slug of Object.keys(TOOL_COST_RULES)) expect(toolNames).toContain(slug);
     expect(lookupToolCostPolicy('place.guide.find')).toEqual({ mode: 'outcome', rule: TOOL_COST_RULES['place.guide.find'], paidOutcome: 'operation-completed' });
     expect(lookupToolCostPolicy('place.find-city')).toEqual({ mode: 'outcome', rule: TOOL_COST_RULES['place.find-city'], paidOutcome: 'operation-completed' });
-    expect(lookupToolCostPolicy('place.find-children')).toEqual({ mode: 'outcome', rule: TOOL_COST_RULES['place.find-children'], paidOutcome: 'operation-completed' });
+    expect(lookupToolCostPolicy('place.find-children')).toEqual({ mode: 'free' });
+    expect(lookupToolCostPolicy('place.create')).toEqual({ mode: 'free' });
+    expect(Object.hasOwn(TOOL_COST_RULES, 'place.find-children')).toBe(false);
+    expect(Object.hasOwn(TOOL_COST_RULES, 'place.create')).toBe(false);
     expect(Object.hasOwn(TOOL_COST_RULES, 'place.reference.generate')).toBe(false);
     expect(Object.hasOwn(TOOL_COST_RULES, 'place.open')).toBe(false);
   });
@@ -138,10 +144,11 @@ describe('Spark costs', () => {
     expect(lookupToolCostPolicy('book.create')).toEqual({ mode: 'fixed', rule: TOOL_COST_RULES['book.create'], paidOutcome: 'queue-accepted' });
     expect(lookupToolCostPolicy('book.extend', { mode: 'preview' })).toEqual({ mode: 'action' });
     expect(lookupToolCostPolicy('highlight.create')).toEqual({ mode: 'fixed', rule: TOOL_COST_RULES['highlight.create'], paidOutcome: 'operation-completed' });
-    for (const slug of ['place.open', 'place.update', 'document.find']) {
+    for (const slug of ['place.create', 'place.find-children', 'place.open', 'place.update', 'document.find']) {
       expect(lookupToolCostPolicy(slug)).toEqual({ mode: 'free' });
     }
     expect(lookupToolCostPolicy('agent.guide')).toEqual({ mode: 'free' });
+    expect(lookupToolCostPolicy('agent.guide', { mode: 'topics' })).toEqual({ mode: 'action' });
   });
 
   test('carries exact storage fractions across split calculations', () => {

@@ -19,6 +19,8 @@ import { defaultBookService } from '@/lib/books/default-service';
 import { handlePolarWebhook, POLAR_WEBHOOK_V1_PATH } from './polar-webhook';
 import { polarConfiguration } from '@/lib/commerce/polar';
 import { closeAppNotificationQueue, recoverAppNotificationQueue, startAppNotificationWorker } from '@/lib/app-notifications/queue';
+import { closeConversationArchiveProjectionQueue, recoverConversationArchiveProjectionQueue, startConversationArchiveProjectionWorker } from '@/lib/conversations/archive-projection-queue';
+import { closeConversationGuideTopicsQueue, recoverConversationGuideTopicsQueue, startConversationGuideTopicsWorker } from '@/lib/conversations/guide-topics-queue';
 
 export const app = new Hono();
 const api = app.basePath('/api/v1');
@@ -95,6 +97,8 @@ if (import.meta.main) {
   const galleryWorker = startGalleryUploadWorker();
   const conversationImageWorker = startConversationImageTurnWorker();
   const conversationAttachmentWorker = startConversationAttachmentPersistenceWorker();
+  const conversationArchiveWorker = startConversationArchiveProjectionWorker();
+  const conversationGuideTopicsWorker = startConversationGuideTopicsWorker();
   const appNotificationWorker = startAppNotificationWorker();
   startBookRefundWorker();
   void recoverGalleryUploadQueue().catch((error) => console.error('gallery upload queue recovery failed', { error }));
@@ -102,6 +106,8 @@ if (import.meta.main) {
   void recoverEmailSyncQueue().catch((error) => console.error('email synchronization queue recovery failed', { error }));
   void recoverConversationImageTurnQueue().catch((error) => console.error('conversation image queue recovery failed', { error }));
   void recoverConversationAttachmentPersistenceQueue().catch((error) => console.error('conversation attachment persistence queue recovery failed', { error }));
+  void recoverConversationArchiveProjectionQueue().catch((error) => console.error('conversation archive projection queue recovery failed', { error }));
+  void recoverConversationGuideTopicsQueue().catch((error) => console.error('conversation guide topics queue recovery failed', { error }));
   void defaultBookService.recoverGenerations().catch((error) => console.error('book generation recovery failed', { error }));
   void recoverAppNotificationQueue().catch((error) => console.error('app notification queue recovery failed', { error }));
   const renewalTimer = setInterval(() => { void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error })); }, 6 * 60 * 60_000);
@@ -109,6 +115,8 @@ if (import.meta.main) {
   const galleryRecoveryTimer = setInterval(() => { void recoverGalleryUploadQueue().catch((error) => console.error('gallery upload queue recovery failed', { error })); }, 60_000);
   const conversationImageRecoveryTimer = setInterval(() => { void recoverConversationImageTurnQueue().catch((error) => console.error('conversation image queue recovery failed', { error })); }, 60_000);
   const conversationAttachmentRecoveryTimer = setInterval(() => { void recoverConversationAttachmentPersistenceQueue().catch((error) => console.error('conversation attachment persistence queue recovery failed', { error })); }, 60_000);
+  const conversationArchiveRecoveryTimer = setInterval(() => { void recoverConversationArchiveProjectionQueue().catch((error) => console.error('conversation archive projection queue recovery failed', { error })); }, 60_000);
+  const conversationGuideTopicsRecoveryTimer = setInterval(() => { void recoverConversationGuideTopicsQueue().catch((error) => console.error('conversation guide topics queue recovery failed', { error })); }, 60_000);
   const bookGenerationRecoveryTimer = setInterval(() => { void defaultBookService.recoverGenerations().catch((error) => console.error('book generation recovery failed', { error })); }, 60_000);
 
   let shuttingDown = false;
@@ -121,16 +129,22 @@ if (import.meta.main) {
     clearInterval(galleryRecoveryTimer);
     clearInterval(conversationImageRecoveryTimer);
     clearInterval(conversationAttachmentRecoveryTimer);
+    clearInterval(conversationArchiveRecoveryTimer);
+    clearInterval(conversationGuideTopicsRecoveryTimer);
     clearInterval(bookGenerationRecoveryTimer);
     await emailWorker.close();
     await galleryWorker.close();
     await conversationImageWorker.close();
     await conversationAttachmentWorker.close();
+    await conversationArchiveWorker.close();
+    await conversationGuideTopicsWorker.close();
     await appNotificationWorker.close();
     await closeEmailSyncQueue();
     await closeGalleryUploadQueue();
     await closeConversationImageTurnQueue();
     await closeConversationAttachmentPersistenceQueue();
+    await closeConversationArchiveProjectionQueue();
+    await closeConversationGuideTopicsQueue();
     await closeAppNotificationQueue();
     await closeBookRefundWorker();
     await closeAutomations();

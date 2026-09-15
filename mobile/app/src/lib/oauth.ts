@@ -94,7 +94,7 @@ export async function launchOAuthProvider(provider: OAuthProvider) {
           keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
         });
       }
-      const pendingName = await SecureStore.getItemAsync(PENDING_APPLE_NAME_KEY).then((value) => {
+      const pendingName = providedName || await SecureStore.getItemAsync(PENDING_APPLE_NAME_KEY).then((value) => {
         if (!value) return "";
         try {
           const parsed = JSON.parse(value) as { user?: unknown; name?: unknown };

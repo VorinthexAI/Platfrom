@@ -38,10 +38,11 @@ import {
   chunkDocumentContent,
   documentSemanticHash,
 } from "@/lib/ai/document-processing/chunking";
-import type { DocumentScanInput } from "@/lib/ai/document-scanning";
 import type { UserSearchService } from "@/lib/user-searches/service";
 import type { GeneratedDocumentBinding } from "@/lib/db/generated-document-bindings.node";
 import { withArangoKey } from "@/lib/db/base";
+import { SparkRepositoryError } from "@/lib/sparks/repository";
+import { SparkExecutionPendingError } from "@/lib/ai/events/runtime";
 import { emailMessagePayloadSchema } from "@/lib/email-inbox/archive-payloads";
 import { isInitialWorkspaceDocumentKey, isInitialWorkspaceFolderKey } from "@/lib/initial-workspace-content-identifiers";
 
@@ -330,10 +331,6 @@ export interface ContentToolDependencies extends RouterDependencies {
   searchQueries?: ContentSearchQueryStore;
   userSearches?: UserSearchService;
   searchEmbeddingTimeoutMs?: number;
-  scanDocument?: (
-    input: DocumentScanInput,
-    teamKey: string,
-  ) => Promise<{ documentKey: string; content: string; storageKeys: string[] }>;
   getFolderCoverImage?: (
     scopeKey: string,
     imageKey: string,
@@ -373,7 +370,6 @@ const MUTATIONS = new Set<ContentToolName>([
   "folder.copy",
   "folder.delete",
   "document.parse",
-  "document.scan",
   "document.create",
   "document.update",
   "document.rename",
@@ -465,6 +461,7 @@ async function folderView(
     purpose: _purpose,
     managedPurpose: _managedPurpose,
     managedOwnerKey: _managedOwnerKey,
+    privateOwnerUserKey: _privateOwnerUserKey,
     mutationPolicy: _mutationPolicy,
     archiveVisibility: _archiveVisibility,
     _internalDeletion: _internalDeletion,
@@ -507,6 +504,7 @@ function documentView(document: Document) {
     sourceStorageKeys: _sourceStorageKeys,
     managedPurpose: _managedPurpose,
     managedOwnerKey: _managedOwnerKey,
+    privateOwnerUserKey: _privateOwnerUserKey,
     mutationPolicy: _mutationPolicy,
     archiveVisibility: _archiveVisibility,
     _internalDeletion: _internalDeletion,
@@ -906,22 +904,19 @@ export async function authorizeDocumentParseLocation(
         "document.parse",
         { action: "authorization", resourceKey: folderKey },
       );
-    if (folder._internalDeletion)
+    if (folder.privateOwnerUserKey && folder.privateOwnerUserKey !== context.principal.user.key)
       throw new ContentError(
         "CONTENT_NOT_FOUND",
         "Folder was not found.",
         "document.parse",
         { action: "read", resourceKey: folderKey },
       );
-    if (
-      folder.mutationPolicy === "system-container" ||
-      folder.managedPurpose !== undefined
-    )
+    if (folder._internalDeletion)
       throw new ContentError(
-        "CONTENT_FORBIDDEN",
-        "Managed folders cannot contain generic documents.",
+        "CONTENT_NOT_FOUND",
+        "Folder was not found.",
         "document.parse",
-        { action: "insert", resourceKey: folderKey },
+        { action: "read", resourceKey: folderKey },
       );
     folderKey = folder.parentFolderKey;
   }
@@ -1334,7 +1329,70 @@ export async function runContentTool<Name extends ContentToolName>(
         };
       },
     });
-  const repo = observeRepository(d.repository);
+  const ownerVisibleRepository = (target: ContentRepository): ContentRepository => {
+    const privateVisible = (value: Folder | Document) => !value.privateOwnerUserKey || value.privateOwnerUserKey === member.user.key;
+    const visibleFolders = async (scopeKey: string, includePendingDeletion = false) => {
+      const all = await target.listFolders(scopeKey, includePendingDeletion);
+      const byKey = new Map(all.map((item) => [item.key, item]));
+      return all.filter((item) => {
+        const visited = new Set<string>();
+        let current: Folder | undefined = item;
+        while (current) {
+          if (visited.has(current.key) || !privateVisible(current)) return false;
+          visited.add(current.key);
+          if (!current.parentFolderKey) return true;
+          current = byKey.get(current.parentFolderKey);
+          if (!current) return false;
+        }
+        return false;
+      });
+    };
+    const folderVisible = async (value: Folder | null) => {
+      if (!value || !privateVisible(value)) return null;
+      return (await visibleFolders(value.scopeKey, true)).some(({ key }) => key === value.key) ? value : null;
+    };
+    const documentVisible = async (value: Document | null) => {
+      if (!value || !privateVisible(value)) return null;
+      if (!value.folderKey) return value;
+      return (await visibleFolders(value.scopeKey, true)).some(({ key }) => key === value.folderKey) ? value : null;
+    };
+    return new Proxy(target, {
+      get(repository, property, receiver) {
+        const value = Reflect.get(repository, property, receiver);
+        if (property === "getFolder") return async (key: string) => folderVisible(await repository.getFolder(key));
+        if (property === "listFolders") return visibleFolders;
+        if (property === "getDocument") return async (key: string) => documentVisible(await repository.getDocument(key));
+        if (property === "listDocuments") return async (scopeKey: string, includePendingDeletion = false) => {
+          const folders = new Set((await visibleFolders(scopeKey, true)).map(({ key }) => key));
+          return (await repository.listDocuments(scopeKey, includePendingDeletion)).filter((item) => privateVisible(item) && (!item.folderKey || folders.has(item.folderKey)));
+        };
+        if (property === "semanticSearch") return async (...args: Parameters<ContentRepository["semanticSearch"]>) => {
+          const matches = await repository.semanticSearch({ ...args[0], privateOwnerUserKey: member.user.key } as Parameters<ContentRepository["semanticSearch"]>[0]);
+          const foldersByScope = new Map<string, Set<string>>();
+          for (const scopeKey of new Set(matches.map(({ document }) => document.scopeKey))) foldersByScope.set(scopeKey, new Set((await visibleFolders(scopeKey, true)).map(({ key }) => key)));
+          return matches.filter(({ document }) => privateVisible(document) && (!document.folderKey || foldersByScope.get(document.scopeKey)?.has(document.folderKey)));
+        };
+        if (property === "semanticSearchFolders" && typeof value === "function") return async (...args: Parameters<NonNullable<ContentRepository["semanticSearchFolders"]>>) => {
+          const matches = await value.call(repository, { ...args[0], privateOwnerUserKey: member.user.key });
+          const visible = new Set<string>();
+          for (const { folder } of matches) if (privateVisible(folder) && await folderVisible(folder)) visible.add(folder.key);
+          return matches.filter(({ folder }: { folder: Folder }) => visible.has(folder.key));
+        };
+        if (property === "semanticNeighbors" && typeof value === "function") return async (...args: Parameters<NonNullable<ContentRepository["semanticNeighbors"]>>) => {
+          const output = await value.call(repository, { ...args[0], privateOwnerUserKey: member.user.key });
+          const folders = new Set((await visibleFolders(args[0].scopeKey, true)).map(({ key }) => key));
+          return {
+            folders: output.folders.filter(({ folder }: { folder: Folder }) => privateVisible(folder) && folders.has(folder.key)),
+            documents: output.documents.filter(({ document }: { document: Document }) => privateVisible(document) && (!document.folderKey || folders.has(document.folderKey))),
+            files: output.files.filter(({ document }: { document: Document }) => privateVisible(document) && (!document.folderKey || folders.has(document.folderKey))),
+          };
+        };
+        if (property === "transaction" && typeof value === "function") return (operation: (bound: ContentRepository) => Promise<unknown>) => value.call(repository, (bound: ContentRepository) => operation(ownerVisibleRepository(bound)));
+        return typeof value === "function" ? value.bind(repository) : value;
+      },
+    });
+  };
+  const repo = observeRepository(ownerVisibleRepository(d.repository));
   const action = async (
     slug: string,
     actionInput: Record<string, unknown>,
@@ -1508,7 +1566,7 @@ export async function runContentTool<Name extends ContentToolName>(
     }
   };
   const archiveVisible = (value: Folder | Document) =>
-    value.archiveVisibility !== "domain-only";
+    value.archiveVisibility !== "domain-only" && (!value.privateOwnerUserKey || value.privateOwnerUserKey === member.user.key);
   const managedFolder = (value: Folder) =>
     value.mutationPolicy === "system-container" ||
     value.managedPurpose !== undefined;
@@ -2083,6 +2141,7 @@ export async function runContentTool<Name extends ContentToolName>(
         { action: "idempotency", retryable: false },
       );
     if (claim.status === "failed") {
+      if (claim.failure.code === 'INSUFFICIENT_BALANCE' || claim.failure.code === 'OUTSTANDING_DEBT' || claim.failure.code === 'USER_NOT_FOUND') throw new SparkRepositoryError(claim.failure.code, claim.failure.message);
       throw new ContentError(
         "CONTENT_IDEMPOTENCY_FAILED",
         claim.failure.message,
@@ -2173,14 +2232,6 @@ export async function runContentTool<Name extends ContentToolName>(
                 fail(
                   "FOLDER_MOVE_FORBIDDEN",
                   "Parent belongs to another scope.",
-                  tool,
-                  "insert",
-                  item.parentFolderKey,
-                );
-              if (managedFolder(parent))
-                fail(
-                  "CONTENT_FORBIDDEN",
-                  "Managed folders cannot contain generic child folders.",
                   tool,
                   "insert",
                   item.parentFolderKey,
@@ -3401,19 +3452,11 @@ export async function runContentTool<Name extends ContentToolName>(
       );
     } else if (tool === "document.parse") {
       await roleFor(input.scopeKey, "moderator");
-      const target = await location(
+      await location(
         input.scopeKey,
         input.folderKey,
         "moderator",
       );
-      if (target && managedFolder(target))
-        fail(
-          "CONTENT_FORBIDDEN",
-          "Managed folders cannot contain generic documents.",
-          tool,
-          "insert",
-          target.key,
-        );
       const processingLogger = dependencies.ingestion?.logger;
       const processingInput = input.idempotencyKey
         ? {
@@ -3427,6 +3470,11 @@ export async function runContentTool<Name extends ContentToolName>(
         : input;
       const processed = await d.parseDocument(processingInput, {
         ...dependencies.ingestion,
+        teamKey: context.teamKey,
+        signal: dependencies.signal ?? dependencies.ingestion?.signal,
+        getFolder: dependencies.ingestion?.getFolder ?? ((key) => repo.getFolder(key)),
+        getDocument: dependencies.ingestion?.getDocument ?? ((key) => repo.getDocument(key)),
+        insert: dependencies.ingestion?.insert ?? ((document) => repo.insertDocument(document)),
         ...(!dependencies.ingestion?.embed &&
         !dependencies.ingestion?.embedBatch
           ? {
@@ -3460,131 +3508,12 @@ export async function runContentTool<Name extends ContentToolName>(
         },
       });
       result = { document: documentView(processed.document) };
-    } else if (tool === "document.scan") {
-      const target = await location(
-        input.scopeKey,
-        input.folderKey,
-        "moderator",
-      );
-      if (target && managedFolder(target))
-        fail(
-          "CONTENT_FORBIDDEN",
-          "Managed folders cannot contain generic documents.",
-          tool,
-          "insert",
-          target.key,
-        );
-      const processingInput = {
-        ...input,
-        idempotencyKey: input.idempotencyKey
-          ? createHash("sha256")
-              .update(member.user.key)
-              .update("\0")
-              .update(input.idempotencyKey)
-              .digest("hex")
-          : invocationKey,
-      };
-      const scan =
-        dependencies.scanDocument ??
-        (await import("@/lib/ai/document-scanning")).scanDocumentImages;
-      const deterministicKey = (
-        await import("@/lib/ai/document-processing")
-      ).documentKeyForRequest(
-        input.scopeKey,
-        input.folderKey,
-        processingInput.idempotencyKey,
-      );
-      const replay = await repo.getDocument(deterministicKey);
-      if (replay) result = { document: documentView(replay) };
-      else {
-        const processed = await scan(processingInput, context.teamKey);
-        try {
-          const cleaned = await documentCleanup(
-            { text: processed.content },
-            { logger: () => undefined },
-          );
-          const transformed = await representations(
-            cleaned.content,
-            input.name ??
-              `Scanned document ${d.clock().toISOString().slice(0, 10)}`,
-            processed.documentKey,
-            input.scopeKey,
-          );
-          const timestamp = now();
-          const created = await repo.insertDocument({
-            key: processed.documentKey,
-            scopeKey: input.scopeKey,
-            ...(input.folderKey ? { folderKey: input.folderKey } : {}),
-            name: input.name ?? `Scanned document ${timestamp.slice(0, 10)}`,
-            mutationPolicy: "user",
-            isFavorite: false,
-            sourceStorageKeys: processed.storageKeys,
-            ...transformed,
-            createdAt: timestamp,
-            updatedAt: timestamp,
-          });
-          result = { document: documentView(created) };
-        } catch (error) {
-          let committed: Document | null;
-          try {
-            committed = await repo.getDocument(processed.documentKey);
-          } catch (ownershipError) {
-            throw new ContentError(
-              "CONTENT_CONFLICT",
-              "Document ownership could not be verified after scanning failed; source images were retained for safe reconciliation.",
-              tool,
-              {
-                action: "cleanup",
-                resourceKey: processed.documentKey,
-                retryable: true,
-                cause: new AggregateError(
-                  [error, ownershipError],
-                  "Document scanning and ownership verification failed.",
-                ),
-              },
-            );
-          }
-          if (committed) result = { document: documentView(committed) };
-          else {
-            const cleanup = await Promise.allSettled(
-              processed.storageKeys.map((key) => d.storage.delete(key)),
-            );
-            const cleanupErrors = cleanup.flatMap((outcome) =>
-              outcome.status === "rejected" ? [outcome.reason] : [],
-            );
-            if (cleanupErrors.length)
-              throw new ContentError(
-                "CONTENT_CONFLICT",
-                "Document scanning failed and its source images could not be fully cleaned up.",
-                tool,
-                {
-                  action: "cleanup",
-                  resourceKey: processed.documentKey,
-                  retryable: true,
-                  cause: new AggregateError(
-                    [error, ...cleanupErrors],
-                    "Document scanning and source cleanup failed.",
-                  ),
-                },
-              );
-            throw error;
-          }
-        }
-      }
     } else if (tool === "document.create") {
-      const target = await location(
+      await location(
         input.scopeKey,
         input.folderKey,
         "moderator",
       );
-      if (target && managedFolder(target))
-        fail(
-          "CONTENT_FORBIDDEN",
-          "Managed folders cannot contain generic documents.",
-          tool,
-          "insert",
-          target.key,
-        );
       const key = d.id();
       const transformed = await representations(
         input.content,
@@ -6328,6 +6257,7 @@ export async function runContentTool<Name extends ContentToolName>(
     return parsed;
   } catch (error) {
     const mapped = mappedError(error, tool);
+    const billingError = error instanceof SparkRepositoryError || error instanceof SparkExecutionPendingError ? error : undefined;
     let terminalError: ContentError | undefined;
     if (
       idempotencyIdentity &&
@@ -6341,9 +6271,9 @@ export async function runContentTool<Name extends ContentToolName>(
           requestHash,
           invocationKey,
           {
-            code: mapped.code,
-            message: mapped.message,
-            retryable: mapped.retryable,
+            code: error instanceof SparkRepositoryError ? error.code : mapped.code,
+            message: billingError?.message ?? mapped.message,
+            retryable: billingError ? true : mapped.retryable,
           },
           now(),
         )
@@ -6367,6 +6297,7 @@ export async function runContentTool<Name extends ContentToolName>(
       context.runtimeScopeKey,
       Math.round(performance.now() - invocationStarted),
     );
+    if (billingError) throw billingError;
     if (terminalError) throw terminalError;
     throw mapped;
   }

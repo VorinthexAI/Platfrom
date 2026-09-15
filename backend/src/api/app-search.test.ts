@@ -23,6 +23,7 @@ describe('app search HTTP API', () => {
     const dependencies = { getIdentity: async () => ({ key: userKey, identityType: 'user' as const }), authorize: async () => ({ input: { teamKey, scopeKey }, context }), service: { search: async () => ({ query: 'ok', groups: [] }) } as never };
     expect((await request(dependencies, { teamKey, scopeKey, query: 'ok', collectionSlugs: ['folders'], teamMembershipKey: newId() })).status).toBe(400);
     expect((await request(dependencies, { teamKey, scopeKey, query: 'ok', collectionSlugs: ['folders'], embedding: [1] })).status).toBe(400);
+    expect((await request(dependencies, { teamKey, scopeKey, operation: 'sum', scope: 'account', field: 'sizeBytes', userKey })).status).toBe(400);
   });
 
   test('is registered at POST /app/search', async () => {
@@ -67,6 +68,21 @@ describe('app search HTTP API', () => {
     expect(await response.json()).toEqual({ success: true, data: { ...output, retrieval: null } });
     expect(calls).toEqual([{ operation: 'sum', collectionSlugs: ['images'], field: 'sizeBytes', recordHistory: true, limit: 10 }]);
     expect((await request(dependencies, { teamKey, scopeKey, operation: 'sum', collectionSlugs: ['images'], field: 'width' })).status).toBe(400);
+  });
+
+  test('preserves exact account aggregates across HTTP and Core without exposing an identity selector', async () => {
+    const calls: unknown[] = [];
+    const output = { operation: 'sum', scope: 'account', field: 'sizeBytes', sum: '90071992547410000', unit: 'bytes' };
+    const service = { search: async (input: unknown) => { calls.push(input); return output; } } as never;
+    await runTool('app.search', '', { operation: 'sum', scope: 'account', field: 'sizeBytes', limit: 10 }, { contentContext: context, appSearchService: service });
+    const response = await request({
+      getIdentity: async () => ({ key: userKey, identityType: 'user' }),
+      authorize: async () => ({ input: { teamKey, scopeKey }, context }),
+      service,
+    }, { teamKey, scopeKey, operation: 'sum', scope: 'account', field: 'sizeBytes' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true, data: { ...output, retrieval: null } });
+    expect(calls).toEqual(Array.from({ length: 2 }, () => ({ operation: 'sum', scope: 'account', field: 'sizeBytes', recordHistory: true, limit: 10 })));
   });
 
   test('preserves strict field filters when invoking exact count operations', async () => {
@@ -115,12 +131,12 @@ describe('app search HTTP API', () => {
     expect(authorizations).toBe(0);
   });
 
-  test('returns list, get, and summarize responses without retrieval metadata', async () => {
+  test('returns retrieval metadata for resource results but not summaries', async () => {
     const key = newId();
-    for (const [body, output] of [
-      [{ teamKey, scopeKey, operation: 'list', collectionSlugs: ['books'] }, { operation: 'list', groups: [{ collectionSlug: 'books', results: [] }] }],
-      [{ teamKey, scopeKey, operation: 'get', collectionSlugs: ['books'], key }, { operation: 'get', groups: [{ collectionSlug: 'books', results: [{ key, title: 'Systems' }] }] }],
-      [{ teamKey, scopeKey, operation: 'summarize', collectionSlugs: ['documents'], key, summary: { style: 'technical' } }, { operation: 'summarize', collectionSlug: 'documents', key, summary: 'Summary' }],
+    for (const [body, output, retrieval] of [
+      [{ teamKey, scopeKey, operation: 'list', collectionSlugs: ['books'] }, { operation: 'list', groups: [{ collectionSlug: 'books', results: [] }] }, null],
+      [{ teamKey, scopeKey, operation: 'get', collectionSlugs: ['books'], key }, { operation: 'get', groups: [{ collectionSlug: 'books', results: [{ key, title: 'Systems' }] }] }, { source: 'results', limit: 10, searchCollectionSlugs: ['books'], groups: [{ collectionSlug: 'books', results: [{ key, label: 'Systems' }] }] }],
+      [{ teamKey, scopeKey, operation: 'summarize', collectionSlugs: ['documents'], key, summary: { style: 'technical' } }, { operation: 'summarize', collectionSlug: 'documents', key, summary: 'Summary' }, null],
     ] as const) {
       const response = await request({
         getIdentity: async () => ({ key: userKey, identityType: 'user' }),
@@ -128,7 +144,7 @@ describe('app search HTTP API', () => {
         service: { search: async () => output } as never,
       }, body);
       expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ success: true, data: { ...output, retrieval: null } });
+      expect(await response.json()).toEqual({ success: true, data: { ...output, retrieval } });
     }
   });
 

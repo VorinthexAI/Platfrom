@@ -13,6 +13,22 @@ const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member
 const output = { key: newId(), documentKey, version: 1, sourceContentHash: 'a'.repeat(64), sourceTitle: 'Notes', sourceDocumentUpdatedAt: '2026-08-27T00:00:00.000Z', mimeType: 'audio/mpeg' as const, sizeBytes: 1, durationMs: 1_000, isCurrent: false, playbackPositionMs: 0, voice: 'clear', speakingRate: 1, includeTitle: true, includeCode: false, createdAt: '2026-08-27T00:00:00.000Z', current: true, url: 'https://audio.example/version.mp3' };
 
 describe('app speech HTTP API', () => {
+  test('accepts the Archive audio payload with its required per-generation request header', async () => {
+    const calls: unknown[][] = [];
+    const app = new Hono().post('/app/speech', createAppSpeechHandler({
+      getIdentity: async () => ({ key: userKey, identityType: 'user' }),
+      authorize: async () => ({ input: { teamKey, scopeKey }, context }),
+      recordEvent: async () => {}, appScopeKey: newId(),
+      service: { generateDocument: async (...args: unknown[]) => { calls.push(args); return output; }, generateForTarget: async () => { throw new Error('unexpected target'); } },
+    }));
+    const body = JSON.stringify({ teamKey, scopeKey, input: { documentKey, voice: 'clear', pace: 1, includeTitle: true, includeCode: false } });
+    expect((await app.request('/app/speech', { method: 'POST', headers: { 'content-type': 'application/json' }, body })).status).toBe(400);
+    expect(calls).toHaveLength(0);
+    const response = await app.request('/app/speech', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'archive-audio-generation' }, body });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true, data: output });
+    expect(calls).toHaveLength(1);
+  });
   test('registers the authenticated strict route', async () => {
     const routes = new Hono(); registerRoutes(routes);
     expect((await routes.request('/app/speech', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(401);

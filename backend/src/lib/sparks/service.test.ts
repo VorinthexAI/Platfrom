@@ -137,4 +137,18 @@ describe('Spark service', () => {
     await service.refund('user-1', { ...identity, idempotencyKey: 'refund-1', microSparks: 20, chargeTransactionKey: charge.transaction.key });
     expect(events).toEqual(['user-1:spark.balance.changed', 'user-1:spark.balance.changed']);
   });
+
+  test('does not wait for balance invalidation after persisting a charge', async () => {
+    const memory = createMemoryRepository(100);
+    const neverPublishes = new Promise<void>(() => {});
+    const service = createSparkService({ repository: memory.repository, publishBalance: () => neverPublishes });
+
+    const outcome = await Promise.race([
+      service.charge('user-1', { ...identity, kind: 'tool', toolSlug: 'document.create', microSparks: 20 }).then(() => 'charged'),
+      Bun.sleep(100).then(() => 'timed-out'),
+    ]);
+
+    expect(outcome).toBe('charged');
+    expect(memory.balance).toBe(80);
+  });
 });

@@ -15,6 +15,7 @@ import { defaultBookService } from '@/lib/books/default-service';
 import type { BookService } from '@/lib/books/service';
 import { getDefaultScopeTagRepository, type ScopeTagRepository, type ScopeTagTarget } from '@/lib/scope-tags/repository';
 import { createScopeTagService, normalizeScopeTagName, ScopeTagError } from '@/lib/scope-tags/service';
+import { getDefaultStorageChargingRepository } from '@/lib/automations/storage-charger-repository';
 
 export const appSearchCollectionSlugSchema = z.enum([
   'folders', 'documents', 'files', 'collections', 'images', 'inboxes', 'email-tones', 'email-messages', 'email-drafts', 'places', 'trips', 'countries', 'books', 'tags', 'tag-assignments',
@@ -25,6 +26,8 @@ export const appSearchOperationSchema = z.enum(['search', 'list', 'count', 'sum'
 type AppSearchOperation = z.infer<typeof appSearchOperationSchema>;
 export const appSearchSumFieldSchema = z.enum(['sizeBytes', 'estimatedMinutes', 'chapterCount']);
 type AppSearchSumField = z.infer<typeof appSearchSumFieldSchema>;
+export const appSearchScopeSchema = z.enum(['current', 'account']);
+type AppSearchScope = z.infer<typeof appSearchScopeSchema>;
 type AppSearchSumFieldMetadata = { description: string; unit: 'bytes' | 'minutes' | 'chapters' };
 type AppSearchFilterName = 'folderKey' | 'includeDescendants' | 'collectionKey' | 'connectorKey' | 'readState' | 'emailFacets' | 'status' | 'isFavorite' | 'createdFrom' | 'createdTo' | 'tagNames' | 'tagKeys' | 'tagMatch' | 'targetTypes';
 type AppSearchCollectionAdapter = { description: string; operations: readonly AppSearchOperation[]; filters: readonly AppSearchFilterName[]; fields: readonly string[]; sumFields?: Partial<Record<AppSearchSumField, AppSearchSumFieldMetadata>>; statuses?: readonly string[] };
@@ -51,6 +54,18 @@ export function describeAppSearchCollections() {
     const sums = Object.entries(adapter.sumFields ?? {}).map(([field, metadata]) => `${field} (${metadata!.description} Unit: ${metadata!.unit})`).join(', ');
     return `${slug}: ${adapter.description} Operations: ${adapter.operations.join(', ')}. Public fields: ${adapter.fields.join(', ')}.${sums ? ` Summable fields: ${sums}.` : ''}`;
   }).join(' ');
+}
+
+export const APP_SEARCH_ACCOUNT_SUM_FIELDS = Object.freeze({
+  sizeBytes: {
+    description: 'Current bytes used by all active tracked storage objects owned by the authenticated user across every app and scope.',
+    unit: 'bytes',
+    resolve: (userKey: string) => getDefaultStorageChargingRepository().getActiveStoredBytes(userKey),
+  },
+} as const satisfies Partial<Record<AppSearchSumField, AppSearchSumFieldMetadata & { resolve: (userKey: string) => Promise<string> }>>);
+
+export function describeAppSearchAccountAggregates() {
+  return Object.entries(APP_SEARCH_ACCOUNT_SUM_FIELDS).map(([field, metadata]) => `${field} (${metadata.description} Unit: ${metadata.unit})`).join(', ');
 }
 
 const tagNamesSchema = z.array(z.string().transform((value) => value.normalize('NFKC').trim().replace(/\s+/g, ' ')).pipe(z.string().min(1).max(120))).min(1).max(20).superRefine((names, context) => {
@@ -86,41 +101,51 @@ export const appSearchInputShape = {
   query: z.string().trim().min(1).max(500).optional(),
   collectionSlugs: z.array(appSearchCollectionSlugSchema).min(1).max(appSearchCollectionSlugSchema.options.length).superRefine((slugs, context) => {
     if (new Set(slugs).size !== slugs.length) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Collection slugs must be distinct.' });
-  }),
+  }).describe('Canonical resource collections for current-scope operations. Omit only for an account-scoped sum.').optional(),
+  scope: appSearchScopeSchema.describe('Aggregation boundary. Use account only for an account-wide sum and omit collectionSlugs; current is the default for resource sums.').optional(),
   recordHistory: z.boolean().default(true),
   limit: appSearchLimitSchema.default(10),
-  field: appSearchSumFieldSchema.optional(),
+  field: appSearchSumFieldSchema.describe('Registered numeric field to sum. Account scope supports only fields listed in the account aggregate catalog.').optional(),
   key: z.string().cuid().optional(),
   summary: z.object({ topic: z.string().trim().min(1).max(500).optional(), style: z.enum(['brief', 'detailed', 'executive', 'bullet-points', 'technical']).default('brief'), language: z.string().trim().min(1).max(100).optional() }).strict().optional(),
   filters: appSearchFiltersSchema.optional(),
 } as const;
 export function validateAppSearchInput(input: z.infer<z.ZodObject<typeof appSearchInputShape>>, context: z.RefinementCtx) {
   const operation = input.operation ?? (input.query ? 'search' : 'list');
+  const collectionSlugs = input.collectionSlugs ?? [];
+  const scope: AppSearchScope = input.scope ?? 'current';
+  const accountAggregate = operation === 'sum' && scope === 'account';
+  if (accountAggregate && collectionSlugs.length) context.addIssue({ code: 'custom', path: ['collectionSlugs'], message: 'Account sums do not accept collection slugs.' });
+  if (!accountAggregate && collectionSlugs.length === 0) context.addIssue({ code: 'custom', path: ['collectionSlugs'], message: `${operation} requires at least one collection.` });
+  if (scope === 'account' && operation !== 'sum') context.addIssue({ code: 'custom', path: ['scope'], message: 'Account scope requires sum.' });
+  if (scope === 'current' && input.scope !== undefined && operation !== 'sum') context.addIssue({ code: 'custom', path: ['scope'], message: 'An explicit scope applies only to sum.' });
   if (operation === 'search' && !input.query) context.addIssue({ code: 'custom', path: ['query'], message: 'Search requires a query.' });
   if (operation !== 'search' && input.query !== undefined) context.addIssue({ code: 'custom', path: ['query'], message: `${operation} does not accept a search query.` });
   if ((operation === 'get' || operation === 'summarize') && !input.key) context.addIssue({ code: 'custom', path: ['key'], message: `${operation} requires a resource key.` });
-  if ((operation === 'get' || operation === 'summarize') && input.collectionSlugs.length !== 1) context.addIssue({ code: 'custom', path: ['collectionSlugs'], message: `${operation} accepts exactly one collection.` });
+  if ((operation === 'get' || operation === 'summarize') && collectionSlugs.length !== 1) context.addIssue({ code: 'custom', path: ['collectionSlugs'], message: `${operation} accepts exactly one collection.` });
   if (operation !== 'get' && operation !== 'summarize' && input.key !== undefined) context.addIssue({ code: 'custom', path: ['key'], message: `${operation} does not accept a resource key.` });
   if ((operation === 'get' || operation === 'summarize') && input.filters !== undefined) context.addIssue({ code: 'custom', path: ['filters'], message: `${operation} does not accept filters.` });
   if (operation !== 'summarize' && input.summary !== undefined) context.addIssue({ code: 'custom', path: ['summary'], message: 'Summary options require summarize.' });
   if (operation === 'sum' && !input.field) context.addIssue({ code: 'custom', path: ['field'], message: 'sum requires a field.' });
   if (operation !== 'sum' && input.field !== undefined) context.addIssue({ code: 'custom', path: ['field'], message: 'A sum field requires sum.' });
-  for (const slug of input.collectionSlugs) if (!(APP_SEARCH_COLLECTION_OPERATIONS[slug] as readonly string[]).includes(operation)) context.addIssue({ code: 'custom', path: ['collectionSlugs'], message: `${operation} is not supported for ${slug}.` });
-  if (operation === 'sum' && input.field) for (const slug of input.collectionSlugs) if (!(APP_SEARCH_COLLECTION_ADAPTERS[slug] as AppSearchCollectionAdapter).sumFields?.[input.field]) context.addIssue({ code: 'custom', path: ['field'], message: `${input.field} cannot be summed for ${slug}.` });
+  if (accountAggregate && input.field && !APP_SEARCH_ACCOUNT_SUM_FIELDS[input.field as keyof typeof APP_SEARCH_ACCOUNT_SUM_FIELDS]) context.addIssue({ code: 'custom', path: ['field'], message: `${input.field} cannot be summed at account scope.` });
+  if (accountAggregate && input.filters !== undefined) context.addIssue({ code: 'custom', path: ['filters'], message: 'Account sums do not accept collection filters.' });
+  for (const slug of collectionSlugs) if (!(APP_SEARCH_COLLECTION_OPERATIONS[slug] as readonly string[]).includes(operation)) context.addIssue({ code: 'custom', path: ['collectionSlugs'], message: `${operation} is not supported for ${slug}.` });
+  if (operation === 'sum' && !accountAggregate && input.field) for (const slug of collectionSlugs) if (!(APP_SEARCH_COLLECTION_ADAPTERS[slug] as AppSearchCollectionAdapter).sumFields?.[input.field]) context.addIssue({ code: 'custom', path: ['field'], message: `${input.field} cannot be summed for ${slug}.` });
   const supportsFilter = (filter: AppSearchFilterName) => {
-    if (input.collectionSlugs.some((slug) => !(APP_SEARCH_COLLECTION_ADAPTERS[slug].filters as readonly AppSearchFilterName[]).includes(filter))) context.addIssue({ code: 'custom', path: ['filters', filter], message: `${filter} does not apply to every requested collection.` });
+    if (collectionSlugs.some((slug) => !(APP_SEARCH_COLLECTION_ADAPTERS[slug].filters as readonly AppSearchFilterName[]).includes(filter))) context.addIssue({ code: 'custom', path: ['filters', filter], message: `${filter} does not apply to every requested collection.` });
   };
   if (input.filters) for (const filter of Object.keys(input.filters) as AppSearchFilterName[]) if (input.filters[filter] !== undefined) supportsFilter(filter);
   if (input.filters?.includeDescendants !== undefined) {
     if (!input.filters.folderKey) context.addIssue({ code: 'custom', path: ['filters', 'includeDescendants'], message: 'includeDescendants requires folderKey.' });
   }
   if (input.filters?.emailFacets && input.filters.emailFacets.length > 1 && !input.filters.readState) context.addIssue({ code: 'custom', path: ['filters', 'emailFacets'], message: 'Multiple email facets require readState.' });
-  if ((operation === 'list' || operation === 'count') && input.collectionSlugs.some((slug) => slug === 'email-messages' || slug === 'email-drafts') && !input.filters?.connectorKey && !input.filters?.tagNames && !input.filters?.tagKeys) context.addIssue({ code: 'custom', path: ['filters', 'connectorKey'], message: 'Email list and count operations require connectorKey unless exact tag filtering is used.' });
+  if ((operation === 'list' || operation === 'count') && collectionSlugs.some((slug) => slug === 'email-messages' || slug === 'email-drafts') && !input.filters?.connectorKey && !input.filters?.tagNames && !input.filters?.tagKeys) context.addIssue({ code: 'custom', path: ['filters', 'connectorKey'], message: 'Email list and count operations require connectorKey unless exact tag filtering is used.' });
   if ((input.filters?.status !== undefined || input.filters?.isFavorite !== undefined) && operation !== 'list' && operation !== 'count' && operation !== 'sum') context.addIssue({ code: 'custom', path: ['filters'], message: 'status and isFavorite filters require list, count, or sum.' });
-  if (input.filters?.status && input.collectionSlugs.some((slug) => !(APP_SEARCH_COLLECTION_ADAPTERS[slug] as AppSearchCollectionAdapter).statuses?.includes(input.filters!.status!))) context.addIssue({ code: 'custom', path: ['filters', 'status'], message: 'status is not valid for every requested collection.' });
+  if (input.filters?.status && collectionSlugs.some((slug) => !(APP_SEARCH_COLLECTION_ADAPTERS[slug] as AppSearchCollectionAdapter).statuses?.includes(input.filters!.status!))) context.addIssue({ code: 'custom', path: ['filters', 'status'], message: 'status is not valid for every requested collection.' });
   if ((input.filters?.createdFrom || input.filters?.createdTo) && !['search', 'list', 'count', 'sum'].includes(operation)) context.addIssue({ code: 'custom', path: ['filters'], message: 'Date filters require search, list, count, or sum.' });
   if (input.filters?.createdFrom && input.filters.createdTo && input.filters.createdFrom > input.filters.createdTo) context.addIssue({ code: 'custom', path: ['filters', 'createdTo'], message: 'createdTo must not precede createdFrom.' });
-  if ((input.filters?.tagNames || input.filters?.tagKeys) && input.collectionSlugs.some((slug) => slug === 'countries' || slug === 'tags')) context.addIssue({ code: 'custom', path: ['collectionSlugs'], message: 'countries and tags do not support resource tag filtering.' });
+  if ((input.filters?.tagNames || input.filters?.tagKeys) && collectionSlugs.some((slug) => slug === 'countries' || slug === 'tags')) context.addIssue({ code: 'custom', path: ['collectionSlugs'], message: 'countries and tags do not support resource tag filtering.' });
 }
 export const appSearchInputSchema = z.object(appSearchInputShape).strict().superRefine(validateAppSearchInput);
 export const appSearchModelInputSchema = z.object({
@@ -190,7 +215,9 @@ export const appSearchResourceOutputSchema = z.object({
   groups: z.array(z.object({ collectionSlug: appSearchCollectionSlugSchema, results: z.array(z.unknown()), totalCount: z.number().int().nonnegative().optional() }).strict()),
 }).strict();
 export const appSearchCountOutputSchema = z.object({ operation: z.literal('count'), groups: z.array(z.object({ collectionSlug: appSearchCollectionSlugSchema, count: z.number().int().nonnegative() }).strict()) }).strict();
-export const appSearchSumOutputSchema = z.object({ operation: z.literal('sum'), groups: z.array(z.object({ collectionSlug: appSearchCollectionSlugSchema, field: appSearchSumFieldSchema, sum: z.number().int().nonnegative().safe(), unit: z.enum(['bytes', 'minutes', 'chapters']), matchedCount: z.number().int().nonnegative(), valueCount: z.number().int().nonnegative() }).strict()) }).strict();
+const appSearchResourceSumOutputSchema = z.object({ operation: z.literal('sum'), scope: z.literal('current').optional(), groups: z.array(z.object({ collectionSlug: appSearchCollectionSlugSchema, field: appSearchSumFieldSchema, sum: z.number().int().nonnegative().safe(), unit: z.enum(['bytes', 'minutes', 'chapters']), matchedCount: z.number().int().nonnegative(), valueCount: z.number().int().nonnegative() }).strict()) }).strict();
+const appSearchAccountSumOutputSchema = z.object({ operation: z.literal('sum'), scope: z.literal('account'), field: appSearchSumFieldSchema, sum: z.string().regex(/^(0|[1-9]\d*)$/), unit: z.enum(['bytes', 'minutes', 'chapters']) }).strict();
+export const appSearchSumOutputSchema = z.union([appSearchResourceSumOutputSchema, appSearchAccountSumOutputSchema]);
 export const appSearchSummaryOutputSchema = z.object({ operation: z.literal('summarize'), collectionSlug: z.enum(['documents', 'files']), key: z.string().cuid(), summary: z.string().min(1) }).strict();
 export const appSearchResultSchema = z.union([appSearchOutputSchema, appSearchResourceOutputSchema, appSearchCountOutputSchema, appSearchSumOutputSchema, appSearchSummaryOutputSchema]);
 export type AppSearchResourceOutput = z.infer<typeof appSearchResourceOutputSchema>;
@@ -282,7 +309,8 @@ function copyReference(value: object, field: 'key' | 'name') {
 /** Produces the bounded, redacted workspace evidence supplied to any model after app.search. */
 export function projectAppSearchModelResult(result: unknown) {
   if (!result || typeof result !== 'object') return result ?? null;
-  const appResult = result as { operation?: unknown; query?: unknown; groups?: unknown; collectionSlug?: unknown; key?: unknown; summary?: unknown };
+  const appResult = result as { operation?: unknown; scope?: unknown; field?: unknown; sum?: unknown; unit?: unknown; query?: unknown; groups?: unknown; collectionSlug?: unknown; key?: unknown; summary?: unknown };
+  if (appResult.operation === 'sum' && appResult.scope === 'account') return { operation: 'sum', scope: 'account', field: appResult.field, sum: appResult.sum, unit: appResult.unit };
   if ((appResult.operation === 'count' || appResult.operation === 'sum') && Array.isArray(appResult.groups)) return { operation: appResult.operation, groups: appResult.groups };
   if (appResult.operation === 'summarize') return { operation: 'summarize', collectionSlug: appResult.collectionSlug, summary: appResult.summary };
   if (!Array.isArray(appResult.groups)) return result;
@@ -332,35 +360,38 @@ export type AppSearchRetrievalResult = z.infer<typeof appSearchRetrievalResultSc
 export type AppSearchRetrievalGroup = z.infer<typeof appSearchRetrievalGroupSchema>;
 export type AppSearchRetrieval = z.infer<typeof appSearchRetrievalSchema>;
 
-function retrievalLabel(value: string, fallback: string) {
-  return value.trim().slice(0, 200) || fallback;
+function retrievalLabel(value: unknown, fallback: string) {
+  return typeof value === 'string' ? value.trim().slice(0, 200) || fallback : fallback;
 }
 
-type ImageSearchResultShape = { key: string; caption: string; filename: string; collections?: Array<{ key: string; name: string }> };
-
-/** Matched images become one pill per accessible collection; collection-less images stay image pills. */
-function imageCollectionPills(results: ImageSearchResultShape[]): AppSearchRetrievalResult[] {
-  const seen = new Set<string>();
-  const pills: AppSearchRetrievalResult[] = [];
-  for (const result of results) {
-    for (const collection of result.collections ?? []) {
-      if (seen.has(collection.key)) continue;
-      seen.add(collection.key);
-      pills.push({ key: collection.key, label: retrievalLabel(collection.name, 'Collection') });
-    }
-  }
-  return pills;
-}
-
-function uncollectedImageResults(results: ImageSearchResultShape[]): AppSearchRetrievalResult[] {
-  return results.filter((result) => !result.collections?.length).map((result) => ({ key: result.key, label: retrievalLabel(result.caption.trim() || result.filename, 'Image') }));
+function incrementParentCount(counts: Map<string, number>, key: string) {
+  counts.set(key, (counts.get(key) ?? 0) + 1);
 }
 
 export function projectAppSearchRetrieval(rawInput: unknown, rawOutput: unknown): AppSearchRetrieval | null {
   const input = z.object(appSearchInputShape).strict().parse(rawInput);
-  if ((input.operation ?? 'search') !== 'search') return null;
-  const output = appSearchOutputSchema.parse(rawOutput);
-  let remaining = Math.min(MAX_APP_SEARCH_RETRIEVAL_RESULTS, input.limit * input.collectionSlugs.length);
+  const operation = input.operation ?? (input.query ? 'search' : 'list');
+  if (operation !== 'search' && operation !== 'list' && operation !== 'get') return null;
+  const collectionSlugs = input.collectionSlugs ?? [];
+  const output = operation === 'search' ? appSearchOutputSchema.parse(rawOutput) : appSearchResourceOutputSchema.parse(rawOutput);
+  if ('operation' in output && output.operation !== operation) throw new Error('app.search resource operation did not match its input.');
+  const groups = output.groups as AppSearchOutput['groups'];
+  const folderCounts = new Map<string, number>();
+  const collectionCounts = new Map<string, number>();
+  const inboxCounts = new Map<string, number>();
+  const tripCounts = new Map<string, number>();
+  for (const group of groups) {
+    if (group.collectionSlug === 'documents' || group.collectionSlug === 'files') {
+      for (const result of group.results) if (result.folder) incrementParentCount(folderCounts, result.folder.key);
+    } else if (group.collectionSlug === 'images') {
+      for (const result of group.results) for (const collection of new Map((result.collections ?? []).map((value) => [value.key, value])).values()) incrementParentCount(collectionCounts, collection.key);
+    } else if (group.collectionSlug === 'email-messages' || group.collectionSlug === 'email-drafts') {
+      for (const result of group.results) if (result.inbox) incrementParentCount(inboxCounts, `${group.collectionSlug}:${result.inbox.key}`);
+    } else if (group.collectionSlug === 'places') {
+      for (const result of group.results) for (const trip of new Map((result.trips ?? []).map((value) => [value.key, value])).values()) incrementParentCount(tripCounts, trip.key);
+    }
+  }
+  let remaining = Math.min(MAX_APP_SEARCH_RETRIEVAL_RESULTS, input.limit * collectionSlugs.length);
   const projected = new Map<AppSearchCollectionSlug, AppSearchRetrievalResult[]>();
   const seen = new Map<string, AppSearchRetrievalResult>();
   const add = (collectionSlug: AppSearchCollectionSlug, result: AppSearchRetrievalResult) => {
@@ -376,39 +407,43 @@ export function projectAppSearchRetrieval(rawInput: unknown, rawOutput: unknown)
     projected.set(collectionSlug, [...(projected.get(collectionSlug) ?? []), result]);
     remaining -= 1;
   };
-  for (const group of output.groups) {
+  for (const group of groups) {
     let results: AppSearchRetrievalResult[];
     switch (group.collectionSlug) {
       case 'countries': results = group.results.map((result) => ({ key: result.countryCode, label: retrievalLabel(result.name, 'Country') })); break;
       case 'images': {
-        for (const result of imageCollectionPills(group.results)) add('collections', result);
-        for (const result of uncollectedImageResults(group.results)) add('images', result);
+        for (const result of group.results) {
+          const sharedCollection = result.collections?.find((collection) => (collectionCounts.get(collection.key) ?? 0) > 1);
+          if (sharedCollection) add('collections', { key: sharedCollection.key, label: retrievalLabel(sharedCollection.name, 'Collection') });
+          else add('images', { key: result.key, label: retrievalLabel(result.caption, retrievalLabel(result.filename, 'Image')) });
+        }
         continue;
       }
       case 'documents':
       case 'files':
         for (const result of group.results) {
-          if (result.folder) add('folders', { key: result.folder.key, label: retrievalLabel(result.folder.name, 'Folder'), destinationCollectionSlug: group.collectionSlug });
+          if (result.folder && (folderCounts.get(result.folder.key) ?? 0) > 1) add('folders', { key: result.folder.key, label: retrievalLabel(result.folder.name, 'Folder'), destinationCollectionSlug: group.collectionSlug });
           else add(group.collectionSlug, { key: result.key, label: retrievalLabel(result.name, 'Resource') });
         }
         continue;
       case 'places':
         for (const result of group.results) {
-          if (result.trips?.length) for (const trip of result.trips) add('trips', { key: trip.key, label: retrievalLabel(trip.name, 'Trip') });
+          const sharedTrip = result.trips?.find((trip) => (tripCounts.get(trip.key) ?? 0) > 1);
+          if (sharedTrip) add('trips', { key: sharedTrip.key, label: retrievalLabel(sharedTrip.name, 'Trip') });
           else add('places', { key: result.key, label: retrievalLabel(result.name, 'Place') });
         }
         continue;
       case 'inboxes': results = group.results.map((result) => ({ key: result.key, destinationKey: result.connectorKey, label: retrievalLabel(result.name || result.email, 'Inbox') })); break;
       case 'email-messages':
         for (const result of group.results) {
-          if (result.inbox) add('inboxes', { key: result.inbox.key, destinationKey: result.inbox.connectorKey, destinationCollectionSlug: 'email-messages', label: retrievalLabel(result.inbox.name, 'Inbox') });
-          else add('email-messages', { key: result.key, ...(input.filters?.connectorKey ? { destinationKey: input.filters.connectorKey } : {}), label: retrievalLabel(result.subject, 'Email message') });
+          if (result.inbox && (inboxCounts.get(`email-messages:${result.inbox.key}`) ?? 0) > 1) add('inboxes', { key: result.inbox.key, destinationKey: result.inbox.connectorKey, destinationCollectionSlug: 'email-messages', label: retrievalLabel(result.inbox.name, 'Inbox') });
+          else add('email-messages', { key: result.key, ...(result.inbox?.connectorKey || input.filters?.connectorKey ? { destinationKey: result.inbox?.connectorKey ?? input.filters!.connectorKey } : {}), label: retrievalLabel(result.subject, 'Email message') });
         }
         continue;
       case 'email-drafts':
         for (const result of group.results) {
-          if (result.inbox) add('inboxes', { key: result.inbox.key, destinationKey: result.inbox.connectorKey, destinationCollectionSlug: 'email-drafts', label: retrievalLabel(result.inbox.name, 'Inbox') });
-          else add('email-drafts', { key: result.key, ...(input.filters?.connectorKey ? { destinationKey: input.filters.connectorKey } : {}), label: result.variant === 'new' ? retrievalLabel(result.subject, 'Email draft') : 'Reply draft' });
+          if (result.inbox && (inboxCounts.get(`email-drafts:${result.inbox.key}`) ?? 0) > 1) add('inboxes', { key: result.inbox.key, destinationKey: result.inbox.connectorKey, destinationCollectionSlug: 'email-drafts', label: retrievalLabel(result.inbox.name, 'Inbox') });
+          else add('email-drafts', { key: result.key, ...(result.inbox?.connectorKey || result.variant === 'new' || input.filters?.connectorKey ? { destinationKey: result.inbox?.connectorKey ?? (result.variant === 'new' ? result.connectorKey : input.filters!.connectorKey) } : {}), label: result.variant === 'new' ? retrievalLabel(result.subject, 'Email draft') : 'Reply draft' });
         }
         continue;
       case 'books': results = group.results.map((result) => ({ key: result.key, label: retrievalLabel(result.title, 'Audio book') })); break;
@@ -417,9 +452,9 @@ export function projectAppSearchRetrieval(rawInput: unknown, rawOutput: unknown)
     }
     for (const result of results) add(group.collectionSlug, result);
   }
-  const groups = [...projected].map(([collectionSlug, results]) => ({ collectionSlug, results }));
-  if (!groups.length) return null;
-  return appSearchRetrievalSchema.parse({ query: input.query, limit: input.limit, ...(input.filters ? { filters: input.filters } : {}), searchCollectionSlugs: input.collectionSlugs, groups });
+  const retrievalGroups = [...projected].map(([collectionSlug, results]) => ({ collectionSlug, results }));
+  if (!retrievalGroups.length) return null;
+  return appSearchRetrievalSchema.parse({ ...(operation === 'search' ? { query: input.query } : { source: 'results' as const }), limit: input.limit, ...(input.filters ? { filters: input.filters } : {}), searchCollectionSlugs: collectionSlugs, groups: retrievalGroups });
 }
 
 const embeddingCache = new Map<string, { embedding: number[]; expiresAt: number }>();
@@ -439,6 +474,7 @@ export interface AppSearchDependencies extends Pick<ExecuteActionOptions, 'signa
   books?: BookService;
   userSearches?: UserSearchService;
   scopeTags?: ScopeTagRepository;
+  accountSumResolvers?: Partial<Record<AppSearchSumField, (userKey: string) => Promise<string>>>;
   executeEmbedding?: (teamKey: string, input: EmbeddingInput, options: Pick<ExecuteActionOptions, 'signal' | 'timeoutMs'>) => Promise<EmbeddingOutput>;
 }
 
@@ -562,6 +598,7 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
       const trusted = actor(context);
       const dependencies = { ...defaults, ...execution };
       const operation = input.operation ?? (input.query ? 'search' : 'list');
+      const collectionSlugs = input.collectionSlugs ?? [];
       const email = dependencies.email ?? createEmailService();
       const emailActor = { ...trusted.serviceContext, userKey: trusted.userKey };
       const travel = dependencies.travel ?? createTravelService();
@@ -574,7 +611,7 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
        const scopeTags = dependencies.scopeTags ?? (projectTags ? getDefaultScopeTagRepository() : emptyScopeTags);
        const scopeTagQueries = createScopeTagService({ repository: scopeTags as ScopeTagRepository });
       const tagOwner = { teamKey: context.teamKey, scopeKey: context.runtimeScopeKey, userKey: trusted.userKey, teamMembershipKey: trusted.membership.key };
-       const targetTypes = [...new Set(input.collectionSlugs.flatMap((slug) => slug === 'countries' || slug === 'tags' || slug === 'tag-assignments' ? [] : slug === 'email-messages' ? ['email-thread' as const, 'email-message' as const] : [APP_SEARCH_TAG_TARGET[slug]]))];
+       const targetTypes = [...new Set(collectionSlugs.flatMap((slug) => slug === 'countries' || slug === 'tags' || slug === 'tag-assignments' ? [] : slug === 'email-messages' ? ['email-thread' as const, 'email-message' as const] : [APP_SEARCH_TAG_TARGET[slug]]))];
        let candidateKeys: Record<string, string[]> | undefined;
        if (targetTypes.length && (input.filters?.tagNames || input.filters?.tagKeys)) {
          const owned = input.filters.tagNames
@@ -583,7 +620,7 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
          if (owned.some((tag) => !tag)) throw new ContentError('CONTENT_NOT_FOUND', 'Tag was not found in the authenticated user and scope.', 'app.search', { action: 'resolution' });
          if (input.filters.tagNames && owned.length !== input.filters.tagNames.length) throw new ContentError('CONTENT_NOT_FOUND', 'Tag was not found in the authenticated user and scope.', 'app.search', { action: 'resolution' });
           candidateKeys = await scopeTags.resolveCandidateKeys(tagOwner, owned.map((tag) => tag!.key), targetTypes, input.filters.tagMatch ?? 'any');
-         if (input.collectionSlugs.includes('email-messages')) candidateKeys['email-thread'] = [...new Set([...(candidateKeys['email-thread'] ?? []), ...await scopeTags.resolveEmailThreadKeys(tagOwner, candidateKeys['email-message'] ?? [])])];
+         if (collectionSlugs.includes('email-messages')) candidateKeys['email-thread'] = [...new Set([...(candidateKeys['email-thread'] ?? []), ...await scopeTags.resolveEmailThreadKeys(tagOwner, candidateKeys['email-message'] ?? [])])];
       }
       const isCandidate = (slug: Exclude<AppSearchCollectionSlug, 'countries' | 'tags' | 'tag-assignments'>, value: unknown) => {
         if (!candidateKeys) return true;
@@ -676,10 +713,10 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
       };
 
       if (operation === 'list') {
-        return tagResults(appSearchResourceOutputSchema.parse({ operation, groups: await Promise.all(input.collectionSlugs.map(async (collectionSlug) => ({ collectionSlug, results: (await list(collectionSlug, Boolean(input.filters?.tagNames || input.filters?.tagKeys))).slice(0, input.limit) }))) }));
+        return tagResults(appSearchResourceOutputSchema.parse({ operation, groups: await Promise.all(collectionSlugs.map(async (collectionSlug) => ({ collectionSlug, results: (await list(collectionSlug, Boolean(input.filters?.tagNames || input.filters?.tagKeys))).slice(0, input.limit) }))) }));
       }
       if (operation === 'count') {
-        const groups = await Promise.all(input.collectionSlugs.map(async (collectionSlug) => {
+        const groups = await Promise.all(collectionSlugs.map(async (collectionSlug) => {
           if (collectionSlug === 'tag-assignments') { const result = await scopeTagQueries.queryAssignments({ operation: 'count', tagNames: input.filters?.tagNames, tagKeys: input.filters?.tagKeys, tagMatch: input.filters?.tagMatch ?? 'any', targetTypes: input.filters?.targetTypes }, context); return { collectionSlug, count: result.count ?? 0 }; }
           if (collectionSlug === 'tags') { const result = await scopeTagQueries.queryTags({ operation: 'count', ...creationDateRange(input) }, context); return { collectionSlug, count: result.count ?? 0 }; }
           if (collectionSlug === 'email-messages') {
@@ -704,7 +741,13 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
       }
       if (operation === 'sum') {
         const field = input.field!;
-        const groups = await Promise.all(input.collectionSlugs.map(async (collectionSlug) => {
+        if (input.scope === 'account') {
+          const aggregate = APP_SEARCH_ACCOUNT_SUM_FIELDS[field as keyof typeof APP_SEARCH_ACCOUNT_SUM_FIELDS];
+          const resolver = dependencies.accountSumResolvers?.[field] ?? aggregate?.resolve;
+          if (!resolver || !aggregate) throw new Error(`${field} does not have an account aggregate resolver.`);
+          return appSearchSumOutputSchema.parse({ operation, scope: 'account', field, sum: await resolver(trusted.userKey), unit: aggregate.unit });
+        }
+        const groups = await Promise.all(collectionSlugs.map(async (collectionSlug) => {
           const items = await list(collectionSlug, true);
           let sum = 0; let valueCount = 0;
           for (const item of items) {
@@ -720,7 +763,7 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
         return appSearchSumOutputSchema.parse({ operation, groups });
       }
       if (operation === 'get') {
-        const collectionSlug = input.collectionSlugs[0]!; let results: unknown[];
+        const collectionSlug = collectionSlugs[0]!; let results: unknown[];
         if (collectionSlug === 'tags') { const result = await scopeTagQueries.queryTags({ operation: 'get', key: input.key }, context); results = (result.items ?? []).map((tag) => projectTag(tag as Parameters<typeof projectTag>[0])); }
         else if (collectionSlug === 'tag-assignments') results = (await scopeTagQueries.queryAssignments({ operation: 'get', key: input.key }, context)).items ?? [];
         else if (collectionSlug === 'folders') results = batchData(await executeContent('folder.find', { folderKeys: [input.key], includeChildrenCount: true, includeDocumentCount: true }, context, dependencies.contentDependencies)).map((item: any) => projectFolder(item.folder));
@@ -736,7 +779,7 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
         return tagResults(appSearchResourceOutputSchema.parse({ operation, groups: [{ collectionSlug, results }] }));
       }
       if (operation === 'summarize') {
-        const collectionSlug = input.collectionSlugs[0]! as 'documents' | 'files';
+        const collectionSlug = collectionSlugs[0]! as 'documents' | 'files';
         const output = await executeContent('document.summarize', { documentKeys: [input.key], ...input.summary, persist: false }, context, dependencies.contentDependencies);
         const data = batchData(output)[0] as { text?: unknown } | undefined;
         return appSearchSummaryOutputSchema.parse({ operation, collectionSlug, key: input.key, summary: data?.text });
@@ -757,7 +800,7 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
         embeddingCache.set(embeddingCacheKey, { embedding: queryEmbedding, expiresAt: Date.now() + EMBEDDING_CACHE_TTL_MS });
       }
       if (candidateKeys) {
-        const groups = await Promise.all(input.collectionSlugs.map(async (collectionSlug) => {
+        const groups = await Promise.all(collectionSlugs.map(async (collectionSlug) => {
           if (collectionSlug === 'countries' || collectionSlug === 'tags' || collectionSlug === 'tag-assignments') return { collectionSlug, results: [] };
           const targetType = APP_SEARCH_TAG_TARGET[collectionSlug];
           const ranked = await scopeTags.rankCandidateKeys(tagOwner, targetType, candidateKeys[targetType] ?? [], queryEmbedding!);
@@ -788,7 +831,7 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
         }));
         return tagResults(appSearchOutputSchema.parse({ query, groups }));
       }
-      const requested = new Set(input.collectionSlugs);
+      const requested = new Set(collectionSlugs);
       const requestedDocumentCollections = Number(requested.has('documents')) + Number(requested.has('files'));
       const contentLimit = candidateKeys ? 100 : Math.min(100, input.limit * Math.max(1, requestedDocumentCollections));
 
@@ -810,7 +853,7 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
       const countries = dependencies.countries ?? createCountrySearchService();
       const commonSearchInput = { query, minimumScore: -1, limit: candidateKeys ? 50 : input.limit, recordHistory: false, ...creationDateRange(input) };
 
-      const groupPromises = input.collectionSlugs.map(async (collectionSlug) => {
+      const groupPromises = collectionSlugs.map(async (collectionSlug) => {
         if (collectionSlug === 'tags') { const result = await scopeTagQueries.queryTags({ operation: 'search', embedding: queryEmbedding, limit: input.limit, ...creationDateRange(input) }, context); return { collectionSlug, results: (result.items ?? []).map((tag) => projectTag(tag as Parameters<typeof projectTag>[0])) }; }
         if (collectionSlug === 'folders') {
           const output = await contentPromise!;

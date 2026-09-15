@@ -5,6 +5,7 @@ export type AppEvent =
   | { type: "inbox.changed" }
   | { type: "communication.changed" }
   | { type: "conversation.changed" }
+  | { type: "content.changed" }
   | { type: "event-stream.connected" };
 
 const listeners = new Set<(event: AppEvent) => void>();

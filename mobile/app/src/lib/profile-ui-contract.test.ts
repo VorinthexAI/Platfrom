@@ -38,6 +38,7 @@ test("profile and settings are routed screens over bottom-presented child sheets
   expect(layout).toContain('animation: "slide_from_right"');
   expect(profile).toContain('focusKey="profile-name"');
   expect(profile).toContain('focusKey="profile-faq"');
+  expect(profile).toContain('focusKey="profile-faq-answer"');
   expect(profile).toContain('focusKey="profile-referral"');
   expect(profile).toContain('focusKey="profile-scope-create"');
   expect(profile).toContain('focusKey="profile-cancel-subscription"');
@@ -68,7 +69,7 @@ test("profile and settings are routed screens over bottom-presented child sheets
   expect(profile).toContain('placeholder="What belongs in this scope?"');
   expect(profile).toContain("queryClient.removeQueries");
   expect(profile).toContain("queryClient.invalidateQueries");
-  expect(profile).toContain('pageKey={selectedFaq ? `answer-${faqQuestionIndex}` : "questions"}');
+  expect(profile).not.toContain('pageKey={selectedFaq ? `answer-${faqQuestionIndex}` : "questions"}');
   expect(profile).toContain("setSheet(undefined);\n    const update = optimisticProfile({ name: nextName });");
   expect(profile.match(/loading=/g)?.length).toBeGreaterThanOrEqual(2);
   expect(profile).not.toContain("loading={deletingAccount}");
@@ -80,13 +81,11 @@ test("profile and settings are routed screens over bottom-presented child sheets
   expect(profile).toContain("function SettingsActionCard");
 });
 
-test("team selection is backend-gated and clears the previous team and scope cache", () => {
-  expect(profile).toContain('const teamSelectionEnabled = useAuthStore((state) => state.teamSelectionEnabled)');
-  expect(profile).toContain('{teamSelectionEnabled ? <SettingsActionCard icon={<SwitchTeamIcon size="lg" />} label="Switch team" onPress={() => setSheet("teams")}');
-  expect(profile).toContain('queryFn: ({ signal }) => listTeams(signal), enabled: teamSelectionEnabled && sheet === "teams"');
-  expect(profile).toContain('selectTeam(targetTeamKey, targetScopeKey)');
-  expect(profile).toContain('queryBelongsToTeamScope(queryKey, previousTeamKey, previousScopeKey)');
-  expect(profile).toContain('setPendingTeamMfa(result)');
+test("settings does not expose internal team selection", () => {
+  expect(profile).not.toContain('teamSelectionEnabled');
+  expect(profile).not.toContain('label="Switch team"');
+  expect(profile).not.toContain('sheet === "teams"');
+  expect(profile).not.toContain('listTeams');
 });
 
 test("every profile API action changes the UI before asynchronous work", () => {
@@ -102,9 +101,9 @@ test("every profile API action changes the UI before asynchronous work", () => {
   expect(profile).not.toContain("showSelectedFirst");
   expectBefore(auth.slice(auth.indexOf("signOut: async")), "set(signedOutState);", "tokenVault.read()");
   expectBefore(profile.slice(profile.indexOf("const permanentlyDeleteAccount")), "setSheet(undefined);", "deleteAccount()");
-  expect(profile.slice(profile.indexOf("const permanentlyDeleteAccount"))).toContain('const deletion = deleteAccount();\n    queryClient.clear();\n    router.replace("/onboarding");');
+  expect(profile.slice(profile.indexOf("const permanentlyDeleteAccount"))).toContain('const deletion = deleteAccount();\n    queryClient.clear();\n    router.replace("/auth");');
   expectBefore(auth.slice(auth.indexOf("deleteAccount: async")), "set(signedOutState);", "await deletion;");
-  expectBefore(auth.slice(auth.indexOf("deleteAccount: async")), "clearOnboardingCompletion()", "set(signedOutState);");
+  expect(auth.slice(auth.indexOf("deleteAccount: async"))).toContain("markPostDeletionOnboarding()");
   expectBefore(profile.slice(profile.indexOf("const permanentlyDeleteAccount")), "queryClient.clear();", 'showToast({ title: "Your account has been deleted."');
   expect(profile).not.toContain("deletingAccount");
 });
@@ -158,14 +157,38 @@ test("profile and settings headers expose account actions", () => {
   expect(profile).not.toContain("NotificationsSheet");
   expect(profile).toContain('params: { slug: "signal", tab: "inbox", inbox: "internal" }');
   expect(profile).toContain('<SettingsActionCard danger icon={<SignOutIcon size="lg" variant="danger" />} label="Log out"');
-  expectBefore(profile.slice(profile.indexOf("const logOut")), "await signOut();", 'router.replace("/auth")');
-  expect(profile).toContain('await signOut();\n    queryClient.clear();\n    router.replace("/auth");');
+  expectBefore(profile.slice(profile.indexOf("const logOut")), "const cleanup = signOut();", 'router.replace("/auth")');
+  expect(profile).toContain('const cleanup = signOut();\n    queryClient.clear();\n    router.replace("/auth");\n    void cleanup.catch(() => undefined);');
   expect(profile).toContain('<SettingsActionCard icon={<FeedbackIcon size="lg" />} label="Feedback"');
   expect(profile).toContain('<SettingsActionCard icon={<IssueIcon size="lg" />} label="Report issue"');
   expect(profile).toContain('<Text numberOfLines={2} style={[styles.settingsCardLabel');
+  expectBefore(profile, '<SettingsActionCard icon={<ReferralIcon size="lg" />} label="Referral"', '<SettingsActionCard icon={<SparksIcon size="lg" />} label="Sparks"');
+  expectBefore(profile, '<SettingsActionCard icon={<SparksIcon size="lg" />} label="Sparks"', '<SettingsActionCard danger icon={<DeleteAccountIcon');
+  expect(profile).toContain('label="Sparks" onPress={openCostDetails}');
   expectBefore(profile, '<SettingsActionCard icon={<ReferralIcon size="lg" />} label="Referral"', '<SettingsActionCard danger icon={<DeleteAccountIcon');
   expectBefore(profile, 'label="Cancel subscription"', 'label="Delete account"');
-  for (const icon of ["IssueIcon", "FeedbackIcon", "FaqIcon", "TermsIcon", "PrivacyIcon", "ReferralIcon", "WarningIcon", "DeleteAccountIcon", "SignOutIcon"]) expect(profile).toContain(`<${icon} size="lg"`);
+  for (const icon of ["IssueIcon", "FeedbackIcon", "FaqIcon", "TermsIcon", "PrivacyIcon", "ReferralIcon", "SparksIcon", "WarningIcon", "DeleteAccountIcon", "SignOutIcon"]) expect(profile).toContain(`<${icon} size="lg"`);
+});
+
+test("settings renders the shared legal copy in full-screen sheets", () => {
+  expect(profile).toContain('PRIVACY_COPY, TERMS_COPY, type VaultCopy');
+  expect(profile).toContain('label="Terms" onPress={() => setSheet("terms")}');
+  expect(profile).toContain('label="Privacy" onPress={() => setSheet("privacy")}');
+  expect(profile).not.toContain("Linking.openURL");
+  expect(profile).toContain('open={sheet === "terms"} title="Terms of service"');
+  expect(profile).toContain('open={sheet === "privacy"} title="Privacy policy"');
+  expect(profile).toContain("<LegalSheetContent copy={TERMS_COPY} />");
+  expect(profile).toContain("<LegalSheetContent copy={PRIVACY_COPY} />");
+  expect(profile).not.toContain("description={TERMS_COPY.eyebrow}");
+  expect(profile).not.toContain("description={PRIVACY_COPY.eyebrow}");
+  expect(profile).not.toContain("styles.legalEyebrow");
+  expect(profile).not.toContain("styles.legalSectionTitle");
+  for (const state of ["terms", "privacy"]) {
+    const marker = profile.indexOf(`open={sheet === "${state}"}`);
+    const legalSheet = profile.slice(profile.lastIndexOf("<BottomSheet", marker), profile.indexOf("</BottomSheet>", marker));
+    expect(legalSheet).toContain('height="full"');
+    expect(legalSheet).toContain('footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>}');
+  }
 });
 
 test("settings exposes cancellation only for an active cancellable subscription", () => {
@@ -202,13 +225,20 @@ test("account deletion uses the compact confirmation pattern without secondary c
   expect(profile).not.toContain("DELETE_CONFIRMATION");
 });
 
-test("FAQ and referral use full-screen established patterns", () => {
-  const referralSheet = profile.slice(profile.indexOf('<BottomSheet description={referralMode'), profile.indexOf('<BottomSheet description={selectedFaq'));
+test("FAQ uses a full-screen list with stacked answer sheets", () => {
+  const referralSheet = profile.slice(profile.indexOf('<BottomSheet description={referralMode'), profile.indexOf('<BottomSheet description="Quick answers about using Core and its connected apps, plus Sparks and plans."'));
   expect(profile).toContain('shape="pill" size="md" style={styles.faqPill} variant="secondary"');
   expect(profile).toContain('faqPill: { justifyContent: "flex-start", minHeight: 40, paddingHorizontal: spacing.md, width: "100%" }');
-  expect(profile).toContain('description={selectedFaq ? undefined : "Quick answers about plans and Sparks."}');
-  expect(profile).toContain('{selectedFaq ? "Back" : "Close"}');
+  expect(profile).toContain('description="Quick answers about using Core and its connected apps, plus Sparks and plans."');
+  expect(profile).toContain('["What is Vorinthex AI, and where should I start?"');
+  expect(profile).toContain('["What happens to my Sparks and stored work if I cancel or run out of Sparks?"');
+  const faqDefinition = profile.slice(profile.indexOf("const FAQ = ["), profile.indexOf("] as const;", profile.indexOf("const FAQ = [")));
+  expect(faqDefinition.match(/^  \["/gm)).toHaveLength(20);
+  expect(faqDefinition).toContain("Ascend");
+  expect(profile).toContain('open={sheet === "faq" && Boolean(selectedFaq)}');
+  expect(profile).toContain('onOpenChange={(open) => { if (!open) setFaqQuestionIndex(undefined); }}');
   expect(profile).toContain('enabled: Boolean(user?.key && sheet === "referral")');
+  expect(profile).toContain('initialData: authReferralSummary?.code.ownerUserKey === user?.key ? authReferralSummary : undefined');
   expect(profile).toContain('referralQuery.data.attributionCount === 0');
   expect(profile).toContain('referralQuery.data.code.code');
   expect(profile).toContain('invitee.firstPaidRewardStatus === "earned"');

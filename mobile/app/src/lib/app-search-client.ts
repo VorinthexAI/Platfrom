@@ -5,7 +5,7 @@ import { conversationRetrievalSchema } from "@/lib/conversation-client";
 import { publishUserSearchHistoryAppend } from "@/lib/user-search-history-events";
 import { useAuthStore } from "@/state/auth";
 
-export const appSearchCollectionSlugSchema = z.enum(["folders", "documents", "files", "collections", "images", "inboxes", "email-tones", "email-messages", "email-drafts", "places", "trips", "countries", "books"]);
+export const appSearchCollectionSlugSchema = z.enum(["folders", "documents", "files", "collections", "images", "inboxes", "email-tones", "email-messages", "email-drafts", "places", "trips", "countries", "books", "tags", "tag-assignments"]);
 export type AppSearchCollectionSlug = z.infer<typeof appSearchCollectionSlugSchema>;
 
 export const appSearchInputSchema = z.strictObject({
@@ -20,17 +20,21 @@ export const appSearchInputSchema = z.strictObject({
     collectionKey: z.string().min(1).optional(),
     connectorKey: z.string().min(1).optional(),
     readState: z.enum(["read", "unread"]).optional(),
-    emailFacets: z.array(z.enum(["urgent", "important", "purchases", "filtered", "favorite"])).max(5).optional(),
+    emailFacets: z.array(z.enum(["urgent", "important", "purchases", "filtered", "favorite"])).min(1).max(5).optional(),
+    status: z.enum(["active", "error", "revoked", "generated", "edited", "sending", "sent", "discarded", "wishlist", "visited", "planned", "completed", "queued", "researching", "planning", "writing", "narrating", "finalizing", "failed", "ready", "cancelled"]).optional(),
+    isFavorite: z.boolean().optional(),
     createdFrom: z.string().datetime({ offset: true }).transform((value) => new Date(value).toISOString()).optional(),
     createdTo: z.string().datetime({ offset: true }).transform((value) => new Date(value).toISOString()).optional(),
+    tagNames: z.array(z.string().trim().min(1).max(120)).min(1).max(20).optional(),
     tagKeys: z.array(z.string().min(1)).min(1).max(20).refine((keys) => new Set(keys).size === keys.length, "Tag keys must be distinct.").optional(),
     tagMatch: z.enum(["any", "all"]).optional(),
+    targetTypes: z.array(z.enum(["folder", "document", "image-collection", "image", "image-highlight", "image-memory", "place", "trip", "email-inbox", "email-tone", "email-thread", "email-message", "email-draft", "book"])).min(1).max(14).optional(),
   }).optional(),
 }).superRefine((input, context) => {
   const operation = input.operation ?? (input.query ? "search" : "list");
   if (operation === "search" && !input.query) context.addIssue({ code: "custom", path: ["query"], message: "Search requires a query." });
   if (operation === "list" && input.query) context.addIssue({ code: "custom", path: ["query"], message: "List does not accept a query." });
-  if (input.filters?.tagMatch && !input.filters.tagKeys) context.addIssue({ code: "custom", path: ["filters", "tagMatch"], message: "tagMatch requires tagKeys." });
+  if (input.filters?.tagMatch && !input.filters.tagKeys && !input.filters.tagNames) context.addIssue({ code: "custom", path: ["filters", "tagMatch"], message: "tagMatch requires tagKeys or tagNames." });
   if ((input.filters?.createdFrom || input.filters?.createdTo) && input.collectionSlugs.includes("countries")) context.addIssue({ code: "custom", path: ["filters"], message: "Countries do not have a creation date." });
   if (input.filters?.createdFrom && input.filters.createdTo && input.filters.createdFrom > input.filters.createdTo) context.addIssue({ code: "custom", path: ["filters", "createdTo"], message: "createdTo must not precede createdFrom." });
 });

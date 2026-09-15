@@ -16,10 +16,7 @@ export type OnboardingEventSlug =
   | "onboarding.profile-badge.claimed"
   | "onboarding.profile-badge.skipped"
   | "onboarding.notifications"
-  | "onboarding.photos"
   | "onboarding.camera"
-  | "onboarding.photos.allowed"
-  | "onboarding.photos.skipped"
   | "onboarding.camera.allowed"
   | "onboarding.camera.skipped"
   | "onboarding.notifications.allowed"
@@ -33,10 +30,10 @@ export type AuthOptionEventSlug =
 
 export type AnalyticsEventSlug = "app.opened" | AuthOptionEventSlug | OnboardingEventSlug;
 
-export async function recordAnalyticsEvent(slug: AnalyticsEventSlug) {
-  await postJson<{ slug: AnalyticsEventSlug }, { success: true }>("/events", { slug });
+export async function recordAnalyticsEvent(slug: AnalyticsEventSlug, appKey?: string) {
+  await postJson<{ slug: AnalyticsEventSlug }, { success: true }>("/events", { slug }, { appKey });
 }
 
-export async function recordOnboardingEvent(slug: OnboardingEventSlug) {
-  await recordAnalyticsEvent(slug);
+export async function recordOnboardingEvent(slug: OnboardingEventSlug, appKey?: string) {
+  await recordAnalyticsEvent(slug, appKey);
 }

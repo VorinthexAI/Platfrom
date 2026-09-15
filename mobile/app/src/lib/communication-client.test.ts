@@ -22,14 +22,14 @@ test("uses strict communication list, detail, read-state, and reply contracts", 
   responses.set("/auth/me/communications/thread-1/read", { success: true, data: storedDetail });
   responses.set("/auth/me/communications/thread-1/read-state", { success: true, data: storedThread });
   responses.set("/auth/me/communications/thread-1/messages", { success: true, data: storedDetail.messages[0] });
-  await expect(client.listCommunicationThreads({ tab: "inbox", limit: 50 }, context)).resolves.toEqual({ items: [{ ...thread, source: { kind: "internal", label: "Vorinthex" } }], unreadCount: 1, nextCursor: null });
+  await expect(client.listCommunicationThreads({ tab: "inbox", limit: 50, query: " update ", readState: "unread" }, context)).resolves.toEqual({ items: [{ ...thread, source: { kind: "internal", label: "Vorinthex" } }], unreadCount: 1, nextCursor: null });
   await client.readCommunicationThread("thread-1", context);
-  await client.markCommunicationThreadRead("thread-1", context);
+  await client.markCommunicationThreadRead("thread-1", context, false);
   await client.replyToCommunicationThread("thread-1", " Thank you ", "request-1", context);
   expect(calls).toEqual([
-    { method: "POST", path: "/auth/me/communications/list", body: { teamKey: "team-1", scopeKey: "scope-1", mailbox: "inbox", limit: 50 }, config: undefined },
+    { method: "POST", path: "/auth/me/communications/list", body: { teamKey: "team-1", scopeKey: "scope-1", mailbox: "inbox", limit: 50, query: "update", readState: "unread" }, config: undefined },
     { method: "POST", path: "/auth/me/communications/thread-1/read", body: { teamKey: "team-1", scopeKey: "scope-1" }, config: undefined },
-    { method: "PUT", path: "/auth/me/communications/thread-1/read-state", body: { teamKey: "team-1", scopeKey: "scope-1", read: true } },
+    { method: "PUT", path: "/auth/me/communications/thread-1/read-state", body: { teamKey: "team-1", scopeKey: "scope-1", read: false } },
     { method: "POST", path: "/auth/me/communications/thread-1/read", body: { teamKey: "team-1", scopeKey: "scope-1" }, config: undefined },
     { method: "POST", path: "/auth/me/communications/thread-1/messages", body: { teamKey: "team-1", scopeKey: "scope-1", message: "Thank you" }, config: { headers: { "Idempotency-Key": "request-1" } } },
     { method: "POST", path: "/auth/me/communications/thread-1/read", body: { teamKey: "team-1", scopeKey: "scope-1" }, config: undefined },

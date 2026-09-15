@@ -1,5 +1,5 @@
 import { Button } from "@vorinthex/shared/ui/button";
-import { BellIcon, CameraIcon, GalleryIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { BellIcon, CameraIcon } from "@vorinthex/shared/ui/icons-mobile";
 import * as ImagePicker from "expo-image-picker";
 import * as Notifications from "expo-notifications";
 import { useEffect, useEffectEvent, useState } from "react";
@@ -10,13 +10,12 @@ import { recordOnboardingEvent } from "@/lib/onboarding-events";
 import { fonts, palette } from "@/theme/tokens";
 import { syncPushSubscription } from "@/lib/push-notifications";
 
-type PermissionStep = "notifications" | "photos" | "camera";
+type PermissionStep = "notifications" | "camera";
 type Recovery = "request" | "settings";
 
-const STEPS: readonly PermissionStep[] = ["photos", "camera", "notifications"];
+const STEPS: readonly PermissionStep[] = ["camera", "notifications"];
 const PRESENTATION = {
   notifications: { title: "Allow notifications", description: "Stay up to date with updates and never miss anything.", Icon: BellIcon },
-  photos: { title: "Allow full photo access", description: "Let Gallery organize, search, and enrich your full photo library.", Icon: GalleryIcon },
   camera: { title: "Allow camera", description: "Use your camera to scan documents and capture images directly in Vorinthex.", Icon: CameraIcon },
 } as const;
 
@@ -24,9 +23,6 @@ function settingsInstructions(step: PermissionStep) {
   if (step === "notifications") return Platform.OS === "ios"
     ? "Open Settings, choose Notifications, then turn on Allow Notifications. Return here when finished."
     : "Open App settings, choose Notifications, then turn on Allow notifications. Return here when finished.";
-  if (step === "photos") return Platform.OS === "ios"
-    ? "Open Settings, choose Photos, then select Full Access. Return here when finished."
-    : "Open App settings, choose Photos and videos, then allow full access. Return here when finished.";
   return Platform.OS === "ios"
     ? "Open Settings, choose Camera, then turn on camera access. Return here when finished."
     : "Open App settings, choose Permissions, then allow Camera access. Return here when finished.";
@@ -34,10 +30,6 @@ function settingsInstructions(step: PermissionStep) {
 
 async function accessIsEnabled(step: PermissionStep) {
   if (step === "notifications") return (await Notifications.getPermissionsAsync()).granted;
-  if (step === "photos") {
-    const permission = await ImagePicker.getMediaLibraryPermissionsAsync();
-    return permission.granted && permission.accessPrivileges === "all";
-  }
   return (await ImagePicker.getCameraPermissionsAsync()).granted;
 }
 
@@ -46,7 +38,7 @@ export function OnboardingPermissions({ onFinished }: { onFinished: () => void }
   const [recovery, setRecovery] = useState<Recovery>("request");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const step = STEPS[index] ?? "photos";
+  const step = STEPS[index] ?? "camera";
   const presentation = PRESENTATION[step];
   const StepIcon = presentation.Icon;
   const advanceAfterSettings = useEffectEvent(() => next());
@@ -90,15 +82,6 @@ export function OnboardingPermissions({ onFinished }: { onFinished: () => void }
         } else {
           setRecovery(permission.canAskAgain ? "request" : "settings");
           setError(permission.canAskAgain ? "Notifications were not enabled. Tap Allow to try again, or use the close button to continue without them." : settingsInstructions("notifications"));
-        }
-        return;
-      }
-      if (step === "photos") {
-        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (permission.granted && permission.accessPrivileges === "all") next();
-        else {
-          setRecovery(permission.canAskAgain && permission.accessPrivileges !== "limited" ? "request" : "settings");
-          setError(permission.accessPrivileges === "limited" ? settingsInstructions("photos") : permission.canAskAgain ? "Photo access was not enabled. Tap Allow to try again, or use the close button to continue." : settingsInstructions("photos"));
         }
         return;
       }

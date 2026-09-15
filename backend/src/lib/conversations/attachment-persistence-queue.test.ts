@@ -1,13 +1,31 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import type { ConversationAttachmentArtifact, ConversationAttachmentArtifactRepository } from './attachment-artifacts';
-import { conversationAttachmentPersistenceJobSchema, enqueueConversationAttachmentPersistence, processConversationAttachmentPersistence, recoverConversationAttachmentPersistenceQueue } from './attachment-persistence-queue';
+import { conversationAttachmentPersistenceJobSchema, enqueueConversationAttachmentPersistence, processConversationAttachmentPersistence as processImplementation, recoverConversationAttachmentPersistenceQueue } from './attachment-persistence-queue';
+
+const processConversationAttachmentPersistence = (input: unknown, dependencies: Parameters<typeof processImplementation>[1] = {}) => processImplementation(input, { observe: async (_slug, _context, execute) => execute(), ...dependencies });
 
 const artifactKey = newId(), userMessageKey = newId(), userKey = newId(), conversationKey = newId(), now = new Date('2026-09-01T00:00:00.000Z');
 const job = () => conversationAttachmentPersistenceJobSchema.parse({ schemaVersion: 1, artifactKey, userMessageKey });
 const artifact = { key: artifactKey, ownerKey: newId(), teamKey: 'team', scopeKey: newId(), userKey, conversationKey, requestKey: 'turn', userMessageKey, kind: 'document', filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 3, documentContent: 'abc', stagedStorageKey: 'pending/notes', stagedSha256: 'a'.repeat(64), status: 'PROCESSING', attempts: 1, availableAt: now.toISOString(), leaseToken: 'lease', leaseExpiresAt: new Date(now.getTime() + 300_000).toISOString(), createdAt: now.toISOString(), expiresAt: '2026-10-01T00:00:00.000Z' } as ConversationAttachmentArtifact;
 
 describe('conversation attachment durable outbox', () => {
+  test('background document persistence enters action-metered document.parse with a stable user-bound identity', async () => {
+    let observed = false;
+    await processConversationAttachmentPersistence(job(), {
+      artifacts: { lease: async () => artifact, renew: async () => true, complete: async () => true, settleMessage: async () => null } as never,
+      persist: async () => ({ key: newId(), kind: 'document', filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 3 }),
+      storage: { delete: async () => undefined },
+      observe: async (slug, context, execute, options) => {
+        expect(slug).toBe('document.parse');
+        expect(context.principal.kind === 'member' && context.principal.user.key).toBe(userKey);
+        expect(options?.idempotencyKey).toBe(`attachment:${userKey}:${artifactKey}`);
+        observed = true;
+        return execute();
+      },
+    });
+    expect(observed).toBe(true);
+  });
   test('queues only durable identities with deterministic artifact job IDs', async () => {
     const calls: any[] = [];
     await expect(enqueueConversationAttachmentPersistence(job(), { getJob: async () => undefined, add: async (...args: any[]) => { calls.push(args); return { id: args[2].jobId }; } } as never)).resolves.toEqual({ jobId: artifactKey });
@@ -25,6 +43,13 @@ describe('conversation attachment durable outbox', () => {
     const artifacts = { lease: async () => artifact, renew: async () => true, complete: async (_key: string, token: string) => { order.push(`complete:${token}`); return true; }, retry: async () => false, settleMessage: async () => { order.push('settle'); return { userKey, conversationKey, status: 'COMPLETED', references: [] }; } } as unknown as ConversationAttachmentArtifactRepository;
     await expect(processConversationAttachmentPersistence(job(), { artifacts, token: () => 'lease', now: () => now, persist: async () => { order.push('persist'); return { key: newId(), kind: 'document', filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 3 }; }, storage: { delete: async () => { order.push('cleanup'); } }, publishChanged: async () => { order.push('publish'); } })).resolves.toEqual({ references: 1 });
     expect(order).toEqual(['persist', 'complete:lease', 'cleanup', 'settle', 'publish']);
+  });
+
+  test('settles a parent message when a stalled retry finds an already completed artifact', async () => {
+    const order: string[] = [];
+    const artifacts = { lease: async () => null, settleMessage: async () => { order.push('settle'); return { userKey, conversationKey, status: 'COMPLETED', references: [] }; } } as unknown as ConversationAttachmentArtifactRepository;
+    await expect(processConversationAttachmentPersistence(job(), { artifacts, publishChanged: async () => { order.push('publish'); } })).resolves.toEqual({ references: 0 });
+    expect(order).toEqual(['settle', 'publish']);
   });
 
   test('retains retry state and rejects a lost lease fence', async () => {

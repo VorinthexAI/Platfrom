@@ -27,9 +27,11 @@ import {
   type ScopesDatabase,
 } from './types';
 
-export const SCOPE_REMOVAL_WRITE_COLLECTIONS = [
+const BASE_SCOPE_REMOVAL_WRITE_COLLECTIONS = [
   'users', 'scopes', 'scopeScopes', 'scopeMembers', 'userTeams', 'conversations', 'conversationMessages', 'folders', 'documents', 'documentVersions', 'documentAudioVersions', 'documentSummaries', 'documentSummaryAudio', 'generatedDocumentBindings', 'emailAttachmentBindings', 'emailAttachments', 'emailInboxes', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailWritingProfiles', 'images', 'imageCaptions', 'visualIdentities', 'galleryUploads', 'collectionImages', 'imageIdentities', 'imageCollecitionHightlights', 'imageCollectionMemories', 'placeImages', 'collections', 'places', 'trips', 'tripPlaces', 'tripAttachments', 'tripCreationReceipts', 'tripGuides', 'placeReferences', 'placeHeroMedia', 'books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress', 'bookExtensions', 'bookRefundIntents', 'tags', 'tagAssignments', 'userHiddens', 'events', 'contentSearchQueries', 'appNotifications', 'appNotificationRecipients', 'pushDeliveries', 'userInboxThreads', 'userInboxMessages', 'channels', 'channelParticipants', 'threads', 'messages', 'messageMentions', 'messageReactions', 'polls', 'pollOptions', 'pollVotes', 'storageDeletionJobs', 'tickets',
 ] as const;
+
+export const SCOPE_REMOVAL_WRITE_COLLECTIONS = [...BASE_SCOPE_REMOVAL_WRITE_COLLECTIONS, 'conversationAttachmentArtifacts', 'conversationArchiveStates'] as const;
 
 const SCOPE_REMOVAL_SPECIAL_COLLECTIONS = new Set<string>(['users', 'scopes', 'scopeScopes', 'userTeams', 'storageDeletionJobs', 'bookRefundIntents', 'appNotifications', 'appNotificationRecipients', 'pushDeliveries']);
 export const SCOPE_KEYED_REMOVAL_COLLECTIONS = SCOPE_REMOVAL_WRITE_COLLECTIONS.filter((collection) => !SCOPE_REMOVAL_SPECIAL_COLLECTIONS.has(collection));
@@ -185,6 +187,7 @@ export function createScopeRepository(
             (FOR attachment IN emailAttachments FILTER attachment.scopeKey == @scopeKey && IS_STRING(attachment.storageKey) RETURN attachment.storageKey),
             (FOR media IN placeHeroMedia FILTER media.scopeKey == @scopeKey && IS_STRING(media.storageKey) RETURN media.storageKey),
             (FOR upload IN galleryUploads FILTER upload.scopeKey == @scopeKey && IS_STRING(upload.storageKey) RETURN upload.storageKey),
+            (FOR artifact IN conversationAttachmentArtifacts FILTER artifact.scopeKey == @scopeKey && IS_STRING(artifact.stagedStorageKey) RETURN artifact.stagedStorageKey),
             (FOR image IN images FILTER image.scopeKey == @scopeKey && IS_STRING(image.storageKey) RETURN image.storageKey)
           ), 2) FILTER IS_STRING(storageKey) RETURN storageKey)
           RETURN storageKeys

@@ -1,9 +1,23 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
-import { acknowledgeFundingRequirement, isPendingFundingRequirement, listPendingFundingRequirements } from './events';
+import { acknowledgeFundingRequirement, isPendingFundingRequirement, listPendingFundingRequirements, publishEvent } from './events';
 import { APP_EVENT_SLUGS, parseEventEnvelope, shouldDeliverEvent } from './event-contract';
 
 describe('app event routing', () => {
+  test('delivers locally without waiting for Redis publication', async () => {
+    const local: string[] = [];
+    let resolveRemote!: () => void;
+    const remote = new Promise<void>((resolve) => { resolveRemote = resolve; });
+    const publication = publishEvent(
+      { route: 'user', userKey: 'user-1', event: 'conversation.changed' },
+      { emitLocal: (message) => { local.push(message); }, publishRemote: () => remote },
+    );
+
+    expect(local).toEqual(['{"route":"user","userKey":"user-1","event":"conversation.changed"}']);
+    resolveRemote();
+    await publication;
+  });
+
   test('accepts only registered strict routing envelopes', () => {
     for (const event of APP_EVENT_SLUGS.filter((slug) => slug !== 'spark.balance.required')) expect(parseEventEnvelope(JSON.stringify({ route: 'user', userKey: 'user-1', event }))).toEqual({ route: 'user', userKey: 'user-1', event });
     expect(parseEventEnvelope('{"route":"user","userKey":"user-1","event":"spark.balance.required","code":"OUTSTANDING_DEBT","key":"message-1"}')).toEqual({ route: 'user', userKey: 'user-1', event: 'spark.balance.required', code: 'OUTSTANDING_DEBT', key: 'message-1' });
@@ -17,6 +31,7 @@ describe('app event routing', () => {
     expect(parseEventEnvelope('{"route":"scope","scopeKey":"scope-1","event":"inbox.changed"}')).toEqual({ route: 'scope', scopeKey: 'scope-1', event: 'inbox.changed' });
     expect(parseEventEnvelope('{"route":"scope","scopeKey":"scope-1","event":"book.changed"}')).toEqual({ route: 'scope', scopeKey: 'scope-1', event: 'book.changed' });
     expect(parseEventEnvelope('{"route":"user","userKey":"user-1","event":"conversation.changed"}')).toEqual({ route: 'user', userKey: 'user-1', event: 'conversation.changed' });
+    expect(parseEventEnvelope('{"route":"user","userKey":"user-1","event":"communication.changed"}')).toEqual({ route: 'user', userKey: 'user-1', event: 'communication.changed' });
     expect(parseEventEnvelope('{"route":"user","userKey":"user-1","event":"referral.reward.created"}')).toEqual({ route: 'user', userKey: 'user-1', event: 'referral.reward.created' });
     expect(parseEventEnvelope('{"route":"user","userKey":"user-1","event":"spark.balance.changed"}')).toEqual({ route: 'user', userKey: 'user-1', event: 'spark.balance.changed' });
     expect(parseEventEnvelope('{"route":"scope","scopeKey":"scope-1","event":"inbox.changed","credentials":"no"}')).toBeNull();

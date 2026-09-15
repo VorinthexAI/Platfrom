@@ -23,7 +23,8 @@ test("keeps independent favorite and hidden filters local to each workspace", ()
 test("uses one wrapping Gallery-style active badge row in all filtered surfaces", () => {
   for (const source of [gallery, archive]) {
     expect(source).toContain('filterBadgeRow: { flexDirection: "row", flexWrap: "wrap"');
-    expect(source).toContain('similarPill: { alignSelf: "flex-start", maxWidth: "100%", minHeight: 38');
+    expect(source).toContain('similarPill: { alignSelf: "flex-start", maxWidth: "100%", height: 32');
+    expect(source).toContain('filterBadgeClose: { width: 24, height: 24, minHeight: 24');
     expect(source).toContain('>Favorites</Text>');
     expect(source).toContain('>Show hidden</Text>');
   }

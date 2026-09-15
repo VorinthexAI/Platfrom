@@ -537,14 +537,14 @@ export function createBookRepository(
       await authorize(database, context, false);
       const rows = await (
         await database.query(
-          'FOR document IN documents FILTER document.scopeKey == @scopeKey && document._key IN @keys && (document.archiveVisibility || "visible") == "visible" && (!HAS(document, "_internalDeletion") || document._internalDeletion == null) RETURN document',
-          { scopeKey: context.scopeKey, keys },
+          'FOR document IN documents FILTER document.scopeKey == @scopeKey && document._key IN @keys && (!HAS(document, "privateOwnerUserKey") || document.privateOwnerUserKey == null || document.privateOwnerUserKey == @userKey) && (document.archiveVisibility || "visible") == "visible" && (!HAS(document, "_internalDeletion") || document._internalDeletion == null) RETURN document',
+          { scopeKey: context.scopeKey, userKey: context.userKey, keys },
         )
       ).all();
       const folders = await (
         await database.query(
-          'FOR folder IN folders FILTER folder.scopeKey == @scopeKey RETURN { _key: folder._key, parentFolderKey: folder.parentFolderKey, archiveVisibility: folder.archiveVisibility, _internalDeletion: folder._internalDeletion }',
-          { scopeKey: context.scopeKey },
+          'FOR folder IN folders FILTER folder.scopeKey == @scopeKey FILTER !HAS(folder, "privateOwnerUserKey") || folder.privateOwnerUserKey == null || folder.privateOwnerUserKey == @userKey RETURN { _key: folder._key, parentFolderKey: folder.parentFolderKey, archiveVisibility: folder.archiveVisibility, _internalDeletion: folder._internalDeletion }',
+          { scopeKey: context.scopeKey, userKey: context.userKey },
         )
       ).all() as Array<{ _key: string; parentFolderKey?: string; archiveVisibility?: string; _internalDeletion?: unknown }>;
       const byKey = new Map(folders.map((folder) => [folder._key, folder]));

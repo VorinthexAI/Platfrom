@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CORE_CHAT_DOCUMENT_MIME_TYPES } from '@/lib/ai/actions/core-chat';
+import { CORE_CHAT_DOCUMENT_MIME_TYPES, CORE_CHAT_IMAGE_MIME_TYPES, CORE_CHAT_MAX_FILE_BYTES_TOTAL } from '@/lib/ai/actions/core-chat';
 import { parseDocument, documentStorage, type DocumentObjectStorage, type DocumentParseDependencies } from '@/lib/ai/document-processing';
 import { processImages, type ImageProcessingDependencies } from '@/lib/ai/image-processing';
 import { evaluateScopeAccess } from '@/lib/ai/tools/domain-access-engine';
@@ -12,8 +12,8 @@ import { conversationAttachmentReferenceSchema, type ConversationAttachmentRefer
 import { artifactSha256, conversationAttachmentArtifactSchema, type ConversationAttachmentArtifact } from './attachment-artifacts';
 
 export type CoreAttachment =
-  | { kind: 'document'; filename: string; mimeType: 'text/plain' | 'text/markdown' | 'text/x-markdown' | 'application/pdf' | 'application/msword' | 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'; bytes: Uint8Array }
-  | { kind: 'image'; filename: string; mimeType: 'image/png'; bytes: Uint8Array };
+  | { kind: 'document'; filename: string; mimeType: typeof CORE_CHAT_DOCUMENT_MIME_TYPES[number]; bytes: Uint8Array }
+  | { kind: 'image'; filename: string; mimeType: typeof CORE_CHAT_IMAGE_MIME_TYPES[number]; bytes: Uint8Array };
 
 export interface ConversationAttachmentPersistenceDependencies {
   storage?: Pick<DocumentObjectStorage, 'download' | 'delete'>;
@@ -45,14 +45,16 @@ async function authorizeArtifacts(identity: { teamKey: string; scopeKey: string;
 export async function prepareConversationAttachments(records: readonly ConversationAttachmentArtifact[], context: ToolContext, dependencies: Pick<ConversationAttachmentPersistenceDependencies, 'storage' | 'authorize'> = {}): Promise<CoreAttachment[]> {
   const { identity, artifacts } = trustedArtifacts(records, context);
   await authorizeArtifacts(identity, context, dependencies.authorize ?? evaluateScopeAccess);
+  if (artifacts.reduce((total, artifact) => total + artifact.sizeBytes, 0) > CORE_CHAT_MAX_FILE_BYTES_TOTAL) throw new Error('Conversation attachment bytes exceed the aggregate request limit.');
   const storage = dependencies.storage ?? documentStorage;
-  return Promise.all(artifacts.map(async (artifact) => {
+  const prepared = await Promise.all(artifacts.map(async (artifact) => {
     const object = await storage.download(artifact.stagedStorageKey);
     if (object.bytes.byteLength !== artifact.sizeBytes || artifactSha256(object.bytes) !== artifact.stagedSha256) throw new Error('A claimed conversation attachment is unavailable.');
     return artifact.kind === 'document'
-      ? { kind: 'document' as const, filename: artifact.filename, mimeType: artifact.mimeType as (typeof CORE_CHAT_DOCUMENT_MIME_TYPES)[number], bytes: object.bytes }
-      : { kind: 'image' as const, filename: artifact.filename, mimeType: 'image/png' as const, bytes: object.bytes };
+      ? { kind: 'document' as const, filename: artifact.filename, mimeType: z.enum(CORE_CHAT_DOCUMENT_MIME_TYPES).parse(artifact.mimeType), bytes: object.bytes }
+      : { kind: 'image' as const, filename: artifact.filename, mimeType: z.enum(CORE_CHAT_IMAGE_MIME_TYPES).parse(artifact.mimeType), bytes: object.bytes };
   }));
+  return prepared;
 }
 
 export async function persistConversationAttachment(record: ConversationAttachmentArtifact, context: ToolContext, dependencies: ConversationAttachmentPersistenceDependencies = {}): Promise<ConversationAttachmentReference> {
@@ -62,19 +64,19 @@ export async function persistConversationAttachment(record: ConversationAttachme
   const object = await storage.download(artifact!.stagedStorageKey);
   if (object.bytes.byteLength !== artifact!.sizeBytes || artifactSha256(object.bytes) !== artifact!.stagedSha256) throw new Error('A claimed conversation attachment is unavailable.');
   if (artifact!.kind === 'document') {
-    const parsed = await (dependencies.parse ?? parseDocument)({ file: { filename: artifact!.filename, mimeType: artifact!.mimeType, sizeBytes: artifact!.sizeBytes, bytes: object.bytes }, scopeKey: identity.scopeKey, folderKey: initialWorkspaceFolderKey(identity.scopeKey, 'assistant'), idempotencyKey: `conversation-attachment:${artifact!.key}` }, { ...dependencies.document, insert: (document) => contentPersistence.insertConversationAttachmentDocument(document, identity.actorKey) });
-    return conversationAttachmentReferenceSchema.parse({ key: parsed.document.key, kind: 'document', filename: artifact!.filename, mimeType: artifact!.mimeType, sizeBytes: artifact!.sizeBytes });
+    const parsed = await (dependencies.parse ?? parseDocument)({ file: { filename: artifact!.filename, mimeType: artifact!.mimeType, sizeBytes: artifact!.sizeBytes, bytes: object.bytes }, scopeKey: identity.scopeKey, folderKey: initialWorkspaceFolderKey(identity.scopeKey, 'assistant'), idempotencyKey: `conversation-attachment:${artifact!.key}` }, { ...dependencies.document, teamKey: identity.teamKey, signal: dependencies.signal, insert: (document) => contentPersistence.insertConversationAttachmentDocument(document, identity.actorKey) });
+    return conversationAttachmentReferenceSchema.parse({ key: parsed.document.key, kind: 'document', ...(artifact!.displayKey ? { displayKey: artifact!.displayKey } : {}), filename: artifact!.filename, mimeType: artifact!.mimeType, sizeBytes: artifact!.sizeBytes });
   }
   const gallery = dependencies.gallery ?? getDefaultGalleryRepository();
   const now = dependencies.now ?? (() => new Date().toISOString());
   const collection = await gallery.ensureGeneratedMediaCollection(identity.scopeKey, identity.actorKey, await (dependencies.embedCollection ?? embedText)({ text: 'Core', purpose: 'document' }), now());
   if (!collection) throw new Error('Conversation image attachment destination is unavailable.');
-  const [image] = await (dependencies.process ?? processImages)([{ scopeKey: identity.scopeKey, ownerKey: identity.actorKey, billingUserKey: identity.userKey, origin: 'uploaded', mutationPolicy: 'user', idempotencyKey: `conversation-attachment:${artifact!.key}`, trustedCanonicalPng: { sha256: artifact!.stagedSha256, width: artifact!.width!, height: artifact!.height! }, file: { filename: artifact!.filename, mimeType: 'image/png', sizeBytes: artifact!.sizeBytes, bytes: object.bytes }, ...(dependencies.signal ? { signal: dependencies.signal } : {}) }], dependencies.image);
+  const [image] = await (dependencies.process ?? processImages)([{ scopeKey: identity.scopeKey, ownerKey: identity.actorKey, billingUserKey: identity.userKey, origin: 'uploaded', mutationPolicy: 'user', idempotencyKey: `conversation-attachment:${artifact!.key}`, file: { filename: artifact!.filename, mimeType: artifact!.mimeType, sizeBytes: artifact!.sizeBytes, bytes: object.bytes }, ...(dependencies.signal ? { signal: dependencies.signal } : {}) }], dependencies.image);
   if (!image || image.mimeType !== 'image/png') throw new Error('Conversation image attachment was not persisted as canonical PNG media.');
   if (!await gallery.attachConversationMedia(identity.scopeKey, collection.key, [image.key], identity.actorKey, now())) {
     const cleanup = await gallery.deleteImages(identity.scopeKey, [image.key], identity.actorKey, now()).catch(() => null);
     await Promise.all((cleanup?.storageKeys ?? []).map((key) => storage.delete(key).catch(() => undefined)));
     throw new Error('Conversation image could not be attached to its managed collection.');
   }
-  return conversationAttachmentReferenceSchema.parse({ key: image.key, kind: 'image', filename: image.filename, mimeType: 'image/png', sizeBytes: image.sizeBytes, width: image.width, height: image.height });
+  return conversationAttachmentReferenceSchema.parse({ key: image.key, kind: 'image', ...(artifact!.displayKey ? { displayKey: artifact!.displayKey } : {}), filename: image.filename, mimeType: 'image/png', sizeBytes: image.sizeBytes, width: image.width, height: image.height });
 }

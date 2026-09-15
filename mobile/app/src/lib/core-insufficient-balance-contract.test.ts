@@ -10,6 +10,6 @@ test("avoids a duplicate Core toast while retaining insufficient-balance rollbac
 
 test("restores a failed submitted prompt only before the user edits a newer draft", () => {
   expect(core).toContain("const submittedDraftRevision = draftRevision.current");
-  expect(core).toContain("if (draftRevision.current === submittedDraftRevision) setInput(content)");
+  expect(core).toContain("if (!direct && draftRevision.current === submittedDraftRevision) setInput(content)");
   expect(core).toContain("onChangeText={(value) => { draftRevision.current += 1; setInput(value); }}");
 });

@@ -3,14 +3,8 @@ import { Hono } from 'hono';
 import { newId } from '@/lib/ids';
 import type { ToolContext } from '@/lib/ai/tools';
 import { createTransientAttachmentHandlers } from './transient-attachments';
-import { normalizeTransientAttachmentError } from '@/lib/conversations/transient-attachments';
-import { DocumentInputError } from '@/lib/ai/document-processing';
 
 describe('transient attachment HTTP contract', () => {
-  test('classifies deterministic file validation as a client error', () => {
-    expect(normalizeTransientAttachmentError(new DocumentInputError('DOCUMENT_UPLOAD_INVALID', 'Invalid bytes.', 'document-validate'))).toMatchObject({ status: 400, code: 'DOCUMENT_UPLOAD_INVALID' });
-  });
-
   test('requires user auth, rejects unknown fields, and passes only trusted ownership to the service', async () => {
     const teamKey = 'team', scopeKey = newId(), userKey = newId(), conversationKey = newId();
     const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;

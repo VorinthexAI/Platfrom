@@ -73,9 +73,28 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
 describe('Content runtime', () => {
   test('preflights document ingestion scope role and folder hierarchy', async () => {
     const allowed = fixture('moderator');
+    allowed.folders.get(allowed.folderKey).mutationPolicy = 'system-container';
     await expect(authorizeDocumentParseLocation({ scopeKey: allowed.scopeKey, folderKey: allowed.folderKey }, allowed.context, allowed.repository)).resolves.toBeUndefined();
     const denied = fixture('viewer');
     await expect(authorizeDocumentParseLocation({ scopeKey: denied.scopeKey, folderKey: denied.folderKey }, denied.context, denied.repository)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
+  });
+
+  test('keeps private managed conversation folders and documents visible only to their owner', async () => {
+    const f = fixture();
+    const privateFolderKey = newId();
+    const privateDocumentKey = newId();
+    const ownerUserKey = f.context.principal.user.key;
+    f.folders.set(privateFolderKey, { key: privateFolderKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Private chat', embedding, privateOwnerUserKey: ownerUserKey, managedPurpose: 'conversation', managedOwnerKey: newId(), mutationPolicy: 'system-container', archiveVisibility: 'visible', isFavorite: false, createdAt: now, updatedAt: now });
+    f.documents.set(privateDocumentKey, { key: privateDocumentKey, scopeKey: f.scopeKey, folderKey: privateFolderKey, name: `${now} - Core`, content: 'Private response', embedding, contentChunks: ['Private response'], chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: 'a'.repeat(64), privateOwnerUserKey: ownerUserKey, managedPurpose: 'conversation-message', managedOwnerKey: newId(), mutationPolicy: 'system-only', archiveVisibility: 'visible', isFavorite: false, createdAt: now, updatedAt: now });
+
+    const owned = await runContentTool('document.find', { documentKeys: [privateDocumentKey], include: ['content'] }, f.context, { repository: f.repository });
+    expect(owned.results[0]).toMatchObject({ success: true, data: { document: { key: privateDocumentKey, managed: true, content: 'Private response' } } });
+
+    const otherContext = { ...f.context, principal: { ...f.context.principal, user: { key: newId() }, userTeam: { ...f.context.principal.userTeam, userId: newId() } } };
+    const hidden = await runContentTool('document.find', { documentKeys: [privateDocumentKey], include: ['content'] }, otherContext, { repository: f.repository });
+    expect(hidden.results[0]).toMatchObject({ success: false });
+    const listed = await runContentTool('folder.list', { scopeKey: f.scopeKey, includeDescendants: true }, otherContext, { repository: f.repository });
+    expect(listed.folders.some(({ key }) => key === privateFolderKey)).toBe(false);
   });
 
   test('creates one editable document from scanned pages, retains sources, and replays idempotently', async () => {
@@ -104,9 +123,12 @@ describe('Content runtime', () => {
       storage: { async upload() { return { storageKey: '' }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
       signDocumentSourceUrl: async (storageKey: string) => `https://images.example/${storageKey}`,
       clock: () => new Date(now),
-      scanDocument: async (scanInput: any) => {
+      parseDocument: async (scanInput: any, options: any) => {
         scanCalls += 1;
-        return { documentKey: documentKeyForRequest(scanInput.scopeKey, scanInput.folderKey, scanInput.idempotencyKey), content: '## Page 1\n\nStore receipt\n\n## Page 2\n\nTotal: $42.00', storageKeys: ['scan/page-01.jpg', 'scan/page-02.jpg'] };
+        expect(options.teamKey).toBe(f.context.teamKey);
+        const document = { key: documentKeyForRequest(scanInput.scopeKey, scanInput.folderKey, scanInput.idempotencyKey), scopeKey: scanInput.scopeKey, folderKey: scanInput.folderKey, name: scanInput.name, content: 'Store receipt\n\nTotal: $42.00', sourceStorageKeys: ['scan/page-01.jpg', 'scan/page-02.jpg'], embedding, isFavorite: false, createdAt: now, updatedAt: now };
+        f.documents.set(document.key, document);
+        return { document };
       },
       runAction: async (action: string, actionInput: any) => {
         if (action === 'document-cleanup') return { content: actionInput.text.replace('## Page 1', 'Page 1').replace('## Page 2', 'Page 2') };
@@ -115,8 +137,8 @@ describe('Content runtime', () => {
       },
     };
 
-    const first = await runContentTool('document.scan', input, f.context, dependencies);
-    const replay = await runContentTool('document.scan', input, f.context, dependencies);
+    const first = await runContentTool('document.parse', input, f.context, dependencies);
+    const replay = await runContentTool('document.parse', input, f.context, dependencies);
 
     expect(scanCalls).toBe(1);
     expect(replay.document.key).toBe(first.document.key);
@@ -134,51 +156,6 @@ describe('Content runtime', () => {
       { page: 2, url: 'https://images.example/scan/page-02.jpg' },
     ] } } });
     expect(sources.results[0]?.data?.document).not.toHaveProperty('sourceStorageKeys');
-  });
-
-  test('reports a retryable cleanup failure when scan processing and source deletion both fail', async () => {
-    const f = fixture('moderator');
-    const documentKey = newId();
-    const deleted: string[] = [];
-    await expect(runContentTool('document.scan', {
-      scopeKey: f.scopeKey,
-      folderKey: f.folderKey,
-      pages: [{ filename: 'page.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }],
-    }, f.context, {
-      repository: f.repository,
-      storage: {
-        async upload() { return { storageKey: '' }; },
-        async delete(key: string) { deleted.push(key); throw new Error('storage unavailable'); },
-        async download() { return { bytes: new Uint8Array() }; },
-        async copy() { return { storageKey: '' }; },
-      },
-      scanDocument: async () => ({ documentKey, content: 'Scanned body', storageKeys: ['scan/page-01.jpg'] }),
-      runAction: async (action: string) => { if (action === 'document-cleanup') throw new Error('cleanup unavailable'); throw new Error(`Unexpected action ${action}`); },
-    })).rejects.toMatchObject({ code: 'CONTENT_CONFLICT', action: 'cleanup', resourceKey: documentKey, retryable: true });
-    expect(deleted).toEqual(['scan/page-01.jpg']);
-  });
-
-  test('retains scan sources when ownership cannot be verified after processing fails', async () => {
-    const f = fixture('moderator');
-    const documentKey = newId();
-    const deleted: string[] = [];
-    const repository = { ...f.repository, async getDocument(key: string) { if (key === documentKey) throw new Error('database unavailable'); return f.repository.getDocument(key); } };
-    await expect(runContentTool('document.scan', {
-      scopeKey: f.scopeKey,
-      folderKey: f.folderKey,
-      pages: [{ filename: 'page.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }],
-    }, f.context, {
-      repository,
-      storage: {
-        async upload() { return { storageKey: '' }; },
-        async delete(key: string) { deleted.push(key); },
-        async download() { return { bytes: new Uint8Array() }; },
-        async copy() { return { storageKey: '' }; },
-      },
-      scanDocument: async () => ({ documentKey, content: 'Scanned body', storageKeys: ['scan/page-01.jpg'] }),
-      runAction: async (action: string) => { if (action === 'document-cleanup') throw new Error('cleanup unavailable'); throw new Error(`Unexpected action ${action}`); },
-    })).rejects.toMatchObject({ code: 'CONTENT_CONFLICT', action: 'cleanup', resourceKey: documentKey, retryable: true });
-    expect(deleted).toEqual([]);
   });
 
   test('requires a resolved human principal for every registered tool', async () => {
@@ -1352,10 +1329,47 @@ describe('Content runtime', () => {
     expect(search.results.map(({ documentKey }) => documentKey)).not.toContain(hiddenDocumentKey);
   });
 
-  test('rejects generic creation in managed folders and every generated-content path for managed documents', async () => {
+  test('allows direct child creation, upload, and scan in managed folders while retaining structural mutation fences', async () => {
     const f = fixture('owner');
     f.folders.get(f.folderKey).mutationPolicy = 'system-container';
-    await expect(runContentTool('document.create', { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Blocked', content: 'Blocked body' }, f.context, { repository: f.repository, embed: async () => embedding })).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
+    const dependencies: any = {
+      repository: f.repository,
+      embed: async () => embedding,
+      ingestion: { embeddingDimensions: EMBEDDING_DIMENSIONS },
+      clock: () => new Date(now),
+      storage: { async upload() { return { storageKey: '' }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
+      parseDocument: async (input: any) => {
+        const key = newId();
+        const document = { key, scopeKey: input.scopeKey, folderKey: input.folderKey, name: input.file?.filename ?? 'Scanned body', ...(input.file ? { extension: 'txt', mimeType: input.file.mimeType, sizeBytes: input.file.sizeBytes, storageKey: `docs/${key}` } : { sourceStorageKeys: ['scan/page-01.jpg'] }), content: 'Uploaded body', embedding, isFavorite: false, createdAt: now, updatedAt: now };
+        f.documents.set(key, document);
+        return { document };
+      },
+      runAction: async (action: string, input: any) => {
+        if (action === 'document-cleanup') return { content: input.text };
+        if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
+        throw new Error(`Unexpected action ${action}`);
+      },
+    };
+
+    const child = await runContentTool('folder.create', { folders: [{ scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child' }] }, f.context, dependencies);
+    const created = await runContentTool('document.create', { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Created', content: 'Created body' }, f.context, dependencies);
+    const uploaded = await runContentTool('document.parse', { scopeKey: f.scopeKey, folderKey: f.folderKey, file: { filename: 'upload.txt', mimeType: 'text/plain', sizeBytes: 4, bytes: new TextEncoder().encode('text') } }, f.context, dependencies);
+    const scanned = await runContentTool('document.parse', { scopeKey: f.scopeKey, folderKey: f.folderKey, pages: [{ filename: 'page.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }] }, f.context, dependencies);
+
+    expect(child.results[0]).toMatchObject({ success: true, data: { folder: { parentFolderKey: f.folderKey, managed: false } } });
+    for (const document of [created.document, uploaded.document, scanned.document]) expect(document).toMatchObject({ folderKey: f.folderKey, managed: false });
+
+    const userFolderKey = newId();
+    f.folders.set(userFolderKey, { key: userFolderKey, scopeKey: f.scopeKey, name: 'User content', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    const userDocumentKey = f.addDocument('Existing user content');
+    f.documents.get(userDocumentKey).folderKey = userFolderKey;
+    for (const output of await Promise.all([
+      runContentTool('folder.move', { moves: [{ folderKey: userFolderKey, targetParentFolderKey: f.folderKey }] }, f.context, dependencies),
+      runContentTool('folder.copy', { copies: [{ folderKey: userFolderKey, targetScopeKey: f.scopeKey, targetParentFolderKey: f.folderKey }] }, f.context, dependencies),
+      runContentTool('document.move', { moves: [{ documentKey: userDocumentKey, targetScopeKey: f.scopeKey, targetFolderKey: f.folderKey }] }, f.context, dependencies),
+      runContentTool('document.copy', { copies: [{ documentKey: userDocumentKey, targetScopeKey: f.scopeKey, targetFolderKey: f.folderKey }] }, f.context, dependencies),
+    ])) expect(output).toMatchObject({ summary: { failed: 1 }, results: [{ error: { code: 'CONTENT_FORBIDDEN' } }] });
+
     const documentKey = f.addDocument('Managed source');
     f.documents.get(documentKey).mutationPolicy = 'system-only';
     const generated = await runContentTool('document.enhance', { documentKeys: [documentKey], mode: 'preview' }, f.context, { repository: f.repository, runAction: async () => ({ text: 'Generated' }) });
@@ -1857,7 +1871,6 @@ describe('Content runtime', () => {
       else if (name === 'folder.copy') input = { copies: [{ folderKey: childKey, targetScopeKey: f.scopeKey, targetParentFolderKey: siblingKey }] };
       else if (name === 'folder.delete') input = { folderKeys: [childKey] };
       else if (name === 'document.parse') input = { file: { filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 4, bytes: new Uint8Array([1, 2, 3, 4]) }, scopeKey: f.scopeKey, folderKey: f.folderKey };
-      else if (name === 'document.scan') input = { pages: [{ filename: 'page.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }], scopeKey: f.scopeKey, folderKey: f.folderKey };
       else if (name === 'document.create') input = { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Created document', content: 'Created body' };
       else if (name === 'document.find') input = { documentKeys: [documentKey], include: ['content'] };
       else if (name === 'document.list') input = { scopeKey: f.scopeKey, folderKey: f.folderKey };

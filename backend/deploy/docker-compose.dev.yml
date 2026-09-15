@@ -54,7 +54,7 @@ services:
       dockerfile: backend/deploy/Dockerfile
       target: dev
     entrypoint: ['/bin/sh', '-c']
-    command: ['bun run src/db/migration-runner.ts && exec bun run --hot src/api/index.ts']
+    command: ['bun run src/db/migration-runner.ts && exec bun run --watch src/api/index.ts']
     environment:
       ROLE: app
       NODE_ENV: development
@@ -89,7 +89,7 @@ services:
       context: ../..
       dockerfile: backend/deploy/Dockerfile
       target: dev
-    command: ['--hot', 'src/render-worker/index.ts']
+    command: ['--watch', 'src/render-worker/index.ts']
     environment:
       ROLE: render
       NODE_ENV: development

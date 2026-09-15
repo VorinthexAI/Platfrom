@@ -22,6 +22,7 @@ test("orders the shared compact secondary Sparks button immediately before the p
   expect(profile).toBeGreaterThan(sparks);
   expect(balanceButton).toContain('size="xs"');
   expect(balanceButton).toContain('variant="secondary"');
+  expect(balanceButton).toContain('icon={<SparksIcon size="sm" />}');
   expect(header).toContain("formatWholeSparks(balance ?? 0)");
   expect(header).not.toContain('"--"');
   expect(header).toContain("Sparks balance:");
@@ -60,6 +61,7 @@ test("mounts one nonvisual balance observer and routes every entry to Sparks", (
   expect(observer).not.toMatch(/Dialog|BottomSheet|openSparksSheet/);
   expect(paywall).toContain('title={page === "plans" ? "Sparks"');
   expect(paywall).toContain("Current balance");
+  expect(paywall).toContain('<SparksIcon size="lg" />');
   expect(paywall).toContain("formatWholeSparks(balance ?? 0)");
   expect(paywall).toContain('accessibilityLabel="How Sparks are billed"');
 });

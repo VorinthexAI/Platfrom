@@ -6,10 +6,15 @@ describe('user inbox repository', () => {
   test('lists Inbox and Sent using only the authenticated owner and stable cursor', async () => {
     let query = '', vars: Record<string, unknown> = {};
     const repository = createUserInboxRepository({ query: async (text, bind) => { query = text; vars = bind ?? {}; return { next: async () => ({ cursorValid: true, unreadCount: 2, items: [] }) }; } });
-    await expect(repository.list(newId(), { mailbox: 'sent', limit: 20 })).resolves.toEqual({ items: [], unreadCount: 2, nextCursor: null });
+    await expect(repository.list(newId(), { mailbox: 'sent', limit: 20, query: ' Update ', readState: 'unread' })).resolves.toEqual({ items: [], unreadCount: 2, nextCursor: null });
     expect(query).toContain('message.sender == "user"');
     expect(query).toContain('thread.userKey == @userKey');
-    expect(vars).toMatchObject({ mailbox: 'sent', pageSize: 21 });
+    expect(query).toContain('CONTAINS(LOWER(thread.subject), @query)');
+    expect(query).toContain('@readState == "unread" && thread.readAt == null');
+    expect(query).toContain('preview: NOT_NULL(latestMessage, "")');
+    expect(query).not.toContain('latestMessage ?? ""');
+    expect(vars).toMatchObject({ mailbox: 'sent', pageSize: 21, query: 'update', readState: 'unread' });
+    expect(vars).not.toHaveProperty('limit');
   });
 
   test('staff reply atomically inserts the message, unread state, and linked push delivery', async () => {

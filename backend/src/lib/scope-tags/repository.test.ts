@@ -37,8 +37,9 @@ describe('scope tag repository', () => {
     expect(query).toContain('tag.userKey == @userKey'); expect(query).toContain('assignment.sourceType == @sourceType'); expect(query).toContain('tag.normalizedName > @cursor.normalizedName');
     expect(query).toContain('scopeRole IN ["owner", "admin", "moderator", "viewer"]');
     expect(query).toContain('privateTarget ? target.userKey == @userKey && (scoped || elevated)');
-    expect(query).toContain('collectionTarget ? elevated || ownsCollection || (managedCollection && scoped)');
-    expect(query).toContain('imageTarget ? elevated || imageOwnerAccess || (managedImageAccess && scoped)');
+    expect(query).toContain('directCollection.mutationPolicy == "system-only" ? @sourceType == "image-highlight"');
+    expect(query).toContain('managedImageAccess ? (scoped || elevated)');
+    expect(query).toContain('image.mutationPolicy != "system-only"');
     expect(query).not.toContain('collectionMembers');
     expect(bindVars).toMatchObject({ userKey: owner.userKey, sourceType: 'document', limit: 51 }); expect(result[0]).not.toHaveProperty('_key');
   });
@@ -96,7 +97,7 @@ describe('scope tag repository', () => {
     expect(result.map(({ assignment, changed }) => [assignment?.key ?? null, assignment?.source ?? null, changed])).toEqual([
       [existingKey, 'user', false], [removedKey, 'ai', true], [insertedKey, 'ai', true], [null, null, false],
     ]);
-    expect(queries[0]?.query).toContain('FOR requestedTarget IN @targets'); expect(queries[0]?.query).toContain('managedCollection && scoped');
+    expect(queries[0]?.query).toContain('FOR requestedTarget IN @targets'); expect(queries[0]?.query).toContain('managedCollection && (scoped || elevated) && target.createdByKey == @teamMembershipKey');
     expect(queries[1]?.query).toContain('tag.userKey == @userKey'); expect(queries[3]?.query).toContain('UPDATE {}');
     expect(Object.keys(queries[1]?.bindVars ?? {}).sort()).toEqual(['scopeKey', 'tagKeys', 'userKey']);
     expect(queries[2]?.query).toContain('candidate.scopeKey == @scopeKey');

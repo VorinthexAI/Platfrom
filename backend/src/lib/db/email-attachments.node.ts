@@ -21,6 +21,7 @@ export const emailAttachmentSchema = z.object({
   leaseExpiresAt: z.string().datetime().optional(),
   archiveDocumentKey: z.string().cuid().optional(),
   galleryImageKey: z.string().cuid().optional(),
+  exportPending: z.boolean().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 }).strict().superRefine((attachment, context) => {

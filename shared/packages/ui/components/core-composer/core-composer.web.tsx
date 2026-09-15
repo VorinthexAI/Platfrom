@@ -12,6 +12,7 @@ export type CoreComposerProps = {
   expandedAccessory?: ReactNode;
   expandedPrompts?: readonly string[];
   focusRequest?: number;
+  focusOnOpenRequest?: boolean;
   expandedLeading?: ReactNode;
   expandedLeadingAccessibilityLabel?: string;
   expandedLeadingDisabled?: boolean;

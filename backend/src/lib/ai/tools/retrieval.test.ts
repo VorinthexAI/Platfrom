@@ -75,6 +75,9 @@ describe('retrieval tool', () => {
     expect(source).toContain('KEEP(document, @fields)');
     expect(source).toContain('document._internalDeletion == null');
     expect(source).toContain('parentFolder._internalDeletion == null');
+    expect(source).toContain('document.privateOwnerUserKey == viewerUserKey');
+    expect(source).toContain('parentFolder.privateOwnerUserKey == viewerUserKey');
+    expect(source).toContain('(document.archiveVisibility || "visible") == "visible"');
     expect(source).not.toContain('RETURN document');
   });
 });

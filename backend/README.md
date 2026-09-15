@@ -20,9 +20,9 @@ Mailpit is included in the dev infra at `localhost:8025` with SMTP on `localhost
 
 ### Infra in Docker, backend native
 
-This is the supported dev layout: everything in `backend/docker-compose.yml` except `app` and `render` runs as containers, and the backend runs natively via Bun so `bun --hot` picks up edits instantly.
+This is the supported dev layout: everything in `backend/docker-compose.yml` except `app` and `render` runs as containers, and the backend runs natively via Bun so `bun --watch` restarts the process on edits. A process restart is required because the API owns long-lived queue workers and timers.
 
-Do not develop against the `app` and `render` Compose services (`bun run dev:services`). They exist to exercise the container image, not for day-to-day development: on Windows and macOS, file-change events do not cross the Docker mount into the container, so `bun --hot` silently never sees edits — changes appear to have no effect until the container is restarted. If you do use them, restart `app` (and `render`) after every edit:
+Do not develop against the `app` and `render` Compose services (`bun run dev:services`). They exist to exercise the container image, not for day-to-day development: on Windows and macOS, file-change events do not cross the Docker mount into the container, so `bun --watch` silently never sees edits — changes appear to have no effect until the container is restarted. If you do use them, restart `app` (and `render`) after every edit:
 
 ```bash
 docker compose --profile services restart app render
@@ -32,7 +32,7 @@ Run the live content release gate with `bun run test:e2e:content`. It starts the
 
 ## Production
 
-Production deploys are defined in `.github/workflows/deploy.yml` and `deploy/`. The app role runs blue-green behind Caddy and processes document parsing and scanning directly while it waits on external OCR and model APIs. Image hashing remains isolated transient Fargate compute.
+Production deploys are defined in `.github/workflows/deploy.yml` and `deploy/`. The app role runs blue-green behind Caddy and handles file uploads and scanned pages through the unified `document.parse` service. PDF/image transcription uses the text AI action and token-based billing; local text/Word decoders and source storage remain part of the same ingestion service. Image hashing remains isolated transient Fargate compute.
 
 ## Adding Behavior
 

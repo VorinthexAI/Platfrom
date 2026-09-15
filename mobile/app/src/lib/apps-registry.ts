@@ -2,6 +2,19 @@ import { z } from "zod";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://vorinthex.com";
 const BACKEND_API_KEY = process.env.EXPO_PUBLIC_BACKEND_API_KEY ?? "";
+type RequestIdentityHeadersProvider = () => Record<string, string> | Promise<Record<string, string>>;
+
+let requestIdentityHeaders: RequestIdentityHeadersProvider = async () => {
+  const [{ getInstallationEventIdentifier, INSTALLATION_EVENT_IDENTIFIER_HEADER }, { getDeviceIdentifier, DEVICE_IDENTIFIER_HEADER }] = await Promise.all([
+    import("./installation-event-identifier-vault"),
+    import("./device-identifier-vault"),
+  ]);
+  const [eventIdentifier, device] = await Promise.all([getInstallationEventIdentifier(), getDeviceIdentifier()]);
+  return {
+    [INSTALLATION_EVENT_IDENTIFIER_HEADER]: eventIdentifier,
+    ...(device ? { [DEVICE_IDENTIFIER_HEADER]: device } : {}),
+  };
+};
 
 export const CANONICAL_APP_SLUGS = [
   "vorinthex-ai",
@@ -47,8 +60,15 @@ export function parseAppsRegistry(input: unknown): ServerApp[] {
   return appsRegistryResponseSchema.parse(input).apps;
 }
 
-export function appsBootstrapHeaders(): Record<string, string> {
-  return BACKEND_API_KEY ? { "X-Vorinthex-API-Key": BACKEND_API_KEY } : {};
+export async function appsBootstrapHeaders(): Promise<Record<string, string>> {
+  return {
+    ...await requestIdentityHeaders(),
+    ...(BACKEND_API_KEY ? { "X-Vorinthex-API-Key": BACKEND_API_KEY } : {}),
+  };
+}
+
+export function configureAppsBootstrapIdentityHeaders(provider: RequestIdentityHeadersProvider) {
+  requestIdentityHeaders = provider;
 }
 
 export async function fetchAppsRegistry(): Promise<ServerApp[]> {
@@ -56,7 +76,7 @@ export async function fetchAppsRegistry(): Promise<ServerApp[]> {
   const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
     const response = await fetch(`${API_BASE_URL.replace(/\/$/, "")}/api/v1/apps`, {
-      headers: appsBootstrapHeaders(),
+      headers: await appsBootstrapHeaders(),
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`App registry request failed with status ${response.status}.`);

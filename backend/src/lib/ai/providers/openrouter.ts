@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { speechInputSchema, speechOutputSchema, type SpeechInput, type SpeechOutput } from '@/lib/ai/actions/speech';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
-import { tokenUsage, ZERO_TOKEN_USAGE } from '@/lib/ai/shared/usage';
+import { tokenUsage } from '@/lib/ai/shared/usage';
 import { normalizeProviderError, ProviderError, providerErrorCodeForStatus } from './errors';
 import {
   chatInputSchema,
@@ -175,12 +175,16 @@ function chatBody(chat: ChatInput, model: string, capabilities?: ProviderExecuti
 function parseToolArguments(value: string) {
   try { return JSON.parse(value) as unknown; } catch (error) { throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter returned invalid tool arguments', { cause: error }); }
 }
+function requiredTokenUsage(usage: z.infer<typeof usageSchema> | undefined, operation: string) {
+  if (usage?.prompt_tokens === undefined || usage.completion_tokens === undefined) throw new ProviderError(PROVIDER_ID, 'response_invalid', `OpenRouter ${operation} response did not include token usage`);
+  return tokenUsage(usage.prompt_tokens, usage.completion_tokens, usage.total_tokens);
+}
 function normalizeChat(raw: z.infer<typeof chatResponseSchema>) {
   const choice = raw.choices[0]!;
   const toolCalls = (choice.message.tool_calls ?? []).map((call) => ({ id: call.id, name: call.function.name, arguments: parseToolArguments(call.function.arguments) }));
   const output: ChatOutput = { text: choice.message.content ?? '', toolCalls, stopReason: toolCalls.length ? 'tool_use' : choice.finish_reason ?? null };
   if (!output.text && !toolCalls.length) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter returned no text or tool calls');
-  return { output, usage: tokenUsage(raw.usage?.prompt_tokens, raw.usage?.completion_tokens, raw.usage?.total_tokens), costUsd: raw.usage?.cost ?? undefined };
+  return { output, usage: requiredTokenUsage(raw.usage, 'text'), costUsd: raw.usage?.cost ?? undefined };
 }
 
 async function executeChat<TInput, TOutput>(fetcher: typeof fetch, config: z.output<typeof openRouterProviderConfigSchema>, request: ProviderExecuteRequest<TInput>) {
@@ -240,7 +244,7 @@ function captionInstruction(value: ImageCaptionInput) {
   if (value.purpose === 'document-transcription') return `Transcribe all visible text from each of the ${value.imageUrls.length} document images as clean plain text. Preserve structure and do not summarize. Score source legibility and quality from 1 to 100. ${json}`;
   if (value.purpose === 'document-reconciliation') return `Produce the best faithful transcription for each of the ${value.imageUrls.length} images. Compare the supplied primary and secondary text against each image, prefer the primary source on conflicts, and repair clear OCR errors. Score legibility and quality from 1 to 100. ${json}`;
   if (value.purpose === 'artwork-compliance') return `Inspect each of the ${value.imageUrls.length} images. An image is compliant only when it contains no person or human-like subject, no visible writing or text-like mark, and no botanical, fungal, or vegetation imagery. Use caption "compliant" and score 100 only when compliant; otherwise describe violations and score 1. ${json}`;
-  return `Write one rich factual caption for each of the ${value.imageUrls.length} images, preserving order. Describe visible subjects, actions, setting, composition, colors, lighting, style, and readable text without speculation. Score image quality from 1 to 100. ${json}`;
+  return `Write one rich factual caption for each of the ${value.imageUrls.length} images, preserving order. Describe visible subjects, actions, setting, composition, colors, lighting, style, and readable text without speculation. Finish every caption as a complete sentence and never end one with an ellipsis. Score image quality from 1 to 100. ${json}`;
 }
 
 async function executeStructuredImage<TOutput>(fetcher: typeof fetch, config: z.output<typeof openRouterProviderConfigSchema>, request: ProviderExecuteRequest, content: unknown[], name: string, schema: Record<string, unknown>, parse: (value: unknown) => TOutput): Promise<ProviderExecuteResponse<TOutput>> {
@@ -255,7 +259,7 @@ async function executeStructuredImage<TOutput>(fetcher: typeof fetch, config: z.
     const candidate = fenced ?? trimmed.slice(trimmed.indexOf('{'), trimmed.lastIndexOf('}') + 1);
     value = JSON.parse(candidate);
   } catch (error) { throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter returned invalid image analysis JSON', { cause: error }); }
-  return { output: parse(value), usage: tokenUsage(raw.usage?.prompt_tokens, raw.usage?.completion_tokens, raw.usage?.total_tokens), ...(raw.usage?.cost != null ? { costUsd: raw.usage.cost } : {}), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: raw };
+  return { output: parse(value), usage: requiredTokenUsage(raw.usage, 'image analysis'), ...(raw.usage?.cost != null ? { costUsd: raw.usage.cost } : {}), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: raw };
 }
 
 async function captionImages<TOutput>(fetcher: typeof fetch, config: z.output<typeof openRouterProviderConfigSchema>, request: ProviderExecuteRequest): Promise<ProviderExecuteResponse<TOutput>> {
@@ -331,7 +335,7 @@ async function generateSpeech<TInput, TOutput>(fetcher: typeof fetch, config: z.
     audio.push(parsed.bytes); durationSeconds += parsed.durationSeconds;
   }
   const output: SpeechOutput = speechOutputSchema.parse({ base64: Buffer.concat(audio).toString('base64'), mimeType: 'audio/mpeg', durationSeconds: Math.max(1, Math.ceil(durationSeconds)) });
-  return { output: output as TOutput, usage: ZERO_TOKEN_USAGE, providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: { chunks: chunks.length } };
+  return { output: output as TOutput, usage: tokenUsage(0, output.durationSeconds, output.durationSeconds), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: { chunks: chunks.length } };
 }
 
 async function* streamChat<TInput>(fetcher: typeof fetch, config: z.output<typeof openRouterProviderConfigSchema>, request: ProviderExecuteRequest<TInput>): AsyncIterable<ProviderStreamChunk> {
@@ -339,7 +343,7 @@ async function* streamChat<TInput>(fetcher: typeof fetch, config: z.output<typeo
     const chat = input(chatInputSchema, request.input, 'text stream');
     const result = await post(fetcher, config, '/chat/completions', chatBody(chat, request.externalModelId, request.capabilities, true), request, 'text stream');
     if (!result.body) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter returned no stream body');
-    const reader = result.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let sawDone = false; let finishReason: string | null | undefined;
+    const reader = result.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let sawDone = false; let sawUsage = false; let finishReason: string | null | undefined;
     const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
     const parseEvent = (event: string): ProviderStreamChunk[] => {
       const data = event.split(/\r?\n/).filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim()).join('');
@@ -361,7 +365,7 @@ async function* streamChat<TInput>(fetcher: typeof fetch, config: z.output<typeo
         if (part.function?.arguments) current.arguments += part.function.arguments;
         toolCalls.set(part.index, current);
       }
-      if (parsed.usage) chunks.push({ type: 'usage', usage: tokenUsage(parsed.usage.prompt_tokens, parsed.usage.completion_tokens, parsed.usage.total_tokens) });
+      if (parsed.usage) { sawUsage = true; chunks.push({ type: 'usage', usage: requiredTokenUsage(parsed.usage, 'text stream') }); }
       return chunks;
     };
     try {
@@ -375,8 +379,12 @@ async function* streamChat<TInput>(fetcher: typeof fetch, config: z.output<typeo
     } finally { reader.releaseLock(); }
     if (!sawDone) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter stream ended before completion');
     if (toolCalls.size ? finishReason !== 'tool_calls' : finishReason === 'tool_calls' || finishReason == null) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter stream finish reason did not match its tool calls');
-    for (const [, call] of [...toolCalls.entries()].sort(([left], [right]) => left - right)) {
+    const orderedToolCalls = [...toolCalls.entries()].sort(([left], [right]) => left - right);
+    for (const [, call] of orderedToolCalls) {
       if (!call.id || !call.name) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter returned an incomplete streamed tool call');
+    }
+    if (!sawUsage) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter text stream response did not include token usage');
+    for (const [, call] of orderedToolCalls) {
       yield { type: 'tool-call', toolCall: { id: call.id, name: call.name, arguments: parseToolArguments(call.arguments) } };
     }
     yield { type: 'done' };

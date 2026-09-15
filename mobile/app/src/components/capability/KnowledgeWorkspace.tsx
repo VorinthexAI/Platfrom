@@ -56,6 +56,7 @@ import { SearchHistorySheet } from "@/components/SearchHistorySheet";
 import { TagFilterLane } from "@/components/TagFilterLane";
 import { TagFilterSheet } from "@/components/TagFilterSheet";
 import { assistantIconSource, contentPresentationIconSource } from "@/data/capability-icons";
+import { subscribeAppEvent } from "@/lib/app-events";
 import {
   hardDeleteContentSelection,
   askPersonalAssistant,
@@ -223,6 +224,12 @@ function documentDisplayName(document: Pick<ContentDocument, "name" | "extension
   return `${document.name}.${document.extension}`;
 }
 
+function documentPillName(document: Pick<ContentDocument, "name" | "extension">): string {
+  if (!document.extension) return document.name;
+  const suffix = `.${document.extension.toLowerCase()}`;
+  return document.name.toLowerCase().endsWith(suffix) ? document.name.slice(0, -suffix.length) : document.name;
+}
+
 function capitalizeLabel(value: string) {
   return value ? `${value.charAt(0).toLocaleUpperCase()}${value.slice(1)}` : value;
 }
@@ -303,10 +310,6 @@ function ArchiveContentViewport({ children, editor, onRefresh, refreshEnabled = 
 
 function ScannedBadge({ document }: { document: ContentDocument }) {
   return document.sourceImageCount ? <Badge accessibilityLabel={`Scanned from ${document.sourceImageCount} ${document.sourceImageCount === 1 ? "image" : "images"}`} style={styles.scannedBadge}><Text style={styles.scannedBadgeText}>Scanned</Text></Badge> : null;
-}
-
-function ProcessingDocumentButton({ name }: { name: string }) {
-  return <Skeleton accessibilityLabel={`Processing ${name}`} accessibilityRole="progressbar" style={styles.documentSkeleton} />;
 }
 
 export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initialDocumentKey, initialDocumentTitle, initialFolderKey, initialSearchQuery, returnSignalConnectorKey, returnSignalMessageKey, returnSignalThreadKey, returnTripKey, returnTripName }: { initialAction?: "create" | "create-folder" | "create-document" | "upload-files" | "scan"; initialCollectionKind?: string; initialDocumentKey?: string; initialDocumentTitle?: string; initialFolderKey?: string; initialSearchQuery?: string; returnSignalConnectorKey?: string; returnSignalMessageKey?: string; returnSignalThreadKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
@@ -474,6 +477,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
   const pendingFolderCreates = useRef(new Map<string, Promise<ContentFolder>>());
   const createVersionOnNextSave = useRef(false);
   const navigationGeneration = useRef(0);
+  const folderTabSelectionRevision = useRef(0);
   const destinationGeneration = useRef(0);
   const sheetCloseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const activeSheetRef = useRef<ArchiveSheet | undefined>(undefined);
@@ -950,13 +954,15 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     setDocuments(location.documents);
   };
 
-  const refreshArchive = async () => {
+  const refreshArchive = async (interactive = true) => {
     if (!hasContentContext || userRefreshing) return;
     const viewKey = refreshViewKey.current;
     const navigationRequest = navigationGeneration.current;
     const isCurrent = () => refreshViewKey.current === viewKey && navigationGeneration.current === navigationRequest;
-    setUserRefreshing(true);
-    setError(undefined);
+    if (interactive) {
+      setUserRefreshing(true);
+      setError(undefined);
+    }
     try {
       if (workspaceMode === "editor") {
         const documentKey = documentKeyRef.current;
@@ -993,11 +999,16 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         else setRootSearchResults(matches);
       }
     } catch (cause) {
-      if (isCurrent()) setError(cause instanceof Error ? cause.message : "Archive could not be refreshed.");
+      if (interactive && isCurrent()) setError(cause instanceof Error ? cause.message : "Archive could not be refreshed.");
     } finally {
-      setUserRefreshing(false);
+      if (interactive) setUserRefreshing(false);
     }
   };
+  const refreshArchiveFromEvent = useEffectEvent(() => { void refreshArchive(false); });
+
+  useEffect(() => subscribeAppEvent((event) => {
+    if (event.type === "content.changed" || event.type === "event-stream.connected") refreshArchiveFromEvent();
+  }), []);
 
   useEffect(() => {
     if (!userHiddensQuery.data) return;
@@ -2011,7 +2022,6 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
 
   const markLongPress = (id: string) => {
     longPressedItem.current = id;
-    void Haptics.selectionAsync();
   };
 
   const consumeLongPress = (id: string) => {
@@ -2032,10 +2042,11 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     }).finally(() => setHydratingFolderKeys((current) => current.filter((key) => key !== folder.key)));
   };
 
-  const handleFolderLongPress = (folder: ContentFolder) => {
-    markLongPress(`folder:${folder.key}`);
+  const handleFolderLongPress = (folder: ContentFolder, suppressPress = true) => {
+    if (suppressPress) markLongPress(`folder:${folder.key}`);
     const selecting = !selectedFolders.some(({ key }) => key === folder.key);
     toggleFolderSelection(folder);
+    if (selecting && selectedCount === 0) void Haptics.selectionAsync();
     if (selecting && selectedCount < MAX_SELECTED_CONTENT_RESOURCES) hydrateSelectedFolder(folder);
   };
 
@@ -2050,15 +2061,17 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     else void (hasContentContext ? openFolder(folder) : selectFolder(folder));
   };
 
-  const handleDocumentLongPress = (document: ContentDocument) => {
-    markLongPress(`document:${document.key}`);
+  const handleDocumentLongPress = (document: ContentDocument, suppressPress = true) => {
+    if (suppressPress) markLongPress(`document:${document.key}`);
+    const selecting = !selectedDocuments.some(({ key }) => key === document.key);
     toggleDocumentSelection(document);
+    if (selecting && selectedCount === 0) void Haptics.selectionAsync();
   };
 
-  const handleSearchDocumentLongPress = (document: ContentSearchDocument) => {
+  const handleSearchDocumentLongPress = (document: ContentSearchDocument, suppressPress = true) => {
     const provisional: ContentDocument = { key: document.documentKey, name: document.name, folderKey: document.folderKey, extension: document.extension, isFavorite: document.isFavorite, managed: document.managed, updatedAt: "" };
     const selecting = !selectedDocuments.some(({ key }) => key === document.documentKey);
-    handleDocumentLongPress(provisional);
+    handleDocumentLongPress(provisional, suppressPress);
     if (!selecting || selectedCount >= MAX_SELECTED_CONTENT_RESOURCES) return;
     setHydratingDocumentKeys((current) => [...current.filter((key) => key !== document.documentKey), document.documentKey]);
     void getContentDocument(queryClient, contentContext, document.documentKey).then((resolved) => {
@@ -2263,6 +2276,11 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     });
   };
 
+  const selectFolderContentTab = (tab: FolderContentTab) => {
+    folderTabSelectionRevision.current += 1;
+    setFolderContentTab(tab);
+  };
+
   const openFolder = async (folder: ContentFolder) => {
     if (!hasContentContext) return;
     if (folderStack.at(-1)?.key === folder.key) {
@@ -2274,6 +2292,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
       return;
     }
     const generation = ++navigationGeneration.current;
+    const tabSelectionRevision = folderTabSelectionRevision.current;
     const previousFolders = folders;
     const previousDocuments = documents;
     const previousStack = folderStack;
@@ -2286,7 +2305,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     if (cached) {
       setFolders(cached.folders);
       setDocuments(cached.documents);
-      setFolderContentTab((selected) => populatedContentTab(cached, selected));
+      setFolderContentTab((selected) => folderTabSelectionRevision.current === tabSelectionRevision ? populatedContentTab(cached, selected) : selected);
     } else {
       setFolders(tree ? contentFolderChildren(tree, folder.key) : []);
       setDocuments([]);
@@ -2305,7 +2324,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
       if (generation !== navigationGeneration.current) return;
       setFolders(location.folders);
       setDocuments(location.documents);
-      setFolderContentTab((selected) => populatedContentTab(location, selected));
+      setFolderContentTab((selected) => folderTabSelectionRevision.current === tabSelectionRevision ? populatedContentTab(location, selected) : selected);
     } catch (cause) {
       if (generation === navigationGeneration.current) {
         setFolders(previousFolders);
@@ -2313,7 +2332,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         setFolderStack(previousStack);
         workspaceModeRef.current = previousMode;
         setWorkspaceMode(previousMode);
-        setFolderContentTab(previousTab);
+        if (folderTabSelectionRevision.current === tabSelectionRevision) setFolderContentTab(previousTab);
         setError(cause instanceof Error ? cause.message : "The folder could not be opened.");
       }
     } finally {
@@ -2901,6 +2920,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
       const completed = uploadBatchRef.current;
       const successCount = completed.filter(({ status }) => status === "success").length;
       const failureCount = completed.filter(({ status }) => status === "error").length;
+      if (failureCount) setError(completed.find(({ status }) => status === "error")?.error ?? "Files could not be uploaded.");
       if (currentFolderKeyRef.current === folderKey) {
         setFolders(location.folders);
         setDocuments(location.documents);
@@ -2918,9 +2938,17 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
       const topUploaded = batch.map(({ id }) => uploadedDocuments.get(id)).find((document): document is ContentDocument => Boolean(document));
       if (topUploaded) await openNote(topUploaded);
     } catch (cause) {
-      setSheetError(cause instanceof Error ? cause.message : "Files could not be selected.");
+      if (generation !== uploadGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
+      const message = cause instanceof Error ? cause.message : "Files could not be selected.";
+      setError(message);
+      setSheetError(message);
     } finally {
-      if (generation === uploadGeneration.current) setUploading(false);
+      if (generation === uploadGeneration.current) {
+        setUploading(false);
+        uploadBatchRef.current = [];
+        setUploadBatch([]);
+        setUploadFolderKey(undefined);
+      }
     }
   };
 
@@ -2978,7 +3006,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     } catch (cause) {
       if (generation !== scanGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
       const message = cause instanceof Error ? cause.message : "The document could not be scanned.";
-      if (processingStarted) notify("Document could not be scanned");
+      if (processingStarted) { setError(message); notify("Document could not be scanned"); }
       else setScanError(message);
     } finally {
       if (generation === scanGeneration.current) {
@@ -3771,7 +3799,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
       {closeFooter(false)}
     </>;
   else if (activeSheet === "audioVersions") mutationFooter = <>
-      {!managedDocument ? <Button disabled={loadingAudioVersions || generatingDocumentAudio || saveState !== "saved"} loading={generatingDocumentAudio} onPress={() => void generateSelectedDocumentAudio()} size="md" variant="primary">Generate audio</Button> : null}
+      {!managedDocument ? <Button disabled={loadingAudioVersions || generatingDocumentAudio || saveState !== "saved"} onPress={() => void generateSelectedDocumentAudio()} size="md" variant="primary">Generate audio</Button> : null}
       {closeFooter(generatingDocumentAudio)}
     </>;
   else if (activeSheet === "folderDetails") mutationFooter = <>
@@ -3870,8 +3898,9 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     <Button accessibilityLabel="Selected item actions" contentMode="raw" disabled={selectionMetadataLoading} loading={selectionMetadataLoading} onPress={() => openSheet("bulkActions")} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
   </Tabs> : null;
   const filterBadges = !filtersActive ? null : <View style={styles.filterBadgeRow}>
-    {showOnlyFavorites ? <View style={styles.similarPill}><Text numberOfLines={1} style={styles.similarPillText}>Favorites</Text><Button accessibilityLabel="Close Favorites filter" contentMode="raw" onPress={() => setViewFilters((current) => ({ ...current, favoritesOnly: false }))} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View> : null}
-    {showHidden ? <View style={styles.similarPill}><Text numberOfLines={1} style={styles.similarPillText}>Show hidden</Text><Button accessibilityLabel="Close Show hidden filter" contentMode="raw" onPress={() => setViewFilters((current) => ({ ...current, showHidden: false }))} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View> : null}
+    <TagFilterLane context={contentContext} />
+    {showOnlyFavorites ? <View style={styles.similarPill}><Text numberOfLines={1} style={styles.similarPillText}>Favorites</Text><Button accessibilityLabel="Close Favorites filter" contentMode="raw" onPress={() => setViewFilters((current) => ({ ...current, favoritesOnly: false }))} size="xs" style={styles.filterBadgeClose} variant="icon"><CloseIcon size="sm" /></Button></View> : null}
+    {showHidden ? <View style={styles.similarPill}><Text numberOfLines={1} style={styles.similarPillText}>Show hidden</Text><Button accessibilityLabel="Close Show hidden filter" contentMode="raw" onPress={() => setViewFilters((current) => ({ ...current, showHidden: false }))} size="xs" style={styles.filterBadgeClose} variant="icon"><CloseIcon size="sm" /></Button></View> : null}
   </View>;
   const rootSearchActive = Boolean(rootSearchQuery.trim() || selectedTags.length);
   const folderSearchActive = Boolean(query.trim() || selectedTags.length);
@@ -3905,20 +3934,19 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
               </View>
               <Button accessibilityLabel="Filter Archive" contentMode="raw" disabled={!hasContentContext} onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
             </View>
-            <TagFilterLane context={contentContext} />
             {bulkToolbar}
             {filterBadges}
             <View style={[styles.rootContent, rootSearchEmpty && styles.searchRootContent]}>
               <Tabs accessibilityRole="tablist" style={styles.folderTabs}>
-                <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "folders" }} onPress={() => setFolderContentTab("folders")} size="xs" style={styles.folderTab} variant={folderContentTab === "folders" ? "secondary" : "ghost"}>Folders</Button>
-                <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "documents" }} onPress={() => setFolderContentTab("documents")} size="xs" style={styles.folderTab} variant={folderContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
-                <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "files" }} onPress={() => setFolderContentTab("files")} size="xs" style={styles.folderTab} variant={folderContentTab === "files" ? "secondary" : "ghost"}>Files</Button>
+                <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "folders" }} onPress={() => selectFolderContentTab("folders")} size="xs" style={styles.folderTab} variant={folderContentTab === "folders" ? "secondary" : "ghost"}>Folders</Button>
+                <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "documents" }} onPress={() => selectFolderContentTab("documents")} size="xs" style={styles.folderTab} variant={folderContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
+                <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "files" }} onPress={() => selectFolderContentTab("files")} size="xs" style={styles.folderTab} variant={folderContentTab === "files" ? "secondary" : "ghost"}>Files</Button>
               </Tabs>
               {rootSearchActive ? rootSearching || !rootSearchResults ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folder search results" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.loadingGrid]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel="Loading search results" accessibilityRole="progressbar" style={styles.rootDocuments}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? <View accessibilityLiveRegion="polite" style={[styles.rootFolderGrid, rootSearchFolders.length === 0 && styles.searchEmptyContent]}>
                 {rootSearchFolders.map((folder) => { const selected = selectedFolders.some(({ key }) => key === folder.key); return <View key={folder.key} style={[styles.rootFolderCard, selected && styles.selectedItem, { width: archiveCardSize, height: archiveCardSize }]}><FolderCover folder={folder} /><Button accessibilityState={{ selected }} contentMode="raw" onLongPress={() => handleFolderLongPress(folder)} onPress={() => handleFolderPress(folder)} shape="rounded" size="xl" style={[styles.rootFolderMain, folderHasCover(folder) && styles.coveredFolderMain]} variant="ghost">{folderHasCover(folder) ? null : <FolderIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.archiveCardLabel, folderHasCover(folder) && styles.coveredFolderLabel]}>{folder.name}</Text></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>; })}
                 {rootSearchFolders.length === 0 ? <Text style={styles.empty}>No folders matched this search.</Text> : null}
               </View> : <View accessibilityLiveRegion="polite" style={[styles.rootDocuments, rootSearchDocuments.length === 0 && styles.searchEmptyContent]}>
-                {rootSearchDocuments.map((document) => { const selected = selectedDocuments.some(({ key }) => key === document.documentKey); return <Button accessibilityState={{ selected }} contentMode="raw" key={document.documentKey} onLongPress={() => handleSearchDocumentLongPress(document)} onPress={() => handleSearchDocumentPress(document)} size="sm" style={[styles.documentButton, selected && styles.selectedDocumentItem]} variant={selected ? "ghost" : "secondary"}><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{documentDisplayName(document)}</Text></Button>; })}
+                {rootSearchDocuments.map((document) => { const selected = selectedDocuments.some(({ key }) => key === document.documentKey); return <Button accessibilityState={{ selected }} contentMode="raw" key={document.documentKey} onLongPress={() => handleSearchDocumentLongPress(document)} onPress={() => handleSearchDocumentPress(document)} size="sm" style={[styles.documentButton, selected && styles.selectedDocumentItem]} variant={selected ? "ghost" : "secondary"}><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{documentPillName(document)}</Text></Button>; })}
                 {rootSearchDocuments.length === 0 ? <Text style={styles.empty}>No {folderContentTab === "files" ? "files" : "documents"} matched this search.</Text> : null}
               </View> : archiveLocationLoading && (folderContentTab !== "folders" || filteredRootFolders.length === 0) ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folders" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.loadingGrid]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel={`Loading ${folderContentTab}`} accessibilityRole="progressbar" style={styles.rootDocuments}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
                 <View style={[styles.rootFolderGrid, filteredRootFolders.length === 0 && !archiveLocationLoading && styles.emptyTabContent]}>
@@ -3936,12 +3964,11 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
                    {rootTabDocuments.length ? rootTabDocuments.map((document) => (
                     <Button accessibilityState={{ selected: selectedDocuments.some(({ key }) => key === document.key) }} contentMode="raw" key={document.key} onLongPress={() => handleDocumentLongPress(document)} onPress={() => handleDocumentPress(document)} size="sm" style={[styles.documentButton, selectedDocuments.some(({ key }) => key === document.key) && styles.selectedDocumentItem]} variant={selectedDocuments.some(({ key }) => key === document.key) ? "ghost" : "secondary"}>
                       <FileIcon size="sm" />
-                      <Text numberOfLines={1} style={styles.documentButtonLabel}>{documentDisplayName(document)}</Text>
+                       <Text numberOfLines={1} style={styles.documentButtonLabel}>{documentPillName(document)}</Text>
                       <ScannedBadge document={document} />
                    </Button>
                   )) : (folderContentTab === "files" ? visibleUploadBatch.length === 0 : !visibleProcessingScan) && !error ? <View style={styles.folderEmptyState}><Text style={styles.empty}>{showOnlyFavorites ? `No favorite ${folderContentTab}.` : folderContentTab === "files" ? "No files here yet." : "No documents here yet."}</Text>{!showOnlyFavorites ? <Button accessibilityLabel={folderContentTab === "files" ? "Upload files" : "Create document"} contentMode="raw" onPress={() => { if (folderContentTab === "files") void pickAndUpload(currentFolder?.key); else startNewNote(); }} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : null}
-                  {folderContentTab === "files" && visibleUploadBatch.length ? <LoadingText text={`Processing ${visibleUploadBatch.length} ${visibleUploadBatch.length === 1 ? "file" : "files"}, this might take a while...`} /> : folderContentTab === "documents" && visibleProcessingScan ? <LoadingText text="Processing scanned document, this might take a while..." /> : null}
-                  {folderContentTab === "files" ? visibleUploadBatch.map((item) => <ProcessingDocumentButton key={item.id} name={item.name} />) : visibleProcessingScan ? <ProcessingDocumentButton key={visibleProcessingScan.id} name={visibleProcessingScan.name} /> : null}
+                  {folderContentTab === "files" ? visibleUploadBatch.map((item) => <Skeleton accessibilityLabel={`Processing ${item.name}`} accessibilityRole="progressbar" key={item.id} style={[styles.documentSkeleton, styles.skeletonCard]} />) : visibleProcessingScan ? <Skeleton accessibilityLabel="Processing scanned document" accessibilityRole="progressbar" key={visibleProcessingScan.id} style={[styles.documentSkeleton, styles.skeletonCard]} /> : null}
                 </View>
               )}
             </View>
@@ -3953,7 +3980,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
               <Text numberOfLines={1} style={styles.folderTitle}>{currentFolder?.name ?? "Archive"}</Text>
               <View style={styles.folderTitleActions}>
                 {currentFolder ? <Button accessibilityLabel={`Manage ${currentFolder.name}`} contentMode="raw" onPress={() => showFolderActions(currentFolder)} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : null}
-                {!currentFolder?.managed ? <Button accessibilityLabel={`Create in ${currentFolder?.name ?? "Archive"}`} contentMode="raw" onPress={() => openSheet("create")} size="xs" variant="icon"><PlusIcon size="sm" /></Button> : null}
+                <Button accessibilityLabel={`Create in ${currentFolder?.name ?? "Archive"}`} contentMode="raw" onPress={() => openSheet("create")} size="xs" variant="icon"><PlusIcon size="sm" /></Button>
               </View>
             </View>
             {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
@@ -3965,13 +3992,12 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
               </View>
               <Button accessibilityLabel={`Filter ${currentFolder?.name ?? "this folder"}`} contentMode="raw" disabled={!hasContentContext} onPress={() => openSheet("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
             </View>
-            <TagFilterLane context={contentContext} />
             {bulkToolbar}
             {filterBadges}
             <Tabs accessibilityRole="tablist" style={styles.folderTabs}>
-              <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "folders" }} onPress={() => setFolderContentTab("folders")} size="xs" style={styles.folderTab} variant={folderContentTab === "folders" ? "secondary" : "ghost"}>Folders</Button>
-              <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "documents" }} onPress={() => setFolderContentTab("documents")} size="xs" style={styles.folderTab} variant={folderContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
-              <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "files" }} onPress={() => setFolderContentTab("files")} size="xs" style={styles.folderTab} variant={folderContentTab === "files" ? "secondary" : "ghost"}>Files</Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "folders" }} onPress={() => selectFolderContentTab("folders")} size="xs" style={styles.folderTab} variant={folderContentTab === "folders" ? "secondary" : "ghost"}>Folders</Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "documents" }} onPress={() => selectFolderContentTab("documents")} size="xs" style={styles.folderTab} variant={folderContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "files" }} onPress={() => selectFolderContentTab("files")} size="xs" style={styles.folderTab} variant={folderContentTab === "files" ? "secondary" : "ghost"}>Files</Button>
             </Tabs>
             {folderSearchActive ? folderSearching || !folderSearchResults ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folder search results" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.folderTabContent, styles.loadingGrid]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel="Loading search results" accessibilityRole="progressbar" style={[styles.folderDocuments, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
               <View accessibilityLiveRegion="polite" style={[styles.rootFolderGrid, styles.folderTabContent, folderSearchFolders.length === 0 && styles.searchEmptyContent]}>
@@ -3985,7 +4011,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
             ) : <View accessibilityLiveRegion="polite" style={[styles.folderDocuments, styles.folderTabContent, folderSearchDocuments.length === 0 && styles.searchEmptyContent]}>
               {folderSearchDocuments.map((document) => { const selected = selectedDocuments.some(({ key }) => key === document.documentKey); return <Button accessibilityState={{ selected }} contentMode="raw" key={document.documentKey} onLongPress={() => handleSearchDocumentLongPress(document)} onPress={() => handleSearchDocumentPress(document)} size="sm" style={[styles.documentButton, selected && styles.selectedDocumentItem]} variant={selected ? "ghost" : "secondary"}>
                 <FileIcon size="sm" />
-                <Text numberOfLines={1} style={styles.documentButtonLabel}>{documentDisplayName(document)}</Text>
+                <Text numberOfLines={1} style={styles.documentButtonLabel}>{documentPillName(document)}</Text>
               </Button>; })}
               {folderSearchDocuments.length === 0 ? <Text style={styles.empty}>No {folderContentTab === "files" ? "files" : "documents"} matched this search.</Text> : null}
             </View> : archiveLocationLoading && (folderContentTab !== "folders" || filteredFolders.length === 0) ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folders" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel={`Loading ${folderContentTab}`} accessibilityRole="progressbar" style={[styles.folderDocuments, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
@@ -4003,12 +4029,11 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
                 {folderTabDocuments.length ? folderTabDocuments.map((document) => (
                   <Button accessibilityState={{ selected: selectedDocuments.some(({ key }) => key === document.key) }} contentMode="raw" key={document.key} onLongPress={() => handleDocumentLongPress(document)} onPress={() => handleDocumentPress(document)} size="sm" style={[styles.documentButton, selectedDocuments.some(({ key }) => key === document.key) && styles.selectedDocumentItem]} variant={selectedDocuments.some(({ key }) => key === document.key) ? "ghost" : "secondary"}>
                     <FileIcon size="sm" />
-                    <Text numberOfLines={1} style={styles.documentButtonLabel}>{documentDisplayName(document)}</Text>
+                    <Text numberOfLines={1} style={styles.documentButtonLabel}>{documentPillName(document)}</Text>
                     <ScannedBadge document={document} />
                   </Button>
                 )) : (folderContentTab === "files" ? visibleUploadBatch.length === 0 : !visibleProcessingScan) ? <View style={styles.folderEmptyState}><Text style={styles.empty}>{showOnlyFavorites ? `No favorite ${folderContentTab}.` : folderContentTab === "files" ? "No files here yet." : "No documents here yet."}</Text>{!showOnlyFavorites ? <Button accessibilityLabel={folderContentTab === "files" ? "Upload files" : "Create document"} contentMode="raw" onPress={() => { if (folderContentTab === "files") void pickAndUpload(currentFolder?.key); else startNewNote(); }} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : null}
-                {folderContentTab === "files" && visibleUploadBatch.length ? <LoadingText text={`Processing ${visibleUploadBatch.length} ${visibleUploadBatch.length === 1 ? "file" : "files"}, this might take a while...`} /> : folderContentTab === "documents" && visibleProcessingScan ? <LoadingText text="Processing scanned document, this might take a while..." /> : null}
-                {folderContentTab === "files" ? visibleUploadBatch.map((item) => <ProcessingDocumentButton key={item.id} name={item.name} />) : visibleProcessingScan ? <ProcessingDocumentButton key={visibleProcessingScan.id} name={visibleProcessingScan.name} /> : null}
+                {folderContentTab === "files" ? visibleUploadBatch.map((item) => <Skeleton accessibilityLabel={`Processing ${item.name}`} accessibilityRole="progressbar" key={item.id} style={[styles.documentSkeleton, styles.skeletonCard]} />) : visibleProcessingScan ? <Skeleton accessibilityLabel="Processing scanned document" accessibilityRole="progressbar" key={visibleProcessingScan.id} style={[styles.documentSkeleton, styles.skeletonCard]} /> : null}
               </View>
             )}
           </View>
@@ -4138,7 +4163,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
 
       <SearchHistorySheet error={sheetLoadError ?? sheetError} history={history} loading={historyLoading} onClose={closeSheet} onRemove={(item) => void removeHistoryQuery(item)} onSelect={useHistoryQuery} open={sheetOpen && activeSheet === "searchHistory"} removingQuery={removingHistoryQuery} />
       <TagFilterSheet context={contentContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />
-      <ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />
+      <ResourceTagsSheet context={contentContext} onApply={clearSelection} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />
 
       <BottomSheet
         description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "transform" ? documentTransformation === "enhance" ? "Review or adjust how this document should be enhanced." : "Review or adjust how this document should be translated." : activeSheet === "documentVersions" ? "Choose a document version to open." : activeSheet === "versions" ? `Choose an ${documentTransformation === "enhance" ? "enhancement" : "translation"} to open.` : activeSheet === "audioVersions" ? "Listen to your saved recordings." : activeSheet === "summarize" ? `Choose one of the ${selectedDocument?.extension ? "file's" : "document's"} primary topics to summarize.` : activeSheet === "summaryVersions" ? "View saved summaries or create a new one." : undefined}
@@ -4194,9 +4219,9 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         {activeSheet === "similar" ? (
           <View style={styles.similarPanel}>
             <Tabs accessibilityRole="tablist" style={styles.folderTabs}>
-              <Button accessibilityRole="tab" accessibilityState={{ selected: similarContentTab === "folders" }} contentMode="raw" onPress={() => setSimilarContentTab("folders")} size="md" style={styles.similarTab} variant={similarContentTab === "folders" ? "secondary" : "ghost"}><Text numberOfLines={1} style={styles.similarTabText}>Folders</Text></Button>
-              <Button accessibilityRole="tab" accessibilityState={{ selected: similarContentTab === "documents" }} contentMode="raw" onPress={() => setSimilarContentTab("documents")} size="md" style={styles.similarTab} variant={similarContentTab === "documents" ? "secondary" : "ghost"}><Text numberOfLines={1} style={styles.similarTabText}>Documents</Text></Button>
-              <Button accessibilityRole="tab" accessibilityState={{ selected: similarContentTab === "files" }} contentMode="raw" onPress={() => setSimilarContentTab("files")} size="md" style={styles.similarTab} variant={similarContentTab === "files" ? "secondary" : "ghost"}><Text numberOfLines={1} style={styles.similarTabText}>Files</Text></Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: similarContentTab === "folders" }} onPress={() => setSimilarContentTab("folders")} size="xs" style={styles.folderTab} variant={similarContentTab === "folders" ? "secondary" : "ghost"}>Folders</Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: similarContentTab === "documents" }} onPress={() => setSimilarContentTab("documents")} size="xs" style={styles.folderTab} variant={similarContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: similarContentTab === "files" }} onPress={() => setSimilarContentTab("files")} size="xs" style={styles.folderTab} variant={similarContentTab === "files" ? "secondary" : "ghost"}>Files</Button>
             </Tabs>
             {filterBadges}
             <ScrollView contentContainerStyle={styles.similarResults} showsVerticalScrollIndicator={false}>
@@ -4210,7 +4235,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
                 {similarFolders.length === 0 ? <Text style={styles.empty}>No matching folders found.</Text> : null}
               </View> : null}
               {!similarLoading && similarContentTab !== "folders" ? <View style={similarTabDocuments.length > 0 ? styles.folderDocuments : styles.similarEmpty}>
-                {similarTabDocuments.map((document) => <Button contentMode="raw" key={document.key} onPress={() => { closeSheet(); requestAnimationFrame(() => { void openArchiveDocument(document); }); }} size="md" style={styles.documentButton} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{documentDisplayName(document)}</Text><ScannedBadge document={document} /></Button>)}
+                {similarTabDocuments.map((document) => <Button contentMode="raw" key={document.key} onPress={() => { closeSheet(); requestAnimationFrame(() => { void openArchiveDocument(document); }); }} size="md" style={styles.documentButton} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{documentPillName(document)}</Text><ScannedBadge document={document} /></Button>)}
                 {similarResults && similarTabDocuments.length === 0 ? <Text style={styles.empty}>No matching {similarContentTab} found.</Text> : null}
               </View> : null}
             </ScrollView>
@@ -4224,7 +4249,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
               if (workspaceModeRef.current === "viewer") { closeSheet(); leaveFileViewer(); }
               else void showOriginal();
             }} style={styles.sheetAction}>{workspaceMode === "viewer" ? "Show text" : "Show original"}</BottomSheetItem> : selectedDocument.sourceImageCount ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openScanSources()} style={styles.sheetAction}>Show scanned pages</BottomSheetItem> : null}
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={downloadOriginal} style={styles.sheetAction}>{selectedDocument.originalAvailable ? "Download original" : "Download text"}</BottomSheetItem>
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={downloadOriginal} style={styles.sheetAction}>Download</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openSimilarContent({ documentKey: selectedDocument.key }, selectedDocument.extension ? "files" : "documents")} style={styles.sheetAction}>Find similar</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => setHiddenOptimistically("document", selectedDocument.key, !hidden("document", selectedDocument.key), selectedDocument.extension ? "File" : "Document")} style={styles.sheetAction}>{hidden("document", selectedDocument.key) ? "Reveal" : "Hide"}</BottomSheetItem>
             {!selectedDocument.managed && !selectedDocument.structuralProtection ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => pushSheet("deleteDocument")} style={styles.sheetAction}>Delete {selectedDocument.extension ? "file" : "document"}</BottomSheetItem> : null}
@@ -4288,11 +4313,11 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
             <ScrollView contentContainerStyle={[styles.audioVersionList, !loadingSummaries && summaries.length === 0 && styles.sheetEmptyContent]} showsVerticalScrollIndicator={false} style={styles.sheetList}>
               {!loadingSummaries && summaries.length === 0 ? <Text style={styles.empty}>No summaries yet.</Text> : null}
               {loadingSummaries ? Array.from({ length: 3 }, (_, index) => (
-                <Skeleton accessibilityLabel={generatingSummary ? "Generating document summary" : "Loading summary versions"} accessibilityRole="progressbar" key={index} style={styles.audioVersionSkeletonRow} />
+                <Skeleton accessibilityLabel={generatingSummary ? "Generating document summary" : "Loading summary versions"} accessibilityRole="progressbar" key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />
               )) : summaries.map((summary) => (
-                <Button contentMode="raw" key={summary.key} onPress={() => openSummaryReader(summary)} size="md" style={styles.versionMain} variant="secondary">
-                  <FileIcon size="md" />
-                  <View style={styles.resultText}><Text numberOfLines={1} style={styles.rowTitle}>{capitalizeLabel(summary.topic ?? `Summary ${summary.version}`)}</Text><Text style={styles.rowSubtitle}>Version {summary.version} · {new Date(summary.createdAt).toLocaleString()}</Text></View>
+                <Button contentMode="raw" key={summary.key} onPress={() => openSummaryReader(summary)} size="md" style={styles.documentButton} variant="secondary">
+                  <FileIcon size="sm" />
+                  <Text ellipsizeMode="tail" numberOfLines={1} style={styles.documentButtonLabel}>{capitalizeLabel(summary.topic ?? summary.sourceTitle)}</Text>
                 </Button>
               ))}
             </ScrollView>
@@ -4355,8 +4380,8 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         ) : null}
         {activeSheet === "audioVersions" ? (
           <View style={styles.audioVersionPanel}>
-            <ScrollView accessibilityLabel={loadingAudioVersions ? "Loading audio versions" : undefined} accessibilityRole={loadingAudioVersions ? "progressbar" : undefined} contentContainerStyle={[styles.audioVersionList, !loadingAudioVersions && audioVersions.length === 0 && styles.sheetEmptyContent]} showsVerticalScrollIndicator={false} style={styles.sheetList}>
-              {!loadingAudioVersions && audioVersions.length === 0 ? <Text style={styles.empty}>No saved audio versions.</Text> : null}
+            <ScrollView accessibilityLabel={loadingAudioVersions ? "Loading audio versions" : undefined} accessibilityRole={loadingAudioVersions ? "progressbar" : undefined} contentContainerStyle={[styles.audioVersionList, !loadingAudioVersions && !generatingDocumentAudio && audioVersions.length === 0 && styles.sheetEmptyContent]} showsVerticalScrollIndicator={false} style={styles.sheetList}>
+              {!loadingAudioVersions && !generatingDocumentAudio && audioVersions.length === 0 ? <Text style={styles.empty}>No saved audio versions.</Text> : null}
               {loadingAudioVersions ? Array.from({ length: 3 }, (_, index) => (
                 <Skeleton key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />
               )) : audioVersions.map((version) => (
@@ -4365,6 +4390,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
                   <Text numberOfLines={1} style={styles.documentButtonLabel}>Audio version {version.version}</Text>
                 </Button>
               ))}
+              {generatingDocumentAudio ? <Skeleton accessibilityLabel="Generating document audio" accessibilityRole="progressbar" style={[styles.documentSkeleton, styles.skeletonCard]} /> : null}
             </ScrollView>
           </View>
         ) : null}
@@ -4419,7 +4445,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
             <ScrollView contentContainerStyle={[styles.folderGrid, visibleDocuments.length === 0 && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" style={styles.folderList}>
               {libraryQuery.trim() && (librarySearching || !librarySearchResults) ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading Archive document picker search" accessibilityRole="progressbar" key={index} style={styles.folderTileSkeleton} />) : visibleDocuments.map((document) => (
                 <Button contentMode="raw" key={"documentKey" in document ? document.documentKey : document.key} onPress={() => void ("documentKey" in document ? openLibrarySearchDocument(document) : openArchiveDocument(document, true))} size="md" style={styles.folderTile} variant="secondary">
-                  <FileIcon size="md" /><Text numberOfLines={1} style={styles.folderTileLabel}>{documentDisplayName(document)}</Text>{"documentKey" in document ? null : <ScannedBadge document={document} />}
+                  <FileIcon size="md" /><Text numberOfLines={1} style={styles.folderTileLabel}>{documentPillName(document)}</Text>{"documentKey" in document ? null : <ScannedBadge document={document} />}
                 </Button>
               ))}
               {!librarySearching && librarySearchResults && visibleDocuments.length === 0 ? <Text style={styles.empty}>No documents or files match this search.</Text> : null}
@@ -4486,8 +4512,6 @@ const styles = StyleSheet.create({
   folderDocuments: { width: "100%", gap: 7 },
   folderTabContent: { flexGrow: 1 },
   similarPanel: { flex: 1, minHeight: 0, gap: spacing.md },
-  similarTab: { minWidth: 0, flex: 1, minHeight: 34, paddingHorizontal: 8, paddingVertical: 8 },
-  similarTabText: { color: palette.silver100, fontFamily: fonts.semibold, fontSize: 11, letterSpacing: 0.88, lineHeight: 14 },
   similarResults: { flexGrow: 1, paddingBottom: spacing.lg },
   similarEmpty: { flexGrow: 1, minHeight: 320, alignItems: "center", justifyContent: "center" },
   folderEmptyState: { flexGrow: 1, minHeight: 360, width: "100%", alignItems: "center", justifyContent: "center", gap: 14 },
@@ -4540,8 +4564,9 @@ const styles = StyleSheet.create({
   filterPanel: { gap: 6 },
   searchHistoryOption: { backgroundColor: palette.page },
   filterBadgeRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing.xs },
-  similarPill: { alignSelf: "flex-start", maxWidth: "100%", minHeight: 38, padding: 4, paddingLeft: 5, flexDirection: "row", alignItems: "center", gap: 7, borderWidth: 1, borderColor: palette.hairline, borderRadius: 999, backgroundColor: palette.panel },
+  similarPill: { alignSelf: "flex-start", maxWidth: "100%", height: 32, padding: 2, paddingLeft: 10, flexDirection: "row", alignItems: "center", gap: 5, borderWidth: 1, borderColor: palette.hairline, borderRadius: 999, backgroundColor: palette.panel },
   similarPillText: { maxWidth: 210, color: palette.silver300, fontFamily: fonts.medium, fontSize: 11 },
+  filterBadgeClose: { width: 24, height: 24, minHeight: 24, paddingHorizontal: 0, paddingVertical: 0 },
   enhanceIdentity: { padding: 14, flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   enhanceCopy: { flex: 1, gap: 4 },
   versionPanel: { gap: 6 },
@@ -4553,7 +4578,6 @@ const styles = StyleSheet.create({
   sheetList: { flex: 1 },
   audioVersionPanel: { flex: 1, minHeight: 0, gap: spacing.md },
   audioVersionList: { gap: 6, paddingBottom: spacing.xl },
-  audioVersionSkeletonRow: { minHeight: 52, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderRadius: radii.lg, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised, opacity: 0.72 },
   summaryTopicScroll: { flex: 1, minHeight: 0 },
   summaryTopicPanel: { flexGrow: 1, gap: spacing.sm, paddingBottom: spacing.xl },
   summaryVersionPanel: { flex: 1, minHeight: 0, gap: spacing.md },

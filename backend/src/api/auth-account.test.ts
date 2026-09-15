@@ -20,7 +20,7 @@ describe('GET /auth/me response contract', () => {
     expect(response.teamMembership.role).toBe('owner');
     expect(response.scope).toMatchObject({ name: 'Main', slug: 'main', role: 'owner' });
     expect(response.user.is_onboarded).toBe(false);
-    expect(response.teamSelectionEnabled).toBe(false);
+    expect(response).not.toHaveProperty('teamSelectionEnabled');
     expect(response.user).not.toHaveProperty('settings');
     expect(response).not.toHaveProperty('content_execution');
     expect(JSON.stringify(response)).not.toContain('refresh-secret');

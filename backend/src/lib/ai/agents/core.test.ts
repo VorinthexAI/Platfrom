@@ -6,7 +6,7 @@ import { newId } from '@/lib/ids';
 import { SparkRefundError } from '@/lib/ai/events/runtime';
 import { SparkRepositoryError } from '@/lib/sparks/repository';
 import { coreAgent, executeCoreAgent } from './core';
-import { resolveAgentAllowlist } from './index';
+import { AgentStreamProtocolError, resolveAgentAllowlist } from './index';
 import { coreAgentToolInputSchema, internalAgentRequestSchema } from './schemas';
 
 const teamKey = newId(), scopeKey = newId(), userKey = newId();
@@ -37,42 +37,88 @@ describe('native Core agent loop', () => {
     expect(coreAgent.allowlist).toEqual(['app.search', 'agent.guide', 'app.generate-image']);
     expect(coreAgent.capabilities).toEqual({ webGrounding: 'model-selected' });
     expect(resolveAgentAllowlist(coreAgent.allowlist, coreAgent.allowlist)).toEqual([...coreAgent.allowlist]);
-    expect(coreAgent.systemPrompt).toContain('re-run app.search before relying on the current state');
-    expect(coreAgent.systemPrompt).toContain('same language as that message');
+    expect(coreAgent.systemPrompt).toContain('Always answer in concise, natural English');
+    expect(coreAgent.systemPrompt).toContain('Use app.search only for the user\'s private workspace');
+    expect(coreAgent.systemPrompt.length).toBeLessThan(2_500);
   });
 
   test('strict-parses trusted and public inputs', () => {
     expect(internalAgentRequestSchema.parse(request())).toMatchObject({ generateName: false, attachments: [] });
     const recalledContext = [{ role: 'user' as const, content: 'Older preference', createdAt: '2026-01-01T00:00:00.000Z' }];
-    expect(internalAgentRequestSchema.parse(request({ recalledContext })).recalledContext).toEqual(recalledContext);
+    expect(internalAgentRequestSchema.parse(request({ currentConversationSummary: 'Earlier decisions', recalledContext }))).toMatchObject({ currentConversationSummary: 'Earlier decisions', recalledContext });
     expect(() => internalAgentRequestSchema.parse(request({ recalledContext: Array(21).fill(recalledContext[0]) }))).toThrow();
     expect(() => internalAgentRequestSchema.parse({ ...request(), extra: true })).toThrow('Unrecognized key');
     expect(coreAgentToolInputSchema.parse({ message: 'hello' })).toEqual({ message: 'hello', generateName: false });
-    for (const field of ['systemPrompt', 'currentDate', 'requestKey', 'recalledContext', 'teamKey', 'scopeKey']) expect(() => coreAgentToolInputSchema.parse({ message: 'hello', [field]: 'forged' })).toThrow('Unrecognized key');
+    for (const field of ['systemPrompt', 'currentConversationSummary', 'currentDate', 'requestKey', 'recalledContext', 'teamKey', 'scopeKey']) expect(() => coreAgentToolInputSchema.parse({ message: 'hello', [field]: 'forged' })).toThrow('Unrecognized key');
   });
 
-  test('streams direct text on the first native request and creates the title locally', async () => {
+  test('streams direct text immediately while generating a concise model-written conversation name', async () => {
     const inputs: CoreChatInput[] = []; const options: any[] = []; const deltas: string[] = []; let beforeDone = '';
     const stream = async function* (_team: string, input: CoreChatInput, streamOptions?: unknown) {
-      inputs.push(input); options.push(streamOptions); yield text('A'.repeat(100)); beforeDone = deltas.join(''); yield done;
+      inputs.push(input); options.push(streamOptions);
+      if (input.responseFormat?.name === 'conversation_name') { yield text('{"name":"Useful Launch Plan"}'); yield done; return; }
+      yield text('A'.repeat(100)); beforeDone = deltas.join(''); yield done;
     };
     const message = `  ${'A useful title '.repeat(8)}  `;
     const recalledContext = [{ role: 'user' as const, content: 'A completely different old title', createdAt: '2026-01-01T00:00:00.000Z' }];
-    const result = await executeCoreAgent(request({ generateName: true, message, recalledContext }), { toolContext, onDelta: (delta) => { deltas.push(delta); } }, { stream, tools: { names: coreAgent.allowlist, definitions, execute: async () => ({}) } });
+    const result = await executeCoreAgent(request({ generateName: true, message, currentConversationSummary: 'The user is planning a launch.', recalledContext }), { toolContext, onDelta: (delta) => { deltas.push(delta); } }, { stream, tools: { names: coreAgent.allowlist, definitions, execute: async () => ({}) } });
     expect(beforeDone).toBe('A'.repeat(100));
     expect(deltas.join('')).toBe('A'.repeat(100));
-    expect(result.name).toBe(`${message.replace(/\s+/g, ' ').trim().slice(0, 77).trimEnd()}...`);
-    expect(JSON.parse((inputs[0]!.messages[0]!.content[0] as { text: string }).text).recalledContext).toEqual(recalledContext);
-    expect(inputs[0]!.systemPrompt).toContain('Native public web search is available directly within the text model');
-    expect(inputs[0]!.systemPrompt).toContain('Swedish dog-breed usage of "perro" may mean perro de agua español');
-    expect(inputs[0]!.systemPrompt).toContain('Tell the user what you found directly');
-    expect(inputs[0]!.systemPrompt).toContain('one brief natural sentence');
-    expect(inputs[0]!.systemPrompt).toContain('do not append URLs or a Sources list unless the user asks');
-    expect(inputs[0]!.systemPrompt).toContain('Current-request attachments are already provided directly to you');
-    expect(inputs[0]!.systemPrompt).toContain('Never call app.search or use public web grounding merely because the user refers to this, the attached, the uploaded, or the captured image or document');
-    expect(inputs[0]!.tools?.map(({ name }) => name)).toEqual([...coreAgent.allowlist]);
-    expect(options[0].capabilities).toEqual({ webGrounding: 'model-selected' });
-    expect(inputs[0]!.responseFormat).toBeUndefined();
+    expect(result.name).toBe('Useful Launch Plan');
+    const namingIndex = inputs.findIndex(({ responseFormat }) => responseFormat?.name === 'conversation_name');
+    const answerIndex = inputs.findIndex(({ responseFormat }) => responseFormat === undefined);
+    expect(JSON.parse((inputs[namingIndex]!.messages[0]!.content[0] as { text: string }).text)).toEqual({ message: message.trim() });
+    expect(inputs[namingIndex]!.systemPrompt).toContain('concise English chat name');
+    expect(inputs[namingIndex]!.systemPrompt).toContain('Use 1 to 5 words');
+    expect(inputs[namingIndex]!.tools).toBeUndefined();
+    expect((options[namingIndex] as any).capabilities).toEqual({});
+    expect(JSON.parse((inputs[answerIndex]!.messages[0]!.content[0] as { text: string }).text)).toEqual({ currentConversationSummary: 'The user is planning a launch.', recalledContext, currentDate: '2026-09-01T00:00:00.000Z' });
+    expect((inputs[answerIndex]!.messages[1]!.content[0] as { text: string }).text).toBe(message.trim());
+    expect(inputs[answerIndex]!.systemPrompt).toBe(coreAgent.systemPrompt);
+    expect(inputs[answerIndex]!.systemPrompt).toContain('Use native web search only for current public facts');
+    expect(inputs[answerIndex]!.systemPrompt).toContain('Inspect current-request images and files directly');
+    expect(inputs[answerIndex]!.systemPrompt).toContain('Do not search merely because an attachment is mentioned');
+    expect(inputs[answerIndex]!.tools?.map(({ name }) => name)).toEqual([...coreAgent.allowlist]);
+    expect((options[answerIndex] as any).capabilities).toEqual({ webGrounding: 'model-selected' });
+    expect(inputs[answerIndex]!.responseFormat).toBeUndefined();
+  });
+
+  test('discards a verbose generated conversation name instead of clipping it', async () => {
+    const stream = async function* (_team: string, input: CoreChatInput) {
+      yield text(input.responseFormat?.name === 'conversation_name' ? '{"name":"One two three four five six"}' : 'The answer.');
+      yield done;
+    };
+    const result = await executeCoreAgent(request({ generateName: true }), { toolContext }, { stream, tools: { names: coreAgent.allowlist, definitions, execute: async () => ({}) } });
+    expect(result.message).toBe('The answer.');
+    expect(result.name).toBeUndefined();
+  });
+
+  test('keeps Swedish history in its original roles and English as the final request turn', async () => {
+    const inputs: CoreChatInput[] = [];
+    const currentMessage = 'Can you summarize that briefly?';
+    const context = Array.from({ length: 10 }, (_, index) => ({ role: index % 2 ? 'assistant' as const : 'user' as const, content: `Lång svensk historisk kontext ${index}`, createdAt: `2026-08-${String(index + 1).padStart(2, '0')}T00:00:00.000Z` }));
+    await executeCoreAgent(request({ message: currentMessage, context }), { toolContext }, { stream: queue([[text('Yes.'), done]], inputs), tools: { names: coreAgent.allowlist, definitions, execute: async () => ({}) } });
+    expect(inputs[0]!.messages).toHaveLength(12);
+    expect(JSON.parse((inputs[0]!.messages[0]!.content[0] as { text: string }).text)).toEqual({ recalledContext: [], currentDate: '2026-09-01T00:00:00.000Z' });
+    expect(inputs[0]!.messages.slice(1, -1).map(({ role }) => role)).toEqual(context.map(({ role }) => role));
+    expect(inputs[0]!.messages.at(-2)).toEqual({ role: 'assistant', content: [{ type: 'text', text: 'Lång svensk historisk kontext 9' }] });
+    expect(inputs[0]!.messages.at(-1)).toEqual({ role: 'user', content: [{ type: 'text', text: currentMessage }] });
+    expect(JSON.stringify(inputs[0]!.messages.at(-1))).not.toContain('svensk historisk kontext');
+    expect(inputs[0]!.systemPrompt).toBe(coreAgent.systemPrompt);
+  });
+
+  test('injects one strict trusted preloaded guide result and removes it from provider tools', async () => {
+    const inputs: CoreChatInput[] = [];
+    const preloadedTools = [{ slug: 'agent.guide' as const, arguments: { mode: 'explain' as const }, result: { mode: 'explain', guides: [{ id: 'platform-welcome', title: 'Welcome', content: 'Grounding' }] } }];
+    const result = await executeCoreAgent(request({ preloadedTools }), { toolContext }, { stream: queue([[text('A concise guide answer.'), done]], inputs), tools: { names: coreAgent.allowlist, definitions, execute: async () => { throw new Error('Preloaded guidance must not execute again.'); } } });
+    expect(result.tools).toContainEqual(expect.objectContaining({ slug: 'agent.guide', status: 'succeeded', arguments: { mode: 'explain' } }));
+    expect(inputs[0]!.tools?.map(({ name }) => name)).toEqual(['app.search', 'app.generate-image']);
+    expect(inputs[0]!.messages.slice(1, 3)).toEqual([
+      { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'preloaded-1', name: 'agent.guide', arguments: { mode: 'explain' } }] },
+      { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'preloaded-1', result: expect.objectContaining({ slug: 'agent.guide', status: 'succeeded' }) }] },
+    ]);
+    expect(inputs[0]!.messages.at(-1)).toEqual({ role: 'user', content: [{ type: 'text', text: 'Help me' }] });
+    expect(() => internalAgentRequestSchema.parse(request({ preloadedTools: [{ ...preloadedTools[0], forged: true }] }))).toThrow('Unrecognized key');
   });
 
   test('does not delay visible text while provider teardown and billing remain pending', async () => {
@@ -94,7 +140,21 @@ describe('native Core agent loop', () => {
     await expect(operation).resolves.toMatchObject({ message: 'The complete answer is visible now.' });
   });
 
-  test('passes current images and files directly without workspace or public search capabilities', async () => {
+  test('aborts a provider attempt that emits no initial stream event', async () => {
+    let observedSignal: AbortSignal | undefined;
+    const stream = async function* (_team: string, _input: CoreChatInput, options?: { signal?: AbortSignal }) {
+      observedSignal = options?.signal;
+      await new Promise<void>((resolve, reject) => {
+        if (options?.signal?.aborted) reject(options.signal.reason);
+        else options?.signal?.addEventListener('abort', () => reject(options.signal!.reason), { once: true });
+      });
+      yield done;
+    };
+    await expect(executeCoreAgent(request(), { toolContext }, { stream: stream as never, initialResponseTimeoutMs: 1, tools: { names: coreAgent.allowlist, definitions, execute: async () => ({}) } })).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(observedSignal?.aborted).toBe(true);
+  });
+
+  test('passes ordered current attachments before the final standalone current-message language anchor', async () => {
     const inputs: CoreChatInput[] = []; const options: any[] = [];
     const stream = queue([[text('I see a red square.'), done]], inputs, options);
     const result = await executeCoreAgent(request({
@@ -102,27 +162,71 @@ describe('native Core agent loop', () => {
       attachments: [
         { kind: 'image', filename: 'capture.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]) },
         { kind: 'document', filename: 'notes.pdf', mimeType: 'application/pdf', bytes: new Uint8Array([4, 5, 6]) },
+        { kind: 'document', filename: 'brief.txt', mimeType: 'text/plain', bytes: new Uint8Array([7, 8, 9]) },
       ],
     }), { toolContext }, { stream, tools: { names: coreAgent.allowlist, definitions, execute: async () => { throw new Error('Attachment analysis must not invoke a tool.'); } } });
     expect(result).toMatchObject({ message: 'I see a red square.', tools: [] });
     expect(inputs[0]!.tools?.map(({ name }) => name)).toEqual(['agent.guide', 'app.generate-image']);
     expect(options[0].capabilities).toEqual({});
-    expect(inputs[0]!.messages.at(-1)?.content).toContainEqual(expect.objectContaining({ type: 'image' }));
-    expect(inputs[0]!.messages.at(-1)?.content).toContainEqual(expect.objectContaining({ type: 'file', filename: 'notes.pdf', mimeType: 'application/pdf', bytes: new Uint8Array([4, 5, 6]) }));
+    expect(inputs[0]!.systemPrompt).toBe(coreAgent.systemPrompt);
+    expect(inputs[0]!.systemPrompt).toContain('Inspect current-request images and files directly');
+    expect(inputs[0]!.systemPrompt!.length).toBeLessThan(2_500);
+    expect(inputs[0]!.messages.at(-1)?.content).toEqual([
+      expect.objectContaining({ type: 'image' }),
+      { type: 'file', filename: 'notes.pdf', mimeType: 'application/pdf', bytes: new Uint8Array([4, 5, 6]) },
+      { type: 'file', filename: 'brief.txt', mimeType: 'text/plain', bytes: new Uint8Array([7, 8, 9]) },
+      { type: 'text', text: 'What do you see in this image?' },
+    ]);
   });
 
-  test('preserves mixed visible text in the stream and assistant tool-call transcript', async () => {
+  test('repeats the current-message language anchor after opposite-language history and tool results', async () => {
     const inputs: CoreChatInput[] = []; const deltas: string[] = [];
-    const result = await executeCoreAgent(request(), { toolContext, onDelta: (delta) => { deltas.push(delta); } }, runtime([
-      [text('I will check that. '), call('search', 'app.search', { operation: 'count', collectionSlugs: ['books'], limit: 10 }), done],
+    const currentMessage = 'How many books do I have?';
+    const result = await executeCoreAgent(request({ message: currentMessage, context: [{ role: 'assistant', content: 'Jag fortsätter på svenska.', createdAt: '2026-08-31T00:00:00.000Z' }] }), { toolContext, onDelta: (delta) => { deltas.push(delta); } }, runtime([
+      [call('search', 'app.search', { operation: 'count', collectionSlugs: ['books'], limit: 10 }), done],
       [text('You have four books.'), done],
-    ], async () => ({ operation: 'count', groups: [{ collectionSlug: 'books', count: 4 }] }), inputs));
-    expect(result.message).toBe('I will check that. You have four books.');
+    ], async () => ({ operation: 'count', groups: [{ collectionSlug: 'books', count: 4, summary: 'Du har fyra böcker.' }] }), inputs));
+    expect(result.message).toBe('You have four books.');
     expect(deltas.join('')).toBe(result.message);
-    expect(inputs[1]!.messages.at(-2)?.content).toEqual([
-      { type: 'text', text: 'I will check that. ' },
+    expect(inputs[1]!.messages.at(-3)?.content).toEqual([
       { type: 'tool-call', toolCallId: 'search', name: 'app.search', arguments: { operation: 'count', collectionSlugs: ['books'], limit: 10 } },
     ]);
+    expect(inputs[0]!.messages.at(-2)).toEqual({ role: 'assistant', content: [{ type: 'text', text: 'Jag fortsätter på svenska.' }] });
+    expect(inputs[0]!.messages.at(-1)).toEqual({ role: 'user', content: [{ type: 'text', text: currentMessage }] });
+    expect(inputs[1]!.messages.at(-1)).toEqual({ role: 'user', content: [{ type: 'text', text: currentMessage }] });
+    expect(inputs[1]!.messages[0]).toEqual({ role: 'user', content: [{ type: 'text', text: currentMessage }] });
+    expect(JSON.stringify(inputs[1]!.messages)).not.toContain('recalledContext');
+    expect(JSON.stringify(inputs[1]!.messages)).not.toContain('Jag fortsätter på svenska');
+    expect(inputs[1]!.systemPrompt).toBe(coreAgent.systemPrompt);
+    expect(inputs[1]!.systemPrompt).toBe(inputs[0]!.systemPrompt);
+  });
+
+  test('keeps each consecutive turn final while enforcing English output', async () => {
+    const scenarios = [
+      { message: 'Can you explain that in simple terms?', prior: 'Jag svarar på svenska.', answer: 'Yes, here is a simple explanation.' },
+      { message: 'Perfect thank you', prior: 'Jag svarar på svenska.', answer: 'You are welcome.' },
+      { message: 'Peux-tu donner un exemple concret ?', prior: 'Here is an English answer.', answer: 'Here is a concrete example.' },
+      { message: '请用一个简单的例子解释。', prior: 'Voici une réponse française.', answer: 'Here is a simple example.' },
+    ];
+    for (const scenario of scenarios) {
+      const inputs: CoreChatInput[] = [];
+      await executeCoreAgent(request({ message: scenario.message, context: [{ role: 'assistant', content: scenario.prior, createdAt: '2026-08-31T00:00:00.000Z' }] }), { toolContext }, {
+        stream: queue([[text(scenario.answer), done]], inputs),
+        tools: { names: coreAgent.allowlist, definitions, execute: async () => ({}) },
+      });
+      expect(inputs[0]!.messages.at(-2)).toEqual({ role: 'assistant', content: [{ type: 'text', text: scenario.prior }] });
+      expect(inputs[0]!.messages.at(-1)).toEqual({ role: 'user', content: [{ type: 'text', text: scenario.message }] });
+    }
+  });
+
+  test('rejects mixed visible text and tool calls before executing a tool', async () => {
+    const deltas: string[] = []; let executions = 0;
+    const operation = executeCoreAgent(request(), { toolContext, onDelta: (delta) => { deltas.push(delta); } }, runtime([
+      [text('I will check that. '), call('search', 'app.search', { operation: 'count', collectionSlugs: ['books'], limit: 10 }), done],
+    ], async () => { executions += 1; return {}; }));
+    await expect(operation).rejects.toBeInstanceOf(AgentStreamProtocolError);
+    expect(deltas).toEqual(['I will check that. ']);
+    expect(executions).toBe(0);
   });
 
   test('validates an entire batch before dispatching any call', async () => {
@@ -149,17 +253,18 @@ describe('native Core agent loop', () => {
     expect(result.tools.map(({ slug }) => slug)).toEqual(['app.search', 'agent.guide']);
   });
 
-  test('executes a write alone and delegates the Core image name', async () => {
-    const called: string[] = []; const inputs: CoreChatInput[] = []; let trustedMessage: string | undefined;
-    const result = await executeCoreAgent(request(), { toolContext, currentUserMessageContent: 'Draw what I described', onToolSucceeded: (slug) => slug === 'app.generate-image' }, runtime([
+  test('executes image generation alone and returns only a localized post-success start confirmation', async () => {
+    const called: string[] = []; const inputs: CoreChatInput[] = []; const deltas: string[] = []; let trustedMessage: string | undefined;
+    const result = await executeCoreAgent(request({ message: 'Skapa en bild av jorden från omloppsbana.' }), { toolContext, currentUserMessageContent: 'Draw what I described', onDelta: (delta) => { deltas.push(delta); }, onToolSucceeded: (slug) => slug === 'app.generate-image' }, runtime([
       [call('image', 'app.generate-image', { prompt: 'Earth from orbit' }), done],
-      [text('I am creating your view of Earth from orbit now.'), done],
+      [text('Jag har börjat skapa din bild av jorden från omloppsbana.'), done],
     ], async (name, _input, dependencies) => { called.push(name); trustedMessage = dependencies.currentUserMessageContent; return { queued: true }; }, inputs));
     expect(called).toEqual(['app.generate-image']);
     expect(trustedMessage).toBe('Draw what I described');
     expect(inputs).toHaveLength(2);
     expect(inputs[1]!.tools).toBeUndefined();
-    expect(result.message).toBe('I am creating your view of Earth from orbit now.');
+    expect(result.message).toBe('Jag har börjat skapa din bild av jorden från omloppsbana.');
+    expect(deltas).toEqual([result.message]);
     expect(result.tools[0]).toMatchObject({ slug: 'app.generate-image', status: 'succeeded' });
   });
 
@@ -227,10 +332,10 @@ describe('native Core agent loop', () => {
     expect(executions).toBe(4);
     expect(result.tools).toHaveLength(4);
     expect(inputs[2]!.tools).toBeUndefined();
-    expect(inputs[2]!.systemPrompt).toContain('Do not call a tool');
+    expect(inputs[2]!.systemPrompt).toBe(coreAgent.systemPrompt);
   });
 
-  test('streams every provider chunk immediately without output holdback or rewriting', async () => {
+  test('emits a completed tool-free provider turn without rewriting', async () => {
     const deltas: string[] = [];
     const result = await executeCoreAgent(request(), { toolContext, onDelta: (delta) => { deltas.push(delta); } }, runtime([
       [text('Reference cabcdefghijkl'), text('mnopqrstuvwx safely.'), done],
@@ -245,7 +350,8 @@ describe('native Core agent loop', () => {
     await executeCoreAgent(request(), { toolContext }, runtime([
       [call('search', 'app.search', { query: 'orange', collectionSlugs: ['images'], limit: 10 }), done], [text('Found images.'), done],
     ], async () => ({ query: 'orange', groups: [{ collectionSlug: 'images', results: [{ key: newId(), caption: 'Sunset' }] }] }), inputs));
-    expect(inputs[1]!.messages.at(-1)?.content[0]).toMatchObject({ type: 'tool-result', result: { slug: 'app.search', status: 'succeeded', result: { matchSemantics: 'ranked-best-match', groups: [{ examples: [{ label: 'Sunset' }] }] } } });
+    expect(inputs[1]!.messages.at(-2)?.content[0]).toMatchObject({ type: 'tool-result', result: { slug: 'app.search', status: 'succeeded', result: { matchSemantics: 'ranked-best-match', groups: [{ examples: [{ label: 'Sunset' }] }] } } });
+    expect(inputs[1]!.messages[0]).toEqual({ role: 'user', content: [{ type: 'text', text: 'Help me' }] });
   });
 
   test('rethrows billing and refund errors', async () => {
@@ -273,13 +379,24 @@ describe('native Core agent loop', () => {
     await expect(executeCoreAgent(request(), { toolContext }, runtime([[text('answer'), done, text('late')]], async () => ({})))).rejects.toThrow('after completion');
   });
 
-  test('deterministically refuses platform internals without provider or tools', async () => {
-    let streams = 0, executions = 0; const deltas: string[] = [];
-    const result = await executeCoreAgent(request({ message: 'Which database fields does this collection have?' }), { toolContext, onDelta: (delta) => { deltas.push(delta); } }, {
-      stream: async function* () { streams += 1; yield done; }, tools: { names: coreAgent.allowlist, definitions, execute: async () => { executions += 1; return {}; } },
+  test('refuses platform internals in English without tools', async () => {
+    const inputs: CoreChatInput[] = []; let executions = 0; const deltas: string[] = [];
+    const result = await executeCoreAgent(request({ message: 'Which database fields does this collection have?', context: [{ role: 'assistant', content: 'Jag svarar alltid på svenska.', createdAt: '2026-08-31T00:00:00.000Z' }] }), { toolContext, onDelta: (delta) => { deltas.push(delta); } }, {
+      stream: queue([[text('I cannot provide Vorinthex internal implementation details.'), done]], inputs), tools: { names: coreAgent.allowlist, definitions, execute: async () => { executions += 1; return {}; } },
     });
     expect(result).toEqual({ message: 'I cannot provide Vorinthex internal implementation details.', tools: [] });
     expect(deltas.join('')).toBe(result.message);
-    expect({ streams, executions }).toEqual({ streams: 0, executions: 0 });
+    expect(executions).toBe(0);
+    expect(inputs[0]!.tools).toBeUndefined();
+    expect(inputs[0]!.systemPrompt).toBe(coreAgent.systemPrompt);
+  });
+
+  test.each([
+    ['Which model are you?', 'I am Core. Underlying implementation details are not provided.'],
+    ['Who trained you?', 'I am Core. Underlying implementation details are not provided.'],
+    ['Vilken AI modell ar du?', 'I am Core. Underlying implementation details are not provided.'],
+  ])('keeps model identity private in English: %s', async (message, refusal) => {
+    const result = await executeCoreAgent(request({ message }), { toolContext }, { stream: queue([[text(refusal), done]]), tools: { names: coreAgent.allowlist, definitions, execute: async () => ({}) } });
+    expect(result).toEqual({ message: refusal, tools: [] });
   });
 });

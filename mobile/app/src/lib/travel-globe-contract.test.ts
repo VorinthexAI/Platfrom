@@ -245,8 +245,8 @@ test("uses compact controls without changing Core sizing when the page opens", (
   expect(coreComposer).toContain('size="sm"');
   expect(coreComposer).not.toContain('size={expanded ? "md" : "sm"}');
   expect(coreComposer).not.toContain("expandedSend");
-  expect(knowledgeWorkspace).toContain('contentMode="raw" onPress={() => setSimilarContentTab("documents")}');
-  expect(knowledgeWorkspace).toContain('<Text numberOfLines={1} style={styles.similarTabText}>Documents</Text>');
+  expect(knowledgeWorkspace).toContain('onPress={() => setSimilarContentTab("documents")} size="xs" style={styles.folderTab}');
+  expect(knowledgeWorkspace).not.toContain('styles.similarTab');
 });
 
 test("serializes and version-gates every persisted trip mutation without loading UI", () => {

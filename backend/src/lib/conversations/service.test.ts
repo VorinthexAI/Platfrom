@@ -15,6 +15,7 @@ const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member
 const message = (overrides: Partial<ConversationMessage> = {}): ConversationMessage => ({
   key: newId(), conversationKey, teamKey, scopeKey, userKey, turnKey: 'request-1', requestHash: 'a'.repeat(64), type: 'TEXT',
   role: 'ASSISTANT', status: 'COMPLETED', content: 'answer', attachments: [], retrievals: [], createdAt: at, completedAt: at, ...overrides,
+  guideTopics: overrides.guideTopics ?? { status: 'NONE' },
   attachmentStatus: overrides.attachmentStatus ?? (overrides.attachments?.length ? 'COMPLETED' : overrides.pendingAttachmentKeys?.length ? 'PENDING' : 'NONE'),
 });
 
@@ -23,6 +24,7 @@ function repositoryMock(overrides: RepositoryOverrides = {}) {
   const pending = message({ status: 'PENDING', content: 'Pending', completedAt: undefined }); let failed = 0; let begunUser: ConversationMessage | undefined;
   const repository = {
     beginTurn: async (_owner: typeof owner, _conversationKey: string, user: ConversationMessage, assistant: ConversationMessage) => { begunUser = user; return { state: 'created' as const, user, assistant: { ...assistant, key: pending.key }, first: overrides.first ?? false }; },
+    validateGuideTopicSelection: async () => 'explain' as const,
     latestCompletedMessages: async () => overrides.recent ?? [], semanticMessages: async () => [], setMessageEmbedding: async () => true,
     setMessageAttachments: async (_owner: typeof owner, _conversationKey: string, _messageKey: string, attachments: ConversationMessage['attachments']) => begunUser ? { ...begunUser, attachments } : null,
     failMessageAttachments: async () => true,
@@ -33,6 +35,19 @@ function repositoryMock(overrides: RepositoryOverrides = {}) {
 }
 
 describe('private conversations', () => {
+  test('atomically materializes a verified opening greeting when creating a conversation', async () => {
+    const greetingKey = newId(); let saved: unknown[] = [];
+    const repository = { create: async (...args: unknown[]) => { saved = args; return args[0]; } } as unknown as ConversationRepository;
+    const snapshot = { version: 1 as const, key: greetingKey, teamKey, scopeKey, userKey, occasion: 'returning' as const, greetingState: 'returning' as const, message: 'Welcome back.', guideTopicMode: 'explain' as const, guideTopics: { status: 'READY' as const, topics: [1, 2, 3].map((index) => ({ key: `greeting.explain.${index}`, label: `Topic ${index}`, question: `Question ${index}?` })) }, createdAt: at, expiresAt: Date.now() + 60_000 };
+    const created = await createConversationService({ repository, id: () => conversationKey, now: () => at, verifyOpeningGreeting: async () => snapshot }).create({ name: 'New chat', openingGreetingToken: 'signed-greeting' }, context);
+    expect(created).toMatchObject({ key: conversationKey, name: 'New chat' });
+    expect(saved[2]).toMatchObject({ key: greetingKey, conversationKey, role: 'ASSISTANT', status: 'COMPLETED', content: 'Welcome back.', guideTopics: snapshot.guideTopics, guideTopicMode: 'explain' });
+    expect(saved[2]).not.toHaveProperty('occasion');
+
+    const invalid = createConversationService({ repository, id: () => conversationKey, now: () => at, verifyOpeningGreeting: async () => ({ ...snapshot, userKey: newId() }) });
+    await expect(invalid.create({ openingGreetingToken: 'wrong-owner' }, context)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
   test('keeps public conversation inputs strict and embedding state private', async () => {
     expect(() => conversationSendInputSchema.parse({ conversationKey, message: 'x', requestKey: 'r', extra: true })).toThrow('Unrecognized key');
     expect(() => conversationModelSendInputSchema.parse({ conversationKey, message: 'x', requestKey: 'forged' })).toThrow('Unrecognized key');
@@ -46,6 +61,11 @@ describe('private conversations', () => {
     const { retrievals: _retrievals, ...legacy } = message();
     expect(conversationMessageSchema.parse(legacy)).toHaveProperty('retrievals', []);
     expect(() => conversationMessageSchema.parse({ ...message(), unexpected: true })).toThrow('Unrecognized key');
+    const legacyTopicMessage: any = { ...message() }; delete legacyTopicMessage.guideTopics;
+    expect(conversationMessageSchema.parse(legacyTopicMessage).guideTopics).toEqual({ status: 'NONE' });
+    const privateTopicState = message({ guideTopics: { status: 'PENDING' }, guideMode: 'recommend', guideContext: { private: true }, guideTopicGeneration: 1 });
+    expect(projectConversationMessage(privateTopicState)).toMatchObject({ guideTopics: { status: 'PENDING' } });
+    for (const key of ['guideMode', 'guideContext', 'guideTopicGeneration']) expect(projectConversationMessage(privateTopicState)).not.toHaveProperty(key);
     expect(() => conversationImageTurnInputSchema.parse({ conversationKey, prompt: 'x', requestKey: 'r', count: 2 })).toThrow('Unrecognized key');
     expect(() => conversationMessageSchema.parse({ ...message(), type: 'TEXT', imageKey: newId() })).toThrow('Text messages cannot reference');
     const attachment = { key: newId(), kind: 'document' as const, filename: 'notes.txt', mimeType: 'text/plain' as const, sizeBytes: 4 };
@@ -57,6 +77,38 @@ describe('private conversations', () => {
     expect(conversationMessageSchema.parse({ ...message(), type: 'IMAGE', imageKey: newId(), embedding: undefined }).type).toBe('IMAGE');
   });
 
+  test('preloads selected canonical guidance and emits done before detached topic admission', async () => {
+    const operations: string[] = []; let coreRequest: any; let completedGuide: unknown;
+    const selectedUser = message({ role: 'USER', status: 'COMPLETED', content: 'How does it work?', selectedGuideMode: 'explain' });
+    const { repository } = repositoryMock({
+      beginTurn: async (_owner, _conversation, _user, assistant) => ({ state: 'created', user: selectedUser, assistant, first: false }),
+      completeTurn: async (_owner, _conversation, _key, content, embedding, retrievals, completedAt, _name, guide) => {
+        operations.push('complete'); completedGuide = guide;
+        return { message: message({ content, embedding, retrievals, completedAt, guideTopics: { status: 'PENDING' }, guideMode: 'explain', guideContext: guide?.context, guideTopicGeneration: 1 }), nameApplied: false };
+      },
+    });
+    const events: any[] = [];
+    await createConversationService({
+      repository, embed: async () => [1],
+      runGuide: (async (_name: string, _skill: string, input: unknown) => { operations.push('guide'); expect(input).toEqual({ mode: 'explain' }); return { mode: 'explain', guides: [{ id: 'platform-welcome', title: 'Welcome', content: 'Grounding' }] }; }) as never,
+      core: async (request) => { coreRequest = request; return { message: 'Direct answer.', tools: [] }; },
+      enqueueGuideTopicsJob: async () => { operations.push('enqueue'); },
+    }).turn({ conversationKey, message: 'How does it work?', requestKey: 'selected', guideTopicSelection: { sourceAssistantMessageKey: newId(), topicKey: newId() } }, context, (event) => { events.push(event); if (event.type === 'done') operations.push('done'); });
+    await Promise.resolve();
+    expect(coreRequest.preloadedTools[0]).toMatchObject({ slug: 'agent.guide', arguments: { mode: 'explain' } });
+    expect(completedGuide).toMatchObject({ mode: 'explain' });
+    expect(operations).toEqual(['guide', 'complete', 'done', 'enqueue']);
+    expect(events.at(-1)).toMatchObject({ type: 'done', message: { guideTopics: { status: 'PENDING' } } });
+  });
+
+  test('keeps a guide-backed answer complete when topic queue admission fails', async () => {
+    const { repository } = repositoryMock({ completeTurn: async (_owner, _conversation, _key, content, embedding, retrievals, completedAt, _name, guide) => ({ message: message({ content, embedding, retrievals, completedAt, guideTopics: { status: 'PENDING' }, guideMode: 'recommend', guideContext: guide?.context, guideTopicGeneration: 1 }), nameApplied: false }) });
+    const events: any[] = [];
+    await createConversationService({ repository, embed: async () => [1], core: async (_request, execution) => { execution.onToolSucceeded?.('agent.guide', { mode: 'recommend' }, { mode: 'recommend', guides: [] }); return { message: 'Answer', tools: [] }; }, enqueueGuideTopicsJob: async () => { throw new Error('redis unavailable'); } }).turn({ conversationKey, message: 'Help me start', requestKey: 'guide-admission' }, context, (event) => { events.push(event); });
+    await Promise.resolve();
+    expect(events.at(-1)).toMatchObject({ type: 'done', message: { content: 'Answer', guideTopics: { status: 'PENDING' } } });
+  });
+
   test('deletes the canonical paired turn with trusted ownership', async () => {
     const selectedMessageKey = newId(), pairedMessageKey = newId(); const calls: unknown[] = [];
     const repository = { deleteMessageTurn: async (...args: unknown[]) => { calls.push(args); return [selectedMessageKey, pairedMessageKey]; } } as unknown as ConversationRepository;
@@ -64,6 +116,22 @@ describe('private conversations', () => {
     expect(calls).toEqual([[owner, conversationKey, selectedMessageKey, at]]);
     const missing = createConversationService({ repository: { deleteMessageTurn: async () => null } as unknown as ConversationRepository });
     await expect(missing.deleteMessage({ conversationKey, messageKey: selectedMessageKey }, context)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  test('durably queues a summary rebuild after transactional turn deletion', async () => {
+    const deletedKeys = [newId(), newId()];
+    const operations: string[] = [];
+    const state = { key: conversationKey, conversationKey, teamKey, scopeKey, userKey, actorKey: context.principal.kind === 'member' ? context.principal.userTeam.key : newId(), desiredRevision: 4, projectedRevision: 3, createdAt: at, updatedAt: at };
+    const repository = {
+      deleteMessageTurn: async () => deletedKeys,
+      requestArchiveProjection: async () => { operations.push('advance-revision'); return state; },
+    } as unknown as ConversationRepository;
+    const jobs: unknown[] = [];
+
+    await createConversationService({ repository, now: () => at, enqueueArchiveJob: async (job) => { jobs.push(job); operations.push('enqueue'); } }).deleteMessage({ conversationKey, messageKey: deletedKeys[0] }, context);
+
+    expect(operations).toEqual(['advance-revision', 'enqueue']);
+    expect(jobs).toEqual([{ schemaVersion: 1, conversationKey, teamKey, scopeKey, userKey, actorKey: state.actorKey, desiredRevision: 4 }]);
   });
 
   test('projects retrievals into ordered typed references without leaking search filters', () => {
@@ -78,15 +146,30 @@ describe('private conversations', () => {
     expect(JSON.stringify(references)).not.toContain('isFavorite');
   });
 
-  test('delegates latest 50 completed prior messages to Core with current message separate', async () => {
+  test('delegates the current summary and latest 10 completed prior messages to Core with current message separate', async () => {
     const prior = Array.from({ length: 55 }, (_, index) => message({ role: index % 2 ? 'ASSISTANT' : 'USER', content: `prior-${index}`, createdAt: new Date(Date.UTC(2026, 0, index + 1)).toISOString() }));
     let startedUser: ConversationMessage | undefined; let request: any; let execution: any;
-    const { repository } = repositoryMock({ beginTurn: async (_owner, _conversation, user, assistant) => { startedUser = user; return { state: 'created', user, assistant, first: false }; }, latestCompletedMessages: async () => [...prior, startedUser!] });
+    const { repository } = repositoryMock({ beginTurn: async (_owner, _conversation, user, assistant) => { startedUser = user; return { state: 'created', user, assistant, first: false }; }, latestCompletedMessages: async (_owner, _conversationKey, _before, limit) => { expect(limit).toBe(10); return [...prior, startedUser!]; }, readArchiveSummary: async () => 'Current rolling summary' });
     await createConversationService({ repository, embed: async () => [1], core: async (input, suppliedExecution) => { request = input; execution = suppliedExecution; return { message: 'answer', tools: [] }; } }).turn({ conversationKey, message: 'CURRENT', requestKey: 'history' }, context, () => {});
-    expect(request.message).toBe('CURRENT'); expect(request.context).toHaveLength(50);
-    expect(request.context.map((item: { content: string }) => item.content)).toEqual(prior.slice(-50).map(({ content }) => content));
+    expect(request.message).toBe('CURRENT'); expect(request.currentConversationSummary).toBe('Current rolling summary'); expect(request.context).toHaveLength(10);
+    expect(request.context.map((item: { content: string }) => item.content)).toEqual(prior.slice(-10).map(({ content }) => content));
     expect(JSON.stringify(request.context)).not.toContain('CURRENT');
     expect(execution.currentConversationKey).toBe(conversationKey);
+  });
+
+  test('provides completed image turns as safe recent context for follow-up references', async () => {
+    const generatedImageKey = newId();
+    const imageUser = message({ type: 'IMAGE', role: 'USER', content: 'Generate a red sports car', imageKey: undefined, createdAt: '2026-09-01T09:00:00.000Z', completedAt: '2026-09-01T09:00:00.000Z' });
+    const imageAssistant = message({ type: 'IMAGE', content: '{"prompt":"private expanded provider prompt"}', imageKey: generatedImageKey, imageSummaryText: 'A red sports car parked beside a coastal road.', createdAt: '2026-09-01T09:00:01.000Z', completedAt: '2026-09-01T09:00:02.000Z' });
+    let request: any;
+    const { repository } = repositoryMock({ recent: [imageUser, imageAssistant] });
+    await createConversationService({ repository, embed: async () => [1], core: async (input) => { request = input; return { message: 'answer', tools: [] }; } }).turn({ conversationKey, message: 'Where can I find that image?', requestKey: 'image-follow-up' }, context, () => {});
+    expect(request.context).toEqual([
+      { role: 'user', content: 'Generate a red sports car', createdAt: imageUser.createdAt },
+      { role: 'assistant', content: 'A generated image was saved in Gallery. Visible description: A red sports car parked beside a coastal road.', createdAt: imageAssistant.createdAt },
+    ]);
+    expect(JSON.stringify(request.context)).not.toContain('private expanded provider prompt');
+    expect(JSON.stringify(request.context)).not.toContain(generatedImageKey);
   });
 
   test('awaits one user embedding and reuses its exact vector for one scoped recall outside Core retries', async () => {
@@ -99,24 +182,25 @@ describe('private conversations', () => {
     const { repository } = repositoryMock({
       first: true,
       beginTurn: async (_owner, _conversation, user, assistant) => { currentUser = user; return { state: 'created', user, assistant, first: true }; },
-      latestCompletedMessages: async (_owner, _conversation, before, limit) => { expect({ before, limit }).toEqual({ before: at, limit: 50 }); return [recent]; },
+      latestCompletedMessages: async (_owner, _conversation, before, limit) => { expect({ before, limit }).toEqual({ before: at, limit: 10 }); return [recent]; },
       setMessageEmbedding: async (_owner, _conversation, _key, embedding) => { indexedVector = embedding; throw new Error('index unavailable'); },
       semanticMessages: async (_owner, embedding, input) => {
         semanticCalls += 1; queriedVector = embedding;
-        expect(input).toEqual({ before: at, excludedKeys: [currentUser!.key, recent.key], limit: 20 });
-        return [{ message: recent, similarity: 1 }, { message: currentUser!, similarity: 1 }, { message: future, similarity: 1 }, ...recalled.map((item, index) => ({ message: item, similarity: 0.9 - index / 100 }))];
+        expect(input).toEqual({ before: at, excludedKeys: [currentUser!.key, recent.key], limit: 5 });
+        return [{ message: recent, similarity: 1 }, { message: currentUser!, similarity: 1 }, { message: future, similarity: 1 }, { message: recalled[0]!, similarity: 0.95 }, ...recalled.map((item, index) => ({ message: item, similarity: 0.9 - index / 100 }))];
       },
     });
-    await createConversationService({
+    await expect(createConversationService({
       repository,
       now: () => at,
       embed: async (input) => { embeddings.push(input); return vector; },
       core: async (request) => { requests.push(request); throw new Error('retry'); },
-    }).turn({ conversationKey, message: 'CURRENT TITLE ONLY', requestKey: 'automatic-recall' }, context, () => {});
+    }).turn({ conversationKey, message: 'CURRENT TITLE ONLY', requestKey: 'automatic-recall' }, context, () => {})).rejects.toThrow('retry');
     expect(embeddings).toEqual([{ text: 'CURRENT TITLE ONLY', purpose: 'document', signal: undefined, timeoutMs: undefined }]);
     expect(indexedVector).toBe(vector); expect(queriedVector).toBe(vector); expect(semanticCalls).toBe(1); expect(requests).toHaveLength(2);
     expect(requests[0].context.map((item: { content: string }) => item.content)).toEqual(['recent']);
-    expect(requests[0].recalledContext).toHaveLength(20);
+    expect(requests[0].recalledContext).toHaveLength(5);
+    expect(new Set(requests[0].recalledContext.map((item: { content: string }) => item.content)).size).toBe(5);
     expect(requests[0].recalledContext.map((item: { content: string }) => item.content)).not.toContain('recent');
     expect(requests[0].recalledContext.map((item: { content: string }) => item.content)).not.toContain('future');
     expect(requests[0].recalledContext[0].content).toContain('Roadmap');
@@ -134,6 +218,13 @@ describe('private conversations', () => {
     });
     await createConversationService({ repository, embed: async () => [1], core: async (request: any) => { expect(request.recalledContext).toEqual([]); return { message: 'answer', tools: [] }; } }).turn({ conversationKey, message: 'question', requestKey: 'recall-failure' }, context, (event) => { events.push(event); });
     expect(indexedKeys.filter((key) => key === currentUserKey)).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({ type: 'done', message: { content: 'answer' } });
+  });
+
+  test('continues without a rolling summary when its Archive read fails', async () => {
+    const events: any[] = [];
+    const { repository } = repositoryMock({ readArchiveSummary: async () => { throw new Error('Archive unavailable'); } });
+    await createConversationService({ repository, embed: async () => [1], core: async (request: any) => { expect(request.currentConversationSummary).toBeUndefined(); return { message: 'answer', tools: [] }; } }).turn({ conversationKey, message: 'question', requestKey: 'summary-failure' }, context, (event) => { events.push(event); });
     expect(events.at(-1)).toMatchObject({ type: 'done', message: { content: 'answer' } });
   });
 
@@ -242,28 +333,29 @@ describe('private conversations', () => {
     });
     const records = new Map([
       [imageKey, { key: imageKey, kind: 'image', status: 'claimed', result: { kind: 'image', filename: 'photo.png', mimeType: 'image/png', sizeBytes: 3, storageKey: 'temporary/image' } }],
-      [documentKey, { key: documentKey, kind: 'document', status: 'claimed', result: { kind: 'document', filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 5, content: 'private attachment text' } }],
+      [documentKey, { key: documentKey, kind: 'document', status: 'claimed', result: { kind: 'document', filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 5 } }],
     ]);
     const embeds: string[] = [];
     await createConversationService({
       repository,
       embed: async ({ text }) => { embeds.push(text); return [1]; },
-      attachmentArtifacts: { readClaimed: async (selectedOwner) => { expect(selectedOwner).toEqual(owner); return [...records.values()] as never; } },
+      attachmentArtifacts: { readClaimed: async (selectedOwner) => { expect(selectedOwner).toEqual(owner); return [...records.values()] as never; }, releaseClaimed: async () => 2 },
       attachmentStorage: { download: async () => ({ bytes: new Uint8Array([1, 2, 3]), sizeBytes: 3, mimeType: 'image/png' }) },
-      prepareAttachments: async () => { order.push('prepare'); return [{ kind: 'image', filename: 'photo.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]) }, { kind: 'document', filename: 'notes.txt', mimeType: 'text/plain', bytes: new TextEncoder().encode('private attachment text') }]; },
+       prepareAttachments: async () => { order.push('prepare'); return [{ kind: 'image', filename: 'photo.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]) }, { kind: 'document', filename: 'notes.txt', mimeType: 'text/plain', bytes: new Uint8Array([4, 5, 6]) }]; },
+      scheduleAttachmentJobs: (callback) => callback(),
       enqueueAttachmentJob: async (job) => { order.push('enqueue'); queued.push(job); },
-      core: async (input) => { order.push('core'); request = input; return { message: 'answer', tools: [] }; },
+      core: async (input) => { order.push('core'); request = input; expect((input as any).generateName).toBe(true); return { message: 'answer', tools: [] }; },
     }).turn({ conversationKey, message: 'Use these', requestKey: 'attachments', attachmentKeys: [imageKey, documentKey] }, assuredContext, (event) => { if (event.type === 'start') { order.push('start'); expect(event.userMessage).toMatchObject({ attachments: [], attachmentStatus: 'PENDING' }); expect(event.userMessage).not.toHaveProperty('pendingAttachmentKeys'); } });
     expect(request.attachments).toEqual([
       { kind: 'image', filename: 'photo.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]) },
-      { kind: 'document', filename: 'notes.txt', mimeType: 'text/plain', bytes: new TextEncoder().encode('private attachment text') },
+      { kind: 'document', filename: 'notes.txt', mimeType: 'text/plain', bytes: new Uint8Array([4, 5, 6]) },
     ]);
     expect(startedUser!.content).toBe('Use these');
     expect(embeds).toEqual(['Use these', 'answer']);
     expect(queued).toEqual([{ schemaVersion: 1, artifactKey: imageKey, userMessageKey: startedUser!.key }, { schemaVersion: 1, artifactKey: documentKey, userMessageKey: startedUser!.key }]);
     expect(startedUser!.pendingAttachmentKeys).toEqual([imageKey, documentKey]);
     expect(startedUser!.attachmentStatus).toBe('PENDING');
-    expect(order).toEqual(['prepare', 'enqueue', 'enqueue', 'start', 'core']);
+    expect(order).toEqual(['prepare', 'start', 'core', 'enqueue', 'enqueue']);
   });
 
   test('does not retry a failed Core execution with an uploaded image', async () => {
@@ -271,16 +363,16 @@ describe('private conversations', () => {
     const { repository } = repositoryMock();
     const record = { key: imageKey, status: 'claimed', result: { kind: 'image', filename: 'dog.png', mimeType: 'image/png', sizeBytes: 3, storageKey: 'temporary/image' } };
     const events: any[] = [];
-    await createConversationService({
+    await expect(createConversationService({
       repository, embed: async () => [1],
       attachmentArtifacts: { readClaimed: async () => [record] as never },
       attachmentStorage: { download: async () => ({ bytes: new Uint8Array([1, 2, 3]), sizeBytes: 3, mimeType: 'image/png' }) },
       prepareAttachments: async () => [{ kind: 'image', filename: 'dog.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]) }],
       enqueueAttachmentJob: async () => undefined,
       core: async () => { attempts += 1; throw new Error('vision failed'); },
-    }).turn({ conversationKey, message: 'Vad är detta för hundras?', requestKey: 'image-failure', attachmentKeys: [imageKey] }, context, (event) => { events.push(event); });
+    }).turn({ conversationKey, message: 'Vad är detta för hundras?', requestKey: 'image-failure', attachmentKeys: [imageKey] }, context, (event) => { events.push(event); })).rejects.toThrow('vision failed');
     expect(attempts).toBe(1);
-    expect(events.at(-1)).toMatchObject({ type: 'done', message: { content: 'I could not complete that request reliably. Please try again.' } });
+    expect(events.some(({ type }) => type === 'done')).toBe(false);
   });
 
   test('preserves the Core response when initial durable queue admission fails', async () => {
@@ -289,11 +381,65 @@ describe('private conversations', () => {
     await createConversationService({
       repository, embed: async () => [1],
       attachmentArtifacts: { readClaimed: async () => [{ key: attachmentKey }] as never },
-      prepareAttachments: async () => [{ kind: 'document', filename: 'notes.txt', mimeType: 'text/plain', bytes: new TextEncoder().encode('abc') }],
+      prepareAttachments: async () => [{ kind: 'document', filename: 'notes.txt', mimeType: 'text/plain', bytes: new Uint8Array([1, 2, 3]) }],
       enqueueAttachmentJob: async () => { throw new Error('redis unavailable'); },
       core: async (request: any) => { expect(request.attachments).toHaveLength(1); return { message: 'answer from attachment', tools: [] }; },
     }).turn({ conversationKey, message: 'Use this', requestKey: 'queue-failure', attachmentKeys: [attachmentKey] }, context, (event) => { events.push(event); });
     expect(events.at(-1)).toMatchObject({ type: 'done', message: { content: 'answer from attachment' } });
+  });
+
+  test('does not hold turn completion on attachment persistence or final Archive projection', async () => {
+    const attachmentKey = newId(); const events: any[] = [];
+    const pending = new Promise<never>(() => {}); let projectionRequests = 0; let attachmentReleaseStarted = false;
+    const { repository } = repositoryMock({
+      requestArchiveProjection: async () => { projectionRequests += 1; return projectionRequests === 1 ? null : pending; },
+    });
+    const turn = createConversationService({
+      repository,
+      embed: async () => [1],
+      attachmentArtifacts: {
+        readClaimed: async () => [{ key: attachmentKey }] as never,
+        releaseClaimed: async () => { attachmentReleaseStarted = true; return pending; },
+      },
+      prepareAttachments: async () => [{ kind: 'document', filename: 'notes.txt', mimeType: 'text/plain', bytes: new Uint8Array([1]) }],
+      core: async () => ({ message: 'answer', tools: [] }),
+    }).turn({ conversationKey, message: 'Use this', requestKey: 'detached-persistence', attachmentKeys: [attachmentKey] }, context, (event) => { events.push(event); });
+
+    expect(await Promise.race([turn.then(() => 'completed'), Bun.sleep(100).then(() => 'blocked')])).toBe('completed');
+    expect(events.at(-1)).toMatchObject({ type: 'done', message: { content: 'answer' } });
+    expect(projectionRequests).toBe(1);
+    expect(attachmentReleaseStarted).toBe(true);
+  });
+
+  test('passes ordered document bytes to Core and retains legacy attachment context for follow-up turns', async () => {
+    const firstKey = newId(), secondKey = newId();
+    let priorUser: ConversationMessage | undefined;
+    const requests: any[] = [];
+    const { repository } = repositoryMock({
+      beginTurn: async (_owner, _conversation, user, assistant) => ({ state: 'created', user, assistant, first: false }),
+      latestCompletedMessages: async () => priorUser ? [priorUser] : [],
+    });
+    const service = createConversationService({
+      repository,
+      embed: async () => [1],
+      attachmentArtifacts: { readClaimed: async () => [{ key: firstKey }, { key: secondKey }] as never },
+      prepareAttachments: async () => [
+        { kind: 'document', filename: 'first.txt', mimeType: 'text/plain', bytes: new Uint8Array([1]) },
+        { kind: 'document', filename: 'second.md', mimeType: 'text/markdown', bytes: new Uint8Array([2]) },
+      ],
+      enqueueAttachmentJob: async () => undefined,
+      core: async (request) => { requests.push(request); return { message: 'answer', tools: [] }; },
+    });
+    await service.turn({ conversationKey, message: 'Compare these', requestKey: 'ordered', attachmentKeys: [firstKey, secondKey] }, context, () => {});
+    expect(requests[0].attachments).toEqual([
+      { kind: 'document', filename: 'first.txt', mimeType: 'text/plain', bytes: new Uint8Array([1]) },
+      { kind: 'document', filename: 'second.md', mimeType: 'text/markdown', bytes: new Uint8Array([2]) },
+    ]);
+    const legacyContext = [{ filename: 'first.txt', content: 'First document' }, { filename: 'second.md', content: 'Second document' }];
+    priorUser = message({ role: 'USER', content: 'Compare these', pendingAttachmentKeys: [firstKey, secondKey], attachmentStatus: 'PENDING', attachmentContext: legacyContext, createdAt: '2026-09-01T09:59:00.000Z', completedAt: '2026-09-01T09:59:00.000Z' });
+    await service.turn({ conversationKey, message: 'What did the second file say?', requestKey: 'follow-up' }, context, () => {});
+    expect(requests[1].context[0].content).toContain(JSON.stringify(legacyContext));
+    expect(requests[1].context[0].content.indexOf('first.txt')).toBeLessThan(requests[1].context[0].content.indexOf('second.md'));
   });
 
   test('keeps the newest recent context within the aggregate bound and orders a turn user-first', async () => {
@@ -394,7 +540,7 @@ describe('private conversations', () => {
     expect(failed()).toBe(0);
   });
 
-  test('replays idempotently and completes a fallback after retrying Core failures', async () => {
+  test('replays idempotently and fails after retrying Core without language-guessing prose', async () => {
     const replayEvents: any[] = [];
     const durableAttachment = { key: newId(), kind: 'document' as const, filename: 'notes.txt', mimeType: 'text/plain' as const, sizeBytes: 4 };
     await createConversationService({ repository: { beginTurn: async () => ({ state: 'replay', user: message({ role: 'USER', attachments: [durableAttachment] }), assistant: message({ content: 'Already done' }), first: false }) } as unknown as ConversationRepository, attachmentArtifacts: { readClaimed: async () => { throw new Error('replay must not reclaim'); } } }).turn({ conversationKey, message: 'again', requestKey: 'request-1', attachmentKeys: [newId()] }, context, (event) => { replayEvents.push(event); });
@@ -402,16 +548,16 @@ describe('private conversations', () => {
     expect(replayEvents.at(-1)).toMatchObject({ type: 'done', replayed: true, message: { content: 'Already done' } });
     const events: any[] = []; let attempts = 0;
     const { repository, failed } = repositoryMock({ completeTurn: async (_owner, _conversation, _key, content, embedding, retrievals, completedAt) => ({ message: message({ content, embedding, retrievals, completedAt }), nameApplied: false }) });
-    await createConversationService({ repository, embed: async () => [1], core: async () => { attempts += 1; throw new Error('agent failed'); } }).turn({ conversationKey, message: 'x', requestKey: 'failed' }, context, (event) => { events.push(event); });
+    await expect(createConversationService({ repository, embed: async () => [1], core: async () => { attempts += 1; throw new Error('agent failed'); } }).turn({ conversationKey, message: 'x', requestKey: 'failed' }, context, (event) => { events.push(event); })).rejects.toThrow('agent failed');
     expect(attempts).toBe(2);
-    expect(failed()).toBe(0);
-    expect(events.at(-1)).toMatchObject({ type: 'done', message: { status: 'COMPLETED', content: 'I could not complete that request reliably. Please try again.' } });
+    expect(failed()).toBe(1);
+    expect(events.some(({ type }) => type === 'done')).toBe(false);
   });
 
-  test('preserves an exact app.search count when both agent continuations fail', async () => {
+  test('does not synthesize language-specific aggregate prose when both agent continuations fail', async () => {
     const events: any[] = []; let attempts = 0; const embedded: string[] = [];
     const { repository } = repositoryMock();
-    await createConversationService({
+    await expect(createConversationService({
       repository,
       embed: async ({ text }) => { embedded.push(text); return [1]; },
       core: async (_request, execution) => {
@@ -419,27 +565,27 @@ describe('private conversations', () => {
         execution.onToolSucceeded?.('app.search', { operation: 'count', collectionSlugs: ['trips'] }, { operation: 'count', groups: [{ collectionSlug: 'trips', count: 4 }] });
         throw new Error('malformed continuation');
       },
-    }).turn({ conversationKey, message: 'hur många resor har vi', requestKey: 'count-fallback' }, context, (event) => { events.push(event); });
+    }).turn({ conversationKey, message: 'hur många resor har vi', requestKey: 'count-fallback' }, context, (event) => { events.push(event); })).rejects.toThrow('malformed continuation');
     expect(attempts).toBe(2);
     expect(embedded).toEqual(['hur många resor har vi']);
-    expect(events.at(-1)).toMatchObject({ type: 'done', message: { status: 'COMPLETED', content: '4' } });
+    expect(events.some(({ type }) => type === 'done')).toBe(false);
   });
 
-  test('preserves an exact app.search sum when both agent continuations fail', async () => {
+  test('does not synthesize an English sum when both agent continuations fail', async () => {
     const events: any[] = []; const { repository } = repositoryMock();
-    await createConversationService({
+    await expect(createConversationService({
       repository, embed: async () => [1],
       core: async (_request, execution) => {
         execution.onToolSucceeded?.('app.search', { operation: 'sum', collectionSlugs: ['images'], field: 'sizeBytes' }, { operation: 'sum', groups: [{ collectionSlug: 'images', field: 'sizeBytes', sum: 1_500_000_000, unit: 'bytes', matchedCount: 20, valueCount: 20 }] });
         throw new Error('malformed continuation');
       },
-    }).turn({ conversationKey, message: 'how many GB of images', requestKey: 'sum-fallback' }, context, (event) => { events.push(event); });
-    expect(events.at(-1)).toMatchObject({ type: 'done', message: { status: 'COMPLETED', content: '20 matching resources; 1500000000 bytes' } });
+    }).turn({ conversationKey, message: 'how many GB of images', requestKey: 'sum-fallback' }, context, (event) => { events.push(event); })).rejects.toThrow('malformed continuation');
+    expect(events.some(({ type }) => type === 'done')).toBe(false);
   });
 
-  test('preserves compound aggregate evidence after another successful read-only lookup', async () => {
+  test('does not synthesize English compound aggregate prose after provider failure', async () => {
     const events: any[] = []; const { repository } = repositoryMock(); const collectionKey = newId();
-    await createConversationService({
+    await expect(createConversationService({
       repository, embed: async () => [1],
       core: async (_request, execution) => {
         execution.onToolSucceeded?.('agent.guide', { mode: 'explain' }, { guides: [] });
@@ -447,8 +593,8 @@ describe('private conversations', () => {
         execution.onToolSucceeded?.('app.search', { operation: 'sum', collectionSlugs: ['images'], field: 'sizeBytes', filters: { collectionKey }, limit: 10 }, { operation: 'sum', groups: [{ collectionSlug: 'images', field: 'sizeBytes', sum: 1_500_000_000, unit: 'bytes', matchedCount: 20, valueCount: 20 }] });
         throw new Error('malformed continuation');
       },
-    }).turn({ conversationKey, message: 'Hur många bilder och hur många MB?', requestKey: 'compound-fallback' }, context, (event) => { events.push(event); });
-    expect(events.at(-1)).toMatchObject({ type: 'done', message: { status: 'COMPLETED', content: '20 matching resources; 1500000000 bytes' } });
+    }).turn({ conversationKey, message: 'Hur många bilder och hur många MB?', requestKey: 'compound-fallback' }, context, (event) => { events.push(event); })).rejects.toThrow('malformed continuation');
+    expect(events.some(({ type }) => type === 'done')).toBe(false);
   });
 
   test('keeps visible partial text and does not retry after streaming starts', async () => {

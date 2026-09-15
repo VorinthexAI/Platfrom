@@ -3,7 +3,7 @@ import { streamSSE } from 'hono/streaming';
 import { z, ZodError } from 'zod';
 import { authorizeContentExecution, ContentError, type ToolContext } from '@/lib/ai/tools';
 import { createConversationService, getDefaultConversationService, ConversationError, type ConversationService, type ConversationTurnEvent } from '@/lib/conversations/service';
-import { conversationCreateInputSchema, conversationFavoriteInputSchema, conversationImageTurnRequestKeySchema, conversationImageTurnShape, conversationKeyInputSchema, conversationListInputSchema, conversationMessageDeleteInputSchema, conversationMessageListInputSchema, conversationRenameInputSchema, conversationSafeMessageSchema, conversationSearchInputSchema, conversationSendInputSchema } from '@/lib/conversations/schemas';
+import { conversationCreateServiceInputSchema, conversationFavoriteInputSchema, conversationImageTurnRequestKeySchema, conversationImageTurnShape, conversationKeyInputSchema, conversationListInputSchema, conversationMessageDeleteInputSchema, conversationMessageListInputSchema, conversationRenameInputSchema, conversationSafeMessageSchema, conversationSearchInputSchema, conversationSendInputSchema, guideTopicSelectionSchema } from '@/lib/conversations/schemas';
 import { getAuthIdentity } from './security';
 import { parseJson } from './validation';
 import { publishUserEvent } from './events';
@@ -64,7 +64,7 @@ async function invoke(c: Context, schema: z.ZodTypeAny, run: (service: Conversat
 }
 
 export function createConversationHandlers(dependencies: ConversationHandlerDependencies = {}) { return {
-  create: (c: Context) => invoke(c, selected(conversationCreateInputSchema.shape), (service, input, context) => service.create(input, context), true, dependencies),
+  create: (c: Context) => invoke(c, selected(conversationCreateServiceInputSchema.shape), (service, input, context) => service.create(input, context), true, dependencies),
   list: (c: Context) => invoke(c, selected(conversationListInputSchema.shape), (service, input, context) => service.list(input, context), false, dependencies),
   search: (c: Context) => invoke(c, selected(conversationSearchInputSchema.shape), (service, input, context) => service.search(input, context), false, dependencies),
   rename: (c: Context) => invoke(c, selected({ name: conversationRenameInputSchema.shape.name }), (service, input, context) => service.rename({ ...input, conversationKey: z.string().cuid().parse(c.req.param('conversationKey')) }, context), true, dependencies),
@@ -93,25 +93,31 @@ export function createConversationHandlers(dependencies: ConversationHandlerDepe
   },
   async turn(c: Context) {
     try {
-      const body = await parseJson(c, selected({ message: z.string().trim().min(1).max(20_000), requestKey: z.string().trim().min(1).max(180), attachmentKeys: z.array(z.string().cuid()).max(12).default([]), referenceImageKeys: z.array(z.string().cuid()).max(1).default([]) }));
+      const body = await parseJson(c, selected({ message: z.string().trim().min(1).max(20_000), requestKey: z.string().trim().min(1).max(180), attachmentKeys: z.array(z.string().cuid()).max(12).default([]), referenceImageKeys: z.array(z.string().cuid()).max(1).default([]), guideTopicSelection: guideTopicSelectionSchema.optional() }));
       const context = await authenticated(c, body.teamKey, body.scopeKey, dependencies); if (context instanceof Response) return context;
-      const input = conversationSendInputSchema.parse({ conversationKey: c.req.param('conversationKey'), message: body.message, requestKey: body.requestKey, attachmentKeys: body.attachmentKeys, referenceImageKeys: body.referenceImageKeys });
+      const input = conversationSendInputSchema.parse({ conversationKey: c.req.param('conversationKey'), message: body.message, requestKey: body.requestKey, attachmentKeys: body.attachmentKeys, referenceImageKeys: body.referenceImageKeys, ...(body.guideTopicSelection ? { guideTopicSelection: body.guideTopicSelection } : {}) });
       return streamSSE(c, async (stream) => {
         const abort = bindConversationStreamAbort(stream, c.req.raw.signal);
         const service = dependencies.createTurnService?.(abort.signal) ?? createConversationService({ router: { signal: abort.signal } });
         let correlationKey = body.requestKey;
+        let doneEvent: z.infer<typeof conversationDoneEventSchema> | undefined;
         try {
           await observeToolExecution('conversation.message.send', context, () => service.turn(input, context, async (event: ConversationTurnEvent) => {
             if (!abort.active()) return;
             correlationKey = event.correlationKey;
             const schema = event.type === 'start' ? conversationStartEventSchema : event.type === 'delta' ? conversationDeltaEventSchema : conversationDoneEventSchema;
-            const parsed = schema.parse(event); await stream.writeSSE({ event: event.type, data: JSON.stringify(parsed), id: event.correlationKey });
-            if (event.type === 'done' && context.principal.kind === 'member') {
-              await (dependencies.publishChanged ?? publishUserEvent)(context.principal.user.key, 'conversation.changed').catch((error) => {
-                console.error('conversation change publication failed', { conversationKey: input.conversationKey, correlationKey, error });
-              });
-            }
+            const parsed = schema.parse(event);
+            if (event.type === 'done') { doneEvent = parsed as z.infer<typeof conversationDoneEventSchema>; return; }
+            await stream.writeSSE({ event: event.type, data: JSON.stringify(parsed), id: event.correlationKey });
           }), { recorder: dependencies.recordEvent, idempotencyKey: body.requestKey, input, ...dependencies.billing });
+          if (!abort.active()) return;
+          if (!doneEvent) throw new ConversationError('FAILED', 'Conversation completed without a terminal event.');
+          await stream.writeSSE({ event: 'done', data: JSON.stringify(doneEvent), id: doneEvent.correlationKey });
+          if (context.principal.kind === 'member') {
+            void (dependencies.publishChanged ?? publishUserEvent)(context.principal.user.key, 'conversation.changed').catch((error) => {
+              console.error('conversation change publication failed', { conversationKey: input.conversationKey, correlationKey, error });
+            });
+          }
         } catch (error) {
           if (!abort.active()) return;
           console.error('conversation turn failed', { conversationKey: input.conversationKey, correlationKey, error });

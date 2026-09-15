@@ -1,13 +1,14 @@
 import * as SecureStore from "expo-secure-store";
 
-const COMPLETE_KEY = "vorinthex.onboarding.complete.v2";
-const LEGACY_PREVIEW_COMPLETE_KEY = "vorinthex.onboarding.preview-complete.v1";
-export type LocalOnboardingState = {
-  complete: boolean;
-  previewComplete: boolean;
-};
+import { initialLocalOnboardingState, withIntroSeen, withOnboardingComplete, withPostDeletion, type LocalOnboardingState } from "./onboarding-policy";
 
-let state: LocalOnboardingState = { complete: false, previewComplete: false };
+const COMPLETE_KEY = "vorinthex.onboarding.complete.v2";
+const INTRO_SEEN_KEY = "vorinthex.onboarding.intro-seen.v1";
+const POST_DELETION_KEY = "vorinthex.onboarding.post-deletion.v1";
+const LEGACY_PREVIEW_COMPLETE_KEY = "vorinthex.onboarding.preview-complete.v1";
+export type { LocalOnboardingState } from "./onboarding-policy";
+
+let state: LocalOnboardingState = initialLocalOnboardingState;
 const listeners = new Set<(next: LocalOnboardingState) => void>();
 
 function publish(next: LocalOnboardingState) {
@@ -16,12 +17,18 @@ function publish(next: LocalOnboardingState) {
 }
 
 export async function readLocalOnboardingState() {
-  const complete = await SecureStore.getItemAsync(COMPLETE_KEY);
+  const [complete, introSeen, postDeletion] = await Promise.all([
+    SecureStore.getItemAsync(COMPLETE_KEY),
+    SecureStore.getItemAsync(INTRO_SEEN_KEY),
+    SecureStore.getItemAsync(POST_DELETION_KEY),
+  ]);
   await Promise.all([
     SecureStore.deleteItemAsync(LEGACY_PREVIEW_COMPLETE_KEY),
   ]).catch(() => undefined);
   const next = {
     complete: complete === "true",
+    introSeen: introSeen === "true" || complete === "true",
+    postDeletion: postDeletion === "true",
     previewComplete: false,
   };
   publish(next);
@@ -29,21 +36,33 @@ export async function readLocalOnboardingState() {
 }
 
 export async function markOnboardingPreviewComplete() {
-  publish({ ...state, previewComplete: true });
+  publish(withIntroSeen(state));
+  await SecureStore.setItemAsync(INTRO_SEEN_KEY, "true");
 }
 
 export async function markOnboardingComplete() {
-  publish({ complete: true, previewComplete: true });
-  await SecureStore.setItemAsync(COMPLETE_KEY, "true");
+  publish(withOnboardingComplete());
+  await Promise.all([
+    SecureStore.setItemAsync(COMPLETE_KEY, "true"),
+    SecureStore.setItemAsync(INTRO_SEEN_KEY, "true"),
+    SecureStore.deleteItemAsync(POST_DELETION_KEY),
+  ]);
 }
 
-export async function clearOnboardingCompletion() {
-  publish({ complete: false, previewComplete: false });
-  await SecureStore.deleteItemAsync(COMPLETE_KEY);
+export async function markPostDeletionOnboarding() {
+  publish(withPostDeletion(state));
+  await Promise.all([
+    SecureStore.setItemAsync(INTRO_SEEN_KEY, "true"),
+    SecureStore.setItemAsync(POST_DELETION_KEY, "true"),
+  ]);
 }
 
 export function resetOnboardingSession() {
   publish({ ...state, previewComplete: false });
+}
+
+export function getLocalOnboardingState() {
+  return state;
 }
 
 export function subscribeLocalOnboardingState(listener: (next: LocalOnboardingState) => void) {

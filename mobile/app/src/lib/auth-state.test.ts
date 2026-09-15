@@ -4,7 +4,6 @@ const realContext = {
   user: { key: "user", email: "user@example.com", country_code: "SE", is_onboarded: true },
   team: { key: "team" },
   teamMembership: { key: "membership", role: "owner" },
-  teamSelectionEnabled: true,
   scope: { key: "scope" },
 };
 const guestContext = {
@@ -17,6 +16,14 @@ const storedSession = {
   accessExpiresAt: Date.now() + 60_000,
   refreshExpiresAt: Date.now() + 120_000,
 };
+const referralSummary = {
+  code: { key: "referral", ownerUserKey: "user", programVersion: "v1" as const, code: "ABCDEF123456", createdAt: "2026-01-01T00:00:00.000Z" },
+  attributionCount: 0,
+  signupRewardCount: 0,
+  paidRewardCount: 0,
+  earnedMicroSparks: 0,
+  invitees: [],
+};
 
 let contextResponse: unknown = realContext;
 let patchResponse: unknown = realContext;
@@ -26,6 +33,9 @@ let postGate: Promise<void> | undefined;
 let postError: Error | undefined;
 let session: typeof storedSession | null = null;
 let getCalls = 0;
+let referralCalls = 0;
+let referralError: Error | undefined;
+let referralGate: Promise<void> | undefined;
 let clearContextCalls = 0;
 let clearTokenCalls = 0;
 let revokeCalls = 0;
@@ -37,13 +47,15 @@ let tokenReadGate: Promise<void> | undefined;
 const patchCalls: unknown[] = [];
 const postCalls: unknown[] = [];
 const deleteCalls: unknown[] = [];
-let clearOnboardingCalls = 0;
+let postDeletionOnboardingCalls = 0;
+let clearReferralCalls = 0;
 let writeContextCalls = 0;
 let unauthorizedListener: (() => void) | undefined;
 
-mock.module("@/lib/api-client", () => ({
+mock.module("@/lib/auth-transport", () => ({
   apiClient: {
     delete: async (...args: unknown[]) => { deleteCalls.push(args); },
+    get: async () => { referralCalls += 1; await referralGate; if (referralError) throw referralError; return { data: { success: true, data: referralSummary } }; },
     post: (...args: unknown[]) => {
       const handler = (globalThis as { __archiveApiPost?: (...input: unknown[]) => unknown }).__archiveApiPost;
       if (!handler) throw new Error("Archive API test handler is unavailable.");
@@ -68,6 +80,7 @@ mock.module("@/lib/api-client", () => ({
   revokeRemoteSession: async () => { revokeCalls += 1; },
   cleanupRemoteSession: async () => { cleanupCalls += 1; await cleanupGate; if (cleanupError) throw cleanupError; },
   deleteRemoteAccount: async () => { postCalls.push({ path: "/auth/me/delete", input: { confirmation: "DELETE MY ACCOUNT" } }); await postGate; if (postError) throw postError; },
+  fetchReferralSummary: async () => { referralCalls += 1; await referralGate; if (referralError) throw referralError; return referralSummary; },
 }));
 mock.module("@/lib/auth-context-vault", () => ({
   clearAuthContext: async () => { clearContextCalls += 1; },
@@ -83,9 +96,12 @@ mock.module("@/lib/token-vault", () => ({
   },
 }));
 mock.module("@/lib/onboarding-state", () => ({
-  clearOnboardingCompletion: async () => { clearOnboardingCalls += 1; },
   markOnboardingComplete: async () => undefined,
+  markPostDeletionOnboarding: async () => { postDeletionOnboardingCalls += 1; },
   resetOnboardingSession: () => undefined,
+}));
+mock.module("@/lib/pending-referral-vault", () => ({
+  clearPendingReferralCode: async () => { clearReferralCalls += 1; },
 }));
 const { useAuthStore } = await import("../state/auth");
 
@@ -98,6 +114,9 @@ beforeEach(() => {
   postError = undefined;
   session = null;
   getCalls = 0;
+  referralCalls = 0;
+  referralError = undefined;
+  referralGate = undefined;
   clearContextCalls = 0;
   clearTokenCalls = 0;
   revokeCalls = 0;
@@ -109,15 +128,16 @@ beforeEach(() => {
   patchCalls.length = 0;
   postCalls.length = 0;
   deleteCalls.length = 0;
-  clearOnboardingCalls = 0;
+  postDeletionOnboardingCalls = 0;
+  clearReferralCalls = 0;
   writeContextCalls = 0;
-  useAuthStore.setState({ status: "bootstrapping", user: null, team: null, teamMembership: null, teamSelectionEnabled: false, scope: null });
+  useAuthStore.setState({ status: "bootstrapping", user: null, team: null, teamMembership: null, scope: null, referralSummary: null });
 });
 
 test("optimistically completes onboarding before the profile request resolves", async () => {
   let releasePatch!: () => void;
   patchGate = new Promise<void>((resolve) => { releasePatch = resolve; });
-  useAuthStore.setState({ status: "authenticated", user: { ...realContext.user, isOnboarded: false }, team: realContext.team, teamMembership: realContext.teamMembership, teamSelectionEnabled: true, scope: realContext.scope });
+  useAuthStore.setState({ status: "authenticated", user: { ...realContext.user, isOnboarded: false }, team: realContext.team, teamMembership: realContext.teamMembership, scope: realContext.scope });
 
   const completion = useAuthStore.getState().completeOnboarding();
 
@@ -131,21 +151,21 @@ test("optimistically completes onboarding before the profile request resolves", 
 
 test("rolls optimistic onboarding completion back when the profile request fails", async () => {
   patchError = new Error("profile unavailable");
-  useAuthStore.setState({ status: "authenticated", user: { ...realContext.user, isOnboarded: false }, team: realContext.team, teamMembership: realContext.teamMembership, teamSelectionEnabled: true, scope: realContext.scope });
+  useAuthStore.setState({ status: "authenticated", user: { ...realContext.user, isOnboarded: false }, team: realContext.team, teamMembership: realContext.teamMembership, scope: realContext.scope });
 
   const completion = useAuthStore.getState().completeOnboarding();
   expect(useAuthStore.getState().user?.isOnboarded).toBe(true);
 
   await expect(completion).rejects.toThrow("profile unavailable");
   expect(useAuthStore.getState().user?.isOnboarded).toBe(false);
-  expect(clearOnboardingCalls).toBe(0);
+  expect(postDeletionOnboardingCalls).toBe(0);
 });
 
 test("preserves and reconciles an optimistic avatar while onboarding completion returns stale profile data", async () => {
   let releasePatch!: () => void;
   patchGate = new Promise<void>((resolve) => { releasePatch = resolve; });
   patchResponse = { ...realContext, user: { ...realContext.user, is_onboarded: true, avatar_url: null } };
-  useAuthStore.setState({ status: "authenticated", user: { ...realContext.user, isOnboarded: false }, team: realContext.team, teamMembership: realContext.teamMembership, teamSelectionEnabled: true, scope: realContext.scope });
+  useAuthStore.setState({ status: "authenticated", user: { ...realContext.user, isOnboarded: false }, team: realContext.team, teamMembership: realContext.teamMembership, scope: realContext.scope });
   const avatar = useAuthStore.getState().optimisticProfile({ avatarUrl: "https://example.com/candidate.png" });
 
   const completion = useAuthStore.getState().completeOnboarding();
@@ -169,7 +189,8 @@ test("clears auth immediately while remote account deletion is pending", async (
   expect(useAuthStore.getState().status).toBe("unauthenticated");
   expect(useAuthStore.getState().user).toBeNull();
   expect(clearContextCalls).toBe(1);
-  expect(clearOnboardingCalls).toBe(1);
+  expect(postDeletionOnboardingCalls).toBe(1);
+  expect(clearReferralCalls).toBe(1);
   await Promise.resolve();
   expect(postCalls).toEqual([{ path: "/auth/me/delete", input: { confirmation: "DELETE MY ACCOUNT" } }]);
   releasePost();
@@ -178,7 +199,7 @@ test("clears auth immediately while remote account deletion is pending", async (
   expect(useAuthStore.getState().user).toBeNull();
   expect(clearTokenCalls).toBe(1);
   expect(clearContextCalls).toBe(1);
-  expect(clearOnboardingCalls).toBe(1);
+  expect(postDeletionOnboardingCalls).toBe(1);
 });
 
 test("keeps local auth cleared when remote account deletion fails", async () => {
@@ -239,7 +260,42 @@ test("hydrates a persisted real account session", async () => {
 
   expect(useAuthStore.getState().status).toBe("authenticated");
   expect(useAuthStore.getState().user?.email).toBe("user@example.com");
+  expect(useAuthStore.getState().referralSummary?.code.code).toBe("ABCDEF123456");
+  expect(referralCalls).toBe(1);
   expect(clearTokenCalls).toBe(0);
+});
+
+test("reuses a loaded referral summary when hydrating the same account", async () => {
+  useAuthStore.setState({ referralSummary });
+
+  await useAuthStore.getState().hydrate();
+
+  expect(useAuthStore.getState().referralSummary).toEqual(referralSummary);
+  expect(referralCalls).toBe(0);
+});
+
+test("keeps authentication available when referral prefetch fails", async () => {
+  referralError = new Error("referrals unavailable");
+
+  await useAuthStore.getState().hydrate();
+
+  expect(useAuthStore.getState().status).toBe("authenticated");
+  expect(useAuthStore.getState().referralSummary).toBeNull();
+});
+
+test("does not restore a referral summary after sign out interrupts prefetch", async () => {
+  let releaseReferral!: () => void;
+  referralGate = new Promise<void>((resolve) => { releaseReferral = resolve; });
+  session = storedSession;
+  const bootstrap = useAuthStore.getState().bootstrap();
+  await Bun.sleep(0);
+
+  const signOut = useAuthStore.getState().signOut();
+  releaseReferral();
+  await Promise.all([bootstrap, signOut]);
+
+  expect(useAuthStore.getState().status).toBe("unauthenticated");
+  expect(useAuthStore.getState().referralSummary).toBeNull();
 });
 
 test("retires a persisted legacy guest session", async () => {
@@ -315,11 +371,12 @@ test("a newer failure restores an older successful edit", () => {
 });
 
 test("signs out locally even when secure session reads fail", async () => {
-  useAuthStore.setState({ status: "authenticated", user: { ...realContext.user, isOnboarded: true }, team: realContext.team, scope: realContext.scope });
+  useAuthStore.setState({ status: "authenticated", user: { ...realContext.user, isOnboarded: true }, team: realContext.team, scope: realContext.scope, referralSummary });
   tokenReadError = new Error("secure storage unavailable");
   await useAuthStore.getState().signOut();
   expect(useAuthStore.getState().status).toBe("unauthenticated");
   expect(useAuthStore.getState().user).toBeNull();
+  expect(useAuthStore.getState().referralSummary).toBeNull();
   expect(clearTokenCalls).toBe(1);
   expect(clearContextCalls).toBe(1);
   expect(cleanupCalls).toBe(0);
@@ -369,6 +426,7 @@ test("remote cleanup checks responses and bounds offline waits", async () => {
   expect(source).toContain("controller.abort(), 2_000");
   expect(source).toContain('request("/auth/me/push-subscription", { method: "DELETE", body: "{}" })');
   expect(source).toContain('request("/auth/logout", { method: "POST", body: "{}" })');
-  expect(source.indexOf('request("/auth/me/push-subscription"')).toBeLessThan(source.indexOf('request("/auth/logout"'));
-  expect(source).toContain("failure ??= error");
+  expect(source).toContain("Promise.allSettled([");
+  expect(source).toContain('request("/auth/logout", { method: "POST", body: "{}" })');
+  expect(source).toContain('result.status === "rejected"');
 });

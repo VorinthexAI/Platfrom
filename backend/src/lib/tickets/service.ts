@@ -50,12 +50,15 @@ function safe(ticket: Ticket) {
   return safeTicketSchema.parse({ key: ticket.key, threadKey: ticket.threadKey, initialMessageKey: ticket.initialMessageKey, message: ticket.message, kind: ticket.type, createdAt: ticket.createdAt });
 }
 
-export function createTicketService(options: { repository?: TicketRepository; embed?: typeof embedText; ask?: typeof executeAsk; id?: () => string; now?: () => string } = {}): TicketService {
+type PublishCommunicationChanged = (userKey: string, event: 'communication.changed') => Promise<unknown>;
+
+export function createTicketService(options: { repository?: TicketRepository; embed?: typeof embedText; ask?: typeof executeAsk; id?: () => string; now?: () => string; publishChanged?: PublishCommunicationChanged } = {}): TicketService {
   const repository = options.repository ?? getDefaultTicketRepository();
   const embed = options.embed ?? embedText;
   const ask = options.ask ?? executeAsk;
   const id = options.id ?? newId;
   const now = options.now ?? (() => new Date().toISOString());
+  const publishChanged = options.publishChanged ?? ((userKey: string) => import('@/api/events').then(({ publishUserEvent }) => publishUserEvent(userKey, 'communication.changed')));
   const create = async (rawInput: z.input<typeof ticketSubmitInputSchema>, context: ToolContext, rawIdempotencyKey: string, type: 'issue' | 'feedback') => {
       const input = ticketSubmitInputSchema.parse(rawInput);
       const idempotencyKey = ticketIdempotencyKeySchema.parse(rawIdempotencyKey);
@@ -88,6 +91,7 @@ export function createTicketService(options: { repository?: TicketRepository; em
       const result = await repository.createOrReplay(ticket, thread, initialMessage, teamMembershipKey);
       if (result.state === 'forbidden') throw new TicketAccessError('Active team and scope membership is required.');
       if (result.state === 'conflict') throw new TicketIdempotencyError('Idempotency-Key was already used for a different ticket request.');
+      if (result.state === 'created') await publishChanged(userKey, 'communication.changed').catch(() => undefined);
       return safe(result.ticket);
   };
   return {

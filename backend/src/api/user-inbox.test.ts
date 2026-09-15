@@ -23,16 +23,17 @@ describe('user inbox HTTP adapters', () => {
       .put('/:threadKey/read-state', handlers.markRead)
       .post('/:threadKey/messages', handlers.send);
     const json = (path: string, method: string, body: unknown) => app.request(path, { method, headers: { 'content-type': 'application/json', 'idempotency-key': 'request-1' }, body: JSON.stringify(body) });
-    expect((await json('/list', 'POST', { teamKey, scopeKey, mailbox: 'sent' })).status).toBe(200);
+    expect((await json('/list', 'POST', { teamKey, scopeKey, mailbox: 'sent', query: 'support', readState: 'unread' })).status).toBe(200);
     expect((await json(`/${threadKey}/read`, 'POST', { teamKey, scopeKey })).status).toBe(200);
     expect((await json(`/${threadKey}/read-state`, 'PUT', { teamKey, scopeKey, read: false })).status).toBe(200);
     expect((await json(`/${threadKey}/messages`, 'POST', { teamKey, scopeKey, message: 'Any update?' })).status).toBe(201);
     expect(calls).toEqual([
-      ['list', { mailbox: 'sent', limit: 25 }, context],
+      ['list', { mailbox: 'sent', limit: 25, query: 'support', readState: 'unread' }, context],
       ['read', { threadKey }, context],
       ['mark', { threadKey, read: false }, context],
       ['send', { threadKey, message: 'Any update?' }, context, 'request-1'],
     ]);
     expect((await json('/list', 'POST', { teamKey, scopeKey, userKey })).status).toBe(400);
+    expect((await json('/list', 'POST', { teamKey, scopeKey, readState: 'urgent' })).status).toBe(400);
   });
 });

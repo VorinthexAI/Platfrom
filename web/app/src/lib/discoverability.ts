@@ -1,5 +1,5 @@
 export const CANONICAL_ORIGIN = "https://vorinthex.com" as const;
-export const CONTENT_LAST_REVIEWED = "2026-09-09" as const;
+export const CONTENT_LAST_REVIEWED = "2026-09-12" as const;
 export const CONTACT_EMAIL = "contact@vorinthex.com" as const;
 export const PRICING_HERO_HEADING = "One balance for everything you create and use" as const;
 export const PRICING_HERO_BODY =
@@ -37,6 +37,7 @@ export const CORE_CAPABILITIES = [
     details: [
       "Capture quick thoughts, create polished documents, upload existing work, and organize notes, ideas, research, and knowledge in one simple place.",
       "Powerful search helps you rediscover information, while built-in AI can write, rewrite, summarize, translate, explain, and transform entire documents naturally.",
+      "Core chats appear under Vorinthex AI / Core / Chats. Messages are organized automatically, rolling summaries support continuity, and archived chat content can be searched by meaning later within its private authorized scope.",
     ],
     connection:
       "Archive gives every Core app durable memory, so conversations, plans and coaching can build on saved knowledge.",
@@ -44,6 +45,7 @@ export const CORE_CAPABILITIES = [
       "Notes, ideas, and research",
       "Folders, labels, and backlinks",
       "Semantic search and knowledge connections",
+      "Private, scoped Core chat history",
     ],
   },
   {
@@ -128,7 +130,7 @@ export const PRODUCT_FACTS = {
   privacy:
     "Privacy and user control are central product principles for Core.",
   sparks:
-    `${PRICING_HERO_HEADING}. ${PRICING_HERO_BODY} The current launch subscriptions are $19.99 monthly for 1,000 Sparks (discounted from the $24.99 regular monthly price) and $7.99 weekly for 200 Sparks. A one-time 200-Spark top-up is $9.99. Purchases are not yet available on the public website. Prepaid Sparks remain available after subscription cancellation, balances never go below zero, and storage is charged hourly from prepaid Sparks. Unfunded storage incurs no debt or backcharges, uploads can continue, and existing data remains available for export, deletion, and recovery. Adding enough Sparks before deletion begins restores prospective charging. Once deletion begins, it cannot be reversed. Stored S3-backed data is hard-deleted after 90 consecutive unfunded days. Pricing is shown in USD and excludes VAT and other local taxes; Polar calculates and adds applicable tax at checkout.`,
+    `${PRICING_HERO_HEADING}. ${PRICING_HERO_BODY} The current launch subscriptions are $19.99 monthly for 1,000 Sparks (discounted from the $24.99 regular monthly price) and $7.99 weekly for 200 Sparks. A one-time 200-Spark top-up is $9.99. Purchases are not yet available on the public website. Prepaid Sparks remain available after subscription cancellation, balances never go below zero, and storage is charged hourly from prepaid Sparks. Unfunded storage incurs no debt or backcharges, uploads can continue, and existing data remains available for export, deletion, and recovery. Adding enough Sparks before deletion begins restores prospective charging. Once deletion begins, it cannot be reversed. Stored data is permanently deleted after 90 consecutive unfunded days. Pricing is shown in USD and excludes VAT and other local taxes; Polar calculates and adds applicable tax at checkout.`,
   pricing: {
     currency: SPARK_PRICING_CURRENCY,
     newcomerAllocation: NEWCOMER_FREE_SPARKS,

@@ -38,6 +38,7 @@ describe('storage deletion outbox', () => {
     const source = await Bun.file(new URL('./db/storage-deletion-jobs.node.ts', import.meta.url)).text();
     expect(source).toContain('UPDATE job WITH { status: "deleting", claimToken: @claimToken');
     expect(source).toContain('job.status == "deleting" && job.claimToken == @claimToken');
+    expect(source).toContain('{ maxRuntime: 30 }');
     expect(source).toContain('job.status == "reserved" && job.reservationExpiresAt <= @claimedAt');
     expect(source).toContain('job.status == "deleting" && job.claimedAt <= @staleBefore');
     expect(source).toContain('status: "reserved", reservationExpiresAt: @reservationExpiresAt, claimToken: @token');

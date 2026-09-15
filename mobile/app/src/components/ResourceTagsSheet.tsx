@@ -1,5 +1,5 @@
-import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { ScrollView, StyleSheet, Text, View, type TextInput as NativeTextInput } from "react-native";
+import { useEffect, useEffectEvent, useRef, useState, type ComponentRef } from "react";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
@@ -8,6 +8,7 @@ import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
 
+import { TagCreateSheet, TagSheetEmptyState } from "@/components/TagSheetShared";
 import { appSearchQueryRoot } from "@/lib/app-search-client";
 import type { ContentContext } from "@/lib/content-client";
 import { appendResourceTag, createResourceTagKey, createScopeTag, groupResourceTagAssignmentRequests, normalizeResourceTagTargets, persistResourceTagAssignments, removeResourceTag, replaceResourceTag, resolvePendingResourceTagDraft, type ResourceTagAssignmentState, type ResourceTagTarget, type ScopeTag } from "@/lib/tag-client";
@@ -15,14 +16,14 @@ import { applyResourceTagDraft, refreshResourceTagAssignments, refreshScopeTags,
 import { invalidateAssistantChanges } from "@/lib/workspace-query-cache";
 import { fonts, palette, spacing } from "@/theme/tokens";
 
-export type ResourceTagsSheetProps = { context: ContentContext; targets: readonly ResourceTagTarget[]; open: boolean; onClose: () => void };
+export type ResourceTagsSheetProps = { context: ContentContext; targets: readonly ResourceTagTarget[]; open: boolean; onApply?: () => void; onClose: () => void };
 
 const workspaceByTarget = {
   folder: "archive", document: "archive", "image-collection": "gallery", image: "gallery", "image-highlight": "gallery", "image-memory": "gallery",
   place: "compass", trip: "compass", "email-inbox": "signal", "email-tone": "signal", "email-thread": "signal", "email-message": "signal", "email-draft": "signal", book: "ascend",
 } as const;
 
-export function ResourceTagsSheet({ context, targets, open, onClose }: ResourceTagsSheetProps) {
+export function ResourceTagsSheet({ context, targets, open, onApply, onClose }: ResourceTagsSheetProps) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const batchIdentity = normalizeResourceTagTargets(targets).map(({ type, key }) => `${type}:${key}`).join("|");
@@ -34,7 +35,7 @@ export function ResourceTagsSheet({ context, targets, open, onClose }: ResourceT
   const [tagName, setTagName] = useState("");
   const requestRef = useRef(0);
   const sessionRef = useRef(0);
-  const createInputRef = useRef<NativeTextInput>(null);
+  const createInputRef = useRef<ComponentRef<typeof TextInput>>(null);
   const createSubmissionRef = useRef<string | undefined>(undefined);
   const pendingCreationsRef = useRef(new Map<string, Promise<boolean>>());
 
@@ -130,6 +131,7 @@ export function ResourceTagsSheet({ context, targets, open, onClose }: ResourceT
     const optimistic = applyResourceTagDraft(previous, normalizedTargets, draft);
     queryClient.setQueryData(queryKey, optimistic);
     onClose();
+    onApply?.();
     void (async () => {
       const resolved = await resolvePendingResourceTagDraft(draft, new Map(pendingCreationsRef.current));
       let baseline = resolved.failedKeys.reduce(removeResourceTag, previous);
@@ -148,6 +150,7 @@ export function ResourceTagsSheet({ context, targets, open, onClose }: ResourceT
         showToast({ title: caught instanceof Error ? caught.message : "Tags could not be updated.", duration: 3_000 });
         return;
       }
+      showToast({ title: "Tags updated", duration: 2_000 });
       try { await refreshResourceTagAssignments(queryClient, context, normalizedTargets); } catch { /* Preserve the optimistic success when reconciliation is unavailable. */ }
       const changes = [...new Set(normalizedTargets.map(({ type }) => workspaceByTarget[type]))].map((workspace) => ({ workspace }));
       void Promise.all([invalidateAssistantChanges(queryClient, context, changes), queryClient.invalidateQueries({ queryKey: appSearchQueryRoot })]).catch(() => undefined);
@@ -160,17 +163,14 @@ export function ResourceTagsSheet({ context, targets, open, onClose }: ResourceT
     <ScrollView contentContainerStyle={[styles.list, !loading && state?.tags.length === 0 && styles.emptyContent]} showsVerticalScrollIndicator={false} style={styles.scroll}>
       {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
       {loading ? <View accessibilityLabel="Loading tags" accessibilityRole="progressbar" style={styles.list}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.skeleton} />)}</View> : null}
-      {!loading && !error && state?.tags.length === 0 ? <Text style={styles.empty}>No tags yet.</Text> : null}
+      {!loading && !error && state?.tags.length === 0 ? <TagSheetEmptyState onCreate={openCreate} /> : null}
       {!loading && state ? state.tags.map((tag) => { const tagState = resourceTagState(state, targets, tag.key, draft); return <FilterPill fullWidth key={tag.key} label={tag.name} mixed={tagState === "some"} onPress={() => setDraft((current) => toggleResourceTagDraft(current, state, targets, tag.key))} selected={tagState === "all"} />; }) : null}
     </ScrollView>
-  </BottomSheet><BottomSheet footer={<View style={styles.footer}><Button disabled={!tagName.trim()} onPress={createTag} size="md" variant="primary">Create</Button><Button onPress={closeCreate} size="md" variant="secondary">Close</Button></View>} onOpenChange={(next) => { if (!next) closeCreate(); }} open={open && createOpen} title="Create tag">
-    <View style={styles.form}><Text style={styles.inputLabel}>Name</Text><TextInput accessibilityLabel="Name" autoFocusInBottomSheet={false} maxLength={120} onChangeText={setTagName} onSubmitEditing={createTag} placeholder="Tag name" ref={createInputRef} returnKeyType="done" value={tagName} /></View>
-  </BottomSheet></>;
+  </BottomSheet><TagCreateSheet inputRef={createInputRef} name={tagName} onClose={closeCreate} onCreate={createTag} onNameChange={setTagName} open={open && createOpen} /></>;
 }
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 }, list: { flexGrow: 1, gap: spacing.xs, paddingBottom: spacing.xl }, emptyContent: { justifyContent: "center" },
-  empty: { color: palette.muted, fontFamily: fonts.regular, fontSize: 13, textAlign: "center" }, error: { color: palette.danger, fontFamily: fonts.medium, fontSize: 13, textAlign: "center" },
+  error: { color: palette.danger, fontFamily: fonts.medium, fontSize: 13, textAlign: "center" },
   skeleton: { width: "100%", height: 38, borderRadius: 999, backgroundColor: palette.hairlineBright, opacity: 0.72 }, footer: { gap: spacing.sm },
-  form: { gap: spacing.xs }, inputLabel: { color: palette.text, fontFamily: fonts.medium, fontSize: 13 },
 });

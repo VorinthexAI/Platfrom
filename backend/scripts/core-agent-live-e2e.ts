@@ -429,7 +429,7 @@ try {
     return result;
   });
   if (normalizedToken(documentTurn.content).toUpperCase() !== documentMarker) throw new Error(`Document answer was inaccurate: ${JSON.stringify(documentTurn.content)}`);
-  pass('document attachment', documentTurn, documentUsage, 'COMPLETED durable persistence and exact extraction answer');
+  pass('document attachment', documentTurn, documentUsage, 'native file analysis and COMPLETED asynchronous Archive persistence');
 
   const redPng = await sharp({ create: { width: 96, height: 96, channels: 3, background: '#ff0000' } }).png().toBuffer();
   const image = await prepareAttachment('image-analysis', `red-${shortSuffix}.png`, 'image/png', redPng);

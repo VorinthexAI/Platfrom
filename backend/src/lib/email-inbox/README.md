@@ -18,6 +18,15 @@ After a subscription-origin `messagesAdded` thread has been sorted and committed
 
 Supported PDF, TXT, Markdown, DOC, and DOCX attachments use Archive's parser, while images use Gallery processing. Canonical bytes and ownership remain in `emailAttachments`; any Archive document or Gallery image is an ordinary export copy created just in time. Both attachment paths run from the shared provider-thread parser, so manual synchronization and subscription notifications behave identically.
 
+PDF exports use the same model-based document transcription as direct uploads;
+the parser receives the trusted connector team context and no longer uses AWS OCR.
+
+Permanent provider attachment errors are isolated per MIME part and exposed as unavailable attachment counts; transient errors retry ingestion. Export intent is persisted with canonical attachment storage (`exportPending`). The attachment export worker recovers pending exports every minute, retries independently of mailbox cursors, and acknowledges them only after persistence and refresh publication. Acknowledged exports are not recreated on ordinary replay.
+
+Draft attachment selectors accept private email attachment keys owned by the user or Archive/Gallery asset keys in the authorized destination scope. Original stored bytes and MIME types are used for sending; text-only Archive documents are sent as UTF-8 text files. Sent workspace selections are re-ingested from Gmail into independent canonical email attachments. Thread reads project canonical attachment keys to their separate Archive/Gallery export keys for the shipped attachment viewer; stored message references remain canonical.
+
+Automatic drafts resolve tones, reply context, sender identity, and persistence ownership from the connector owner, never the system execution principal. Sent-only and archived threads skip the inbox-only automatic draft precheck. Inbox visibility and categories use inbox labels, while the conversation preview and action state include newer sent/archived replies (excluding spam, trash, and provider drafts).
+
 Disconnect blocks new local work and destroys that connector's encrypted credentials. It intentionally does not stop the account-wide Gmail watch or revoke the account-wide Google OAuth grant because another authorized Vorinthex connector may share them; notifications for the disconnected connector are ignored and its watch expires naturally.
 
 Migration backfills reuse the storage key already referenced by an Archive or Gallery export; they do not copy physical objects. Legacy Compass hero rows therefore derive a deterministic migration hash from that storage key when the historical Gallery row has no byte hash. A later rewrite creates independently owned canonical objects during normal regeneration.

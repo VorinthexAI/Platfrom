@@ -109,7 +109,8 @@ describe('Arango Spark repository', () => {
     const refund = { ...rawRecord, _key: 'refund-1', kind: 'refund', deltaMicroSparks: 10, balanceAfterMicroSparks: 100, idempotencyKey: 'refund:charge-1', metadata: { executionIdentity: 'execution-hash', refundOfTransactionKey: 'charge-1' } };
     const execution = { _key: 'execution-1', userKey: 'user-1', executionIdentity: 'execution-hash', requestHash: input.requestHash, status: 'pending', chargeTransactionKey: 'charge-1', leaseOwner: 'old-owner', leaseExpiresAt: '2026-09-04T10:01:00.000Z' };
     let written: Record<string, unknown> | undefined;
-    const transact: SparkTransactionRunner = async (_collections, operation) => operation({ query: async (query, bind) => {
+    const declarations: unknown[] = [];
+    const transact: SparkTransactionRunner = async (collections, operation) => { declarations.push(collections); return operation({ query: async (query, bind) => {
       if (query.includes('FOR item IN billingExecutions')) return cursor(execution);
       if (query.includes('DOCUMENT(sparkTransactions')) return cursor(charge);
       if (query.includes('item.kind == "refund"')) return cursor(refund);
@@ -118,10 +119,22 @@ describe('Arango Spark repository', () => {
         return cursor({ ...written, balanceAfterMicroSparks: 90 });
       }
       return cursor();
-    } });
+    } }); };
     const repository = createArangoSparkRepository({ query: async () => cursor() }, transact);
     await expect(repository.applyExecutionCharge!({ ...input, kind: 'tool', deltaMicroSparks: -10, toolSlug: 'book.create' }, 'execution-hash')).resolves.toMatchObject({ status: 'applied', transaction: { idempotencyKey: 'operation-1:a2', metadata: { executionAttempt: 2 } } });
     expect(written).toMatchObject({ idempotencyKey: 'operation-1:a2', metadata: { executionIdentity: 'execution-hash', executionAttempt: 2 } });
+    expect(declarations).toEqual([{ write: ['users', 'sparkTransactions', 'billingExecutions'], exclusive: [] }]);
+  });
+
+  test('applies a new execution charge with ordinary transaction locks', async () => {
+    const queries: string[] = []; const declarations: unknown[] = [];
+    const charged = { ...rawRecord, _key: input.key, kind: 'tool', deltaMicroSparks: -10, balanceAfterMicroSparks: 90, toolSlug: 'book.create', idempotencyKey: 'operation-1:a1', metadata: { executionIdentity: 'execution-hash', executionAttempt: 1 } };
+    const database: SparkDatabase = { query: async (query) => { queries.push(query); return query.includes('LET user = DOCUMENT') ? cursor(charged) : cursor(); } };
+    const repository = createArangoSparkRepository(database, async (collections, operation) => { declarations.push(collections); return operation(database); });
+    await expect(repository.applyExecutionCharge!({ ...input, kind: 'tool', deltaMicroSparks: -10, toolSlug: 'book.create' }, 'execution-hash')).resolves.toMatchObject({ status: 'applied', claimOwner: input.key, transaction: { idempotencyKey: 'operation-1:a1' } });
+    expect(declarations).toEqual([{ write: ['users', 'sparkTransactions', 'billingExecutions'], exclusive: [] }]);
+    expect(queries.some((query) => query.includes('INSERT ledgerRecord INTO sparkTransactions'))).toBe(true);
+    expect(queries.some((query) => query.includes('INTO billingExecutions'))).toBe(true);
   });
 
   test('blocks a live duplicate, reclaims a stale lease, and completes only for its owner', async () => {
@@ -136,7 +149,8 @@ describe('Arango Spark repository', () => {
       if (query.includes('UPDATE item')) return cursor(true);
       return cursor();
     } });
-    const repository = createArangoSparkRepository({ query: async () => cursor() }, transact);
+    const database = { query: async (query: string) => { queries.push(query); return query.includes('UPDATE item') ? cursor(true) : cursor(); } };
+    const repository = createArangoSparkRepository(database, transact);
     await expect(repository.applyExecutionCharge!({ ...input, kind: 'tool', deltaMicroSparks: -10, toolSlug: 'book.create' }, 'execution-hash', { owner: 'second', now: '2026-09-04T10:02:00.000Z', expiresAt: '2026-09-04T10:07:00.000Z' })).resolves.toMatchObject({ status: 'pending' });
     await expect(repository.applyExecutionCharge!({ ...input, kind: 'tool', deltaMicroSparks: -10, toolSlug: 'book.create' }, 'execution-hash', { owner: 'second', now: '2026-09-04T10:06:00.000Z', expiresAt: '2026-09-04T10:11:00.000Z' })).resolves.toMatchObject({ status: 'applied', claimOwner: 'second', transaction: { key: 'charge-1' } });
     await expect(repository.completeExecution!('user-1', 'execution-hash', 'second', '2026-09-04T10:07:00.000Z')).resolves.toBe(true);

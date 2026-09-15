@@ -176,18 +176,18 @@ describe('document-extract action', () => {
     await expect(documentExtract({ ...normalized('docx'), storageKey: 'docx' }, { logger: quiet, extractDocx: async () => { throw failure; } })).rejects.toMatchObject({ code: 'DOCUMENT_EXTRACTION_FAILED', retryable: true, cause: failure });
   });
 
-  test('routes text-based and scanned PDFs through the file action', async () => {
+  test('routes text-based and scanned PDFs through the model transcription operation', async () => {
     for (const text of ['Selectable PDF', 'Scanned OCR']) {
       const calls: unknown[] = [];
-      const result = await documentExtract({ ...normalized('pdf'), storageKey: 'pdf' }, { logger: quiet, fileAction: { execute: async (input, teamKey) => { calls.push({ input, teamKey }); return { text, metadata: { provider: 'aws-textract' } }; } } });
+      const result = await documentExtract({ ...normalized('pdf'), storageKey: 'pdf' }, { logger: quiet, teamKey: 'team', transcribe: async (input, context) => { calls.push({ input, context }); return { text }; } });
       expect(result.extractedText).toBe(text);
-      expect(result.metadata).toEqual({ provider: 'aws-textract' });
-      expect(calls).toEqual([{ input: { operation: 'document', storageKey: 'pdf', filename: 'Report.pdf', mimeType: 'application/pdf', bytes: normalized('pdf').fileInput }, teamKey: scopeKey }]);
+      expect(result.metadata).toEqual({ method: 'model-transcription' });
+      expect(calls).toEqual([{ input: { type: 'file', filename: 'Report.pdf', mimeType: 'application/pdf', bytes: normalized('pdf').fileInput }, context: { teamKey: 'team', signal: undefined } }]);
     }
   });
 
   test('returns a structured extraction failure', async () => {
-    await expect(documentExtract({ ...normalized('pdf'), storageKey: 'pdf' }, { logger: quiet, fileAction: { execute: async () => { throw new Error('provider payload'); } } })).rejects.toMatchObject({ code: 'DOCUMENT_EXTRACTION_FAILED', action: 'document-extract' });
+    await expect(documentExtract({ ...normalized('pdf'), storageKey: 'pdf' }, { logger: quiet, transcribe: async () => { throw new Error('provider payload'); } })).rejects.toMatchObject({ code: 'DOCUMENT_EXTRACTION_FAILED', action: 'document-extract' });
   });
 });
 

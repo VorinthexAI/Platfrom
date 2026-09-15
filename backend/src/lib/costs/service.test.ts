@@ -10,7 +10,10 @@ describe('public Spark costs', () => {
     expect(staticCharges).toHaveLength(listedRules.length + 2);
     expect(staticCharges.slice(0, listedRules.length).map(({ key }) => key)).toEqual(listedRules.map(([key]) => key));
     expect(charges.some(({ key }) => key === 'image.caption')).toBe(false);
-    expect(charges).toContainEqual(expect.objectContaining({ key: 'document.parse', name: 'Upload a document' }));
+    expect(charges.some(({ key }) => key === 'document.parse' || key === 'document.scan')).toBe(false);
+    expect(charges).toContainEqual(expect.objectContaining({ key: 'place.guide.find', name: 'View country' }));
+    expect(charges).toContainEqual(expect.objectContaining({ key: 'place.find-city', name: 'View city' }));
+    expect(charges.some(({ key }) => key === 'place.create' || key === 'place.find-children')).toBe(false);
     expect(charges).toContainEqual(expect.objectContaining({ key: 'book.create', name: 'Create an audio book', description: 'Generate and save a complete audio book.' }));
     expect(charges).toContainEqual(expect.objectContaining({ key: 'book.extend', name: 'Extend an audio book', description: 'Generate and save an additional audio book chapter.' }));
     expect(charges).toContainEqual(expect.objectContaining({ key: 'highlight.create', description: 'Create a generated highlight from an image collection.' }));

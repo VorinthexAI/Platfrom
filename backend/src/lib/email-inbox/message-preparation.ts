@@ -88,8 +88,13 @@ export async function sortAndPersistInboxThread(input: {
   });
   const visible = classified.filter(({ message }) => message.labels?.includes('INBOX'));
   const relevant = visible.length ? visible : classified;
-  const latestMessage = latestEmailMessage(relevant.map(({ message }) => message))!;
-  const latest = relevant.find(({ message }) => message.providerMessageId === latestMessage.providerMessageId)!;
+  // Inbox membership determines visibility/categories, not conversation chronology.
+  // Include sent and archived replies, but do not let discarded messages replace
+  // the active conversation's preview or action state.
+  const conversation = classified.filter(({ message }) => !message.labels?.some((label) => ['TRASH', 'SPAM', 'DRAFT'].includes(label)));
+  const chronological = conversation.length ? conversation : relevant;
+  const latestMessage = latestEmailMessage(chronological.map(({ message }) => message))!;
+  const latest = chronological.find(({ message }) => message.providerMessageId === latestMessage.providerMessageId)!;
   const labels = [...new Set(relevant.flatMap(({ message }) => message.labels ?? []))];
   const inboxCategory: InboxCategory = relevant.some(({ message, classification }) => inboxCategoryFor(message.labels ?? [], classification) === 'Filtered')
     ? 'Filtered'

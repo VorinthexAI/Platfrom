@@ -12,6 +12,8 @@ import { documentStorage, type DocumentObjectStorage } from '@/lib/ai/document-p
 import { imageDataUrl } from '@/lib/gallery/image-reference';
 
 const QUEUE_NAME = 'conversation-image-turns';
+const conversationImageSummarySchema = z.string().trim().min(1).max(20_000);
+
 const jobOptions: JobsOptions = {
   attempts: 3,
   backoff: { type: 'exponential', delay: 2_000 },
@@ -58,10 +60,10 @@ async function resolveStagedImageReferences(job: ConversationImageTurnJob, artif
     }
     try {
       const object = await storage.download(artifact.stagedStorageKey);
-      if (object.mimeType !== undefined && object.mimeType.toLowerCase() !== 'image/png') throw new Error('A staged image reference MIME type changed.');
+      if (object.mimeType !== undefined && object.mimeType.toLowerCase() !== artifact.mimeType) throw new Error('A staged image reference MIME type changed.');
       if (object.sizeBytes !== undefined && object.sizeBytes !== artifact.sizeBytes) throw new Error('A staged image reference size changed.');
       if (object.bytes.byteLength !== artifact.sizeBytes || artifactSha256(object.bytes) !== artifact.stagedSha256) throw new Error('A staged image reference content changed.');
-      resolvedReferences.push({ identity: `artifact:${artifact.key}:${artifact.stagedSha256}`, inputReference: imageDataUrl(object.bytes, 'image/png') });
+      resolvedReferences.push({ identity: `artifact:${artifact.key}:${artifact.stagedSha256}`, inputReference: imageDataUrl(object.bytes, artifact.mimeType) });
     } catch (error) {
       artifact = assertOwnedImageArtifact(await artifacts.read(key), job, now);
       if (artifact.status === 'COMPLETED' && artifact.finalReference?.kind === 'image') {
@@ -94,6 +96,7 @@ export async function processConversationImageTurn(raw: unknown, dependencies: {
   storage?: Pick<DocumentObjectStorage, 'download'>;
   terminalFailure?: boolean;
   now?: () => string;
+  enqueueArchiveJob?: (input: unknown) => Promise<unknown>;
 } = {}) {
   const job = conversationImageTurnJobSchema.parse(raw);
   const repository = dependencies.repository ?? getDefaultConversationRepository();
@@ -108,14 +111,31 @@ export async function processConversationImageTurn(raw: unknown, dependencies: {
       { recorder: dependencies.recordEvent ?? (dependencies.images ? undefined : toolEventService.record), appScopeKey: dependencies.appScopeKey, idempotencyKey: job.requestKey, input: job.input, ...dependencies.billing },
     );
     if (output.images.length !== 1) throw new Error('Conversation image generation must produce exactly one image.');
-    const completed = await repository.completeImageTurn({ teamKey: job.teamKey, scopeKey: job.scopeKey, userKey: job.userKey }, job.conversationKey, job.assistantMessageKey, output.images[0]!.key, output.images[0]!.caption, (dependencies.now ?? (() => new Date().toISOString()))());
+    const ownership = { teamKey: job.teamKey, scopeKey: job.scopeKey, userKey: job.userKey };
+    const completedAt = (dependencies.now ?? (() => new Date().toISOString()))();
+    const imageSummary = conversationImageSummarySchema.parse(output.images[0]!.caption).replace(/(?:\.{3,}|…)\s*$/, '.');
+    const completed = await repository.completeImageTurn(ownership, job.conversationKey, job.assistantMessageKey, output.images[0]!.key, imageSummary, completedAt);
     if (!completed) throw new Error('Conversation image response changed before completion.');
+    const state = await repository.requestArchiveProjection?.(ownership, job.conversationKey, completedAt, job.actorKey) ?? null;
+    if (state) {
+      const enqueue = dependencies.enqueueArchiveJob ?? ((value: unknown) => import('./archive-projection-queue').then(({ enqueueConversationArchiveProjection }) => enqueueConversationArchiveProjection(value)));
+      void enqueue({ schemaVersion: 1, conversationKey: state.conversationKey, teamKey: state.teamKey, scopeKey: state.scopeKey, userKey: state.userKey, actorKey: state.actorKey, desiredRevision: state.desiredRevision }).catch((error) => console.error('conversation image archive projection enqueue failed; durable recovery will retry', { conversationKey: state.conversationKey, desiredRevision: state.desiredRevision, error }));
+    }
     await (dependencies.publishChanged ?? publishUserEvent)(job.userKey, 'conversation.changed').catch(() => undefined);
     return { imageKey: output.images[0]!.key };
   } catch (error) {
     if (dependencies.terminalFailure ?? true) {
       const fundingRequiredCode = error instanceof SparkRepositoryError && (error.code === 'INSUFFICIENT_BALANCE' || error.code === 'OUTSTANDING_DEBT') ? error.code : undefined;
-      const failed = await repository.failTurn({ teamKey: job.teamKey, scopeKey: job.scopeKey, userKey: job.userKey }, job.conversationKey, job.assistantMessageKey, (dependencies.now ?? (() => new Date().toISOString()))(), fundingRequiredCode);
+      const ownership = { teamKey: job.teamKey, scopeKey: job.scopeKey, userKey: job.userKey };
+      const failedAt = (dependencies.now ?? (() => new Date().toISOString()))();
+      const failed = await repository.failTurn(ownership, job.conversationKey, job.assistantMessageKey, failedAt, fundingRequiredCode);
+      if (failed) {
+        const state = await repository.requestArchiveProjection?.(ownership, job.conversationKey, failedAt, job.actorKey) ?? null;
+        if (state) {
+          const enqueue = dependencies.enqueueArchiveJob ?? ((value: unknown) => import('./archive-projection-queue').then(({ enqueueConversationArchiveProjection }) => enqueueConversationArchiveProjection(value)));
+          void enqueue({ schemaVersion: 1, conversationKey: state.conversationKey, teamKey: state.teamKey, scopeKey: state.scopeKey, userKey: state.userKey, actorKey: state.actorKey, desiredRevision: state.desiredRevision }).catch(() => undefined);
+        }
+      }
       if (failed && fundingRequiredCode) await (dependencies.publishChanged ?? publishUserEvent)(job.userKey, 'spark.balance.required', fundingRequiredCode, job.assistantMessageKey).catch(() => undefined);
       await (dependencies.publishChanged ?? publishUserEvent)(job.userKey, 'conversation.changed').catch(() => undefined);
     }

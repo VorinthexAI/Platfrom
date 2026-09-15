@@ -30,9 +30,12 @@ export function storageRetentionWarningContent(monthlyCostSparks: string, wipeDu
   };
 }
 
-export function createAppNotificationService(dependencies: { repository?: AppNotificationRepository; inbox?: UserInboxService; enqueue?: typeof enqueueAppNotification; embed?: (text: string) => Promise<number[]> } = {}) {
+type PublishCommunicationChanged = (userKey: string, event: 'communication.changed') => Promise<unknown>;
+
+export function createAppNotificationService(dependencies: { repository?: AppNotificationRepository; inbox?: UserInboxService; enqueue?: typeof enqueueAppNotification; embed?: (text: string) => Promise<number[]>; publishChanged?: PublishCommunicationChanged } = {}) {
   const repository = dependencies.repository ?? appNotificationRepository;
   const enqueue = dependencies.enqueue ?? enqueueAppNotification;
+  const publishChanged = dependencies.publishChanged ?? ((userKey: string) => import('@/api/events').then(({ publishUserEvent }) => publishUserEvent(userKey, 'communication.changed')));
   const activeMember = (context: ToolContext) => {
     const principal = context.principal;
     if (principal.kind !== 'member' || principal.userTeam.status !== 'active' || principal.userTeam.teamKey !== context.teamKey) throw new AppNotificationAccessError('Active team membership is required.');
@@ -54,6 +57,7 @@ export function createAppNotificationService(dependencies: { repository?: AppNot
       if (requested && (recipientUserKeys.length !== requested.length || new Set(recipientUserKeys).size !== requested.length || requested.some((key) => !recipientUserKeys.includes(key)))) throw new AppNotificationAccessError('Every recipient must be an active user in the current team.');
       const embedding = currentEmbeddingSchema.parse(await (dependencies.embed ?? ((text) => embedText({ text, purpose: 'document' })))(`${input.title}\n\n${input.message}`));
       const result = await repository.createNotification(input, { actorUserKey, teamKey: context.teamKey, scopeKey: context.runtimeScopeKey, idempotencyKey }, recipientUserKeys, embedding);
+      if (!result.replayed) await Promise.all(recipientUserKeys.map((userKey) => publishChanged(userKey, 'communication.changed').catch(() => undefined)));
       if (result.deliveries > 0) await enqueue(result.key);
       return result;
     },
@@ -72,6 +76,7 @@ export function createAppNotificationService(dependencies: { repository?: AppNot
         now: input.now,
         warningDayStart: `${input.now.slice(0, 10)}T00:00:00.000Z`,
       });
+      if (result) await publishChanged(input.userKey, 'communication.changed').catch(() => undefined);
       if (result && result.deliveries > 0) await enqueue(result.key);
       return result;
     },

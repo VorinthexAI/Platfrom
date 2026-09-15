@@ -18,14 +18,24 @@ function expectBefore(source: string, first: string, second: string) {
 }
 
 test("opens Core as an in-layout page and returns without routing", () => {
+  const openRequestEffect = core.slice(core.indexOf("useLayoutEffect(() => {"));
   expect(core).not.toContain("BottomSheet");
   expect(core).not.toContain("<Modal");
   expect(core).not.toContain("useRouter");
   expect(core).toContain("const [pageOpen, setPageOpen] = useState(openRequest > 0)");
+  expect(core).toContain("const handledOpenRequestRef = useRef(0)");
+  expect(core).toContain("if (openRequest <= handledOpenRequestRef.current) return");
+  expectBefore(openRequestEffect, "handledOpenRequestRef.current = openRequest", "onFocusChangeRef.current?.(true)");
   expect(core).toContain('accessibilityLabel="Back from Core"');
   expect(core).toContain("<CorePage");
   expect(core).toContain("CORE_FOCUS_DELAY_MS = 100");
   expect(core).toContain("inputRef.current?.focus()");
+  expect(core).toContain("if (!focusInputOnMount) return;");
+  expect(core).toContain("setFocusInputOnPageMount(focusOnOpenRequest)");
+  expect(core).toContain("if (!focusOnOpenRequest) {");
+  expect(core).toContain("intentionalFocus.current = false;");
+  expectBefore(openRequestEffect, "inputRef.current?.blur()", "onFocusChangeRef.current?.(true)");
+  expectBefore(openRequestEffect, "Keyboard.dismiss()", "onFocusChangeRef.current?.(true)");
   expect(core).toContain("if (closingRef.current) return undefined");
   expect(core).toContain("setPageOpen(false)");
   expect(core).toContain("accessibilityViewIsModal onAccessibilityEscape={closePage}");
@@ -65,8 +75,8 @@ test("keeps the workspace composer compact and grows the Core input only when te
   expect(core).toContain('const inputValue = expanded ? value : (value.split(/\\r?\\n/)[0] ?? "")');
   expect(core).toContain("scrollEnabled={expanded && inputLineCount > 6}");
   expect(core).not.toContain('borderColor: "#55616C"');
-  expect(core).toContain('expanded && (expandedAccessory || expandedFooter)');
-  expect(core).toContain('{expanded ? expandedAccessory : null}');
+  expect(core).toContain('{expanded && expandedAccessory ? <View style={styles.expandedAccessory}>{expandedAccessory}</View> : null}');
+  expect(core).not.toContain('{expanded ? expandedAccessory : null}');
   expect(core).toContain('{expanded ? expandedFooter : null}');
 });
 
@@ -80,23 +90,26 @@ test("waits for the keyboard to hide and restores the workspace composer without
   expect(core).toContain("inputRef.current?.blur();\n    Keyboard.dismiss();\n    onSubmit();");
 });
 
-test("delays focus by 100ms and moves only the composer above the keyboard", () => {
+test("delays focus and adds the composer keyboard lift to the conversation bottom", () => {
   expect(core).toContain("useAnimatedKeyboard()");
   expect(core).not.toContain("isStatusBarTranslucentAndroid");
   expect(core).not.toContain("isNavigationBarTranslucentAndroid");
   expect(core).toContain("KeyboardState.OPENING");
-  expect(core).toContain("const keyboardLift = Math.max(0, keyboard.height.value - bottomInset)");
-  expect(core).toContain("translateY: keyboardMoving ? -keyboardLift - Math.min(spacing.md, keyboardLift) : 0");
+  expect(core).toContain("const lift = Math.max(0, keyboard.height.value - bottomInset)");
+  expect(core).toContain("return keyboardMoving ? lift + Math.min(spacing.md, lift) : 0");
+  expect(core).toContain("paddingBottom: keyboardLift.value");
   expect(core).toContain("}, CORE_FOCUS_DELAY_MS)");
   expect(core).toContain("inputRef.current?.setNativeProps({ selection: { start: cursor, end: cursor } })");
   expect(core).toContain("if (!closingRef.current) inputRef.current?.focus()");
   expect(core).not.toContain("selection={expanded ? inputSelection");
   expect(core).toContain("<View style={[styles.pageContent, style");
   expect(core).toContain("paddingBottom: Math.max(bottomInset, spacing.sm)");
+  expect(core).toContain("<Reanimated.View style={[styles.pageConversation, keyboardConversationStyle]}>{message}</Reanimated.View>");
   expect(core).toContain("<Reanimated.View style={keyboardLiftStyle}>{composer}</Reanimated.View>");
   expect(core).not.toContain("keyboardSpacerStyle");
   expect(core).not.toContain("KeyboardAvoidingView");
   expect(core).not.toContain("withTiming");
+  expect(core).not.toContain("scrollToEnd");
 });
 
 test("keeps the page backdrop outside the keyboard-responsive content", () => {

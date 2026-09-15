@@ -68,7 +68,7 @@ import { scopeHandlers } from './scopes';
 import { appNotificationHandlers } from './app-notifications';
 import { teamHandlers } from './teams';
 import { listCosts } from './costs';
-import { generateAgentGreeting } from './agent-guide';
+import { generateAgentGreeting, generateAgentGreetingTopics } from './agent-guide';
 import { userInboxHandlers } from './user-inbox';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -425,7 +425,6 @@ export function registerRoutes(app: Hono) {
   app.post('/scopes/:scopeKey/prioritize', scopeHandlers.prioritize);
   app.patch('/scopes/:scopeKey', scopeHandlers.update);
   app.delete('/scopes/:scopeKey', scopeHandlers.delete);
-  app.post('/teams/list', teamHandlers.list);
   app.post('/teams/select', teamHandlers.select);
   app.post('/tags/list', tagHandlers.list);
   app.post('/tags', tagHandlers.create);
@@ -573,6 +572,7 @@ export function registerRoutes(app: Hono) {
   app.post('/books/goal-suggestions', bookHandlers.goalSuggestions);
   app.post('/assistant/respond', respondToAssistant);
   app.post('/agent/greeting', generateAgentGreeting);
+  app.post('/agent/greeting/topics', generateAgentGreetingTopics);
   app.post('/books', bookHandlers.create);
   app.post('/books/:bookKey/detail', bookHandlers.detail);
   app.post('/books/:bookKey/extension/preview', bookHandlers.extensionPreview);

@@ -58,6 +58,21 @@ endpoints, checks persisted history, and removes its folder and conversation in
 `finally`. It refuses non-local API hosts unless
 `CORE_AGENT_E2E_DANGEROUS_REMOTE=true` is explicitly set.
 
+The attachment performance evaluation compares direct-provider execution with
+the complete upload, canonicalization, conversation SSE, and asynchronous
+persistence pipeline across text files, small images, realistic large images,
+and mixed attachment sets:
+
+```bash
+bun run --cwd backend test:e2e:core-attachments-performance
+```
+
+Use `--provider-only`, `--core-only`, or `--pipeline-only` to isolate one path,
+`--scenario=two-realistic-images` to isolate one fixture set, and `--repeat=3`
+to collect repeated measurements. The evaluation records each upload phase,
+first answer delta, terminal-frame tail, persistence convergence, and premature stream EOFs. Remote execution is refused unless
+`CORE_ATTACHMENT_EVAL_DANGEROUS_REMOTE=true` is set.
+
 The multilingual embedding smoke evaluation compares Swedish, Spanish,
 German, and misspelled English workspace queries with relevant and unrelated
 English resource descriptions using the configured production embedding model:

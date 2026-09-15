@@ -24,6 +24,7 @@ test("uses four-column full sheets, exact-open freshness, and owner-only creatio
   expect(memories).toContain('staleTime: 0');
   expect(memories).toContain('exact: true, refetchType: "none"');
   expect(memories).toContain('owner ? <Button disabled={creating || listLoading || opening}');
+  expect(memories).toContain("const owner = collection.access.canContribute");
   expect(memories).toContain('notify("Memory created")');
   expect(memories).toContain('setMemories((current) => [...current.filter(({ key }) => key !== memory.key), memory])');
   expect(memories.indexOf('{creating ?')).toBeGreaterThan(memories.indexOf('memories.map((memory)'));
@@ -57,14 +58,14 @@ test("guards auto-open and preserves typing across zoom and event refresh", () =
   expect(memories).not.toContain("LinearTransition");
 });
 
-test("uses selected-memory actions for tags and partial deletion while retaining selection", () => {
+test("uses selected-memory actions for tags and partial deletion", () => {
   expect(memories).toContain("Promise.allSettled(memoryKeys.map((memoryKey) => deleteGalleryCollectionMemory(memoryKey, collection.key)))");
   expect(memories).toContain('disabled={creating || opening || deleting}');
   expect(memories).toContain('accessibilityLabel="Selected memory actions"');
   expect(memories).toContain('<MoreHorizontalIcon size="sm" />');
   expect(memories).toContain('setActiveSheet("actions")');
   expect(memories).toContain('type: "image-memory" as const, key');
-  expect(memories).toContain('<ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={open && resourceTagsOpen} targets={resourceTagTargets} />');
+  expect(memories).toContain('<ResourceTagsSheet context={contentContext} onApply={() => setSelectedMemoryKeys([])} onClose={() => setResourceTagsOpen(false)} open={open && resourceTagsOpen} targets={resourceTagTargets} />');
   expect(memories).toContain('>Tags</BottomSheetItem>');
   expect(memories).toContain('>Delete</BottomSheetItem>');
   expect(memories).toContain("queryClient.removeQueries({ queryKey: galleryQueryKeys.memory");

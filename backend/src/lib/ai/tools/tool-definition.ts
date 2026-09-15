@@ -2,16 +2,19 @@ import { CONTENT_TOOL_DEFINITIONS, contentToolModelInputSchemas, hasContentIdemp
 import { isContentMutation, runContentTool, type ContentToolDependencies } from './content-runtime';
 import type { ContentToolName } from './content-schemas';
 import type { ToolContext } from './tool-context';
-import type { TeamService } from '@/lib/teams';
+import type { ConversationService } from '@/lib/conversations/service';
+import type { GuideTopic } from '@/lib/conversations/schemas';
 
 export interface PublicToolDependencies {
   context: ToolContext;
   content?: ContentToolDependencies;
   executeContent?: typeof runContentTool;
   requestKey?: string;
-  teamService?: TeamService;
+  conversationService?: Pick<ConversationService, 'list'>;
   signal?: AbortSignal;
   timeoutMs?: number;
+  onGreetingDelta?: (text: string) => void | Promise<void>;
+  onGuideTopic?: (topic: GuideTopic) => void | Promise<void>;
 }
 
 const contentDefinitions = new Map(CONTENT_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));

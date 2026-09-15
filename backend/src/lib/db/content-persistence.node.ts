@@ -368,6 +368,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       sourceFolderKey?: string;
       sourceDocumentKey?: string;
       limit: number;
+      privateOwnerUserKey?: string;
     }) {
       const embedding = currentEmbeddingSchema.parse(input.embedding);
       const limit = Math.min(
@@ -378,6 +379,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
         `
         LET folderMatches = (FOR folder IN folders
           FILTER folder.scopeKey == @scopeKey
+          FILTER !HAS(folder, "privateOwnerUserKey") || folder.privateOwnerUserKey == null || folder.privateOwnerUserKey == @privateOwnerUserKey
           FILTER (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null) && folder._key IN @activeFolderKeys
           FILTER @sourceFolderKey == null || folder._key != @sourceFolderKey
           FILTER IS_ARRAY(folder.embedding) && LENGTH(folder.embedding) == LENGTH(@embedding)
@@ -388,6 +390,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
           RETURN { score, value: folder })
         LET documentMatches = (FOR document IN documents
           FILTER document.scopeKey == @scopeKey
+          FILTER !HAS(document, "privateOwnerUserKey") || document.privateOwnerUserKey == null || document.privateOwnerUserKey == @privateOwnerUserKey
           FILTER (document.archiveVisibility || "visible") == "visible"
           FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
           FILTER document.folderKey == null || document.folderKey IN @activeFolderKeys
@@ -405,6 +408,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
           RETURN { score, value: document })
         LET fileMatches = (FOR document IN documents
           FILTER document.scopeKey == @scopeKey
+          FILTER !HAS(document, "privateOwnerUserKey") || document.privateOwnerUserKey == null || document.privateOwnerUserKey == @privateOwnerUserKey
           FILTER (document.archiveVisibility || "visible") == "visible"
           FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
           FILTER document.folderKey == null || document.folderKey IN @activeFolderKeys
@@ -428,6 +432,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
           limit,
           sourceFolderKey: input.sourceFolderKey ?? null,
           sourceDocumentKey: input.sourceDocumentKey ?? null,
+          privateOwnerUserKey: input.privateOwnerUserKey ?? null,
         },
       );
       const result = (await cursor.next()) as
@@ -633,7 +638,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
         currentEmbeddingSchema.parse(parsed.embedding);
       const cursor = await executor.query(
         `LET parent = @parentKey == null ? {} : DOCUMENT(folders, @parentKey)
-         FILTER @parentKey == null || (parent != null && parent.scopeKey == @scopeKey && (!HAS(parent, "_internalDeletion") || parent._internalDeletion == null) && parent.mutationPolicy != "system-container" && parent.managedPurpose == null)
+         FILTER @parentKey == null || (parent != null && parent.scopeKey == @scopeKey && (!HAS(parent, "_internalDeletion") || parent._internalDeletion == null))
          INSERT @folder INTO folders RETURN NEW`,
         {
           folder: toArangoDoc(parsed),
@@ -653,8 +658,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
         `LET folder = @folderKey == null ? null : DOCUMENT(folders, @folderKey)
          FILTER @folderKey == null || (folder != null && folder.scopeKey == @scopeKey)
          FILTER @folderKey == null || (!HAS(folder, "_internalDeletion") || folder._internalDeletion == null)
-         FILTER @folderKey == null || (folder.mutationPolicy != "system-container" && folder.managedPurpose == null)
-         INSERT @document INTO documents RETURN NEW`,
+          INSERT @document INTO documents RETURN NEW`,
         {
           document: toArangoDoc(parsed),
           folderKey: parsed.folderKey ?? null,

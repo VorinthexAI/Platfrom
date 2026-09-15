@@ -25,7 +25,7 @@ function positiveSafeInteger(value: number): number {
 }
 
 export function createSparkService({ repository, createKey = newId, now = () => new Date(), getActiveStoredBytes = async () => '0', publishBalance = async () => {} }: SparkServiceDependencies) {
-  const publish = (userKey: string) => publishBalance(userKey, 'spark.balance.changed').catch(() => undefined);
+  const publish = (userKey: string) => { void publishBalance(userKey, 'spark.balance.changed').catch(() => undefined); };
   const apply = async (
     trustedUserKey: string,
     kind: SparkTransactionKind,
@@ -45,7 +45,7 @@ export function createSparkService({ repository, createKey = newId, now = () => 
       ...(input.metadata ? { metadata: sparkMetadataSchema.parse(input.metadata) } : {}),
       createdAt: now().toISOString(),
     });
-    if (result.status === 'applied' || result.status === 'replayed') await publish(trustedUserKey);
+    if (result.status === 'applied' || result.status === 'replayed') publish(trustedUserKey);
     return result;
   };
 
@@ -65,7 +65,7 @@ export function createSparkService({ repository, createKey = newId, now = () => 
       const claimedAt = now();
       const owner = createKey();
       const result = await (repository.applyExecutionCharge ? repository.applyExecutionCharge(record, executionIdentity, { owner, now: claimedAt.toISOString(), expiresAt: new Date(claimedAt.getTime() + 5 * 60_000).toISOString() }) : repository.apply(record));
-      if (result.status === 'applied' || result.status === 'replayed') await publish(trustedUserKey);
+      if (result.status === 'applied' || result.status === 'replayed') publish(trustedUserKey);
       return result;
     },
     async completeExecution(trustedUserKey: string, executionIdentity: string, owner: string) {

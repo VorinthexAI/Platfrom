@@ -65,12 +65,3 @@ export async function listActiveUserTeamsByUser(
   const docs = await cursor.all();
   return docs.map((doc) => userTeamSchema.parse(withArangoKey(doc)));
 }
-
-export async function hasActiveEnvironmentSeededMembership(userId: string): Promise<boolean> {
-  const cursor = await db.query(aql`
-    FOR link IN ${db.collection(USER_TEAM_COLLECTION)}
-      FILTER link.userId == ${userId} && link.status == "active" && link.environmentSeeded == true
-      LIMIT 1 RETURN true
-  `);
-  return Boolean(await cursor.next());
-}

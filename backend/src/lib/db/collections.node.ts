@@ -6,6 +6,8 @@ import { currentEmbeddingSchema } from '@/lib/embeddings';
 
 export const COLLECTIONS_COLLECTION = 'collections';
 export const collectionPurposeSchema = z.enum(['place-media', 'email-media', 'generated-media', 'scope-directory']);
+export const CONTRIBUTABLE_MANAGED_COLLECTION_PURPOSES = ['email-media', 'generated-media', 'place-media'] as const;
+export const READABLE_MANAGED_COLLECTION_PURPOSES = [...CONTRIBUTABLE_MANAGED_COLLECTION_PURPOSES, 'scope-directory'] as const;
 export const mutationPolicySchema = z.enum(['user', 'system-only']);
 export const collectionPresentationSchema = z.enum(['travel', 'communication', 'learning']);
 export const collectionSchema = z.object({
@@ -16,6 +18,9 @@ export const collectionSchema = z.object({
   isFavorite: z.boolean().default(false), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type Collection = z.infer<typeof collectionSchema>;
+export function isManagedCollectionContributable(collection: Pick<Collection, 'mutationPolicy' | 'purpose'>) {
+  return collection.mutationPolicy === 'system-only' && (CONTRIBUTABLE_MANAGED_COLLECTION_PURPOSES as readonly string[]).includes(collection.purpose ?? '');
+}
 export const collectionsEmbeddingFields = ['name', 'description'] as const;
 const helpers = createNodeHelpers(COLLECTIONS_COLLECTION, collectionSchema, collectionsEmbeddingFields, { includeEmbeddingMetadata: false });
 export const insertCollection = helpers.insert;

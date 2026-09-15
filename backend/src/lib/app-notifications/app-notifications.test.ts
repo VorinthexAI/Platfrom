@@ -39,7 +39,8 @@ describe('app notifications', () => {
 
   test('keeps notification history pagination and read state strict', () => {
     expect(notificationListInputSchema.parse({})).toEqual({ limit: 25, mailbox: 'inbox' });
-    expect(notificationListInputSchema.parse({ cursor: newId(), limit: 10, mailbox: 'sent' })).toMatchObject({ limit: 10, mailbox: 'sent' });
+    expect(notificationListInputSchema.parse({ cursor: newId(), limit: 10, mailbox: 'sent', query: ' support ', readState: 'unread' })).toMatchObject({ limit: 10, mailbox: 'sent', query: 'support', readState: 'unread' });
+    expect(() => notificationListInputSchema.parse({ readState: 'urgent' })).toThrow();
     expect(() => notificationListInputSchema.parse({ userKey: newId() })).toThrow('Unrecognized key');
   });
 
@@ -67,9 +68,11 @@ describe('app notifications', () => {
       createNotification: async (...args: unknown[]) => { calls.push(args); return { key: newId(), recipients: 1, deliveries: 1, replayed: false }; },
     } as any;
     let enqueued = '';
-    const result = await createAppNotificationService({ repository, embed, enqueue: async (key) => { enqueued = key; } }).notify({ title: 'Ready', message: 'Open the app.', userKeys: [target], notifyAll: false }, actor.value, 'request-1');
+    const published: unknown[] = [];
+    const result = await createAppNotificationService({ repository, embed, enqueue: async (key) => { enqueued = key; }, publishChanged: async (...args) => { published.push(args); } }).notify({ title: 'Ready', message: 'Open the app.', userKeys: [target], notifyAll: false }, actor.value, 'request-1');
     expect(calls[0]).toEqual({ teamKey: actor.value.teamKey, scopeKey: actor.value.runtimeScopeKey, requested: [target] });
     expect(enqueued).toBe(result.key);
+    expect(published).toEqual([[target, 'communication.changed']]);
   });
 
   test('persists one history projection per recipient independently of device deliveries', async () => {
@@ -101,15 +104,15 @@ describe('app notifications', () => {
     const order: string[] = [];
     let persisted: any;
     const repository = { async createStorageRetentionWarning(input: unknown) { order.push('persist'); persisted = input; return { key: 'warning-1', recipients: 1, deliveries: 2, replayed: false }; } } as any;
-    const service = createAppNotificationService({ repository, embed: async (text) => { order.push(`embed:${text}`); return Array(EMBEDDING_DIMENSIONS).fill(0.25); }, enqueue: async (key) => { order.push(`enqueue:${key}`); } });
+    const service = createAppNotificationService({ repository, embed: async (text) => { order.push(`embed:${text}`); return Array(EMBEDDING_DIMENSIONS).fill(0.25); }, enqueue: async (key) => { order.push(`enqueue:${key}`); }, publishChanged: async (userKey, event) => { order.push(`publish:${userKey}:${event}`); } });
     await service.notifyStorageRetentionWarning({ userKey: 'user', paymentPastDueAt: '2026-01-01T00:00:00.000Z', wipeDueAt: '2026-04-01T00:00:00.000Z', monthlyCostSparks: '180', now: '2026-02-03T00:00:00.000Z' });
-    expect(order).toEqual(['embed:Your storage needs Sparks\n\nYour stored data costs 180 Sparks a month and will be deleted in 57 days unless Sparks are refilled.', 'persist', 'enqueue:warning-1']);
+    expect(order).toEqual(['embed:Your storage needs Sparks\n\nYour stored data costs 180 Sparks a month and will be deleted in 57 days unless Sparks are refilled.', 'persist', 'publish:user:communication.changed', 'enqueue:warning-1']);
     expect(persisted).toMatchObject({ expectedPaymentPastDueAt: '2026-01-01T00:00:00.000Z', expectedWipeDueAt: '2026-04-01T00:00:00.000Z', warningDayStart: '2026-02-03T00:00:00.000Z', embedding: expect.any(Array) });
 
     order.length = 0;
     repository.createStorageRetentionWarning = async () => { order.push('persist'); return { key: 'history', recipients: 1, deliveries: 0, replayed: false }; };
     await service.notifyStorageRetentionWarning({ userKey: 'user', paymentPastDueAt: '2026-01-01T00:00:00.000Z', wipeDueAt: '2026-04-01T00:00:00.000Z', monthlyCostSparks: '180', now: '2026-02-04T00:00:00.000Z' });
-    expect(order.at(-1)).toBe('persist');
+    expect(order.slice(-2)).toEqual(['persist', 'publish:user:communication.changed']);
   });
 
   test('atomically fences one warning per UTC day and lifecycle while persisting embedding metadata and delivery rows', async () => {
@@ -169,12 +172,23 @@ describe('app notifications', () => {
       resolveRecipientUserKeys: async () => [actor.userKey],
       createNotification: async () => ({ key: 'notification-1', recipients: 1, deliveries, replayed }),
     } as any;
-    const service = createAppNotificationService({ repository, embed, enqueue: async (key) => { enqueued.push(key); } });
+    const published: string[] = [];
+    const service = createAppNotificationService({ repository, embed, enqueue: async (key) => { enqueued.push(key); }, publishChanged: async (key) => { published.push(key); } });
     await service.notify({ title: 'Ready', message: 'Body', userKeys: [actor.userKey], notifyAll: false }, actor.value, 'retry');
     replayed = false;
     deliveries = 0;
     await service.notify({ title: 'History only', message: 'Body', userKeys: [actor.userKey], notifyAll: false }, actor.value, 'history');
     expect(enqueued).toEqual(['notification-1']);
+    expect(published).toEqual([actor.userKey]);
+  });
+
+  test('publishes every persisted recipient without push devices and preserves success when publication fails', async () => {
+    const actor = context();
+    const recipients = [newId(), newId()];
+    const attempts: string[] = [];
+    const repository = { resolveRecipientUserKeys: async () => recipients, createNotification: async () => ({ key: 'notification-1', recipients: 2, deliveries: 0, replayed: false }) } as any;
+    await expect(createAppNotificationService({ repository, embed, publishChanged: async (key) => { attempts.push(key); throw new Error('SSE unavailable'); } }).notify({ title: 'Ready', message: 'Body', notifyAll: true }, actor.value, 'request')).resolves.toMatchObject({ deliveries: 0 });
+    expect(attempts).toEqual(recipients);
   });
 
   test('lists only through the authenticated member context', async () => {

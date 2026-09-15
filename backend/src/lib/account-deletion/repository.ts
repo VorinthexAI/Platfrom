@@ -28,7 +28,7 @@ export interface AccountDeletionRepository {
   finalize(userKey: string): Promise<AccountDeletionResult>;
 }
 
-const ACCOUNT_DELETE_WRITE_COLLECTIONS = [
+const BASE_ACCOUNT_DELETE_WRITE_COLLECTIONS = [
   'users', 'teams', 'userTeams', 'scopes', 'scopeMembers', 'authSessions', 'authChallenges', 'userSessions', 'userConnectors',
   'visitors', 'visitorSessions',
   'userMentions', 'userReactions', 'userHiddens', 'userGenerations', 'userSearches', 'contentSearchQueries', 'contentIdempotency',
@@ -38,6 +38,8 @@ const ACCOUNT_DELETE_WRITE_COLLECTIONS = [
   'checkoutHandoffs', 'paymentCheckouts', 'paymentOrders', 'subscriptions', 'bookRefundIntents',
   'storageObjects', 'storageChargingHours', 'storageChargingMeters', 'storageRetentionStates', 'galleryUploads', 'storageDeletionJobs',
 ] as const;
+
+const ACCOUNT_DELETE_WRITE_COLLECTIONS = [...BASE_ACCOUNT_DELETE_WRITE_COLLECTIONS, 'conversationArchiveStates'] as const;
 
 const DELETE_WRITE_COLLECTIONS = [...new Set([...ACCOUNT_DELETE_WRITE_COLLECTIONS, ...SCOPE_REMOVAL_WRITE_COLLECTIONS])];
 
@@ -141,6 +143,9 @@ export function createAccountDeletionRepository(
           LET cleanupIdempotency = (FOR item IN contentIdempotency FILTER item.actorKey == @userKey REMOVE item IN contentIdempotency RETURN 1)
           LET cleanupConversationMessages = (FOR item IN conversationMessages FILTER item.userKey == @userKey REMOVE item IN conversationMessages RETURN 1)
            LET cleanupConversationAttachmentArtifacts = (FOR item IN conversationAttachmentArtifacts FILTER item.userKey == @userKey REMOVE item IN conversationAttachmentArtifacts RETURN 1)
+           LET cleanupConversationArchiveStates = (FOR item IN conversationArchiveStates FILTER item.userKey == @userKey REMOVE item IN conversationArchiveStates RETURN 1)
+           LET cleanupConversationArchiveDocuments = (FOR item IN documents FILTER item.privateOwnerUserKey == @userKey && item.managedPurpose IN ["conversation-message", "conversation-summary"] REMOVE item IN documents RETURN 1)
+           LET cleanupConversationArchiveFolders = (FOR item IN folders FILTER item.privateOwnerUserKey == @userKey && item.managedPurpose IN ["conversation-root", "conversation", "conversation-summaries"] REMOVE item IN folders RETURN 1)
            LET cleanupConversations = (FOR item IN conversations FILTER item.userKey == @userKey REMOVE item IN conversations RETURN 1)
             LET cleanupTickets = (FOR item IN tickets FILTER item.userKey == @userKey REMOVE item IN tickets RETURN 1)
             LET notificationKeys = (FOR item IN appNotifications FILTER item.actorUserKey == @userKey RETURN item._key)

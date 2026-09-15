@@ -7,12 +7,13 @@ import { drainStorageDeletionJobs, type StorageDeletionDependencies } from '@/li
 export const STORAGE_DELETION_QUEUE_NAME = 'storage-object-deletion';
 export const STORAGE_DELETION_SCHEDULER_ID = 'storage-object-deletion-wakeup-v1';
 export const STORAGE_DELETION_REPEAT = { pattern: '* * * * *', tz: 'UTC' } as const;
-export const STORAGE_DELETION_LANES = 4;
-export const STORAGE_DELETION_LANE_BATCH_SIZE = 1000;
+export const STORAGE_DELETION_LANES = 1;
+export const STORAGE_DELETION_LANE_BATCH_SIZE = 100;
+const LEGACY_STORAGE_DELETION_MAX_LANE = 3;
 export const storageDeletionJobOptions: JobsOptions = { attempts: 8, backoff: { type: 'exponential', delay: 5_000 }, removeOnComplete: { age: 24 * 60 * 60, count: 10_000 }, removeOnFail: { age: 7 * 24 * 60 * 60, count: 10_000 } };
 
 const wakeSchema = z.object({ schemaVersion: z.literal(1), kind: z.literal('wake') }).strict();
-const laneSchema = z.object({ schemaVersion: z.literal(1), kind: z.literal('delete-lane'), bucket: z.string().datetime(), lane: z.number().int().min(0).max(STORAGE_DELETION_LANES - 1) }).strict();
+const laneSchema = z.object({ schemaVersion: z.literal(1), kind: z.literal('delete-lane'), bucket: z.string().datetime(), lane: z.number().int().min(0).max(LEGACY_STORAGE_DELETION_MAX_LANE) }).strict();
 export const storageDeletionQueueJobSchema = z.discriminatedUnion('kind', [wakeSchema, laneSchema]);
 export type StorageDeletionQueueJob = z.infer<typeof storageDeletionQueueJobSchema>;
 type Result = { enqueued: number; bucket: string } | { deleted: number; pending: number };
@@ -38,7 +39,7 @@ export const storageDeletionMinuteBucket = (now: Date) => {
   if (!Number.isFinite(now.getTime())) throw new TypeError('A valid storage deletion time is required.');
   return new Date(Math.floor(now.getTime() / 60_000) * 60_000).toISOString();
 };
-export const storageDeletionLaneJobId = (bucket: string, lane: number) => createHash('sha256').update(`storage-delete-lane\0${z.string().datetime().parse(bucket)}\0${z.number().int().min(0).max(STORAGE_DELETION_LANES - 1).parse(lane)}`).digest('hex');
+export const storageDeletionLaneJobId = (bucket: string, lane: number) => createHash('sha256').update(`storage-delete-lane\0${z.string().datetime().parse(bucket)}\0${z.number().int().min(0).max(LEGACY_STORAGE_DELETION_MAX_LANE).parse(lane)}`).digest('hex');
 
 async function enqueueLane(bucket: string, lane: number, targetQueue: QueueAccess) {
   const data = laneSchema.parse({ schemaVersion: 1, kind: 'delete-lane', bucket, lane });

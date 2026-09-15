@@ -27,6 +27,7 @@ describe('app search service', () => {
     expect(() => appSearchModelInputSchema.parse({ query: 'roadmap', collectionSlugs: ['folders'] })).toThrow();
     expect(appSearchModelInputSchema.parse({ query: 'roadmap', collectionSlugs: ['folders'], limit: 1 })).toMatchObject({ limit: 1 });
     expect(appSearchModelInputSchema.parse({ query: 'roadmap', collectionSlugs: ['folders'], limit: 50 })).toMatchObject({ limit: 50 });
+    expect(appSearchModelInputSchema.parse({ operation: 'sum', scope: 'account', field: 'sizeBytes', limit: 10 })).toMatchObject({ operation: 'sum', scope: 'account', field: 'sizeBytes' });
   });
 
   test('publishes distinct field, filter, operation, and status metadata for every collection adapter', () => {
@@ -81,6 +82,7 @@ describe('app search service', () => {
     expect(appSearchInputSchema.parse({ operation: 'count', collectionSlugs: ['places'], filters: { status: 'visited' } })).toMatchObject({ filters: { status: 'visited' } });
     expect(appSearchInputSchema.parse({ operation: 'count', collectionSlugs: ['books'], filters: { isFavorite: true } })).toMatchObject({ filters: { isFavorite: true } });
     expect(appSearchInputSchema.parse({ operation: 'sum', collectionSlugs: ['images', 'files'], field: 'sizeBytes' })).toMatchObject({ operation: 'sum', field: 'sizeBytes' });
+    expect(appSearchInputSchema.parse({ operation: 'sum', scope: 'account', field: 'sizeBytes' })).toMatchObject({ operation: 'sum', scope: 'account', field: 'sizeBytes' });
     expect(appSearchInputSchema.parse({ operation: 'sum', collectionSlugs: ['books'], field: 'chapterCount', filters: { status: 'ready', isFavorite: true } })).toMatchObject({ operation: 'sum', field: 'chapterCount' });
     for (const invalid of [
       { operation: 'list', query: 'books', collectionSlugs: ['books'] },
@@ -96,6 +98,12 @@ describe('app search service', () => {
       { operation: 'sum', collectionSlugs: ['images'], field: 'chapterCount' },
       { operation: 'sum', collectionSlugs: ['images', 'books'], field: 'sizeBytes' },
       { operation: 'count', collectionSlugs: ['images'], field: 'sizeBytes' },
+      { operation: 'sum', field: 'sizeBytes' },
+      { operation: 'sum', scope: 'account', collectionSlugs: ['images'], field: 'sizeBytes' },
+      { operation: 'sum', scope: 'account', field: 'sizeBytes', filters: { createdFrom: '2026-01-01T00:00:00.000Z' } },
+      { operation: 'sum', scope: 'account', field: 'chapterCount' },
+      { operation: 'count', scope: 'account', collectionSlugs: ['images'] },
+      { operation: 'sum', scope: 'account', field: 'sizeBytes', userKey },
     ]) expect(() => appSearchInputSchema.parse(invalid)).toThrow();
 
     for (const [input, path] of [
@@ -250,7 +258,10 @@ describe('app search service', () => {
     const compact = projectAppSearchModelResult(listed);
     expect(compact).toMatchObject({ groups: [{ examples: [{ tag: 'Work', targetType: 'document', targetLabel: 'Research Note' }] }] });
     expect(JSON.stringify(compact)).not.toMatch(new RegExp(`${assignmentKey}|${workKey}|${targetKey}`));
-    expect(projectAppSearchRetrieval(input, listed)).toBeNull();
+    expect(projectAppSearchRetrieval(input, listed)).toEqual({
+      source: 'results', limit: 10, filters: { tagNames: ['Work', 'Priority'], tagMatch: 'all', targetTypes: ['document'] }, searchCollectionSlugs: ['tag-assignments'],
+      groups: [{ collectionSlug: 'tag-assignments', results: [{ key: assignmentKey, label: 'Research Note' }] }],
+    });
   });
 
   test('lists and counts canonical resources without creating an embedding or search history', async () => {
@@ -345,6 +356,24 @@ describe('app search service', () => {
     expect(projectAppSearchModelResult(output)).toEqual(output);
     expect(projectAppSearchRetrieval({ operation: 'sum', collectionSlugs: ['images'], field: 'sizeBytes' }, output)).toBeNull();
     expect(calls).toEqual([{ collectionKey, createdFrom: boundary, createdTo: boundary, limit: 100 }, { collectionKey, createdFrom: boundary, createdTo: boundary, cursor: 'next', limit: 100 }]);
+    expect(embedded).toBe(false);
+  });
+
+  test('resolves exact account sums from trusted identity without collection enumeration', async () => {
+    const calls: string[] = []; let galleryCalls = 0; let embedded = false;
+    const service = createAppSearchService({
+      accountSumResolvers: { sizeBytes: async (trustedUserKey) => { calls.push(trustedUserKey); return '90071992547410000'; } },
+      galleryOverview: (async () => { galleryCalls += 1; return { collections: [], images: [] }; }) as never,
+      executeEmbedding: async () => { embedded = true; return { embedding }; },
+    });
+    const input = { operation: 'sum' as const, scope: 'account' as const, field: 'sizeBytes' as const };
+    const output = await service.search(input, context);
+    expect(output).toEqual({ operation: 'sum', scope: 'account', field: 'sizeBytes', sum: '90071992547410000', unit: 'bytes' });
+    expect(() => appSearchSumOutputSchema.parse(output)).not.toThrow();
+    expect(projectAppSearchModelResult(output)).toEqual(output);
+    expect(projectAppSearchRetrieval(input, output)).toBeNull();
+    expect(calls).toEqual([userKey]);
+    expect(galleryCalls).toBe(0);
     expect(embedded).toBe(false);
   });
 
@@ -605,26 +634,51 @@ describe('app search service', () => {
     expect(JSON.stringify(result)).not.toMatch(/"key"|connectorKey/);
   });
 
-  test('projects matched images as one collection pill per accessible collection and keeps uncollected images', () => {
+  test('groups multiple matched images by a shared collection and keeps uncollected images direct', () => {
     const collected = { key: newId(), filename: 'dog.jpg', caption: 'Dog at the shore', imageCaptionKey: null, mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, city: null, country: null, countryCode: null, latitude: null, longitude: null, locationSource: null, origin: 'uploaded' as const, mutationPolicy: 'user' as const, isFavorite: false, createdAt: '2026-08-24T00:00:00.000Z', updatedAt: '2026-08-24T00:00:00.000Z', url: 'https://example.test/dog.jpg', score: 0.9, collections: [{ key: newId(), name: 'Coastal Days' }, { key: newId(), name: 'Dogs' }] };
     const uncollected = { ...collected, key: newId(), filename: 'stray.jpg', caption: '   ', collections: [] };
     const retrieval = projectAppSearchRetrieval({ query: 'dog', collectionSlugs: ['images'], limit: 10 }, { query: 'dog', groups: [{ collectionSlug: 'images', results: [collected, { ...collected, key: newId(), filename: 'dog-2.jpg', caption: 'Another dog' }, uncollected] }] })!;
     expect(retrieval).toEqual({
       query: 'dog', limit: 10, searchCollectionSlugs: ['images'],
       groups: [
-        { collectionSlug: 'collections', results: [{ key: collected.collections[0]!.key, label: 'Coastal Days' }, { key: collected.collections[1]!.key, label: 'Dogs' }] },
+        { collectionSlug: 'collections', results: [{ key: collected.collections[0]!.key, label: 'Coastal Days' }] },
         { collectionSlug: 'images', results: [{ key: uncollected.key, label: 'stray.jpg' }] },
       ],
     });
   });
 
-  test('does not let one requested image fan out into multiple visible collection retrievals', () => {
+  test('projects list and get resources as non-search result retrievals', () => {
+    const collection = { key: newId(), name: 'Core' };
+    const image = { key: newId(), filename: 'generated.png', caption: 'A red sports car by the coast.', collections: [collection] };
+    expect(projectAppSearchRetrieval(
+      { operation: 'list', collectionSlugs: ['images'], limit: 1 },
+      { operation: 'list', groups: [{ collectionSlug: 'images', results: [image] }] },
+    )).toEqual({
+      source: 'results', limit: 1, searchCollectionSlugs: ['images'],
+      groups: [{ collectionSlug: 'images', results: [{ key: image.key, label: image.caption }] }],
+    });
+    const folder = { key: newId(), name: 'Project Atlas' };
+    expect(projectAppSearchRetrieval(
+      { operation: 'get', collectionSlugs: ['folders'], key: folder.key, limit: 1 },
+      { operation: 'get', groups: [{ collectionSlug: 'folders', results: [folder] }] },
+    )).toEqual({
+      source: 'results', limit: 1, searchCollectionSlugs: ['folders'],
+      groups: [{ collectionSlug: 'folders', results: [{ key: folder.key, label: 'Project Atlas' }] }],
+    });
+    const document = { key: newId(), name: 'Exact note', folder };
+    expect(projectAppSearchRetrieval(
+      { operation: 'get', collectionSlugs: ['documents'], key: document.key, limit: 1 },
+      { operation: 'get', groups: [{ collectionSlug: 'documents', results: [document] }] },
+    )).toMatchObject({ groups: [{ collectionSlug: 'documents', results: [{ key: document.key, label: 'Exact note' }] }] });
+  });
+
+  test('keeps images direct when their parent collections do not group multiple matches', () => {
     const date = '2026-08-24T00:00:00.000Z';
     const collections = Array.from({ length: 9 }, (_, index) => ({ key: newId(), name: `Collection ${index + 1}` }));
     const images = collections.map((collection, index) => ({ key: newId(), filename: `${index}.jpg`, caption: `Image ${index}`, imageCaptionKey: null, mimeType: 'image/jpeg', sizeBytes: 1, width: 1, height: 1, city: null, country: null, countryCode: null, latitude: null, longitude: null, locationSource: null, origin: 'uploaded' as const, mutationPolicy: 'user' as const, isFavorite: false, createdAt: date, updatedAt: date, url: `https://example.test/${index}.jpg`, score: 0.9, collections: [collection] }));
     const retrieval = projectAppSearchRetrieval({ query: 'these images', collectionSlugs: ['images'], limit: 1 }, { query: 'these images', groups: [{ collectionSlug: 'images', results: images }] })!;
     expect(retrieval.limit).toBe(1);
-    expect(retrieval.groups).toEqual([{ collectionSlug: 'collections', results: [{ key: collections[0]!.key, label: 'Collection 1' }] }]);
+    expect(retrieval.groups).toEqual([{ collectionSlug: 'images', results: [{ key: images[0]!.key, label: 'Image 0' }] }]);
   });
 
   test('projects nested Archive matches to one containing-folder pill and keeps root resources direct', () => {
@@ -649,7 +703,7 @@ describe('app search service', () => {
     ]);
   });
 
-  test('projects Signal children to their inbox and Compass places to every containing trip', () => {
+  test('keeps manageable Signal and Compass children direct with supported destination context', () => {
     const inbox = { key: newId(), connectorKey: newId(), name: 'Work' };
     const date = '2026-08-24T00:00:00.000Z';
     const message = { key: newId(), subject: 'Launch', summary: 'Summary', intent: 'Review', priority: 'normal', state: 'informational', lastMessageAt: date, unread: false, isRead: true, isFavorite: false, inboxCategory: 'Important', createdAt: date, updatedAt: date, score: 0.9, inbox };
@@ -661,9 +715,31 @@ describe('app search service', () => {
       { query: 'summer', groups: [{ collectionSlug: 'email-messages', results: [message] }, { collectionSlug: 'places', results: [place, standalone] }] },
     )!;
     expect(retrieval.groups).toEqual([
+      { collectionSlug: 'email-messages', results: [{ key: message.key, destinationKey: inbox.connectorKey, label: 'Launch' }] },
+      { collectionSlug: 'places', results: [{ key: place.key, label: 'Stockholm' }, { key: standalone.key, label: 'Oslo' }] },
+    ]);
+  });
+
+  test('collapses multiple children sharing an inbox or trip while retaining unrelated direct links', () => {
+    const inbox = { key: newId(), connectorKey: newId(), name: 'Work' };
+    const trip = { key: newId(), name: 'Nordic summer' };
+    const messages = ['Launch', 'Quarterly review'].map((subject) => ({ key: newId(), subject, inbox }));
+    const places = ['Stockholm', 'Oslo'].map((name) => ({ key: newId(), name, trips: [trip] }));
+    const directPlace = { key: newId(), name: 'Copenhagen', trips: [{ key: newId(), name: 'Weekend' }] };
+    const messageRetrieval = projectAppSearchRetrieval(
+      { operation: 'list', collectionSlugs: ['email-messages'], filters: { connectorKey: inbox.connectorKey } },
+      { operation: 'list', groups: [{ collectionSlug: 'email-messages', results: messages }] },
+    )!;
+    expect(messageRetrieval.groups).toEqual([
       { collectionSlug: 'inboxes', results: [{ key: inbox.key, destinationKey: inbox.connectorKey, destinationCollectionSlug: 'email-messages', label: 'Work' }] },
+    ]);
+    const placeRetrieval = projectAppSearchRetrieval(
+      { operation: 'list', collectionSlugs: ['places'] },
+      { operation: 'list', groups: [{ collectionSlug: 'places', results: [...places, directPlace] }] },
+    )!;
+    expect(placeRetrieval.groups).toEqual([
       { collectionSlug: 'trips', results: [{ key: trip.key, label: 'Nordic summer' }] },
-      { collectionSlug: 'places', results: [{ key: standalone.key, label: 'Oslo' }] },
+      { collectionSlug: 'places', results: [{ key: directPlace.key, label: 'Copenhagen' }] },
     ]);
   });
 
@@ -691,7 +767,7 @@ describe('app search service', () => {
       { query: 'many', collectionSlugs: ['images', 'folders'], limit: 50 },
       { query: 'many', groups: [{ collectionSlug: 'images', results: images }, { collectionSlug: 'folders', results: folders }] },
     )!;
-    expect(retrieval.groups.map(({ collectionSlug, results }) => [collectionSlug, results.length])).toEqual([['collections', 50], ['folders', 50]]);
+    expect(retrieval.groups.map(({ collectionSlug, results }) => [collectionSlug, results.length])).toEqual([['images', 50], ['folders', 50]]);
     expect(retrieval.groups.flatMap(({ results }) => results)).toHaveLength(MAX_APP_SEARCH_RETRIEVAL_RESULTS);
   });
 

@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { createEmailHandlers } from './email-inbox';
-import { EmailIdempotencyError } from '@/lib/email-inbox/service';
+import { createEmailService, EmailIdempotencyError } from '@/lib/email-inbox/service';
+import { createEmailRepository } from '@/lib/email-inbox/repository';
+import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
+import { toArangoDoc } from '@/lib/db/base';
 import { runTool } from '@/lib/ai/tools';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 
@@ -64,6 +67,35 @@ function appWith(overrides: Parameters<typeof createEmailHandlers>[0]) {
 }
 
 describe('email inbox handlers', () => {
+  test('HTTP and Core draft attachment updates share workspace authorization and byte loading', async () => {
+    const reads: any[] = [];
+    const downloads: string[] = [];
+    let denied = false;
+    const repository = createEmailRepository({ query: async (query: string, vars: any) => {
+      if (query.includes('FOR ref IN @refs')) {
+        reads.push(vars);
+        return { all: async () => denied ? [] : [{ type: 'document', key: connectorKey, name: 'proposal.pdf', mimeType: 'application/pdf', sizeBytes: 5, storageKey: 'original.pdf' }] };
+      }
+      const { connectorKey: _connectorKey, ...draft } = newDraftOutput;
+      return { next: async () => toArangoDoc({ ...draft, accountKey: connectorKey, userKey, scopeKey: userKey, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), attachments: vars.attachments.attachments, status: 'edited' }) };
+    } } as never);
+    const service = createEmailService({ repository, authorize: async () => ({ teamMembershipKey: userKey, role: 'owner' }), publishInboxChanged: async () => undefined,
+      storage: { download: async (key: string) => { downloads.push(key); return { bytes: new TextEncoder().encode('hello') }; } } as never,
+    });
+    const app = appWith({ getIdentity: identity as never, service, oauth: {} as never });
+    const contentContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: connectorKey, teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const attachments = [{ type: 'document', key: connectorKey }];
+    const request = () => app.request(`/email/drafts/${userKey}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, attachments }) });
+    expect((await request()).status).toBe(200);
+    await runTool('email.draft.update', '', { draftKey: userKey, attachments }, { contentContext, emailService: service });
+    expect(downloads).toEqual(['original.pdf', 'original.pdf']);
+    expect(reads).toHaveLength(4);
+    expect(reads.every((read) => read.userKey === userKey && read.scopeKey === scopeKey)).toBe(true);
+    denied = true;
+    expect((await request()).status).toBe(403);
+    await expect(runTool('email.draft.update', '', { draftKey: userKey, attachments }, { contentContext, emailService: service })).rejects.toThrow('Every attachment');
+    expect(downloads).toHaveLength(2);
+  });
   test('passes authenticated team and scope context to overview', async () => {
     let received: unknown;
     const app = appWith({ getIdentity: identity as never, service: { overview: async (actor: unknown, input: unknown) => { received = { actor, input }; return overviewOutput; } } as never, oauth: {} as never });

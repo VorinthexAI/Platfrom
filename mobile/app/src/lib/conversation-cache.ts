@@ -74,6 +74,22 @@ export function replaceConversationInMatchingLists(queryClient: QueryClient, con
   });
 }
 
+export function conversationListMembershipKeys(queryClient: QueryClient, context: ConversationContext, conversationKey: string): QueryKey[] {
+  return queryClient.getQueryCache().findAll({ queryKey: conversationQueryKeys.lists(context) }).filter((query) => {
+    const data = query.state.data as InfiniteData<ConversationPage> | undefined;
+    return data?.pages.some((page) => page.conversations.some(({ key }) => key === conversationKey));
+  }).map(({ queryKey }) => queryKey);
+}
+
+export function restoreConversationToLists(queryClient: QueryClient, conversation: Conversation, queryKeys: readonly QueryKey[]) {
+  for (const queryKey of queryKeys) queryClient.setQueryData<InfiniteData<ConversationPage>>(queryKey, (data) => {
+    if (!data) return data;
+    const flattened = data.pages.flatMap(({ conversations }) => conversations);
+    if (flattened.some(({ key }) => key === conversation.key)) return data;
+    return repartition(data, [...flattened, conversation].sort(compareConversations));
+  });
+}
+
 export function removeConversationFromLists(queryClient: QueryClient, context: ConversationContext, conversationKey: string) {
   updateLists(queryClient, context, (current) => current.filter(({ key }) => key !== conversationKey));
   queryClient.removeQueries({ queryKey: conversationQueryKeys.messages(context, conversationKey) });
@@ -99,6 +115,11 @@ export type LocalConversationAttachment = {
   uri: string;
 };
 export type ConversationDisplayAttachment = ConversationMessage["attachments"][number] | LocalConversationAttachment;
+export const conversationAttachmentDisplayKey = (attachment: ConversationDisplayAttachment) => "local" in attachment ? attachment.clientKey : attachment.displayKey ?? attachment.key;
+export function conversationAttachmentsForRender(previous: readonly ConversationDisplayAttachment[], message: Pick<OptimisticMessage, "attachments" | "attachmentStatus">): ConversationDisplayAttachment[] {
+  if (message.attachments.length) return [...message.attachments];
+  return message.attachmentStatus === "PENDING" ? [...previous] : [];
+}
 export type OptimisticMessage = Omit<ConversationMessage, "turnKey" | "completedAt" | "attachments"> & {
   turnKey?: string;
   completedAt?: string;
@@ -146,7 +167,44 @@ export function settlePendingAttachmentOverlays(persisted: readonly Conversation
 }
 
 export function replaceTurnMessages(messages: readonly OptimisticMessage[], userMessage: OptimisticMessage, assistantMessage: OptimisticMessage, optimisticKeys: readonly string[]) {
-  const authoritativeIdentities = new Set([turnRoleIdentity(userMessage), turnRoleIdentity(assistantMessage)].filter(Boolean));
-  const withoutOptimistic = messages.filter((message) => !optimisticKeys.includes(message.key) && message.key !== userMessage.key && message.key !== assistantMessage.key && !authoritativeIdentities.has(turnRoleIdentity(message)));
-  return [...withoutOptimistic, userMessage, assistantMessage];
+  const terminalAttachmentStatuses = new Set(["COMPLETED", "PARTIAL", "FAILED"]);
+  const preserveTerminalAttachmentVersion = (incoming: OptimisticMessage) => {
+    const incomingIdentity = turnRoleIdentity(incoming);
+    if (incoming.attachmentStatus !== "PENDING" || !incomingIdentity) return incoming;
+    return messages.find((message) => turnRoleIdentity(message) === incomingIdentity && terminalAttachmentStatuses.has(message.attachmentStatus)) ?? incoming;
+  };
+  const resolvedUserMessage = preserveTerminalAttachmentVersion(userMessage);
+  const resolvedAssistantMessage = preserveTerminalAttachmentVersion(assistantMessage);
+  const authoritativeIdentities = new Set([turnRoleIdentity(resolvedUserMessage), turnRoleIdentity(resolvedAssistantMessage)].filter(Boolean));
+  const withoutOptimistic = messages.filter((message) => !optimisticKeys.includes(message.key) && message.key !== resolvedUserMessage.key && message.key !== resolvedAssistantMessage.key && !authoritativeIdentities.has(turnRoleIdentity(message)));
+  return [...withoutOptimistic, resolvedUserMessage, resolvedAssistantMessage];
+}
+
+export type RemovedConversationMessages = {
+  pages: { pageIndex: number; messages: ConversationMessage[] }[];
+};
+
+export function removeConversationMessages(data: InfiniteData<ConversationMessagePage> | undefined, remove: (message: ConversationMessage) => boolean) {
+  if (!data) return { data, removed: { pages: [] } satisfies RemovedConversationMessages };
+  const removedPages: RemovedConversationMessages["pages"] = [];
+  const pages = data.pages.map((page, pageIndex) => {
+    const removed = page.messages.filter(remove);
+    if (!removed.length) return page;
+    removedPages.push({ pageIndex, messages: removed });
+    return { ...page, messages: page.messages.filter((message) => !remove(message)) };
+  });
+  return { data: removedPages.length ? { ...data, pages } : data, removed: { pages: removedPages } };
+}
+
+export function restoreConversationMessages(data: InfiniteData<ConversationMessagePage> | undefined, removed: RemovedConversationMessages) {
+  if (!data || !removed.pages.length) return data;
+  const byPage = new Map(removed.pages.map((page) => [page.pageIndex, page.messages]));
+  const pages = data.pages.map((page, pageIndex) => {
+    const restoring = byPage.get(pageIndex);
+    if (!restoring?.length) return page;
+    const messages = [...new Map([...page.messages, ...restoring].map((message) => [message.key, message])).values()]
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.key.localeCompare(right.key));
+    return { ...page, messages };
+  });
+  return { ...data, pages };
 }

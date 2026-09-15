@@ -72,7 +72,7 @@ test("fences pull-to-refresh results to the initiating Archive view", () => {
   expect(refresh).toContain("if (!isCurrent()) return;");
   expect(refresh).toContain("refreshContentLocation(queryClient, contentContext, folderKey)");
   expect(refresh.indexOf("if (!isCurrent()) return;", refresh.indexOf("await Promise.all"))).toBeLessThan(refresh.indexOf("setFolders(location.folders)"));
-  expect(refresh).toContain("if (isCurrent()) setError(");
+  expect(refresh).toContain("if (interactive && isCurrent()) setError(");
 });
 
 test("keeps newly created folder cards fully interactive with their canonical optimistic key", () => {
@@ -130,7 +130,7 @@ test("keeps scanned originals complete and ignores stale source-page requests", 
 test("uses explicit original availability rather than file extension for original actions", () => {
   expect(source).toContain("document.originalAvailable ? \"original\" : \"txt\"");
   expect(source).toContain("selectedDocument.extension && selectedDocument.originalAvailable");
-  expect(source).toContain('selectedDocument.originalAvailable ? "Download original" : "Download text"');
+  expect(source).toContain('onPress={downloadOriginal} style={styles.sheetAction}>Download</BottomSheetItem>');
 });
 
 test("uses folder cards while root and nested folder searches load", () => {
@@ -144,6 +144,14 @@ test("keeps folder empty states hidden until the visible location resolves", () 
   expect(source).not.toContain("archiveFolderTreeReady");
 });
 
+test("does not let folder loading overwrite an explicit tab selection", () => {
+  expect(source).toContain("const folderTabSelectionRevision = useRef(0)");
+  expect(source).toContain("folderTabSelectionRevision.current += 1");
+  expect(source.match(/folderTabSelectionRevision\.current === tabSelectionRevision \? populatedContentTab/g)).toHaveLength(2);
+  expect(source.match(/onPress=\{\(\) => selectFolderContentTab\(/g)).toHaveLength(6);
+  expect(source).toContain("if (folderTabSelectionRevision.current === tabSelectionRevision) setFolderContentTab(previousTab)");
+});
+
 test("uses canonical app search for Archive folder and document pickers", () => {
   expect(source).toContain("const [librarySearchResults, setLibrarySearchResults] = useState<ContentSearchResponse>()");
   expect(source).toContain("searchContentMatches(normalized, controller.signal, undefined, false)");
@@ -155,7 +163,8 @@ test("uses canonical app search for Archive folder and document pickers", () => 
 test("integrates global tag filters only into primary Archive root and folder results", () => {
   expect(source).toContain("const tagContextKey = tagFilterContextKey(contentContext)");
   expect(source).toContain("state.selectedTagsByContext[tagContextKey] ?? EMPTY_SELECTED_TAGS");
-  expect(source.match(/<TagFilterLane context=\{contentContext\} \/>/g)).toHaveLength(2);
+  expect(source.match(/<TagFilterLane context=\{contentContext\} \/>/g)).toHaveLength(1);
+  expect(source).toContain('const filterBadges = !filtersActive ? null : <View style={styles.filterBadgeRow}>\n    <TagFilterLane context={contentContext} />');
   expect(source).toContain('<TagFilterSheet context={contentContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />');
   expect(source).toContain('<BottomSheetItem onPress={openTagFilters} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem>');
   expect(source).toContain("closeSheet();\n    requestAnimationFrame(() => setTagFilterOpen(true));");
@@ -170,9 +179,10 @@ test("integrates global tag filters only into primary Archive root and folder re
 
 test("appends processing documents and generated versions as full-pill skeletons", () => {
   expect(source).toContain('import { Skeleton } from "@vorinthex/shared/ui/skeleton";');
-  const processingButton = source.slice(source.indexOf("function ProcessingDocumentButton"), source.indexOf("export function KnowledgeWorkspace"));
-  expect(processingButton).toContain('<Skeleton accessibilityLabel={`Processing ${name}`} accessibilityRole="progressbar" style={styles.documentSkeleton} />');
-  expect(processingButton).not.toContain("Spinner");
+  expect(source).not.toContain('ProcessingDocumentButton');
+  expect(source.match(/<Skeleton accessibilityLabel=\{`Processing \$\{item.name\}`\} accessibilityRole="progressbar" key=\{item.id\} style=\{\[styles.documentSkeleton, styles.skeletonCard\]\} \/>/g)).toHaveLength(2);
+  expect(source.match(/<Skeleton accessibilityLabel="Processing scanned document" accessibilityRole="progressbar" key=\{visibleProcessingScan.id\} style=\{\[styles.documentSkeleton, styles.skeletonCard\]\} \/>/g)).toHaveLength(2);
+  expect(source).not.toContain('this might take a while');
   expect(source).toContain('setVersions((history) => [...history.filter(({ key }) => key !== version.key), version])');
   const versionList = source.slice(source.indexOf('{versions.map((version)'), source.indexOf('</View>\n        ) : null}', source.indexOf('{versions.map((version)')));
   expect(versionList.indexOf('{versions.map((version)')).toBeLessThan(versionList.indexOf('<Skeleton accessibilityLabel={pendingDocumentVersionLabel}'));
@@ -231,15 +241,26 @@ test("centers confirmed empty states across Archive sheets", () => {
   expect(searchHistorySheet).toContain('styles.list, !loading && history.length === 0 && styles.emptyContent');
   expect(source).toContain('styles.summaryTopicPanel, !loadingSummaryTopics && !sheetError && summaryTopics.length === 0 && styles.sheetEmptyContent');
   expect(source).toContain('styles.versionPanel, !loadingVersions && !pendingDocumentVersionLabel && versions.length === 0 && styles.sheetEmptyContent');
-  expect(source).toContain('styles.audioVersionList, !loadingAudioVersions && audioVersions.length === 0 && styles.sheetEmptyContent');
+  expect(source).toContain('styles.audioVersionList, !loadingAudioVersions && !generatingDocumentAudio && audioVersions.length === 0 && styles.sheetEmptyContent');
   expect(source).toContain('await generateContentDocumentAudio(document.key)');
   expect(source).toContain('>Generate audio</Button>');
+  expect(source).not.toContain('loading={generatingDocumentAudio}');
+  expect(source).toContain('{generatingDocumentAudio ? <Skeleton accessibilityLabel="Generating document audio" accessibilityRole="progressbar" style={[styles.documentSkeleton, styles.skeletonCard]} /> : null}');
   expect(source).toContain('await playAudioVersion(version, 0, true, false)');
   expect(source).toContain('styles.audioVersionList, !loadingSummaries && summaries.length === 0 && styles.sheetEmptyContent');
   expect(source).toContain('styles.sourceGrid, !sourceImagesLoading && !sheetError && sourceImages.length === 0 && styles.sheetEmptyContent');
   expect(source).toContain('styles.destinationFolderGrid, !destinationLoading && !sheetError && destinationFolders.length === 0 && styles.sheetEmptyContent');
   expect(source).toContain('styles.folderGrid, !showArchiveRoot && visibleFolders.length === 0 && styles.sheetEmptyContent');
   expect(source).toContain('styles.folderGrid, visibleDocuments.length === 0 && styles.sheetEmptyContent');
+});
+
+test("summary history uses compact single-line name pills", () => {
+  const summaries = source.slice(source.indexOf('{activeSheet === "summaryVersions" ? ('), source.indexOf('{activeSheet === "summaryReader" ? ('));
+  expect(summaries).toContain('onPress={() => openSummaryReader(summary)} size="md" style={styles.documentButton}');
+  expect(summaries).toContain('<Text ellipsizeMode="tail" numberOfLines={1} style={styles.documentButtonLabel}>{capitalizeLabel(summary.topic ?? summary.sourceTitle)}</Text>');
+  expect(summaries).not.toContain('summary.version');
+  expect(summaries).not.toContain('summary.createdAt');
+  expect(summaries).not.toContain('styles.rowSubtitle');
 });
 
 test("uses the single shared search history sheet", async () => {
@@ -284,7 +305,8 @@ test("keeps compact and actionable Archive errors inline", () => {
   expect(source).toContain('if (action === "upload") setSheetError(message);');
   expect(source).toContain('setSheetError(cause instanceof Error ? cause.message : "The search could not be removed.")');
   expect(source).toContain('if (activeSheetRef.current === "versions") setSheetError(message);');
-  expect(source).toContain('setSheetError(cause instanceof Error ? cause.message : "Files could not be selected.")');
+  expect(source).toContain('const message = cause instanceof Error ? cause.message : "Files could not be selected.";');
+  expect(source).toContain('setError(message);\n      setSheetError(message);');
 });
 
 test("uses only intrinsic and full-height Archive sheets", () => {
@@ -373,7 +395,6 @@ test("retains known favorite state on provisional selected search documents", ()
 
 test("suppresses structural Archive actions for managed and protected resources while retaining edit, favorite, and hide", () => {
   expect(source).toContain("const selectionHasStructuralProtection = [...selectedFolders, ...selectedDocuments].some((item) => item.managed || item.structuralProtection)");
-  expect(source).toContain("!currentFolder?.managed ? <Button");
   expect(source).toContain("!selectionHasStructuralProtection ? <Button");
   expect(source).toContain("!selectedDocument.managed ? <BottomSheetItem");
   expect(source).toContain("!selectedFolder.managed ? <BottomSheetItem");
@@ -391,11 +412,18 @@ test("suppresses structural Archive actions for managed and protected resources 
   expect(folderActions.match(/!selectedFolder\.managed && !selectedFolder\.structuralProtection/g)).toHaveLength(3);
 });
 
-test("opens bulk Archive tag assignment with the full content context and preserves selection", () => {
+test("shows the folder header create action inside managed Archive folders", () => {
+  expect(source).toContain('<Button accessibilityLabel={`Create in ${currentFolder?.name ?? "Archive"}`} contentMode="raw" onPress={() => openSheet("create")} size="xs" variant="icon"><PlusIcon size="sm" /></Button>');
+  expect(source).not.toContain('!currentFolder?.managed ? <Button accessibilityLabel={`Create in');
+});
+
+test("opens bulk Archive tag assignment with the full content context and clears selection on apply", () => {
   expect(source).toContain('import { ResourceTagsSheet } from "@/components/ResourceTagsSheet";');
   expect(source).toContain('selectedFolders.map(({ key }) => ({ type: "folder" as const, key }))');
   expect(source).toContain('selectedDocuments.map(({ key }) => ({ type: "document" as const, key }))');
   expect(source).toContain('closeSheet(true);\n    requestAnimationFrame(() => setResourceTagsOpen(true));');
   expect(source).toContain('<Button disabled={bulkLoading} onPress={openResourceTags} size="md" variant="secondary">Tags</Button>');
-  expect(source).toContain('<ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />');
+  expect(source).toContain('<ResourceTagsSheet context={contentContext} onApply={clearSelection} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />');
+  expect(source).toContain('function documentPillName(document: Pick<ContentDocument, "name" | "extension">): string');
+  expect(source).toContain('{documentPillName(document)}');
 });

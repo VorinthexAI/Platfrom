@@ -5,7 +5,7 @@ import { conversationMessageSchema, projectConversationMessage, type Conversatio
 import { EMBEDDING_DIMENSIONS, embeddingMetadata } from '@/lib/embeddings';
 
 const timestamp = '2026-09-01T00:00:00.000Z';
-const turnMessage = (role: 'USER' | 'ASSISTANT', overrides: Partial<ConversationMessage> = {}): ConversationMessage => ({ key: newId(), conversationKey: newId(), teamKey: 'team', scopeKey: newId(), userKey: newId(), turnKey: 'request', requestHash: 'a'.repeat(64), type: 'TEXT', role, status: role === 'USER' ? 'COMPLETED' : 'PENDING', content: role === 'USER' ? 'question' : 'Pending', attachments: [], retrievals: [], createdAt: timestamp, ...(role === 'USER' ? { completedAt: timestamp } : {}), ...overrides, attachmentStatus: overrides.attachmentStatus ?? (overrides.attachments?.length ? 'COMPLETED' : overrides.pendingAttachmentKeys?.length ? 'PENDING' : 'NONE') });
+const turnMessage = (role: 'USER' | 'ASSISTANT', overrides: Partial<ConversationMessage> = {}): ConversationMessage => ({ key: newId(), conversationKey: newId(), teamKey: 'team', scopeKey: newId(), userKey: newId(), turnKey: 'request', requestHash: 'a'.repeat(64), type: 'TEXT', role, status: role === 'USER' ? 'COMPLETED' : 'PENDING', content: role === 'USER' ? 'question' : 'Pending', attachments: [], retrievals: [], createdAt: timestamp, ...(role === 'USER' ? { completedAt: timestamp } : {}), ...overrides, guideTopics: overrides.guideTopics ?? { status: 'NONE' }, attachmentStatus: overrides.attachmentStatus ?? (overrides.attachments?.length ? 'COMPLETED' : overrides.pendingAttachmentKeys?.length ? 'PENDING' : 'NONE') });
 const raw = ({ key, ...value }: ConversationMessage) => ({ _key: key, ...value });
 
 describe('conversation repository boundaries', () => {
@@ -28,6 +28,8 @@ describe('conversation repository boundaries', () => {
     expect([legacyNone.attachmentStatus, legacyCompleted.attachmentStatus, legacyPending.attachmentStatus]).toEqual(['NONE', 'COMPLETED', 'PENDING']);
     expect(projectConversationMessage(legacyPending)).toMatchObject({ attachmentStatus: 'PENDING', attachments: [] });
     expect(projectConversationMessage(legacyPending)).not.toHaveProperty('pendingAttachmentKeys');
+    const privateContext = conversationMessageSchema.parse({ ...turnMessage('USER', { pendingAttachmentKeys: [pendingKey] }), attachmentContext: [{ filename: 'notes.txt', content: 'private extracted text' }] });
+    expect(projectConversationMessage(privateContext)).not.toHaveProperty('attachmentContext');
     expect(conversationMessageSchema.parse({ ...turnMessage('USER', { attachments: [attachment] }), attachmentStatus: 'PARTIAL' }).attachmentStatus).toBe('PARTIAL');
   });
 
@@ -38,9 +40,10 @@ describe('conversation repository boundaries', () => {
     await repository.list(owner, { limit: 26, favoriteOnly: false });
     await repository.listMessages(owner, newId(), undefined, 26);
     expect(queries[0]).toContain('SORT conversation.isFavorite DESC, conversation.updatedAt DESC, conversation._key ASC');
+    expect(queries[0]).toContain('message.role == "USER"');
     expect(queries[0]).toContain('FILTER !@favoriteOnly || conversation.isFavorite == true');
     expect(queries[0]).toContain('@cursor.updatedAt');
-    expect(bindings[0]).toMatchObject({ favoriteOnly: false, cursor: null, limit: 26 });
+    expect(bindings[0]).toMatchObject({ '@messages': 'conversationMessages', favoriteOnly: false, cursor: null, limit: 26 });
     expect(queries[1]).toContain('SORT message.createdAt DESC, message._key DESC');
   });
 
@@ -67,6 +70,7 @@ describe('conversation repository boundaries', () => {
     expect(query).toContain('SORT message.createdAt DESC, message.turnKey DESC, message.role ASC, message._key DESC LIMIT @limit');
     expect(query).toContain('message.createdAt < @before');
     expect(vars).toEqual({ '@conversations': 'conversations', '@messages': 'conversationMessages', ...owner, conversationKey, before: timestamp, limit: 50 });
+    expect(query).not.toContain('message.type == "TEXT"');
   });
 
   test('retrieves both completed roles scope-wide only through existing same-owner conversations', async () => {
@@ -90,6 +94,34 @@ describe('conversation repository boundaries', () => {
     expect(query).toContain('message.embeddingDimensions == @dimensions');
     expect(query).toContain('similarity >= @minimumSimilarity');
     expect(vars).toEqual({ '@conversations': 'conversations', '@messages': 'conversationMessages', ...owner, embedding: vector, dimensions: EMBEDDING_DIMENSIONS, embeddingProvider: embeddingMetadata().embeddingProvider, embeddingModel: embeddingMetadata().embeddingModel, minimumSimilarity: CONVERSATION_SEMANTIC_MINIMUM_COSINE_SIMILARITY, before: timestamp, excludedKeys, limit: 20 });
+  });
+
+  test('reads only the deterministic current summary owned by the conversation user', async () => {
+    let query = ''; let vars: any;
+    const owner = { teamKey: 'team', scopeKey: newId(), userKey: newId() }, conversationKey = newId();
+    const database: any = { query: async (value: string, bind: unknown) => { query = value; vars = bind; return { next: async () => 'Owned rolling summary' }; } };
+
+    await expect(createConversationRepository(database).readArchiveSummary!(owner, conversationKey)).resolves.toBe('Owned rolling summary');
+
+    for (const filter of ['conversation != null', 'conversation.teamKey == @teamKey', 'conversation.scopeKey == @scopeKey', 'conversation.userKey == @userKey', 'summary.privateOwnerUserKey == @userKey', 'summary.managedPurpose == "conversation-summary"', 'summary.managedOwnerKey == conversation._key', 'summary.mutationPolicy == "system-only"']) expect(query).toContain(filter);
+    expect(vars).toMatchObject({ '@conversations': 'conversations', '@documents': 'documents', ...owner, conversationKey });
+    expect(vars.summaryKey).toBeString();
+  });
+
+  test('self-heals missing Archive projection state with the authorized actor', async () => {
+    let query = ''; let vars: any;
+    const owner = { teamKey: 'team', scopeKey: newId(), userKey: newId() }, conversationKey = newId(), actorKey = newId();
+    const state = { _key: conversationKey, conversationKey, ...owner, actorKey, desiredRevision: 1, projectedRevision: 0, createdAt: timestamp, updatedAt: timestamp };
+    const database: any = { query: async (value: string, bind: unknown) => { query = value; vars = bind; return { next: async () => state }; } };
+
+    await expect(createConversationRepository(database).requestArchiveProjection!(owner, conversationKey, timestamp, actorKey)).resolves.toMatchObject({ key: conversationKey, actorKey, desiredRevision: 1 });
+
+    expect(query).toContain('UPSERT { _key: conversation._key }');
+    expect(query).toContain('desiredRevision: 1, projectedRevision: 0');
+    expect(query).toContain('desiredRevision: OLD.desiredRevision + 1');
+    expect(query).toContain('conversation.name != @defaultName');
+    expect(vars.defaultName).toBe('New chat');
+    expect(vars).toMatchObject({ ...owner, conversationKey, actorKey, updatedAt: timestamp });
   });
 
   test('stores a completed message embedding only through its owned conversation', async () => {
@@ -133,6 +165,9 @@ describe('conversation repository boundaries', () => {
     expect(source.indexOf('REMOVE artifact IN @@artifacts')).toBeLessThan(source.indexOf('REMOVE conversation IN @@conversations'));
     expect(source.indexOf('REMOVE message IN @@messages')).toBeLessThan(source.indexOf('REMOVE conversation IN @@conversations'));
     expect(source).not.toContain('deletedAt');
+    expect(source).toContain('root.managedPurpose == "conversation-root"');
+    expect(source).toContain('folder.managedPurpose == "conversation"');
+    expect(source).toContain('FILTER remaining == null REMOVE root');
   });
 
   test('hard-deletes the owned paired turn selected by either message', async () => {
@@ -143,9 +178,11 @@ describe('conversation repository boundaries', () => {
     for (const filter of ['conversation != null', 'selected != null', 'selected.conversationKey == conversation._key', 'selected.teamKey == @teamKey', 'message.turnKey == selected.turnKey', 'message.status == "PENDING"', 'REMOVE message IN @@messages']) expect(query).toContain(filter);
     expect(query).toContain('UPDATE conversation WITH { updatedAt: @updatedAt }');
     expect(query).toContain('REMOVE artifact IN @@artifacts');
+    expect(query).toContain('REMOVE document IN @@documents');
+    expect(query.indexOf('REMOVE document IN @@documents')).toBeLessThan(query.indexOf('REMOVE message IN @@messages'));
     expect(query).toContain('UPSERT { storageKey: artifact.stagedStorageKey }');
     expect(query).toContain('artifact._key NOT IN retainedArtifactKeys');
-    expect(vars).toEqual({ '@conversations': 'conversations', '@messages': 'conversationMessages', '@artifacts': 'conversationAttachmentArtifacts', '@storageJobs': 'storageDeletionJobs', ...owner, conversationKey, messageKey, updatedAt: timestamp });
+    expect(vars).toEqual({ '@conversations': 'conversations', '@messages': 'conversationMessages', '@artifacts': 'conversationAttachmentArtifacts', '@storageJobs': 'storageDeletionJobs', '@documents': 'documents', ...owner, conversationKey, messageKey, updatedAt: timestamp });
   });
 
   test('atomically claims the first turn and serializes a distinct pending turn', async () => {
@@ -154,7 +191,7 @@ describe('conversation repository boundaries', () => {
     const database: any = { query: async (query: string) => { call += 1; if (call === 1) return { next: async () => ({ existingUser: null, existingAssistant: null, active: null, first: true }) }; inserts.push(query); return { next: async () => raw(call === 2 ? user : assistant) }; } };
     const repository = createConversationRepository(database, (operation) => operation(database));
     expect(await repository.beginTurn({ teamKey: user.teamKey, scopeKey: user.scopeKey, userKey: user.userKey }, user.conversationKey, user, assistant)).toMatchObject({ state: 'created', first: true });
-    expect(inserts).toHaveLength(2);
+    expect(inserts).toHaveLength(3);
 
     const busyDb: any = { query: async () => ({ next: async () => ({ existingUser: null, existingAssistant: null, active: newId(), first: false }) }) };
     expect(await createConversationRepository(busyDb, (operation) => operation(busyDb)).beginTurn({ teamKey: user.teamKey, scopeKey: user.scopeKey, userKey: user.userKey }, user.conversationKey, user, assistant)).toEqual({ state: 'busy' });
@@ -189,16 +226,50 @@ describe('conversation repository boundaries', () => {
   });
 
   test('conditionally applies first generated name without overwriting a rename', async () => {
-    const assistant = turnMessage('ASSISTANT'); let query = ''; let bindings: any;
+    const assistant = turnMessage('ASSISTANT'); let query = ''; let bindings: any; let transactions = 0;
     const database: any = { query: async (value: string, bind: unknown) => { query = value; bindings = bind; return { next: async () => ({ completed: raw({ ...assistant, status: 'COMPLETED', content: 'answer', completedAt: timestamp }), nameApplied: false }) }; } };
-    const repository = createConversationRepository(database, (operation) => operation(database));
+    const repository = createConversationRepository(database, (operation) => { transactions += 1; return operation(database); });
     const retrievals = [{ query: 'roadmap', limit: 10, minimumScore: 0.55, groups: [{ collectionSlug: 'documents' as const, results: [{ key: newId(), label: 'Roadmap' }] }] }];
     const result = await repository.completeTurn({ teamKey: assistant.teamKey, scopeKey: assistant.scopeKey, userKey: assistant.userKey }, assistant.conversationKey, assistant.key, 'answer', [1], retrievals, timestamp, 'Generated name');
     expect(result).toMatchObject({ nameApplied: false, message: { content: 'answer' } });
-    expect(query).toContain('conversation.name == @defaultName'); expect(query).toContain('priorCompleted == 0');
+    expect(query).toContain('conversation.name == @defaultName'); expect(query).toContain('userTurns == 1');
+    expect(query).toContain('other.role == "USER"');
     expect(query).toContain('retrievals: @retrievals'); expect(bindings.retrievals).toEqual(retrievals);
     expect(query).not.toContain('paths: @paths'); expect(bindings).not.toHaveProperty('paths');
     expect(bindings.defaultName).toBe('New chat');
+    expect(transactions).toBe(0);
+  });
+
+  test('validates selected topics and persists their trusted guide mode inside beginTurn', async () => {
+    const user = turnMessage('USER', { content: 'How does Archive work?' }), assistant = turnMessage('ASSISTANT', { conversationKey: user.conversationKey, scopeKey: user.scopeKey, userKey: user.userKey });
+    const queries: string[] = []; let insertedUser: any;
+    const database: any = { query: async (query: string, vars: any) => {
+      queries.push(query);
+      if (queries.length === 1) return { next: async () => ({ existingUser: null, existingAssistant: null, active: null, first: false, selectionValid: true, selectedGuideMode: 'explain' }) };
+      if (query.includes('INSERT @user')) { insertedUser = vars.user; return { next: async () => ({ ...vars.user, _key: vars.user._key }) }; }
+      if (query.includes('INSERT @assistant')) return { next: async () => ({ ...vars.assistant, _key: vars.assistant._key }) };
+      return { next: async () => undefined };
+    } };
+    const selection = { sourceAssistantMessageKey: newId(), topicKey: newId() };
+    const result = await createConversationRepository(database, (operation) => operation(database)).beginTurn({ teamKey: user.teamKey, scopeKey: user.scopeKey, userKey: user.userKey }, user.conversationKey, user, assistant, undefined, selection);
+    expect(result).toMatchObject({ state: 'created', user: { selectedGuideMode: 'explain' } });
+    expect(insertedUser.selectedGuideMode).toBe('explain');
+    for (const text of ['selectedSource.conversationKey == conversation._key', 'selectedSource.guideTopics.status == "READY"', 'TO_ARRAY(selectedSource.guideTopics.topics)', 'topic.question == @message', 'selectedSource._key == latestAssistant._key']) expect(queries[0]).toContain(text);
+    expect(queries[1]).toContain('guideTopics.status == "PENDING"');
+
+    const invalidDb: any = { query: async () => ({ next: async () => ({ existingUser: null, existingAssistant: null, active: null, first: false, selectionValid: false, selectedGuideMode: null }) }) };
+    await expect(createConversationRepository(invalidDb, (operation) => operation(invalidDb)).beginTurn({ teamKey: user.teamKey, scopeKey: user.scopeKey, userKey: user.userKey }, user.conversationKey, user, assistant, undefined, selection)).resolves.toEqual({ state: 'guide-selection-conflict' });
+  });
+
+  test('validates a READY topic from any owned completed assistant message', async () => {
+    let query = ''; let vars: any;
+    const owner = { teamKey: 'team', scopeKey: newId(), userKey: newId() }, conversationKey = newId();
+    const selection = { sourceAssistantMessageKey: newId(), topicKey: 'greeting.explain.archive' };
+    const database: any = { query: async (value: string, bindings: unknown) => { query = value; vars = bindings; return { next: async () => 'explain' }; } };
+    await expect(createConversationRepository(database).validateGuideTopicSelection(owner, conversationKey, selection, 'How does Archive work?')).resolves.toBe('explain');
+    for (const condition of ['source.conversationKey == conversation._key', 'source.teamKey == @teamKey', 'source.scopeKey == @scopeKey', 'source.userKey == @userKey', 'source.guideTopics.status == "READY"', 'item.question == @message']) expect(query).toContain(condition);
+    expect(query).not.toContain('latestAssistant');
+    expect(vars).toMatchObject({ ...owner, conversationKey, sourceAssistantMessageKey: selection.sourceAssistantMessageKey, topicKey: selection.topicKey, message: 'How does Archive work?' });
   });
 
   test('stores AI-written image status separately from private generation input', async () => {

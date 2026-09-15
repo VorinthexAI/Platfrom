@@ -60,7 +60,7 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   const listLoaded = useRef(false);
   const listSheetOpen = useRef(open && !detail && !opening && activeSheet === "list");
   const longPressedMemory = useRef<string | undefined>(undefined);
-  const owner = true;
+  const owner = collection.access.canContribute;
   const cardWidth = Math.floor(((gridWidth || width - 40) - GAP * (COLUMNS - 1)) / COLUMNS);
   const expandedImageHeight = Math.max(120, detailViewportHeight - spacing.lg * 2);
   const expandedImageSize = detail ? fitContainedMediaSize(detail.image, { width: detailImageWidth, height: expandedImageHeight }) : { width: detailImageWidth, height: expandedImageHeight };
@@ -147,12 +147,15 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
     setSelectedMemoryKeys((current) => current.includes(memoryKey) ? current.filter((key) => key !== memoryKey) : [...current, memoryKey]);
   }
 
-  function handleLongPress(memoryKey: string) {
+  function handleLongPress(memoryKey: string, suppressPress = true) {
     if (!owner) return;
-    longPressedMemory.current = memoryKey;
-    setTimeout(() => { if (longPressedMemory.current === memoryKey) longPressedMemory.current = undefined; }, 50);
+    if (suppressPress) {
+      longPressedMemory.current = memoryKey;
+      setTimeout(() => { if (longPressedMemory.current === memoryKey) longPressedMemory.current = undefined; }, 50);
+    }
+    const enteringSelection = selectedMemoryKeys.length === 0 && !selectedMemoryKeys.includes(memoryKey);
     toggleSelection(memoryKey);
-    void Haptics.selectionAsync();
+    if (enteringSelection) void Haptics.selectionAsync();
   }
 
   function handlePress(memory: GalleryMemory) {
@@ -241,7 +244,7 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
     <BottomSheet footer={listFooter} height="full" onOpenChange={(next) => { if (!next && !createMenuOpen && !customCreateOpen) close(); }} open={open && !detail} title="Memories">
       <ScrollView contentContainerStyle={[styles.grid, listEmpty && styles.emptyGrid]} onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} showsVerticalScrollIndicator={false}>
         {selectedMemoryKeys.length ? <Tabs style={styles.bulkToolbar}><View style={styles.bulkToolbarSelection}><Button accessibilityLabel="Clear memory selection" contentMode="raw" disabled={deleting} onPress={() => setSelectedMemoryKeys([])} size="md" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text style={styles.bulkSelectionText}>{selectedMemoryKeys.length} selected</Text></View><Button accessibilityLabel="Selected memory actions" contentMode="raw" disabled={deleting} onPress={() => { listSheetOpen.current = false; setActiveSheet("actions"); }} size="md" variant="icon"><MoreHorizontalIcon size="sm" /></Button></Tabs> : null}
-        {listLoading ? Array.from({ length: 4 }, (_, index) => <Skeleton key={index} style={[styles.cardFrame, { width: cardWidth, height: cardWidth }]} />) : memories.map((memory) => { const selected = selectedMemoryKeys.includes(memory.key); return <Button accessibilityActions={owner ? [{ name: "longpress", label: selected ? "Deselect memory" : "Select memory" }] : undefined} accessibilityLabel="Open memory" accessibilityState={{ selected }} contentMode="raw" disabled={creating || opening || deleting} key={memory.key} onAccessibilityAction={owner ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") toggleSelection(memory.key); } : undefined} onLongPress={owner ? () => handleLongPress(memory.key) : undefined} onPress={() => handlePress(memory)} shape="rounded" size="md" style={[styles.cardFrame, styles.card, selected && styles.cardSelected, { width: cardWidth, height: cardWidth }]} variant="ghost"><Image contentFit="cover" source={memory.image.url} style={StyleSheet.absoluteFill} transition={150} />{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</Button>; })}
+        {listLoading ? Array.from({ length: 4 }, (_, index) => <Skeleton key={index} style={[styles.cardFrame, { width: cardWidth, height: cardWidth }]} />) : memories.map((memory) => { const selected = selectedMemoryKeys.includes(memory.key); return <Button accessibilityActions={owner ? [{ name: "longpress", label: selected ? "Deselect memory" : "Select memory" }] : undefined} accessibilityLabel="Open memory" accessibilityState={{ selected }} contentMode="raw" disabled={creating || opening || deleting} key={memory.key} onAccessibilityAction={owner ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleLongPress(memory.key, false); } : undefined} onLongPress={owner ? () => handleLongPress(memory.key) : undefined} onPress={() => handlePress(memory)} shape="rounded" size="md" style={[styles.cardFrame, styles.card, selected && styles.cardSelected, { width: cardWidth, height: cardWidth }]} variant="ghost"><Image contentFit="cover" source={memory.image.url} style={StyleSheet.absoluteFill} transition={150} />{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</Button>; })}
         {creating ? <View accessibilityLabel="Creating memory" accessibilityRole="progressbar"><Skeleton style={[styles.cardFrame, { width: cardWidth, height: cardWidth }]} /></View> : null}
         {listEmpty ? <Text style={styles.empty}>No memories yet.</Text> : null}
       </ScrollView>
@@ -249,7 +252,7 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
 
     <BottomSheet hideHeading onOpenChange={setCreateMenuOpen} open={open && createMenuOpen} title=""><BottomSheetMenu><BottomSheetItem disabled={creating} onPress={() => { setCreateMenuOpen(false); listSheetOpen.current = true; void createMemory(); }} style={styles.menuItem} variant="secondary">Random</BottomSheetItem><BottomSheetItem disabled={creating} onPress={() => { setCreateMenuOpen(false); setCustomCreateOpen(true); }} style={styles.menuItem} variant="secondary">Custom</BottomSheetItem></BottomSheetMenu></BottomSheet>
     <GalleryCollectionImagePicker collection={collection} description="Tap one image to create a memory from it." mode="single" onClose={() => setCustomCreateOpen(false)} onSelect={([imageKey]) => { if (!imageKey) return; setCustomCreateOpen(false); listSheetOpen.current = true; void createMemory(imageKey); }} open={open && customCreateOpen} title="Custom memory" />
-    <ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={open && resourceTagsOpen} targets={resourceTagTargets} />
+    <ResourceTagsSheet context={contentContext} onApply={() => setSelectedMemoryKeys([])} onClose={() => setResourceTagsOpen(false)} open={open && resourceTagsOpen} targets={resourceTagTargets} />
 
     <BottomSheet footer={detailFooter} height="full" onOpenChange={(next) => { if (!next) close(); }} open={open && Boolean(detail)} title="Memory">
       {detail ? <ScrollView contentContainerStyle={styles.detail} onLayout={({ nativeEvent }) => setDetailViewportHeight(nativeEvent.layout.height)} showsVerticalScrollIndicator={false}><Animated.View onLayout={({ nativeEvent }) => setDetailImageWidth(nativeEvent.layout.width)} style={[styles.detailImageStage, imageStageStyle]}><Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.expandedImageLayer, expandedImageStyle]}><Image contentFit="contain" source={detail.image.url} style={[expandedImageSize, styles.expandedDetailImage]} transition={180} /></Animated.View><Animated.View pointerEvents="none" style={[styles.detailThumbnailLayer, compactImageStyle]}><View collapsable={false} style={styles.thumbnailImageClip}><Image contentFit="cover" source={detail.image.url} style={styles.detailImage} transition={180} /></View></Animated.View></Animated.View>{showImage ? null : <View style={styles.memoryCopy}>{splitGalleryMemoryText(typedText).map((section, index) => <Text key={`${index}:${section.length}`} style={styles.memoryText}>{section}</Text>)}</View>}</ScrollView> : null}

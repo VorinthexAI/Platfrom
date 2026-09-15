@@ -41,13 +41,15 @@ test("the persistent vault serializes initialization and replaces invalid Secure
 test("global Axios, manual XHR SSE, and logout cleanup await the installation header", () => {
   const client = read("./api-client.ts");
   const analytics = read("./onboarding-events.ts");
+  const registry = read("./apps-registry.ts");
 
   expect(client.match(/getInstallationEventIdentifier\(\)/g)).toHaveLength(3);
   expect(client).toContain("headers.set(INSTALLATION_EVENT_IDENTIFIER_HEADER, eventIdentifier)");
   expect(client).toContain("[INSTALLATION_EVENT_IDENTIFIER_HEADER]: eventIdentifier");
   expect(client).toContain("request.setRequestHeader(name, value)");
-  expect(analytics).toContain('recordAnalyticsEvent(slug: AnalyticsEventSlug)');
-  expect(analytics).toContain('postJson<{ slug: AnalyticsEventSlug }, { success: true }>("/events", { slug })');
+  expect(registry).toContain("[INSTALLATION_EVENT_IDENTIFIER_HEADER]: eventIdentifier");
+  expect(analytics).toContain('recordAnalyticsEvent(slug: AnalyticsEventSlug, appKey?: string)');
+  expect(analytics).toContain('postJson<{ slug: AnalyticsEventSlug }, { success: true }>("/events", { slug }, { appKey })');
 });
 
 test("native transports persist and inject a trusted device identifier", () => {

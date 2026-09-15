@@ -28,7 +28,7 @@ export function SparkCostsSheet({ onOpenChange, open }: { onOpenChange: (open: b
 }
 
 const styles = StyleSheet.create({
-  content: { gap: spacing.lg, paddingBottom: spacing.lg },
+  content: { gap: spacing.lg, paddingBottom: spacing.lg, paddingHorizontal: spacing.xxs },
   statusText: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 14, lineHeight: 21 },
   costList: { gap: spacing.lg },
   costRow: { alignItems: "center", flexDirection: "row", gap: spacing.md, justifyContent: "space-between" },

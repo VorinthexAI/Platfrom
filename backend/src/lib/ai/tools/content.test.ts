@@ -13,14 +13,15 @@ import { contentBatchOutputSchema } from './content-schemas';
 
 const expectedNames = [
   'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.delete',
-  'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-summaries', 'document.find-summary', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.delete', 'document.download', 'document.export', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.topics', 'document.enhance', 'document.translate', 'document.rewrite',
+  'document.parse', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-summaries', 'document.find-summary', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.delete', 'document.download', 'document.export', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.topics', 'document.enhance', 'document.translate', 'document.rewrite',
   'document.search', 'content.search', 'content.search-history.list', 'content.search-history.delete', 'content.neighbors', 'document.search-all',
 ] as const;
 
 describe('Content tool registry', () => {
   test('contains exactly the registered dotted names and no action-style kebab names', () => {
     expect([...CONTENT_TOOL_NAMES]).toEqual([...expectedNames]);
-    expect(CONTENT_TOOL_NAMES).toHaveLength(42);
+    expect(CONTENT_TOOL_NAMES).toHaveLength(41);
+    expect(isContentToolName('document.scan')).toBe(false);
     for (const name of CONTENT_TOOL_NAMES) {
       expect(name).toMatch(/^[a-z]+(?:[.-][a-z]+)*$/);
       expect(name).toContain('.');
@@ -43,7 +44,7 @@ describe('Content tool registry', () => {
     expect(contentToolInputSchemas['folder.list'].parse({ scopeKey })).toMatchObject({ scopeKey });
     expect(contentToolInputSchemas['folder.create'].parse({ folders: [{ scopeKey, name: 'Folder' }] })).toMatchObject({ folders: [{ scopeKey }] });
     expect(contentToolInputSchemas['document.search-all'].parse({ teamKey, query: 'roadmap' })).toMatchObject({ teamKey });
-    for (const name of ['folder.list', 'document.parse', 'document.scan', 'document.create', 'document.list', 'document.search', 'content.search', 'content.search-history.list', 'content.search-history.delete'] as const) {
+    for (const name of ['folder.list', 'document.parse', 'document.create', 'document.list', 'document.search', 'content.search', 'content.search-history.list', 'content.search-history.delete'] as const) {
       expect(contentToolModelInputSchemas[name].safeParse({ scopeKey }).error?.issues.some((issue) => issue.code === 'unrecognized_keys')).toBe(true);
     }
     expect(() => contentToolModelInputSchemas['folder.create'].parse({ folders: [{ scopeKey, name: 'Folder' }] })).toThrow('Unrecognized key');

@@ -19,6 +19,14 @@ test("the authenticated unified stream converges Signal and Archive caches", () 
   expect(bridge).not.toContain('["archive", teamKey, scopeKey]');
 });
 
+test("managed communication events refresh the active Vorinthex AI inbox", () => {
+  expect(bridge).toContain('if (event.event === "communication.changed")');
+  expect(bridge).toContain("communicationQueryKeys.all(communicationContext)");
+  expect(bridge).toContain('publishAppEvent({ type: "communication.changed" })');
+  expect(bridge).not.toContain('event.event === "notification.changed"');
+  expect(bridge).not.toContain('event.event === "support.thread.changed"');
+});
+
 test("content changes invalidate Signal metadata in the current workspace", () => {
   expect(bridge).toMatch(/if \(event\.event === "content\.changed"\) \{[\s\S]*?signalQueryKeys\.overview\(compassContext\)[\s\S]*?refetchType: "active"[\s\S]*?\}/);
   expect(bridge).toMatch(/if \(event\.event === "content\.changed"\) \{[\s\S]*?signalQueryKeys\.replyContexts\(compassContext\)[\s\S]*?refetchType: "active"[\s\S]*?\}/);
@@ -55,4 +63,5 @@ test("referral rewards and no-replay recovery refresh billing and referral statu
   expect(bridge.match(/invalidateReferral\(\)/g)?.length).toBe(3);
   expect(bridge).toMatch(/}, currentController\.signal, \(\) => \{[\s\S]*?invalidateBilling\(\);\s+invalidateReferral\(\);[\s\S]*?publishAppEvent\(\{ type: "event-stream\.connected" \}\)/);
   expect(bridge).toMatch(/if \(!wasActive\) \{[\s\S]*?invalidateBilling\(\);\s+invalidateReferral\(\);[\s\S]*?connect\(\)/);
+  expect(bridge).toContain('["referral-summary", "scope-list"].includes(String(queryKey[0]))');
 });

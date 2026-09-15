@@ -15,10 +15,13 @@ function actor(context: ToolContext) {
   return { userKey: principal.user.key, teamKey: context.teamKey, scopeKey: context.runtimeScopeKey };
 }
 
-export function createUserInboxService(options: { repository?: UserInboxRepository; id?: () => string; now?: () => string; enqueue?: typeof enqueueAppNotification } = {}) {
+type PublishCommunicationChanged = (userKey: string, event: 'communication.changed') => Promise<unknown>;
+
+export function createUserInboxService(options: { repository?: UserInboxRepository; id?: () => string; now?: () => string; enqueue?: typeof enqueueAppNotification; publishChanged?: PublishCommunicationChanged } = {}) {
   const repository = options.repository ?? getDefaultUserInboxRepository();
   const id = options.id ?? newId;
   const now = options.now ?? (() => new Date().toISOString());
+  const publishChanged = options.publishChanged ?? ((userKey: string) => import('@/api/events').then(({ publishUserEvent }) => publishUserEvent(userKey, 'communication.changed')));
   const required = <T>(result: { state: 'ok'; value: T } | { state: 'not_found' }) => {
     if (result.state === 'not_found') throw new UserInboxNotFoundError('Communication thread was not found.');
     return result.value;
@@ -39,6 +42,7 @@ export function createUserInboxService(options: { repository?: UserInboxReposito
       const input = communicationStaffReplyInputSchema.parse(rawInput); const stored = await repository.staffReply(staffUserKey, input.threadKey, id(), input.message, idempotencyKey, now());
       if (stored.state === 'conflict') throw new UserInboxIdempotencyError('Idempotency-Key was already used for a different staff reply.');
       const result = required(stored);
+      await publishChanged(result.message.userKey, 'communication.changed').catch(() => undefined);
       if (result.deliveries > 0) await (options.enqueue ?? enqueueAppNotification)(result.notificationKey);
       return result.message;
     },

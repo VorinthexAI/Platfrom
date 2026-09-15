@@ -11,13 +11,11 @@ import { parseJson, strictObject } from './validation';
 import { z } from 'zod';
 import { signProfileAvatarUrl, trySignProfileAvatarUrl } from '@/lib/account-profile/avatar-url';
 import { accountDeleteInputSchema, accountDeletionService, type AccountDeletionService } from '@/lib/account-deletion/service';
-import { hasActiveEnvironmentSeededMembership } from '@/lib/db/user-team.node';
 
 export async function buildAuthAccountResponse(
   user: NonNullable<Awaited<ReturnType<typeof getUserById>>>,
   context: NonNullable<Awaited<ReturnType<typeof getPersonalAuthContext>>>,
   signAvatar: typeof signProfileAvatarUrl = signProfileAvatarUrl,
-  teamSelectionEnabled = false,
 ) {
   const avatarUrl = user.profileStorageKey ? await trySignProfileAvatarUrl(user.profileStorageKey, signAvatar) : null;
   const selectedScope = {
@@ -49,7 +47,6 @@ export async function buildAuthAccountResponse(
       title: context.membership.teamTitle,
     },
     scope: selectedScope,
-    teamSelectionEnabled,
   };
 }
 
@@ -95,7 +92,7 @@ export async function patchAuthAccount(c: Context) {
     isOnboarded: body.isOnboarded,
     updatedAt: new Date().toISOString(),
   });
-  return c.json(await buildAuthAccountResponse(user, context, signProfileAvatarUrl, await hasActiveEnvironmentSeededMembership(user.key)));
+  return c.json(await buildAuthAccountResponse(user, context));
 }
 
 export const patchAuthAccountSchema = strictObject({ isOnboarded: z.literal(true) });
@@ -106,7 +103,7 @@ export async function getAuthAccount(c: Context) {
   const user = await getUserById(identity.key);
   if (!user?.isVerified) return c.json({ error: 'verified authentication required' }, 403);
   const context = await provisionPersonalAuthContext(user);
-  return c.json(await buildAuthAccountResponse(user, context, signProfileAvatarUrl, await hasActiveEnvironmentSeededMembership(user.key)));
+  return c.json(await buildAuthAccountResponse(user, context));
 }
 
 export async function logoutAuthAccount(c: Context) {

@@ -811,13 +811,14 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
   function toggleBookSelection(bookKey: string) {
     setSelectedBookKeys((current) => current.includes(bookKey) ? current.filter((key) => key !== bookKey) : [...current, bookKey]);
   }
-  function handleBookLongPress(bookKey: string) {
-    longPressedBook.current = bookKey;
+  function handleBookLongPress(bookKey: string, suppressPress = true) {
+    if (suppressPress) longPressedBook.current = bookKey;
+    const enteringSelection = selectedBookKeys.length === 0 && !selectedBookKeys.includes(bookKey);
     toggleBookSelection(bookKey);
-    void Haptics.selectionAsync();
-    requestAnimationFrame(() => {
-      if (longPressedBook.current === bookKey) longPressedBook.current = undefined;
-    });
+    if (enteringSelection) void Haptics.selectionAsync();
+    if (suppressPress) requestAnimationFrame(() => {
+        if (longPressedBook.current === bookKey) longPressedBook.current = undefined;
+      });
   }
   function handleBookPress(book: Book) {
     if (longPressedBook.current === book.key) {
@@ -1122,7 +1123,7 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
               {filteredBooks.map((book, index) => {
                 if (book.key.startsWith("pending-") || ["queued", "researching", "planning"].includes(book.status)) return <Skeleton accessibilityLabel="Preparing audio book metadata" accessibilityRole="progressbar" key={book.key} style={{ width: cardWidth, height: (cardWidth * 16) / 9, borderRadius: radii.sm }} />;
                 const selected = selectedBookKeys.includes(book.key);
-                return <View key={book.key} style={[styles.bookCardFrame, selected && styles.selectedItem, { width: cardWidth, height: (cardWidth * 16) / 9 }]}><Button accessibilityActions={[{ name: "longpress", label: selected ? `Deselect ${book.title}` : `Select ${book.title}` }]} accessibilityLabel={book.title} accessibilityRole="button" accessibilityState={{ selected }} contentMode="raw" onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleBookLongPress(book.key); }} onLongPress={() => handleBookLongPress(book.key)} onPress={() => handleBookPress(book)} shape="rounded" size="md" style={styles.bookCard} variant="ghost"><Cover book={book} index={index} /><LinearGradient colors={["transparent", "rgba(0,0,0,0.08)", "rgba(0,0,0,0.58)"]} locations={[0, 0.58, 1]} style={styles.cardShade} /><View style={styles.cardCopy}><Text numberOfLines={3} style={styles.cardTitle}>{book.title}</Text></View></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>;
+                return <View key={book.key} style={[styles.bookCardFrame, selected && styles.selectedItem, { width: cardWidth, height: (cardWidth * 16) / 9 }]}><Button accessibilityActions={[{ name: "longpress", label: selected ? `Deselect ${book.title}` : `Select ${book.title}` }]} accessibilityLabel={book.title} accessibilityRole="button" accessibilityState={{ selected }} contentMode="raw" onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleBookLongPress(book.key, false); }} onLongPress={() => handleBookLongPress(book.key)} onPress={() => handleBookPress(book)} shape="rounded" size="md" style={styles.bookCard} variant="ghost"><Cover book={book} index={index} /><LinearGradient colors={["transparent", "rgba(0,0,0,0.08)", "rgba(0,0,0,0.58)"]} locations={[0, 0.58, 1]} style={styles.cardShade} /><View style={styles.cardCopy}><Text numberOfLines={3} style={styles.cardTitle}>{book.title}</Text></View></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>;
               })}
             </View>
           )}
@@ -1263,7 +1264,7 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
       </BottomSheet>
 
       <TagFilterSheet context={contentContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />
-      <ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />
+      <ResourceTagsSheet context={contentContext} onApply={() => setSelectedBookKeys([])} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />
 
       <BottomSheet
         dismissible={!topicSuggestionsMutation.isPending}

@@ -351,7 +351,7 @@ test("matches Archive bulk actions and uses cover-backed progress surfaces", () 
   expect(workspace).toContain('setBookFavorite(book.key, isFavorite)');
   expect(workspace).toContain('allSelectedFavorite ? "Unfavorite" : "Favorite"');
   expect(workspace).toContain('selectedBookKeys.map((key) => ({ type: "book" as const, key }))');
-  expect(workspace).toContain('<ResourceTagsSheet context={contentContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />');
+  expect(workspace).toContain('<ResourceTagsSheet context={contentContext} onApply={() => setSelectedBookKeys([])} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />');
   const bulkTags = workspace.slice(workspace.indexOf("function openSelectedBookTags"), workspace.indexOf("function closeCreationSheets"));
   expect(bulkTags).toContain("setSheetOpen(false)");
   expect(bulkTags).toContain("setSheet(undefined)");

@@ -1,7 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { cleanupExpiredConversationAttachmentArtifacts, createConversationAttachmentArtifactRepository } from './attachment-artifacts';
+import { newId } from '@/lib/ids';
+import { cleanupExpiredConversationAttachmentArtifacts, conversationAttachmentArtifactSchema, createConversationAttachmentArtifactRepository } from './attachment-artifacts';
 
 describe('conversation attachment artifact repository', () => {
+  test('accepts new byte-only documents and legacy extracted document fields', () => {
+    const base = { key: newId(), ownerKey: newId(), teamKey: 'team', scopeKey: newId(), userKey: newId(), conversationKey: newId(), requestKey: 'request', kind: 'document' as const, filename: 'notes.txt', mimeType: 'text/plain' as const, sizeBytes: 3, stagedStorageKey: 'pending/notes', stagedSha256: 'a'.repeat(64), status: 'PREPARED' as const, attempts: 0, availableAt: '2026-09-01T00:00:00.000Z', createdAt: '2026-09-01T00:00:00.000Z', expiresAt: '2026-10-01T00:00:00.000Z' };
+    expect(conversationAttachmentArtifactSchema.parse(base)).not.toHaveProperty('documentContent');
+    expect(conversationAttachmentArtifactSchema.parse({ ...base, documentContent: 'Legacy extracted text', documentMetadata: { pages: 1 } })).toMatchObject({ documentContent: 'Legacy extracted text', documentMetadata: { pages: 1 } });
+  });
+
   test('idempotently inserts prepared records without relying on an INSERT OLD value', async () => {
     let query = '';
     const database = { query: async (value: string) => { query = value; return { all: async () => [] }; } };

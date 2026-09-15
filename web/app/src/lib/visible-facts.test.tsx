@@ -39,7 +39,7 @@ test("renders only active launch pricing and accurate referral rewards", () => {
   expect(html).toContain("Prepaid Sparks remain available after subscription cancellation");
   expect(html).toContain("balances never go below zero");
   expect(html).toContain("no debt or backcharges accrue");
-  expect(html).toContain("hard-deleted after 90 consecutive unfunded days");
+  expect(html).toContain("permanently deleted after 90 consecutive unfunded days");
   expect(html).not.toMatch(/notice/i);
   expect(html).toContain("Best Value");
   expect(html).toContain("Currently discounted from regular");

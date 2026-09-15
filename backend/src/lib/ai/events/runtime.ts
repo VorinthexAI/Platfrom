@@ -120,12 +120,12 @@ export async function recordActionUsage(actionSlug: string, input: unknown, usag
   const amount = fixed ? calculateFixedCost(fixed.rule, input) : calculateActionCostMicroSparks(actionSlug, usage, input);
   if (amount === 0) return;
   const sequence = active.actionSequence++;
-  const actionIdentity = await active.hash(JSON.stringify({ executionIdentity: active.executionIdentity, actionSlug, sequence, input }));
+  const actionIdentity = await active.hash(JSON.stringify({ executionIdentity: active.executionIdentity, actionSlug, sequence }));
   const result = await active.charge(active.userKey, {
     kind: 'action', actionSlug, microSparks: amount,
     idempotencyKey: `execution:${actionIdentity}`,
     executionIdentity: actionIdentity,
-    requestHash: await active.hash(JSON.stringify({ toolSlug: active.toolSlug, actionSlug, sequence, input })),
+    requestHash: await active.hash(JSON.stringify({ toolSlug: active.toolSlug, actionSlug, sequence })),
     eventKey: active.eventKey,
     metadata: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens, amountMicroSparks: amount },
   });
@@ -219,6 +219,7 @@ export async function observeToolExecution<T>(
   const policy = options.lookupCost
     ? injectedToolRule ? { mode: 'fixed' as const, rule: injectedToolRule.rule, paidOutcome: 'operation-completed' as const } : { mode: 'action' as const }
     : lookupToolCostPolicy(slug, options.input) ?? { mode: 'free' as const };
+  const billingMode = policy.mode === 'fixed' || policy.mode === 'outcome' ? policy.mode : 'action';
   const toolMicroSparks = policy.mode === 'fixed' ? calculateFixedCost(policy.rule, options.input) : 0;
   if (userKey && toolMicroSparks > 0 && !idempotencyKey) throw new Error(`Priced tool ${slug} requires a stable request key.`);
   if (userKey && toolMicroSparks > 0 && !recorder) throw new Error(`Priced tool ${slug} requires an analytics recorder.`);
@@ -230,9 +231,9 @@ export async function observeToolExecution<T>(
   const getBalance = options.getBalance ?? (options.charge ? async () => Number.MAX_SAFE_INTEGER : sparkService.getBalance);
   const getDebt = options.getDebt ?? (options.charge ? async () => 0 : sparkService.getDebt);
   let eventKey: string | undefined;
-  if (userKey && recorder && (policy.mode === 'action' || policy.mode === 'outcome')) eventKey = (options.id ?? newId)();
+  if (userKey && recorder && (billingMode === 'action' || billingMode === 'outcome')) eventKey = (options.id ?? newId)();
   const cost: CostContext = {
-    toolSlug: slug, actionUsage: [], userKey, idempotencyKey, billingMode: policy.mode, lookupCost: lookup,
+    toolSlug: slug, actionUsage: [], userKey, idempotencyKey, billingMode, lookupCost: lookup,
     recorderAvailable: Boolean(recorder), executionIdentity, hash, charge, complete, renew: options.renew ?? sparkService.renewExecution, getBalance, getDebt,
     actionSequence: 0, actionPreflighted: false, actionCharges: [], actionLeaseRenewal: Promise.resolve(true), eventKey, fixedOutcomeAccepted: false,
   };

@@ -124,7 +124,7 @@ export interface ImageGenerationServiceDependencies extends ExecuteActionOptions
   processing?: ImageProcessingDependencies;
   signUrl?: (storageKey: string) => Promise<string>;
   now?: () => number;
-  gallery?: Pick<GalleryRepository, 'getCollectionRole' | 'getCollection' | 'canAccessImage' | 'getImage' | 'attachGeneratedImages'> & Partial<Pick<GalleryRepository, 'ensureGeneratedMediaCollection' | 'attachGeneratedMedia'>>;
+  gallery?: Pick<GalleryRepository, 'canContributeToCollection' | 'getCollection' | 'canAccessImage' | 'getImage' | 'attachGeneratedImages'> & Partial<Pick<GalleryRepository, 'ensureGeneratedMediaCollection' | 'attachGeneratedMedia'>>;
   embedCollection?: typeof embedText;
   getImage?: typeof getImageById;
   resolveReference?: (storageKey: string, mimeType: string) => Promise<string>;
@@ -276,10 +276,8 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
       : destination.collectionKey;
     if (!collectionKey) throw new ImageGenerationAccessError('Managed Gallery collection access denied.');
     const collection = managedDestination ? undefined : await gallery.getCollection(context.runtimeScopeKey, collectionKey);
-    if (!managedDestination && collection?.mutationPolicy === 'system-only') throw new ImageGenerationAccessError('Image generation cannot modify this managed Gallery collection.');
     if (!managedDestination) {
-      const role = await gallery.getCollectionRole(context.runtimeScopeKey, collectionKey, ownerKey);
-      if (!role || role === 'viewer') throw new ImageGenerationAccessError('Image generation requires ownership of the Gallery collection.');
+      if (!collection || !await gallery.canContributeToCollection(context.runtimeScopeKey, collectionKey, ownerKey)) throw new ImageGenerationAccessError('Image generation requires contribution access to the Gallery collection.');
     }
     const references = await Promise.all(referenceImageKeys.map(async (imageKey) => {
       const image = await gallery.getImage(imageKey);

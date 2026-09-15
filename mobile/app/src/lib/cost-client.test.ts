@@ -4,7 +4,7 @@ import { sparkCostsResponseSchema } from "./cost-client";
 
 test("parses inbox, storage, and variable Spark charges while rejecting retired recurring contracts and grants", () => {
   const response = sparkCostsResponseSchema.parse({ success: true, data: { capabilityCosts: { "profile.badge.generate": { sparkCost: "10", microSparkCost: 10_000_000, unit: "invocation" } }, charges: [
-    { key: "document.parse", kind: "static", name: "Parse a document", description: "Extract content.", sparkCost: "2", unit: "documents" },
+    { key: "trip.create", kind: "static", name: "Create a trip", description: "Create a trip plan.", sparkCost: "15", unit: "invocation" },
     { key: "storage", kind: "storage", name: "Storage", description: "Charged hourly.", sparkCost: "30", unit: "gb-month" },
     { key: "inbox.sync", kind: "static", name: "Connect an inbox", description: "Initial import.", sparkCost: "100", unit: "invocation" },
     { key: "inbox.subscribe", kind: "static", name: "Receive a new email", description: "One new email.", sparkCost: "1", unit: "new-email" },

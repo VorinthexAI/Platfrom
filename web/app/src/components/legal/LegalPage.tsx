@@ -12,14 +12,14 @@ export function LegalPage({ copy }: { copy: VaultCopy }) {
       <SiteNeuralBackdrop />
       <main id="main-content" tabIndex={-1}>
       <article className={styles.content}>
-        <p className={styles.eyebrow}>{copy.eyebrow}</p>
         <h1>{copy.title}</h1>
+        {copy.eyebrow ? <p className={styles.subtitle}>{copy.eyebrow}</p> : null}
         {copy.paragraphs.map((paragraph) => (
           <p key={paragraph}>{paragraph}</p>
         ))}
         {copy.sections?.map((section) => (
           <section key={section.title}>
-            <h2>{section.title}</h2>
+            <p>{section.title}</p>
             {section.paragraphs.map((paragraph) => (
               <p key={paragraph}>{paragraph}</p>
             ))}

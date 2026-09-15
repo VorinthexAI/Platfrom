@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { GalleryRefreshCoalescer, galleryRefreshPlan, isCurrentContextGeneration, mergeGalleryRefreshPlans, reconcileDestination, reconcileGalleryPermissions, reconcileGalleryState, reconcileKeys, reconcileOptimisticUploads, reconcilePaginatedKeys, reconcilePaginatedSelected, reconcileSelected, reconcileUploadJobRegistry, recoverAssistantSearchMode, recoverContextualSearchFailure, replayPaginatedWindow, shouldRunGalleryAssistantTextSearch } from "./gallery-convergence";
+import { GalleryRefreshCoalescer, bindPersistedGalleryGridKeys, galleryPersistedGridKey, galleryRefreshPlan, isCurrentContextGeneration, mergeGalleryRefreshPlans, reconcileDestination, reconcileGalleryPermissions, reconcileGalleryState, reconcileKeys, reconcileOptimisticUploads, reconcilePaginatedKeys, reconcilePaginatedSelected, reconcileSelected, reconcileUploadJobRegistry, recoverAssistantSearchMode, recoverContextualSearchFailure, replayPaginatedWindow, shouldRunGalleryAssistantTextSearch } from "./gallery-convergence";
 
 test("maps audited slugs to precise cache and mode families", () => {
   expect([...galleryRefreshPlan("subject.changed")]).toEqual(["subjects", "search"]);
@@ -119,6 +119,13 @@ test("promotes authoritative images and retains unresolved upload placeholders",
   const optimistic = [{ clientKey: "ready-client", imageKey: "ready", uri: "file://ready" }, { clientKey: "pending-client", imageKey: "pending", uri: "file://pending" }];
   const ready = { key: "ready", url: "https://images.example/ready" };
   expect(reconcileOptimisticUploads(optimistic, [ready])).toEqual({ remaining: [optimistic[1]], promoted: [{ item: optimistic[0], image: ready }] });
+});
+
+test("preserves the client grid key after reservation and persistence", () => {
+  const keys = bindPersistedGalleryGridKeys({ existing: "existing-client" }, [{ clientKey: "picker-client", imageKey: "reserved-image" }]);
+  expect(galleryPersistedGridKey("reserved-image", keys)).toBe("picker-client");
+  expect(galleryPersistedGridKey("unrelated-image", keys)).toBe("unrelated-image");
+  expect(keys.existing).toBe("existing-client");
 });
 
 test("settles upload jobs once and retains only unresolved identities", () => {

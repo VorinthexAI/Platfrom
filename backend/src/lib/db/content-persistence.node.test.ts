@@ -172,11 +172,15 @@ describe('scoped Content persistence', () => {
     expect(calls[0]?.bindVars?.allowManagedUpdate).toBe(true);
   });
 
-  test('rejects generic document inserts into every managed folder at the persistence boundary', async () => {
-    let query = '';
-    const executor: ContentQueryExecutor = { async query(value) { query = value; return { async next() { return undefined; } }; } };
-    await expect(createContentPersistence(executor).insertDocument({ key: 'cm00000000000000000000003', scopeKey, folderKey, name: 'Blocked', content: 'Body', embedding, mutationPolicy: 'user', isFavorite: false, createdAt: timestamp, updatedAt: timestamp })).rejects.toThrow('Document destination is pending deletion.');
-    expect(query).toContain('folder.mutationPolicy != "system-container" && folder.managedPurpose == null');
+  test('allows folder and document inserts into active managed folders at the persistence boundary', async () => {
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const executor: ContentQueryExecutor = { async query(query, bindVars) { calls.push({ query, bindVars }); return { async next() { return { ...((bindVars?.folder ?? bindVars?.document) as object) }; } }; } };
+    const persistence = createContentPersistence(executor);
+    await expect(persistence.insertFolder({ key: 'cm00000000000000000000003', scopeKey, parentFolderKey: folderKey, name: 'Child', embedding, isFavorite: false, createdAt: timestamp, updatedAt: timestamp })).resolves.toMatchObject({ parentFolderKey: folderKey, name: 'Child' });
+    await expect(persistence.insertDocument({ key: 'cm00000000000000000000004', scopeKey, folderKey, name: 'Created', content: 'Body', embedding, mutationPolicy: 'user', isFavorite: false, createdAt: timestamp, updatedAt: timestamp })).resolves.toMatchObject({ folderKey, name: 'Created', mutationPolicy: 'user' });
+    expect(calls).toHaveLength(2);
+    expect(calls.every(({ query }) => query.includes('_internalDeletion'))).toBe(true);
+    expect(calls.every(({ query }) => !query.includes('mutationPolicy != "system-container"') && !query.includes('managedPurpose == null'))).toBe(true);
   });
 
   test('only the marker owner can unfreeze a pending deletion', async () => {

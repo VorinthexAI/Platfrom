@@ -55,7 +55,7 @@ import type { SupportComposeKind } from "@/components/SupportComposeSheets";
 import { SearchHistorySheet } from "@/components/SearchHistorySheet";
 import { TagFilterLane } from "@/components/TagFilterLane";
 import { TagFilterSheet } from "@/components/TagFilterSheet";
-import { assistantIconSource } from "@/data/capability-icons";
+import { assistantIconSource, contentPresentationIconSource } from "@/data/capability-icons";
 import { type CapabilitySlug } from "@/data/registry";
 import { subscribeAppEvent } from "@/lib/app-events";
 import type { CommunicationTab } from "@/lib/communication-client";
@@ -254,7 +254,7 @@ export function EmailWorkspace({ initialCollectionKind, initialCommunicationThre
   const teamKey = useAuthStore((state) => typeof state.team?.key === "string" ? state.team.key : "");
   const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
   if (!teamKey || !scopeKey) return null;
-  if (!initialConnectorKey) return <SignalWorkspace initialCompose={initialCompose} initialInbox={initialInbox} initialTab={initialTab} initialThreadKey={initialCommunicationThreadKey} />;
+  if (!initialConnectorKey && (initialInbox === "internal" || initialCommunicationThreadKey || initialCompose)) return <SignalWorkspace initialCompose={initialCompose} initialTab={initialTab} initialThreadKey={initialCommunicationThreadKey} />;
   const emailContext = { teamKey, scopeKey };
   const sessionKey = `${emailContext.teamKey}:${emailContext.scopeKey}:${initialConnectorKey ?? "root"}:${initialThreadKey ?? "inbox"}:${initialMessageKey ?? "latest"}:${initialDraftKey ?? ""}:${initialToneKey ?? ""}:${initialCollectionKind ?? ""}:${initialSearchQuery ?? ""}:${openAttachments ? "attachments" : "reader"}`;
   return <EmailWorkspaceSession emailContext={emailContext} initialCollectionKind={initialCollectionKind} initialConnectorKey={initialConnectorKey} initialDraftKey={initialDraftKey} initialMessageKey={initialMessageKey} initialSearchQuery={initialSearchQuery} initialThreadKey={initialThreadKey} initialToneKey={initialToneKey} key={sessionKey} navigatedFromRoot={navigatedFromRoot} openAttachments={openAttachments} />;
@@ -555,6 +555,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const searchedTones = rootFilterActive && rootSearchResults?.tab === "tones" && rootSearchResults.filterKey === rootFilterKey ? rootSearchResults.tones ?? [] : rootFilterActive ? [] : toneRecords;
   const visibleAccounts = searchedAccounts.filter(({ isFavorite }) => !rootFavoritesOnly || isFavorite);
   const visibleTones = searchedTones.filter(({ isFavorite }) => !rootFavoritesOnly || isFavorite);
+  const managedInboxVisible = !rootFavoritesOnly && !selectedTagKeys.length && (!normalizedRootQuery || "vorinthex ai managed inbox".includes(normalizedRootQuery.toLocaleLowerCase()));
   const selectedMessage = selected?.messages.find(({ key }) => key === selectedMessageKey)
     ?? [...(selected?.messages ?? [])].sort((left, right) => right.sentAt.localeCompare(left.sentAt) || right.key.localeCompare(left.key))[0];
   const orderedThreadMessages = [...(selected?.messages ?? [])].sort((left, right) => left.sentAt.localeCompare(right.sentAt) || left.key.localeCompare(right.key));
@@ -1769,10 +1770,12 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     rootSelectionGeneration.current += 1;
     setSelectedInboxes([]);
   }
-  function handleRootInboxLongPress(account: EmailConnector) {
-    rootLongPressedInbox.current = account.connectorKey;
+  function handleRootInboxLongPress(account: EmailConnector, suppressPress = true) {
+    if (!permissions.canMutate || rootBulkBusy) return;
+    if (suppressPress) rootLongPressedInbox.current = account.connectorKey;
+    const enteringSelection = selectedInboxes.length === 0 && !selectedInboxes.some(({ connectorKey }) => connectorKey === account.connectorKey);
     toggleRootInboxSelection(account);
-    void Haptics.selectionAsync();
+    if (enteringSelection) void Haptics.selectionAsync();
   }
   function handleRootInboxPress(account: EmailConnector) {
     if (rootLongPressedInbox.current === account.connectorKey) {
@@ -1860,11 +1863,12 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       return [...current, thread];
     });
   }
-  function handleThreadLongPress(thread: EmailThread) {
+  function handleThreadLongPress(thread: EmailThread, suppressPress = true) {
     if (bulkBusy || bulkActionsLoading) return;
-    longPressedThread.current = thread.key;
+    if (suppressPress) longPressedThread.current = thread.key;
+    const enteringSelection = selectedThreads.length === 0 && !selectedThreads.some(({ key }) => key === thread.key);
     toggleThreadSelection(thread);
-    void Haptics.selectionAsync();
+    if (enteringSelection) void Haptics.selectionAsync();
   }
   function handleThreadPress(thread: EmailThread) {
     if (bulkActionsLoading) return;
@@ -2473,12 +2477,16 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       return [...current, key];
     });
   }
-  function handleGeneratedLongPress(kind: GeneratedKind, key: string) {
-    if (!permissions.canMutate) return;
-    longPressedGenerated.current = `${kind}:${key}`;
-    setTimeout(() => { if (longPressedGenerated.current === `${kind}:${key}`) longPressedGenerated.current = undefined; }, 50);
+  function handleGeneratedLongPress(kind: GeneratedKind, key: string, suppressPress = true) {
+    if (!permissions.canMutate || generatedDeleteInFlight.current) return;
+    if (suppressPress) {
+      longPressedGenerated.current = `${kind}:${key}`;
+      setTimeout(() => { if (longPressedGenerated.current === `${kind}:${key}`) longPressedGenerated.current = undefined; }, 50);
+    }
+    const selection = kind === "translation" ? selectedTranslationKeys : selectedSummaryKeys;
+    const enteringSelection = selection.length === 0 && !selection.includes(key);
     toggleGeneratedSelection(kind, key);
-    void Haptics.selectionAsync();
+    if (enteringSelection) void Haptics.selectionAsync();
   }
   function handleGeneratedPress(kind: GeneratedKind, key: string) {
     const token = `${kind}:${key}`;
@@ -3248,7 +3256,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
             accessibilityLabel={rootTab === "inboxes" ? "Signal inboxes" : "Signal tones"}
             alwaysBounceVertical
             contentContainerStyle={[styles.rootGrid, { paddingBottom: insets.bottom + spacing.xl }, rootTab === "inboxes"
-              ? !loading && !loadError && !visibleAccounts.length && styles.emptyGrid
+              ? !loading && !loadError && !managedInboxVisible && !visibleAccounts.length && styles.emptyGrid
               : !tonesLoading && !toneError && !visibleTones.length && styles.emptyGrid]}
             onLayout={({ nativeEvent }) => setRootGridWidth(nativeEvent.layout.width)}
             refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />}
@@ -3259,6 +3267,12 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
               <>
                 {loadError ? <View accessibilityRole="alert" style={styles.rootInlineNotice}><Text style={styles.inlineNoticeText}>{loadError}</Text><Button onPress={() => void load()} size="md" variant="secondary">Retry</Button></View> : null}
                 {rootSearchError ? <View accessibilityRole="alert" style={styles.rootInlineNotice}><Text style={styles.inlineNoticeText}>{rootSearchError}</Text></View> : null}
+                {managedInboxVisible ? <View style={[styles.rootCard, { width: rootCardSize, height: rootCardSize }]}>
+                  <Button accessibilityLabel="Open Vorinthex AI inbox" contentMode="raw" onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "inbox", inbox: "internal" } })} shape="rounded" size="xl" style={styles.rootCardMain} variant="ghost">
+                    <Image accessibilityLabel="Vorinthex AI inbox cover" contentFit="contain" source={contentPresentationIconSource.platform} style={styles.managedInboxLogo} />
+                    <Text ellipsizeMode="tail" numberOfLines={1} style={styles.rootCardTitle}>Vorinthex AI</Text>
+                  </Button>
+                </View> : null}
                 {visibleAccounts.map((account) => { const accountSelected = selectedInboxes.some(({ connectorKey }) => connectorKey === account.connectorKey); return (
                   <View key={account.key} style={[styles.rootCard, accountSelected && styles.rootCardSelected, { width: rootCardSize, height: rootCardSize }]}>
                     {account.coverUrl ? <Image contentFit="cover" source={account.coverUrl} style={StyleSheet.absoluteFill} /> : null}
@@ -3268,7 +3282,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
                     accessibilityState={{ selected: accountSelected }}
                     contentMode="raw"
                     disabled={rootBulkBusy}
-                    onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleRootInboxLongPress(account); }}
+                    onAccessibilityAction={permissions.canMutate ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleRootInboxLongPress(account, false); } : undefined}
                     onLongPress={permissions.canMutate ? () => handleRootInboxLongPress(account) : undefined}
                     onPress={() => handleRootInboxPress(account)}
                     shape="rounded"
@@ -3281,8 +3295,8 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
                   </Button>
                   </View>
                 ); })}
-                {!loadError && !rootSearchError && !visibleAccounts.length && rootFilterActive ? <Text style={styles.rootEmpty}>No inboxes matched these filters.</Text> : null}
-                {!loadError && !visibleAccounts.length && !rootFilterActive ? (
+                {!loadError && !rootSearchError && !managedInboxVisible && !visibleAccounts.length && rootFilterActive ? <Text style={styles.rootEmpty}>No inboxes matched these filters.</Text> : null}
+                {!loadError && !managedInboxVisible && !visibleAccounts.length && !rootFilterActive ? (
                   <View style={styles.rootEmptyState}>
                     <Text style={styles.rootEmpty}>{rootFavoritesOnly ? "No favorite inboxes." : "No connected inbox yet."}</Text>
                     {permissions.canManageConnector ? <Button accessibilityLabel="Connect email" contentMode="raw" onPress={openConnectForm} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : <Text style={styles.rootEmptyHelp}>Connect an inbox to get started.</Text>}
@@ -3370,7 +3384,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
                 contentMode="raw"
                 disabled={bulkBusy}
                 key={thread.key}
-                onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") { toggleThreadSelection(thread); void Haptics.selectionAsync(); } }}
+                onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleThreadLongPress(thread, false); }}
                 onLongPress={() => handleThreadLongPress(thread)}
                 onPress={() => handleThreadPress(thread)}
                 shape="pill"
@@ -3473,7 +3487,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
 
       <SearchHistorySheet error={searchHistoryError} history={searchHistory} loading={searchHistoryLoading} onClose={closeSearchHistory} onRemove={(item) => void removeSearchHistory(item)} onSelect={applySearchHistory} open={sheetOpen && sheet === "searchHistory"} removingQuery={removingHistoryQuery} />
       <TagFilterSheet context={historyContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />
-      <ResourceTagsSheet context={historyContext} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />
+      <ResourceTagsSheet context={historyContext} onApply={() => { setSelectedInboxes([]); setSelectedThreads([]); }} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />
       <BottomSheet
         description={selectedInboxDraft ? `To: ${selectedInboxDraft.to.join(", ")}` : undefined}
         dismissible={!draftSending && !draftTransformation}
@@ -3747,13 +3761,13 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         {readerError ? <View accessibilityRole="alert" style={styles.sheetError}><Text style={styles.sheetErrorText}>{readerError}</Text></View> : null}
         {readerSheet === "translate" || readerSheet === "translationReader" ? <View style={[styles.versionPanel, !readerLoading && translations.length === 0 && styles.sheetEmptyContent]}>
           {permissions.canMutate && selectedTranslationKeys.length ? <Tabs accessibilityLabel="Selected translations toolbar" style={styles.generatedBulkToolbar}><View style={styles.generatedBulkToolbarSelection}><Button accessibilityLabel="Clear translation selection" contentMode="raw" disabled={generatedDeleteBusy} onPress={() => setSelectedTranslationKeys([])} size="md" style={styles.generatedBulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text accessibilityLiveRegion="polite" style={styles.generatedBulkSelectionText}>{selectedTranslationKeys.length} selected</Text></View><Button disabled={generatedDeleteBusy} onPress={() => openGeneratedDeleteConfirmation("translation")} size="md" style={styles.generatedBulkDeleteAction} textStyle={styles.generatedBulkDeleteText} variant="secondary">Delete</Button></Tabs> : null}
-          {readerLoading && readerGenerating !== "translation" ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading translation versions" accessibilityRole="progressbar" key={index} style={styles.versionSkeleton} />) : <>{translations.map((version) => { const selectedVersion = selectedTranslationKeys.includes(version.key); return <View key={version.key} style={styles.versionRow}><Button accessibilityActions={permissions.canMutate ? [{ name: "longpress", label: selectedVersion ? "Deselect translation" : "Select translation" }] : undefined} accessibilityLabel={`Translation ${version.version}`} accessibilityState={{ selected: selectedVersion }} contentMode="raw" disabled={generatedDeleteBusy} onAccessibilityAction={permissions.canMutate ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") toggleGeneratedSelection("translation", version.key); } : undefined} onLongPress={permissions.canMutate ? () => handleGeneratedLongPress("translation", version.key) : undefined} onPress={() => handleGeneratedPress("translation", version.key)} size="md" style={[styles.versionMain, selectedVersion && styles.generatedVersionSelected]} variant="secondary"><ClockIcon size="sm" variant="accent" /><Text numberOfLines={1} style={styles.rowTitle}>Translation {version.version}</Text>{selectedVersion ? <View pointerEvents="none" style={styles.generatedSelectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</Button></View>; })}{readerGenerating === "translation" ? <Skeleton accessibilityLabel="Generating translation" accessibilityRole="progressbar" style={styles.versionSkeleton} /> : translations.length === 0 ? <Text style={styles.centerText}>No translations yet.</Text> : null}</>}
+          {readerLoading && readerGenerating !== "translation" ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading translation versions" accessibilityRole="progressbar" key={index} style={styles.versionSkeleton} />) : <>{translations.map((version) => { const selectedVersion = selectedTranslationKeys.includes(version.key); return <View key={version.key} style={styles.versionRow}><Button accessibilityActions={permissions.canMutate ? [{ name: "longpress", label: selectedVersion ? "Deselect translation" : "Select translation" }] : undefined} accessibilityLabel={`Translation ${version.version}`} accessibilityState={{ selected: selectedVersion }} contentMode="raw" disabled={generatedDeleteBusy} onAccessibilityAction={permissions.canMutate ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleGeneratedLongPress("translation", version.key, false); } : undefined} onLongPress={permissions.canMutate ? () => handleGeneratedLongPress("translation", version.key) : undefined} onPress={() => handleGeneratedPress("translation", version.key)} size="md" style={[styles.versionMain, selectedVersion && styles.generatedVersionSelected]} variant="secondary"><ClockIcon size="sm" variant="accent" /><Text numberOfLines={1} style={styles.rowTitle}>Translation {version.version}</Text>{selectedVersion ? <View pointerEvents="none" style={styles.generatedSelectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</Button></View>; })}{readerGenerating === "translation" ? <Skeleton accessibilityLabel="Generating translation" accessibilityRole="progressbar" style={styles.versionSkeleton} /> : translations.length === 0 ? <Text style={styles.centerText}>No translations yet.</Text> : null}</>}
         </View> : null}
         {readerSheet === "translationForm" ? <View style={styles.transformationForm}><Text style={styles.inputLabel}>Language</Text><TextInput accessibilityLabel="Translation language" editable={!readerLoading} maxLength={100} onChangeText={setTargetLanguage} placeholder="Language" ref={readerInputRef} value={targetLanguage} /></View> : null}
         {readerSheet === "summaryVersions" || readerSheet === "summaryReader" ? <View style={styles.summaryVersionPanel}>
           {permissions.canMutate && selectedSummaryKeys.length ? <Tabs accessibilityLabel="Selected summaries toolbar" style={styles.generatedBulkToolbar}><View style={styles.generatedBulkToolbarSelection}><Button accessibilityLabel="Clear summary selection" contentMode="raw" disabled={generatedDeleteBusy} onPress={() => setSelectedSummaryKeys([])} size="md" style={styles.generatedBulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text accessibilityLiveRegion="polite" style={styles.generatedBulkSelectionText}>{selectedSummaryKeys.length} selected</Text></View><Button disabled={generatedDeleteBusy} onPress={() => openGeneratedDeleteConfirmation("summary")} size="md" style={styles.generatedBulkDeleteAction} textStyle={styles.generatedBulkDeleteText} variant="secondary">Delete</Button></Tabs> : null}
           <ScrollView contentContainerStyle={[styles.versionList, !readerLoading && summaries.length === 0 && styles.sheetEmptyContent]} showsVerticalScrollIndicator={false} style={styles.sheetList}>
-            {readerLoading && readerGenerating !== "summary" ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading summary versions" accessibilityRole="progressbar" key={index} style={styles.versionSkeleton} />) : <>{summaries.map((summary) => { const selectedVersion = selectedSummaryKeys.includes(summary.key); return <Button accessibilityActions={permissions.canMutate ? [{ name: "longpress", label: selectedVersion ? "Deselect summary" : "Select summary" }] : undefined} accessibilityLabel={`Summary ${summary.version}`} accessibilityState={{ selected: selectedVersion }} contentMode="raw" disabled={generatedDeleteBusy} key={summary.key} onAccessibilityAction={permissions.canMutate ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") toggleGeneratedSelection("summary", summary.key); } : undefined} onLongPress={permissions.canMutate ? () => handleGeneratedLongPress("summary", summary.key) : undefined} onPress={() => handleGeneratedPress("summary", summary.key)} size="md" style={[styles.versionMain, selectedVersion && styles.generatedVersionSelected]} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.rowTitle}>Summary {summary.version}</Text>{selectedVersion ? <View pointerEvents="none" style={styles.generatedSelectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</Button>; })}{readerGenerating === "summary" ? <Skeleton accessibilityLabel="Generating summary" accessibilityRole="progressbar" style={styles.versionSkeleton} /> : summaries.length === 0 ? <Text style={styles.centerText}>No summaries yet.</Text> : null}</>}
+            {readerLoading && readerGenerating !== "summary" ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading summary versions" accessibilityRole="progressbar" key={index} style={styles.versionSkeleton} />) : <>{summaries.map((summary) => { const selectedVersion = selectedSummaryKeys.includes(summary.key); return <Button accessibilityActions={permissions.canMutate ? [{ name: "longpress", label: selectedVersion ? "Deselect summary" : "Select summary" }] : undefined} accessibilityLabel={`Summary ${summary.version}`} accessibilityState={{ selected: selectedVersion }} contentMode="raw" disabled={generatedDeleteBusy} key={summary.key} onAccessibilityAction={permissions.canMutate ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleGeneratedLongPress("summary", summary.key, false); } : undefined} onLongPress={permissions.canMutate ? () => handleGeneratedLongPress("summary", summary.key) : undefined} onPress={() => handleGeneratedPress("summary", summary.key)} size="md" style={[styles.versionMain, selectedVersion && styles.generatedVersionSelected]} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.rowTitle}>Summary {summary.version}</Text>{selectedVersion ? <View pointerEvents="none" style={styles.generatedSelectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</Button>; })}{readerGenerating === "summary" ? <Skeleton accessibilityLabel="Generating summary" accessibilityRole="progressbar" style={styles.versionSkeleton} /> : summaries.length === 0 ? <Text style={styles.centerText}>No summaries yet.</Text> : null}</>}
           </ScrollView>
         </View> : null}
         {readerSheet === "replies" ? <ScrollView contentContainerStyle={[styles.versionList, !readerLoading && !readerError && replyDrafts.length === 0 && styles.sheetEmptyContent]} showsVerticalScrollIndicator={false} style={styles.sheetList}>
@@ -3878,11 +3892,12 @@ function ReplyContextSheets({ canMutate, context, onClose, open }: { canMutate: 
   function toggleSelection(key: string) {
     setSelectedKeys((current) => current.includes(key) ? current.filter((candidate) => candidate !== key) : [...current, key]);
   }
-  function handleLongPress(key: string) {
+  function handleLongPress(key: string, suppressPress = true) {
     if (!canMutate) return;
-    longPressedNote.current = key;
+    if (suppressPress) longPressedNote.current = key;
+    const enteringSelection = activeSelectedKeys.length === 0 && !activeSelectedKeys.includes(key);
     toggleSelection(key);
-    void Haptics.selectionAsync();
+    if (enteringSelection) void Haptics.selectionAsync();
   }
   function openEditor(note?: EmailReplyContext) {
     setName(note?.name ?? "");
@@ -4001,7 +4016,7 @@ function ReplyContextSheets({ canMutate, context, onClose, open }: { canMutate: 
     <BottomSheet footer={<View style={styles.replyContextFooter}>{canMutate ? <Button disabled={deleting} onPress={() => openEditor()} size="md" variant="primary">Create context note</Button> : null}<Button disabled={deleting} onPress={onClose} size="md" variant="secondary">Close</Button></View>} height="full" onOpenChange={(nextOpen) => { if (!nextOpen && open && !deleting) onClose(); }} open={open} title="Reply context">
       <ScrollView accessibilityLabel="Reply context notes" accessibilityLiveRegion="polite" accessibilityState={{ busy: notesQuery.isPending || deleting }} contentContainerStyle={[styles.replyContextList, !notesQuery.isPending && !notesQuery.error && !notes.length && styles.replyContextEmpty]} showsVerticalScrollIndicator={false}>
         {activeSelectedKeys.length ? <Tabs accessibilityLabel="Context note selection toolbar" style={styles.replyContextSelectionToolbar}><View style={styles.replyContextSelectionCount}><Button accessibilityLabel="Clear context note selection" contentMode="raw" disabled={deleting} onPress={() => setSelectedKeys([])} size="md" style={styles.replyContextSelectionClear} variant="secondary"><CloseIcon size="sm" /></Button><Text style={styles.replyContextSelectionText}>{activeSelectedKeys.length} selected</Text></View><Button disabled={deleting} onPress={() => setDeleteConfirmOpen(true)} size="md" variant="danger">Delete</Button></Tabs> : null}
-        {notesQuery.isPending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.replyContextPillSkeleton} />) : notesQuery.error ? <View style={styles.replyContextEmpty}><Text style={styles.rootEmpty}>{messageFor(notesQuery.error)}</Text><Button onPress={() => void notesQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : notes.map((note) => { const selected = activeSelectedKeys.includes(note.key); return <Button accessibilityActions={canMutate ? [{ name: "longpress", label: selected ? `Deselect ${note.name}` : `Select ${note.name}` }] : undefined} accessibilityLabel={activeSelectedKeys.length ? `${selected ? "Deselect" : "Select"} ${note.name}` : `Open ${note.name}`} accessibilityState={{ selected }} contentMode="raw" disabled={deleting} key={note.key} onAccessibilityAction={canMutate ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") toggleSelection(note.key); } : undefined} onLongPress={canMutate ? () => handleLongPress(note.key) : undefined} onPress={() => handlePress(note)} shape="pill" size="md" style={[styles.replyContextPill, selected && styles.replyContextPillSelected]} variant="secondary"><Text numberOfLines={1} style={styles.replyContextPillText}>{note.name}</Text></Button>; })}
+        {notesQuery.isPending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.replyContextPillSkeleton} />) : notesQuery.error ? <View style={styles.replyContextEmpty}><Text style={styles.rootEmpty}>{messageFor(notesQuery.error)}</Text><Button onPress={() => void notesQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : notes.map((note) => { const selected = activeSelectedKeys.includes(note.key); return <Button accessibilityActions={canMutate ? [{ name: "longpress", label: selected ? `Deselect ${note.name}` : `Select ${note.name}` }] : undefined} accessibilityLabel={activeSelectedKeys.length ? `${selected ? "Deselect" : "Select"} ${note.name}` : `Open ${note.name}`} accessibilityState={{ selected }} contentMode="raw" disabled={deleting} key={note.key} onAccessibilityAction={canMutate ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleLongPress(note.key, false); } : undefined} onLongPress={canMutate ? () => handleLongPress(note.key) : undefined} onPress={() => handlePress(note)} shape="pill" size="md" style={[styles.replyContextPill, selected && styles.replyContextPillSelected]} variant="secondary"><Text numberOfLines={1} style={styles.replyContextPillText}>{note.name}</Text></Button>; })}
         {!notesQuery.isPending && !notesQuery.error && !notes.length ? <View style={styles.replyContextEmpty}><Text style={styles.rootEmpty}>No context notes yet.</Text>{canMutate ? <Button accessibilityLabel="Create context note" contentMode="raw" onPress={() => openEditor()} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : null}
       </ScrollView>
     </BottomSheet>
@@ -4104,6 +4119,7 @@ const styles = StyleSheet.create({
   rootCardSelected: { borderColor: palette.silver50, borderWidth: 1, backgroundColor: "transparent" },
   rootCardSkeleton: { borderRadius: radii.md, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   rootCardMain: { width: "100%", height: "100%", paddingHorizontal: 8, paddingVertical: 10, flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10 },
+  managedInboxLogo: { width: "58%", height: "58%" },
   coveredCardMain: { justifyContent: "flex-end", paddingBottom: 10 },
   coveredCardLabel: { width: "auto", maxWidth: "100%", paddingHorizontal: 5, paddingVertical: 4, overflow: "hidden", borderRadius: radii.sm, backgroundColor: "rgba(0,0,0,0.68)", color: palette.silver50 },
   rootCardTitle: { width: "100%", color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, lineHeight: 15, textAlign: "center" },

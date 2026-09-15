@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 
-import { CANONICAL_APP_SLUGS, parseAppsRegistry } from "./apps-registry";
+import { CANONICAL_APP_SLUGS, configureAppsBootstrapIdentityHeaders, parseAppsRegistry } from "./apps-registry";
 import { selectedAppKeyHeaders } from "./app-request-headers";
 import { useAppsStore } from "@/state/apps";
 
@@ -58,6 +58,7 @@ describe("apps registry parsing", () => {
 
 describe("apps registry state", () => {
   beforeEach(() => {
+    configureAppsBootstrapIdentityHeaders(() => ({ "X-Vorinthex-Event-Identifier": "a".repeat(128), "X-Vorinthex-Device-Identifier": "ios" }));
     useAppsStore.setState({
       apps: [],
       products: [],
@@ -80,6 +81,9 @@ describe("apps registry state", () => {
     globalThis.fetch = ((input) => new Promise((resolve) => { releases.set(String(input).split("/").at(-1)!, resolve); })) as typeof fetch;
     const bootstrapping = useAppsStore.getState().bootstrap();
     expect(useAppsStore.getState().bootstrapStatus).toBe("bootstrapping");
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     expect([...releases.keys()]).toEqual(["health", "products", "costs", "apps"]);
     releases.get("apps")!({ ok: true, status: 200, json: async () => response([app("future-app", 8)]) });
     releases.get("health")!({ ok: true, status: 200, json: async () => ({ ok: true }) });

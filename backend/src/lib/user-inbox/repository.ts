@@ -34,12 +34,14 @@ export function createUserInboxRepository(database: UserInboxDatabase = db as un
         LET items = (FOR thread IN userInboxThreads
           FILTER thread.userKey == @userKey
           FILTER @mailbox == "inbox" || LENGTH(FOR message IN userInboxMessages FILTER message.threadKey == thread._key && message.userKey == @userKey && message.sender == "user" LIMIT 1 RETURN 1) > 0
+          FILTER @readState == "all" || @readState == "read" && thread.readAt != null || @readState == "unread" && thread.readAt == null
+          FILTER @query == "" || CONTAINS(LOWER(thread.subject), @query) || LENGTH(FOR message IN userInboxMessages FILTER message.threadKey == thread._key && message.userKey == @userKey && CONTAINS(LOWER(message.body), @query) LIMIT 1 RETURN 1) > 0
           FILTER cursorThread == null || thread.lastMessageAt < cursorThread.lastMessageAt || (thread.lastMessageAt == cursorThread.lastMessageAt && thread._key < cursorThread._key)
           SORT thread.lastMessageAt DESC, thread._key DESC LIMIT @pageSize
           LET latestMessage = FIRST(FOR message IN userInboxMessages FILTER message.threadKey == thread._key SORT message.createdAt DESC, message._key DESC LIMIT 1 RETURN message.body)
-          RETURN MERGE(thread, { preview: latestMessage ?? "" }))
+          RETURN MERGE(thread, { preview: NOT_NULL(latestMessage, "") }))
         RETURN { cursorValid: @cursor == null || cursorThread != null, unreadCount, items }
-      `, { userKey, ...input, cursor: input.cursor ?? null, pageSize: input.limit + 1 });
+      `, { userKey, mailbox: input.mailbox, query: input.query?.toLocaleLowerCase() ?? '', readState: input.readState ?? 'all', cursor: input.cursor ?? null, pageSize: input.limit + 1 });
       const result = await cursor.next() as { cursorValid: boolean; unreadCount: number; items: Record<string, unknown>[] } | undefined;
       if (!result?.cursorValid) throw new InvalidCommunicationCursorError('Invalid communication cursor.');
       const parsed = (result.items ?? []).map((item) => userInboxThreadListItemSchema.parse(withArangoKey(item)));

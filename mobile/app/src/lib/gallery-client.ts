@@ -11,7 +11,7 @@ export type GalleryCollection = {
   key: string;
   name: string;
   description: string | null;
-  purpose: "place-media" | "email-media" | "generated-media" | null;
+  purpose: "place-media" | "email-media" | "generated-media" | "scope-directory" | null;
   mutationPolicy: "user" | "system-only";
   isFavorite: boolean;
   count: number;
@@ -79,7 +79,7 @@ export type GalleryOverview = {
 const galleryCollectionAccessSchema = z.strictObject({ canRead: z.boolean(), canContribute: z.boolean(), canManage: z.boolean() });
 const galleryResultTagsSchema = z.array(z.strictObject({ key: z.string().min(1), name: z.string() }));
 const galleryCollectionTransportSchema = z.strictObject({
-  key: z.string().min(1), name: z.string().min(1), description: z.string().nullable(), purpose: z.enum(["place-media", "email-media", "generated-media"]).nullable(), mutationPolicy: z.enum(["user", "system-only"]),
+  key: z.string().min(1), name: z.string().min(1), description: z.string().nullable(), purpose: z.enum(["place-media", "email-media", "generated-media", "scope-directory"]).nullable(), mutationPolicy: z.enum(["user", "system-only"]),
   isFavorite: z.boolean(), count: z.number().int().nonnegative(), coverUrl: z.string().min(1).nullable(), presentation: z.enum(["travel", "communication", "learning"]).optional(), actorKey: z.string().min(1), isOwned: z.boolean().optional(),
   role: z.enum(["owner", "viewer"]), access: galleryCollectionAccessSchema, createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(), score: z.number().optional(), tags: galleryResultTagsSchema.optional(),
 });
@@ -392,7 +392,13 @@ export type PreparedGalleryUpload = {
   processingMode?: "library" | "cover";
 };
 
+export const MAX_GALLERY_UPLOAD_IMAGES = 20;
+export const MAX_GALLERY_UPLOAD_IMAGE_BYTES = 20 * 1024 * 1024;
+
 export async function uploadGalleryImages(files: PreparedGalleryUpload[], collectionKey?: string, context?: GalleryContext) {
+  if (files.length === 0 || files.length > MAX_GALLERY_UPLOAD_IMAGES) throw new Error(`Gallery uploads must contain between 1 and ${MAX_GALLERY_UPLOAD_IMAGES} images.`);
+  if (new Set(files.map(({ clientKey }) => clientKey)).size !== files.length) throw new Error("Gallery upload client keys must be unique.");
+  if (files.some(({ sizeBytes }) => !Number.isSafeInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > MAX_GALLERY_UPLOAD_IMAGE_BYTES)) throw new Error("Each Gallery image must be no larger than 20 MiB.");
   if (files.some(({ filename }) => !/^[^/\\]+\.png$/i.test(filename))) throw new Error("Gallery images must be converted to PNG before upload.");
   const reservation = await postGallery<{
     uploads: { clientKey: string; uploadKey: string; imageKey: string; url: string; headers: Record<string, string> }[];

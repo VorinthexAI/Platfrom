@@ -32,6 +32,7 @@ import {
   type UserTeam,
 } from '@/lib/db/user-team.node';
 import { generateAlias, pickWelcomeLine } from '@/lib/alias';
+import { signInEmailInput } from '@/lib/email/lifecycle';
 import { redisConnection } from '@/lib/redis';
 import { approveHandoff, createHandoffSecret, HANDOFF_CLAIM_WINDOW_MS } from './auth-handoff';
 import { rawReferralCodeSchema } from '@/lib/referrals/contracts';
@@ -753,14 +754,32 @@ type AppleJwk = JsonWebKey & { kid?: string; alg?: string };
 
 type GoogleJwk = JsonWebKey & { kid?: string; alg?: string; use?: string };
 
+const SIGNING_KEY_CACHE_MS = 60 * 60 * 1000;
+let appleSigningKeys: { expiresAt: number; keys: AppleJwk[] } | null = null;
+let googleSigningKeys: { expiresAt: number; keys: GoogleJwk[] } | null = null;
+
+async function loadSigningKeys<T extends JsonWebKey>(url: string, unavailableMessage: string, cached: { expiresAt: number; keys: T[] } | null, force = false) {
+  if (!force && cached && cached.expiresAt > Date.now()) return cached;
+  const response = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+  const body = await response.json().catch(() => null) as { keys?: T[] } | null;
+  if (!response.ok || !Array.isArray(body?.keys)) throw new Error(unavailableMessage);
+  const maxAge = Number(response.headers.get('cache-control')?.match(/(?:^|,)\s*max-age=(\d+)/i)?.[1]);
+  return { keys: body.keys, expiresAt: Date.now() + (Number.isFinite(maxAge) ? maxAge * 1000 : SIGNING_KEY_CACHE_MS) };
+}
+
+async function loadAppleSigningKeys(force = false) {
+  appleSigningKeys = await loadSigningKeys('https://appleid.apple.com/auth/keys', 'Apple signing keys unavailable', appleSigningKeys, force);
+  return appleSigningKeys.keys;
+}
+
+async function loadGoogleSigningKeys(force = false) {
+  googleSigningKeys = await loadSigningKeys('https://www.googleapis.com/oauth2/v3/certs', 'Google signing keys unavailable', googleSigningKeys, force);
+  return googleSigningKeys.keys;
+}
+
 export async function verifyAppleIdentityToken(
   token: string,
-  loadKeys: () => Promise<AppleJwk[]> = async () => {
-    const response = await fetch('https://appleid.apple.com/auth/keys');
-    const body = await response.json().catch(() => null) as { keys?: AppleJwk[] } | null;
-    if (!response.ok || !Array.isArray(body?.keys)) throw new Error('Apple signing keys unavailable');
-    return body.keys;
-  },
+  loadKeys: () => Promise<AppleJwk[]> = loadAppleSigningKeys,
   options: { clientId?: string; nonce?: string } = {},
 ) {
   const [encodedHeader, encodedPayload, encodedSignature, extra] = token.split('.');
@@ -768,7 +787,8 @@ export async function verifyAppleIdentityToken(
   const header = decodeJwtPart(encodedHeader);
   const payload = decodeJwtPart(encodedPayload);
   if (header?.alg !== 'RS256' || typeof header.kid !== 'string' || !payload) return null;
-  const key = (await loadKeys()).find((candidate) => candidate.kid === header.kid && (!candidate.alg || candidate.alg === 'RS256'));
+  let key = (await loadKeys()).find((candidate) => candidate.kid === header.kid && (!candidate.alg || candidate.alg === 'RS256'));
+  if (!key && loadKeys === loadAppleSigningKeys) key = (await loadAppleSigningKeys(true)).find((candidate) => candidate.kid === header.kid && (!candidate.alg || candidate.alg === 'RS256'));
   if (!key) return null;
   const publicKey = await crypto.subtle.importKey('jwk', key, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
   const validSignature = await crypto.subtle.verify(
@@ -791,12 +811,7 @@ export async function verifyAppleIdentityToken(
 
 export async function verifyGoogleIdentityToken(
   token: string,
-  loadKeys: () => Promise<GoogleJwk[]> = async () => {
-    const response = await fetch('https://www.googleapis.com/oauth2/v3/certs');
-    const body = await response.json().catch(() => null) as { keys?: GoogleJwk[] } | null;
-    if (!response.ok || !Array.isArray(body?.keys)) throw new Error('Google signing keys unavailable');
-    return body.keys;
-  },
+  loadKeys: () => Promise<GoogleJwk[]> = loadGoogleSigningKeys,
 ) {
   const [encodedHeader, encodedPayload, encodedSignature, extra] = token.split('.');
   if (!encodedHeader || !encodedPayload || !encodedSignature || extra) return null;
@@ -804,7 +819,10 @@ export async function verifyGoogleIdentityToken(
   const payload = decodeJwtPart(encodedPayload);
   if (header?.alg !== 'RS256' || typeof header.kid !== 'string' || !payload) return null;
   try {
-    const key = (await loadKeys()).find((candidate) => candidate.kid === header.kid
+    let key = (await loadKeys()).find((candidate) => candidate.kid === header.kid
+      && (!candidate.alg || candidate.alg === 'RS256')
+      && (!candidate.use || candidate.use === 'sig'));
+    if (!key && loadKeys === loadGoogleSigningKeys) key = (await loadGoogleSigningKeys(true)).find((candidate) => candidate.kid === header.kid
       && (!candidate.alg || candidate.alg === 'RS256')
       && (!candidate.use || candidate.use === 'sig'));
     if (!key) return null;
@@ -926,7 +944,6 @@ async function completeOAuthProfile(
     lastLoginAt: new Date().toISOString(),
     ...(!(existingUser?.isVerified ?? false) && referralCode ? { pendingReferralCode: normalizeReferralCode(referralCode) } : {}),
   }, { initializeNameOnly: true });
-  await provisionPersonalAuthContext(user);
   const personalContext = await selectPersonalAuthContext(user.key);
   const tokens = await issueUserTokens(user);
   await completeReferralForNewlyVerifiedUser({ userKey: user.key, wasVerified: existingUser?.isVerified ?? false, referralCode });
@@ -1021,23 +1038,7 @@ export async function exchangeMobileOAuthGrant(code: string) {
 }
 
 async function deliverSignInEmail(input: { email: string; magicLink: string; expiresAt: Date }) {
-  await sendBrandedEmail({
-    to: input.email,
-    subject: 'Your Vorinthex sign in link',
-    preheader: 'Sign in to access your galaxy.',
-    label: 'Sign in',
-    eyebrow: 'Secure access',
-    headline: 'Your galaxy awaits',
-    bodyHtml: 'Sign in to access your galaxy.',
-    actionUrl: input.magicLink,
-    actionLabel: 'Sign in',
-    supportingHtml: 'If you did not request this, you can ignore this email.',
-    footerHtml: 'You received this because someone requested Vorinthex access for this email.',
-    extraPayload: {
-      magic_link: input.magicLink,
-      expires_at: input.expiresAt.toISOString(),
-    },
-  });
+  await sendBrandedEmail(signInEmailInput(input));
 }
 
 function escapeHtml(value: string) {

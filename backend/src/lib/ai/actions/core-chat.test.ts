@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { CORE_CHAT_MAX_IMAGE_BYTES, coreChatInputSchema } from './core-chat';
+import { CORE_CHAT_MAX_FILE_BYTES, CORE_CHAT_MAX_IMAGE_BYTES, coreChatInputSchema } from './core-chat';
 
 describe('core chat input', () => {
   test('rejects trusted web grounding capabilities in model input', () => {
@@ -14,6 +14,13 @@ describe('core chat input', () => {
     expect(coreChatInputSchema.parse({ messages: [{ role: 'user', content: Array.from({ length: 12 }, (_, index) => ({ type: 'file' as const, filename: `${index}.txt`, mimeType: 'text/plain' as const, bytes: new Uint8Array([1]) })) }] }).messages[0]!.content).toHaveLength(12);
     expect(() => coreChatInputSchema.parse({ messages: [{ role: 'user', content: Array.from({ length: 13 }, (_, index) => ({ type: 'file' as const, filename: `${index}.txt`, mimeType: 'text/plain' as const, bytes: new Uint8Array([1]) })) }] })).toThrow('at most 12 attachments');
     expect(() => coreChatInputSchema.parse({ messages: [{ role: 'assistant', content: [{ type: 'image', mimeType: 'image/png', bytes: new Uint8Array([1]) }] }] })).toThrow('Images are allowed only in user messages');
+    expect(() => coreChatInputSchema.parse({ messages: [{ role: 'assistant', content: [{ type: 'file', filename: 'notes.txt', mimeType: 'text/plain', bytes: new Uint8Array([1]) }] }] })).toThrow('Files are allowed only in user messages');
+    const maximumFile = new Uint8Array(CORE_CHAT_MAX_FILE_BYTES);
+    expect(() => coreChatInputSchema.parse({ messages: [{ role: 'user', content: [
+      { type: 'file', filename: 'one.pdf', mimeType: 'application/pdf', bytes: maximumFile },
+      { type: 'file', filename: 'two.pdf', mimeType: 'application/pdf', bytes: maximumFile },
+      { type: 'file', filename: 'three.txt', mimeType: 'text/plain', bytes: new Uint8Array([1]) },
+    ] }] })).toThrow('Chat file bytes');
   });
 
   test('rejects unsupported MIME types, unknown fields, and oversized images', () => {

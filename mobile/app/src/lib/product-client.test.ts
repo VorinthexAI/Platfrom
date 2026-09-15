@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 
 import { activeSubscriptionOffers, activeTopup, effectivePriceCents, fetchPublicBootstrap, parseProducts } from "./product-client";
+import { configureAppsBootstrapIdentityHeaders } from "./apps-registry";
 
 const product = (productId: "nova.weekly" | "nova.monthly" | "nova.monthly.discounted" | "topup.small", index: number) => ({
   key: `c${String(index).padStart(24, "0")}`,
@@ -18,6 +19,7 @@ const product = (productId: "nova.weekly" | "nova.monthly" | "nova.monthly.disco
 
 const catalog = { success: true as const, data: [product("nova.weekly", 1), product("nova.monthly", 2), product("nova.monthly.discounted", 3), product("topup.small", 4)] };
 const originalFetch = globalThis.fetch;
+configureAppsBootstrapIdentityHeaders(() => ({ "X-Vorinthex-Event-Identifier": "a".repeat(128), "X-Vorinthex-Device-Identifier": "ios" }));
 afterEach(() => { globalThis.fetch = originalFetch; });
 
 test("strictly parses the complete public product contract", () => {
@@ -46,6 +48,8 @@ test("starts health and products together and rejects either invalid response", 
     return new Promise<Response>((resolve) => releases.set(path, resolve));
   }) as typeof fetch;
   const request = fetchPublicBootstrap();
+  await Promise.resolve();
+  await Promise.resolve();
   await Promise.resolve();
   expect(started).toEqual(["health", "products"]);
   releases.get("health")!(new Response(JSON.stringify({ ok: true }), { status: 200 }));

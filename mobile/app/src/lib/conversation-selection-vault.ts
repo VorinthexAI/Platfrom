@@ -26,10 +26,16 @@ function selectionKey(context: ConversationContext) {
 export function readConversationSelection(context: ConversationContext): Promise<Conversation | undefined> {
   return serialize(async () => {
     const key = selectionKey(context);
-    const raw = await SecureStore.getItemAsync(key);
-    if (!raw) return undefined;
-    try { return storedConversationSchema.parse(JSON.parse(raw)); }
-    catch { await SecureStore.deleteItemAsync(key); return undefined; }
+    let raw: string | null;
+    try { raw = await SecureStore.getItemAsync(key); }
+    catch { return undefined; }
+    try { return raw ? storedConversationSchema.parse(JSON.parse(raw)) : undefined; }
+    catch {
+      // Invalid cache data falls back to a greeting; transient read failures above
+      // do not erase an otherwise valid remembered selection.
+      await SecureStore.deleteItemAsync(key).catch(() => undefined);
+      return undefined;
+    }
   });
 }
 
