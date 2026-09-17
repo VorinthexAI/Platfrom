@@ -103,7 +103,8 @@ describe('conversation repository boundaries', () => {
 
     await expect(createConversationRepository(database).readArchiveSummary!(owner, conversationKey)).resolves.toBe('Owned rolling summary');
 
-    for (const filter of ['conversation != null', 'conversation.teamKey == @teamKey', 'conversation.scopeKey == @scopeKey', 'conversation.userKey == @userKey', 'summary.privateOwnerUserKey == @userKey', 'summary.managedPurpose == "conversation-summary"', 'summary.managedOwnerKey == conversation._key', 'summary.mutationPolicy == "system-only"']) expect(query).toContain(filter);
+    for (const filter of ['conversation != null', 'conversation.teamKey == @teamKey', 'conversation.scopeKey == @scopeKey', 'conversation.userKey == @userKey', 'summary.privateOwnerUserKey == @userKey', 'summary.managedPurpose == "conversation-summary"', 'summary.managedOwnerKey == conversation._key']) expect(query).toContain(filter);
+    expect(query).not.toContain('summary.mutationPolicy == "system-only"');
     expect(vars).toMatchObject({ '@conversations': 'conversations', '@documents': 'documents', ...owner, conversationKey });
     expect(vars.summaryKey).toBeString();
   });
@@ -161,13 +162,17 @@ describe('conversation repository boundaries', () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     expect(source).toContain('transact(async (trx)');
     expect(source).toContain('artifact.conversationKey == conversation._key');
-    expect(source).toContain('UPSERT { storageKey: artifact.stagedStorageKey }');
+    expect(source).toContain('UPSERT { storageKey }');
+    expect(source).toContain('UNIQUE(FOR artifact IN artifacts');
+    expect(source).toContain('CONVERSATION_DELETE_WRITE');
+    expect(source).toContain('exclusive: []');
+    expect(source).toContain('IS_STRING(artifact.stagedStorageKey)');
     expect(source.indexOf('REMOVE artifact IN @@artifacts')).toBeLessThan(source.indexOf('REMOVE conversation IN @@conversations'));
     expect(source.indexOf('REMOVE message IN @@messages')).toBeLessThan(source.indexOf('REMOVE conversation IN @@conversations'));
     expect(source).not.toContain('deletedAt');
-    expect(source).toContain('root.managedPurpose == "conversation-root"');
-    expect(source).toContain('folder.managedPurpose == "conversation"');
-    expect(source).toContain('FILTER remaining == null REMOVE root');
+    expect(source).toContain('REMOVE state IN @@states');
+    expect(source).not.toContain('REMOVE folder IN @@folders');
+    expect(source).not.toContain('REMOVE root IN @@folders');
   });
 
   test('hard-deletes the owned paired turn selected by either message', async () => {
@@ -180,7 +185,8 @@ describe('conversation repository boundaries', () => {
     expect(query).toContain('REMOVE artifact IN @@artifacts');
     expect(query).toContain('REMOVE document IN @@documents');
     expect(query.indexOf('REMOVE document IN @@documents')).toBeLessThan(query.indexOf('REMOVE message IN @@messages'));
-    expect(query).toContain('UPSERT { storageKey: artifact.stagedStorageKey }');
+    expect(query).toContain('UPSERT { storageKey }');
+    expect(query).toContain('IS_STRING(artifact.stagedStorageKey)');
     expect(query).toContain('artifact._key NOT IN retainedArtifactKeys');
     expect(vars).toEqual({ '@conversations': 'conversations', '@messages': 'conversationMessages', '@artifacts': 'conversationAttachmentArtifacts', '@storageJobs': 'storageDeletionJobs', '@documents': 'documents', ...owner, conversationKey, messageKey, updatedAt: timestamp });
   });

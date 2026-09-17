@@ -29,7 +29,7 @@ const styles = StyleSheet.create({
   root: { height: 38, minWidth: 0, padding: 2, flexDirection: "row", alignItems: "center", borderRadius: 999, borderColor: "rgba(221, 226, 229, 0.14)", borderWidth: 1, backgroundColor: colors.page },
   fullWidth: { width: "100%" },
   selected: { borderColor: "#F5F7F8" },
-  mixed: { borderColor: "#9CA7AD", borderStyle: "dashed", backgroundColor: "rgba(245, 247, 248, 0.07)" },
+  mixed: { borderColor: "#9CA7AD", borderStyle: "dashed" },
   labelButton: { minWidth: 0, minHeight: 32, height: 32, paddingHorizontal: 10, paddingVertical: 0, overflow: "hidden" },
   grow: { flex: 1, justifyContent: "flex-start" },
   label: { color: "#F5F7F8", fontFamily: "Geist_500Medium", fontSize: 13 },

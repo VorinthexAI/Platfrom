@@ -24,9 +24,9 @@ export interface ConversationArchiveFolder {
   managedPurpose: ConversationArchiveFolderPurpose;
   managedOwnerKey: string;
   privateOwnerUserKey: string;
-  mutationPolicy: 'system-container';
+  mutationPolicy: 'user' | 'system-container';
   archiveVisibility: 'visible';
-  isFavorite: false;
+  isFavorite: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -45,9 +45,9 @@ export interface ConversationArchiveDocument {
   managedPurpose: ConversationArchiveDocumentPurpose;
   managedOwnerKey: string;
   privateOwnerUserKey: string;
-  mutationPolicy: 'system-only';
+  mutationPolicy: 'user' | 'system-only';
   archiveVisibility: 'visible';
-  isFavorite: false;
+  isFavorite: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -202,12 +202,11 @@ export async function prepareConversationArchiveProjection(snapshot: Conversatio
     { key: keys.summariesFolderKey, parentFolderKey: keys.conversationFolderKey, name: 'Summaries', managedPurpose: 'conversation-summaries' as const, managedOwnerKey: conversation.key },
   ];
   const folders: ConversationArchiveFolder[] = [];
-  const pendingFolderSpecs: typeof folderSpecs = [];
+  const pendingFolderSpecs: Array<Omit<(typeof folderSpecs)[number], 'parentFolderKey'> & { parentFolderKey?: string; previous?: ConversationArchiveFolder }> = [];
   for (const spec of folderSpecs) {
-    const fields = { scopeKey: state.scopeKey, parentFolderKey: spec.parentFolderKey, name: spec.name, managedPurpose: spec.managedPurpose, managedOwnerKey: spec.managedOwnerKey, privateOwnerUserKey: state.userKey, mutationPolicy: 'system-container' as const, archiveVisibility: 'visible' as const, isFavorite: false as const };
     const previous = existingFolders.get(spec.key);
-    if (sameFields(previous, fields) && previous?.embedding.length) folders.push(previous);
-    else pendingFolderSpecs.push(spec);
+    if (previous && (spec.managedPurpose !== 'conversation' || previous.name === spec.name) && previous.embedding.length) folders.push(previous);
+    else pendingFolderSpecs.push({ ...spec, parentFolderKey: previous ? previous.parentFolderKey : spec.parentFolderKey, previous });
   }
 
   const documentSpecs: Array<{ key: string; folderKey: string; name: string; content: string; managedPurpose: ConversationArchiveDocumentPurpose; managedOwnerKey: string }> = snapshot.messages.filter((message) => message.status === 'COMPLETED').map((message) => ({
@@ -218,13 +217,17 @@ export async function prepareConversationArchiveProjection(snapshot: Conversatio
   if (summary !== null) documentSpecs.push({ key: keys.summaryDocumentKey, folderKey: keys.summariesFolderKey, name: 'Current summary', content: boundedSummary(summary), managedPurpose: 'conversation-summary', managedOwnerKey: conversation.key });
 
   const documents: ConversationArchiveDocument[] = [];
-  const pendingDocuments: Array<(typeof documentSpecs)[number] & { chunks: string[]; fields: Record<string, unknown> }> = [];
+  const pendingDocuments: Array<(typeof documentSpecs)[number] & { chunks: string[]; previous?: ConversationArchiveDocument }> = [];
   for (const spec of documentSpecs) {
-    const chunks = chunkDocumentContent(spec.content);
-    const fields = { scopeKey: state.scopeKey, folderKey: spec.folderKey, name: spec.name, content: spec.content, contentChunks: chunks, semanticChunkCount: chunks.length, semanticContentHash: documentSemanticHash(spec.content), managedPurpose: spec.managedPurpose, managedOwnerKey: spec.managedOwnerKey, privateOwnerUserKey: state.userKey, mutationPolicy: 'system-only' as const, archiveVisibility: 'visible' as const, isFavorite: false as const };
     const previous = existingDocuments.get(spec.key);
-    if (sameFields(previous, fields) && previous?.chunkEmbeddings.length === chunks.length) documents.push(previous);
-    else pendingDocuments.push({ ...spec, chunks, fields });
+    if (spec.managedPurpose === 'conversation-message' && previous) {
+      documents.push(previous);
+      continue;
+    }
+    const chunks = chunkDocumentContent(spec.content);
+    const fields = { content: spec.content, contentChunks: chunks, semanticChunkCount: chunks.length, semanticContentHash: documentSemanticHash(spec.content) };
+    if (previous && sameFields(previous, fields) && previous.chunkEmbeddings.length === chunks.length) documents.push(previous);
+    else pendingDocuments.push({ ...spec, folderKey: previous?.folderKey ?? spec.folderKey, name: previous?.name ?? spec.name, chunks, previous });
   }
 
   const embeddingInputs = [
@@ -235,13 +238,25 @@ export async function prepareConversationArchiveProjection(snapshot: Conversatio
   if (embeddings.length !== embeddingInputs.length || embeddings.some((embedding) => !embedding.length || embedding.some((value) => !Number.isFinite(value)))) throw new Error('Archive projection embedding output is not aligned with its inputs.');
   let offset = 0;
   for (const spec of pendingFolderSpecs) {
-    const previous = existingFolders.get(spec.key);
-    folders.push({ key: spec.key, scopeKey: state.scopeKey, parentFolderKey: spec.parentFolderKey, name: spec.name, managedPurpose: spec.managedPurpose, managedOwnerKey: spec.managedOwnerKey, privateOwnerUserKey: state.userKey, mutationPolicy: 'system-container', archiveVisibility: 'visible', isFavorite: false, embedding: embeddings[offset++]!, createdAt: previous?.createdAt ?? now, updatedAt: now });
+    const previous = spec.previous;
+    folders.push({
+      ...(previous ?? {}),
+      key: spec.key, scopeKey: state.scopeKey, parentFolderKey: spec.parentFolderKey, name: spec.name, managedPurpose: spec.managedPurpose, managedOwnerKey: spec.managedOwnerKey, privateOwnerUserKey: state.userKey,
+      mutationPolicy: previous?.mutationPolicy ?? 'user', archiveVisibility: 'visible', isFavorite: previous?.isFavorite ?? false,
+      embedding: embeddings[offset++]!, createdAt: previous?.createdAt ?? now, updatedAt: now,
+    });
   }
   for (const spec of pendingDocuments) {
-    const previous = existingDocuments.get(spec.key);
+    const previous = spec.previous;
     const chunkEmbeddings = embeddings.slice(offset, offset + spec.chunks.length); offset += spec.chunks.length;
-    documents.push({ key: spec.key, ...(spec.fields as Omit<ConversationArchiveDocument, 'key' | 'embedding' | 'chunkEmbeddings' | 'createdAt' | 'updatedAt'>), embedding: chunkEmbeddings[0]!, chunkEmbeddings, createdAt: previous?.createdAt ?? now, updatedAt: now });
+    documents.push({
+      ...(previous ?? {}),
+      key: spec.key, scopeKey: state.scopeKey, folderKey: spec.folderKey, name: spec.name, content: spec.content, contentChunks: spec.chunks,
+      semanticChunkCount: spec.chunks.length, semanticContentHash: documentSemanticHash(spec.content),
+      managedPurpose: spec.managedPurpose, managedOwnerKey: spec.managedOwnerKey, privateOwnerUserKey: state.userKey,
+      mutationPolicy: previous?.mutationPolicy ?? 'user', archiveVisibility: 'visible', isFavorite: previous?.isFavorite ?? false,
+      embedding: chunkEmbeddings[0]!, chunkEmbeddings, createdAt: previous?.createdAt ?? now, updatedAt: now,
+    });
   }
   return { folders: folderSpecs.map(({ key }) => folders.find((folder) => folder.key === key)!), documents: documentSpecs.map(({ key }) => documents.find((document) => document.key === key)!) };
 }
@@ -252,7 +267,7 @@ const parseState = (value: unknown) => conversationArchiveStateSchema.parse(with
 
 export function createConversationArchiveProjectionRepository(database: ArchiveDatabase = db as unknown as ArchiveDatabase, transaction?: ArchiveTransaction): ConversationArchiveProjectionRepository {
   const transact = transaction ?? (database === db as unknown as ArchiveDatabase
-    ? (operation) => withTransaction({ read: ['conversations', 'conversationMessages'], write: [CONVERSATION_ARCHIVE_STATES_COLLECTION, 'folders', 'documents'] }, (trx) => operation(trx as unknown as ArchiveDatabase))
+    ? (operation) => withTransaction({ read: ['conversations', 'conversationMessages'], write: [CONVERSATION_ARCHIVE_STATES_COLLECTION, 'folders', 'documents'], exclusive: [] }, (trx) => operation(trx as unknown as ArchiveDatabase))
     : (operation) => operation(database));
   const binding = (alias: string) => `${alias}.conversationKey == @conversationKey && ${alias}.teamKey == @teamKey && ${alias}.scopeKey == @scopeKey && ${alias}.userKey == @userKey && ${alias}.actorKey == @actorKey`;
   const ownerBindings = ({ conversationKey, teamKey, scopeKey, userKey, actorKey }: ConversationArchiveOwner) => ({ conversationKey, teamKey, scopeKey, userKey, actorKey });
@@ -279,8 +294,8 @@ export function createConversationArchiveProjectionRepository(database: ArchiveD
         if (!current) return { status: 'stale' as const };
         const source = await (await executor.query('FOR value IN @@conversations FILTER value._key == @conversationKey && value.teamKey == @teamKey && value.scopeKey == @scopeKey && value.userKey == @userKey LIMIT 1 RETURN true', { '@conversations': 'conversations', ...conversationBindings(state) })).next();
         if (!source) return { status: 'stale' as const };
-        const folderConflicts = await (await executor.query('FOR value IN folders FILTER value._key IN @keys LET desired = FIRST(FOR item IN @desired FILTER item.key == value._key RETURN item) FILTER !(value.privateOwnerUserKey == @userKey && value.managedPurpose == desired.managedPurpose && value.managedOwnerKey == desired.managedOwnerKey && value.mutationPolicy == "system-container") RETURN value._key', { keys: projection.folders.map(({ key }) => key), desired: projection.folders.map(({ key, managedPurpose, managedOwnerKey }) => ({ key, managedPurpose, managedOwnerKey })), userKey: state.userKey })).all();
-        const documentConflicts = await (await executor.query('FOR value IN documents FILTER value._key IN @keys LET desired = FIRST(FOR item IN @desired FILTER item.key == value._key RETURN item) FILTER !(value.privateOwnerUserKey == @userKey && value.managedPurpose == desired.managedPurpose && value.managedOwnerKey == desired.managedOwnerKey && value.mutationPolicy == "system-only") RETURN value._key', { keys: projection.documents.map(({ key }) => key), desired: projection.documents.map(({ key, managedPurpose, managedOwnerKey }) => ({ key, managedPurpose, managedOwnerKey })), userKey: state.userKey })).all();
+        const folderConflicts = await (await executor.query('FOR value IN folders FILTER value._key IN @keys LET desired = FIRST(FOR item IN @desired FILTER item.key == value._key RETURN item) FILTER !(value.privateOwnerUserKey == @userKey && value.managedPurpose == desired.managedPurpose && value.managedOwnerKey == desired.managedOwnerKey) RETURN value._key', { keys: projection.folders.map(({ key }) => key), desired: projection.folders.map(({ key, managedPurpose, managedOwnerKey }) => ({ key, managedPurpose, managedOwnerKey })), userKey: state.userKey })).all();
+        const documentConflicts = await (await executor.query('FOR value IN documents FILTER value._key IN @keys LET desired = FIRST(FOR item IN @desired FILTER item.key == value._key RETURN item) FILTER !(value.privateOwnerUserKey == @userKey && value.managedPurpose == desired.managedPurpose && value.managedOwnerKey == desired.managedOwnerKey) RETURN value._key', { keys: projection.documents.map(({ key }) => key), desired: projection.documents.map(({ key, managedPurpose, managedOwnerKey }) => ({ key, managedPurpose, managedOwnerKey })), userKey: state.userKey })).all();
         if (folderConflicts.length || documentConflicts.length) throw new Error(`Conversation Archive deterministic keys conflict with non-owned resources: ${[...folderConflicts, ...documentConflicts].join(', ')}`);
         for (const [collection, values] of [['folders', projection.folders], ['documents', projection.documents]] as const) await executor.query(`FOR value IN @values UPSERT { _key: value._key } INSERT value REPLACE value IN ${collection}`, { values: values.map((value) => toArangoDoc(value as unknown as Record<string, unknown> & { key: string })) });
         await executor.query('FOR value IN documents FILTER value.folderKey == @folderKey && value.managedPurpose == "conversation-message" && value.privateOwnerUserKey == @userKey && value._key NOT IN @desiredKeys REMOVE value IN documents', { folderKey: keys.conversationFolderKey, userKey: state.userKey, desiredKeys: projection.documents.filter(({ managedPurpose }) => managedPurpose === 'conversation-message').map(({ key }) => key) });
@@ -292,18 +307,17 @@ export function createConversationArchiveProjectionRepository(database: ArchiveD
     },
     async deleteMissingSource(owner, desiredRevision) {
       const input = ownerSchema.parse(owner);
-      return transact(async (executor) => {
-        const state = await (await executor.query(`FOR value IN @@states FILTER value.desiredRevision == @desiredRevision && ${binding('value')} LIMIT 1 RETURN value`, { '@states': CONVERSATION_ARCHIVE_STATES_COLLECTION, ...input, desiredRevision })).next();
-        if (!state) return 'stale';
-        const source = await (await executor.query('FOR value IN @@conversations FILTER value._key == @conversationKey && value.teamKey == @teamKey && value.scopeKey == @scopeKey && value.userKey == @userKey LIMIT 1 RETURN true', { '@conversations': 'conversations', ...conversationBindings(input) })).next();
-        if (source) return 'stale';
-        const keys = conversationArchiveKeys(input);
-        await executor.query('FOR value IN documents FILTER value.privateOwnerUserKey == @userKey && ((value.folderKey IN @folderKeys && value.managedPurpose IN ["conversation-message", "conversation-summary"]) || value._key == @summaryKey) REMOVE value IN documents', { userKey: input.userKey, folderKeys: [keys.conversationFolderKey, keys.summariesFolderKey], summaryKey: keys.summaryDocumentKey });
-        await executor.query('FOR value IN folders FILTER value._key IN @keys && value.privateOwnerUserKey == @userKey && value.managedPurpose IN ["conversation", "conversation-summaries"] REMOVE value IN folders', { keys: [keys.summariesFolderKey, keys.conversationFolderKey], userKey: input.userKey });
-        await executor.query('LET root = DOCUMENT("folders", @rootFolderKey) FILTER root != null && root.scopeKey == @scopeKey && root.privateOwnerUserKey == @userKey && root.managedPurpose == "conversation-root" && root.managedOwnerKey == @userKey LET remaining = FIRST(FOR folder IN folders FILTER folder.parentFolderKey == root._key && folder.scopeKey == @scopeKey && folder.privateOwnerUserKey == @userKey && folder.managedPurpose == "conversation" LIMIT 1 RETURN true) FILTER remaining == null REMOVE root IN folders', { rootFolderKey: keys.rootFolderKey, scopeKey: input.scopeKey, userKey: input.userKey });
-        await executor.query('REMOVE @key IN @@states', { '@states': CONVERSATION_ARCHIVE_STATES_COLLECTION, key: (state as Record<string, unknown>)._key });
-        return 'deleted';
-      });
+      const state = await (await database.query(`FOR value IN @@states FILTER value.desiredRevision == @desiredRevision && ${binding('value')} LIMIT 1 RETURN value`, { '@states': CONVERSATION_ARCHIVE_STATES_COLLECTION, ...input, desiredRevision })).next();
+      if (!state) return 'stale';
+      const source = await (await database.query('FOR value IN @@conversations FILTER value._key == @conversationKey && value.teamKey == @teamKey && value.scopeKey == @scopeKey && value.userKey == @userKey LIMIT 1 RETURN true', { '@conversations': 'conversations', ...conversationBindings(input) })).next();
+      if (source) return 'stale';
+      const keys = conversationArchiveKeys(input);
+      await database.query('FOR document IN documents FILTER document.scopeKey == @scopeKey && document.privateOwnerUserKey == @userKey && document.folderKey IN @folderKeys && document.managedPurpose IN ["conversation-message", "conversation-summary"] REMOVE document IN documents', { scopeKey: input.scopeKey, userKey: input.userKey, folderKeys: [keys.conversationFolderKey, keys.summariesFolderKey] });
+      await database.query('LET summary = DOCUMENT(documents, @summaryKey) FILTER summary != null && summary.privateOwnerUserKey == @userKey && summary.managedPurpose == "conversation-summary" REMOVE summary IN documents', { userKey: input.userKey, summaryKey: keys.summaryDocumentKey });
+      await database.query('FOR folderKey IN @keys LET folder = DOCUMENT(folders, folderKey) FILTER folder != null && folder.privateOwnerUserKey == @userKey && folder.managedPurpose IN ["conversation", "conversation-summaries"] REMOVE folder IN folders', { keys: [keys.summariesFolderKey, keys.conversationFolderKey], userKey: input.userKey });
+      await database.query('LET root = DOCUMENT(folders, @rootFolderKey) FILTER root != null && root.scopeKey == @scopeKey && root.privateOwnerUserKey == @userKey && root.managedPurpose == "conversation-root" && root.managedOwnerKey == @userKey LET remaining = FIRST(FOR folder IN folders FILTER folder.parentFolderKey == root._key && folder.scopeKey == @scopeKey && folder.privateOwnerUserKey == @userKey && folder.managedPurpose == "conversation" LIMIT 1 RETURN 1) FILTER remaining == null REMOVE root IN folders', { rootFolderKey: keys.rootFolderKey, scopeKey: input.scopeKey, userKey: input.userKey });
+      await database.query('REMOVE @key IN @@states', { '@states': CONVERSATION_ARCHIVE_STATES_COLLECTION, key: (state as Record<string, unknown>)._key });
+      return 'deleted';
     },
     async listPending(limit = 1_000) {
       const bounded = z.number().int().min(1).max(10_000).parse(limit);

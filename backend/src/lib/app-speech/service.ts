@@ -8,7 +8,7 @@ import { contentDocumentAudioVersionSchema } from '@/lib/ai/tools/content-schema
 import { runContentTool, type ContentRepository, type ContentToolDependencies } from '@/lib/ai/tools/content-runtime';
 import { ContentError } from '@/lib/ai/tools/content-errors';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
-import type { Document } from '@/lib/db/documents.node';
+import { isConversationArchiveDocument, type Document } from '@/lib/db/documents.node';
 import type { DocumentAudioVersion } from '@/lib/db/document-audio-versions.node';
 import { newId } from '@/lib/ids';
 
@@ -118,7 +118,7 @@ export function createAppSpeechService(dependencies: AppSpeechDependencies = {})
       if (!document || document.scopeKey !== context.runtimeScopeKey || document.scopeKey !== projected.data.document.scopeKey || document._internalDeletion || document.archiveVisibility === 'domain-only') {
         throw new ContentError('CONTENT_NOT_FOUND', 'Document was not found in the active Archive scope.', 'app.speech', { action: 'resolution', resourceKey: input.documentKey });
       }
-      if (document.mutationPolicy === 'system-only' || document.managedPurpose) throw new ContentError('CONTENT_FORBIDDEN', 'Managed documents are read-only.', 'app.speech', { action: 'persist', resourceKey: input.documentKey });
+      if (!isConversationArchiveDocument(document) && (document.mutationPolicy === 'system-only' || document.managedPurpose)) throw new ContentError('CONTENT_FORBIDDEN', 'Managed documents are read-only.', 'app.speech', { action: 'persist', resourceKey: input.documentKey });
       if (!repository.createAudioVersion) throw new ContentError('CONTENT_CONFLICT', 'Document audio persistence is unavailable.', 'app.speech', { action: 'persist', resourceKey: input.documentKey });
       const text = narrationText(document, input);
       if (!text) throw new ContentError('CONTENT_INVALID_INPUT', 'Document narration is empty.', 'app.speech', { action: 'speech', resourceKey: input.documentKey });

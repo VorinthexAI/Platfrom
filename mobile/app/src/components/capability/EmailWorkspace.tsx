@@ -61,6 +61,7 @@ import { subscribeAppEvent } from "@/lib/app-events";
 import type { CommunicationTab } from "@/lib/communication-client";
 import { enhanceAppTextForContext, translateAppTextForContext } from "@/lib/app-transformation-client";
 import { languageForCountryCode } from "@/lib/auth-helpers";
+import { isSparkFundingError } from "@/lib/domain-error-observer";
 import { deleteContentSearchHistory, getContentContext, type ContentDocument, type ContentSearchHistoryItem } from "@/lib/content-client";
 import { getContentDocument } from "@/lib/content-query-cache";
 import { getUserSearchHistory, promoteCachedUserSearchHistory, removeCachedUserSearchHistory, userSearchHistoryQueryKey } from "@/lib/user-search-history-cache";
@@ -224,6 +225,7 @@ const CORE_PROMPTS = [
 
 
 function messageFor(error: unknown) {
+  if (isSparkFundingError(error)) return "";
   return error instanceof Error
     ? error.message
     : "Email could not complete that request.";
@@ -274,6 +276,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const selectedTags = useUiStore((state) => state.selectedTagsByContext[tagContextKey] ?? EMPTY_SELECTED_TAGS);
   const selectedTagKeys = useMemo(() => selectedTags.map(({ key }) => key).sort(), [selectedTags]);
   const notify = (title: string) => {
+    if (!title) return;
     showToast({ title, duration: 2_000 });
   };
   const params = useLocalSearchParams<{
@@ -471,6 +474,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const [draftSearchResults, setDraftSearchResults] = useState<{ connectorKey: string; query: string; tagKeys: string; drafts: EmailDraft[] }>();
   const [draftSearching, setDraftSearching] = useState(false);
   const [draftSearchError, setDraftSearchError] = useState<string>();
+  const [draftSearchRevision, setDraftSearchRevision] = useState(0);
   const [draftPages, setDraftPages] = useState<{ drafts: EmailDraft[]; nextCursor: string | null }>({ drafts: [], nextCursor: null });
   const loadingMoreDrafts = useRef(false);
   const draftPageGeneration = useRef(0);
@@ -1568,7 +1572,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const controller = new AbortController();
     const timeout = setTimeout(() => { void searchLatest(next, false, controller.signal); }, next ? 300 : 0);
     return () => { clearTimeout(timeout); controller.abort(); };
-  }, [emailContext.teamKey, emailContext.scopeKey, initialConnectorKey, inboxTab, query, selectedTagKey, selectedTagKeys]);
+  }, [emailContext.teamKey, emailContext.scopeKey, initialConnectorKey, inboxTab, query, selectedTagKey, selectedTagKeys, draftSearchRevision]);
   async function loadMore() {
     const cursor = overview?.nextCursor;
     if (!cursor || loadingMore.current || loadingOverview.current || loading || loadError) return;
@@ -3130,7 +3134,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     >
       {sheet === "connectForm" ? "Connect" : sheet === "toneCreate" ? "Create tone" : "Save"}
     </Button> : null}
-    {sheet === "toneEdit" && permissions.canMutate && !editingTone?.slug ? <Button disabled={Boolean(busy)} onPress={() => setSheet("toneDelete")} size="md" variant="danger">Delete tone</Button> : null}
+    {sheet === "toneEdit" && permissions.canMutate && !editingTone?.slug ? <Button disabled={Boolean(busy)} onPress={() => setSheet("toneDelete")} size="md" variant="danger">Delete</Button> : null}
     <Button disabled={Boolean(busy)} onPress={requestFormClose} size="md" variant="secondary">Close</Button>
   </> : undefined;
   const sheetFooter = sheet === "bulkTrash" ? <>
@@ -3376,7 +3380,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
             scrollEventThrottle={120}
             showsVerticalScrollIndicator={false}
           >
-            {inboxTab === "drafts" ? draftsQuery.isPending || draftSearching || Boolean((normalizedInboxSearch || selectedTagKeys.length) && !activeDraftSearchResults) ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading drafts" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : visibleInboxDrafts.map((saved) => <Button accessibilityLabel={`${saved.variant === "new" ? saved.subject : "Reply"}, to ${saved.to.join(", ")}`} contentMode="raw" key={saved.key} onPress={() => openInboxDraft(saved)} shape="pill" size="sm" style={styles.threadCard} variant="secondary"><MailIcon size="sm" /><View style={styles.threadBody}><Text numberOfLines={1} style={styles.subject}>{saved.variant === "new" ? saved.subject : "Reply"}</Text><Text numberOfLines={1} style={styles.rowSubtitle}>To: {saved.to.join(", ")}</Text></View></Button>) : loading || inboxQueryPending || initialSyncPending ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading inbox messages" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : overview?.threads.map((thread) => (
+            {inboxTab === "drafts" ? draftSearchError ? <Button onPress={() => setDraftSearchRevision((value) => value + 1)} size="md" variant="secondary">Retry search</Button> : draftsQuery.isPending || draftSearching || Boolean((normalizedInboxSearch || selectedTagKeys.length) && !activeDraftSearchResults) ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading drafts" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : visibleInboxDrafts.map((saved) => <Button accessibilityLabel={`${saved.variant === "new" ? saved.subject : "Reply"}, to ${saved.to.join(", ")}`} contentMode="raw" key={saved.key} onPress={() => openInboxDraft(saved)} shape="pill" size="sm" style={styles.threadCard} variant="secondary"><MailIcon size="sm" /><View style={styles.threadBody}><Text numberOfLines={1} style={styles.subject}>{saved.variant === "new" ? saved.subject : "Reply"}</Text><Text numberOfLines={1} style={styles.rowSubtitle}>To: {saved.to.join(", ")}</Text></View></Button>) : loading || inboxQueryPending || initialSyncPending ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading inbox messages" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : overview?.threads.map((thread) => (
               <Button
                 accessibilityActions={[{ name: "longpress", label: selectedThreads.some(({ key }) => key === thread.key) ? `Deselect ${thread.subject}` : `Select ${thread.subject}` }]}
                 accessibilityLabel={`${!thread.isRead ? "Unread, " : ""}${shortAddress(thread.latestFrom)}, ${thread.subject}`}
@@ -3558,7 +3562,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
             <Button onPress={() => void openSearchHistory()} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button>
           </View>
         ) : sheet === "toneDelete" ? (
-          <View style={styles.sheetItems}><Text style={styles.confirmText}>This permanently deletes the custom email tone.</Text><Button onPress={() => void deleteTone()} size="md" variant="danger">Delete tone</Button><Button onPress={() => setSheet("toneEdit")} size="md" variant="secondary">Cancel</Button></View>
+          <View style={styles.sheetItems}><Text style={styles.confirmText}>This permanently deletes the custom email tone.</Text><Button onPress={() => void deleteTone()} size="md" variant="danger">Delete</Button><Button onPress={() => setSheet("toneEdit")} size="md" variant="secondary">Cancel</Button></View>
         ) : sheet === "rootCreate" ? (
           <BottomSheetMenu>
             <BottomSheetItem disabled={!permissions.canMutate} onPress={openToneCreate} style={styles.sheetAction} variant="secondary">Create email tone</BottomSheetItem>
@@ -3828,7 +3832,8 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
 
 function ReplyContextSheets({ canMutate, context, onClose, open }: { canMutate: boolean; context: ReturnType<typeof getEmailContext>; onClose: () => void; open: boolean }) {
   const queryClient = useQueryClient();
-  const { showToast } = useToast();
+  const { showToast: presentToast } = useToast();
+  const showToast = (input: { title: string; duration?: number }) => { if (input.title) presentToast(input); };
   const contextGeneration = useRef(0);
   const createInFlight = useRef(false);
   const updateInFlight = useRef(false);

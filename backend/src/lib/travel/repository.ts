@@ -7,13 +7,13 @@ import { tripAttachmentSchema, type TripAttachment } from '@/lib/db/trip-attachm
 import { tripCreationReceiptSchema, type TripCreationReceipt } from '@/lib/db/trip-creation-receipts.node';
 import { documentSchema, type Document } from '@/lib/db/documents.node';
 import { generatedDocumentBindingSchema, type GeneratedDocumentBinding } from '@/lib/db/generated-document-bindings.node';
-import { generatedDocumentFolderKeys } from '@/lib/generated-documents/folders';
+import { ensureGeneratedDocumentFolders, generatedDocumentFolderKeys, type GeneratedDocumentFolderKind } from '@/lib/generated-documents/folders';
 import { tripGuideSchema, type TripGuide } from '@/lib/db/trip-guides.node';
 import { placeReferenceSchema, type PlaceReference } from '@/lib/db/place-references.node';
 import { placeHeroMediaSchema, type PlaceHeroMedia } from '@/lib/db/place-hero-media.node';
 import { collectionImageSchema, type CollectionImage } from '@/lib/db/collection-images.node';
 import { currentEmbeddingSchema } from '@/lib/embeddings';
-import { ensureGeneratedDocumentFolders } from '@/lib/generated-documents/folders';
+
 import { z } from 'zod';
 
 export interface TravelAccessContext { teamKey: string; scopeKey: string; userKey: string }
@@ -666,10 +666,11 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
     },
     async copyGeneratedDocument(context, record) {
       const valid = { document: documentSchema.parse(record.document), binding: generatedDocumentBindingSchema.parse(record.binding) };
-      const expectedFolderKey = generatedDocumentFolderKeys(context.scopeKey)[valid.binding.kind as keyof ReturnType<typeof generatedDocumentFolderKeys>];
+      const kind = valid.binding.kind as GeneratedDocumentFolderKind;
+      const expectedFolderKey = generatedDocumentFolderKeys(context.scopeKey)[kind];
       if (!expectedFolderKey || valid.document.scopeKey !== context.scopeKey || valid.document.folderKey !== expectedFolderKey || valid.binding.scopeKey !== context.scopeKey || valid.binding.createdByKey !== context.userKey || valid.binding.documentKey !== valid.document.key) throw new TravelRepositoryError('forbidden');
       await transaction({ read: [], write: ['folders', 'documents', 'generatedDocumentBindings'] }, async (executor) => {
-        await ensureGeneratedDocumentFolders(executor, context.scopeKey, valid.document.createdAt);
+        await ensureGeneratedDocumentFolders(executor, context.scopeKey, valid.document.createdAt, kind);
         await executor.query('UPSERT { _key: @key } INSERT @document UPDATE {} IN documents', { key: valid.document.key, document: toArangoDoc(valid.document) });
         await executor.query('UPSERT { _key: @key } INSERT @binding UPDATE {} IN generatedDocumentBindings', { key: valid.binding.key, binding: toArangoDoc(valid.binding) });
       });

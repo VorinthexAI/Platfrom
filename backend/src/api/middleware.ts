@@ -58,7 +58,7 @@ export const isOnboardingSandboxPath = (path: string, method = 'GET') => method 
 
 export function createBindEventApp(resolveApp: (appKey: string) => Promise<{ aliasKey: string; scopeKey: string }> = (appKey) => appsService.resolveAlias(appKey)): MiddlewareHandler {
   return async (c, next) => {
-    const exempt = /^\/api\/v1\/(health|apps)\/?$/.test(c.req.path);
+    const exempt = /^\/api\/v1\/(health|apps|products|costs)\/?$/.test(c.req.path);
     const rawAppKey = c.req.header(TOOL_APP_KEY_HEADER);
     const appKey = rawAppKey === undefined ? APP_KEYS.CORE : rawAppKey.trim();
     if (exempt) return next();

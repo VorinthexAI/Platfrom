@@ -200,6 +200,7 @@ describe("legal policy copy", () => {
 
     for (const copy of [terms, privacy]) {
       expect(copy).not.toMatch(/Effective September 4/i);
+      expect(copy).toContain("Effective 16 Sept 2026");
       expect(copy).toContain("prepaid Sparks");
       expect(copy).toContain("no debt or grace-period backcharges accrue");
       expect(copy).toContain("uploads can continue");

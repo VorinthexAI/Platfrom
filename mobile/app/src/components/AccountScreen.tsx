@@ -21,12 +21,12 @@ import { profileInitial } from "@/lib/auth-helpers";
 import { createScope, deleteScope, listScopes, prioritizeScope, scheduleScopeOperation, scopeListQueryKey, scopeOperationIsPending, selectScope, updateScopeCover, type ScopeSummary } from "@/lib/scope-client";
 import { useAuthStore } from "@/state/auth";
 import { useAppsStore } from "@/state/apps";
-import { extractDomainErrorMessage } from "@/lib/domain-error-observer";
+import { extractDomainErrorMessage, isSparkFundingError } from "@/lib/domain-error-observer";
 import { fonts, palette, radii, spacing } from "@/theme/tokens";
 import { AccountScreenShell } from "@/components/AccountScreenShell";
 import { normalizeCapturedPng } from "@/lib/captured-image";
 import { deleteGalleryImages, fetchGalleryUploadStatus, uploadGalleryImages, type GalleryContext } from "@/lib/gallery-client";
-import { currentSubscriptionQueryKey, formatStorageSummary, setSubscriptionCancellation } from "@/lib/billing-client";
+import { billingSummaryQueryKey, currentSubscriptionQueryKey, formatStorageSummary, setDevSparkBalance, setSubscriptionCancellation, wholeSparks } from "@/lib/billing-client";
 import { useBillingSummary, useCurrentSubscription } from "@/hooks/use-billing-summary";
 import { fetchReferralSummary, normalizeReferralCode, redeemReferralCode, referralCodeSchema, referralRedemptionErrorMessage, referralSummaryQueryKey, type ReferralRedeemResult } from "@/lib/referral-client";
 import { subscriptionPresentation } from "@/lib/subscription-presentation";
@@ -129,6 +129,8 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const [referralRedemption, setReferralRedemption] = useState<ReferralRedeemResult>();
   const [referralRedemptionError, setReferralRedemptionError] = useState("");
   const [redeemingReferral, setRedeemingReferral] = useState(false);
+  const [sparkBalanceDraft, setSparkBalanceDraft] = useState("");
+  const [savingSparkBalance, setSavingSparkBalance] = useState(false);
   const referralCodeInputRef = useRef<ComponentRef<typeof TextInput>>(null);
   const longPressedScopeKey = useRef<string | undefined>(undefined);
   const scopeListMutation = useRef(0);
@@ -138,6 +140,7 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const scopeCardSize = Math.floor((width - spacing.md * 2 - 20) / 3);
   const settingsCardSize = scopeCardSize;
   const billingSummaryQuery = useBillingSummary(user?.key);
+  const sparkBalance = billingSummaryQuery.data ? wholeSparks(billingSummaryQuery.data.microSparkBalance) : undefined;
   const subscriptionQuery = useCurrentSubscription(page === "settings" ? user?.key : undefined);
   const referralQuery = useQuery({ queryKey: referralSummaryQueryKey(String(user?.key ?? "")), queryFn: fetchReferralSummary, enabled: Boolean(user?.key && sheet === "referral"), initialData: authReferralSummary?.code.ownerUserKey === user?.key ? authReferralSummary : undefined });
   const scopesQuery = useQuery({ queryKey: scopeQueryKey, queryFn: ({ signal }) => listScopes(teamKey, signal), enabled: Boolean(user?.key && teamKey), refetchOnMount: "always" });
@@ -220,8 +223,8 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
         update.rollback();
         throw error;
       }
-    } catch {
-      showToast({ title: "Your profile badge could not be generated. Please try again.", duration: 2_500 });
+    } catch (error) {
+      if (!isSparkFundingError(error)) showToast({ title: "Your profile badge could not be generated. Please try again.", duration: 2_500 });
     } finally {
       setGeneratingBadge(false);
     }
@@ -241,6 +244,29 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
       update.rollback();
       showToast({ title: "Name could not be updated.", duration: 2_500 });
     });
+  };
+
+  useEffect(() => {
+    if (sparkBalance === undefined) return;
+    setSparkBalanceDraft((current) => current.trim() ? current : String(sparkBalance));
+  }, [sparkBalance]);
+
+  const saveSparkBalance = () => {
+    const userKey = user?.key;
+    if (!userKey || savingSparkBalance) return;
+    const sparks = Number.parseInt(sparkBalanceDraft.trim(), 10);
+    if (!Number.isInteger(sparks) || sparks < 0 || sparks > 1_000_000) {
+      showToast({ title: "Enter a whole Spark amount from 0 to 1000000.", duration: 2_500 });
+      return;
+    }
+    setSavingSparkBalance(true);
+    void setDevSparkBalance(sparks).then((summary) => {
+      queryClient.setQueryData(billingSummaryQueryKey(userKey), summary);
+      setSparkBalanceDraft(String(wholeSparks(summary.microSparkBalance)));
+      showToast({ title: "Spark balance updated.", duration: 2_000 });
+    }).catch(() => {
+      showToast({ title: "Spark balance could not be updated.", duration: 2_500 });
+    }).finally(() => setSavingSparkBalance(false));
   };
 
   const permanentlyDeleteAccount = () => {
@@ -527,6 +553,7 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
           <Button accessibilityLabel="Edit name" contentMode="raw" onPress={openName} size="xl" style={styles.nameButton} variant="ghost"><Text numberOfLines={2} style={styles.name}>{name}</Text></Button>
           {user?.email ? <Text style={styles.email}>{user.email}</Text> : null}
         </View>
+        {__DEV__ ? <View style={styles.sparkTest}><Text style={styles.inputLabel}>Sparks (test)</Text><TextInput accessibilityLabel="Spark balance" keyboardType="number-pad" onChangeText={setSparkBalanceDraft} onSubmitEditing={saveSparkBalance} placeholder="0" returnKeyType="done" value={sparkBalanceDraft} /><Button disabled={savingSparkBalance} loading={savingSparkBalance} onPress={saveSparkBalance} size="md" variant="secondary">Set balance</Button></View> : null}
         <View style={styles.storageSection}>
           <View style={styles.scopeTitleRow}><Text style={styles.scopeTitle}>{storageSparkCost ? `Storage (${storageSparkCost} Sparks / GB / Month)` : "Storage"}</Text><Button accessibilityLabel="How is storage charged?" contentMode="raw" iconOnly onPress={() => setSheet("storage-help")} size="xs" variant="icon"><HelpIcon size="sm" /></Button></View>
           {billingSummaryQuery.isPending ? <Skeleton style={styles.storageSkeleton} /> : billingSummaryQuery.isError ? <Text accessibilityRole="alert" style={styles.storageSummary}>Storage usage is unavailable.</Text> : <Text style={styles.storageSummary}>{formatStorageSummary(billingSummaryQuery.data.storage.bytes, billingSummaryQuery.data.storage.estimatedMonthlyMicroSparks)}</Text>}
@@ -576,11 +603,11 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
       <Text style={styles.scopeHelp}>Storage reflects tracked files and media across your apps. Usage is measured continuously and charged in Sparks each hour. The monthly amount shown is an estimate at your current usage. If storage remains unfunded for 90 days, your tracked stored data becomes eligible for deletion.</Text>
     </BottomSheet>
 
-    <BottomSheet footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "terms"} title="Terms of service">
+    <BottomSheet description={TERMS_COPY.eyebrow} footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "terms"} title="Terms of service">
       <LegalSheetContent copy={TERMS_COPY} />
     </BottomSheet>
 
-    <BottomSheet footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "privacy"} title="Privacy policy">
+    <BottomSheet description={PRIVACY_COPY.eyebrow} footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "privacy"} title="Privacy policy">
       <LegalSheetContent copy={PRIVACY_COPY} />
     </BottomSheet>
 
@@ -592,7 +619,7 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
       </BottomSheetMenu>
     </BottomSheet>
 
-    <BottomSheet dismissible={!deletingScope} footer={<><Button disabled={deletingScope} loading={deletingScope} onPress={deleteSelectedScope} size="md" variant="primary">Delete</Button><Button disabled={deletingScope} onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open && !deletingScope) setSheet(undefined); }} open={sheet === "scope-delete" && canDeleteSelectedScope} title="Delete scope?">
+    <BottomSheet dismissible={!deletingScope} footer={<><Button onPress={deleteSelectedScope} size="md" variant="primary">Delete</Button><Button disabled={deletingScope} onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open && !deletingScope) setSheet(undefined); }} open={sheet === "scope-delete" && canDeleteSelectedScope} title="Delete scope?">
       <Text style={styles.scopeHelp}>All data connected to this scope will be deleted. This action can&apos;t be undone.</Text>
     </BottomSheet>
 
@@ -658,6 +685,7 @@ const styles = StyleSheet.create({
   badgeAvatar: { backgroundColor: palette.voidBlack },
   badgeContent: { alignItems: "center", flex: 1, gap: spacing.md, justifyContent: "center" },
   badgePreview: { alignSelf: "center", borderColor: palette.hairlineBright, borderRadius: 999, borderWidth: 1, overflow: "hidden" },
+  sparkTest: { alignSelf: "stretch", gap: spacing.sm, marginTop: spacing.xl, width: "100%" },
   identity: { alignItems: "center", gap: spacing.xs, marginTop: spacing.md },
   nameButton: { maxWidth: "100%", paddingHorizontal: spacing.sm },
   name: { color: palette.silver50, flexShrink: 1, fontFamily: fonts.medium, fontSize: 28, lineHeight: 34, textAlign: "center" },

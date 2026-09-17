@@ -1516,9 +1516,7 @@ async function createSubject(
       "GALLERY_FORBIDDEN",
       "Gallery subjects are read-only.",
     );
-  const identityKey = context.idempotencyKey
-    ? `c${createHash("sha256").update(`subject\0${input.scopeKey}\0${membership.key}\0${context.idempotencyKey}`).digest("hex").slice(0, 24)}`
-    : newId();
+  const identityKey = requestIdentity("subject", context);
   const replay = await repository.getSubject(
     input.scopeKey,
     identityKey,
@@ -1878,7 +1876,7 @@ async function createMemory(
             ],
             options: { temperature: 0.7, maxTokens: 220 },
           },
-          { signal: context.signal, timeoutMs: 15_000 },
+          { signal: context.signal, timeoutMs: 55_000 },
         )
       ).output.text;
   const generationDurationMs = performance.now() - generationStartedAt;

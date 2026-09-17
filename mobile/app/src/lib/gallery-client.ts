@@ -156,7 +156,7 @@ export function resolveGalleryHighlightSlides(highlight: GalleryHighlightDetail)
 }
 
 export function isManagedGalleryCollection(collection: Pick<GalleryCollection, "purpose" | "mutationPolicy"> | undefined) {
-  return collection?.purpose === "place-media" || collection?.mutationPolicy === "system-only";
+  return collection?.mutationPolicy === "system-only";
 }
 
 export function isManagedGalleryImage(image: Pick<GalleryImage, "mutationPolicy"> | undefined) {
@@ -239,9 +239,13 @@ export function getGalleryContext(): GalleryContext {
   return context;
 }
 
-async function postGallery<T>(path: string, input: Record<string, unknown>, timeout = 60_000, signal?: AbortSignal, context?: GalleryContext) {
+export function createGalleryMutationKey() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function postGallery<T>(path: string, input: Record<string, unknown>, timeout = 60_000, signal?: AbortSignal, context?: GalleryContext, idempotencyKey?: string) {
   try {
-    const response = await apiClient.post<ApiResponse<T>>(path, { ...(context ?? getGalleryContext()), ...input }, { signal, timeout });
+    const response = await apiClient.post<ApiResponse<T>>(path, { ...(context ?? getGalleryContext()), ...input }, { signal, timeout, ...(idempotencyKey ? { headers: { "Idempotency-Key": z.string().trim().min(1).max(200).parse(idempotencyKey) } } : {}) });
     const payload = response.data as ApiResponse<T> | undefined;
     if (!payload || typeof payload !== "object" || payload.success !== true) throw galleryClientError(payload && "error" in payload ? payload.error : undefined);
     if (!("data" in payload)) throw galleryClientError(undefined);
@@ -272,7 +276,7 @@ const galleryMemoryCreateInputSchema = z.strictObject({ collectionKey: z.string(
 
 export function createGalleryCollectionHighlight(collectionKey: string, imageKeys?: string[]) {
   const input = galleryHighlightCreateInputSchema.parse({ collectionKey, ...(imageKeys ? { imageKeys } : {}) });
-  return postGallery<{ highlight: GalleryHighlightProjection }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.create, input)
+  return postGallery<{ highlight: GalleryHighlightProjection }>(GALLERY_COLLECTION_HIGHLIGHT_ENDPOINTS.create, input, 60_000, undefined, undefined, createGalleryMutationKey())
     .then(({ highlight }) => ({ highlight: normalizeGalleryHighlight(highlight) }));
 }
 
@@ -296,7 +300,7 @@ export function deleteGalleryCollectionHighlight(highlightKey: string) {
 
 export function createGalleryCollectionMemory(collectionKey: string, imageKey?: string) {
   const input = galleryMemoryCreateInputSchema.parse({ collectionKey, ...(imageKey !== undefined ? { imageKey } : {}) });
-  return postGallery<{ memory: GalleryMemory }>(GALLERY_COLLECTION_MEMORY_ENDPOINTS.create, input)
+  return postGallery<{ memory: GalleryMemory }>(GALLERY_COLLECTION_MEMORY_ENDPOINTS.create, input, 60_000, undefined, undefined, createGalleryMutationKey())
     .then(({ memory }) => ({ memory: normalizeGalleryMemory(memory) }));
 }
 
@@ -515,7 +519,7 @@ export function listGallerySubjects() {
 }
 
 export function createGallerySubject(name: string, imageKeys: string[]) {
-  return postGallery<{ subject: GallerySubject }>("/gallery/subjects", { name, imageKeys }, 4 * 60_000);
+  return postGallery<{ subject: GallerySubject }>("/gallery/subjects", { name, imageKeys }, 4 * 60_000, undefined, undefined, createGalleryMutationKey());
 }
 
 export function listGallerySubjectImages(identityKey: string) {

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { publishScopeEvent, publishUserEvent } from '@/api/events';
 import { executeAsk } from '@/lib/ai/router';
 import { embedTexts } from '@/lib/embeddings';
+import { initialWorkspaceContentService } from '@/lib/initial-workspace-content';
 import { createRedisConnection } from '@/lib/redis';
 import {
   conversationArchiveKey,
@@ -91,6 +92,7 @@ export async function processConversationArchiveProjection(raw: unknown, depende
   const summary = completed.some((message) => message.role === 'USER')
     ? await summarizeConversationArchive(completed, job.teamKey, dependencies.ask ?? defaultAsk, dependencies.signal)
     : null;
+  await initialWorkspaceContentService.ensure(job.scopeKey).catch(() => undefined);
   const projection = await prepareConversationArchiveProjection(result.snapshot, summary, {
     embedTexts: dependencies.embedTexts ?? ((texts, signal) => embedTexts({ texts, signal })),
     now: dependencies.now,

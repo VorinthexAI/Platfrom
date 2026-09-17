@@ -138,7 +138,7 @@ describe('image generation service', () => {
     const processed: ProcessImageInput[][] = []; const attached: unknown[][] = []; let providerCalls = 0;
     const service = createImageGenerationService({
       history, idempotency: claimedLedger(), getImage: async () => null, embedCollection: async () => [], signUrl: async () => 'https://images.example/generated.png',
-      gallery: { ...authorizedGallery, canContributeToCollection: async () => { throw new Error('public collection authorization must not run'); }, ensureGeneratedMediaCollection: async () => ({ key: collectionKey, purpose: 'generated-media', mutationPolicy: 'system-only' }) as never, attachGeneratedMedia: async (...args) => { attached.push(args); return true; } },
+      gallery: { ...authorizedGallery, canContributeToCollection: async () => { throw new Error('public collection authorization must not run'); }, ensureGeneratedMediaCollection: async () => ({ key: collectionKey, purpose: 'generated-media', mutationPolicy: 'user' }) as never, attachGeneratedMedia: async (...args) => { attached.push(args); return true; } },
       execute: (async () => { providerCalls += 1; return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' }; }) as any,
       process: async (inputs) => { processed.push([...inputs]); return [persistedImage()]; },
     });
@@ -155,7 +155,7 @@ describe('image generation service', () => {
       history, idempotency: claimedLedger(), getImage: async () => null, embedCollection: async () => [], signUrl: async () => 'https://images.example/generated.png',
       gallery: {
         ...authorizedGallery,
-        ensureGeneratedMediaCollection: async () => ({ key: collectionKey, purpose: 'generated-media', mutationPolicy: 'system-only' }) as never,
+        ensureGeneratedMediaCollection: async () => ({ key: collectionKey, purpose: 'generated-media', mutationPolicy: 'user' }) as never,
         canContributeToCollection: async () => { contributionChecks += 1; return false; },
         attachGeneratedImages: async () => { genericAttachments += 1; return true; },
         attachGeneratedMedia: async (...args) => { attached.push(args); return true; },

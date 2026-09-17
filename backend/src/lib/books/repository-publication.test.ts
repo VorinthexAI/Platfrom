@@ -36,7 +36,7 @@ describe('book Archive publication', () => {
     expect(calls.some(({ query }) => query.includes('archiveDocumentKey: @documentKey'))).toBe(true);
     expect(calls.some(({ query }) => query.includes('archiveFolderKey: @folderKey'))).toBe(true);
     expect(calls.filter(({ query }) => query.includes('UPSERT { _key: @') && query.includes('IN folders'))).toHaveLength(2);
-    expect(calls.find(({ query }) => query.includes('mutationPolicy: "system-container"'))?.bind.rootKey).toBe(initialWorkspaceFolderKey(scopeKey, 'learning'));
+    expect(calls.find(({ query }) => query.includes('mutationPolicy: "user"') && query.includes('name: "Ascend"'))?.bind.rootKey).toBe(initialWorkspaceFolderKey(scopeKey, 'learning'));
   });
 
   test('requires completed Archive links before canonical readiness', async () => {

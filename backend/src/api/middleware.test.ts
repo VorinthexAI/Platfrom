@@ -63,7 +63,7 @@ describe('application key middleware', () => {
 
   test('does not look up apps for health or the public registry', async () => {
     const exempt = createBindEventApp(async () => { throw new Error('must not query'); });
-    for (const path of ['/api/v1/health', '/api/v1/apps']) await exempt(middlewareContext(path), async () => undefined);
+    for (const path of ['/api/v1/health', '/api/v1/apps', '/api/v1/products', '/api/v1/costs']) await exempt(middlewareContext(path), async () => undefined);
   });
 });
 

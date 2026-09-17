@@ -11,36 +11,28 @@ const storedConversationSchema = z.strictObject({
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
-let storageOperation = Promise.resolve<unknown>(undefined);
-
-function serialize<T>(work: () => Promise<T>): Promise<T> {
-  const next = storageOperation.then(work, work);
-  storageOperation = next.catch(() => undefined);
-  return next;
-}
+const selections = new Map<string, Conversation>();
 
 function selectionKey(context: ConversationContext) {
   return `${SELECTION_KEY_PREFIX}.${context.userKey}.${context.teamKey}.${context.scopeKey}`;
 }
 
-export function readConversationSelection(context: ConversationContext): Promise<Conversation | undefined> {
-  return serialize(async () => {
-    const key = selectionKey(context);
-    let raw: string | null;
-    try { raw = await SecureStore.getItemAsync(key); }
-    catch { return undefined; }
-    try { return raw ? storedConversationSchema.parse(JSON.parse(raw)) : undefined; }
-    catch {
-      // Invalid cache data falls back to a greeting; transient read failures above
-      // do not erase an otherwise valid remembered selection.
-      await SecureStore.deleteItemAsync(key).catch(() => undefined);
-      return undefined;
-    }
-  });
+function forgetPersistedSelection(key: string) {
+  void SecureStore.deleteItemAsync(key).catch(() => undefined);
 }
 
-export function writeConversationSelection(context: ConversationContext, conversation?: Conversation) {
-  return serialize(() => conversation
-    ? SecureStore.setItemAsync(selectionKey(context), JSON.stringify(storedConversationSchema.parse(conversation)), { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY })
-    : SecureStore.deleteItemAsync(selectionKey(context)));
+export async function readConversationSelection(context: ConversationContext): Promise<Conversation | undefined> {
+  const key = selectionKey(context);
+  forgetPersistedSelection(key);
+  return selections.get(key);
+}
+
+export async function writeConversationSelection(context: ConversationContext, conversation?: Conversation) {
+  const key = selectionKey(context);
+  forgetPersistedSelection(key);
+  if (!conversation) {
+    selections.delete(key);
+    return;
+  }
+  selections.set(key, storedConversationSchema.parse(conversation));
 }

@@ -34,6 +34,11 @@ export const folderSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
+export const CONVERSATION_ARCHIVE_FOLDER_PURPOSES = ['conversation-root', 'conversation', 'conversation-summaries'] as const;
+export function isConversationArchiveFolder(value: { managedPurpose?: string }): boolean {
+  return value.managedPurpose === 'conversation-root' || value.managedPurpose === 'conversation' || value.managedPurpose === 'conversation-summaries';
+}
+
 export type Folder = Omit<z.infer<typeof folderSchema>, 'archiveVisibility'> & { archiveVisibility?: 'visible' | 'domain-only' };
 export const foldersEmbeddingFields = ['name', 'description'] as const;
 const helpers = createNodeHelpers(FOLDERS_COLLECTION, folderSchema, foldersEmbeddingFields, { includeEmbeddingMetadata: false });

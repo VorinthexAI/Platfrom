@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import Pdf from "react-native-pdf";
 import { WebView } from "react-native-webview";
 import { BrainIcon } from "../../icons/brain/brain.mobile";
@@ -19,23 +19,24 @@ export type FileViewerProps = {
   onEdit?: () => void;
   onHistory?: () => void;
   onMenu: () => void;
+  onTitlePress?: () => void;
   onRenderError?: (message: string) => void;
   htmlUri?: string;
   pdfUri?: string;
   title: string;
 };
 
-export function FileViewer({ error, htmlUri, loading = false, onAi, onBack, onEdit, onHistory, onMenu, onRenderError, pdfUri, title }: FileViewerProps) {
+export function FileViewer({ error, htmlUri, loading = false, onAi, onBack, onEdit, onHistory, onMenu, onRenderError, onTitlePress, pdfUri, title }: FileViewerProps) {
   return <View style={styles.root}>
     <View style={styles.header}>
       <Button accessibilityLabel="Back" contentMode="raw" onPress={onBack} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
-      <Text numberOfLines={1} style={styles.headerTitle}>{title}</Text>
+      {onTitlePress ? <Pressable accessibilityLabel={`Edit ${title}`} accessibilityRole="button" android_ripple={{ color: "transparent" }} onPress={onTitlePress} style={styles.headerTitleHit}><Text numberOfLines={1} style={styles.headerTitleText}>{title}</Text></Pressable> : <Text numberOfLines={1} style={styles.headerTitle}>{title}</Text>}
       <Button accessibilityLabel={`Manage ${title}`} contentMode="raw" onPress={onMenu} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
     </View>
     {onEdit || onAi || onHistory ? <View style={styles.headerActions}>
-      {onEdit ? <Button accessibilityLabel="Edit extracted text" contentMode="raw" onPress={onEdit} size="sm" variant="icon"><EditIcon size="sm" /></Button> : null}
-      {onAi ? <Button accessibilityLabel="AI document actions" contentMode="raw" onPress={onAi} size="sm" variant="icon"><BrainIcon size="sm" /></Button> : null}
-      {onHistory ? <Button accessibilityLabel="Document and audio versions" contentMode="raw" onPress={onHistory} size="sm" variant="icon"><ClockIcon size="sm" /></Button> : null}
+      {onEdit ? <Button accessibilityLabel="Edit extracted text" contentMode="raw" onPress={onEdit} size="xs" variant="icon"><EditIcon size="sm" /></Button> : null}
+      {onAi ? <Button accessibilityLabel="AI document actions" contentMode="raw" onPress={onAi} size="xs" variant="icon"><BrainIcon size="sm" /></Button> : null}
+      {onHistory ? <Button accessibilityLabel="Document and audio versions" contentMode="raw" onPress={onHistory} size="xs" variant="icon"><ClockIcon size="sm" /></Button> : null}
     </View> : null}
     <View style={styles.documentArea}>
       {loading ? <Skeleton accessibilityLabel={`Loading ${title}`} accessibilityRole="progressbar" style={styles.loadingSkeleton} />
@@ -48,9 +49,11 @@ export function FileViewer({ error, htmlUri, loading = false, onAi, onBack, onEd
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, minWidth: 0, gap: spacing.sm, paddingHorizontal: spacing.md, paddingTop: spacing.md, backgroundColor: colors.page },
-  header: { minHeight: 48, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  root: { flex: 1, minWidth: 0, gap: spacing.md, paddingHorizontal: spacing.md, paddingTop: spacing.md, backgroundColor: colors.page },
+  header: { minHeight: 48, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 },
+  headerTitleHit: { flex: 1, minWidth: 0, justifyContent: "center" },
   headerTitle: { flex: 1, minWidth: 0, color: colors.text, fontFamily: "Geist_500Medium", fontSize: 24 },
+  headerTitleText: { minWidth: 0, color: colors.text, fontFamily: "Geist_500Medium", fontSize: 24 },
   headerActions: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: spacing.xs },
   documentArea: { flex: 1, minWidth: 0, minHeight: 0, borderRadius: radii.xl, borderColor: colors.hairline, borderWidth: 1, overflow: "hidden", backgroundColor: colors.page },
   loadingSkeleton: { flex: 1, backgroundColor: colors.hairlineBright, opacity: 0.72 },

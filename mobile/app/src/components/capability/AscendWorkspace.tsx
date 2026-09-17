@@ -59,6 +59,7 @@ import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitch
 import { assistantIconSource, vorinthexMarkSource } from "@/data/capability-icons";
 import { enhanceAppTextForContext, translateAppTextForContext } from "@/lib/app-transformation-client";
 import { languageForCountryCode } from "@/lib/auth-helpers";
+import { isSparkFundingError } from "@/lib/domain-error-observer";
 import { audioTimelineDuration, audioTimelinePosition, formatAudioTime, resolveAudioTimelinePosition } from "@/lib/audio-playback-timeline";
 import { useBookPlayback } from "@/lib/book-playback";
 import { restoredBookDraft, retryBookCreateRequestKey, type FailedBookCreate } from "@/lib/book-create-retry";
@@ -161,6 +162,7 @@ const INITIAL_DRAFT: Draft = {
 };
 
 function errorMessage(error: unknown) {
+  if (isSparkFundingError(error)) return "";
   return error instanceof Error
     ? error.message
     : "The request could not be completed.";
@@ -263,7 +265,8 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
   const selectedTagKeys = useMemo(() => selectedTags.map(({ key }) => key).sort(), [selectedTags]);
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const { showToast } = useToast();
+  const { showToast: presentToast } = useToast();
+  const showToast = (input: { title: string; duration?: number }) => { if (input.title) presentToast(input); };
   const countryCode = useAuthStore((state) => state.user?.countryCode);
   const [gridWidth, setGridWidth] = useState(0);
   const [chapterGridWidth, setChapterGridWidth] = useState(0);
@@ -462,9 +465,8 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
         setDraft(restoredBookDraft(failedCreate.current));
         const restoringCustomCreate = Boolean(mutationContext.pending.input.additionalInstructions?.trim());
         setCustomCreate(restoringCustomCreate);
-        setDraftError(
-          `${errorMessage(error)} Your draft was restored so you can retry.`,
-        );
+        const message = errorMessage(error);
+        setDraftError(message ? `${message} Your draft was restored so you can retry.` : "Your draft was restored so you can retry.");
         closeCreationSheets();
         if (restoringCustomCreate) setCreateDetailsOpen(true);
         else setCreateGoalOpen(true);
@@ -860,37 +862,35 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
   async function deleteSelectedBooks() {
     if (!selectedBooks.length || bulkMutationLocked.current) return;
     bulkMutationLocked.current = true;
-    setBulkLoading(true);
     setLifecycleError(undefined);
     const favorites = selectedBooks.filter(({ isFavorite }) => isFavorite);
     const eligible = selectedBooks.filter(({ isFavorite }) => !isFavorite);
+    if (eligible.length === 0) {
+      bulkMutationLocked.current = false;
+      setSheetOpen(false);
+      setSheet(undefined);
+      showToast({ title: `Can't delete ${favorites.length} favorite audio book${favorites.length === 1 ? "" : "s"}`, duration: 2_500 });
+      return;
+    }
+    eligible.forEach((book) => {
+      removeCachedBook(queryClient, context, book.key);
+      if (playback.playbackBookKey === book.key) playback.clear(false);
+    });
+    setSelectedBookKeys(favorites.map(({ key }) => key));
+    setSheetOpen(false);
+    setSheet(undefined);
+    showToast({ title: `${eligible.length} ${eligible.length === 1 ? "audio book" : "audio books"} deleted`, duration: 2_000 });
     const results = await Promise.allSettled(eligible.map(async (book) => {
       await deleteBook(book.key, randomUUID());
       return book;
     }));
     const staleFavorites = results.flatMap((result, index) => result.status === "rejected" && result.reason instanceof BookClientError && result.reason.code === "BOOK_FAVORITE" ? [{ ...eligible[index]!, isFavorite: true }] : []);
-    const failedKeys = results.flatMap((result, index) => result.status === "rejected" && !(result.reason instanceof BookClientError && result.reason.code === "BOOK_FAVORITE") ? [eligible[index]!.key] : []);
-    const firstFailure = results.find((result) => result.status === "rejected" && !(result.reason instanceof BookClientError && result.reason.code === "BOOK_FAVORITE"));
-    const failureMessage = firstFailure?.status === "rejected" && firstFailure.reason instanceof Error ? firstFailure.reason.message : undefined;
-    results.forEach((result) => {
-      if (result.status === "fulfilled") {
-        removeCachedBook(queryClient, context, result.value.key);
-        if (playback.playbackBookKey === result.value.key) playback.clear(false);
-      }
-    });
+    const failed = results.flatMap((result, index) => result.status === "rejected" && !(result.reason instanceof BookClientError && result.reason.code === "BOOK_FAVORITE") ? [eligible[index]!] : []);
     staleFavorites.forEach((book) => patchCachedBook(queryClient, context, book));
-    const retainedFavorites = [...favorites, ...staleFavorites];
-    setSelectedBookKeys([...retainedFavorites.map(({ key }) => key), ...failedKeys]);
-    setBulkLoading(false);
+    failed.forEach((book) => patchCachedBook(queryClient, context, book));
     bulkMutationLocked.current = false;
-    setSheetOpen(false);
-    setSheet(undefined);
-    if (retainedFavorites.length) showToast({ title: `Can't delete ${retainedFavorites.length} favorite audio book${retainedFavorites.length === 1 ? "" : "s"}`, duration: 2_500 });
-    else if (failedKeys.length) {
-      setLifecycleError(failureMessage ?? `${eligible.length - failedKeys.length} deleted, ${failedKeys.length} failed`);
-      showToast({ title: failureMessage ?? `${eligible.length - failedKeys.length} deleted, ${failedKeys.length} failed`, duration: 4_000 });
-    }
-    else showToast({ title: `${eligible.length} ${eligible.length === 1 ? "audio book" : "audio books"} deleted`, duration: 2_000 });
+    if (staleFavorites.length) showToast({ title: `Can't delete ${staleFavorites.length} favorite audio book${staleFavorites.length === 1 ? "" : "s"}`, duration: 2_500 });
+    else if (failed.length) showToast({ title: failed.length === eligible.length ? "Audio book deletion failed" : "Some audio books could not be deleted", duration: 4_000 });
   }
   function deleteSelectedBook() {
     if (!selectedBook) return;
@@ -1231,7 +1231,7 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
           <Button disabled={bulkLoading || selectedBooks.some(({ managed }) => managed)} onPress={() => setSheet("bulkDelete")} size="md" variant="secondary">Delete</Button>
         </BottomSheetMenu> : null}
         {sheet === "bulkDelete" ? <View style={styles.compactSheetActions}>
-          <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void deleteSelectedBooks()} size="md" variant="primary">Delete</Button>
+          <Button onPress={() => void deleteSelectedBooks()} size="md" variant="primary">Delete</Button>
           <Button disabled={bulkLoading} onPress={() => { setSheetOpen(false); setSheet(undefined); }} size="md" variant="secondary">Close</Button>
         </View> : null}
         {sheet === "delete" && selectedBook ? (

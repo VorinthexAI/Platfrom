@@ -14,7 +14,10 @@
       "usesAppleSignIn": true,
       "infoPlist": {
         "UIFileSharingEnabled": true,
-        "LSSupportsOpeningDocumentsInPlace": true
+        "LSSupportsOpeningDocumentsInPlace": true,
+        "UIBackgroundModes": [
+          "audio"
+        ]
       },
       "associatedDomains": [
         "applinks:vorinthex.com"
@@ -120,7 +123,8 @@
       "@config-plugins/react-native-blob-util",
       "expo-asset",
       "expo-font",
-      "expo-image"
+      "expo-image",
+      "./plugins/with-android-build-paths"
     ],
     "experiments": {
       "typedRoutes": true,

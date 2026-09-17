@@ -12,6 +12,7 @@ type UiState = {
   agentGreetingRequest?: AgentGreetingRequest;
   agentGreetingSequence: number;
   selectedTagsByContext: Record<string, SelectedTag[]>;
+  clearSelectedTags: () => void;
   closePaywall: () => void;
   openCostDetails: () => void;
   openPaywall: () => void;
@@ -35,6 +36,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   agentGreetingRequest: undefined,
   agentGreetingSequence: 0,
   selectedTagsByContext: {},
+  clearSelectedTags: () => set((state) => Object.keys(state.selectedTagsByContext).length ? { selectedTagsByContext: {} } : state),
   closePaywall: () => set((state) => state.paywallOpen ? { paywallOpen: false } : state),
   openCostDetails: () => set((state) => state.paywallOpen && state.paywallEntry === "costs" ? state : { paywallEntry: "costs", paywallOpen: true }),
   openPaywall: () => set((state) => state.paywallOpen && state.paywallEntry === "plans" ? state : { paywallEntry: "plans", paywallOpen: true }),

@@ -13,6 +13,7 @@ import { useToast } from "@vorinthex/shared/ui/toast";
 
 import { createGalleryCollectionHighlight, deleteGalleryCollectionHighlight, fetchGalleryCollectionHighlight, getGalleryContext, isGalleryClientErrorCode, listGalleryCollectionHighlights, resolveGalleryHighlightSlides, type GalleryCollection, type GalleryHighlight, type GalleryHighlightDetail } from "@/lib/gallery-client";
 import { HIGHLIGHT_SLIDE_DURATION_MS, initialHighlightPlaybackState, reduceHighlightPlayback } from "@/lib/gallery-highlight-playback";
+import { isSparkFundingError } from "@/lib/domain-error-observer";
 import { galleryQueryKeys } from "@/lib/workspace-query-cache";
 import { subscribeAppEvent } from "@/lib/app-events";
 import { GalleryCollectionImagePicker } from "@/components/capability/GalleryCollectionImagePicker";
@@ -42,10 +43,9 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   const [gridWidth, setGridWidth] = useState(0);
   const [highlights, setHighlights] = useState<GalleryHighlight[]>([]);
   const [detail, setDetail] = useState<GalleryHighlightDetail>();
-  const [listLoading, setListLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [opening, setOpening] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [selectedHighlightKeys, setSelectedHighlightKeys] = useState<string[]>([]);
   const [activeSheet, setActiveSheet] = useState<HighlightSheet>("player");
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
@@ -56,6 +56,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   const detailRequest = useRef(0);
   const createRequest = useRef(0);
   const listLoaded = useRef(false);
+  const pendingHighlightDeletes = useRef(new Set<string>());
   const longPressedHighlight = useRef<string | undefined>(undefined);
   const listSheetOpen = useRef(open && !detail && !opening && activeSheet === "player");
   const fadeProgress = useSharedValue(1);
@@ -69,12 +70,12 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
 
   async function loadList(invalidate = false) {
     const generation = ++listRequest.current;
-    if (!listLoaded.current) setListLoading(true);
+    if (!listLoaded.current && highlights.length > 0) setListLoading(true);
     try {
       if (invalidate) await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" });
       const result = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), queryFn: () => listGalleryCollectionHighlights(collection.key), staleTime: 0 });
       if (generation === listRequest.current) {
-        const orderedHighlights = [...result.highlights].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+        const orderedHighlights = [...result.highlights].filter(({ key }) => !pendingHighlightDeletes.current.has(key)).sort((left, right) => left.createdAt.localeCompare(right.createdAt));
         setHighlights(orderedHighlights);
         setSelectedHighlightKeys((current) => current.filter((key) => orderedHighlights.some((highlight) => highlight.key === key)));
       }
@@ -119,8 +120,8 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
       notify("Highlight created");
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" }).catch(() => undefined);
       if (listSheetOpen.current) void openHighlight(highlight);
-    } catch {
-      if (generation === createRequest.current) notify("Highlight could not be created");
+    } catch (failure) {
+      if (generation === createRequest.current && !isSparkFundingError(failure)) notify("Highlight could not be created");
     } finally {
       if (generation === createRequest.current) setCreating(false);
     }
@@ -149,31 +150,24 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
     else void openHighlight(highlight);
   }
 
-  async function deleteSelectedHighlights() {
+  function deleteSelectedHighlights() {
     if (!owner || selectedHighlightKeys.length === 0) return;
     const highlightKeys = [...selectedHighlightKeys];
-    setDeleting(true);
-    try {
-      const outcomes = await Promise.allSettled(highlightKeys.map((highlightKey) => deleteGalleryCollectionHighlight(highlightKey)));
-      const deletedKeys = highlightKeys.filter((_, index) => outcomes[index]?.status === "fulfilled");
-      const failedKeys = highlightKeys.filter((_, index) => outcomes[index]?.status === "rejected");
-      setHighlights((current) => current.filter(({ key }) => !deletedKeys.includes(key)));
-      deletedKeys.forEach((highlightKey) => queryClient.removeQueries({ queryKey: galleryQueryKeys.highlight(galleryContext, collection.key, highlightKey), exact: true }));
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" });
-      setSelectedHighlightKeys(failedKeys);
-      setActiveSheet("player");
-      if (failedKeys.length) notify(failedKeys.length === 1 ? "Highlight could not be deleted" : `${failedKeys.length} highlights could not be deleted`);
-      await loadList(true);
-    } catch {
-      notify(highlightKeys.length === 1 ? "Highlight could not be deleted" : "Highlights could not be deleted");
-    } finally {
-      setDeleting(false);
-    }
+    highlightKeys.forEach((key) => pendingHighlightDeletes.current.add(key));
+    setHighlights((current) => current.filter(({ key }) => !highlightKeys.includes(key)));
+    highlightKeys.forEach((highlightKey) => queryClient.removeQueries({ queryKey: galleryQueryKeys.highlight(galleryContext, collection.key, highlightKey), exact: true }));
+    setSelectedHighlightKeys([]);
+    setActiveSheet("player");
+    notify(`Deleted ${highlightKeys.length} ${highlightKeys.length === 1 ? "highlight" : "highlights"}`);
+    void Promise.allSettled(highlightKeys.map((highlightKey) => deleteGalleryCollectionHighlight(highlightKey))).then(() => {
+      highlightKeys.forEach((key) => pendingHighlightDeletes.current.delete(key));
+      void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" });
+    });
   }
 
   const loadListOnOpen = useEffectEvent(() => void loadList(true));
   const refreshFromEvent = useEffectEvent(() => {
-    if (!open || creating || deleting || opening) return;
+    if (!open || creating || opening) return;
     if (detail) void openHighlight(detail);
     else void loadList();
   });
@@ -239,25 +233,25 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
 
   const fadeStyle = useAnimatedStyle(() => ({ opacity: fadeProgress.value }));
 
-  const close = () => { listSheetOpen.current = false; listRequest.current += 1; detailRequest.current += 1; createRequest.current += 1; setDetail(undefined); setCreating(false); setDeleting(false); setSelectedHighlightKeys([]); setActiveSheet("player"); setCreateMenuOpen(false); setCustomCreateOpen(false); setResourceTagsOpen(false); dispatch({ type: "pause" }); onClose(); };
-  const listFooter = <>{owner ? <Button disabled={creating || listLoading || opening} onPress={() => { listSheetOpen.current = false; setCreateMenuOpen(true); }} size="md" variant="primary">Create</Button> : null}<Button disabled={creating} onPress={close} size="md" variant="secondary">Close</Button></>;
+  const close = () => { listSheetOpen.current = false; listRequest.current += 1; detailRequest.current += 1; createRequest.current += 1; setDetail(undefined); setCreating(false); setSelectedHighlightKeys([]); setActiveSheet("player"); setCreateMenuOpen(false); setCustomCreateOpen(false); setResourceTagsOpen(false); dispatch({ type: "pause" }); onClose(); };
+  const listFooter = <>{owner ? <Button disabled={creating} onPress={() => { listSheetOpen.current = false; setCreateMenuOpen(true); }} size="md" variant="primary">Create</Button> : null}<Button disabled={creating} onPress={close} size="md" variant="secondary">Close</Button></>;
   const playerFooter = <Button onPress={close} size="md" variant="secondary">Close</Button>;
 
   return <>
     <BottomSheet footer={listFooter} height="full" onOpenChange={(next) => { if (!next && !createMenuOpen && !customCreateOpen) close(); }} open={open && !detail} title="Highlights">
-      <ScrollView contentContainerStyle={[styles.grid, listEmpty && styles.emptyGrid]} onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.grid, listEmpty && styles.emptyGrid]} onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} showsVerticalScrollIndicator={false} style={styles.scroll}>
         {selectedHighlightKeys.length ? <Tabs style={styles.bulkToolbar}>
-          <View style={styles.bulkToolbarSelection}><Button accessibilityLabel="Clear highlight selection" contentMode="raw" disabled={deleting} onPress={() => setSelectedHighlightKeys([])} size="md" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text style={styles.bulkSelectionText}>{selectedHighlightKeys.length} selected</Text></View>
-          <Button accessibilityLabel="Selected highlight actions" contentMode="raw" disabled={deleting} onPress={() => { listSheetOpen.current = false; setActiveSheet("actions"); }} size="md" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
+          <View style={styles.bulkToolbarSelection}><Button accessibilityLabel="Clear highlight selection" contentMode="raw" onPress={() => setSelectedHighlightKeys([])} size="md" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text style={styles.bulkSelectionText}>{selectedHighlightKeys.length} selected</Text></View>
+          <Button accessibilityLabel="Selected highlight actions" contentMode="raw" onPress={() => { listSheetOpen.current = false; setActiveSheet("actions"); }} size="md" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
         </Tabs> : null}
-        {listLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.cardFrame, { width: cardWidth, height: cardWidth * 16 / 9 }]} />) : highlights.map((highlight) => { const selected = selectedHighlightKeys.includes(highlight.key); return <Button accessibilityActions={owner ? [{ name: "longpress", label: selected ? "Deselect highlight" : "Select highlight" }] : undefined} accessibilityLabel={`${highlight.title}, ${highlight.slideCount} slides`} accessibilityState={{ selected }} contentMode="raw" disabled={creating || opening || deleting} key={highlight.key} onAccessibilityAction={owner ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleHighlightLongPress(highlight.key, false); } : undefined} onLongPress={owner ? () => handleHighlightLongPress(highlight.key) : undefined} onPress={() => handleHighlightPress(highlight)} shape="rounded" size="md" style={[styles.cardFrame, styles.card, selected && styles.cardSelected, { width: cardWidth, height: cardWidth * 16 / 9 }]} variant="ghost">
-          {highlight.coverUrl ? <Image contentFit="cover" source={highlight.coverUrl} style={StyleSheet.absoluteFill} transition={180} /> : null}
+        {highlights.map((highlight) => { const selected = selectedHighlightKeys.includes(highlight.key); return <Button accessibilityActions={owner ? [{ name: "longpress", label: selected ? "Deselect highlight" : "Select highlight" }] : undefined} accessibilityLabel={`${highlight.title}, ${highlight.slideCount} slides`} accessibilityState={{ selected }} contentMode="raw" disabled={creating || opening} key={highlight.key} onAccessibilityAction={owner ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleHighlightLongPress(highlight.key, false); } : undefined} onLongPress={owner ? () => handleHighlightLongPress(highlight.key) : undefined} onPress={() => handleHighlightPress(highlight)} shape="rounded" size="md" style={[styles.cardFrame, styles.card, selected && styles.cardSelected, { width: cardWidth, height: cardWidth * 16 / 9 }]} variant="ghost">
+          {highlight.coverUrl ? <Image contentFit="cover" source={highlight.coverUrl} style={StyleSheet.absoluteFill} transition={180} /> : <Skeleton style={StyleSheet.absoluteFill} />}
           <View style={styles.cardShade} />
           <View style={styles.cardCopy}><Text numberOfLines={2} style={styles.title}>{highlight.title}</Text><Text style={styles.cardCount}>{highlight.slideCount} slide{highlight.slideCount === 1 ? "" : "s"}</Text></View>
           {selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}
         </Button>; })}
         {creating ? <View accessibilityLabel="Creating highlight" accessibilityRole="progressbar"><Skeleton style={[styles.cardFrame, { width: cardWidth, height: cardWidth * 16 / 9 }]} /></View> : null}
-        {listEmpty ? <Text style={styles.empty}>No highlights yet.</Text> : null}
+        {listEmpty ? <View style={styles.emptyWrap}><Text style={styles.empty}>No highlights yet.</Text></View> : null}
       </ScrollView>
     </BottomSheet>
 
@@ -270,24 +264,26 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
         <View style={styles.stage}>{activeSlide ? <Animated.View style={[styles.slideFrame, fadeStyle]}><Image contentFit="contain" source={activeSlide.url} style={styles.image} /></Animated.View> : <Text style={styles.empty}>This highlight has no available slides.</Text>}</View>
         <View accessibilityLabel={`Slide ${slides.length ? playback.index + 1 : 0} of ${slides.length}`} accessibilityRole="progressbar" style={styles.progress}>{slides.map((slide, index) => <View key={slide.key} style={styles.progressTrack}><View style={[styles.progressFill, { width: index < playback.index ? "100%" : index > playback.index ? "0%" : `${Math.min(100, playback.progressMs / HIGHLIGHT_SLIDE_DURATION_MS * 100)}%` }]} /></View>)}</View>
         <View style={styles.controls}>
-          <Button accessibilityLabel="Previous slide" contentMode="raw" disabled={playback.index === 0 || slides.length === 0} onPress={() => dispatch({ type: "previous" })} size="md" variant="secondary"><ChevronLeftIcon /></Button>
-          <Button accessibilityLabel={playback.playing ? "Pause highlight" : "Play highlight"} contentMode="raw" disabled={slides.length === 0} onPress={() => dispatch(playback.playing ? { type: "pause" } : { type: "play", slideCount: slides.length })} size="md" style={styles.playbackToggle} variant="secondary">{playback.playing ? <PauseIcon /> : <PlayIcon />}</Button>
-          <Button accessibilityLabel="Next slide" contentMode="raw" disabled={playback.index >= slides.length - 1 || slides.length === 0} onPress={() => dispatch({ type: "next", slideCount: slides.length })} size="md" variant="secondary"><ChevronRightIcon /></Button>
+          <Button accessibilityLabel="Previous slide" contentMode="raw" disabled={playback.index === 0 || slides.length === 0} iconOnly onPress={() => dispatch({ type: "previous" })} size="md" variant="secondary"><ChevronLeftIcon /></Button>
+          <Button accessibilityLabel={playback.playing ? "Pause highlight" : "Play highlight"} contentMode="raw" disabled={slides.length === 0} iconOnly onPress={() => dispatch(playback.playing ? { type: "pause" } : { type: "play", slideCount: slides.length })} size="md" variant="secondary">{playback.playing ? <PauseIcon /> : <PlayIcon />}</Button>
+          <Button accessibilityLabel="Next slide" contentMode="raw" disabled={playback.index >= slides.length - 1 || slides.length === 0} iconOnly onPress={() => dispatch({ type: "next", slideCount: slides.length })} size="md" variant="secondary"><ChevronRightIcon /></Button>
         </View>
         <Text style={styles.count}>{slides.length} slide{slides.length === 1 ? "" : "s"}</Text>
       </View>
     </BottomSheet>
 
-    <BottomSheet hideHeading onOpenChange={(next) => { if (!next) setActiveSheet("player"); }} open={open && !detail && selectedHighlightKeys.length > 0 && activeSheet === "actions"} title=""><BottomSheetMenu><BottomSheetItem onPress={() => { setActiveSheet("player"); requestAnimationFrame(() => setResourceTagsOpen(true)); }} style={styles.menuItem} variant="secondary">Tags</BottomSheetItem><BottomSheetItem disabled={deleting} onPress={() => setActiveSheet("confirmDelete")} style={styles.menuItem} variant="secondary">Delete</BottomSheetItem></BottomSheetMenu></BottomSheet>
-    <BottomSheet dismissible={!deleting} onOpenChange={(next) => { if (!next) setActiveSheet("player"); }} open={open && !detail && selectedHighlightKeys.length > 0 && activeSheet === "confirmDelete"} title={`Delete ${selectedHighlightKeys.length === 1 ? "highlight" : `${selectedHighlightKeys.length} highlights`}?`}>
-      <View style={styles.compactActions}><Button disabled={deleting} loading={deleting} onPress={() => void deleteSelectedHighlights()} size="md" variant="primary">Delete</Button><Button disabled={deleting} onPress={() => setActiveSheet("player")} size="md" variant="secondary">Close</Button></View>
+    <BottomSheet hideHeading onOpenChange={(next) => { if (!next) setActiveSheet("player"); }} open={open && !detail && selectedHighlightKeys.length > 0 && activeSheet === "actions"} title=""><BottomSheetMenu><BottomSheetItem onPress={() => setActiveSheet("confirmDelete")} style={styles.menuItem} variant="secondary">Delete</BottomSheetItem></BottomSheetMenu></BottomSheet>
+    <BottomSheet onOpenChange={(next) => { if (!next) setActiveSheet("player"); }} open={open && !detail && selectedHighlightKeys.length > 0 && activeSheet === "confirmDelete"} title={`Delete ${selectedHighlightKeys.length === 1 ? "highlight" : `${selectedHighlightKeys.length} highlights`}?`}>
+      <View style={styles.compactActions}><Button onPress={deleteSelectedHighlights} size="md" variant="primary">Delete</Button><Button onPress={() => setActiveSheet("player")} size="md" variant="secondary">Close</Button></View>
     </BottomSheet>
   </>;
 }
 
 const styles = StyleSheet.create({
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: GAP, paddingVertical: spacing.md },
-  emptyGrid: { flexGrow: 1, alignItems: "center", justifyContent: "center" },
+  scroll: { flex: 1 },
+  grid: { flexGrow: 1, flexDirection: "row", flexWrap: "wrap", alignContent: "flex-start", gap: GAP, paddingVertical: spacing.md },
+  emptyGrid: { alignContent: "center", alignItems: "center", justifyContent: "center" },
+  emptyWrap: { width: "100%", flexGrow: 1, alignItems: "center", justifyContent: "center" },
   bulkToolbar: { width: "100%", minHeight: 36, marginBottom: spacing.xs, padding: 3, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, backgroundColor: palette.panel },
   bulkToolbarSelection: { flexDirection: "row", alignItems: "center", gap: 8 },
   bulkToolbarClose: { height: 30, minHeight: 30, width: 30, paddingHorizontal: 0, paddingVertical: 0 },
@@ -308,7 +304,6 @@ const styles = StyleSheet.create({
   progressTrack: { flex: 1, height: 3, overflow: "hidden", borderRadius: 2, backgroundColor: palette.silver700 },
   progressFill: { height: "100%", backgroundColor: palette.silver50 },
   controls: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.md },
-  playbackToggle: { height: 35, minHeight: 35, width: 35 },
   count: { textAlign: "center", color: palette.silver500, fontFamily: fonts.regular, fontSize: 12 },
   compactActions: { gap: spacing.sm },
   menuItem: { justifyContent: "center" },

@@ -28,6 +28,7 @@ import { TagFilterSheet } from "@/components/TagFilterSheet";
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import { InteractiveGlobe } from "@/components/three/InteractiveGlobe";
 import { assistantIconSource, capabilityIconSource } from "@/data/capability-icons";
+import { isSparkFundingError } from "@/lib/domain-error-observer";
 import { COUNTRIES, type CountryProperties } from "@/lib/globe-data";
 import { normalizeCapturedPng, type CapturedImage } from "@/lib/captured-image";
 import { deleteContentDocument, deleteContentSearchHistory, getContentContext, type ContentContext, type ContentFolder, type ContentSearchHistoryItem } from "@/lib/content-client";
@@ -119,6 +120,7 @@ export const PLACE_SEARCH_HISTORY_DEBOUNCE_MS = 800;
 export const SHEET_TRANSITION_DELAY_MS = 230;
 
 function errorMessage(error: unknown, fallback = "The request could not be completed.") {
+  if (isSparkFundingError(error)) return "";
   return error instanceof Error && error.message.trim() ? error.message : fallback;
 }
 
@@ -175,7 +177,8 @@ const wait = (duration: number) => new Promise((resolve) => setTimeout(resolve, 
 export function TravelWorkspace({ initialAction, initialCollectionKind, initialCountryCode, initialPlaceKey, initialSearchQuery, initialTripKey, openTripAssets: shouldOpenTripAssets = false }: { initialAction?: "create" | "find-place" | "create-trip"; initialCollectionKind?: string; initialCountryCode?: string; initialPlaceKey?: string; initialSearchQuery?: string; initialTripKey?: string; openTripAssets?: boolean } = {}) {
   const queryClient = useQueryClient();
   const router = useRouter();
-  const { showToast } = useToast();
+  const { showToast: presentToast } = useToast();
+  const showToast = (input: { title: string; duration?: number }) => { if (input.title) presentToast(input); };
   const travelContext = useMemo(() => getTravelContext(), []);
   const contentContext = useMemo(() => getContentContext(), []);
   const tagContextKey = tagFilterContextKey(contentContext);
@@ -614,12 +617,12 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
       pendingPlaceSaveRef.current.delete(saveIdentity);
       setPendingPlaceSaves((current) => current.filter((identity) => identity !== saveIdentity));
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(travelContext) });
-    }).catch(() => {
+    }).catch((error: unknown) => {
       queryClient.setQueryData(overviewKey, (current: CompassOverview | undefined) => removeOptimisticCompassPlace(current, optimisticKey));
       setSelectedPlaceKeys((current) => current.filter((key) => key !== optimisticKey));
       pendingPlaceSaveRef.current.delete(saveIdentity);
       setPendingPlaceSaves((current) => current.filter((identity) => identity !== saveIdentity));
-      showToast({ title: failureTitle, duration: 2_000 });
+      if (!isSparkFundingError(error)) showToast({ title: failureTitle, duration: 2_000 });
     });
   }
 
@@ -881,11 +884,11 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
         optimisticTripRef.current.delete(optimisticKey);
         optimisticTripRef.current.set(trip.key, trip);
         queryClient.setQueryData(tripsKey, (current: Trip[] | undefined) => reconcileOptimisticCompassTrip(current, optimisticKey, trip));
-      } catch {
+      } catch (error) {
         await queryClient.cancelQueries({ queryKey: tripsKey, exact: true }).catch(() => undefined);
         optimisticTripRef.current.delete(optimisticKey);
         queryClient.setQueryData(tripsKey, (current: Trip[] | undefined) => removeOptimisticCompassTrip(current, optimisticKey));
-        showToast({ title: "Trip could not be created", duration: 2_000 });
+        if (!isSparkFundingError(error)) showToast({ title: "Trip could not be created", duration: 2_000 });
       }
     })();
   }
@@ -1494,7 +1497,8 @@ function guideRunStyle(run: GuideTextRun) {
 }
 
 function GeneratedDocumentSheets<T extends GeneratedDocument>({ appendGeneration = false, children, contentContext, createLabel = "Create new", documents, emptyMessage, error, generating, label, loading, onClose, onCreate, onDetailClose, onOpen, onRetry, open, selected, singularLabel }: { appendGeneration?: boolean; children?: ReactNode; contentContext: ContentContext; createLabel?: string; documents?: T[]; emptyMessage: string; error: unknown; generating: boolean; label: string; loading: boolean; onClose: () => void; onCreate: () => void; onDetailClose: () => void; onOpen: (document: T) => void; onRetry: () => void; open: boolean; selected?: T; singularLabel?: string }) {
-  const { showToast } = useToast();
+  const { showToast: presentToast } = useToast();
+  const showToast = (input: { title: string; duration?: number }) => { if (input.title) presentToast(input); };
   const [selectedDocumentKeys, setSelectedDocumentKeys] = useState<string[]>([]);
   const [removedDocumentKeys, setRemovedDocumentKeys] = useState<string[]>([]);
   const [documentActionsOpen, setDocumentActionsOpen] = useState(false);

@@ -16,6 +16,7 @@ export const appSearchInputSchema = z.strictObject({
   limit: z.number().int().min(1).max(50).default(10),
   filters: z.strictObject({
     folderKey: z.string().min(1).optional(),
+    rootOnly: z.boolean().optional(),
     includeDescendants: z.boolean().optional(),
     collectionKey: z.string().min(1).optional(),
     connectorKey: z.string().min(1).optional(),
@@ -35,6 +36,7 @@ export const appSearchInputSchema = z.strictObject({
   if (operation === "search" && !input.query) context.addIssue({ code: "custom", path: ["query"], message: "Search requires a query." });
   if (operation === "list" && input.query) context.addIssue({ code: "custom", path: ["query"], message: "List does not accept a query." });
   if (input.filters?.tagMatch && !input.filters.tagKeys && !input.filters.tagNames) context.addIssue({ code: "custom", path: ["filters", "tagMatch"], message: "tagMatch requires tagKeys or tagNames." });
+  if (input.filters?.rootOnly && (input.filters.folderKey || input.filters.includeDescendants !== undefined || input.collectionSlugs.some((slug) => !["folders", "documents", "files"].includes(slug)))) context.addIssue({ code: "custom", path: ["filters", "rootOnly"], message: "rootOnly applies only to root folders, documents, and files." });
   if ((input.filters?.createdFrom || input.filters?.createdTo) && input.collectionSlugs.includes("countries")) context.addIssue({ code: "custom", path: ["filters"], message: "Countries do not have a creation date." });
   if (input.filters?.createdFrom && input.filters.createdTo && input.filters.createdFrom > input.filters.createdTo) context.addIssue({ code: "custom", path: ["filters", "createdTo"], message: "createdTo must not precede createdFrom." });
 });
@@ -63,6 +65,8 @@ function context() {
 }
 
 function responseError(error: unknown) {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === "ECONNABORTED" || code === "ETIMEDOUT") return new Error("Search timed out. Please try again.");
   const failure = (error as { response?: { data?: { error?: unknown } } }).response?.data?.error;
   if (typeof failure === "string") return new Error(failure);
   if (failure && typeof failure === "object" && "message" in failure && typeof failure.message === "string") return new Error(failure.message);

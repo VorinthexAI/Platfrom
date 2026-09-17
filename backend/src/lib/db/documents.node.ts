@@ -48,6 +48,11 @@ export const documentSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 
+export const CONVERSATION_ARCHIVE_DOCUMENT_PURPOSES = ['conversation-message', 'conversation-summary'] as const;
+export function isConversationArchiveDocument(value: { managedPurpose?: string }): boolean {
+  return value.managedPurpose === 'conversation-message' || value.managedPurpose === 'conversation-summary';
+}
+
 export type Document = Omit<z.infer<typeof documentSchema>, 'archiveVisibility'> & { archiveVisibility?: 'visible' | 'domain-only' };
 export type DocumentExtension = z.infer<typeof documentExtensionSchema>;
 export const documentsEmbeddingFields = ['name', 'content'] as const;

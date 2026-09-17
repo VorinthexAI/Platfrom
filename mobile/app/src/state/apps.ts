@@ -4,6 +4,7 @@ import type { CapabilitySlug } from "@/data/registry";
 import { fetchAppsRegistry, type ServerApp } from "@/lib/apps-registry";
 import { fetchSparkCosts, type CapabilitySparkCost, type SparkCharge } from "@/lib/cost-client";
 import { fetchPublicBootstrap, type MobileProduct } from "@/lib/product-client";
+import { useUiStore } from "./ui";
 
 export type AppBootstrapStatus = "idle" | "bootstrapping" | "ready" | "failed";
 export type ProductBootstrapStatus = "idle" | "loading" | "ready" | "unavailable";
@@ -54,7 +55,8 @@ function appForSlug(apps: ServerApp[], slug: string): ServerApp {
   return app;
 }
 
-function selectedAppState(app: ServerApp) {
+function selectedAppState(app: ServerApp, previousAppKey: string | null) {
+  if (previousAppKey !== app.key) useUiStore.getState().clearSelectedTags();
   return { selectedApp: app, currentAppKey: app.key };
 }
 
@@ -80,7 +82,7 @@ export const useAppsStore = create<AppsState>((set, get) => ({
     bootstrapPromise = fetchAppsRegistry()
       .then((apps) => {
         const core = appForSlug(apps, "core");
-        set({ apps, bootstrapStatus: "ready", bootstrapError: null, ...selectedAppState(core) });
+        set({ apps, bootstrapStatus: "ready", bootstrapError: null, ...selectedAppState(core, get().currentAppKey) });
       })
       .catch((error: unknown) => {
         set({ apps: [], selectedApp: null, currentAppKey: null, bootstrapStatus: "failed", bootstrapError: error instanceof Error ? error.message : "App registry bootstrap failed." });
@@ -92,11 +94,11 @@ export const useAppsStore = create<AppsState>((set, get) => ({
   },
   refreshProducts: () => refreshProducts(set),
   enterWorkspace: (slug) => set((state) => ({
-    ...selectedAppState(appForSlug(state.apps, slug)),
+    ...selectedAppState(appForSlug(state.apps, slug), state.currentAppKey),
     workspaceSelection: slug,
   })),
-  enterCore: () => set((state) => selectedAppState(appForSlug(state.apps, "core"))),
-  leaveCore: () => set((state) => selectedAppState(appForSlug(state.apps, state.workspaceSelection ?? "core"))),
+  enterCore: () => set((state) => selectedAppState(appForSlug(state.apps, "core"), state.currentAppKey)),
+  leaveCore: () => set((state) => selectedAppState(appForSlug(state.apps, state.workspaceSelection ?? "core"), state.currentAppKey)),
 }));
 
 export async function ensureAppsReady(): Promise<string> {

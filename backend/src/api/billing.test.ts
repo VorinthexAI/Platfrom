@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { newId } from '@/lib/ids';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { createBillingSummaryReadTool } from '@/lib/ai/tools/billing-summary-read';
-import { createBillingSummaryHandler } from './billing';
+import { createBillingSummaryHandler, createDevSparkBalanceHandler } from './billing';
 import { errorHandler } from './errors';
 
 const transaction = (userKey: string) => ({
@@ -96,5 +96,39 @@ describe('billing summary boundaries', () => {
     }));
     expect((await app.request('/billing/summary')).status).toBe(200);
     expect(received).toEqual({ limit: 50 });
+  });
+});
+
+describe('dev spark balance', () => {
+  test('is unavailable in production and requires an authenticated user', async () => {
+    const hidden = new Hono();
+    hidden.post('/billing/dev-balance', createDevSparkBalanceHandler({ enabled: false, getIdentity: async () => ({ key: newId(), identityType: 'user' }) }));
+    expect((await hidden.request('/billing/dev-balance', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sparks: 1000 }) })).status).toBe(404);
+
+    const app = new Hono();
+    app.post('/billing/dev-balance', createDevSparkBalanceHandler({ enabled: true, getIdentity: async () => null }));
+    const response = await app.request('/billing/dev-balance', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sparks: 1000 }) });
+    expect(response.status).toBe(401);
+  });
+
+  test('adjusts the authenticated user to the requested whole-spark balance', async () => {
+    const userKey = newId();
+    const adjustments: Array<{ userKey: string; delta: number }> = [];
+    const app = new Hono();
+    app.onError(errorHandler);
+    app.post('/billing/dev-balance', createDevSparkBalanceHandler({
+      enabled: true,
+      getIdentity: async () => ({ key: userKey, identityType: 'user' }),
+      getBalance: async () => 5_000_000,
+      adjust: async (trustedUserKey, input) => {
+        adjustments.push({ userKey: trustedUserKey, delta: input.deltaMicroSparks });
+        return { status: 'applied', transaction: transaction(trustedUserKey) };
+      },
+      getSummary: async () => ({ microSparkBalance: 1_000_000_000, microSparkDebt: 0, spendingBlocked: false, storage: { bytes: '0', estimatedMonthlyMicroSparks: '0' }, transactions: [] }),
+    }));
+    const response = await app.request('/billing/dev-balance', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sparks: 1000 }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ success: true, data: { microSparkBalance: 1_000_000_000 } });
+    expect(adjustments).toEqual([{ userKey, delta: 995_000_000 }]);
   });
 });

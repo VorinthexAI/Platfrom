@@ -17,6 +17,17 @@ function request(dependencies: Parameters<typeof createAppSearchHandler>[0], bod
 }
 
 describe('app search HTTP API', () => {
+  test('HTTP and unified tools preserve the same root-only filter and trusted context', async () => {
+    const calls: unknown[][] = [];
+    const service = { search: async (...args: unknown[]) => { calls.push(args); return { query: 'root', groups: [] }; } } as never;
+    const input = { query: 'root', collectionSlugs: ['folders', 'documents', 'files'], limit: 10, recordHistory: false, filters: { rootOnly: true } };
+    const response = await request({ getIdentity: async () => ({ key: userKey, identityType: 'user' }), authorize: async () => ({ input: { teamKey, scopeKey }, context }), service }, { teamKey, scopeKey, ...input });
+    expect(response.status).toBe(200);
+    await runTool('app.search', '', input, { contentContext: context, appSearchService: service });
+    expect(calls).toHaveLength(2);
+    for (const call of calls) { expect(call[0]).toEqual(input); expect(call[1]).toBe(context); }
+  });
+
   test('requires a user session and strictly validates trusted selectors', async () => {
     expect((await request({ getIdentity: async () => null }, {})).status).toBe(401);
     expect((await request({ getIdentity: async () => ({ key: userKey, identityType: 'member' }) }, {})).status).toBe(400);

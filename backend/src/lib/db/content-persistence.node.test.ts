@@ -191,20 +191,21 @@ describe('scoped Content persistence', () => {
     expect(calls[0]?.bindVars).toMatchObject({ owner: 'invocation-owner', unset: ['_internalDeletion'] });
   });
 
-  test('fences initial guide move and deletion at the persistence boundary', async () => {
+  test('allows initial guide move and deletion at the persistence boundary', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const executor: ContentQueryExecutor = { async query(query, bindVars) { calls.push({ query, bindVars }); return { async next() { return undefined; } }; } };
     const persistence = createContentPersistence(executor);
-    const protectedFolderKey = initialWorkspaceFolderKey(scopeKey, 'platform');
-    const protectedDocumentKey = initialWorkspaceDocumentKey(scopeKey, 'platform-welcome');
-    await persistence.updateFolder(scopeKey, protectedFolderKey, { parentFolderKey: folderKey, updatedAt: timestamp });
-    await persistence.updateDocument(scopeKey, protectedDocumentKey, { folderKey, updatedAt: timestamp });
-    await persistence.setFolderDeletion(scopeKey, protectedFolderKey, { kind: 'folder', owner: 'owner', startedAt: timestamp });
-    await persistence.setDocumentDeletion(scopeKey, protectedDocumentKey, { kind: 'document', owner: 'owner', startedAt: timestamp });
-    await persistence.deleteFolder(scopeKey, protectedFolderKey);
-    await persistence.deleteDocument(scopeKey, protectedDocumentKey);
-    expect(calls.slice(0, 6).every(({ query }) => query.includes('!@structurallyProtected'))).toBe(true);
-    expect(calls.slice(0, 6).every(({ bindVars }) => bindVars?.structurallyProtected === true)).toBe(true);
+    const guideFolderKey = initialWorkspaceFolderKey(scopeKey, 'platform');
+    const guideDocumentKey = initialWorkspaceDocumentKey(scopeKey, 'platform-welcome');
+    await persistence.updateFolder(scopeKey, guideFolderKey, { parentFolderKey: folderKey, updatedAt: timestamp });
+    await persistence.updateDocument(scopeKey, guideDocumentKey, { folderKey, updatedAt: timestamp });
+    await persistence.setFolderDeletion(scopeKey, guideFolderKey, { kind: 'folder', owner: 'owner', startedAt: timestamp });
+    await persistence.setDocumentDeletion(scopeKey, guideDocumentKey, { kind: 'document', owner: 'owner', startedAt: timestamp });
+    await persistence.deleteFolder(scopeKey, guideFolderKey);
+    await persistence.deleteDocument(scopeKey, guideDocumentKey);
+    expect(calls.slice(0, 6).every(({ query }) => query.includes('@guideContent'))).toBe(true);
+    expect(calls.slice(0, 6).every(({ bindVars }) => bindVars?.guideContent === true)).toBe(true);
+    expect(calls.every(({ query }) => !query.includes('structurallyProtected'))).toBe(true);
   });
 
   test('guards every Content insert with its folder or document owner', async () => {
@@ -236,7 +237,7 @@ describe('scoped Content persistence', () => {
     expect(calls[0]?.query).toContain('documentSummaries');
     await persistence.listSummaries(scopeKey, [documentKey]);
     expect(calls[1]?.query).toContain('summary.scopeKey == @scopeKey && summary.documentKey IN @documentKeys');
-    expect(calls[1]?.query).toContain('SORT summary.version DESC');
+    expect(calls[1]?.query).toContain('SORT summary.version ASC');
   });
 
   test('creates one race-safe audio record per summary and lists by summary keys', async () => {

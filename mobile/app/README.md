@@ -17,8 +17,18 @@ bun run mobile:start   # Expo dev server (press a/i for Android/iOS)
 bun run mobile:typecheck
 ```
 
+There is no mobile app test suite. Use typecheck; do not add `*.test.ts` files here.
+
 Native projects are generated on demand (`bunx expo prebuild` in this
 folder) — they are not committed.
+
+For local Android or iOS builds, run `bun run android` or `bun run ios` from
+this folder. Both apply config plugins before building and installing the app,
+including `expo-audio` background playback (`UIBackgroundModes` audio on iOS,
+playback service and foreground-service permissions on Android). After native
+configuration changes, rebuild the installed app with these commands; a Metro
+reload alone cannot update native services, background modes, or lock-screen
+controls.
 
 ## Native Google Sign-In
 

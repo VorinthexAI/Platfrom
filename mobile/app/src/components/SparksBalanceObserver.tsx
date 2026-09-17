@@ -4,12 +4,13 @@ import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
 
 import { billingSummaryQueryKey, currentSubscriptionQueryKey } from "@/lib/billing-client";
-import { extractDomainErrorCode, OUTSTANDING_DEBT_CODE, subscribeDomainErrors } from "@/lib/domain-error-observer";
+import { SPARK_FUNDING_COPY, sparkFundingUserCopy, subscribeDomainErrors } from "@/lib/domain-error-observer";
 import { useAuthStore } from "@/state/auth";
 import { useUiStore } from "@/state/ui";
 
 export function SparksBalanceObserver({ isOffline }: { isOffline: boolean }) {
   const userKey = useAuthStore((state) => state.user?.key);
+  const openPaywall = useUiStore((state) => state.openPaywall);
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const previousOffline = useRef(isOffline);
@@ -28,15 +29,20 @@ export function SparksBalanceObserver({ isOffline }: { isOffline: boolean }) {
     return () => subscription.remove();
   }, [isOffline, queryClient, userKey]);
 
-  useEffect(() => subscribeDomainErrors((error) => {
-    const outstandingDebt = extractDomainErrorCode(error) === OUTSTANDING_DEBT_CODE;
-    const ui = useUiStore.getState();
-    if (!ui.paywallOpen) {
-      showToast({ title: outstandingDebt ? "Spark spending paused" : "Not enough Sparks", description: outstandingDebt ? "Add Sparks to clear your outstanding balance and continue." : "You need more Sparks to continue.", duration: 3_000 });
-      ui.openPaywall();
-    }
-    if (userKey) void queryClient.invalidateQueries({ queryKey: billingSummaryQueryKey(userKey), exact: true, refetchType: "active" });
-  }), [queryClient, showToast, userKey]);
+  useEffect(() => {
+    let lastTitle = "";
+    let lastAt = 0;
+    return subscribeDomainErrors((error) => {
+      const copy = sparkFundingUserCopy(error) ?? SPARK_FUNDING_COPY.INSUFFICIENT_BALANCE;
+      const now = Date.now();
+      if (copy.title === lastTitle && now - lastAt < 2_000) return;
+      lastTitle = copy.title;
+      lastAt = now;
+      showToast({ title: copy.title, description: copy.description, duration: 3_000 });
+      openPaywall();
+      if (userKey) void queryClient.invalidateQueries({ queryKey: billingSummaryQueryKey(userKey), exact: true, refetchType: "active" });
+    });
+  }, [openPaywall, queryClient, showToast, userKey]);
 
   return null;
 }

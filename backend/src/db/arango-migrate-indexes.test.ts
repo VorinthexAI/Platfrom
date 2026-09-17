@@ -89,8 +89,8 @@ describe('Arango migration indexes', () => {
     expect(queries).toHaveLength(3);
     expect(queries[0]).toContain('collection.name == "Generated media"');
     expect(queries[0]).toContain('{ name: "Core" }');
-    expect(queries[1]).toContain('collection.purpose == "generated-media"');
-    expect(queries[1]).toContain('{ mutationPolicy: "system-only" }');
+    expect(queries[1]).toContain('collection.purpose IN ["generated-media", "email-media", "place-media"]');
+    expect(queries[1]).toContain('{ mutationPolicy: "user" }');
     expect(queries[2]).toContain('collection.purpose == "generated-media"');
     expect(queries[2]).toContain('{ mutationPolicy: "user" }');
   });

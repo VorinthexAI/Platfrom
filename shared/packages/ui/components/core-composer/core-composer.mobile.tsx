@@ -348,17 +348,19 @@ export function CoreComposer({
   useLayoutEffect(() => {
     if (openRequest <= handledOpenRequestRef.current) return;
     handledOpenRequestRef.current = openRequest;
-    setInputHeight(COLLAPSED_INPUT_HEIGHT);
-    setInputLineCount(1);
-    setFocusInputOnPageMount(focusOnOpenRequest);
-    if (!focusOnOpenRequest) {
-      intentionalFocus.current = false;
-      inputRef.current?.blur();
-      Keyboard.dismiss();
+    if (!pageOpen) {
+      setInputHeight(COLLAPSED_INPUT_HEIGHT);
+      setInputLineCount(1);
+      setFocusInputOnPageMount(focusOnOpenRequest);
+      if (!focusOnOpenRequest) {
+        intentionalFocus.current = false;
+        inputRef.current?.blur();
+        Keyboard.dismiss();
+      }
     }
     onFocusChangeRef.current?.(true);
     setPageOpen(true);
-  }, [focusOnOpenRequest, openRequest]);
+  }, [focusOnOpenRequest, openRequest, pageOpen]);
 
   useEffect(() => {
     if (focusRequest <= handledFocusRequestRef.current || !pageOpen || !editable) return;

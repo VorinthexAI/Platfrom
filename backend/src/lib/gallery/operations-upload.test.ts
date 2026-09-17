@@ -16,14 +16,14 @@ test("accepts twenty individually valid images without an aggregate upload-size 
 });
 
 test.each([
-  ["generated-media", true],
-  ["email-media", true],
-  ["place-media", true],
-  ["scope-directory", false],
-] as const)("projects %s managed collection contribution as %s", (purpose, canContribute) => {
+  ["generated-media", "user", "owner", true, true],
+  ["email-media", "user", "owner", true, true],
+  ["place-media", "user", "owner", true, true],
+  ["scope-directory", "system-only", "viewer", false, false],
+] as const)("projects %s collection contribution for %s as contribute=%s manage=%s", (purpose, mutationPolicy, role, canContribute, canManage) => {
   const now = new Date().toISOString();
-  const collection = collectionSchema.parse({ key: newId(), scopeKey: newId(), name: purpose, purpose, mutationPolicy: "system-only", embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: now, updatedAt: now });
-  expect(projectGalleryCollection(collection, 0, null, newId(), "viewer", false).access).toEqual({ canRead: true, canContribute, canManage: false });
+  const collection = collectionSchema.parse({ key: newId(), scopeKey: newId(), name: purpose, purpose, mutationPolicy, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdAt: now, updatedAt: now });
+  expect(projectGalleryCollection(collection, 0, null, newId(), role, role === "owner").access).toEqual({ canRead: true, canContribute, canManage });
 });
 
 test("reserves managed-collection uploads through contribution authorization", async () => {

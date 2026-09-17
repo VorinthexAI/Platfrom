@@ -13,8 +13,8 @@ import {
 } from "@/lib/ai/document-processing";
 import type { RouterDependencies } from "@/lib/ai/router";
 import type { DocumentObjectStorage } from "@/lib/ai/document-processing/storage";
-import type { Folder } from "@/lib/db/folders.node";
-import type { Document } from "@/lib/db/documents.node";
+import { isConversationArchiveFolder, type Folder } from "@/lib/db/folders.node";
+import { isConversationArchiveDocument, type Document } from "@/lib/db/documents.node";
 import type { DocumentAudioVersion } from "@/lib/db/document-audio-versions.node";
 import type { DocumentSummary } from "@/lib/db/document-summaries.node";
 import type { DocumentSummaryAudio } from "@/lib/db/document-summary-audio.node";
@@ -162,6 +162,7 @@ export interface ContentRepository {
   listDocuments(
     scopeKey: string,
     includePendingDeletion?: boolean,
+    folderKey?: string | null,
   ): Promise<Document[]>;
   insertDocument(document: Document): Promise<Document>;
   updateDocument(
@@ -470,9 +471,10 @@ async function folderView(
   const projected = {
     ...safe,
     managed:
-      folder.mutationPolicy === "system-container" ||
-      folder.managedPurpose !== undefined,
-    ...(isInitialWorkspaceFolderKey(folder.scopeKey, folder.key) ? { structuralProtection: true as const } : {}),
+      !isConversationArchiveFolder(folder) &&
+      !isInitialWorkspaceFolderKey(folder.scopeKey, folder.key) &&
+      (folder.mutationPolicy === "system-container" ||
+        folder.managedPurpose !== undefined),
   };
   if (!coverImageKey) return projected;
   const image = await dependencies.getFolderCoverImage(
@@ -499,9 +501,10 @@ function documentView(document: Document) {
     emailReplyContextEmbeddingVersion: _emailReplyContextEmbeddingVersion,
     developmentFixtureIdentifier: _developmentFixtureIdentifier,
     _semanticChunkingSkipped: _semanticChunkingSkipped,
-    storageKey: _storageKey,
-    speechStorageKeys: _speechStorageKeys,
-    sourceStorageKeys: _sourceStorageKeys,
+      storageKey: _storageKey,
+      coverImageKey: _coverImageKey,
+      speechStorageKeys: _speechStorageKeys,
+      sourceStorageKeys: _sourceStorageKeys,
     managedPurpose: _managedPurpose,
     managedOwnerKey: _managedOwnerKey,
     privateOwnerUserKey: _privateOwnerUserKey,
@@ -513,15 +516,24 @@ function documentView(document: Document) {
   return {
     ...safe,
     managed:
-      document.mutationPolicy === "system-only" ||
-      document.managedPurpose !== undefined,
-    ...(isInitialWorkspaceDocumentKey(document.scopeKey, document.key) ? { structuralProtection: true as const } : {}),
+      !isConversationArchiveDocument(document) &&
+      !isInitialWorkspaceDocumentKey(document.scopeKey, document.key) &&
+      (document.mutationPolicy === "system-only" ||
+        document.managedPurpose !== undefined),
     originalAvailable: Boolean(
       document.storageKey && document.extension && document.mimeType,
     ),
     ...(document.sourceStorageKeys?.length
       ? { sourceImageCount: document.sourceStorageKeys.length }
       : {}),
+  };
+}
+
+function userCopiedArchiveFields() {
+  return {
+    managedPurpose: undefined,
+    managedOwnerKey: undefined,
+    mutationPolicy: "user" as const,
   };
 }
 
@@ -739,8 +751,8 @@ async function productionRepository(): Promise<ContentRepository> {
         throw new Error("Folder was not found for scoped deletion.");
     },
     getDocument: persistence.getDocument,
-    async listDocuments(scopeKey, includePendingDeletion) {
-      return persistence.listDocuments(scopeKey, includePendingDeletion);
+    async listDocuments(scopeKey, includePendingDeletion, folderKey) {
+      return persistence.listDocuments(scopeKey, includePendingDeletion, folderKey);
     },
     insertDocument: persistence.insertDocument,
     async updateDocument(key, patch, options) {
@@ -1362,9 +1374,12 @@ export async function runContentTool<Name extends ContentToolName>(
         if (property === "getFolder") return async (key: string) => folderVisible(await repository.getFolder(key));
         if (property === "listFolders") return visibleFolders;
         if (property === "getDocument") return async (key: string) => documentVisible(await repository.getDocument(key));
-        if (property === "listDocuments") return async (scopeKey: string, includePendingDeletion = false) => {
+        if (property === "listDocuments") return async function listVisibleDocuments(scopeKey: string, includePendingDeletion = false, folderKey?: string | null) {
           const folders = new Set((await visibleFolders(scopeKey, true)).map(({ key }) => key));
-          return (await repository.listDocuments(scopeKey, includePendingDeletion)).filter((item) => privateVisible(item) && (!item.folderKey || folders.has(item.folderKey)));
+          const listed = arguments.length >= 3
+            ? await repository.listDocuments(scopeKey, includePendingDeletion, folderKey)
+            : await repository.listDocuments(scopeKey, includePendingDeletion);
+          return listed.filter((item) => privateVisible(item) && (!item.folderKey || folders.has(item.folderKey)));
         };
         if (property === "semanticSearch") return async (...args: Parameters<ContentRepository["semanticSearch"]>) => {
           const matches = await repository.semanticSearch({ ...args[0], privateOwnerUserKey: member.user.key } as Parameters<ContentRepository["semanticSearch"]>[0]);
@@ -1568,17 +1583,16 @@ export async function runContentTool<Name extends ContentToolName>(
   const archiveVisible = (value: Folder | Document) =>
     value.archiveVisibility !== "domain-only" && (!value.privateOwnerUserKey || value.privateOwnerUserKey === member.user.key);
   const managedFolder = (value: Folder) =>
-    value.mutationPolicy === "system-container" ||
-    value.managedPurpose !== undefined;
+    !isConversationArchiveFolder(value) &&
+    !isInitialWorkspaceFolderKey(value.scopeKey, value.key) &&
+    (value.mutationPolicy === "system-container" ||
+      value.managedPurpose !== undefined);
   const managedDocument = (value: Document) =>
-    value.mutationPolicy === "system-only" ||
-    value.managedPurpose !== undefined;
-  const forbidStructuralChange = (value: Folder | Document, kind: "folder" | "document", action: "move" | "copy" | "delete") => {
-    const protectedContent = kind === "folder"
-      ? isInitialWorkspaceFolderKey(value.scopeKey, value.key)
-      : isInitialWorkspaceDocumentKey(value.scopeKey, value.key);
-    if (protectedContent) fail("CONTENT_FORBIDDEN", `This ${kind} cannot be ${action === "copy" ? "copied" : `${action}d`}.`, tool, action, value.key);
-  };
+    !isConversationArchiveDocument(value) &&
+    !isInitialWorkspaceDocumentKey(value.scopeKey, value.key) &&
+    (value.mutationPolicy === "system-only" ||
+      value.managedPurpose !== undefined);
+  const forbidStructuralChange = (_value: Folder | Document, _kind: "folder" | "document", _action: "move" | "copy" | "delete") => {};
   const folder = async (
     key: string,
     minimum: Role = "viewer",
@@ -1771,8 +1785,6 @@ export async function runContentTool<Name extends ContentToolName>(
         action,
         currentFolder.key,
       );
-    const protectedFolder = folders.find((item) => folderKeys.has(item.key) && isInitialWorkspaceFolderKey(item.scopeKey, item.key));
-    if (protectedFolder) forbidStructuralChange(protectedFolder, "folder", action);
     const documents = await repository.listDocuments(scopeKey, true);
     const current = documents.find(
       (item) =>
@@ -1781,8 +1793,6 @@ export async function runContentTool<Name extends ContentToolName>(
         managedDocument(item),
     );
     if (current) forbidManagedDocumentMutation(current, action);
-    const protectedDocument = documents.find((item) => item.folderKey && folderKeys.has(item.folderKey) && isInitialWorkspaceDocumentKey(item.scopeKey, item.key));
-    if (protectedDocument) forbidStructuralChange(protectedDocument, "document", action);
   };
   const activeFolderHierarchy = async (
     key: string | undefined,
@@ -2002,6 +2012,58 @@ export async function runContentTool<Name extends ContentToolName>(
       semanticChunkCount,
       semanticContentHash,
     };
+  };
+  const versionSemanticsFromDocument = async (source: Document) => {
+    const {
+      embedding,
+      chunkEmbeddings,
+      semanticChunkCount,
+      semanticContentHash,
+    } = await currentDocumentSemantics(source);
+    return {
+      embedding,
+      chunkEmbeddings,
+      semanticChunkCount,
+      semanticContentHash,
+    };
+  };
+  const snapshotOriginalDocumentVersion = async (
+    mutationRepository: ContentRepository,
+    source: Document,
+  ) => {
+    if (source.currentVersionKey || managedDocument(source)) return source;
+    const existing = await mutationRepository.listVersions(source.scopeKey, [
+      source.key,
+    ]);
+    if (existing.length) return source;
+    const version = await mutationRepository.createVersion({
+      scopeKey: source.scopeKey,
+      documentKey: source.key,
+      label: "Original",
+      content: source.content,
+      ...(await versionSemanticsFromDocument(source)),
+    });
+    return mutationRepository.updateDocument(source.key, {
+      currentVersionKey: version.key,
+    });
+  };
+  const ensureLiveContentVersion = async (
+    mutationRepository: ContentRepository,
+    source: Document,
+  ) => {
+    const currentVersion = source.currentVersionKey
+      ? await mutationRepository.getVersion(source.currentVersionKey)
+      : null;
+    if (currentVersion?.content === source.content) return source;
+    const version = await mutationRepository.createVersion({
+      scopeKey: source.scopeKey,
+      documentKey: source.key,
+      content: source.content,
+      ...(await currentVersionSemantics(source, source.name)),
+    });
+    return mutationRepository.updateDocument(source.key, {
+      currentVersionKey: version.key,
+    });
   };
   // Version snapshots already carry aligned semantics, so restoring one should not repeat a model call.
   const restoredVersionSemantics = (
@@ -2678,6 +2740,7 @@ export async function runContentTool<Name extends ContentToolName>(
                     : current.embedding;
                 const created = await repo.insertFolder({
                   ...current,
+                  ...userCopiedArchiveFields(),
                   key,
                   scopeKey: item.targetScopeKey,
                   ...(parentFolderKey
@@ -2738,6 +2801,7 @@ export async function runContentTool<Name extends ContentToolName>(
                 }
                 const created = await repo.insertDocument({
                   ...current,
+                  ...userCopiedArchiveFields(),
                   key,
                   scopeKey: item.targetScopeKey,
                   folderKey: folderKeys.get(current.folderKey!)!,
@@ -3507,7 +3571,11 @@ export async function runContentTool<Name extends ContentToolName>(
           );
         },
       });
-      result = { document: documentView(processed.document) };
+      result = {
+        document: documentView(
+          await snapshotOriginalDocumentVersion(repo, processed.document),
+        ),
+      };
     } else if (tool === "document.create") {
       await location(
         input.scopeKey,
@@ -3533,7 +3601,11 @@ export async function runContentTool<Name extends ContentToolName>(
         createdAt: timestamp,
         updatedAt: timestamp,
       });
-      result = { document: documentView(created) };
+      result = {
+        document: documentView(
+          await snapshotOriginalDocumentVersion(repo, created),
+        ),
+      };
     } else if (tool === "document.find") {
       result = await batch(
         tool,
@@ -3590,7 +3662,10 @@ export async function runContentTool<Name extends ContentToolName>(
               ),
             ])
           : undefined;
-      const values = (await repo.listDocuments(input.scopeKey)).filter(
+      const listed = folderKeys
+        ? await repo.listDocuments(input.scopeKey)
+        : await repo.listDocuments(input.scopeKey, false, parent?.key ?? null);
+      const values = listed.filter(
         (item) =>
           archiveVisible(item) &&
           !item._internalDeletion &&
@@ -3929,6 +4004,7 @@ export async function runContentTool<Name extends ContentToolName>(
               const timestamp = now();
               const copy = await repo.insertDocument({
                 ...source,
+                ...userCopiedArchiveFields(),
                 key,
                 scopeKey: item.targetScopeKey,
                 ...(target
@@ -4378,6 +4454,8 @@ export async function runContentTool<Name extends ContentToolName>(
             );
             forbidManagedDocumentMutation(current, "create-version");
             const content = input.contents?.[key] ?? current.content;
+            if (content !== current.content)
+              await ensureLiveContentVersion(mutationRepository, current);
             const version = await mutationRepository.createVersion({
               scopeKey: current.scopeKey,
               documentKey: key,
@@ -5288,6 +5366,8 @@ export async function runContentTool<Name extends ContentToolName>(
         repo.listFolders(input.scopeKey),
         repo.listDocuments(input.scopeKey),
       ]);
+      const rootFolderKeys = input.rootOnly ? allFolders.filter((item) => !item.parentFolderKey).map((item) => item.key) : undefined;
+      const rootDocumentKeys = input.rootOnly ? allDocuments.filter((item) => !item.folderKey).map((item) => item.key) : undefined;
       const folderDescriptors = new Map(
         allFolders.map((current) => [
           current.key,
@@ -5354,6 +5434,7 @@ export async function runContentTool<Name extends ContentToolName>(
             sourceRevision?: string;
             minimumScore?: number;
             includeSummaries?: boolean;
+            rootOnly?: boolean;
             limit?: number;
             createdFrom?: string;
             createdTo?: string;
@@ -5366,6 +5447,7 @@ export async function runContentTool<Name extends ContentToolName>(
         cachedValue.sourceRevision === sourceRevision &&
         cachedValue.minimumScore === input.minimumScore &&
         cachedValue.includeSummaries === input.includeSummaries &&
+        Boolean(cachedValue.rootOnly) === Boolean(input.rootOnly) &&
         cachedValue.limit === input.limit &&
         cachedValue.createdFrom === input.createdFrom &&
         cachedValue.createdTo === input.createdTo,
@@ -5412,6 +5494,7 @@ export async function runContentTool<Name extends ContentToolName>(
         };
         const activeFolders = [];
         for (const current of allFolders) {
+          if (input.rootOnly && current.parentFolderKey) continue;
           if (folderKeys && !folderKeys.includes(current.key)) continue;
           if (
             !withinCreationDateRange(
@@ -5437,6 +5520,7 @@ export async function runContentTool<Name extends ContentToolName>(
         }
         const activeDocuments = [];
         for (const current of allDocuments) {
+          if (input.rootOnly && current.folderKey) continue;
           if (
             folderKeys &&
             (!current.folderKey || !folderKeys.includes(current.folderKey))
@@ -5485,9 +5569,10 @@ export async function runContentTool<Name extends ContentToolName>(
           if (embeddingTimer) clearTimeout(embeddingTimer);
           if (queryEmbedding) {
             const [documentMatches, folderMatches] = await Promise.all([
-              repo.semanticSearch({
+              rootDocumentKeys?.length === 0 ? [] : repo.semanticSearch({
                 embedding: queryEmbedding,
                 authorizedScopeKeys: [input.scopeKey],
+                ...(rootDocumentKeys ? { documentKeys: rootDocumentKeys } : {}),
                 ...(folderKeys ? { folderKeys } : {}),
                 createdFrom: input.createdFrom,
                 createdTo: input.createdTo,
@@ -5497,6 +5582,7 @@ export async function runContentTool<Name extends ContentToolName>(
               repo.semanticSearchFolders?.({
                 embedding: queryEmbedding,
                 authorizedScopeKeys: [input.scopeKey],
+                ...(rootFolderKeys ? { folderKeys: rootFolderKeys } : {}),
                 ...(folderKeys ? { folderKeys } : {}),
                 createdFrom: input.createdFrom,
                 createdTo: input.createdTo,
@@ -5506,6 +5592,7 @@ export async function runContentTool<Name extends ContentToolName>(
             ]);
             for (const match of folderMatches) {
               if (
+                (input.rootOnly && match.folder.parentFolderKey) ||
                 !archiveVisible(match.folder) ||
                 !withinCreationDateRange(
                   match.folder,
@@ -5534,6 +5621,7 @@ export async function runContentTool<Name extends ContentToolName>(
             }
             for (const match of documentMatches) {
               if (
+                (input.rootOnly && match.document.folderKey) ||
                 !archiveVisible(match.document) ||
                 !withinCreationDateRange(
                   match.document,
@@ -5587,7 +5675,6 @@ export async function runContentTool<Name extends ContentToolName>(
               : {}),
             isFavorite: Boolean(current.isFavorite),
             managed: managedFolder(current),
-            ...(isInitialWorkspaceFolderKey(current.scopeKey, current.key) ? { structuralProtection: true as const } : {}),
             createdAt: current.createdAt,
             updatedAt: current.updatedAt,
             score: Math.max(0, Math.min(1, score)),
@@ -5616,7 +5703,6 @@ export async function runContentTool<Name extends ContentToolName>(
             ...(current.extension ? { extension: current.extension } : {}),
             isFavorite: Boolean(current.isFavorite),
             managed: managedDocument(current),
-            ...(isInitialWorkspaceDocumentKey(current.scopeKey, current.key) ? { structuralProtection: true as const } : {}),
             createdAt: current.createdAt,
             updatedAt: current.updatedAt,
             score: Math.max(0, Math.min(1, score)),
@@ -5632,6 +5718,7 @@ export async function runContentTool<Name extends ContentToolName>(
           sourceRevision,
           minimumScore: input.minimumScore,
           includeSummaries: false,
+          rootOnly: Boolean(input.rootOnly),
           limit: input.limit,
           createdFrom: input.createdFrom,
           createdTo: input.createdTo,
@@ -5656,9 +5743,10 @@ export async function runContentTool<Name extends ContentToolName>(
           );
         }
         const [documentMatches, folderMatches] = await Promise.all([
-          repo.semanticSearch({
+          rootDocumentKeys?.length === 0 ? [] : repo.semanticSearch({
             embedding: queryEmbedding,
             authorizedScopeKeys: [input.scopeKey],
+            ...(rootDocumentKeys ? { documentKeys: rootDocumentKeys } : {}),
             ...(folderKeys ? { folderKeys } : {}),
             createdFrom: input.createdFrom,
             createdTo: input.createdTo,
@@ -5668,6 +5756,7 @@ export async function runContentTool<Name extends ContentToolName>(
           repo.semanticSearchFolders?.({
             embedding: queryEmbedding,
             authorizedScopeKeys: [input.scopeKey],
+            ...(rootFolderKeys ? { folderKeys: rootFolderKeys } : {}),
             ...(folderKeys ? { folderKeys } : {}),
             createdFrom: input.createdFrom,
             createdTo: input.createdTo,
@@ -5678,6 +5767,7 @@ export async function runContentTool<Name extends ContentToolName>(
         const folders = [];
         for (const match of folderMatches) {
           if (
+            (input.rootOnly && match.folder.parentFolderKey) ||
             match.score < input.minimumScore ||
             !archiveVisible(match.folder) ||
             !withinCreationDateRange(
@@ -5706,7 +5796,6 @@ export async function runContentTool<Name extends ContentToolName>(
               : {}),
             isFavorite: Boolean(match.folder.isFavorite),
             managed: managedFolder(match.folder),
-            ...(isInitialWorkspaceFolderKey(match.folder.scopeKey, match.folder.key) ? { structuralProtection: true as const } : {}),
             createdAt: match.folder.createdAt,
             updatedAt: match.folder.updatedAt,
             score: Math.max(0, Math.min(1, match.score)),
@@ -5720,6 +5809,7 @@ export async function runContentTool<Name extends ContentToolName>(
         const selectedDocuments = [];
         for (const match of documentMatches) {
           if (
+            (!input.rootOnly || !match.document.folderKey) &&
             match.score >= input.minimumScore &&
             archiveVisible(match.document) &&
             withinCreationDateRange(
@@ -5801,7 +5891,6 @@ export async function runContentTool<Name extends ContentToolName>(
                       : {}),
                     isFavorite: Boolean(current.isFavorite),
                     managed: managedDocument(current),
-                    ...(isInitialWorkspaceDocumentKey(current.scopeKey, current.key) ? { structuralProtection: true as const } : {}),
                     createdAt: current.createdAt,
                     updatedAt: current.updatedAt,
                     score: Math.max(0, Math.min(1, score)),
@@ -5824,6 +5913,7 @@ export async function runContentTool<Name extends ContentToolName>(
           sourceRevision,
           minimumScore: input.minimumScore,
           includeSummaries: true,
+          rootOnly: Boolean(input.rootOnly),
           limit: input.limit,
           createdFrom: input.createdFrom,
           createdTo: input.createdTo,
@@ -6127,7 +6217,6 @@ export async function runContentTool<Name extends ContentToolName>(
                 scopeKey: current.scopeKey,
                 ...(current.folderKey ? { folderKey: current.folderKey } : {}),
                 managed: managedDocument(current),
-                ...(isInitialWorkspaceDocumentKey(current.scopeKey, current.key) ? { structuralProtection: true as const } : {}),
                 score: normalizedScore,
                 matchedSource: source,
                 ...(input.include?.includes("snippet")

@@ -8,6 +8,8 @@ const arangoPassword = process.env.ARANGO_ROOT_PASSWORD ?? '';
 const rootDb = new Database({
   url: arangoUrl,
   auth: { username: arangoUsername, password: arangoPassword },
+  keepalive: false,
+  poolSize: 32,
 });
 
 export const db = rootDb.database(arangoDatabaseName);

@@ -7,15 +7,15 @@
     "load-local-env": "bun run ../../.github/scripts/write-local-env.ts dev mobile mobile/app/.env.local",
     "load-production-env": "bun run ../../.github/scripts/write-local-env.ts prod mobile mobile/app/.env.local",
     "start": "bun run load-local-env && expo start",
+    "start:clear": "bun run load-local-env && expo start --clear",
     "start:production": "bun run load-production-env && expo start",
-    "android": "bun run load-local-env && expo run:android",
-    "android:production": "bun run load-production-env && expo run:android",
-    "ios": "bun run load-local-env && expo run:ios",
-    "ios:production": "bun run load-production-env && expo run:ios",
+    "android": "bun run load-local-env && expo prebuild --platform android --no-install && expo run:android",
+    "android:production": "bun run load-production-env && expo prebuild --platform android --no-install && expo run:android",
+    "ios": "bun run load-local-env && expo prebuild --platform ios --no-install && expo run:ios",
+    "ios:production": "bun run load-production-env && expo prebuild --platform ios --no-install && expo run:ios",
     "prebuild": "expo prebuild",
     "typecheck": "tsc --noEmit",
-    "lint": "expo lint",
-    "test": "bun test src/lib/*.test.ts"
+    "lint": "expo lint"
   },
   "dependencies": {
     "@config-plugins/react-native-blob-util": "14.0.2",
