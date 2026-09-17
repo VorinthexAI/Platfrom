@@ -35,7 +35,7 @@ describe('MediaLibrary repository transactions', () => {
     expect(queries[0]).toContain('collection.mutationPolicy == "system-only" && scoped');
     expect(queries[0]).toContain('collection.mutationPolicy != "system-only" && collection.ownerKey == @actorKey');
     expect(queries[1]).toContain('collection.purpose IN ["email-media","generated-media","place-media","scope-directory"]');
-    expect(queries[1]).toContain('? scoped : collection.mutationPolicy != "system-only"');
+    expect(queries[1]).toContain('collection.purpose IN ["email-media","generated-media","place-media"] && scoped');
   });
 
   test('clears a source cover in the same transaction when moving its image', async () => {
@@ -81,7 +81,7 @@ describe('MediaLibrary image similarity search', () => {
     expect(query).toContain('FILTER privileged || (image.createdByKey == @actorKey && relationCount == 0) || collectionAccess');
     expect(query).toContain('collectionImage.collectionKey == @collectionKey');
     expect(query).toContain('LET managedViewer = collection.purpose IN ["email-media","generated-media","place-media","scope-directory"] && collection.mutationPolicy == "system-only" && scoped');
-    expect(query).toContain('FILTER managedViewer || collection.ownerKey == @actorKey');
+    expect(query).toContain('FILTER managedViewer || purposeAlbum || collection.ownerKey == @actorKey');
     expect(query).not.toContain('collectionMembers');
     expect(query).not.toContain('FILTER collection.purpose == "email-media" && collection.mutationPolicy == "system-only" ? scoped');
     expect(query).toContain('LENGTH(image.embedding) == @dimensions');

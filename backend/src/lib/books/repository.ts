@@ -1136,7 +1136,7 @@ export function createBookRepository(
             );
           const rootKey = initialWorkspaceFolderKey(context.scopeKey, "learning");
           await transaction.query(
-            'UPSERT { _key: @rootKey } INSERT { _key: @rootKey, scopeKey: @scopeKey, parentFolderKey: @platformKey, name: "Ascend", presentation: "learning", mutationPolicy: "system-container", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE { parentFolderKey: @platformKey, presentation: "learning", mutationPolicy: "system-container" } IN folders',
+            'UPSERT { _key: @rootKey } INSERT { _key: @rootKey, scopeKey: @scopeKey, parentFolderKey: @platformKey, name: "Ascend", presentation: "learning", mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE { presentation: "learning" } IN folders',
             {
               rootKey,
               platformKey: initialWorkspaceFolderKey(context.scopeKey, "platform"),
@@ -1236,7 +1236,7 @@ export function createBookRepository(
     async ensureGalleryExportCollection(
       context,
       bookKey,
-      bookTitle,
+      _bookTitle,
       embedding,
       now,
     ) {
@@ -1276,17 +1276,15 @@ export function createBookRepository(
           if (typeof ownerKey !== "string")
             throw new BookRepositoryError("forbidden");
           const collectionKey = stableKey(
-            "gallery-book-export",
+            "ascend-gallery-collection",
             context.scopeKey,
-            bookKey,
           );
           await transaction.query(
-            'UPSERT { _key: @collectionKey } INSERT { _key: @collectionKey, scopeKey: @scopeKey, ownerKey: @ownerKey, name: @bookTitle, description: "Artwork generated for this audio book", presentation: "learning", mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE { ownerKey: @ownerKey, name: @bookTitle, description: "Artwork generated for this audio book", presentation: "learning", embedding: @embedding, updatedAt: @now } IN collections',
+            'UPSERT { _key: @collectionKey } INSERT { _key: @collectionKey, scopeKey: @scopeKey, ownerKey: @ownerKey, name: "Ascend", presentation: "learning", mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @now, updatedAt: @now } UPDATE { ownerKey: @ownerKey, presentation: "learning" } IN collections',
             {
               collectionKey,
               scopeKey: context.scopeKey,
               ownerKey,
-              bookTitle,
               embedding,
               now,
             },
@@ -1318,10 +1316,6 @@ export function createBookRepository(
         },
         async (transaction) => {
           await authorize(transaction, context, true);
-          await transaction.query(
-            "FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.collectionKey == @collectionKey && relation.imageKey NOT IN @imageKeys REMOVE relation IN collectionImages",
-            { scopeKey: context.scopeKey, collectionKey, imageKeys },
-          );
           const linked = await (
             await transaction.query(
               'LET book = DOCUMENT(books, @bookKey) FILTER book != null && book.scopeKey == @scopeKey && book.generationLeaseToken == @generationLeaseToken && book.cancelRequestedAt == null && book.status != "cancelled" LET collection = DOCUMENT(collections, @collectionKey) FILTER collection != null && collection.scopeKey == @scopeKey && collection.mutationPolicy == "user" && collection.purpose == null FOR imageKey IN UNIQUE(@imageKeys) LET image = DOCUMENT(images, imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.createdByKey == @ownerKey LET relationKey = CONCAT("c", SUBSTRING(SHA256(CONCAT("book-gallery-export\\u0000", @collectionKey, "\\u0000", imageKey)), 0, 24)) UPSERT { _key: relationKey } INSERT { _key: relationKey, scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey, addedByKey: @ownerKey, createdAt: @now } UPDATE {} IN collectionImages RETURN imageKey',

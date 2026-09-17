@@ -94,7 +94,7 @@ export async function listDocumentVersions(scopeKey: string, documentKey: string
   const cursor = await db.query(aql`
     FOR snapshot IN ${db.collection(DOCUMENT_VERSIONS_COLLECTION)}
       FILTER snapshot.scopeKey == ${scopeKey} && snapshot.documentKey == ${documentKey}
-      SORT snapshot.version DESC
+      SORT snapshot.version ASC
       RETURN snapshot
   `);
   return (await cursor.all()).map((snapshot) => documentVersionSchema.parse(withArangoKey(snapshot)));
@@ -127,7 +127,7 @@ export async function listDocumentVersionsByDocumentKeys(scopeKey: string, docum
   const cursor = await db.query(aql`
     FOR snapshot IN ${db.collection(DOCUMENT_VERSIONS_COLLECTION)}
       FILTER snapshot.scopeKey == ${scopeKey} && snapshot.documentKey IN ${documentKeys}
-      SORT POSITION(${documentKeys}, snapshot.documentKey) ASC, snapshot.version DESC
+      SORT POSITION(${documentKeys}, snapshot.documentKey) ASC, snapshot.version ASC
       RETURN snapshot
   `);
   return (await cursor.all()).map((snapshot) => documentVersionSchema.parse(withArangoKey(snapshot)));

@@ -61,6 +61,7 @@ import { subscribeAppEvent } from "@/lib/app-events";
 import type { CommunicationTab } from "@/lib/communication-client";
 import { enhanceAppTextForContext, translateAppTextForContext } from "@/lib/app-transformation-client";
 import { languageForCountryCode } from "@/lib/auth-helpers";
+import { isSparkFundingError } from "@/lib/domain-error-observer";
 import { deleteContentSearchHistory, getContentContext, type ContentDocument, type ContentSearchHistoryItem } from "@/lib/content-client";
 import { getContentDocument } from "@/lib/content-query-cache";
 import { getUserSearchHistory, promoteCachedUserSearchHistory, removeCachedUserSearchHistory, userSearchHistoryQueryKey } from "@/lib/user-search-history-cache";
@@ -224,6 +225,7 @@ const CORE_PROMPTS = [
 
 
 function messageFor(error: unknown) {
+  if (isSparkFundingError(error)) return "";
   return error instanceof Error
     ? error.message
     : "Email could not complete that request.";
@@ -274,6 +276,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const selectedTags = useUiStore((state) => state.selectedTagsByContext[tagContextKey] ?? EMPTY_SELECTED_TAGS);
   const selectedTagKeys = useMemo(() => selectedTags.map(({ key }) => key).sort(), [selectedTags]);
   const notify = (title: string) => {
+    if (!title) return;
     showToast({ title, duration: 2_000 });
   };
   const params = useLocalSearchParams<{
@@ -3131,7 +3134,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     >
       {sheet === "connectForm" ? "Connect" : sheet === "toneCreate" ? "Create tone" : "Save"}
     </Button> : null}
-    {sheet === "toneEdit" && permissions.canMutate && !editingTone?.slug ? <Button disabled={Boolean(busy)} onPress={() => setSheet("toneDelete")} size="md" variant="danger">Delete tone</Button> : null}
+    {sheet === "toneEdit" && permissions.canMutate && !editingTone?.slug ? <Button disabled={Boolean(busy)} onPress={() => setSheet("toneDelete")} size="md" variant="danger">Delete</Button> : null}
     <Button disabled={Boolean(busy)} onPress={requestFormClose} size="md" variant="secondary">Close</Button>
   </> : undefined;
   const sheetFooter = sheet === "bulkTrash" ? <>
@@ -3559,7 +3562,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
             <Button onPress={() => void openSearchHistory()} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button>
           </View>
         ) : sheet === "toneDelete" ? (
-          <View style={styles.sheetItems}><Text style={styles.confirmText}>This permanently deletes the custom email tone.</Text><Button onPress={() => void deleteTone()} size="md" variant="danger">Delete tone</Button><Button onPress={() => setSheet("toneEdit")} size="md" variant="secondary">Cancel</Button></View>
+          <View style={styles.sheetItems}><Text style={styles.confirmText}>This permanently deletes the custom email tone.</Text><Button onPress={() => void deleteTone()} size="md" variant="danger">Delete</Button><Button onPress={() => setSheet("toneEdit")} size="md" variant="secondary">Cancel</Button></View>
         ) : sheet === "rootCreate" ? (
           <BottomSheetMenu>
             <BottomSheetItem disabled={!permissions.canMutate} onPress={openToneCreate} style={styles.sheetAction} variant="secondary">Create email tone</BottomSheetItem>
@@ -3829,7 +3832,8 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
 
 function ReplyContextSheets({ canMutate, context, onClose, open }: { canMutate: boolean; context: ReturnType<typeof getEmailContext>; onClose: () => void; open: boolean }) {
   const queryClient = useQueryClient();
-  const { showToast } = useToast();
+  const { showToast: presentToast } = useToast();
+  const showToast = (input: { title: string; duration?: number }) => { if (input.title) presentToast(input); };
   const contextGeneration = useRef(0);
   const createInFlight = useRef(false);
   const updateInFlight = useRef(false);

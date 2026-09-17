@@ -13,8 +13,8 @@ import {
 } from "@/lib/ai/document-processing";
 import type { RouterDependencies } from "@/lib/ai/router";
 import type { DocumentObjectStorage } from "@/lib/ai/document-processing/storage";
-import type { Folder } from "@/lib/db/folders.node";
-import type { Document } from "@/lib/db/documents.node";
+import { isConversationArchiveFolder, type Folder } from "@/lib/db/folders.node";
+import { isConversationArchiveDocument, type Document } from "@/lib/db/documents.node";
 import type { DocumentAudioVersion } from "@/lib/db/document-audio-versions.node";
 import type { DocumentSummary } from "@/lib/db/document-summaries.node";
 import type { DocumentSummaryAudio } from "@/lib/db/document-summary-audio.node";
@@ -471,9 +471,10 @@ async function folderView(
   const projected = {
     ...safe,
     managed:
-      folder.mutationPolicy === "system-container" ||
-      folder.managedPurpose !== undefined,
-    ...(isInitialWorkspaceFolderKey(folder.scopeKey, folder.key) ? { structuralProtection: true as const } : {}),
+      !isConversationArchiveFolder(folder) &&
+      !isInitialWorkspaceFolderKey(folder.scopeKey, folder.key) &&
+      (folder.mutationPolicy === "system-container" ||
+        folder.managedPurpose !== undefined),
   };
   if (!coverImageKey) return projected;
   const image = await dependencies.getFolderCoverImage(
@@ -500,9 +501,10 @@ function documentView(document: Document) {
     emailReplyContextEmbeddingVersion: _emailReplyContextEmbeddingVersion,
     developmentFixtureIdentifier: _developmentFixtureIdentifier,
     _semanticChunkingSkipped: _semanticChunkingSkipped,
-    storageKey: _storageKey,
-    speechStorageKeys: _speechStorageKeys,
-    sourceStorageKeys: _sourceStorageKeys,
+      storageKey: _storageKey,
+      coverImageKey: _coverImageKey,
+      speechStorageKeys: _speechStorageKeys,
+      sourceStorageKeys: _sourceStorageKeys,
     managedPurpose: _managedPurpose,
     managedOwnerKey: _managedOwnerKey,
     privateOwnerUserKey: _privateOwnerUserKey,
@@ -514,15 +516,24 @@ function documentView(document: Document) {
   return {
     ...safe,
     managed:
-      document.mutationPolicy === "system-only" ||
-      document.managedPurpose !== undefined,
-    ...(isInitialWorkspaceDocumentKey(document.scopeKey, document.key) ? { structuralProtection: true as const } : {}),
+      !isConversationArchiveDocument(document) &&
+      !isInitialWorkspaceDocumentKey(document.scopeKey, document.key) &&
+      (document.mutationPolicy === "system-only" ||
+        document.managedPurpose !== undefined),
     originalAvailable: Boolean(
       document.storageKey && document.extension && document.mimeType,
     ),
     ...(document.sourceStorageKeys?.length
       ? { sourceImageCount: document.sourceStorageKeys.length }
       : {}),
+  };
+}
+
+function userCopiedArchiveFields() {
+  return {
+    managedPurpose: undefined,
+    managedOwnerKey: undefined,
+    mutationPolicy: "user" as const,
   };
 }
 
@@ -1363,9 +1374,12 @@ export async function runContentTool<Name extends ContentToolName>(
         if (property === "getFolder") return async (key: string) => folderVisible(await repository.getFolder(key));
         if (property === "listFolders") return visibleFolders;
         if (property === "getDocument") return async (key: string) => documentVisible(await repository.getDocument(key));
-        if (property === "listDocuments") return async (scopeKey: string, includePendingDeletion = false) => {
+        if (property === "listDocuments") return async function listVisibleDocuments(scopeKey: string, includePendingDeletion = false, folderKey?: string | null) {
           const folders = new Set((await visibleFolders(scopeKey, true)).map(({ key }) => key));
-          return (await repository.listDocuments(scopeKey, includePendingDeletion)).filter((item) => privateVisible(item) && (!item.folderKey || folders.has(item.folderKey)));
+          const listed = arguments.length >= 3
+            ? await repository.listDocuments(scopeKey, includePendingDeletion, folderKey)
+            : await repository.listDocuments(scopeKey, includePendingDeletion);
+          return listed.filter((item) => privateVisible(item) && (!item.folderKey || folders.has(item.folderKey)));
         };
         if (property === "semanticSearch") return async (...args: Parameters<ContentRepository["semanticSearch"]>) => {
           const matches = await repository.semanticSearch({ ...args[0], privateOwnerUserKey: member.user.key } as Parameters<ContentRepository["semanticSearch"]>[0]);
@@ -1569,17 +1583,16 @@ export async function runContentTool<Name extends ContentToolName>(
   const archiveVisible = (value: Folder | Document) =>
     value.archiveVisibility !== "domain-only" && (!value.privateOwnerUserKey || value.privateOwnerUserKey === member.user.key);
   const managedFolder = (value: Folder) =>
-    value.mutationPolicy === "system-container" ||
-    value.managedPurpose !== undefined;
+    !isConversationArchiveFolder(value) &&
+    !isInitialWorkspaceFolderKey(value.scopeKey, value.key) &&
+    (value.mutationPolicy === "system-container" ||
+      value.managedPurpose !== undefined);
   const managedDocument = (value: Document) =>
-    value.mutationPolicy === "system-only" ||
-    value.managedPurpose !== undefined;
-  const forbidStructuralChange = (value: Folder | Document, kind: "folder" | "document", action: "move" | "copy" | "delete") => {
-    const protectedContent = kind === "folder"
-      ? isInitialWorkspaceFolderKey(value.scopeKey, value.key)
-      : isInitialWorkspaceDocumentKey(value.scopeKey, value.key);
-    if (protectedContent) fail("CONTENT_FORBIDDEN", `This ${kind} cannot be ${action === "copy" ? "copied" : `${action}d`}.`, tool, action, value.key);
-  };
+    !isConversationArchiveDocument(value) &&
+    !isInitialWorkspaceDocumentKey(value.scopeKey, value.key) &&
+    (value.mutationPolicy === "system-only" ||
+      value.managedPurpose !== undefined);
+  const forbidStructuralChange = (_value: Folder | Document, _kind: "folder" | "document", _action: "move" | "copy" | "delete") => {};
   const folder = async (
     key: string,
     minimum: Role = "viewer",
@@ -1772,8 +1785,6 @@ export async function runContentTool<Name extends ContentToolName>(
         action,
         currentFolder.key,
       );
-    const protectedFolder = folders.find((item) => folderKeys.has(item.key) && isInitialWorkspaceFolderKey(item.scopeKey, item.key));
-    if (protectedFolder) forbidStructuralChange(protectedFolder, "folder", action);
     const documents = await repository.listDocuments(scopeKey, true);
     const current = documents.find(
       (item) =>
@@ -1782,8 +1793,6 @@ export async function runContentTool<Name extends ContentToolName>(
         managedDocument(item),
     );
     if (current) forbidManagedDocumentMutation(current, action);
-    const protectedDocument = documents.find((item) => item.folderKey && folderKeys.has(item.folderKey) && isInitialWorkspaceDocumentKey(item.scopeKey, item.key));
-    if (protectedDocument) forbidStructuralChange(protectedDocument, "document", action);
   };
   const activeFolderHierarchy = async (
     key: string | undefined,
@@ -2731,6 +2740,7 @@ export async function runContentTool<Name extends ContentToolName>(
                     : current.embedding;
                 const created = await repo.insertFolder({
                   ...current,
+                  ...userCopiedArchiveFields(),
                   key,
                   scopeKey: item.targetScopeKey,
                   ...(parentFolderKey
@@ -2791,6 +2801,7 @@ export async function runContentTool<Name extends ContentToolName>(
                 }
                 const created = await repo.insertDocument({
                   ...current,
+                  ...userCopiedArchiveFields(),
                   key,
                   scopeKey: item.targetScopeKey,
                   folderKey: folderKeys.get(current.folderKey!)!,
@@ -3993,6 +4004,7 @@ export async function runContentTool<Name extends ContentToolName>(
               const timestamp = now();
               const copy = await repo.insertDocument({
                 ...source,
+                ...userCopiedArchiveFields(),
                 key,
                 scopeKey: item.targetScopeKey,
                 ...(target
@@ -5663,7 +5675,6 @@ export async function runContentTool<Name extends ContentToolName>(
               : {}),
             isFavorite: Boolean(current.isFavorite),
             managed: managedFolder(current),
-            ...(isInitialWorkspaceFolderKey(current.scopeKey, current.key) ? { structuralProtection: true as const } : {}),
             createdAt: current.createdAt,
             updatedAt: current.updatedAt,
             score: Math.max(0, Math.min(1, score)),
@@ -5692,7 +5703,6 @@ export async function runContentTool<Name extends ContentToolName>(
             ...(current.extension ? { extension: current.extension } : {}),
             isFavorite: Boolean(current.isFavorite),
             managed: managedDocument(current),
-            ...(isInitialWorkspaceDocumentKey(current.scopeKey, current.key) ? { structuralProtection: true as const } : {}),
             createdAt: current.createdAt,
             updatedAt: current.updatedAt,
             score: Math.max(0, Math.min(1, score)),
@@ -5786,7 +5796,6 @@ export async function runContentTool<Name extends ContentToolName>(
               : {}),
             isFavorite: Boolean(match.folder.isFavorite),
             managed: managedFolder(match.folder),
-            ...(isInitialWorkspaceFolderKey(match.folder.scopeKey, match.folder.key) ? { structuralProtection: true as const } : {}),
             createdAt: match.folder.createdAt,
             updatedAt: match.folder.updatedAt,
             score: Math.max(0, Math.min(1, match.score)),
@@ -5882,7 +5891,6 @@ export async function runContentTool<Name extends ContentToolName>(
                       : {}),
                     isFavorite: Boolean(current.isFavorite),
                     managed: managedDocument(current),
-                    ...(isInitialWorkspaceDocumentKey(current.scopeKey, current.key) ? { structuralProtection: true as const } : {}),
                     createdAt: current.createdAt,
                     updatedAt: current.updatedAt,
                     score: Math.max(0, Math.min(1, score)),
@@ -6209,7 +6217,6 @@ export async function runContentTool<Name extends ContentToolName>(
                 scopeKey: current.scopeKey,
                 ...(current.folderKey ? { folderKey: current.folderKey } : {}),
                 managed: managedDocument(current),
-                ...(isInitialWorkspaceDocumentKey(current.scopeKey, current.key) ? { structuralProtection: true as const } : {}),
                 score: normalizedScore,
                 matchedSource: source,
                 ...(input.include?.includes("snippet")

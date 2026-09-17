@@ -33,6 +33,11 @@ export function isSparkFundingError(value: unknown) {
   return sparkFundingUserCopy(value) !== undefined;
 }
 
+export function notifyUnlessSparkFunding(notify: (title: string) => void, error: unknown, title: string) {
+  if (!title || isSparkFundingError(error)) return;
+  notify(title);
+}
+
 export function sparkFundingUserCopy(value: unknown) {
   const code = extractDomainErrorCode(value);
   if (code === OUTSTANDING_DEBT_CODE) return SPARK_FUNDING_COPY[OUTSTANDING_DEBT_CODE];

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { createInitialWorkspaceContentService, initialWorkspaceBookRecords, INITIAL_WORKSPACE_CONTENT_VERSION, INITIAL_WORKSPACE_DOCUMENTS, INITIAL_WORKSPACE_FOLDERS } from './initial-workspace-content';
-import { INITIAL_WORKSPACE_DOCUMENT_IDS, INITIAL_WORKSPACE_FOLDER_IDS, initialWorkspaceBookKey, isInitialWorkspaceDocumentKey, isInitialWorkspaceFolderKey } from './initial-workspace-content-identifiers';
+import { INITIAL_WORKSPACE_DOCUMENT_IDS, INITIAL_WORKSPACE_FOLDER_IDS, initialWorkspaceBookKey, initialWorkspaceDocumentKey, initialWorkspaceFolderKey, isInitialWorkspaceDocumentKey, isInitialWorkspaceFolderKey } from './initial-workspace-content-identifiers';
 import { INITIAL_AUDIOBOOK_CHAPTER_GUIDE_IDS } from './initial-audiobook-assets';
 
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
@@ -70,8 +70,8 @@ describe('initial workspace content', () => {
     expect(new Set(persisted?.documents.map(({ value }) => value.key))).toHaveLength(22);
     expect(persisted?.folders.every(({ value }) => isInitialWorkspaceFolderKey(scopeKey, value.key))).toBe(true);
     expect(persisted?.documents.every(({ value }) => isInitialWorkspaceDocumentKey(scopeKey, value.key))).toBe(true);
-    expect(persisted?.folders.every(({ value }) => value.mutationPolicy === 'system-container')).toBe(true);
-    expect(persisted?.documents.every(({ value }) => value.extension === 'txt' && value.mimeType === 'text/plain' && value.mutationPolicy === 'system-only')).toBe(true);
+    expect(persisted?.folders.every(({ value }) => value.mutationPolicy === 'user')).toBe(true);
+    expect(persisted?.documents.every(({ value }) => value.extension === 'txt' && value.mimeType === 'text/plain' && value.mutationPolicy === 'user')).toBe(true);
     expect(persisted?.documents.every(({ value }) => value.storageKey == null && value.sizeBytes == null)).toBe(true);
     expect(persisted?.books).toEqual([{ introducedInVersion: 6, value: expect.objectContaining({ key: initialWorkspaceBookKey(scopeKey), chapterCount: 6 }) }]);
     expect(persisted?.bookChapters).toHaveLength(6);
@@ -93,7 +93,7 @@ describe('initial workspace content', () => {
     expect(persisted?.documents).toHaveLength(1);
     expect(persisted?.documents[0]).toMatchObject({
       introducedInVersion: 8,
-      value: { name: 'How Core Chats Work with Archive', mutationPolicy: 'system-only' },
+      value: { name: 'How Core Chats Work with Archive', mutationPolicy: 'user' },
     });
     expect(persisted?.documents[0]?.value.content).toContain('Vorinthex AI / Core / Chats');
     expect(persisted?.books).toEqual([]);
@@ -163,5 +163,28 @@ describe('initial workspace content', () => {
     });
     await expect(service.ensure(scopeKey)).resolves.toBe(false);
     expect(embedded).toBe(false);
+  });
+
+  test('recreates missing guide folders and documents without rewriting survivors', async () => {
+    const inserted: { folders: Array<{ name: string }>; documents: Array<{ name: string }> } = { folders: [], documents: [] };
+    const service = createInitialWorkspaceContentService({
+      repository: {
+        currentVersion: async () => 8,
+        existingKeys: async () => ({
+          folderKeys: INITIAL_WORKSPACE_FOLDER_IDS.filter((id) => id !== 'assistant').map((id) => initialWorkspaceFolderKey(scopeKey, id)),
+          documentKeys: INITIAL_WORKSPACE_DOCUMENT_IDS.filter((id) => id !== 'assistant-overview').map((id) => initialWorkspaceDocumentKey(scopeKey, id)),
+        }),
+        insertMissing: async (input) => {
+          inserted.folders = input.folders.map(({ name }) => ({ name }));
+          inserted.documents = input.documents.map(({ name }) => ({ name }));
+          return input.folders.length + input.documents.length;
+        },
+        publish: async () => { throw new Error('missing guides must not republish'); },
+      },
+      embed: async ({ texts }) => texts.map(() => Array(EMBEDDING_DIMENSIONS).fill(0)),
+    });
+    expect(await service.ensure(scopeKey)).toBe(true);
+    expect(inserted.folders).toEqual([{ name: 'Core' }]);
+    expect(inserted.documents).toEqual([{ name: 'What Core Is' }]);
   });
 });

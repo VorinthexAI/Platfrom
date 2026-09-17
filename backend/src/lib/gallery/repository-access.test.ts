@@ -21,6 +21,7 @@ describe('Gallery repository collection access', () => {
     expect(query).toContain('membership.teamRole IN ["owner", "admin"] || scopeRole IN ["owner", "admin", "moderator"]');
     expect(query).toContain('collection.purpose IN ["email-media","generated-media","place-media","scope-directory"]');
     expect(query).toContain('collection.mutationPolicy == "system-only" && scoped');
+    expect(query).toContain('collection.purpose IN ["email-media","generated-media","place-media"] && scoped');
     expect(query).toContain('collection.ownerKey == @actorKey');
     expect(query).not.toContain('collectionMembers');
     expect(query).not.toContain('collaborator');
@@ -33,7 +34,7 @@ describe('Gallery repository collection access', () => {
 
     await expect(repository.canContributeToCollection(newId(), newId(), newId())).resolves.toBe(false);
     expect(query).toContain('collection.purpose IN ["email-media","generated-media","place-media"]');
-    expect(query).toContain('collection.mutationPolicy == "system-only" ?');
+    expect(query).toContain('collection.purpose IN ["email-media","generated-media","place-media"] && scoped');
     expect(query).not.toContain('scope-directory');
   });
 
@@ -48,6 +49,9 @@ describe('Gallery repository collection access', () => {
     await repository.getCollectionRole(scopeKey, newId(), actorKey);
     await repository.listOverview({ scopeKey, actorKey, limit: 10 });
     await repository.searchAccessibleCollections({ scopeKey, actorKey, embedding: [], minimumScore: 0, limit: 10 });
+    const overview = queries.find((query) => query.includes('RETURN { collection, count:')) ?? '';
+    expect(overview).toContain('SORT collection.createdAt ASC, collection._key ASC');
+    expect(overview).not.toContain('SORT collection.name ASC');
 
     const readablePolicy = 'collection.purpose IN ["email-media","generated-media","place-media","scope-directory"]';
     expect(queries).toHaveLength(4);
@@ -64,6 +68,13 @@ describe('Gallery repository collection access', () => {
       expect(policy).not.toContain('scope-directory');
     }
     expect(finalize).toContain('image.createdByKey == @actorKey && image.mutationPolicy != "system-only"');
+  });
+
+  test('creates visual identities from any mutable in-scope reference image', async () => {
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    const createSubject = source.slice(source.indexOf('    createSubject('), source.indexOf('    async listSubjectImages('));
+    expect(createSubject).toContain('image.mutationPolicy != "system-only"');
+    expect(createSubject).not.toContain('image.createdByKey == @actorKey');
   });
 
   test('limits managed highlight and memory flows to actor-owned mutable artifacts', async () => {
@@ -103,6 +114,14 @@ describe('Gallery repository collection access', () => {
     }
   });
 
+  test('attaches generated images with the same contribution rule used before generation', async () => {
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    const attach = source.slice(source.indexOf('    async attachGeneratedImages('), source.indexOf('    async ensureGeneratedMediaCollection('));
+    expect(attach).toContain('canContributeToCollection(database, scopeKey, collectionKey, actorKey)');
+    expect(attach).not.toContain('managedContribution');
+    expect(attach).not.toContain('image.createdByKey == @actorKey');
+  });
+
   test('attaches conversation media only through the exact managed uploaded-image boundary', async () => {
     const queries: string[] = [];
     const database = { async query(query: string) { queries.push(query); return { async all() { return query.includes('RETURN { elevated:') ? [{ elevated: true, memberScopes: [], relations: [] }] : [newId()]; } }; } };
@@ -110,9 +129,21 @@ describe('Gallery repository collection access', () => {
     await expect(repository.attachConversationMedia(newId(), newId(), [newId()], newId(), new Date().toISOString())).resolves.toBe(true);
     const attachment = queries.find((query) => query.includes('image.origin == "uploaded"')) ?? '';
     expect(attachment).toContain('collection.purpose == "generated-media"');
-    expect(attachment).toContain('collection.mutationPolicy == "system-only"');
+    expect(attachment).not.toContain('collection.mutationPolicy == "system-only"');
     expect(attachment).toContain('image.mutationPolicy == "user"');
     expect(attachment).toContain('image.createdByKey == @actorKey');
+  });
+
+  test('recreates a user-mutable Core collection without renaming a surviving album', async () => {
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    const ensure = source.slice(source.indexOf('    async ensureGeneratedMediaCollection('), source.indexOf('    attachGeneratedMedia('));
+    expect(ensure).toContain('name: "Core"');
+    expect(ensure).toContain('purpose: "generated-media"');
+    expect(ensure).toContain('mutationPolicy: "user"');
+    expect(ensure).toContain('UPSERT { scopeKey: @scopeKey, purpose: "generated-media" }');
+    expect(ensure).toContain('UPDATE { mutationPolicy: "user", ownerKey: @actorKey }');
+    expect(ensure).not.toContain('UPDATE { mutationPolicy: "system-only"');
+    expect(ensure).not.toContain('name: "Core" } IN collections');
   });
 
   test('declares only the bind variables used by each upload queue query', async () => {

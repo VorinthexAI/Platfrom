@@ -12,14 +12,16 @@ describe('generated Archive documents', () => {
   test('recreates the ordinary hierarchy idempotently with stable keys', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const database = { async query(query: string, bindVars?: Record<string, unknown>) { calls.push({ query, bindVars }); return { async all() { return []; } }; } };
-    const first = await ensureGeneratedDocumentFolders(database, scopeKey, now);
-    const second = await ensureGeneratedDocumentFolders(database, scopeKey, now);
+    const first = await ensureGeneratedDocumentFolders(database, scopeKey, now, 'brief');
+    const second = await ensureGeneratedDocumentFolders(database, scopeKey, now, 'brief');
     expect(first).toEqual(second);
     expect(first).toEqual({ rootKey: initialWorkspaceFolderKey(scopeKey, 'travel'), ...generatedDocumentFolderKeys(scopeKey) });
-    expect(calls).toHaveLength(12);
-    expect(calls.map(({ bindVars }) => bindVars?.name).filter(Boolean).slice(0, 5)).toEqual(['Guides', 'Briefs', 'Accommodations', 'Restaurants', 'Activities']);
-    expect(calls[0]?.query).toContain('mutationPolicy: "system-container"');
-    expect(calls.filter(({ bindVars }) => bindVars?.name).every(({ query }) => query.includes('UPDATE { parentFolderKey: @rootKey, presentation: null }'))).toBe(true);
+    expect(new Set(Object.values(generatedDocumentFolderKeys(scopeKey))).size).toBe(5);
+    expect(Object.keys(generatedDocumentFolderKeys(scopeKey)).sort()).toEqual(['accommodations', 'activities', 'brief', 'guide', 'restaurants']);
+    expect(calls).toHaveLength(4);
+    expect(calls.map(({ bindVars }) => bindVars?.name).filter(Boolean)).toEqual(['Briefs', 'Briefs']);
+    expect(calls[0]?.query).toContain('mutationPolicy: "user"');
+    expect(calls.filter(({ bindVars }) => bindVars?.name).every(({ query }) => query.includes('INSERT { _key: @key, scopeKey: @scopeKey, parentFolderKey: @rootKey') && query.includes('UPDATE { name: @name }'))).toBe(true);
     expect(calls.every(({ query, bindVars }) => !query.includes('purpose') && !query.includes('managedPurpose') && !Object.prototype.hasOwnProperty.call(bindVars ?? {}, 'purpose'))).toBe(true);
     expect(calls.every(({ bindVars }) => !Object.prototype.hasOwnProperty.call(bindVars ?? {}, 'legacyFields'))).toBe(true);
   });
@@ -39,7 +41,7 @@ describe('generated Archive documents', () => {
     await persistence.updateFolder(scopeKey, key, { name: 'Renamed', embedding: [] });
     await persistence.updateFolder(scopeKey, key, { isFavorite: true, updatedAt: now });
     await persistence.deleteFolder(scopeKey, key);
-    expect(calls[0]?.query).toContain('(current.mutationPolicy != "system-container" && current.managedPurpose == null) || @allowManagedUpdate');
+    expect(calls[0]?.query).toContain('(current.managedPurpose IN ["conversation-root", "conversation", "conversation-summaries"] || @guideContent || (current.mutationPolicy != "system-container" && current.managedPurpose == null)) || @allowManagedUpdate');
     expect(calls[0]?.bindVars).toMatchObject({ allowManagedUpdate: false });
     expect(calls[1]?.bindVars).toMatchObject({ allowManagedUpdate: true });
     expect(calls[2]?.bindVars).toMatchObject({ protectSystemContainer: true });

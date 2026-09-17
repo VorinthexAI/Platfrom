@@ -285,10 +285,13 @@ export function createInitialWorkspaceContentService(dependencies: InitialWorksp
       const parsedScopeKey = z.string().cuid().parse(scopeKey);
       const version = contentVersionSchema.parse(INITIAL_WORKSPACE_CONTENT_VERSION);
       const previousVersion = contentVersionSchema.parse(await repository.currentVersion(parsedScopeKey));
-      if (previousVersion >= version) return false;
+      const existing = repository.existingKeys ? await repository.existingKeys(parsedScopeKey) : undefined;
+      const missingFolderIds = new Set(existing ? INITIAL_WORKSPACE_FOLDERS.filter((item) => !existing.folderKeys.includes(initialWorkspaceFolderKey(parsedScopeKey, item.id))).map((item) => item.id) : []);
+      const missingDocumentIds = new Set(existing ? INITIAL_WORKSPACE_DOCUMENTS.filter((item) => !existing.documentKeys.includes(initialWorkspaceDocumentKey(parsedScopeKey, item.id))).map((item) => item.id) : []);
+      if (previousVersion >= version && missingFolderIds.size === 0 && missingDocumentIds.size === 0) return false;
       const timestamp = now().toISOString();
-      const folderDefinitions = INITIAL_WORKSPACE_FOLDERS.filter((item) => item.introducedInVersion > previousVersion);
-      const documentDefinitions = INITIAL_WORKSPACE_DOCUMENTS.filter((item) => item.introducedInVersion > previousVersion);
+      const folderDefinitions = INITIAL_WORKSPACE_FOLDERS.filter((item) => item.introducedInVersion > previousVersion || missingFolderIds.has(item.id));
+      const documentDefinitions = INITIAL_WORKSPACE_DOCUMENTS.filter((item) => item.introducedInVersion > previousVersion || missingDocumentIds.has(item.id));
       const folderKeys = new Map(INITIAL_WORKSPACE_FOLDERS.map((item) => [item.id, initialWorkspaceFolderKey(parsedScopeKey, item.id)]));
       const documentDrafts = documentDefinitions.map((item) => {
         const content = sanitizeDocumentContent(item.content);
@@ -299,24 +302,42 @@ export function createInitialWorkspaceContentService(dependencies: InitialWorksp
       const texts = [...folderTexts, ...documentDrafts.flatMap((item) => item.embeddingTexts)];
       const embeddings = texts.length ? await embed({ texts }) : [];
       if (embeddings.length !== texts.length) throw new Error('Initial workspace content embedding count did not match its source text.');
-      const folders = folderDefinitions.map((item, index) => ({ introducedInVersion: item.introducedInVersion, value: folderSchema.parse({
+      const folders = folderDefinitions.map((item, index) => ({ id: item.id, introducedInVersion: item.introducedInVersion, value: folderSchema.parse({
         key: folderKeys.get(item.id), scopeKey: parsedScopeKey, ...(item.parentId ? { parentFolderKey: folderKeys.get(item.parentId) } : {}), name: item.name,
-         description: item.description, presentation: item.presentation, embedding: embeddings[index], mutationPolicy: 'system-container', isFavorite: false, createdAt: timestamp, updatedAt: timestamp,
+         description: item.description, presentation: item.presentation, embedding: embeddings[index], mutationPolicy: 'user', isFavorite: false, createdAt: timestamp, updatedAt: timestamp,
       }) }));
       let offset = folderTexts.length;
       const documents = documentDrafts.map((item) => {
         const chunkEmbeddings = embeddings.slice(offset, offset + item.chunks.length);
         offset += item.chunks.length;
-        return { introducedInVersion: item.introducedInVersion, value: documentSchema.parse({
+        return { id: item.id, introducedInVersion: item.introducedInVersion, value: documentSchema.parse({
           key: initialWorkspaceDocumentKey(parsedScopeKey, item.id), scopeKey: parsedScopeKey, folderKey: folderKeys.get(item.folderId), name: item.name,
            extension: 'txt', mimeType: 'text/plain', content: item.content, embedding: chunkEmbeddings[0], contentChunks: item.chunks, chunkEmbeddings, semanticChunkCount: item.chunks.length,
-           semanticContentHash: documentSemanticHash(item.content), mutationPolicy: 'system-only', archiveVisibility: 'visible', isFavorite: false, createdAt: timestamp, updatedAt: timestamp,
+           semanticContentHash: documentSemanticHash(item.content), mutationPolicy: 'user', archiveVisibility: 'visible', isFavorite: false, createdAt: timestamp, updatedAt: timestamp,
         }) };
       });
        const initialBook = initialWorkspaceBookRecords(parsedScopeKey, timestamp);
        const books = previousVersion < 6 ? [{ introducedInVersion: 6, value: initialBook.book }] : [];
        const bookChapters = previousVersion < 4 ? initialBook.bookChapters.map((value) => ({ introducedInVersion: 4, value })) : [];
-       return repository.publish({ scopeKey: parsedScopeKey, version, folders, documents, books, bookChapters });
+       let changed = false;
+       if (previousVersion < version) {
+         changed = await repository.publish({
+           scopeKey: parsedScopeKey,
+           version,
+           folders: folders.filter((item) => item.introducedInVersion > previousVersion).map(({ introducedInVersion, value }) => ({ introducedInVersion, value })),
+           documents: documents.filter((item) => item.introducedInVersion > previousVersion).map(({ introducedInVersion, value }) => ({ introducedInVersion, value })),
+           books,
+           bookChapters,
+         });
+       }
+       if (repository.insertMissing && (missingFolderIds.size || missingDocumentIds.size)) {
+         const inserted = await repository.insertMissing({
+           folders: folders.filter((item) => missingFolderIds.has(item.id)).map((item) => item.value),
+           documents: documents.filter((item) => missingDocumentIds.has(item.id)).map((item) => item.value),
+         });
+         changed = changed || inserted > 0;
+       }
+       return changed;
     },
   };
 }

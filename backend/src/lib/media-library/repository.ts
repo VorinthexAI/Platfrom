@@ -1,7 +1,7 @@
 import { db, withTransaction } from "@/lib/db/client";
 import { toArangoDoc, withArangoKey } from "@/lib/db/base";
 import { imageSchema } from "@/lib/db/images.node";
-import { collectionSchema, READABLE_MANAGED_COLLECTION_PURPOSES as READABLE_MANAGED_COLLECTION_PURPOSE_VALUES } from "@/lib/db/collections.node";
+import { collectionSchema, CONTRIBUTABLE_MANAGED_COLLECTION_PURPOSES as CONTRIBUTABLE_MANAGED_COLLECTION_PURPOSE_VALUES, READABLE_MANAGED_COLLECTION_PURPOSES as READABLE_MANAGED_COLLECTION_PURPOSE_VALUES } from "@/lib/db/collections.node";
 import { collectionImageSchema } from "@/lib/db/collection-images.node";
 
 export interface MediaLibraryDatabase {
@@ -45,6 +45,7 @@ async function one(
   return (await (await database.query(query, bindVars)).all())[0] ?? null;
 }
 const activeActor = `LET actorMembership = DOCUMENT(userTeams, @actorKey) LET actorScope = DOCUMENT(scopes, @scopeKey) FILTER actorMembership != null && actorMembership.status == "active" FILTER actorScope != null && actorMembership.teamKey == actorScope.teamKey LET elevated = actorMembership.teamRole IN ["owner", "admin"] LET scopedRole = FIRST(FOR scopeMember IN scopeMembers FILTER scopeMember.scopeKey == @scopeKey && scopeMember.userTeamKey == @actorKey && scopeMember.status == "active" LIMIT 1 RETURN scopeMember.role) LET scoped = scopedRole != null LET writable = scopedRole IN ["owner", "admin", "moderator"]`;
+const CONTRIBUTABLE_MANAGED_COLLECTION_PURPOSES = JSON.stringify(CONTRIBUTABLE_MANAGED_COLLECTION_PURPOSE_VALUES);
 const READABLE_MANAGED_COLLECTION_PURPOSES = JSON.stringify(READABLE_MANAGED_COLLECTION_PURPOSE_VALUES);
 
 export interface MediaLibraryRepository {
@@ -154,7 +155,8 @@ export async function searchAccessibleImages(
           FILTER collection != null
           FILTER collection.scopeKey == @scopeKey
           LET managedViewer = collection.purpose IN ${READABLE_MANAGED_COLLECTION_PURPOSES} && collection.mutationPolicy == "system-only" && scoped
-          FILTER managedViewer || collection.ownerKey == @actorKey
+          LET purposeAlbum = collection.purpose IN ${CONTRIBUTABLE_MANAGED_COLLECTION_PURPOSES} && scoped
+          FILTER managedViewer || purposeAlbum || collection.ownerKey == @actorKey
           RETURN 1
       ) > 0
       LET relationCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == image._key RETURN 1)
@@ -175,7 +177,8 @@ export async function searchAccessibleImages(
           FILTER collection != null
           FILTER collection.scopeKey == @scopeKey
           LET managedViewer = collection.purpose IN ${READABLE_MANAGED_COLLECTION_PURPOSES} && collection.mutationPolicy == "system-only" && scoped
-          FILTER managedViewer || collection.ownerKey == @actorKey
+          LET purposeAlbum = collection.purpose IN ${CONTRIBUTABLE_MANAGED_COLLECTION_PURPOSES} && scoped
+          FILTER managedViewer || purposeAlbum || collection.ownerKey == @actorKey
           SORT relation.createdAt ASC
           LIMIT 3
           RETURN { key: collection._key, name: collection.name }
@@ -278,7 +281,7 @@ export function createMediaLibraryRepository(
       Boolean(
         await one(
           database,
-          `LET image = DOCUMENT(images, @imageKey) ${activeActor} LET privileged = elevated || scopedRole IN ["owner", "admin"] FILTER image != null && image.scopeKey == @scopeKey LET relationCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey RETURN 1) FILTER privileged || (image.createdByKey == @actorKey && relationCount == 0) || LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null FILTER collection.purpose IN ${READABLE_MANAGED_COLLECTION_PURPOSES} && collection.mutationPolicy == "system-only" ? scoped : collection.mutationPolicy != "system-only" && collection.ownerKey == @actorKey RETURN 1) > 0 RETURN true`,
+          `LET image = DOCUMENT(images, @imageKey) ${activeActor} LET privileged = elevated || scopedRole IN ["owner", "admin"] FILTER image != null && image.scopeKey == @scopeKey LET relationCount = LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey RETURN 1) FILTER privileged || (image.createdByKey == @actorKey && relationCount == 0) || LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null FILTER (collection.purpose IN ${CONTRIBUTABLE_MANAGED_COLLECTION_PURPOSES} && scoped) || (collection.purpose IN ${READABLE_MANAGED_COLLECTION_PURPOSES} && collection.mutationPolicy == "system-only" && scoped) || (collection.mutationPolicy != "system-only" && collection.ownerKey == @actorKey) RETURN 1) > 0 RETURN true`,
           { scopeKey, imageKey, actorKey },
         ),
       ),
@@ -286,7 +289,7 @@ export function createMediaLibraryRepository(
       Boolean(
         await one(
           database,
-          `LET collection = DOCUMENT(collections, @collectionKey) ${activeActor} LET privileged = elevated || scopedRole IN ["owner", "admin"] FILTER collection != null && collection.scopeKey == @scopeKey LET managedViewer = collection.purpose IN ${READABLE_MANAGED_COLLECTION_PURPOSES} && collection.mutationPolicy == "system-only" && scoped FILTER privileged || managedViewer || (collection.mutationPolicy != "system-only" && collection.ownerKey == @actorKey) RETURN true`,
+          `LET collection = DOCUMENT(collections, @collectionKey) ${activeActor} LET privileged = elevated || scopedRole IN ["owner", "admin"] FILTER collection != null && collection.scopeKey == @scopeKey LET managedViewer = collection.purpose IN ${READABLE_MANAGED_COLLECTION_PURPOSES} && collection.mutationPolicy == "system-only" && scoped LET purposeAlbum = collection.purpose IN ${CONTRIBUTABLE_MANAGED_COLLECTION_PURPOSES} && scoped FILTER privileged || managedViewer || purposeAlbum || (collection.mutationPolicy != "system-only" && collection.ownerKey == @actorKey) RETURN true`,
           { scopeKey, collectionKey, actorKey },
         ),
       ),

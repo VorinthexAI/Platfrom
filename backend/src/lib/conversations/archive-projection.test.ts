@@ -62,12 +62,12 @@ describe('conversation Archive projection', () => {
       { name: 'Diseño', parentFolderKey: keys.rootFolderKey, managedPurpose: 'conversation' },
       { name: 'Summaries', parentFolderKey: keys.conversationFolderKey, managedPurpose: 'conversation-summaries' },
     ]);
-    expect(projection.folders.every((folder) => folder.privateOwnerUserKey === userKey && folder.mutationPolicy === 'system-container' && folder.archiveVisibility === 'visible')).toBe(true);
+    expect(projection.folders.every((folder) => folder.privateOwnerUserKey === userKey && folder.mutationPolicy === 'user' && folder.archiveVisibility === 'visible')).toBe(true);
     const documents = Object.fromEntries(projection.documents.map((document) => [document.key, document]));
     expect(documents[keys.messageDocumentKey(userMessage.key)]).toMatchObject({ name: '2026-09-12 10:11:12.345 UTC - User', content: userMessage.content, managedPurpose: 'conversation-message' });
     expect(documents[keys.messageDocumentKey(assistantImage.key)]).toMatchObject({ name: '2026-09-12 10:11:12.345 UTC - Core', content: assistantImage.imageSummaryText, managedPurpose: 'conversation-message' });
     expect(documents[keys.summaryDocumentKey]).toMatchObject({ name: 'Current summary', content: 'Resumen actual.', managedPurpose: 'conversation-summary' });
-    expect(projection.documents.every((document) => document.privateOwnerUserKey === userKey && document.mutationPolicy === 'system-only' && document.archiveVisibility === 'visible' && !('storageKey' in document) && !('currentVersionKey' in document))).toBe(true);
+    expect(projection.documents.every((document) => document.privateOwnerUserKey === userKey && document.mutationPolicy === 'user' && document.archiveVisibility === 'visible' && !('storageKey' in document) && !('currentVersionKey' in document))).toBe(true);
     expect(embedded.some((text) => text.includes('{"prompt"'))).toBe(false);
   });
 
@@ -89,6 +89,34 @@ describe('conversation Archive projection', () => {
     const repository = createConversationArchiveProjectionRepository(database, (operation) => operation(database));
 
     await expect(repository.commit(snapshot(), projection, timestamp)).resolves.toEqual({ status: 'committed', projectedRevision: 3 });
+  });
+
+  test('recreates missing folders and documents while preserving user mutations and syncing the chat folder name', async () => {
+    const keys = conversationArchiveKeys({ conversationKey, scopeKey, userKey });
+    const movedParent = 'cmovedparentfolderkey0000001';
+    const existing = await prepareConversationArchiveProjection(snapshot(), 'Resumen actual.', { embedTexts: async (texts) => texts.map(() => [1]), now: () => timestamp });
+    const conversationFolder = existing.folders.find((folder) => folder.key === keys.conversationFolderKey)!;
+    const userDocument = existing.documents.find((document) => document.key === keys.messageDocumentKey(userMessage.key))!;
+    const reused = await prepareConversationArchiveProjection({
+      ...snapshot(),
+      conversation: conversationSchema.parse({ ...snapshot().conversation, name: 'Renamed chat' }),
+      existing: {
+        folders: [
+          existing.folders.find((folder) => folder.key === keys.rootFolderKey)!,
+          { ...conversationFolder, parentFolderKey: movedParent, name: 'Stale name', isFavorite: true },
+        ],
+        documents: [{ ...userDocument, content: 'User edited this message.', name: 'Edited title', folderKey: movedParent, isFavorite: true }],
+      },
+    }, 'Resumen nuevo.', { embedTexts: async (texts) => texts.map(() => [2]), now: () => '2026-09-13T00:00:00.000Z' });
+    expect(reused.folders.map(({ key, name, parentFolderKey, isFavorite }) => ({ key, name, parentFolderKey, isFavorite }))).toEqual([
+      { key: keys.rootFolderKey, name: 'Chats', parentFolderKey: initialWorkspaceFolderKey(scopeKey, 'assistant'), isFavorite: false },
+      { key: keys.conversationFolderKey, name: 'Renamed chat', parentFolderKey: movedParent, isFavorite: true },
+      { key: keys.summariesFolderKey, name: 'Summaries', parentFolderKey: keys.conversationFolderKey, isFavorite: false },
+    ]);
+    const documents = Object.fromEntries(reused.documents.map((document) => [document.key, document]));
+    expect(documents[keys.messageDocumentKey(userMessage.key)]).toMatchObject({ content: 'User edited this message.', name: 'Edited title', folderKey: movedParent, isFavorite: true });
+    expect(documents[keys.messageDocumentKey(assistantImage.key)]).toMatchObject({ content: assistantImage.imageSummaryText, folderKey: keys.conversationFolderKey, mutationPolicy: 'user' });
+    expect(documents[keys.summaryDocumentKey]).toMatchObject({ content: 'Resumen nuevo.', folderKey: keys.summariesFolderKey, name: 'Current summary' });
   });
 
   test('recursively summarizes long authoritative transcripts with bounded strict requests', async () => {

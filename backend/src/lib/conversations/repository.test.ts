@@ -103,7 +103,8 @@ describe('conversation repository boundaries', () => {
 
     await expect(createConversationRepository(database).readArchiveSummary!(owner, conversationKey)).resolves.toBe('Owned rolling summary');
 
-    for (const filter of ['conversation != null', 'conversation.teamKey == @teamKey', 'conversation.scopeKey == @scopeKey', 'conversation.userKey == @userKey', 'summary.privateOwnerUserKey == @userKey', 'summary.managedPurpose == "conversation-summary"', 'summary.managedOwnerKey == conversation._key', 'summary.mutationPolicy == "system-only"']) expect(query).toContain(filter);
+    for (const filter of ['conversation != null', 'conversation.teamKey == @teamKey', 'conversation.scopeKey == @scopeKey', 'conversation.userKey == @userKey', 'summary.privateOwnerUserKey == @userKey', 'summary.managedPurpose == "conversation-summary"', 'summary.managedOwnerKey == conversation._key']) expect(query).toContain(filter);
+    expect(query).not.toContain('summary.mutationPolicy == "system-only"');
     expect(vars).toMatchObject({ '@conversations': 'conversations', '@documents': 'documents', ...owner, conversationKey });
     expect(vars.summaryKey).toBeString();
   });

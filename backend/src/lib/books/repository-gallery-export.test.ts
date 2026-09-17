@@ -22,10 +22,11 @@ describe('book Gallery export persistence', () => {
     await repository.linkGalleryExportImages(context, bookKey, ensured.collectionKey, ensured.ownerKey, [imageKey], '2026-08-27T12:00:00.000Z');
     const collection = calls.find(({ query }) => query.includes('IN collections'))!.query;
     const relation = calls.find(({ query }) => query.includes('IN collectionImages') && query.includes('RETURN imageKey'))!.query;
-    expect(collection).toContain('mutationPolicy: "user"'); expect(collection).toContain('ownerKey: @ownerKey'); expect(collection).toContain('@bookTitle'); expect(collection).not.toContain('purpose'); expect(collection).not.toContain('system-only');
+    expect(collection).toContain('mutationPolicy: "user"'); expect(collection).toContain('ownerKey: @ownerKey'); expect(collection).toContain('name: "Ascend"'); expect(collection).toContain('UPDATE { ownerKey: @ownerKey, presentation: "learning" }'); expect(collection).not.toContain('@bookTitle'); expect(collection).not.toContain('purpose'); expect(collection).not.toContain('system-only');
+    expect(ensured.collectionKey).toBe(replayed.collectionKey);
     expect(calls.some(({ query }) => query.includes('IN collectionMembers'))).toBe(false);
     expect(relation).toContain('collection.mutationPolicy == "user"'); expect(relation).toContain('collection.purpose == null'); expect(relation).toContain('UPDATE {}');
     expect(relation).toContain('image.createdByKey == @ownerKey');
-    expect(calls.some(({ query }) => query.includes('relation.imageKey NOT IN @imageKeys'))).toBe(true);
+    expect(calls.some(({ query }) => query.includes('relation.imageKey NOT IN @imageKeys'))).toBe(false);
   });
 });

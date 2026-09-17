@@ -6,7 +6,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type ComponentRef, type ReactNode } from "react";
-import { BackHandler, Keyboard, Platform, ScrollView, StyleSheet, Text, View, useWindowDimensions, type NativeSyntheticEvent, type TextLayoutEventData } from "react-native";
+import { AppState, BackHandler, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions, type NativeSyntheticEvent, type TextLayoutEventData } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
@@ -32,7 +32,6 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ClockIcon,
-  EditIcon,
   FilterIcon,
   FileIcon,
   FolderIcon,
@@ -159,6 +158,7 @@ import { appendCursorItems, isNearScrollEnd } from "@vorinthex/shared/lib/pagina
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { useAuthStore } from "@/state/auth";
 import { languageForCountryCode } from "@/lib/auth-helpers";
+import { isSparkFundingError } from "@/lib/domain-error-observer";
 import { pauseOwnedPlayer } from "@/lib/audio-player-lifecycle";
 import { tagFilterContextKey } from "@/lib/tag-client";
 import { filterByHiddenView, hideUserSource, isUserHidden, listUserHiddens, revealUserSource, type HiddenViewFilters, type UserHiddenRecord, type UserHiddenSource } from "@/lib/user-hidden-client";
@@ -363,8 +363,8 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
   const [sheetError, setSheetError] = useState<string>();
   const [sheetLoadError, setSheetLoadError] = useState<string>();
   const [editorFocused, setEditorFocused] = useState(false);
-  const [editorEditing, setEditorEditing] = useState(false);
-  const [editorContentHeight, setEditorContentHeight] = useState(280);
+
+  const [editorContentHeight, setEditorContentHeight] = useState<number>();
   const [aiInputFocused, setAiInputFocused] = useState(false);
   const [title, setTitle] = useState(cachedInitialDocument?.name ?? initialDisplayTitle ?? "Untitled document");
   const [content, setContent] = useState("");
@@ -582,7 +582,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     ? `Delete ${selectedDocument?.extension ? "file" : "document"}?`
     : `Delete ${selectedCount} ${bulkDeleteNoun}${selectedCount === 1 ? "" : "s"}?`;
   const allSelectedFavorite = selectionActive && [...selectedFolders, ...selectedDocuments].every((item) => Boolean(item.isFavorite));
-  const selectionHasStructuralProtection = [...selectedFolders, ...selectedDocuments].some((item) => item.managed || item.structuralProtection);
+  const selectionHasStructuralProtection = [...selectedFolders, ...selectedDocuments].some((item) => item.managed);
   const selectionMetadataLoading = hydratingFolderKeys.length > 0 || hydratingDocumentKeys.length > 0;
   const activeDocument = editorDocumentKey
     ? [...documents, ...rootDocuments].find((document) => document.key === editorDocumentKey)
@@ -619,7 +619,8 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
   const similarFolders = filterByHiddenView(similarResults?.folders ?? [], userHiddens, "folder", viewFilters);
   const similarTabDocuments = filterByHiddenView(similarContentTab === "files" ? similarResults?.files ?? [] : similarResults?.documents ?? [], userHiddens, "document", viewFilters);
   const currentNotePassages = useMemo(() => notePassages(content), [content]);
-  const documentSearchMatches = useMemo(() => editorEditing ? [] : searchDocumentPassagesLiteral(currentNotePassages, documentSearchQuery), [currentNotePassages, documentSearchQuery, editorEditing]);
+  const documentEditable = !activeDocument?.managed;
+  const documentSearchMatches = useMemo(() => documentEditable ? [] : searchDocumentPassagesLiteral(currentNotePassages, documentSearchQuery), [currentNotePassages, documentEditable, documentSearchQuery]);
   const documentSearchMatchesById = useMemo(() => new Map(documentSearchMatches.map((match) => [match.id, match])), [documentSearchMatches]);
   const documentSearchTargetId = documentSearchMatches[0]?.id;
   const visibleUploadBatch = uploadFolderKey === currentFolder?.key
@@ -1013,7 +1014,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         const documentKey = documentKeyRef.current;
         const session = editorSession.current;
         const startingRevision = revision.current;
-        if (!documentKey || editorEditing || dirty.current || saveState === "dirty" || saveState === "saving") return;
+        if (!documentKey || documentEditable || dirty.current || saveState === "dirty" || saveState === "saving") return;
         const document = await refreshContentDocument(queryClient, contentContext, documentKey);
         if (isCurrent() && session === editorSession.current && startingRevision === revision.current && documentKeyRef.current === documentKey && !dirty.current) applyRemoteDocument(document);
         return;
@@ -1393,6 +1394,15 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     return () => clearTimeout(timeout);
   }, [content, contentContextKey, currentFolder?.key, hasContentContext, saveRetry, title]);
 
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active" || workspaceModeRef.current !== "editor" || (!dirty.current && !saveInFlight.current)) return;
+      saveImmediately.current = true;
+      setSaveRetry((current) => current + 1);
+    });
+    return () => subscription.remove();
+  }, []);
+
   const markDirty = () => {
     revision.current += 1;
     dirty.current = true;
@@ -1596,9 +1606,11 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
       await openDocumentVersion(version, generated.text, true);
       notify(action === "enhance" ? "Enhanced version ready" : "Translated version ready");
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : action === "enhance" ? "The document could not be enhanced." : "The document could not be translated.";
-      if (activeSheetRef.current === "versions") setSheetError(message);
-      else notify(message);
+      if (!isSparkFundingError(cause)) {
+        const message = cause instanceof Error ? cause.message : action === "enhance" ? "The document could not be enhanced." : "The document could not be translated.";
+        if (activeSheetRef.current === "versions") setSheetError(message);
+        else notify(message);
+      }
     } finally {
       setPendingDocumentVersionLabel(undefined);
       setDocumentActionLoading(undefined);
@@ -1838,7 +1850,6 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
       selectedDocumentKeyRef.current = opened.key;
       setSelectedSummary(undefined);
       setDocumentSearchQuery("");
-      setEditorEditing(false);
       void invalidateContentDocumentTopics(queryClient, contentContext, opened.key);
       return true;
     } catch (cause) {
@@ -1874,7 +1885,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     contentRef.current = "";
     savedTitleRef.current = nextTitle;
     savedContentRef.current = "";
-    setEditorContentHeight(280);
+    setEditorContentHeight(undefined);
     setTitle(nextTitle);
     setContent("");
     setSelectedDocument(undefined);
@@ -1894,7 +1905,6 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     setError(undefined);
     resetEditor(nextTitle);
     setDocumentSearchQuery("");
-    setEditorEditing(true);
     workspaceModeRef.current = "editor";
     setWorkspaceMode("editor");
     if (sheetOpen) closeSheet();
@@ -1932,8 +1942,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     setAiResponse(undefined);
     setOpeningDocumentKey(document.key);
     setOpeningDocumentTitle(documentDisplayName(document));
-    setEditorEditing(false);
-    setEditorContentHeight(280);
+    setEditorContentHeight(undefined);
     setError(undefined);
     const previousMode = workspaceModeRef.current;
     titleRef.current = document.name;
@@ -3854,7 +3863,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         const download = await downloadContentDocument(document.key, document.originalAvailable ? "original" : "txt");
         await saveBase64Download(download.fileName, download.mimeType, download.content);
         await new Promise((resolve) => setTimeout(resolve, 1_000));
-        notify(document.originalAvailable ? "Original downloaded" : "Text downloaded");
+        notify(document.extension ? "File downloaded" : "Document downloaded");
       } catch {
         notify("Download failed");
       }
@@ -3976,16 +3985,6 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
       setSelectedDocument(target);
       notify(isFavoriteContentConflict(cause) ? `Can't delete favorite ${target.extension ? "file" : "document"}` : `${target.extension ? "File" : "Document"} deletion failed`);
     });
-  };
-
-  const finishEditing = () => {
-    Keyboard.dismiss();
-    setEditorFocused(false);
-    if (dirty.current) {
-      saveImmediately.current = true;
-      setSaveRetry((current) => current + 1);
-    }
-    setEditorEditing(false);
   };
 
   const closeFooter = (disabled: boolean) => <Button disabled={disabled} onPress={() => closeSheet()} size="md" variant="secondary">Close</Button>;
@@ -4126,6 +4125,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         loading={!filePreviewError && !filePreviewUri}
         onBack={leaveFileViewer}
         onMenu={() => { if (selectedDocument) showDocumentActions(selectedDocument); }}
+        onTitlePress={selectedDocument && !selectedDocument.managed ? () => showDocumentDetails(selectedDocument) : undefined}
         onRenderError={setFilePreviewError}
         htmlUri={selectedDocument?.extension !== "pdf" ? filePreviewUri : undefined}
         pdfUri={selectedDocument?.extension === "pdf" ? filePreviewUri : undefined}
@@ -4254,19 +4254,18 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         <View style={styles.editorScene}>
           <View style={styles.folderTitleRow}>
             <Button accessibilityLabel={`Back to ${currentFolder?.name ?? "folders"}`} contentMode="raw" onPress={leaveEditor} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
-            <Text numberOfLines={1} style={styles.folderTitle}>{openingDocumentTitle ?? (activeDocument ? documentDisplayName(activeDocument) : title)}</Text>
+            <Pressable accessibilityLabel={`Edit ${openingDocumentTitle ?? (activeDocument ? documentDisplayName(activeDocument) : title)}`} accessibilityRole="button" android_ripple={{ color: "transparent" }} disabled={Boolean(openingDocumentKey) || !activeDocument || activeDocument.managed || saveState !== "saved"} onPress={() => { if (activeDocument) showDocumentDetails(activeDocument); }} style={styles.folderTitleHit}>
+              <Text numberOfLines={1} style={styles.documentHeaderTitle}>{openingDocumentTitle ?? (activeDocument ? documentDisplayName(activeDocument) : title)}</Text>
+            </Pressable>
             <Button accessibilityLabel="Manage document" contentMode="raw" disabled={Boolean(openingDocumentKey) || !activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) showDocumentActions(activeDocument); }} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
           </View>
           <View style={styles.editorHeaderActions}>
-            {!activeDocument?.managed && (editorEditing
-              ? <Button accessibilityLabel="Finish editing document" accessibilityState={{ selected: true }} contentMode="raw" onPress={finishEditing} size="xs" variant="primary"><CheckIcon size="sm" variant="inverse" /></Button>
-              : <Button accessibilityLabel="Edit document" contentMode="raw" onPress={() => { persistNarrationPosition(); stopNarration(); setDocumentSearchQuery(""); setEditorEditing(true); }} size="xs" variant="icon"><EditIcon size="sm" /></Button>)}
             {!activeDocument?.managed ? <Button accessibilityLabel="AI document actions" contentMode="raw" onPress={openEnhanceSheet} size="xs" variant="icon"><BrainIcon size="sm" /></Button> : null}
             <Button accessibilityLabel="Document versions and history" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) openHistoryChooser(activeDocument); }} size="xs" variant="icon"><ClockIcon size="sm" /></Button>
           </View>
           <View style={[styles.rootSearch, styles.documentSearch]}>
             <SearchIcon size="sm" variant="muted" />
-            <TextInput accessibilityLabel="Search in document" editable={!editorEditing} maxLength={200} onChangeText={setDocumentSearchQuery} onSubmitEditing={() => setDocumentSearchRevision((current) => current + 1)} placeholder="Search in document..." returnKeyType="search" style={styles.rootSearchInput} value={documentSearchQuery} />
+            <TextInput accessibilityLabel="Search in document" editable={!documentEditable} maxLength={200} onChangeText={setDocumentSearchQuery} onSubmitEditing={() => setDocumentSearchRevision((current) => current + 1)} placeholder="Search in document..." returnKeyType="search" style={styles.rootSearchInput} value={documentSearchQuery} />
             {documentSearchQuery.trim() ? <Button accessibilityLabel="Clear document search" contentMode="raw" iconOnly onPress={() => setDocumentSearchQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}
           </View>
           {narrationError ? <Text accessibilityRole="alert" style={styles.documentSearchStatus}>{narrationError}</Text> : null}
@@ -4282,8 +4281,8 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
             </View>
           ) : null}
 
-          <ScrollView alwaysBounceVertical contentContainerStyle={styles.editorReadDocument} keyboardShouldPersistTaps="handled" nestedScrollEnabled onLayout={(event) => { editorDocumentViewportHeight.current = event.nativeEvent.layout.height; }} ref={editorDocumentScroll} refreshControl={<PullToRefresh enabled={Boolean(editorDocumentKey) && !editorEditing && saveState === "saved"} onRefresh={refreshArchive} refreshing={userRefreshing} />} showsVerticalScrollIndicator={false} style={styles.editorReadScroll}>
-            {editorEditing ? <>
+          <ScrollView alwaysBounceVertical={!documentEditable} contentContainerStyle={styles.editorReadDocument} keyboardShouldPersistTaps="handled" nestedScrollEnabled onLayout={(event) => { editorDocumentViewportHeight.current = event.nativeEvent.layout.height; }} ref={editorDocumentScroll} refreshControl={<PullToRefresh enabled={Boolean(editorDocumentKey) && !documentEditable && saveState === "saved"} onRefresh={refreshArchive} refreshing={userRefreshing} />} showsVerticalScrollIndicator={false} style={styles.editorReadScroll}>
+            {documentEditable ? <>
               <View style={[styles.editorFrame, (editorFocused || aiInputFocused) && styles.editorFrameFocused]}>
                 <TextInput
                   accessibilityLabel="Document content"
@@ -4299,11 +4298,15 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
                     setContent(value);
                     markDirty();
                   }}
-                  onContentSizeChange={(event) => setEditorContentHeight(Math.max(280, Math.ceil(event.nativeEvent.contentSize.height)))}
+                  onContentSizeChange={(event) => {
+                    const next = Math.max(280, Math.ceil(event.nativeEvent.contentSize.height));
+                    setEditorContentHeight((current) => current != null && Math.abs(current - next) <= 2 ? current : next);
+                  }}
                   placeholder="Start writing from here..."
                   onFocus={() => setEditorFocused(true)}
-                  style={[styles.editor, (editorFocused || aiInputFocused) && styles.editorFocused, { height: editorContentHeight }]}
+                  style={[styles.editor, (editorFocused || aiInputFocused) && styles.editorFocused, editorContentHeight != null && { height: editorContentHeight }]}
                   textAlignVertical="top"
+                  {...(Platform.OS === "android" ? { includeFontPadding: false } : {})}
                   value={content}
                 />
               </View>
@@ -4470,7 +4473,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
             }} style={styles.sheetAction}>{workspaceMode === "viewer" ? "Show text" : "Show original"}</BottomSheetItem> : selectedDocument.sourceImageCount ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openScanSources()} style={styles.sheetAction}>Show scanned pages</BottomSheetItem> : null}
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={downloadOriginal} style={styles.sheetAction}>Download</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => setHiddenOptimistically("document", selectedDocument.key, !hidden("document", selectedDocument.key), selectedDocument.extension ? "File" : "Document")} style={styles.sheetAction}>{hidden("document", selectedDocument.key) ? "Reveal" : "Hide"}</BottomSheetItem>
-            {!selectedDocument.managed && !selectedDocument.structuralProtection ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => pushSheet("deleteDocument")} style={styles.sheetAction}>Delete</BottomSheetItem> : null}
+            {!selectedDocument.managed ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => pushSheet("deleteDocument")} style={styles.sheetAction}>Delete</BottomSheetItem> : null}
           </BottomSheetMenu>
         ) : null}
         {activeSheet === "scanSources" ? (
@@ -4483,11 +4486,11 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         {activeSheet === "folderActions" && selectedFolder ? (
           <BottomSheetMenu>
             {!selectedFolder.managed ? <BottomSheetItem onPress={openFolderDetails} style={styles.sheetAction}>Edit</BottomSheetItem> : null}
-            {!selectedFolder.managed && !selectedFolder.structuralProtection ? <BottomSheetItem onPress={() => void openDestinationPicker("move", { folder: selectedFolder })} style={styles.sheetAction}>Move folder</BottomSheetItem> : null}
-            {!selectedFolder.managed && !selectedFolder.structuralProtection ? <BottomSheetItem onPress={() => void openDestinationPicker("copy", { folder: selectedFolder })} style={styles.sheetAction}>Copy to folder</BottomSheetItem> : null}
+            {!selectedFolder.managed ? <BottomSheetItem onPress={() => void openDestinationPicker("move", { folder: selectedFolder })} style={styles.sheetAction}>Move folder</BottomSheetItem> : null}
+            {!selectedFolder.managed ? <BottomSheetItem onPress={() => void openDestinationPicker("copy", { folder: selectedFolder })} style={styles.sheetAction}>Copy to folder</BottomSheetItem> : null}
             <BottomSheetItem onPress={() => void openSimilarContent({ folderKey: selectedFolder.key }, "folders")} style={styles.sheetAction}>Find similar</BottomSheetItem>
             <BottomSheetItem onPress={() => setHiddenOptimistically("folder", selectedFolder.key, !hidden("folder", selectedFolder.key), "Folder")} style={styles.sheetAction}>{hidden("folder", selectedFolder.key) ? "Reveal" : "Hide"}</BottomSheetItem>
-            {!selectedFolder.managed && !selectedFolder.structuralProtection ? <BottomSheetItem onPress={confirmSelectedFolderDelete} style={styles.sheetAction}>Delete folder</BottomSheetItem> : null}
+            {!selectedFolder.managed ? <BottomSheetItem onPress={confirmSelectedFolderDelete} style={styles.sheetAction}>Delete</BottomSheetItem> : null}
           </BottomSheetMenu>
         ) : null}
         {activeSheet === "folderDetails" && selectedFolder ? (
@@ -4722,7 +4725,9 @@ const styles = StyleSheet.create({
   documentSkeleton: { width: "100%", minHeight: 38, borderRadius: 999 },
   workspacePanel: { flexGrow: 1, gap: spacing.md, padding: spacing.md, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
   folderTitleRow: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 8 },
+  folderTitleHit: { flex: 1, justifyContent: "center" },
   folderTitle: { flex: 1, color: palette.silver50, fontFamily: fonts.medium, fontSize: 24 },
+  documentHeaderTitle: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 24 },
   folderTitleActions: { flexDirection: "row", alignItems: "center", gap: 4 },
   folderTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel },
   folderTab: { flex: 1 },
@@ -4753,7 +4758,7 @@ const styles = StyleSheet.create({
   notice: { marginBottom: 12, padding: 10, borderRadius: radii.sm, color: palette.silver300, backgroundColor: "rgba(120, 76, 40, 0.24)", fontFamily: fonts.regular, fontSize: 12 },
   saveErrorRow: { marginBottom: 10, padding: 10, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: radii.sm, borderColor: palette.hairline, borderWidth: 1 },
   saveErrorText: { flex: 1, color: palette.silver300, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
-  editorFrame: { minHeight: 280, width: "100%", position: "relative", overflow: "hidden" },
+  editorFrame: { minHeight: 280, width: "100%", position: "relative" },
   editorFrameFocused: { minHeight: 280 },
   editor: { minHeight: 280, width: "100%", paddingHorizontal: 0, paddingVertical: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26, textAlign: "left", writingDirection: "ltr" },
   editorReadScroll: { flex: 1, minHeight: 0, width: "100%" },

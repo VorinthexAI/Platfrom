@@ -69,6 +69,11 @@ export async function fetchBillingSummary(): Promise<BillingSummary> {
   return billingSummaryEnvelopeSchema.parse(response.data).data;
 }
 
+export async function setDevSparkBalance(sparks: number): Promise<BillingSummary> {
+  const response = await apiClient.post("/billing/dev-balance", { sparks });
+  return billingSummaryEnvelopeSchema.parse(response.data).data;
+}
+
 export async function fetchCurrentSubscription(): Promise<CurrentSubscription | null> {
   const response = await apiClient.get("/subscriptions/current");
   return subscriptionEnvelopeSchema.parse(response.data).data;

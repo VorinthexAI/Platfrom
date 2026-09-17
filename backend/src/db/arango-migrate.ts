@@ -269,10 +269,10 @@ export async function migrateContainerPresentations(targetDb: Database): Promise
   `, { communicationCollectionKeys });
 }
 
-/** Restores managed collection semantics without overwriting a user-renamed Core collection. */
+/** Restores the Core album name without overwriting a user rename, and unlocks destination collections. */
 export async function migrateManagedGeneratedMedia(targetDb: Database): Promise<void> {
   await targetDb.query('FOR collection IN collections FILTER collection.purpose == "generated-media" && collection.name == "Generated media" UPDATE collection WITH { name: "Core" } IN collections');
-  await targetDb.query('FOR collection IN collections FILTER collection.purpose == "generated-media" && collection.mutationPolicy != "system-only" UPDATE collection WITH { mutationPolicy: "system-only" } IN collections');
+  await targetDb.query('FOR collection IN collections FILTER collection.purpose IN ["generated-media", "email-media", "place-media"] && collection.mutationPolicy == "system-only" UPDATE collection WITH { mutationPolicy: "user" } IN collections');
   await targetDb.query('FOR imageKey IN UNIQUE(FOR relation IN collectionImages LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null && collection.purpose == "generated-media" RETURN relation.imageKey) LET image = DOCUMENT(images, imageKey) FILTER image != null && image.origin == "generated" && image.mutationPolicy == "system-only" UPDATE image WITH { mutationPolicy: "user" } IN images');
 }
 

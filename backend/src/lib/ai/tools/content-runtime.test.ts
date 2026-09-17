@@ -88,13 +88,51 @@ describe('Content runtime', () => {
     f.documents.set(privateDocumentKey, { key: privateDocumentKey, scopeKey: f.scopeKey, folderKey: privateFolderKey, name: `${now} - Core`, content: 'Private response', embedding, contentChunks: ['Private response'], chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: 'a'.repeat(64), privateOwnerUserKey: ownerUserKey, managedPurpose: 'conversation-message', managedOwnerKey: newId(), mutationPolicy: 'system-only', archiveVisibility: 'visible', isFavorite: false, createdAt: now, updatedAt: now });
 
     const owned = await runContentTool('document.find', { documentKeys: [privateDocumentKey], include: ['content'] }, f.context, { repository: f.repository });
-    expect(owned.results[0]).toMatchObject({ success: true, data: { document: { key: privateDocumentKey, managed: true, content: 'Private response' } } });
+    expect(owned.results[0]).toMatchObject({ success: true, data: { document: { key: privateDocumentKey, managed: false, content: 'Private response' } } });
 
     const otherContext = { ...f.context, principal: { ...f.context.principal, user: { key: newId() }, userTeam: { ...f.context.principal.userTeam, userId: newId() } } };
     const hidden = await runContentTool('document.find', { documentKeys: [privateDocumentKey], include: ['content'] }, otherContext, { repository: f.repository });
     expect(hidden.results[0]).toMatchObject({ success: false });
     const listed = await runContentTool('folder.list', { scopeKey: f.scopeKey, includeDescendants: true }, otherContext, { repository: f.repository });
     expect(listed.folders.some(({ key }) => key === privateFolderKey)).toBe(false);
+  });
+
+  test('allows full Archive mutations on Core conversation folders and documents', async () => {
+    const f = fixture('owner');
+    const conversationFolderKey = newId();
+    const targetFolderKey = newId();
+    const documentKey = newId();
+    f.folders.set(conversationFolderKey, { key: conversationFolderKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Private chat', embedding, privateOwnerUserKey: f.context.principal.user.key, managedPurpose: 'conversation', managedOwnerKey: newId(), mutationPolicy: 'system-container', archiveVisibility: 'visible', isFavorite: false, createdAt: now, updatedAt: now });
+    f.folders.set(targetFolderKey, { key: targetFolderKey, scopeKey: f.scopeKey, name: 'Target', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    f.documents.set(documentKey, { key: documentKey, scopeKey: f.scopeKey, folderKey: conversationFolderKey, name: `${now} - Core`, content: 'Private response', embedding, contentChunks: ['Private response'], chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: 'a'.repeat(64), privateOwnerUserKey: f.context.principal.user.key, managedPurpose: 'conversation-message', managedOwnerKey: newId(), mutationPolicy: 'system-only', archiveVisibility: 'visible', isFavorite: false, createdAt: now, updatedAt: now });
+    const dependencies: any = {
+      repository: f.repository,
+      embed: async () => embedding,
+      storage: { copy: async () => ({ storageKey: 'copy' }), delete: async () => undefined },
+      runAction: async (action: string, input: any) => {
+        if (action === 'document-cleanup') return { content: input.text };
+        if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
+        if (action === 'document-enhance') return { text: 'Enhanced' };
+        throw new Error(`Unexpected action ${action}`);
+      },
+    };
+
+    const listed = await runContentTool('folder.list', { scopeKey: f.scopeKey, includeDescendants: true }, f.context, dependencies);
+    expect(listed.folders).toContainEqual(expect.objectContaining({ key: conversationFolderKey, managed: false }));
+    await expect(runContentTool('folder.rename', { renames: [{ folderKey: conversationFolderKey, name: 'Edited chat' }] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
+    await expect(runContentTool('document.update', { updates: [{ documentKey, content: 'Edited response' }] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 }, results: [{ data: { document: { managed: false } } }] });
+    await expect(runContentTool('document.move', { moves: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: conversationFolderKey }] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
+    const copied = await runContentTool('document.copy', { copies: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey }] }, f.context, dependencies);
+    expect(copied).toMatchObject({ summary: { succeeded: 1 }, results: [{ data: { document: { managed: false, folderKey: targetFolderKey } } }] });
+    const copiedKey = copied.results[0]?.data?.document?.key;
+    expect(copiedKey).toBeString();
+    expect(copiedKey).not.toBe(documentKey);
+    expect(f.documents.get(copiedKey!)).toMatchObject({ mutationPolicy: 'user', managedPurpose: undefined });
+    await expect(runContentTool('folder.move', { moves: [{ folderKey: conversationFolderKey, targetParentFolderKey: targetFolderKey }] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
+    await expect(runContentTool('document.delete', { documentKeys: [documentKey] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
+    expect(f.documents.has(documentKey)).toBe(false);
+    await expect(runContentTool('folder.delete', { folderKeys: [conversationFolderKey], recursive: true }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
+    expect(f.folders.has(conversationFolderKey)).toBe(false);
   });
 
   test('creates one editable document from scanned pages, retains sources, and replays idempotently', async () => {
@@ -251,6 +289,19 @@ describe('Content runtime', () => {
     const tree = await runContentTool('document.list', { scopeKey: f.scopeKey, folderKey: f.folderKey, includeDescendants: true }, f.context, { repository: f.repository });
     expect(direct.documents.map((document: any) => document.key)).toEqual([directKey]);
     expect(tree.documents.map((document: any) => document.key).sort()).toEqual([directKey, nestedKey].sort());
+  });
+
+  test('lists a folder location without loading every document in the scope', async () => {
+    const f = fixture('viewer');
+    const calls: unknown[][] = [];
+    const listDocuments = f.repository.listDocuments.bind(f.repository);
+    f.repository.listDocuments = (async (...args: Parameters<ContentRepository['listDocuments']>) => {
+      calls.push(args);
+      return listDocuments(...args);
+    }) as ContentRepository['listDocuments'];
+    f.addDocument('Direct');
+    await runContentTool('document.list', { scopeKey: f.scopeKey, folderKey: f.folderKey }, f.context, { repository: f.repository });
+    expect(calls.some((args) => args[2] === f.folderKey)).toBe(true);
   });
 
   test('projects only plain document content when requested', async () => {
@@ -1371,42 +1422,36 @@ describe('Content runtime', () => {
     expect(f.documents.has(documentKey)).toBe(true);
   });
 
-  test('keeps initial guide content editable while rejecting move, copy, and delete operations', async () => {
+  test('allows full Archive mutations on guide folders and documents', async () => {
     const f = fixture('owner');
     const targetFolderKey = newId();
+    const guideFolderKey = initialWorkspaceFolderKey(f.scopeKey, 'assistant');
     f.folders.set(targetFolderKey, { key: targetFolderKey, scopeKey: f.scopeKey, name: 'Target', embedding, isFavorite: false, createdAt: now, updatedAt: now });
-    const protectedFolderKey = initialWorkspaceFolderKey(f.scopeKey, 'platform');
-    f.folders.set(protectedFolderKey, { key: protectedFolderKey, scopeKey: f.scopeKey, name: 'Guide', embedding, isFavorite: false, createdAt: now, updatedAt: now });
-    const ordinaryDocumentKey = f.addDocument('Editable guide');
-    const protectedDocumentKey = initialWorkspaceDocumentKey(f.scopeKey, 'platform-welcome');
-    f.documents.set(protectedDocumentKey, { ...f.documents.get(ordinaryDocumentKey), key: protectedDocumentKey, folderKey: protectedFolderKey });
-    f.documents.delete(ordinaryDocumentKey);
-    const dependencies = { repository: f.repository, embed: async () => embedding, storage: { copy: async () => { throw new Error('protected copy reached storage'); }, delete: async () => { throw new Error('protected deletion reached storage'); } } as never };
+    f.folders.set(guideFolderKey, { key: guideFolderKey, scopeKey: f.scopeKey, name: 'Core', presentation: 'assistant', embedding, mutationPolicy: 'system-container', isFavorite: false, createdAt: now, updatedAt: now });
+    const guideDocumentKey = initialWorkspaceDocumentKey(f.scopeKey, 'assistant-overview');
+    f.documents.set(guideDocumentKey, { key: guideDocumentKey, scopeKey: f.scopeKey, folderKey: guideFolderKey, name: 'What Core Is', content: 'Guide content', embedding, contentChunks: ['Guide content'], chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: 'a'.repeat(64), mutationPolicy: 'system-only', archiveVisibility: 'visible', isFavorite: false, createdAt: now, updatedAt: now });
+    const dependencies: any = {
+      repository: f.repository,
+      embed: async () => embedding,
+      storage: { copy: async () => ({ storageKey: 'copy' }), delete: async () => undefined },
+      runAction: async (action: string, input: any) => {
+        if (action === 'document-cleanup') return { content: input.text };
+        if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
+        throw new Error(`Unexpected action ${action}`);
+      },
+    };
 
-    const folderOperations = [
-      runContentTool('folder.move', { moves: [{ folderKey: protectedFolderKey, targetParentFolderKey: targetFolderKey }] }, f.context, dependencies),
-      runContentTool('folder.copy', { copies: [{ folderKey: protectedFolderKey, targetScopeKey: f.scopeKey, targetParentFolderKey: targetFolderKey }] }, f.context, dependencies),
-      runContentTool('folder.delete', { folderKeys: [protectedFolderKey], recursive: true }, f.context, dependencies),
-    ];
-    const documentOperations = [
-      runContentTool('document.move', { moves: [{ documentKey: protectedDocumentKey, targetScopeKey: f.scopeKey, targetFolderKey }] }, f.context, dependencies),
-      runContentTool('document.copy', { copies: [{ documentKey: protectedDocumentKey, targetScopeKey: f.scopeKey, targetFolderKey }] }, f.context, dependencies),
-      runContentTool('document.delete', { documentKeys: [protectedDocumentKey] }, f.context, dependencies),
-    ];
-    for (const output of await Promise.all([...folderOperations, ...documentOperations])) expect(output).toMatchObject({ summary: { failed: 1 }, results: [{ success: false, error: { code: 'CONTENT_FORBIDDEN' } }] });
-
-    f.documents.get(protectedDocumentKey).folderKey = f.folderKey;
-    const ancestorOperations = [
-      runContentTool('folder.move', { moves: [{ folderKey: f.folderKey, targetParentFolderKey: targetFolderKey }] }, f.context, dependencies),
-      runContentTool('folder.copy', { copies: [{ folderKey: f.folderKey, targetScopeKey: f.scopeKey, targetParentFolderKey: targetFolderKey }] }, f.context, dependencies),
-      runContentTool('folder.delete', { folderKeys: [f.folderKey], recursive: true }, f.context, dependencies),
-    ];
-    for (const output of await Promise.all(ancestorOperations)) expect(output).toMatchObject({ summary: { failed: 1 }, results: [{ success: false, error: { code: 'CONTENT_FORBIDDEN', resourceKey: protectedDocumentKey } }] });
-
-    await expect(runContentTool('document.update', { updates: [{ documentKey: protectedDocumentKey, content: 'Updated guide content' }] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 }, results: [{ data: { document: { structuralProtection: true, managed: false } } }] });
-    await expect(runContentTool('folder.list', { scopeKey: f.scopeKey, includeDescendants: true }, f.context, dependencies)).resolves.toMatchObject({ folders: expect.arrayContaining([expect.objectContaining({ key: protectedFolderKey, structuralProtection: true, managed: false })]) });
-    expect(f.folders.has(protectedFolderKey)).toBe(true);
-    expect(f.documents.has(protectedDocumentKey)).toBe(true);
+    await expect(runContentTool('folder.list', { scopeKey: f.scopeKey, includeDescendants: true }, f.context, dependencies)).resolves.toMatchObject({ folders: expect.arrayContaining([expect.objectContaining({ key: guideFolderKey, managed: false })]) });
+    await expect(runContentTool('folder.rename', { renames: [{ folderKey: guideFolderKey, name: 'Edited Core' }] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
+    await expect(runContentTool('document.update', { updates: [{ documentKey: guideDocumentKey, content: 'Edited guide' }] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 }, results: [{ data: { document: { managed: false } } }] });
+    await expect(runContentTool('document.move', { moves: [{ documentKey: guideDocumentKey, targetScopeKey: f.scopeKey, targetFolderKey: guideFolderKey }] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
+    const copied = await runContentTool('document.copy', { copies: [{ documentKey: guideDocumentKey, targetScopeKey: f.scopeKey, targetFolderKey }] }, f.context, dependencies);
+    expect(copied).toMatchObject({ summary: { succeeded: 1 }, results: [{ data: { document: { managed: false, folderKey: targetFolderKey } } }] });
+    await expect(runContentTool('folder.move', { moves: [{ folderKey: guideFolderKey, targetParentFolderKey: targetFolderKey }] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
+    await expect(runContentTool('document.delete', { documentKeys: [guideDocumentKey] }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
+    expect(f.documents.has(guideDocumentKey)).toBe(false);
+    await expect(runContentTool('folder.delete', { folderKeys: [guideFolderKey], recursive: true }, f.context, dependencies)).resolves.toMatchObject({ summary: { succeeded: 1 } });
+    expect(f.folders.has(guideFolderKey)).toBe(false);
   });
 
   test('projects visible managed resources and hides domain-only hierarchies from generic reads and search', async () => {

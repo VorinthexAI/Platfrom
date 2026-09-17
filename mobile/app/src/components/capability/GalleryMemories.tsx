@@ -15,6 +15,7 @@ import { createGalleryCollectionMemory, deleteGalleryCollectionMemory, fetchGall
 import { galleryMemoryTypedText, galleryMemoryTypingDuration, splitGalleryMemoryText } from "@/lib/gallery-memory-typing";
 import { fitContainedMediaSize } from "@/lib/media-layout";
 import { subscribeAppEvent } from "@/lib/app-events";
+import { isSparkFundingError } from "@/lib/domain-error-observer";
 import { galleryQueryKeys } from "@/lib/workspace-query-cache";
 import { fonts, palette, radii, spacing } from "@/theme/tokens";
 import { GalleryCollectionImagePicker } from "@/components/capability/GalleryCollectionImagePicker";
@@ -44,10 +45,9 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   const [typingText, setTypingText] = useState("");
   const [typingRun, setTypingRun] = useState(0);
   const [showImage, setShowImage] = useState(false);
-  const [listLoading, setListLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [opening, setOpening] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [selectedMemoryKeys, setSelectedMemoryKeys] = useState<string[]>([]);
   const [activeSheet, setActiveSheet] = useState<MemorySheet>("list");
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
@@ -59,6 +59,7 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   const createRequest = useRef(0);
   const listLoaded = useRef(false);
   const listSheetOpen = useRef(open && !detail && !opening && activeSheet === "list");
+  const pendingMemoryDeletes = useRef(new Set<string>());
   const longPressedMemory = useRef<string | undefined>(undefined);
   const owner = collection.access.canContribute;
   const cardWidth = Math.floor(((gridWidth || width - 40) - GAP * (COLUMNS - 1)) / COLUMNS);
@@ -74,13 +75,13 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
 
   async function loadList(invalidate = false) {
     const generation = ++listRequest.current;
-    if (!listLoaded.current) setListLoading(true);
+    if (!listLoaded.current && memories.length > 0) setListLoading(true);
     try {
       const queryKey = galleryQueryKeys.memories(galleryContext, collection.key);
       if (invalidate) await queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "none" });
       const result = await queryClient.fetchQuery({ queryKey, queryFn: () => listGalleryCollectionMemories(collection.key), staleTime: 0 });
       if (generation !== listRequest.current || !open) return;
-      const orderedMemories = [...result.memories].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      const orderedMemories = [...result.memories].filter(({ key }) => !pendingMemoryDeletes.current.has(key)).sort((left, right) => left.createdAt.localeCompare(right.createdAt));
       setMemories(orderedMemories);
       setSelectedMemoryKeys((current) => current.filter((key) => orderedMemories.some((memory) => memory.key === key)));
     } catch {
@@ -137,7 +138,7 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.memories(galleryContext, collection.key), exact: true, refetchType: "none" }).catch(() => undefined);
       if (listSheetOpen.current) void openMemory(memory);
     } catch (failure) {
-      if (generation === createRequest.current && open) notify(isGalleryMemoryExhaustion(failure) && failure instanceof Error ? failure.message : "Memory could not be created");
+      if (generation === createRequest.current && open && !isSparkFundingError(failure)) notify(isGalleryMemoryExhaustion(failure) && failure instanceof Error ? failure.message : "Memory could not be created");
     } finally {
       if (generation === createRequest.current) setCreating(false);
     }
@@ -166,31 +167,24 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
     else void openMemory(memory);
   }
 
-  async function deleteSelectedMemories() {
+  function deleteSelectedMemories() {
     if (!owner || !selectedMemoryKeys.length) return;
     const memoryKeys = [...selectedMemoryKeys];
-    setDeleting(true);
-    try {
-      const outcomes = await Promise.allSettled(memoryKeys.map((memoryKey) => deleteGalleryCollectionMemory(memoryKey, collection.key)));
-      const deletedKeys = memoryKeys.filter((_, index) => outcomes[index]?.status === "fulfilled");
-      const failedKeys = memoryKeys.filter((_, index) => outcomes[index]?.status === "rejected");
-      setMemories((current) => current.filter(({ key }) => !deletedKeys.includes(key)));
-      deletedKeys.forEach((memoryKey) => queryClient.removeQueries({ queryKey: galleryQueryKeys.memory(galleryContext, collection.key, memoryKey), exact: true }));
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.memories(galleryContext, collection.key), exact: true, refetchType: "none" });
-      setSelectedMemoryKeys(failedKeys);
-      setActiveSheet("list");
-      if (failedKeys.length) notify(failedKeys.length === 1 ? "Memory could not be deleted" : `${failedKeys.length} memories could not be deleted`);
-      await loadList(true);
-    } catch {
-      notify(memoryKeys.length === 1 ? "Memory could not be deleted" : "Memories could not be deleted");
-    } finally {
-      setDeleting(false);
-    }
+    memoryKeys.forEach((key) => pendingMemoryDeletes.current.add(key));
+    setMemories((current) => current.filter(({ key }) => !memoryKeys.includes(key)));
+    memoryKeys.forEach((memoryKey) => queryClient.removeQueries({ queryKey: galleryQueryKeys.memory(galleryContext, collection.key, memoryKey), exact: true }));
+    setSelectedMemoryKeys([]);
+    setActiveSheet("list");
+    notify(`Deleted ${memoryKeys.length} ${memoryKeys.length === 1 ? "memory" : "memories"}`);
+    void Promise.allSettled(memoryKeys.map((memoryKey) => deleteGalleryCollectionMemory(memoryKey, collection.key))).then(() => {
+      memoryKeys.forEach((key) => pendingMemoryDeletes.current.delete(key));
+      void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.memories(galleryContext, collection.key), exact: true, refetchType: "none" });
+    });
   }
 
   const loadListOnOpen = useEffectEvent(() => void loadList(true));
   const refreshFromEvent = useEffectEvent(() => {
-    if (!open || creating || deleting || opening) return;
+    if (!open || creating || opening) return;
     if (detail) void refreshDetail(detail.key);
     else void loadList();
   });
@@ -236,17 +230,17 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
     refreshFromEvent();
   }), [open]);
 
-  const close = () => { listSheetOpen.current = false; listRequest.current += 1; detailRequest.current += 1; createRequest.current += 1; setDetail(undefined); setCreating(false); setDeleting(false); setSelectedMemoryKeys([]); setActiveSheet("list"); setCreateMenuOpen(false); setCustomCreateOpen(false); setResourceTagsOpen(false); onClose(); };
-  const listFooter = <>{owner ? <Button disabled={creating || listLoading || opening} loading={creating} onPress={() => { listSheetOpen.current = false; setCreateMenuOpen(true); }} size="md" variant="primary">Create</Button> : null}<Button disabled={creating} onPress={close} size="md" variant="secondary">Close</Button></>;
+  const close = () => { listSheetOpen.current = false; listRequest.current += 1; detailRequest.current += 1; createRequest.current += 1; setDetail(undefined); setCreating(false); setSelectedMemoryKeys([]); setActiveSheet("list"); setCreateMenuOpen(false); setCustomCreateOpen(false); setResourceTagsOpen(false); onClose(); };
+  const listFooter = <>{owner ? <Button disabled={creating} loading={creating} onPress={() => { listSheetOpen.current = false; setCreateMenuOpen(true); }} size="md" variant="primary">Create</Button> : null}<Button disabled={creating} onPress={close} size="md" variant="secondary">Close</Button></>;
   const detailFooter = <><Button onPress={() => setShowImage((current) => !current)} size="md" variant="primary">{showImage ? "Read memory" : "Show image"}</Button><Button onPress={close} size="md" variant="secondary">Close</Button></>;
 
   return <>
     <BottomSheet footer={listFooter} height="full" onOpenChange={(next) => { if (!next && !createMenuOpen && !customCreateOpen) close(); }} open={open && !detail} title="Memories">
-      <ScrollView contentContainerStyle={[styles.grid, listEmpty && styles.emptyGrid]} onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} showsVerticalScrollIndicator={false}>
-        {selectedMemoryKeys.length ? <Tabs style={styles.bulkToolbar}><View style={styles.bulkToolbarSelection}><Button accessibilityLabel="Clear memory selection" contentMode="raw" disabled={deleting} onPress={() => setSelectedMemoryKeys([])} size="md" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text style={styles.bulkSelectionText}>{selectedMemoryKeys.length} selected</Text></View><Button accessibilityLabel="Selected memory actions" contentMode="raw" disabled={deleting} onPress={() => { listSheetOpen.current = false; setActiveSheet("actions"); }} size="md" variant="icon"><MoreHorizontalIcon size="sm" /></Button></Tabs> : null}
-        {listLoading ? Array.from({ length: 4 }, (_, index) => <Skeleton key={index} style={[styles.cardFrame, { width: cardWidth, height: cardWidth }]} />) : memories.map((memory) => { const selected = selectedMemoryKeys.includes(memory.key); return <Button accessibilityActions={owner ? [{ name: "longpress", label: selected ? "Deselect memory" : "Select memory" }] : undefined} accessibilityLabel="Open memory" accessibilityState={{ selected }} contentMode="raw" disabled={creating || opening || deleting} key={memory.key} onAccessibilityAction={owner ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleLongPress(memory.key, false); } : undefined} onLongPress={owner ? () => handleLongPress(memory.key) : undefined} onPress={() => handlePress(memory)} shape="rounded" size="md" style={[styles.cardFrame, styles.card, selected && styles.cardSelected, { width: cardWidth, height: cardWidth }]} variant="ghost"><Image contentFit="cover" source={memory.image.url} style={StyleSheet.absoluteFill} transition={150} />{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</Button>; })}
+      <ScrollView contentContainerStyle={[styles.grid, listEmpty && styles.emptyGrid]} onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} showsVerticalScrollIndicator={false} style={styles.scroll}>
+        {selectedMemoryKeys.length ? <Tabs style={styles.bulkToolbar}><View style={styles.bulkToolbarSelection}><Button accessibilityLabel="Clear memory selection" contentMode="raw" onPress={() => setSelectedMemoryKeys([])} size="md" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text style={styles.bulkSelectionText}>{selectedMemoryKeys.length} selected</Text></View><Button accessibilityLabel="Selected memory actions" contentMode="raw" onPress={() => { listSheetOpen.current = false; setActiveSheet("actions"); }} size="md" variant="icon"><MoreHorizontalIcon size="sm" /></Button></Tabs> : null}
+        {memories.map((memory) => { const selected = selectedMemoryKeys.includes(memory.key); return <Button accessibilityActions={owner ? [{ name: "longpress", label: selected ? "Deselect memory" : "Select memory" }] : undefined} accessibilityLabel="Open memory" accessibilityState={{ selected }} contentMode="raw" disabled={creating || opening} key={memory.key} onAccessibilityAction={owner ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleLongPress(memory.key, false); } : undefined} onLongPress={owner ? () => handleLongPress(memory.key) : undefined} onPress={() => handlePress(memory)} shape="rounded" size="md" style={[styles.cardFrame, styles.card, selected && styles.cardSelected, { width: cardWidth, height: cardWidth }]} variant="ghost"><Skeleton style={StyleSheet.absoluteFill} /><Image contentFit="cover" source={memory.image.url} style={StyleSheet.absoluteFill} transition={150} />{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</Button>; })}
         {creating ? <View accessibilityLabel="Creating memory" accessibilityRole="progressbar"><Skeleton style={[styles.cardFrame, { width: cardWidth, height: cardWidth }]} /></View> : null}
-        {listEmpty ? <Text style={styles.empty}>No memories yet.</Text> : null}
+        {listEmpty ? <View style={styles.emptyWrap}><Text style={styles.empty}>No memories yet.</Text></View> : null}
       </ScrollView>
     </BottomSheet>
 
@@ -258,16 +252,18 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
       {detail ? <ScrollView contentContainerStyle={styles.detail} onLayout={({ nativeEvent }) => setDetailViewportHeight(nativeEvent.layout.height)} showsVerticalScrollIndicator={false}><Animated.View onLayout={({ nativeEvent }) => setDetailImageWidth(nativeEvent.layout.width)} style={[styles.detailImageStage, imageStageStyle]}><Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.expandedImageLayer, expandedImageStyle]}><Image contentFit="contain" source={detail.image.url} style={[expandedImageSize, styles.expandedDetailImage]} transition={180} /></Animated.View><Animated.View pointerEvents="none" style={[styles.detailThumbnailLayer, compactImageStyle]}><View collapsable={false} style={styles.thumbnailImageClip}><Image contentFit="cover" source={detail.image.url} style={styles.detailImage} transition={180} /></View></Animated.View></Animated.View>{showImage ? null : <View style={styles.memoryCopy}>{splitGalleryMemoryText(typedText).map((section, index) => <Text key={`${index}:${section.length}`} style={styles.memoryText}>{section}</Text>)}</View>}</ScrollView> : null}
     </BottomSheet>
 
-    <BottomSheet hideHeading onOpenChange={(next) => { if (!next) setActiveSheet("list"); }} open={open && !detail && selectedMemoryKeys.length > 0 && activeSheet === "actions"} title=""><BottomSheetMenu><BottomSheetItem onPress={() => { setActiveSheet("list"); requestAnimationFrame(() => setResourceTagsOpen(true)); }} style={styles.menuItem} variant="secondary">Tags</BottomSheetItem><BottomSheetItem disabled={deleting} onPress={() => setActiveSheet("confirmDelete")} style={styles.menuItem} variant="secondary">Delete</BottomSheetItem></BottomSheetMenu></BottomSheet>
-    <BottomSheet dismissible={!deleting} onOpenChange={(next) => { if (!next) setActiveSheet("list"); }} open={open && !detail && selectedMemoryKeys.length > 0 && activeSheet === "confirmDelete"} title={`Delete ${selectedMemoryKeys.length === 1 ? "memory" : `${selectedMemoryKeys.length} memories`}?`}>
-      <View style={styles.confirmActions}><Button disabled={deleting} loading={deleting} onPress={() => void deleteSelectedMemories()} size="md" variant="primary">Delete</Button><Button disabled={deleting} onPress={() => setActiveSheet("list")} size="md" variant="secondary">Close</Button></View>
+    <BottomSheet hideHeading onOpenChange={(next) => { if (!next) setActiveSheet("list"); }} open={open && !detail && selectedMemoryKeys.length > 0 && activeSheet === "actions"} title=""><BottomSheetMenu><BottomSheetItem onPress={() => setActiveSheet("confirmDelete")} style={styles.menuItem} variant="secondary">Delete</BottomSheetItem></BottomSheetMenu></BottomSheet>
+    <BottomSheet onOpenChange={(next) => { if (!next) setActiveSheet("list"); }} open={open && !detail && selectedMemoryKeys.length > 0 && activeSheet === "confirmDelete"} title={`Delete ${selectedMemoryKeys.length === 1 ? "memory" : `${selectedMemoryKeys.length} memories`}?`}>
+      <View style={styles.confirmActions}><Button onPress={deleteSelectedMemories} size="md" variant="primary">Delete</Button><Button onPress={() => setActiveSheet("list")} size="md" variant="secondary">Close</Button></View>
     </BottomSheet>
   </>;
 }
 
 const styles = StyleSheet.create({
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: GAP, paddingVertical: spacing.md },
-  emptyGrid: { flexGrow: 1, alignItems: "center", justifyContent: "center" },
+  scroll: { flex: 1 },
+  grid: { flexGrow: 1, flexDirection: "row", flexWrap: "wrap", alignContent: "flex-start", gap: GAP, paddingVertical: spacing.md },
+  emptyGrid: { alignContent: "center", alignItems: "center", justifyContent: "center" },
+  emptyWrap: { width: "100%", flexGrow: 1, alignItems: "center", justifyContent: "center" },
   cardFrame: { overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.sm, backgroundColor: palette.panelRaised },
   card: { padding: 0 },
   cardSelected: { borderColor: palette.silver50, borderWidth: 2 },

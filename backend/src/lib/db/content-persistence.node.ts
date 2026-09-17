@@ -30,6 +30,10 @@ import {
 import { z } from "zod";
 import { initialWorkspaceFolderKey, isInitialWorkspaceDocumentKey, isInitialWorkspaceFolderKey } from "@/lib/initial-workspace-content-identifiers";
 
+const CONVERSATION_ARCHIVE_FOLDER_PURPOSES_AQL = '["conversation-root", "conversation", "conversation-summaries"]';
+const CONVERSATION_ARCHIVE_DOCUMENT_PURPOSES_AQL = '["conversation-message", "conversation-summary"]';
+const CONVERSATION_ARCHIVE_PURPOSES_AQL = '["conversation-root", "conversation", "conversation-summaries", "conversation-message", "conversation-summary"]';
+
 type QueryCursor = { next(): Promise<unknown>; all?(): Promise<unknown[]> };
 export interface ContentQueryExecutor {
   query(
@@ -108,31 +112,29 @@ async function scopedUpdate<T>(
     collection === "folders"
       ? `
       FILTER !HAS(current, "_internalDeletion") || current._internalDeletion == null
-      FILTER !@changesLocation || !@structurallyProtected
-      FILTER (current.mutationPolicy != "system-container" && current.managedPurpose == null) || @allowManagedUpdate
-      LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "parentFolderKey") ? current.parentFolderKey : null)
-      LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
-      FILTER destinationKey == null || (destination != null && destination.scopeKey == @scopeKey)
-      FILTER destinationKey == null || (!HAS(destination, "_internalDeletion") || destination._internalDeletion == null)
-       FILTER !@changesLocation || destinationKey == null || destinationKey == current.parentFolderKey || (destination.mutationPolicy != "system-container" && destination.managedPurpose == null)
+       FILTER (current.managedPurpose IN ${CONVERSATION_ARCHIVE_FOLDER_PURPOSES_AQL} || @guideContent || (current.mutationPolicy != "system-container" && current.managedPurpose == null)) || @allowManagedUpdate
+       LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "parentFolderKey") ? current.parentFolderKey : null)
+       LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
+       FILTER destinationKey == null || (destination != null && destination.scopeKey == @scopeKey)
+       FILTER destinationKey == null || (!HAS(destination, "_internalDeletion") || destination._internalDeletion == null)
+        FILTER !@changesLocation || destinationKey == null || destinationKey == current.parentFolderKey || (destination.managedPurpose IN ${CONVERSATION_ARCHIVE_FOLDER_PURPOSES_AQL} || @guideDestination || (destination.mutationPolicy != "system-container" && destination.managedPurpose == null))
   `
       : collection === "documents"
         ? `
       FILTER !HAS(current, "_internalDeletion") || current._internalDeletion == null
-      FILTER !@changesLocation || !@structurallyProtected
-       FILTER (current.mutationPolicy != "system-only" && current.managedPurpose == null) || @allowManagedUpdate
-      LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "folderKey") ? current.folderKey : null)
-      LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
-      FILTER destinationKey == null || (destination != null && destination.scopeKey == @scopeKey)
-      FILTER destinationKey == null || (!HAS(destination, "_internalDeletion") || destination._internalDeletion == null)
-       FILTER !@changesLocation || destinationKey == null || destinationKey == current.folderKey || (destination.mutationPolicy != "system-container" && destination.managedPurpose == null)
+        FILTER (current.managedPurpose IN ${CONVERSATION_ARCHIVE_DOCUMENT_PURPOSES_AQL} || @guideContent || (current.mutationPolicy != "system-only" && current.managedPurpose == null)) || @allowManagedUpdate
+       LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "folderKey") ? current.folderKey : null)
+       LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
+       FILTER destinationKey == null || (destination != null && destination.scopeKey == @scopeKey)
+       FILTER destinationKey == null || (!HAS(destination, "_internalDeletion") || destination._internalDeletion == null)
+        FILTER !@changesLocation || destinationKey == null || destinationKey == current.folderKey || (destination.managedPurpose IN ${CONVERSATION_ARCHIVE_FOLDER_PURPOSES_AQL} || @guideDestination || (destination.mutationPolicy != "system-container" && destination.managedPurpose == null))
   `
         : collection === "documentVersions"
           ? `
       LET owner = DOCUMENT(documents, current.documentKey)
        FILTER owner != null && owner.scopeKey == @scopeKey
        FILTER !HAS(owner, "_internalDeletion") || owner._internalDeletion == null
-       FILTER owner.mutationPolicy != "system-only" && owner.managedPurpose == null
+        FILTER owner.managedPurpose IN ${CONVERSATION_ARCHIVE_DOCUMENT_PURPOSES_AQL} || (owner.mutationPolicy != "system-only" && owner.managedPurpose == null)
   `
           : ``;
   const cursor = await executor.query(
@@ -174,14 +176,13 @@ async function scopedUpdate<T>(
             allowManagedUpdate: Object.keys(patch).every(
               (field) => field === "isFavorite" || field === "updatedAt",
             ),
+            guideContent: collection === "folders" ? isInitialWorkspaceFolderKey(scopeKey, key) : isInitialWorkspaceDocumentKey(scopeKey, key),
+            guideDestination: typeof (set.parentFolderKey ?? set.folderKey) === "string" && isInitialWorkspaceFolderKey(scopeKey, String(set.parentFolderKey ?? set.folderKey)),
           }
         : {}),
       patch: set,
       unset,
       expectedUpdatedAt: expectedUpdatedAt ?? null,
-      ...(collection === "folders" || collection === "documents" ? {
-        structurallyProtected: collection === "folders" ? isInitialWorkspaceFolderKey(scopeKey, key) : isInitialWorkspaceDocumentKey(scopeKey, key),
-      } : {}),
     },
   );
   const value = await cursor.next();
@@ -214,8 +215,7 @@ async function scopedDelete(
     LET affectedTripKeys = @attachmentType == null ? [] : (FOR attachment IN tripAttachments FILTER attachment.scopeKey == @scopeKey && attachment.targetType == @attachmentType && attachment.targetKey == @key RETURN DISTINCT attachment.tripKey)
     LET removedKey = FIRST(FOR current IN @@collection
         FILTER current._key == @key && current.scopeKey == @scopeKey
-        FILTER !@structurallyProtected
-        FILTER (!@protectSystemContainer || current.mutationPolicy != "system-container") && current.mutationPolicy != "system-only" && current.managedPurpose == null
+        FILTER current.managedPurpose IN ${CONVERSATION_ARCHIVE_PURPOSES_AQL} || @guideContent || ((!@protectSystemContainer || current.mutationPolicy != "system-container") && current.mutationPolicy != "system-only" && current.managedPurpose == null)
         LIMIT 1
         REMOVE current IN @@collection
         RETURN OLD._key)
@@ -232,7 +232,7 @@ async function scopedDelete(
       scopeKey,
       attachmentType,
       protectSystemContainer,
-      structurallyProtected: collection === "folders" ? isInitialWorkspaceFolderKey(scopeKey, key) : collection === "documents" ? isInitialWorkspaceDocumentKey(scopeKey, key) : false,
+      guideContent: collection === "folders" ? isInitialWorkspaceFolderKey(scopeKey, key) : collection === "documents" ? isInitialWorkspaceDocumentKey(scopeKey, key) : false,
       now,
     },
   );
@@ -480,7 +480,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
     ): Promise<DocumentVersion[]> {
       if (documentKeys.length === 0) return [];
       const cursor = await executor.query(
-        "FOR snapshot IN documentVersions FILTER snapshot.scopeKey == @scopeKey && snapshot.documentKey IN @documentKeys SORT snapshot.version DESC RETURN snapshot",
+        "FOR snapshot IN documentVersions FILTER snapshot.scopeKey == @scopeKey && snapshot.documentKey IN @documentKeys SORT snapshot.version ASC RETURN snapshot",
         { scopeKey, documentKeys },
       );
       const values = cursor.all ? await cursor.all() : [];
@@ -508,7 +508,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
     ): Promise<DocumentAudioVersion[]> {
       if (documentKeys.length === 0) return [];
       const cursor = await executor.query(
-        "FOR audio IN documentAudioVersions FILTER audio.scopeKey == @scopeKey && audio.documentKey IN @documentKeys SORT audio.version DESC RETURN audio",
+        "FOR audio IN documentAudioVersions FILTER audio.scopeKey == @scopeKey && audio.documentKey IN @documentKeys SORT audio.version ASC RETURN audio",
         { scopeKey, documentKeys },
       );
       const values = cursor.all ? await cursor.all() : [];
@@ -535,7 +535,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
         LET document = DOCUMENT(documents, target.documentKey)
         FILTER document != null && document.scopeKey == @scopeKey
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-        FILTER document.mutationPolicy != "system-only" && document.managedPurpose == null
+        FILTER document.managedPurpose IN ${CONVERSATION_ARCHIVE_DOCUMENT_PURPOSES_AQL} || (document.mutationPolicy != "system-only" && document.managedPurpose == null)
         FOR audio IN documentAudioVersions
           FILTER audio.scopeKey == @scopeKey && audio.documentKey == target.documentKey
           FILTER audio._key == target._key || audio.isCurrent == true
@@ -565,7 +565,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
         LET document = DOCUMENT(documents, @documentKey)
         FILTER document != null && document.scopeKey == @scopeKey
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-        FILTER document.mutationPolicy != "system-only" && document.managedPurpose == null
+        FILTER document.managedPurpose IN ${CONVERSATION_ARCHIVE_DOCUMENT_PURPOSES_AQL} || (document.mutationPolicy != "system-only" && document.managedPurpose == null)
         FOR audio IN documentAudioVersions
           FILTER audio.scopeKey == @scopeKey && audio.documentKey == @documentKey && audio.isCurrent == true
           UPDATE audio WITH { isCurrent: false } IN documentAudioVersions
@@ -594,7 +594,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
     ): Promise<DocumentSummary[]> {
       if (documentKeys.length === 0) return [];
       const cursor = await executor.query(
-        "FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN @documentKeys SORT summary.version DESC RETURN summary",
+        "FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN @documentKeys SORT summary.version ASC RETURN summary",
         { scopeKey, documentKeys },
       );
       const values = cursor.all ? await cursor.all() : [];
@@ -716,7 +716,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
         LET document = DOCUMENT(documents, @documentKey)
         FILTER document != null && document.scopeKey == @scopeKey
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-        FILTER document.mutationPolicy != "system-only" && document.managedPurpose == null
+        FILTER document.managedPurpose IN ${CONVERSATION_ARCHIVE_DOCUMENT_PURPOSES_AQL} || (document.mutationPolicy != "system-only" && document.managedPurpose == null)
          LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(folders, document.folderKey) : null
          FILTER folder == null || folder.scopeKey == @scopeKey
          FILTER folder == null || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
@@ -758,7 +758,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
             LET document = DOCUMENT(documents, @documentKey)
             FILTER document != null && document.scopeKey == @scopeKey
             FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-            FILTER document.mutationPolicy != "system-only" && document.managedPurpose == null
+            FILTER document.managedPurpose IN ${CONVERSATION_ARCHIVE_DOCUMENT_PURPOSES_AQL} || (document.mutationPolicy != "system-only" && document.managedPurpose == null)
             LET nextVersion = FIRST(
               FOR existing IN documentAudioVersions
                 FILTER existing.documentKey == @documentKey
@@ -806,7 +806,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
             LET document = DOCUMENT(documents, @documentKey)
             FILTER document != null && document.scopeKey == @scopeKey
             FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-            FILTER document.mutationPolicy != "system-only" && document.managedPurpose == null
+            FILTER document.managedPurpose IN ${CONVERSATION_ARCHIVE_DOCUMENT_PURPOSES_AQL} || (document.mutationPolicy != "system-only" && document.managedPurpose == null)
             LET nextVersion = FIRST(
               FOR existing IN documentSummaries
                 FILTER existing.documentKey == @documentKey
@@ -852,7 +852,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
           FILTER summary != null && summary.scopeKey == @scopeKey && summary.documentKey == @documentKey
           FILTER document != null && document.scopeKey == @scopeKey
           FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-          FILTER document.mutationPolicy != "system-only" && document.managedPurpose == null
+          FILTER document.managedPurpose IN ${CONVERSATION_ARCHIVE_DOCUMENT_PURPOSES_AQL} || (document.mutationPolicy != "system-only" && document.managedPurpose == null)
           INSERT @audio INTO documentSummaryAudio RETURN NEW
         `,
           {
@@ -976,14 +976,13 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       const cursor = await executor.query(
         `
         FOR current IN folders
-          FILTER current._key == @key && current.scopeKey == @scopeKey && current.mutationPolicy != "system-container" && current.managedPurpose == null
-          FILTER !@structurallyProtected
+          FILTER current._key == @key && current.scopeKey == @scopeKey && (current.managedPurpose IN ${CONVERSATION_ARCHIVE_FOLDER_PURPOSES_AQL} || @guideContent || (current.mutationPolicy != "system-container" && current.managedPurpose == null))
           FILTER @owner == null || current._internalDeletion.owner == @owner
           LIMIT 1
           UPDATE current WITH MERGE(@patch, ZIP(@unset, @unset[* RETURN null])) IN folders OPTIONS { keepNull: false }
           RETURN NEW
       `,
-        { key, scopeKey, owner: owner ?? null, structurallyProtected: marker !== undefined && isInitialWorkspaceFolderKey(scopeKey, key), patch: set, unset },
+        { key, scopeKey, owner: owner ?? null, guideContent: isInitialWorkspaceFolderKey(scopeKey, key), patch: set, unset },
       );
       const value = await cursor.next();
       return value
@@ -1001,14 +1000,13 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
         `
         FOR current IN documents
           FILTER current._key == @key && current.scopeKey == @scopeKey
-          FILTER current.mutationPolicy != "system-only" && current.managedPurpose == null
-          FILTER !@structurallyProtected
+          FILTER current.managedPurpose IN ${CONVERSATION_ARCHIVE_DOCUMENT_PURPOSES_AQL} || @guideContent || (current.mutationPolicy != "system-only" && current.managedPurpose == null)
           FILTER @owner == null || current._internalDeletion.owner == @owner
           LIMIT 1
           UPDATE current WITH MERGE(@patch, ZIP(@unset, @unset[* RETURN null])) IN documents OPTIONS { keepNull: false }
           RETURN NEW
       `,
-        { key, scopeKey, owner: owner ?? null, structurallyProtected: marker !== undefined && isInitialWorkspaceDocumentKey(scopeKey, key), patch: set, unset },
+        { key, scopeKey, owner: owner ?? null, guideContent: isInitialWorkspaceDocumentKey(scopeKey, key), patch: set, unset },
       );
       const value = await cursor.next();
       return value

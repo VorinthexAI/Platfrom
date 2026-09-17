@@ -138,7 +138,7 @@ export function addCachedContentDocumentAudioVersion(queryClient: QueryClient, c
   queryClient.setQueryData<ContentDocumentAudioVersion[]>(contentQueryKeys.audioVersions(context, version.documentKey), (current = []) => [
     version,
     ...current.filter(({ key }) => key !== version.key),
-  ].sort((left, right) => right.version - left.version));
+  ].sort((left, right) => left.version - right.version));
   return version;
 }
 
@@ -166,7 +166,7 @@ export function addCachedContentDocumentSummary(queryClient: QueryClient, contex
   queryClient.setQueryData<ContentDocumentSummary[]>(contentQueryKeys.summaries(context, summary.documentKey), (current = []) => [
     summary,
     ...current.filter(({ key }) => key !== summary.key),
-  ].sort((left, right) => right.version - left.version));
+  ].sort((left, right) => left.version - right.version));
   return queryClient.getQueryData<ContentDocumentSummary[]>(contentQueryKeys.summaries(context, summary.documentKey))?.find(({ key }) => key === summary.key) ?? summary;
 }
 
