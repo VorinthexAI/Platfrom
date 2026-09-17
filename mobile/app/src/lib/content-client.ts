@@ -480,19 +480,26 @@ export async function listContentFolderTree(signal?: AbortSignal, contentContext
   return folders;
 }
 
+export const ARCHIVE_LOCATION_PAGE_SIZE = 10;
+
+export async function listContentDocumentPage(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext(), cursor?: string, limit = ARCHIVE_LOCATION_PAGE_SIZE) {
+  const data: { documents: ContentDocument[]; cursor?: string } = await callContentTool("document.list", {
+    scopeKey: contentContext.scopeKey,
+    ...(folderKey ? { folderKey } : {}),
+    ...(cursor ? { cursor } : {}),
+    limit,
+    sort: { field: "updatedAt", direction: "desc" },
+  }, signal, contentContext);
+  return { documents: data.documents, cursor: data.cursor };
+}
+
 export async function listContentDocumentsAtLocation(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext()) {
   const documents: ContentDocument[] = [];
   let cursor: string | undefined;
   do {
-    const data: { documents: ContentDocument[]; cursor?: string } = await callContentTool("document.list", {
-      scopeKey: contentContext.scopeKey,
-      ...(folderKey ? { folderKey } : {}),
-      cursor,
-      limit: 100,
-      sort: { field: "updatedAt", direction: "desc" },
-    }, signal, contentContext);
-    documents.push(...data.documents);
-    cursor = data.cursor;
+    const page = await listContentDocumentPage(folderKey, signal, contentContext, cursor, 100);
+    documents.push(...page.documents);
+    cursor = page.cursor;
   } while (cursor);
   return documents;
 }
@@ -702,8 +709,8 @@ const appResultTagsSchema = z.array(z.strictObject({ key: z.string().min(1), nam
 const appFolderResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), parentFolderKey: z.string().min(1).optional(), name: z.string().min(1), description: z.string().optional(), presentation: z.enum(["platform", "assistant", "knowledge", "media", "travel", "communication", "learning"]).optional(), managed: z.boolean().optional(), structuralProtection: z.literal(true).optional(), isFavorite: z.boolean(), createdAt: z.string().datetime().optional(), updatedAt: z.string().datetime().optional(), score: z.number().optional(), tags: appResultTagsSchema });
 const appDocumentResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), folderKey: z.string().min(1).optional(), folder: z.strictObject({ key: z.string().min(1), name: z.string().min(1) }).optional(), name: z.string().min(1), extension: z.string().optional(), mimeType: z.string().optional(), sizeBytes: z.number().int().positive().optional(), managed: z.boolean().optional(), structuralProtection: z.literal(true).optional(), isFavorite: z.boolean(), content: z.string().optional(), createdAt: z.string().datetime().optional(), updatedAt: z.string().datetime().optional(), score: z.number().optional(), tags: appResultTagsSchema });
 
-async function searchAppContent(query: string, signal: AbortSignal | undefined, folderKey: string | undefined, includeDescendants: boolean, recordHistory: boolean, limit = 50, tagKeys: string[] = []): Promise<ContentSearchResponse> {
-  const filters = { ...(folderKey ? { folderKey, includeDescendants } : {}), ...(tagKeys.length ? { tagKeys, tagMatch: "all" as const } : {}) };
+async function searchAppContent(query: string, signal: AbortSignal | undefined, folderKey: string | undefined, includeDescendants: boolean, recordHistory: boolean, limit = 50, tagKeys: string[] = [], rootOnly = false): Promise<ContentSearchResponse> {
+  const filters = { ...(folderKey ? { folderKey, includeDescendants } : {}), ...(rootOnly ? { rootOnly: true } : {}), ...(tagKeys.length ? { tagKeys, tagMatch: "all" as const } : {}) };
   const output = await searchApp({ ...(query ? { query } : { operation: "list" as const }), collectionSlugs: ["folders", "documents", "files"], recordHistory, limit, ...(Object.keys(filters).length ? { filters } : {}) }, signal);
   const folders = appSearchResults(output, "folders", appFolderResultSchema).map(({ scopeKey: _scopeKey, createdAt: _createdAt, updatedAt: _updatedAt, tags: _tags, score = 0, ...folder }) => ({ ...folder, score }));
   const documents = [...appSearchResults(output, "documents", appDocumentResultSchema), ...appSearchResults(output, "files", appDocumentResultSchema)].map(({ key, content: _content, createdAt: _createdAt, updatedAt: _updatedAt, tags: _tags, score = 0, ...document }) => ({ documentKey: key, ...document, score }));
@@ -714,8 +721,8 @@ export function searchContent(query: string, folderKey?: string, includeDescenda
   return searchAppContent(query, undefined, folderKey, includeDescendants, true);
 }
 
-export function searchContentMatches(query: string, signal?: AbortSignal, folderKey?: string, recordHistory = true, options: { limit?: number; tagKeys?: string[] } = {}) {
-  return searchAppContent(query, signal, folderKey, true, recordHistory, options.limit, options.tagKeys);
+export function searchContentMatches(query: string, signal?: AbortSignal, folderKey?: string, recordHistory = true, options: { limit?: number; tagKeys?: string[]; rootOnly?: boolean } = {}) {
+  return searchAppContent(query, signal, folderKey, true, recordHistory, options.limit, options.tagKeys, options.rootOnly);
 }
 
 export function findContentNeighbors(source: { folderKey: string } | { documentKey: string }, signal?: AbortSignal) {

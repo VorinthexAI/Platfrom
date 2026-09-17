@@ -12,6 +12,47 @@ const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member
 const embedding = Array(EMBEDDING_DIMENSIONS).fill(0.1);
 
 describe('app search service', () => {
+  test('validates root-only location selectors and forwards them to canonical content search', async () => {
+    const calls: unknown[] = [];
+    const service = createAppSearchService({
+      executeEmbedding: async () => ({ embedding }),
+      executeContent: (async (tool: string, input: unknown) => { calls.push({ tool, input }); return { folders: [], documents: [] }; }) as never,
+    });
+    await service.search({ query: 'root-only content', collectionSlugs: ['folders', 'documents', 'files'], filters: { rootOnly: true }, recordHistory: false }, context);
+    expect(calls).toEqual([{ tool: 'content.search', input: expect.objectContaining({ scopeKey, rootOnly: true }) }]);
+    for (const filters of [{ rootOnly: true, folderKey: newId() }, { rootOnly: true, includeDescendants: true }, { rootOnly: true, unknown: true }]) {
+      expect(appSearchInputSchema.safeParse({ query: 'test', collectionSlugs: ['documents'], filters }).success).toBe(false);
+    }
+    expect(appSearchModelInputSchema.safeParse({ query: 'test', collectionSlugs: ['images'], limit: 10, filters: { rootOnly: true } }).success).toBe(false);
+    expect(appSearchModelInputSchema.safeParse({ query: 'test', collectionSlugs: ['documents'], limit: 10, filters: { rootOnly: true } }).success).toBe(true);
+  });
+
+  test('root-only tag searches and lists intersect ranked tags with canonical root locations', async () => {
+    const tagKey = newId(), rootKey = newId(), nestedKey = newId();
+    const service = createAppSearchService({
+      executeEmbedding: async () => ({ embedding }),
+      executeContent: (async (tool: string, input: any) => {
+        expect(input.scopeKey).toBe(scopeKey);
+        expect(input.folderKey).toBeUndefined();
+        expect(input.includeDescendants).toBeUndefined();
+        expect(tool).toBe('document.list');
+        return { documents: [{ key: rootKey, scopeKey, name: 'Root note', isFavorite: false, createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z' }] };
+      }) as never,
+      scopeTags: {
+        get: async () => ({ key: tagKey }),
+        resolveCandidateKeys: async () => ({ document: [nestedKey, rootKey] }),
+        rankCandidateKeys: async () => [{ key: nestedKey, score: 0.99 }, { key: rootKey, score: 0.8 }],
+        listTargetTags: async () => ({}),
+      } as never,
+    });
+    const filters = { rootOnly: true, tagKeys: [tagKey], tagMatch: 'all' as const };
+    const search = await service.search({ query: 'root tagged notes', collectionSlugs: ['documents'], filters, limit: 1, recordHistory: false }, context);
+    expect(search).toMatchObject({ groups: [{ collectionSlug: 'documents', results: [{ key: rootKey, score: 0.8 }] }] });
+    const list = await service.search({ operation: 'list', collectionSlugs: ['documents'], filters, limit: 1 }, context);
+    expect(list).toMatchObject({ groups: [{ collectionSlug: 'documents', results: [{ key: rootKey }] }] });
+    expect(projectAppSearchRetrieval({ query: 'root tagged notes', collectionSlugs: ['documents'], filters, limit: 1 }, search)?.filters).toMatchObject({ rootOnly: true });
+  });
+
   test('has strict model input with defaults, bounds, and distinct collection slugs', () => {
     expect(appSearchInputSchema.parse({ query: 'roadmap', collectionSlugs: ['folders'] })).toEqual({ query: 'roadmap', collectionSlugs: ['folders'], recordHistory: true, limit: 10 });
     expect(appSearchInputSchema.parse({ collectionSlugs: ['collections'] })).toEqual({ collectionSlugs: ['collections'], recordHistory: true, limit: 10 });

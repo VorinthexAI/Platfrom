@@ -340,7 +340,7 @@
 }
 
 .vui-filter-pill.is-selected { border-color: #f5f7f8; }
-.vui-filter-pill.is-mixed { background: rgba(245, 247, 248, 0.07); border-color: #9ca7ad; border-style: dashed; }
+.vui-filter-pill.is-mixed { border-color: #9ca7ad; border-style: dashed; }
 .vui-filter-pill.is-full-width { display: flex; width: 100%; }
 .vui-filter-pill-label { flex: 1; height: 32px; min-width: 0; overflow: hidden; padding: 0 10px; text-overflow: ellipsis; white-space: nowrap; }
 .vui-filter-pill-remove { flex: 0 0 24px; height: 24px; margin-right: 4px; min-height: 24px; padding: 0; width: 24px; }

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { USER_VISIBLE_AI_PROSE_POLICY } from './prose-style';
 
 const proseSurfaces = await Promise.all([
+  Bun.file(new URL('./agents/core.ts', import.meta.url)).text(),
   Bun.file(new URL('./agents/greeting.ts', import.meta.url)).text(),
   Bun.file(new URL('./personal-assistant/runtime.ts', import.meta.url)).text(),
   Bun.file(new URL('../../api/communication.ts', import.meta.url)).text(),

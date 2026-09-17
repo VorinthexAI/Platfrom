@@ -2,7 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { UserHiddenRecord } from "./user-hidden-client";
 
 import {
-  listContentDocumentsAtLocation,
+  listContentDocumentPage,
   listContentFolderTree,
   listContentDocumentAudioVersions,
   listContentDocumentSummaries,
@@ -15,7 +15,7 @@ import {
   type ContentFolder,
 } from "./content-client";
 
-export type ContentLocation = { folders: ContentFolder[]; documents: ContentDocument[] };
+export type ContentLocation = { folders: ContentFolder[]; documents: ContentDocument[]; documentCursor?: string };
 export type FolderContentTab = "folders" | "documents" | "files";
 
 export function populatedContentTab(location: ContentLocation, selected: FolderContentTab): FolderContentTab {
@@ -85,6 +85,7 @@ export function getContentFolderTree(queryClient: QueryClient, context: ContentC
   return queryClient.fetchQuery({
     queryKey: contentQueryKeys.folderTree(context),
     queryFn: ({ signal }) => listContentFolderTree(signal, context),
+    staleTime: 30_000,
   });
 }
 
@@ -92,12 +93,13 @@ export function getContentLocation(queryClient: QueryClient, context: ContentCon
   return queryClient.fetchQuery({
     queryKey: contentQueryKeys.location(context, folderKey),
     queryFn: async ({ signal }) => {
-      const [tree, documents] = await Promise.all([
+      const [tree, page] = await Promise.all([
         getContentFolderTree(queryClient, context),
-        listContentDocumentsAtLocation(folderKey, signal, context),
+        listContentDocumentPage(folderKey, signal, context),
       ]);
-      return { folders: contentFolderChildren(tree, folderKey), documents };
+      return { folders: contentFolderChildren(tree, folderKey), documents: page.documents, documentCursor: page.cursor };
     },
+    staleTime: 30_000,
   });
 }
 

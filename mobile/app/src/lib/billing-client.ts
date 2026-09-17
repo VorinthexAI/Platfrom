@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { apiClient } from "./api-client";
+import { INSUFFICIENT_BALANCE_CODE, isSparkFundingError, observeDomainError, OUTSTANDING_DEBT_CODE } from "./domain-error-observer";
 
 const boundedKeySchema = z.string().trim().min(1).max(200);
 const dottedSlugSchema = z.string().max(200).regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)+$/);
@@ -79,6 +80,18 @@ export async function setSubscriptionCancellation(cancelAtPeriodEnd: boolean): P
   const subscription = subscriptionEnvelopeSchema.parse(response.data).data;
   if (!subscription) throw new Error("Subscription update returned no subscription.");
   return subscription;
+}
+
+export const IMAGE_GENERATE_MICRO_SPARKS = 10_000_000;
+
+export async function ensureSparkCapacity(requiredMicroSparks = 1) {
+  try {
+    const billing = await fetchBillingSummary();
+    if (billing.spendingBlocked) throw observeDomainError(Object.assign(new Error("billing.outstandingDebt"), { code: OUTSTANDING_DEBT_CODE }));
+    if (billing.microSparkBalance < Math.max(1, requiredMicroSparks)) throw observeDomainError(Object.assign(new Error("billing.insufficientBalance"), { code: INSUFFICIENT_BALANCE_CODE }));
+  } catch (error) {
+    if (isSparkFundingError(error)) throw error;
+  }
 }
 
 export function wholeSparks(microSparkBalance: number) {

@@ -252,7 +252,7 @@ const parseState = (value: unknown) => conversationArchiveStateSchema.parse(with
 
 export function createConversationArchiveProjectionRepository(database: ArchiveDatabase = db as unknown as ArchiveDatabase, transaction?: ArchiveTransaction): ConversationArchiveProjectionRepository {
   const transact = transaction ?? (database === db as unknown as ArchiveDatabase
-    ? (operation) => withTransaction({ read: ['conversations', 'conversationMessages'], write: [CONVERSATION_ARCHIVE_STATES_COLLECTION, 'folders', 'documents'] }, (trx) => operation(trx as unknown as ArchiveDatabase))
+    ? (operation) => withTransaction({ read: ['conversations', 'conversationMessages'], write: [CONVERSATION_ARCHIVE_STATES_COLLECTION, 'folders', 'documents'], exclusive: [] }, (trx) => operation(trx as unknown as ArchiveDatabase))
     : (operation) => operation(database));
   const binding = (alias: string) => `${alias}.conversationKey == @conversationKey && ${alias}.teamKey == @teamKey && ${alias}.scopeKey == @scopeKey && ${alias}.userKey == @userKey && ${alias}.actorKey == @actorKey`;
   const ownerBindings = ({ conversationKey, teamKey, scopeKey, userKey, actorKey }: ConversationArchiveOwner) => ({ conversationKey, teamKey, scopeKey, userKey, actorKey });
@@ -292,18 +292,17 @@ export function createConversationArchiveProjectionRepository(database: ArchiveD
     },
     async deleteMissingSource(owner, desiredRevision) {
       const input = ownerSchema.parse(owner);
-      return transact(async (executor) => {
-        const state = await (await executor.query(`FOR value IN @@states FILTER value.desiredRevision == @desiredRevision && ${binding('value')} LIMIT 1 RETURN value`, { '@states': CONVERSATION_ARCHIVE_STATES_COLLECTION, ...input, desiredRevision })).next();
-        if (!state) return 'stale';
-        const source = await (await executor.query('FOR value IN @@conversations FILTER value._key == @conversationKey && value.teamKey == @teamKey && value.scopeKey == @scopeKey && value.userKey == @userKey LIMIT 1 RETURN true', { '@conversations': 'conversations', ...conversationBindings(input) })).next();
-        if (source) return 'stale';
-        const keys = conversationArchiveKeys(input);
-        await executor.query('FOR value IN documents FILTER value.privateOwnerUserKey == @userKey && ((value.folderKey IN @folderKeys && value.managedPurpose IN ["conversation-message", "conversation-summary"]) || value._key == @summaryKey) REMOVE value IN documents', { userKey: input.userKey, folderKeys: [keys.conversationFolderKey, keys.summariesFolderKey], summaryKey: keys.summaryDocumentKey });
-        await executor.query('FOR value IN folders FILTER value._key IN @keys && value.privateOwnerUserKey == @userKey && value.managedPurpose IN ["conversation", "conversation-summaries"] REMOVE value IN folders', { keys: [keys.summariesFolderKey, keys.conversationFolderKey], userKey: input.userKey });
-        await executor.query('LET root = DOCUMENT("folders", @rootFolderKey) FILTER root != null && root.scopeKey == @scopeKey && root.privateOwnerUserKey == @userKey && root.managedPurpose == "conversation-root" && root.managedOwnerKey == @userKey LET remaining = FIRST(FOR folder IN folders FILTER folder.parentFolderKey == root._key && folder.scopeKey == @scopeKey && folder.privateOwnerUserKey == @userKey && folder.managedPurpose == "conversation" LIMIT 1 RETURN true) FILTER remaining == null REMOVE root IN folders', { rootFolderKey: keys.rootFolderKey, scopeKey: input.scopeKey, userKey: input.userKey });
-        await executor.query('REMOVE @key IN @@states', { '@states': CONVERSATION_ARCHIVE_STATES_COLLECTION, key: (state as Record<string, unknown>)._key });
-        return 'deleted';
-      });
+      const state = await (await database.query(`FOR value IN @@states FILTER value.desiredRevision == @desiredRevision && ${binding('value')} LIMIT 1 RETURN value`, { '@states': CONVERSATION_ARCHIVE_STATES_COLLECTION, ...input, desiredRevision })).next();
+      if (!state) return 'stale';
+      const source = await (await database.query('FOR value IN @@conversations FILTER value._key == @conversationKey && value.teamKey == @teamKey && value.scopeKey == @scopeKey && value.userKey == @userKey LIMIT 1 RETURN true', { '@conversations': 'conversations', ...conversationBindings(input) })).next();
+      if (source) return 'stale';
+      const keys = conversationArchiveKeys(input);
+      await database.query('FOR document IN documents FILTER document.scopeKey == @scopeKey && document.privateOwnerUserKey == @userKey && document.folderKey IN @folderKeys && document.managedPurpose IN ["conversation-message", "conversation-summary"] REMOVE document IN documents', { scopeKey: input.scopeKey, userKey: input.userKey, folderKeys: [keys.conversationFolderKey, keys.summariesFolderKey] });
+      await database.query('LET summary = DOCUMENT(documents, @summaryKey) FILTER summary != null && summary.privateOwnerUserKey == @userKey && summary.managedPurpose == "conversation-summary" REMOVE summary IN documents', { userKey: input.userKey, summaryKey: keys.summaryDocumentKey });
+      await database.query('FOR folderKey IN @keys LET folder = DOCUMENT(folders, folderKey) FILTER folder != null && folder.privateOwnerUserKey == @userKey && folder.managedPurpose IN ["conversation", "conversation-summaries"] REMOVE folder IN folders', { keys: [keys.summariesFolderKey, keys.conversationFolderKey], userKey: input.userKey });
+      await database.query('LET root = DOCUMENT(folders, @rootFolderKey) FILTER root != null && root.scopeKey == @scopeKey && root.privateOwnerUserKey == @userKey && root.managedPurpose == "conversation-root" && root.managedOwnerKey == @userKey LET remaining = FIRST(FOR folder IN folders FILTER folder.parentFolderKey == root._key && folder.scopeKey == @scopeKey && folder.privateOwnerUserKey == @userKey && folder.managedPurpose == "conversation" LIMIT 1 RETURN 1) FILTER remaining == null REMOVE root IN folders', { rootFolderKey: keys.rootFolderKey, scopeKey: input.scopeKey, userKey: input.userKey });
+      await database.query('REMOVE @key IN @@states', { '@states': CONVERSATION_ARCHIVE_STATES_COLLECTION, key: (state as Record<string, unknown>)._key });
+      return 'deleted';
     },
     async listPending(limit = 1_000) {
       const bounded = z.number().int().min(1).max(10_000).parse(limit);

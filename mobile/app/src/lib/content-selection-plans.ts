@@ -110,7 +110,7 @@ export function planContentSelectionCopy(selection: ContentSelection, targetScop
   });
   if (documentOperations.length) calls.push({
     tool: "document.copy",
-    input: { copies: documentOperations.map(({ key: documentKey, destinationFolderKey }) => ({ documentKey, targetScopeKey, ...(destinationFolderKey ? { targetFolderKey: destinationFolderKey } : {}), includeVersions: false, includeShares: false })), atomic: false, idempotencyKey: operationKey(idempotencyKey, "document.copy") },
+    input: { copies: documentOperations.map(({ key: documentKey, destinationFolderKey }) => ({ documentKey, targetScopeKey, ...(destinationFolderKey ? { targetFolderKey: destinationFolderKey } : {}), includeVersions: false })), atomic: false, idempotencyKey: operationKey(idempotencyKey, "document.copy") },
     operations: documentOperations,
   });
   return plan(calls);

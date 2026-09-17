@@ -53,6 +53,9 @@ on the same domain services. Exact counts and sums must come from canonical tota
 exhaustive cursor pagination, never from a truncated result page. Selected-inbox
 message and draft queries require an authorized connector selector. Document
 summaries requested through `app.search` are bounded, non-persisting previews.
+For location-scoped root views, `filters.rootOnly: true` restricts folders,
+documents, and files to direct root items before ranking and result limits.
+It is mutually exclusive with `folderKey` and `includeDescendants`.
 Only explicitly registered additive public fields may be summed. The model must
 never aggregate arbitrary fields or bounded search/list examples.
 Specialized tools remain separate for similarity and duplicate detection,

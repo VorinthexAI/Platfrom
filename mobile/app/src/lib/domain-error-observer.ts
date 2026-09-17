@@ -1,6 +1,11 @@
 export const INSUFFICIENT_BALANCE_CODE = "INSUFFICIENT_BALANCE";
 export const OUTSTANDING_DEBT_CODE = "OUTSTANDING_DEBT";
 
+export const SPARK_FUNDING_COPY = {
+  [INSUFFICIENT_BALANCE_CODE]: { title: "Not enough Sparks", description: "You need more Sparks to continue." },
+  [OUTSTANDING_DEBT_CODE]: { title: "Spark spending paused", description: "Add Sparks to clear your outstanding balance and continue." },
+} as const;
+
 type DomainErrorListener = (error: unknown) => void;
 const listeners = new Set<DomainErrorListener>();
 const observedErrors = new WeakSet<object>();
@@ -25,8 +30,18 @@ export function isInsufficientBalanceError(value: unknown) {
 }
 
 export function isSparkFundingError(value: unknown) {
+  return sparkFundingUserCopy(value) !== undefined;
+}
+
+export function sparkFundingUserCopy(value: unknown) {
   const code = extractDomainErrorCode(value);
-  return code === INSUFFICIENT_BALANCE_CODE || code === OUTSTANDING_DEBT_CODE;
+  if (code === OUTSTANDING_DEBT_CODE) return SPARK_FUNDING_COPY[OUTSTANDING_DEBT_CODE];
+  if (code === INSUFFICIENT_BALANCE_CODE) return SPARK_FUNDING_COPY[INSUFFICIENT_BALANCE_CODE];
+  const root = record(value);
+  const message = responseErrorMessage(record(root?.response)?.data ?? value)
+    ?? (value instanceof Error ? value.message : undefined);
+  if (message === "billing.outstandingDebt") return SPARK_FUNDING_COPY[OUTSTANDING_DEBT_CODE];
+  if (message === "billing.insufficientBalance") return SPARK_FUNDING_COPY[INSUFFICIENT_BALANCE_CODE];
 }
 
 function responseErrorMessage(payload: unknown) {
@@ -38,6 +53,8 @@ function responseErrorMessage(payload: unknown) {
 }
 
 export function extractDomainErrorMessage(value: unknown): string | undefined {
+  const funding = sparkFundingUserCopy(value);
+  if (funding) return funding.description;
   const root = record(value);
   const response = record(root?.response);
   return responseErrorMessage(response?.data ?? value)

@@ -211,7 +211,7 @@ After SEO-affecting changes, verify `/llms.txt`, `/llms-full.txt`,
 ## Conventions
 
 - Keep changes scoped and match the surrounding code style.
-- Add or update tests for behavior changes.
+- Add or update tests for behavior changes. Do not add tests under `mobile/app`; mobile relies on typecheck (`bun run mobile:typecheck`), not a test suite.
 - Never use current or future product names as code identifiers or API route
   segments (including function, class, variable, module, and endpoint names).
   Name code after its domain behavior or capability instead; for example, do

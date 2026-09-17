@@ -471,6 +471,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const [draftSearchResults, setDraftSearchResults] = useState<{ connectorKey: string; query: string; tagKeys: string; drafts: EmailDraft[] }>();
   const [draftSearching, setDraftSearching] = useState(false);
   const [draftSearchError, setDraftSearchError] = useState<string>();
+  const [draftSearchRevision, setDraftSearchRevision] = useState(0);
   const [draftPages, setDraftPages] = useState<{ drafts: EmailDraft[]; nextCursor: string | null }>({ drafts: [], nextCursor: null });
   const loadingMoreDrafts = useRef(false);
   const draftPageGeneration = useRef(0);
@@ -1568,7 +1569,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const controller = new AbortController();
     const timeout = setTimeout(() => { void searchLatest(next, false, controller.signal); }, next ? 300 : 0);
     return () => { clearTimeout(timeout); controller.abort(); };
-  }, [emailContext.teamKey, emailContext.scopeKey, initialConnectorKey, inboxTab, query, selectedTagKey, selectedTagKeys]);
+  }, [emailContext.teamKey, emailContext.scopeKey, initialConnectorKey, inboxTab, query, selectedTagKey, selectedTagKeys, draftSearchRevision]);
   async function loadMore() {
     const cursor = overview?.nextCursor;
     if (!cursor || loadingMore.current || loadingOverview.current || loading || loadError) return;
@@ -3376,7 +3377,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
             scrollEventThrottle={120}
             showsVerticalScrollIndicator={false}
           >
-            {inboxTab === "drafts" ? draftsQuery.isPending || draftSearching || Boolean((normalizedInboxSearch || selectedTagKeys.length) && !activeDraftSearchResults) ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading drafts" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : visibleInboxDrafts.map((saved) => <Button accessibilityLabel={`${saved.variant === "new" ? saved.subject : "Reply"}, to ${saved.to.join(", ")}`} contentMode="raw" key={saved.key} onPress={() => openInboxDraft(saved)} shape="pill" size="sm" style={styles.threadCard} variant="secondary"><MailIcon size="sm" /><View style={styles.threadBody}><Text numberOfLines={1} style={styles.subject}>{saved.variant === "new" ? saved.subject : "Reply"}</Text><Text numberOfLines={1} style={styles.rowSubtitle}>To: {saved.to.join(", ")}</Text></View></Button>) : loading || inboxQueryPending || initialSyncPending ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading inbox messages" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : overview?.threads.map((thread) => (
+            {inboxTab === "drafts" ? draftSearchError ? <Button onPress={() => setDraftSearchRevision((value) => value + 1)} size="md" variant="secondary">Retry search</Button> : draftsQuery.isPending || draftSearching || Boolean((normalizedInboxSearch || selectedTagKeys.length) && !activeDraftSearchResults) ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading drafts" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : visibleInboxDrafts.map((saved) => <Button accessibilityLabel={`${saved.variant === "new" ? saved.subject : "Reply"}, to ${saved.to.join(", ")}`} contentMode="raw" key={saved.key} onPress={() => openInboxDraft(saved)} shape="pill" size="sm" style={styles.threadCard} variant="secondary"><MailIcon size="sm" /><View style={styles.threadBody}><Text numberOfLines={1} style={styles.subject}>{saved.variant === "new" ? saved.subject : "Reply"}</Text><Text numberOfLines={1} style={styles.rowSubtitle}>To: {saved.to.join(", ")}</Text></View></Button>) : loading || inboxQueryPending || initialSyncPending ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading inbox messages" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : overview?.threads.map((thread) => (
               <Button
                 accessibilityActions={[{ name: "longpress", label: selectedThreads.some(({ key }) => key === thread.key) ? `Deselect ${thread.subject}` : `Select ${thread.subject}` }]}
                 accessibilityLabel={`${!thread.isRead ? "Unread, " : ""}${shortAddress(thread.latestFrom)}, ${thread.subject}`}

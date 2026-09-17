@@ -19,6 +19,7 @@ export type FileViewerProps = {
   onEdit?: () => void;
   onHistory?: () => void;
   onMenu: () => void;
+  onTitlePress?: () => void;
   onRenderError?: (message: string) => void;
   htmlUri?: string;
   pdfUri?: string;
@@ -33,9 +34,9 @@ export function FileViewer({ error, htmlUri, loading = false, onAi, onBack, onEd
       <Button accessibilityLabel={`Manage ${title}`} contentMode="raw" onPress={onMenu} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
     </View>
     {onEdit || onAi || onHistory ? <View style={styles.headerActions}>
-      {onEdit ? <Button accessibilityLabel="Edit extracted text" contentMode="raw" onPress={onEdit} size="sm" variant="icon"><EditIcon size="sm" /></Button> : null}
-      {onAi ? <Button accessibilityLabel="AI document actions" contentMode="raw" onPress={onAi} size="sm" variant="icon"><BrainIcon size="sm" /></Button> : null}
-      {onHistory ? <Button accessibilityLabel="Document and audio versions" contentMode="raw" onPress={onHistory} size="sm" variant="icon"><ClockIcon size="sm" /></Button> : null}
+      {onEdit ? <Button accessibilityLabel="Edit extracted text" contentMode="raw" onPress={onEdit} size="xs" variant="icon"><EditIcon size="sm" /></Button> : null}
+      {onAi ? <Button accessibilityLabel="AI document actions" contentMode="raw" onPress={onAi} size="xs" variant="icon"><BrainIcon size="sm" /></Button> : null}
+      {onHistory ? <Button accessibilityLabel="Document and audio versions" contentMode="raw" onPress={onHistory} size="xs" variant="icon"><ClockIcon size="sm" /></Button> : null}
     </View> : null}
     <View style={styles.documentArea}>
       {loading ? <Skeleton accessibilityLabel={`Loading ${title}`} accessibilityRole="progressbar" style={styles.loadingSkeleton} />
@@ -48,8 +49,8 @@ export function FileViewer({ error, htmlUri, loading = false, onAi, onBack, onEd
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, minWidth: 0, gap: spacing.sm, paddingHorizontal: spacing.md, paddingTop: spacing.md, backgroundColor: colors.page },
-  header: { minHeight: 48, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  root: { flex: 1, minWidth: 0, gap: spacing.md, paddingHorizontal: spacing.md, paddingTop: spacing.md, backgroundColor: colors.page },
+  header: { minHeight: 48, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 },
   headerTitle: { flex: 1, minWidth: 0, color: colors.text, fontFamily: "Geist_500Medium", fontSize: 24 },
   headerActions: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: spacing.xs },
   documentArea: { flex: 1, minWidth: 0, minHeight: 0, borderRadius: radii.xl, borderColor: colors.hairline, borderWidth: 1, overflow: "hidden", backgroundColor: colors.page },

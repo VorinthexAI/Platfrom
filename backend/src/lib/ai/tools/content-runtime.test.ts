@@ -150,6 +150,11 @@ describe('Content runtime', () => {
     expect(stored.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
     expect(first.document.sourceImageCount).toBe(2);
     expect(first.document.originalAvailable).toBe(false);
+    expect(first.document.currentVersionKey).toBeDefined();
+    expect(f.versions.size).toBe(1);
+    expect([...f.versions.values()][0]).toMatchObject({ label: 'Original', content: stored.content, documentKey: first.document.key });
+    expect(replay.document.currentVersionKey).toBe(first.document.currentVersionKey);
+    expect(f.versions.size).toBe(1);
     const sources = await runContentTool('document.find', { documentKeys: [first.document.key], include: ['sourceImages'] }, f.context, dependencies);
     expect(sources.results[0]).toMatchObject({ success: true, data: { document: { sourceImageCount: 2, sourceImages: [
       { page: 1, url: 'https://images.example/scan/page-01.jpg' },
@@ -329,9 +334,12 @@ describe('Content runtime', () => {
 
     const versioned = await runContentTool('document.create-version', { documentKeys: [rootKey], contents: { [rootKey]: 'Generated version' }, types: { [rootKey]: 'enhancement' } }, f.context, { repository: f.repository, embed: async () => embedding });
     expect(versioned.results[0]?.success).toBe(true);
-    expect([...f.versions.values()].at(-1)?.content).toBe('Generated version');
-    expect([...f.versions.values()].at(-1)?.type).toBe('enhancement');
-    expect(f.documents.get(rootKey).currentVersionKey).toBeUndefined();
+    const history = [...f.versions.values()].sort((left, right) => left.version - right.version);
+    expect(history).toHaveLength(2);
+    expect(history[0]).toMatchObject({ content: 'Root content' });
+    expect(history[1]).toMatchObject({ content: 'Generated version', type: 'enhancement' });
+    expect(f.documents.get(rootKey).currentVersionKey).toBe(history[0]?.key);
+    expect(f.documents.get(rootKey).currentVersionKey).not.toBe(versioned.results[0]?.data?.version.key);
 
     const currentVersion = await runContentTool('document.create-version', { documentKeys: [rootKey] }, f.context, { repository: f.repository, embed: async () => embedding });
     expect(f.documents.get(rootKey).currentVersionKey).toBe(currentVersion.results[0]?.data?.version.key);
@@ -465,19 +473,54 @@ describe('Content runtime', () => {
     expect(f.documents.get(documentKey)).not.toHaveProperty('html');
   });
 
-  test('creates and autosaves live documents without versions', async () => {
+  test('creates and autosaves live documents with one original version', async () => {
     const f = fixture('moderator');
     const dependencies = { repository: f.repository, embed: async () => embedding, ingestion: { embeddingDimensions: EMBEDDING_DIMENSIONS } };
     const created = await runContentTool('document.create', { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Plan', content: 'Initial plan' }, f.context, dependencies);
     expect(created.document.name).toBe('Plan');
-    expect(f.versions.size).toBe(0);
+    expect(created.document.currentVersionKey).toBeDefined();
+    expect(f.versions.size).toBe(1);
+    expect([...f.versions.values()][0]).toMatchObject({ label: 'Original', content: 'Initial plan', documentKey: created.document.key });
     const autosaved = await runContentTool('document.update', { updates: [{ documentKey: created.document.key, content: 'Autosaved plan', createVersion: false, expectedUpdatedAt: created.document.updatedAt }] }, f.context, dependencies);
-    expect(f.versions.size).toBe(0);
+    expect(f.versions.size).toBe(1);
     const autosavedAt = autosaved.results[0]?.data?.document.updatedAt;
     expect(autosavedAt).toBeDefined();
     expect(Date.parse(autosavedAt!)).toBeGreaterThan(Date.parse(created.document.updatedAt));
     const conflict = await runContentTool('document.update', { updates: [{ documentKey: created.document.key, content: 'Stale save', expectedUpdatedAt: created.document.updatedAt }] }, f.context, dependencies);
     expect(conflict.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_VERSION_CONFLICT' } });
+  });
+
+  test('keeps the original version restorable after generated enhance and translate versions', async () => {
+    const f = fixture('moderator');
+    const dependencies = { repository: f.repository, embed: async () => embedding, ingestion: { embeddingDimensions: EMBEDDING_DIMENSIONS } };
+    const created = await runContentTool('document.create', { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Plan', content: 'Initial plan' }, f.context, dependencies);
+    const originalKey = created.document.currentVersionKey;
+    expect(originalKey).toBeDefined();
+    const translated = await runContentTool('document.create-version', { documentKeys: [created.document.key], labels: { [created.document.key]: 'French translation' }, contents: { [created.document.key]: 'Plan traduit' }, types: { [created.document.key]: 'translation' } }, f.context, dependencies);
+    const translatedKey = translated.results[0]?.data?.version.key;
+    expect(translated.results[0]?.success).toBe(true);
+    expect(f.versions.size).toBe(2);
+    expect(f.documents.get(created.document.key).currentVersionKey).toBe(originalKey);
+    expect(f.documents.get(created.document.key).content).toBe('Initial plan');
+
+    await runContentTool('document.restore-version', { restores: [{ documentKey: created.document.key, versionKey: translatedKey, createBackupVersion: false }] }, f.context, dependencies);
+    expect(f.documents.get(created.document.key).content).toBe('Plan traduit');
+    expect(f.versions.size).toBe(2);
+
+    await runContentTool('document.restore-version', { restores: [{ documentKey: created.document.key, versionKey: originalKey, createBackupVersion: false }] }, f.context, dependencies);
+    expect(f.documents.get(created.document.key).content).toBe('Initial plan');
+
+    const autosaved = await runContentTool('document.update', { updates: [{ documentKey: created.document.key, content: 'Edited plan', createVersion: false, expectedUpdatedAt: f.documents.get(created.document.key).updatedAt }] }, f.context, dependencies);
+    expect(autosaved.results[0]?.success).toBe(true);
+    const enhanced = await runContentTool('document.create-version', { documentKeys: [created.document.key], labels: { [created.document.key]: 'Enhanced version' }, contents: { [created.document.key]: 'Edited plan, enhanced' }, types: { [created.document.key]: 'enhancement' } }, f.context, dependencies);
+    expect(enhanced.results[0]?.success).toBe(true);
+    const history = [...f.versions.values()].sort((left, right) => left.version - right.version);
+    expect(history.map((version) => version.content)).toEqual(['Initial plan', 'Plan traduit', 'Edited plan', 'Edited plan, enhanced']);
+    await runContentTool('document.restore-version', { restores: [{ documentKey: created.document.key, versionKey: enhanced.results[0]?.data?.version.key, createBackupVersion: false }] }, f.context, dependencies);
+    expect(f.documents.get(created.document.key).content).toBe('Edited plan, enhanced');
+    const editedSnapshot = history.find((version) => version.content === 'Edited plan');
+    await runContentTool('document.restore-version', { restores: [{ documentKey: created.document.key, versionKey: editedSnapshot?.key, createBackupVersion: false }] }, f.context, dependencies);
+    expect(f.documents.get(created.document.key).content).toBe('Edited plan');
   });
 
   test('routes Archive generation and embeddings through registered actions', async () => {
@@ -734,6 +777,70 @@ describe('Content runtime', () => {
     expect(differentRange.cached).toBe(false);
     expect(differentRange.documents.map((document) => document.documentKey)).toContain(oldDocumentKey);
     expect(differentRange.folders.map((folder) => folder.key)).toContain(oldFolderKey);
+  });
+
+  test('root-only search excludes nested lexical and semantic matches and separates cached scope results', async () => {
+    const f = fixture('viewer');
+    const childKey = newId();
+    f.folders.set(childKey, { ...f.folders.get(f.folderKey), key: childKey, parentFolderKey: f.folderKey, name: 'Launch nested folder' });
+    const nestedKey = f.addDocument('Launch nested file');
+    const rootNoteKey = f.addDocument('Launch root note');
+    const rootFileKey = f.addDocument('Launch root file');
+    delete f.documents.get(rootNoteKey).folderKey;
+    delete f.documents.get(rootNoteKey).extension;
+    delete f.documents.get(rootFileKey).folderKey;
+    let cachedOutput: unknown;
+    const dependencies: any = {
+      repository: f.repository, queryEmbedding: embedding,
+      searchQueries: { async get() { return cachedOutput ? { output: cachedOutput } : null; }, async record(input: any) { cachedOutput = input.output; } },
+      runAction: async () => ({ text: 'Relevant launch content' }),
+    };
+    for (const includeSummaries of [false, true]) {
+      const input = { scopeKey: f.scopeKey, query: 'Launch', includeSummaries, minimumScore: -1, recordHistory: false };
+      const global = await runContentTool('content.search', input, f.context, dependencies);
+      expect(global.documents.map(({ documentKey }) => documentKey)).toContain(nestedKey);
+      const root = await runContentTool('content.search', { ...input, rootOnly: true }, f.context, dependencies);
+      expect(root.cached).toBe(false);
+      expect(root.folders.map(({ key }) => key)).toEqual([f.folderKey]);
+      expect(root.documents.map(({ documentKey }) => documentKey).sort()).toEqual([rootNoteKey, rootFileKey].sort());
+      const replay = await runContentTool('content.search', { ...input, rootOnly: true }, f.context, dependencies);
+      expect(replay.cached).toBe(true);
+      expect(replay.documents).toEqual(root.documents);
+      const globalAgain = await runContentTool('content.search', input, f.context, dependencies);
+      expect(globalAgain.cached).toBe(false);
+      expect(globalAgain.documents.map(({ documentKey }) => documentKey)).toContain(nestedKey);
+    }
+    await expect(runContentTool('content.search', { scopeKey: newId(), query: 'Launch', rootOnly: true }, f.context, dependencies)).rejects.toThrow('Scope was not found in this team.');
+    await expect(runContentTool('content.search', { scopeKey: f.scopeKey, query: 'Launch', rootOnly: true, folderKey: f.folderKey }, f.context, dependencies)).rejects.toThrow();
+    f.repository.allowedScopeKeys = async () => [];
+    await expect(runContentTool('content.search', { scopeKey: f.scopeKey, query: 'Launch', rootOnly: true }, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
+  });
+
+  test('root candidate restrictions reach semantic repositories before their limits', async () => {
+    const f = fixture('viewer');
+    const nestedKey = f.addDocument('Nested');
+    const rootKey = f.addDocument('Root');
+    delete f.documents.get(rootKey).folderKey;
+    let documentCalls = 0;
+    f.repository.semanticSearch = async (input) => {
+      documentCalls += 1;
+      expect(input.documentKeys).toEqual([rootKey]);
+      return [nestedKey, rootKey].filter((key) => input.documentKeys?.includes(key)).slice(0, input.limit).map((key) => ({ document: f.documents.get(key), score: 0.9 }));
+    };
+    f.repository.semanticSearchFolders = async (input) => {
+      expect(input.folderKeys).toEqual([f.folderKey]);
+      return [{ folder: f.folders.get(f.folderKey), score: 0.9 }];
+    };
+    const dependencies: any = { repository: f.repository, queryEmbedding: embedding, searchQueries: { async get() { return null; }, async record() {} }, runAction: async () => ({ text: 'Summary' }) };
+    for (const includeSummaries of [false, true]) {
+      const result = await runContentTool('content.search', { scopeKey: f.scopeKey, query: 'semantic discovery', rootOnly: true, includeSummaries, minimumScore: -1, limit: 1, recordHistory: false }, f.context, dependencies);
+      expect(result.documents).toMatchObject([{ documentKey: rootKey, score: 0.9 }]);
+    }
+    expect(documentCalls).toBe(2);
+    f.documents.delete(rootKey);
+    const empty = await runContentTool('content.search', { scopeKey: f.scopeKey, query: 'semantic discovery', rootOnly: true, includeSummaries: false, minimumScore: -1, recordHistory: false }, f.context, dependencies);
+    expect(empty.documents).toEqual([]);
+    expect(documentCalls).toBe(2);
   });
 
   test('semantically enriches exact lexical matches when the caller disables the cutoff', async () => {
@@ -1357,7 +1464,11 @@ describe('Content runtime', () => {
     const scanned = await runContentTool('document.parse', { scopeKey: f.scopeKey, folderKey: f.folderKey, pages: [{ filename: 'page.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }] }, f.context, dependencies);
 
     expect(child.results[0]).toMatchObject({ success: true, data: { folder: { parentFolderKey: f.folderKey, managed: false } } });
-    for (const document of [created.document, uploaded.document, scanned.document]) expect(document).toMatchObject({ folderKey: f.folderKey, managed: false });
+    for (const document of [created.document, uploaded.document, scanned.document]) {
+      expect(document).toMatchObject({ folderKey: f.folderKey, managed: false });
+      expect(document.currentVersionKey).toBeDefined();
+    }
+    expect([...f.versions.values()].filter((version) => version.label === 'Original')).toHaveLength(3);
 
     const userFolderKey = newId();
     f.folders.set(userFolderKey, { key: userFolderKey, scopeKey: f.scopeKey, name: 'User content', embedding, isFavorite: false, createdAt: now, updatedAt: now });
@@ -1761,9 +1872,9 @@ describe('Content runtime', () => {
       async fail() {},
       async release() {},
     };
-    await runContentTool('document.parse', { file, scopeKey: f.scopeKey, folderKey: f.folderKey, idempotencyKey: 'caller-key' }, f.context, { repository: f.repository, parseDocument, idempotency: ledger });
+    await runContentTool('document.parse', { file, scopeKey: f.scopeKey, folderKey: f.folderKey, idempotencyKey: 'caller-key' }, f.context, { repository: f.repository, parseDocument, idempotency: ledger, embed: async () => embedding });
     const otherActor = { ...f.context, principal: { ...f.context.principal, user: { key: newId() } } };
-    await runContentTool('document.parse', { file, scopeKey: f.scopeKey, folderKey: f.folderKey, idempotencyKey: 'caller-key' }, otherActor, { repository: f.repository, parseDocument, idempotency: ledger });
+    await runContentTool('document.parse', { file, scopeKey: f.scopeKey, folderKey: f.folderKey, idempotencyKey: 'caller-key' }, otherActor, { repository: f.repository, parseDocument, idempotency: ledger, embed: async () => embedding });
     expect(seen).toHaveLength(2);
     expect(seen[0]).not.toBe(seen[1]);
     expect(seen.every((key) => key !== 'caller-key')).toBe(true);

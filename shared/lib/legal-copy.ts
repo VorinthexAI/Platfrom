@@ -10,8 +10,11 @@ export interface VaultCopy {
   email?: string;
 }
 
+export const LEGAL_EFFECTIVE_DATE = "Effective 16 Sept 2026";
+
 export const PRIVACY_COPY: VaultCopy = {
   title: "Privacy Policy",
+  eyebrow: LEGAL_EFFECTIVE_DATE,
   paragraphs: [
     "This policy explains how Vorinthex AI handles personal data across its website, apps, and services.",
   ],
@@ -87,6 +90,7 @@ export const PRIVACY_COPY: VaultCopy = {
 
 export const TERMS_COPY: VaultCopy = {
   title: "Terms",
+  eyebrow: LEGAL_EFFECTIVE_DATE,
   paragraphs: [
     "These terms govern your use of the Vorinthex AI website, apps, and services.",
     "Additional or updated terms may apply to specific Vorinthex apps, services, or AI-assisted features. When using an AI-assisted feature, you remain responsible for reviewing outputs before relying on them for important decisions.",

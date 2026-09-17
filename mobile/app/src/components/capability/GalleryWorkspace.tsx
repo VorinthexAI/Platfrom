@@ -81,6 +81,7 @@ import { subscribeAppEvent } from "@/lib/app-events";
 import { saveUrlDownload } from "@/lib/device-download";
 import { GalleryRefreshCoalescer, bindPersistedGalleryGridKeys, galleryPersistedGridKey, galleryRefreshPlan, isCurrentContextGeneration, reconcileGalleryPermissions, reconcileGalleryState, reconcileOptimisticUploads, reconcilePaginatedSelected, reconcileSelected, reconcileUploadJobRegistry, recoverAssistantSearchMode, recoverContextualSearchFailure, replayPaginatedWindow, shouldRunGalleryAssistantTextSearch, type GalleryRefreshFamily, type GalleryRefreshPlan } from "@/lib/gallery-convergence";
 import { addGalleryGenerationPlaceholder, galleryGenerationHistoryQueryKey, prependGeneratedGalleryImages, prependGeneratedGalleryImagesToCache, removeGalleryGenerationPlaceholder, type GalleryGenerationPlaceholder } from "@/lib/gallery-generation-cache";
+import { extractDomainErrorMessage, isSparkFundingError } from "@/lib/domain-error-observer";
 
 type GallerySheet = "rootActions" | "actions" | "destination" | "newCollection" | "image" | "imageActions" | "imageEdit" | "confirmDeleteImage" | "collectionMenu" | "collectionEdit" | "confirmDeleteCollection" | "similar" | "duplicates" | "confirmDeleteDuplicates" | "cleanupMenu" | "cleanup" | "confirmCleanupDelete" | "visualIdentities" | "confirmDeleteIdentity" | "identityPicker" | "identityName" | "identityPickerFilter" | "transferDestination" | "filter" | "searchHistory" | "bulkActions" | "bulkDelete";
 type ImagePickerPurpose = "identity" | "cover";
@@ -124,7 +125,7 @@ const CORE_PROMPTS = [
 ] as const;
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Gallery could not complete that request.";
+  return extractDomainErrorMessage(error) ?? (error instanceof Error ? error.message : "Gallery could not complete that request.");
 }
 
 export function GalleryWorkspace({ initialAction, initialCollectionKey, initialImageKey, initialSearchQuery, returnSignalConnectorKey, returnSignalMessageKey, returnSignalThreadKey, returnTripKey, returnTripName }: { initialAction?: "create" | "create-collection"; initialCollectionKey?: string; initialImageKey?: string; initialSearchQuery?: string; returnSignalConnectorKey?: string; returnSignalMessageKey?: string; returnSignalThreadKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
@@ -693,7 +694,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
       await Promise.all([queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overview(galleryContext, input.collectionKey), exact: true }), queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overview(galleryContext), exact: true, refetchType: "none" }), queryClient.invalidateQueries({ queryKey: galleryQueryKeys.collections(galleryContext), exact: true, refetchType: "none" }), queryClient.invalidateQueries({ queryKey: galleryGenerationHistoryQueryKey(galleryContext), exact: true, refetchType: "none" })]);
       if (activeCollectionKey.current === input.collectionKey) void load(activeCollection, true);
     } catch (error) {
-      if (isCurrentContextGeneration(generation, refreshContextGeneration.current)) {
+      if (isCurrentContextGeneration(generation, refreshContextGeneration.current) && !isSparkFundingError(error)) {
         const message = errorMessage(error);
         setStatus(message);
         notify(message);
@@ -3160,7 +3161,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
             </View>
             {activeCollection.access.canContribute ? (
               <View style={styles.intelligenceRow}>
-                <Button accessibilityLabel={`AI actions for ${activeCollection.name}`} contentMode="raw" onPress={() => openSheet("cleanupMenu")} size="sm" variant="icon">
+                <Button accessibilityLabel={`AI actions for ${activeCollection.name}`} contentMode="raw" onPress={() => openSheet("cleanupMenu")} size="xs" variant="icon">
                   <BrainIcon size="sm" />
                 </Button>
               </View>

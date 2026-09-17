@@ -51,6 +51,7 @@ export const conversationRetrievalCollectionSlugSchema = z.enum(["folders", "doc
 export const conversationRetrievalFiltersSchema = z.strictObject({
   folderKey: z.string().cuid().optional(),
   includeDescendants: z.boolean().optional(),
+  rootOnly: z.boolean().optional(),
   collectionKey: z.string().cuid().optional(),
   connectorKey: z.string().cuid().optional(),
   readState: z.enum(["read", "unread"]).optional(),
@@ -261,13 +262,12 @@ const conversationImageTurnResultSchema = z.strictObject({
   replayed: z.boolean(),
 });
 
-export async function enqueueConversationImageTurn(context: ConversationContext, input: { conversationKey: string; prompt: string; requestKey: string }, signal?: AbortSignal) {
-  const parsed = z.strictObject({ conversationKey: z.string().min(1), prompt: z.string().trim().min(1).max(CONVERSATION_IMAGE_PROMPT_MAX_LENGTH), requestKey: z.string().trim().min(1).max(180) }).parse(input);
+export async function enqueueConversationImageTurn(context: ConversationContext, input: { conversationKey: string; prompt: string; requestKey: string; referenceImageKeys?: string[] }, signal?: AbortSignal) {
+  const parsed = z.strictObject({ conversationKey: z.string().min(1), prompt: z.string().trim().min(1).max(CONVERSATION_IMAGE_PROMPT_MAX_LENGTH), requestKey: z.string().trim().min(1).max(180), referenceImageKeys: z.array(z.string().min(1)).max(1).default([]) }).parse(input);
   const { conversationKey, ...turn } = parsed;
   const response = await apiClient.post(`/conversations/${encodeURIComponent(conversationKey)}/image-turns`, {
     ...selectors(context),
     ...turn,
-    referenceImageKeys: [],
     size: "1024x1024",
     quality: "medium",
     mode: "default",

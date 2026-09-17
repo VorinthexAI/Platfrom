@@ -351,10 +351,12 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
     async listDocuments(
       scopeKey: string,
       includePendingDeletion = false,
+      folderKey?: string | null,
     ): Promise<Document[]> {
+      const bound = arguments.length >= 3;
       const cursor = await executor.query(
-        `FOR document IN documents FILTER document.scopeKey == @scopeKey FILTER @includePending || !HAS(document, "_internalDeletion") || document._internalDeletion == null RETURN document`,
-        { scopeKey, includePending: includePendingDeletion },
+        `FOR document IN documents FILTER document.scopeKey == @scopeKey FILTER @includePending || !HAS(document, "_internalDeletion") || document._internalDeletion == null FILTER !@bound || (@folderKey == null ? (!HAS(document, "folderKey") || document.folderKey == null) : document.folderKey == @folderKey) RETURN document`,
+        { scopeKey, includePending: includePendingDeletion, bound, folderKey: folderKey ?? null },
       );
       const values = cursor.all ? await cursor.all() : [];
       return values.map((value) =>

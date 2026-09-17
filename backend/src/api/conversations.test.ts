@@ -63,6 +63,17 @@ describe('conversation HTTP contract', () => {
     expect(list.status).toBe(200); expect(calls.at(-1)).toEqual({ input: { favoriteOnly: true, limit: 10 }, selected: context });
   });
 
+  test('deletes a conversation through the canonical service and publishes invalidation', async () => {
+    const teamKey = 'team', scopeKey = newId(), userKey = newId(), conversationKey = newId(); const calls: unknown[] = []; const published: unknown[] = [];
+    const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const handlers = createConversationHandlers({ getIdentity: async () => ({ identityType: 'user', key: userKey }) as never, authorize: async () => ({ context }), service: { delete: async (...args: unknown[]) => { calls.push(args); return { deletedKey: conversationKey }; } } as any, publishChanged: async (...args: unknown[]) => { published.push(args); } });
+    const app = new Hono(); app.delete('/conversations/:conversationKey', handlers.delete);
+    const response = await app.request(`/conversations/${conversationKey}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey }) });
+    expect(response.status).toBe(200); expect(await response.json()).toEqual({ success: true, data: { deletedKey: conversationKey } });
+    expect(calls).toEqual([[{ conversationKey }, context]]); expect(published).toEqual([[userKey, 'conversation.changed']]);
+    expect((await app.request(`/conversations/${conversationKey}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, userKey }) })).status).toBe(400);
+  });
+
   test('deletes a message turn through the canonical service and publishes invalidation', async () => {
     const teamKey = 'team', scopeKey = newId(), userKey = newId(), conversationKey = newId(), messageKey = newId(); const calls: unknown[] = []; const published: unknown[] = [];
     const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;

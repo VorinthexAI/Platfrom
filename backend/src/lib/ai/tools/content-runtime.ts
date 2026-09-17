@@ -162,6 +162,7 @@ export interface ContentRepository {
   listDocuments(
     scopeKey: string,
     includePendingDeletion?: boolean,
+    folderKey?: string | null,
   ): Promise<Document[]>;
   insertDocument(document: Document): Promise<Document>;
   updateDocument(
@@ -739,8 +740,8 @@ async function productionRepository(): Promise<ContentRepository> {
         throw new Error("Folder was not found for scoped deletion.");
     },
     getDocument: persistence.getDocument,
-    async listDocuments(scopeKey, includePendingDeletion) {
-      return persistence.listDocuments(scopeKey, includePendingDeletion);
+    async listDocuments(scopeKey, includePendingDeletion, folderKey) {
+      return persistence.listDocuments(scopeKey, includePendingDeletion, folderKey);
     },
     insertDocument: persistence.insertDocument,
     async updateDocument(key, patch, options) {
@@ -2002,6 +2003,58 @@ export async function runContentTool<Name extends ContentToolName>(
       semanticChunkCount,
       semanticContentHash,
     };
+  };
+  const versionSemanticsFromDocument = async (source: Document) => {
+    const {
+      embedding,
+      chunkEmbeddings,
+      semanticChunkCount,
+      semanticContentHash,
+    } = await currentDocumentSemantics(source);
+    return {
+      embedding,
+      chunkEmbeddings,
+      semanticChunkCount,
+      semanticContentHash,
+    };
+  };
+  const snapshotOriginalDocumentVersion = async (
+    mutationRepository: ContentRepository,
+    source: Document,
+  ) => {
+    if (source.currentVersionKey || managedDocument(source)) return source;
+    const existing = await mutationRepository.listVersions(source.scopeKey, [
+      source.key,
+    ]);
+    if (existing.length) return source;
+    const version = await mutationRepository.createVersion({
+      scopeKey: source.scopeKey,
+      documentKey: source.key,
+      label: "Original",
+      content: source.content,
+      ...(await versionSemanticsFromDocument(source)),
+    });
+    return mutationRepository.updateDocument(source.key, {
+      currentVersionKey: version.key,
+    });
+  };
+  const ensureLiveContentVersion = async (
+    mutationRepository: ContentRepository,
+    source: Document,
+  ) => {
+    const currentVersion = source.currentVersionKey
+      ? await mutationRepository.getVersion(source.currentVersionKey)
+      : null;
+    if (currentVersion?.content === source.content) return source;
+    const version = await mutationRepository.createVersion({
+      scopeKey: source.scopeKey,
+      documentKey: source.key,
+      content: source.content,
+      ...(await currentVersionSemantics(source, source.name)),
+    });
+    return mutationRepository.updateDocument(source.key, {
+      currentVersionKey: version.key,
+    });
   };
   // Version snapshots already carry aligned semantics, so restoring one should not repeat a model call.
   const restoredVersionSemantics = (
@@ -3507,7 +3560,11 @@ export async function runContentTool<Name extends ContentToolName>(
           );
         },
       });
-      result = { document: documentView(processed.document) };
+      result = {
+        document: documentView(
+          await snapshotOriginalDocumentVersion(repo, processed.document),
+        ),
+      };
     } else if (tool === "document.create") {
       await location(
         input.scopeKey,
@@ -3533,7 +3590,11 @@ export async function runContentTool<Name extends ContentToolName>(
         createdAt: timestamp,
         updatedAt: timestamp,
       });
-      result = { document: documentView(created) };
+      result = {
+        document: documentView(
+          await snapshotOriginalDocumentVersion(repo, created),
+        ),
+      };
     } else if (tool === "document.find") {
       result = await batch(
         tool,
@@ -3590,7 +3651,10 @@ export async function runContentTool<Name extends ContentToolName>(
               ),
             ])
           : undefined;
-      const values = (await repo.listDocuments(input.scopeKey)).filter(
+      const listed = folderKeys
+        ? await repo.listDocuments(input.scopeKey)
+        : await repo.listDocuments(input.scopeKey, false, parent?.key ?? null);
+      const values = listed.filter(
         (item) =>
           archiveVisible(item) &&
           !item._internalDeletion &&
@@ -4378,6 +4442,8 @@ export async function runContentTool<Name extends ContentToolName>(
             );
             forbidManagedDocumentMutation(current, "create-version");
             const content = input.contents?.[key] ?? current.content;
+            if (content !== current.content)
+              await ensureLiveContentVersion(mutationRepository, current);
             const version = await mutationRepository.createVersion({
               scopeKey: current.scopeKey,
               documentKey: key,
@@ -5288,6 +5354,8 @@ export async function runContentTool<Name extends ContentToolName>(
         repo.listFolders(input.scopeKey),
         repo.listDocuments(input.scopeKey),
       ]);
+      const rootFolderKeys = input.rootOnly ? allFolders.filter((item) => !item.parentFolderKey).map((item) => item.key) : undefined;
+      const rootDocumentKeys = input.rootOnly ? allDocuments.filter((item) => !item.folderKey).map((item) => item.key) : undefined;
       const folderDescriptors = new Map(
         allFolders.map((current) => [
           current.key,
@@ -5354,6 +5422,7 @@ export async function runContentTool<Name extends ContentToolName>(
             sourceRevision?: string;
             minimumScore?: number;
             includeSummaries?: boolean;
+            rootOnly?: boolean;
             limit?: number;
             createdFrom?: string;
             createdTo?: string;
@@ -5366,6 +5435,7 @@ export async function runContentTool<Name extends ContentToolName>(
         cachedValue.sourceRevision === sourceRevision &&
         cachedValue.minimumScore === input.minimumScore &&
         cachedValue.includeSummaries === input.includeSummaries &&
+        Boolean(cachedValue.rootOnly) === Boolean(input.rootOnly) &&
         cachedValue.limit === input.limit &&
         cachedValue.createdFrom === input.createdFrom &&
         cachedValue.createdTo === input.createdTo,
@@ -5412,6 +5482,7 @@ export async function runContentTool<Name extends ContentToolName>(
         };
         const activeFolders = [];
         for (const current of allFolders) {
+          if (input.rootOnly && current.parentFolderKey) continue;
           if (folderKeys && !folderKeys.includes(current.key)) continue;
           if (
             !withinCreationDateRange(
@@ -5437,6 +5508,7 @@ export async function runContentTool<Name extends ContentToolName>(
         }
         const activeDocuments = [];
         for (const current of allDocuments) {
+          if (input.rootOnly && current.folderKey) continue;
           if (
             folderKeys &&
             (!current.folderKey || !folderKeys.includes(current.folderKey))
@@ -5485,9 +5557,10 @@ export async function runContentTool<Name extends ContentToolName>(
           if (embeddingTimer) clearTimeout(embeddingTimer);
           if (queryEmbedding) {
             const [documentMatches, folderMatches] = await Promise.all([
-              repo.semanticSearch({
+              rootDocumentKeys?.length === 0 ? [] : repo.semanticSearch({
                 embedding: queryEmbedding,
                 authorizedScopeKeys: [input.scopeKey],
+                ...(rootDocumentKeys ? { documentKeys: rootDocumentKeys } : {}),
                 ...(folderKeys ? { folderKeys } : {}),
                 createdFrom: input.createdFrom,
                 createdTo: input.createdTo,
@@ -5497,6 +5570,7 @@ export async function runContentTool<Name extends ContentToolName>(
               repo.semanticSearchFolders?.({
                 embedding: queryEmbedding,
                 authorizedScopeKeys: [input.scopeKey],
+                ...(rootFolderKeys ? { folderKeys: rootFolderKeys } : {}),
                 ...(folderKeys ? { folderKeys } : {}),
                 createdFrom: input.createdFrom,
                 createdTo: input.createdTo,
@@ -5506,6 +5580,7 @@ export async function runContentTool<Name extends ContentToolName>(
             ]);
             for (const match of folderMatches) {
               if (
+                (input.rootOnly && match.folder.parentFolderKey) ||
                 !archiveVisible(match.folder) ||
                 !withinCreationDateRange(
                   match.folder,
@@ -5534,6 +5609,7 @@ export async function runContentTool<Name extends ContentToolName>(
             }
             for (const match of documentMatches) {
               if (
+                (input.rootOnly && match.document.folderKey) ||
                 !archiveVisible(match.document) ||
                 !withinCreationDateRange(
                   match.document,
@@ -5632,6 +5708,7 @@ export async function runContentTool<Name extends ContentToolName>(
           sourceRevision,
           minimumScore: input.minimumScore,
           includeSummaries: false,
+          rootOnly: Boolean(input.rootOnly),
           limit: input.limit,
           createdFrom: input.createdFrom,
           createdTo: input.createdTo,
@@ -5656,9 +5733,10 @@ export async function runContentTool<Name extends ContentToolName>(
           );
         }
         const [documentMatches, folderMatches] = await Promise.all([
-          repo.semanticSearch({
+          rootDocumentKeys?.length === 0 ? [] : repo.semanticSearch({
             embedding: queryEmbedding,
             authorizedScopeKeys: [input.scopeKey],
+            ...(rootDocumentKeys ? { documentKeys: rootDocumentKeys } : {}),
             ...(folderKeys ? { folderKeys } : {}),
             createdFrom: input.createdFrom,
             createdTo: input.createdTo,
@@ -5668,6 +5746,7 @@ export async function runContentTool<Name extends ContentToolName>(
           repo.semanticSearchFolders?.({
             embedding: queryEmbedding,
             authorizedScopeKeys: [input.scopeKey],
+            ...(rootFolderKeys ? { folderKeys: rootFolderKeys } : {}),
             ...(folderKeys ? { folderKeys } : {}),
             createdFrom: input.createdFrom,
             createdTo: input.createdTo,
@@ -5678,6 +5757,7 @@ export async function runContentTool<Name extends ContentToolName>(
         const folders = [];
         for (const match of folderMatches) {
           if (
+            (input.rootOnly && match.folder.parentFolderKey) ||
             match.score < input.minimumScore ||
             !archiveVisible(match.folder) ||
             !withinCreationDateRange(
@@ -5720,6 +5800,7 @@ export async function runContentTool<Name extends ContentToolName>(
         const selectedDocuments = [];
         for (const match of documentMatches) {
           if (
+            (!input.rootOnly || !match.document.folderKey) &&
             match.score >= input.minimumScore &&
             archiveVisible(match.document) &&
             withinCreationDateRange(
@@ -5824,6 +5905,7 @@ export async function runContentTool<Name extends ContentToolName>(
           sourceRevision,
           minimumScore: input.minimumScore,
           includeSummaries: true,
+          rootOnly: Boolean(input.rootOnly),
           limit: input.limit,
           createdFrom: input.createdFrom,
           createdTo: input.createdTo,
