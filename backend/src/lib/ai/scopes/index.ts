@@ -10,10 +10,13 @@ export {
   scopeSlugSchema,
   scopesEmbedKeys,
   SCOPE_MEMBER_ROLES,
+  SCOPE_VISIBILITIES,
+  scopeVisibilitySchema,
   type Scope,
   type ScopeMember,
   type ScopeMemberRole,
   type ScopeScope,
+  type ScopeVisibility,
 } from './schema';
 export {
   DuplicateScopeRelationError,

@@ -1,4 +1,5 @@
 import type { Context } from 'hono';
+import { streamSSE } from 'hono/streaming';
 import { ZodError } from 'zod';
 import { ProviderExecutionError } from '@/lib/ai/router/errors';
 import { TravelRepositoryError } from '@/lib/travel/repository';
@@ -6,7 +7,8 @@ import { createTravelService, GuideGenerationError, travelChildrenFindInputSchem
 import { travelPlaceImageInputSchema } from '@/lib/travel/place-images';
 import { getAuthIdentity } from './security';
 import { authenticatedTeamContext, type AuthIdentity } from './auth';
-import { sparkErrorResponse } from './errors';
+import { projectSparkError, sparkErrorResponse } from './errors';
+import { bindConversationStreamAbort } from './conversations';
 import { authorizeContentExecution, type RunAuthenticatedContentToolOptions } from '@/lib/ai/tools';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
@@ -78,9 +80,43 @@ export function createTravelHandlers(options: { service?: TravelService; getIden
     deletePlace: run(async (c, travel, identity) => travel.deletePlace(travelPlaceDeleteInputSchema.parse(await c.req.json()), identity.key)),
     openPlace: run(async (c, travel, identity) => travel.openPlace(travelPlaceOpenInputSchema.parse(await c.req.json()), identity.key)),
     findPlaceGuide: run(async (c, travel, identity) => { const input = travelPlaceGuideFindInputSchema.parse(await c.req.json()); return observed('place.guide.find', input, identity, requestKey(c, input), () => travel.findPlaceGuide(input, identity.key, { signal: c.req.raw.signal })); }, 'country'),
+    findPlaceGuideStream: async (c: Context) => {
+      try {
+        const identity = await getIdentity(c);
+        if (!identity) throw new TravelHttpError(401, 'TRAVEL_UNAUTHORIZED', 'Authentication required.');
+        if (identity.identityType !== 'user') throw new TravelHttpError(403, 'TRAVEL_FORBIDDEN', 'A user session is required.');
+        const input = travelPlaceGuideFindInputSchema.parse(await c.req.json());
+        const key = requestKey(c, input);
+        return streamSSE(c, async (stream) => {
+          const abort = bindConversationStreamAbort(stream, c.req.raw.signal);
+          try {
+            await stream.writeSSE({ event: 'start', data: JSON.stringify({ type: 'start' }), id: key });
+            const result = await observed('place.guide.find', input, identity, key, () => service.findPlaceGuide(input, identity.key, {
+              signal: abort.signal,
+              onDelta: async (text: string) => {
+                if (!abort.active() || !text) return;
+                await stream.writeSSE({ event: 'delta', data: JSON.stringify({ type: 'delta', text }), id: key });
+              },
+            }));
+            if (!abort.active()) return;
+            await stream.writeSSE({ event: 'done', data: JSON.stringify({ type: 'done', place: result.place }), id: key });
+          } catch (error) {
+            if (!abort.active()) return;
+            const billing = projectSparkError(error);
+            await stream.writeSSE({ event: 'error', data: JSON.stringify({ type: 'error', code: billing?.body.error.code ?? (error instanceof GuideGenerationError ? 'COUNTRY_PROVIDER_INVALID_RESPONSE' : 'TRAVEL_FAILED'), message: billing?.body.error.message ?? (error instanceof GuideGenerationError ? error.message : 'Country generation failed.') }), id: key });
+          } finally { abort.dispose(); }
+        });
+      } catch (error) {
+        const billing = sparkErrorResponse(c, error); if (billing) return billing;
+        if (error instanceof TravelHttpError) return c.json({ success: false, error: { code: error.code, message: error.message } }, error.status);
+        if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ success: false, error: { code: 'TRAVEL_INVALID_INPUT', message: 'Travel request input was invalid.' } }, 400);
+        console.error('travel request failed', { error });
+        return c.json({ success: false, error: { code: 'TRAVEL_FAILED', message: 'Travel request failed.' } }, 500);
+      }
+    },
     findCity: run(async (c, travel, identity) => { const input = travelCityFindInputSchema.parse(await c.req.json()); return observed('place.find-city', input, identity, requestKey(c, input), () => travel.findCity(input, identity.key, { signal: c.req.raw.signal })); }, 'city'),
     findChildren: run(async (c, travel, identity) => { const input = travelChildrenFindInputSchema.parse(await c.req.json()); return observed('place.find-children', input, identity, requestKey(c, input), () => travel.findChildren(input, identity.key, { signal: c.req.raw.signal })); }, 'city'),
-    generatePlaceHeroImage: run(async (c, travel, identity) => { const input = travelPlaceImageInputSchema.parse(await c.req.json()); return observed('image.generate', input, identity, requestKey(c, input), () => travel.generatePlaceHeroImage(input, identity.key, { signal: c.req.raw.signal })); }, 'image'),
+    generatePlaceHeroImage: run(async (c, travel, identity) => { const input = travelPlaceImageInputSchema.parse(await c.req.json()); return observed('image.generate', input, identity, requestKey(c, input), () => travel.generatePlaceHeroImage(input, identity.key, { signal: c.req.raw.signal, timeoutMs: 60_000 })); }, 'image'),
   };
 }
 

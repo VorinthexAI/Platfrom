@@ -31,7 +31,7 @@ export interface AccountDeletionRepository {
 const BASE_ACCOUNT_DELETE_WRITE_COLLECTIONS = [
   'users', 'teams', 'userTeams', 'scopes', 'scopeMembers', 'authSessions', 'authChallenges', 'userSessions', 'userConnectors',
   'visitors', 'visitorSessions',
-  'userMentions', 'userReactions', 'userHiddens', 'userGenerations', 'userSearches', 'contentSearchQueries', 'contentIdempotency',
+  'userMentions', 'userReactions', 'userHiddens', 'userWorkspaceApps', 'userGenerations', 'userSearches', 'contentSearchQueries', 'contentIdempotency',
   'conversations', 'conversationMessages', 'conversationAttachmentArtifacts', 'tickets', 'userInboxThreads', 'userInboxMessages', 'events', 'tags', 'tagAssignments',
   'pushSubscriptions', 'appNotifications', 'appNotificationRecipients', 'pushDeliveries',
   'sparkTransactions', 'billingExecutions', 'referralCodes', 'referralAttributions', 'referralRewards',
@@ -137,6 +137,7 @@ export function createAccountDeletionRepository(
           LET cleanupMentions = (FOR item IN userMentions FILTER item.userKey == @userKey REMOVE item IN userMentions RETURN 1)
           LET cleanupReactions = (FOR item IN userReactions FILTER item.userKey == @userKey REMOVE item IN userReactions RETURN 1)
           LET cleanupHiddens = (FOR item IN userHiddens FILTER item.userKey == @userKey REMOVE item IN userHiddens RETURN 1)
+          LET cleanupWorkspaceApps = (FOR item IN userWorkspaceApps FILTER item.userKey == @userKey REMOVE item IN userWorkspaceApps RETURN 1)
           LET cleanupGenerations = (FOR item IN userGenerations FILTER item.userKey == @userKey REMOVE item IN userGenerations RETURN 1)
           LET cleanupSearches = (FOR item IN userSearches FILTER item.userKey == @userKey REMOVE item IN userSearches RETURN 1)
           LET cleanupSearchCache = (FOR item IN contentSearchQueries FILTER item.actorKey == @userKey REMOVE item IN contentSearchQueries RETURN 1)

@@ -154,6 +154,7 @@ function GlobeScene({
     resetTrackball: false,
   });
   const focusAnimation = useRef<{ from: THREE.Quaternion; fromDistance: number; to: THREE.Quaternion; startedAt: number } | undefined>(undefined);
+  const pendingFocus = useRef<{ latitude: number; longitude: number } | undefined>(undefined);
   const pulseStartedAt = useRef<number | undefined>(undefined);
   const pulseMaterial = useRef<THREE.LineBasicMaterial>(null);
   const boundaries = useMemo(() => createCountryBoundaryGeometry(), []);
@@ -204,25 +205,14 @@ function GlobeScene({
   useEffect(() => () => focusFill?.dispose(), [focusFill]);
   useEffect(() => () => markerTexture.dispose(), [markerTexture]);
   useEffect(() => {
-    const globe = globeRef.current;
-    if (!globe || focusCountryCode === undefined || focusLatitude === undefined || focusLongitude === undefined) {
+    if (focusCountryCode === undefined || focusLatitude === undefined || focusLongitude === undefined) {
+      pendingFocus.current = undefined;
       focusAnimation.current = undefined;
       return;
     }
-    const point = latLonToVector(focusLatitude, focusLongitude);
-    const target = new THREE.Quaternion().setFromUnitVectors(
-      new THREE.Vector3(point.x, point.y, point.z).normalize(),
-      new THREE.Vector3(0, 0, 1),
-    );
-    const startedAt = performance.now();
-    if (reducedMotion) {
-      globe.quaternion.copy(target);
-      cameraRef.current.position.z = MIN_CAMERA_DISTANCE;
-    } else {
-      focusAnimation.current = { from: globe.quaternion.clone(), fromDistance: cameraRef.current.position.z, to: target, startedAt };
-    }
+    pendingFocus.current = { latitude: focusLatitude, longitude: focusLongitude };
     invalidate();
-  }, [focusCountryCode, focusLatitude, focusLongitude, focusRequest, invalidate, reducedMotion]);
+  }, [focusCountryCode, focusLatitude, focusLongitude, focusRequest, invalidate]);
   useEffect(() => {
     pulseStartedAt.current = highlightedCountryCode && !reducedMotion ? performance.now() : undefined;
     invalidate();
@@ -238,6 +228,22 @@ function GlobeScene({
   useFrame((_, delta) => {
     const globe = globeRef.current;
     if (!globe) return;
+    const pending = pendingFocus.current;
+    if (pending) {
+      pendingFocus.current = undefined;
+      const point = latLonToVector(pending.latitude, pending.longitude);
+      const target = new THREE.Quaternion().setFromUnitVectors(
+        new THREE.Vector3(point.x, point.y, point.z).normalize(),
+        new THREE.Vector3(0, 0, 1),
+      );
+      if (reducedMotion) {
+        globe.quaternion.copy(target);
+        cameraRef.current.position.z = MIN_CAMERA_DISTANCE;
+        focusAnimation.current = undefined;
+      } else {
+        focusAnimation.current = { from: globe.quaternion.clone(), fromDistance: cameraRef.current.position.z, to: target, startedAt: performance.now() };
+      }
+    }
     const now = performance.now();
     const focus = focusAnimation.current;
     const idle = gestureRef.current.pointers.size === 0;

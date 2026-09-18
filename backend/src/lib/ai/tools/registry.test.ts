@@ -18,7 +18,7 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(189);
+    expect(TOOL_NAMES).toHaveLength(190);
     expect(MODEL_TOOL_NAMES).toHaveLength(184);
     expect(TOOL_DEFINITIONS).toHaveLength(184);
     expect(TOOL_NAMES).not.toContain('document.scan');
@@ -117,6 +117,10 @@ describe('unified tool registry', () => {
     expect(TOOL_NAMES).toContain('account.delete');
     expect(MODEL_TOOL_NAMES).not.toContain('account.delete');
     expect(TOOL_DEFINITIONS.some(({ name }) => name === 'account.delete')).toBe(false);
+    expect(TOOL_NAMES).toContain('workspace.picker.update');
+    expect(MODEL_TOOL_NAMES).not.toContain('workspace.picker.update');
+    expect(TOOL_DEFINITIONS.some(({ name }) => name === 'workspace.picker.update')).toBe(false);
+    expect(() => toolInputSchemas['workspace.picker.update'].parse({ scopeKeys: [newId()], userKey: newId() })).toThrow('Unrecognized key');
     expect(toolInputSchemas['account.delete'].parse({ confirmation: 'DELETE MY ACCOUNT' })).toEqual({ confirmation: 'DELETE MY ACCOUNT' });
     expect(() => toolInputSchemas['account.delete'].parse({ confirmation: 'DELETE MY ACCOUNT', userKey: newId() })).toThrow('Unrecognized key');
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['inbox.search', 'email.tone.search']));
@@ -359,6 +363,19 @@ describe('unified tool registry', () => {
     await expect(runTrustedTool('account.delete', { confirmation: 'DELETE MY ACCOUNT' }, { context: systemContext, accountDeletion })).rejects.toThrow('Authenticated user context');
     await expect(runTool('account.delete', '', { confirmation: 'DELETE MY ACCOUNT' }, { contentContext: memberContext })).rejects.toThrow();
     expect(calls).toEqual([[{ confirmation: 'DELETE MY ACCOUNT' }, userKey]]);
+  });
+
+  test('updates the workspace picker only through trusted authenticated context', async () => {
+    const teamKey = newId(), scopeKey = newId(), userKey = newId(), signalKey = newId();
+    const memberContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const systemContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'system' } } as ToolContext;
+    const calls: unknown[] = [];
+    const workspacePicker = { update: async (...args: unknown[]) => { calls.push(args); return { apps: [{ scopeKey: signalKey, slug: 'signal', name: 'Signal' }], selectedScopeKeys: [signalKey] }; } } as any;
+    await expect(runTrustedTool('workspace.picker.update', { scopeKeys: [signalKey] }, { context: memberContext, workspacePicker })).resolves.toEqual({ apps: [{ scopeKey: signalKey, slug: 'signal', name: 'Signal' }], selectedScopeKeys: [signalKey] });
+    await expect(runTrustedTool('workspace.picker.update', { scopeKeys: [signalKey], userKey }, { context: memberContext, workspacePicker })).rejects.toThrow('Unrecognized key');
+    await expect(runTrustedTool('workspace.picker.update', { scopeKeys: [signalKey] }, { context: systemContext, workspacePicker })).rejects.toThrow('Authenticated user context');
+    await expect(runTool('workspace.picker.update', '', { scopeKeys: [signalKey] }, { contentContext: memberContext })).rejects.toThrow();
+    expect(calls).toEqual([[userKey, [signalKey]]]);
   });
 
   test('does not expose any removed outside-domain tool', () => {

@@ -3299,10 +3299,10 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
                   </Button>
                   </View>
                 ); })}
-                {!loadError && !rootSearchError && !managedInboxVisible && !visibleAccounts.length && rootFilterActive ? <Text style={styles.rootEmpty}>No inboxes matched these filters.</Text> : null}
-                {!loadError && !managedInboxVisible && !visibleAccounts.length && !rootFilterActive ? (
+                {!loadError && !rootSearchError && !managedInboxVisible && !visibleAccounts.length && (rootFilterActive || rootFavoritesOnly) ? <Text style={styles.rootEmpty}>No inboxes matching these filters.</Text> : null}
+                {!loadError && !managedInboxVisible && !visibleAccounts.length && !rootFilterActive && !rootFavoritesOnly ? (
                   <View style={styles.rootEmptyState}>
-                    <Text style={styles.rootEmpty}>{rootFavoritesOnly ? "No favorite inboxes." : "No connected inbox yet."}</Text>
+                    <Text style={styles.rootEmpty}>No connected inbox yet.</Text>
                     {permissions.canManageConnector ? <Button accessibilityLabel="Connect email" contentMode="raw" onPress={openConnectForm} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : <Text style={styles.rootEmptyHelp}>Connect an inbox to get started.</Text>}
                   </View>
                 ) : null}
@@ -3330,9 +3330,9 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
                 <Text ellipsizeMode="tail" numberOfLines={1} style={styles.rootCardTitle}>{record.name}</Text>
               </Button>
               </View>
-            )) : rootFilterActive ? <Text style={styles.rootEmpty}>No tones matched these filters.</Text> : (
+            )) : rootFilterActive || rootFavoritesOnly ? <Text style={styles.rootEmpty}>No tones matching these filters.</Text> : (
               <View style={styles.rootEmptyState}>
-                <Text style={styles.rootEmpty}>{rootFavoritesOnly ? "No favorite tones." : "No tones yet."}</Text>
+                <Text style={styles.rootEmpty}>No tones yet.</Text>
                 {permissions.canMutate ? <Button accessibilityLabel="Create email tone" contentMode="raw" onPress={openToneCreate} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : <Text style={styles.rootEmptyHelp}>Ask a scope moderator to create an email tone.</Text>}
               </View>
             )}</>}
@@ -3407,13 +3407,13 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
                 </View>
               </Button>
             ))}
-            {inboxTab === "drafts" && !draftsQuery.isPending && !draftSearching && !draftsQuery.error && !draftSearchError && !visibleInboxDrafts.length ? <View style={styles.empty}><Text style={styles.centerText}>{normalizedInboxSearch || selectedTagKeys.length ? "No drafts matched these filters." : "No drafts here yet."}</Text></View> : null}
+            {inboxTab === "drafts" && !draftsQuery.isPending && !draftSearching && !draftsQuery.error && !draftSearchError && !visibleInboxDrafts.length ? <View style={styles.empty}><Text style={styles.centerText}>{normalizedInboxSearch || selectedTagKeys.length ? "No drafts matching these filters." : "No drafts here yet."}</Text></View> : null}
             {inboxTab !== "drafts" && !loading && !inboxQueryPending && !initialSyncPending && !loadError && !overview?.threads.length ? (
               <View style={styles.empty}>
                 <Text style={styles.centerText}>
                   {inboxQuery.search || selectedTagKeys.length
-                    ? "No messages matched these filters."
-                    : inboxQuery.facets.length === 0 ? "Choose one or more facets to show messages." : "No messages match these filters."}
+                    ? "No messages matching these filters."
+                    : inboxQuery.facets.length === 0 ? "Choose one or more facets to show messages." : "No messages matching these filters."}
                 </Text>
               </View>
             ) : null}
@@ -3549,8 +3549,8 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         {sheet === "inboxFilter" ? (
           <View style={styles.rootFilterPanel}>
             {INBOX_FACETS.map(({ facet, label }) => <View key={facet} style={styles.favoriteRow}><Switch accessibilityLabel={`Filter ${label} email`} checked={inboxControlsQuery.facets.includes(facet)} onCheckedChange={() => toggleFacet(facet)} /><Text style={styles.favoriteLabel}>{label}</Text></View>)}
-            <Button onPress={openTagFilters} size="md" style={styles.searchHistoryOption} variant="secondary">Tags</Button>
-            <Button onPress={() => void openSearchHistory()} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button>
+            <BottomSheetItem onPress={openTagFilters} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem>
+            <BottomSheetItem onPress={() => void openSearchHistory()} style={styles.sheetAction} variant="secondary">Search history</BottomSheetItem>
           </View>
         ) : sheet === "rootFilter" ? (
           <View style={styles.rootFilterPanel}>
@@ -3558,8 +3558,8 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
               <Switch accessibilityLabel="Show only favorite Signal items" checked={rootFavoritesOnly} onCheckedChange={(checked) => { setRootFavoritesOnly(checked); setSheetOpen(false); }} />
               <Text style={styles.favoriteLabel}>Favorites</Text>
             </View>
-            <Button onPress={openTagFilters} size="md" style={styles.searchHistoryOption} variant="secondary">Tags</Button>
-            <Button onPress={() => void openSearchHistory()} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button>
+            <BottomSheetItem onPress={openTagFilters} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem>
+            <BottomSheetItem onPress={() => void openSearchHistory()} style={styles.sheetAction} variant="secondary">Search history</BottomSheetItem>
           </View>
         ) : sheet === "toneDelete" ? (
           <View style={styles.sheetItems}><Text style={styles.confirmText}>This permanently deletes the custom email tone.</Text><Button onPress={() => void deleteTone()} size="md" variant="danger">Delete</Button><Button onPress={() => setSheet("toneEdit")} size="md" variant="secondary">Cancel</Button></View>
@@ -4099,7 +4099,7 @@ const styles = StyleSheet.create({
   rootTitle: { minWidth: 0, flex: 1, color: palette.silver50, fontFamily: fonts.medium, fontSize: 24 },
   rootActions: { minHeight: 52, marginTop: -spacing.xs, flexDirection: "row", alignItems: "center", gap: 8 },
   rootMenuButton: { width: 44, height: 44 },
-  rootFilterPanel: { gap: spacing.sm },
+  rootFilterPanel: { gap: 12 },
   searchHistoryOption: { backgroundColor: palette.page },
   rootSearch: {
     minHeight: 44,

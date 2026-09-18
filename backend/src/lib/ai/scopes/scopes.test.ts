@@ -156,8 +156,10 @@ describe('scope schemas', () => {
       description: 'The conversational intelligence scope.',
       position: 2,
       level: 1,
+      visibility: 'public',
       embedding: [],
     });
+    expect(scopeSchema.parse({ ...scope, visibility: 'private' }).visibility).toBe('private');
     expect(scopesEmbedKeys.options).toEqual(['summary']);
     expect(scopeSchema.parse({ ...scope, description: 'x'.repeat(10_000) }).description).toHaveLength(10_000);
     expect(scopeSchema.parse({ ...scope, description: null }).description).toBeNull();

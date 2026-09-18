@@ -13,10 +13,12 @@ describe('GET /auth/me response contract', () => {
     }, {
       team: { key: 'team-1', name: "Person's Team", is_root: false, slug: 'personal-user-1', description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: '', updatedAt: '', embedding: [] },
       membership: { key: 'membership-1', teamKey: 'team-1', userId: 'user-1', teamRole: 'owner', teamTitle: 'Owner', orchestratorKey: null, status: 'active', environmentSeeded: false, joinedAt: '', isMfaEnabled: false, totpSecret: null, lastTotpTimeStep: null, teamMfaVersion: 0, teamMfaRecoveryPending: false, createdAt: '', updatedAt: '', embedding: [] },
-      scope: { key: 'cmrnlzf640000qc7k4p5zem5w', teamKey: 'team-1', slug: 'main', name: 'Main', summary: 'Main personal workspace', description: 'Main personal workspace', position: 1, level: 1, embedding: [] },
+      scope: { key: 'cmrnlzf640000qc7k4p5zem5w', teamKey: 'team-1', slug: 'main', name: 'Main', summary: 'Main personal workspace', description: 'Main personal workspace', position: 1, level: 1, visibility: 'public' as const, embedding: [] },
       scopeMembership: { key: 'cmrnlzf640000qc7k4p5zem5x', scopeKey: 'cmrnlzf640000qc7k4p5zem5w', userTeamKey: 'membership-1', role: 'owner', status: 'active', source: 'explicit' },
     });
 
+    expect(response.rootTeamMember).toBe(false);
+    expect(response.workspacePicker).toEqual({ apps: [], selectedScopeKeys: null });
     expect(response.teamMembership.role).toBe('owner');
     expect(response.scope).toMatchObject({ name: 'Main', slug: 'main', role: 'owner' });
     expect(response.user.is_onboarded).toBe(false);
@@ -39,11 +41,12 @@ describe('GET /auth/me response contract', () => {
     const context = {
       team: { key: 'team-1', name: 'Team', is_root: false, slug: 'personal-user-1', description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: '', updatedAt: '', embedding: [] },
       membership: { key: 'membership-1', teamKey: 'team-1', userId: 'user-1', teamRole: 'owner' as const, teamTitle: 'Owner', orchestratorKey: null, status: 'active' as const, environmentSeeded: false, joinedAt: '', isMfaEnabled: false, totpSecret: null, lastTotpTimeStep: null, teamMfaVersion: 0, teamMfaRecoveryPending: false, createdAt: '', updatedAt: '', embedding: [] },
-      scope: { key: 'cmrnlzf640000qc7k4p5zem5w', teamKey: 'team-1', slug: 'main', name: 'Main', summary: 'Main personal workspace', description: 'Main personal workspace', position: 1, level: 1, embedding: [] },
+      scope: { key: 'cmrnlzf640000qc7k4p5zem5w', teamKey: 'team-1', slug: 'main', name: 'Main', summary: 'Main personal workspace', description: 'Main personal workspace', position: 1, level: 1, visibility: 'public' as const, embedding: [] },
       scopeMembership: { key: 'cmrnlzf640000qc7k4p5zem5x', scopeKey: 'cmrnlzf640000qc7k4p5zem5w', userTeamKey: 'membership-1', role: 'owner' as const, status: 'active' as const, source: 'explicit' as const },
     };
 
-    await expect(buildAuthAccountResponse(user, context, async () => { throw new Error('signer unavailable'); })).resolves.toMatchObject({ user: { name: 'Person', avatar_url: null } });
+    await expect(buildAuthAccountResponse(user, context, async () => { throw new Error('signer unavailable'); })).resolves.toMatchObject({ user: { name: 'Person', avatar_url: null }, rootTeamMember: false });
+    await expect(buildAuthAccountResponse(user, context, async () => { throw new Error('signer unavailable'); }, true)).resolves.toMatchObject({ rootTeamMember: true });
   });
 });
 

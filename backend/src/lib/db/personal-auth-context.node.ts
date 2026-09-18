@@ -80,7 +80,7 @@ export async function provisionPersonalAuthContext(
           INSERT {
             _key: ${scopeKey}, teamKey: team._key, slug: "main", name: "Main",
             summary: "Main personal workspace", description: "Main personal workspace", position: 1,
-            level: 1, embedding: []
+            level: 1, visibility: "public", embedding: []
           }
           UPDATE {} IN scopes
         LET scope = NEW

@@ -33,12 +33,11 @@ describe('durable conversation attachment persistence', () => {
   test('runs normal document and image processing asynchronously', async () => {
     const document = artifact('document', { documentContent: 'Legacy extracted notes' }), image = artifact('image', { displayKey: 'local-photo', filename: 'photo.jpg', mimeType: 'image/jpeg' }); let parseInput: any; let parseDependencies: any; let imageInput: any;
     const documentReference = await persistConversationAttachment(document, context, { authorize: authorization, storage: { download: async () => ({ bytes: new Uint8Array([1, 2, 3]) }), delete: async () => undefined }, parse: async (input, dependencies) => { parseInput = input; parseDependencies = dependencies; return { document: { key: newId(), ...input } } as never; } });
-    const imageReference = await persistConversationAttachment(image, context, { authorize: authorization, storage: { download: async () => ({ bytes: new Uint8Array([1, 2, 3]) }), delete: async () => undefined }, embedCollection: async () => [1], process: async (inputs) => { imageInput = inputs[0]; return [{ key: newId(), filename: 'photo.png', mimeType: 'image/png', sizeBytes: 3, width: 1, height: 1 }] as never; }, gallery: { ensureGeneratedMediaCollection: async () => ({ key: newId() }) as never, attachConversationMedia: async () => true, deleteImages: async () => null }, now: () => at });
+    const imageReference = await persistConversationAttachment(image, context, { authorize: authorization, storage: { download: async () => ({ bytes: new Uint8Array([1, 2, 3]) }), delete: async () => undefined }, embedCollection: async () => [1], ingestGalleryUpload: async (input) => { imageInput = input; return { key: newId(), filename: 'photo.png', mimeType: 'image/png', sizeBytes: 3, width: 1, height: 1 } as never; }, gallery: { ensureGeneratedMediaCollection: async () => ({ key: newId() }) as never }, now: () => at });
     expect(parseInput.file.bytes).toEqual(new Uint8Array([1, 2, 3]));
     expect(parseDependencies).not.toHaveProperty('actions.extract');
     expect(documentReference.kind).toBe('document');
-    expect(imageInput).toMatchObject({ idempotencyKey: `conversation-attachment:${image.key}`, file: { filename: 'photo.jpg', mimeType: 'image/jpeg', sizeBytes: 3, bytes: new Uint8Array([1, 2, 3]) } });
-    expect(imageInput).not.toHaveProperty('trustedCanonicalPng');
+    expect(imageInput).toMatchObject({ filename: 'photo.jpg', mimeType: 'image/jpeg', bytes: new Uint8Array([1, 2, 3]), imageKey: image.key });
     expect(imageReference).toMatchObject({ kind: 'image', displayKey: 'local-photo' });
   });
 

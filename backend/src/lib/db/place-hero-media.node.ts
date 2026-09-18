@@ -11,8 +11,8 @@ export const placeHeroMediaSchema = z.object({
   contentHash: z.string().regex(/^[a-f0-9]{64}$/),
   mimeType: z.literal('image/png'),
   sizeBytes: z.number().int().positive(),
-  width: z.literal(1536),
-  height: z.literal(1024),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 }).strict();

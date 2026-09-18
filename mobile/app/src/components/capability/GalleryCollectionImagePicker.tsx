@@ -244,7 +244,7 @@ const styles = StyleSheet.create({
   empty: { width: "100%", color: palette.silver500, fontFamily: fonts.regular, fontSize: 13, textAlign: "center" },
   error: { marginTop: spacing.sm, padding: spacing.sm, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderRadius: radii.md, backgroundColor: "rgba(64,20,20,0.9)" },
   errorText: { minWidth: 0, flex: 1, color: palette.silver100, fontFamily: fonts.regular, fontSize: 12 },
-  filterPanel: { gap: 6 },
+  filterPanel: { gap: 12 },
   filterRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   filterLabel: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12 },
 });

@@ -2,7 +2,7 @@ import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
 import { collectionImageSchema } from '@/lib/db/collection-images.node';
 import { galleryUploadSchema } from '@/lib/db/gallery-uploads.node';
-import { insertPreparedImageWithCaption } from '@/lib/db/images.node';
+import { insertPreparedImageWithCaption, type Image } from '@/lib/db/images.node';
 import { ImageProcessingError, processImages, type GeneratedImageCaption, type ImageProcessingMetrics } from '@/lib/ai/image-processing';
 import { imageCaptionTool } from '@/lib/ai/tools/image-caption';
 import type { ImageCaptionToolDependencies } from '@/lib/ai/tools/image-caption';
@@ -86,6 +86,58 @@ async function classifyImageSubjects(repository: GalleryRepository, image: Await
 
 async function publish(dependencies: GalleryUploadProcessingDependencies, operation: GalleryMutationEventName, targets: { collections?: Iterable<string>; users?: Iterable<string> }) {
   await publishGalleryEvents(mutationEventTargets(operation, targets), { collection: dependencies.publishCollectionEvent, user: dependencies.publishUserEvent });
+}
+
+export interface GalleryLibraryIngestInput {
+  teamKey: string;
+  scopeKey: string;
+  actorKey: string;
+  userKey: string;
+  collectionKey: string;
+  filename: string;
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+  bytes: Uint8Array;
+  imageKey?: string;
+}
+
+function galleryLibraryFile(input: Pick<GalleryLibraryIngestInput, 'filename' | 'mimeType' | 'bytes'>) {
+  const base = input.filename.replace(/\.[^.]+$/, '').slice(0, 251) || 'image';
+  if (input.mimeType === 'image/jpeg' || (input.bytes[0] === 0xff && input.bytes[1] === 0xd8)) return { filename: `${base}.jpg`, mimeType: 'image/jpeg' as const };
+  return { filename: `${base}.png`, mimeType: 'image/png' as const };
+}
+
+export async function ingestGalleryLibraryUploads(inputs: readonly GalleryLibraryIngestInput[], dependencies: GalleryUploadProcessingDependencies = {}): Promise<Image[]> {
+  if (inputs.length === 0) return [];
+  if (inputs.length > 20) throw new Error('Gallery ingest batches must contain at most 20 uploads.');
+  const teamKey = inputs[0]!.teamKey, scopeKey = inputs[0]!.scopeKey, actorKey = inputs[0]!.actorKey, collectionKey = inputs[0]!.collectionKey;
+  if (inputs.some((input) => input.teamKey !== teamKey || input.scopeKey !== scopeKey || input.actorKey !== actorKey || input.collectionKey !== collectionKey)) throw new Error('Gallery ingest batches must share one team, scope, actor, and collection.');
+  const repository = dependencies.repository ?? getDefaultGalleryRepository();
+  const storage = dependencies.storage ?? documentStorage;
+  const createdAt = (dependencies.now ?? (() => new Date()))().toISOString();
+  const uploads = inputs.map((input) => {
+    const key = newId();
+    const file = galleryLibraryFile(input);
+    return {
+      input,
+      upload: galleryUploadSchema.parse({
+        key, teamKey, scopeKey, actorKey, imageKey: input.imageKey ?? newId(), collectionKey,
+        filename: file.filename, mimeType: file.mimeType, sizeBytes: input.bytes.byteLength,
+        storageKey: `pending/gallery/${scopeKey}/${key}/original.png`, processingMode: 'library', status: 'queued',
+        errorCode: null, createdAt, updatedAt: createdAt, expiresAt: new Date(Date.parse(createdAt) + 15 * 60_000).toISOString(),
+      }),
+    };
+  });
+  await Promise.all(uploads.map(({ input, upload }) => storage.upload({ key: upload.storageKey, bytes: input.bytes, mimeType: upload.mimeType, billingUserKey: input.userKey })));
+  await repository.insertUploads(uploads.map(({ upload }) => upload));
+  await processGalleryUploadBatch(uploads.map(({ upload }) => upload.key), { ...dependencies, repository, storage });
+  const images = await Promise.all(uploads.map(({ upload }) => repository.getImage(upload.imageKey)));
+  if (images.some((image) => !image)) throw new Error('Gallery ingest did not persist every image.');
+  return images as Image[];
+}
+
+export async function ingestGalleryLibraryUpload(input: GalleryLibraryIngestInput, dependencies: GalleryUploadProcessingDependencies = {}) {
+  const [image] = await ingestGalleryLibraryUploads([input], dependencies);
+  return image!;
 }
 
 export async function processGalleryUploadBatch(uploadKeys: readonly string[], dependencies: GalleryUploadProcessingDependencies = {}) {

@@ -21,7 +21,7 @@ const context = {
 } as unknown as ToolContext;
 
 const scope = (overrides: Partial<Scope> = {}): Scope => ({
-  key: newId(), teamKey, slug: 'plans', name: 'Plans', summary: 'Team plans', description: 'Team plans', coverImageKey: null, position: 2, level: 1, embedding: [0.1], ...overrides,
+  key: newId(), teamKey, slug: 'plans', name: 'Plans', summary: 'Team plans', description: 'Team plans', coverImageKey: null, position: 2, level: 1, visibility: 'public', embedding: [0.1], ...overrides,
 });
 
 const teamDecision = (role: 'owner' | 'admin' | 'viewer' = 'owner') => ({ allowed: true, reason: 'ALLOWED', effectiveRole: role, team: {}, membership: {} }) as never;

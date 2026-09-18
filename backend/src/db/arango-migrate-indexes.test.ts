@@ -265,6 +265,16 @@ describe('Arango migration indexes', () => {
     const registry = await Bun.file(new URL('../lib/db/registry.ts', import.meta.url)).text();
     expect(registry).not.toContain('userHiddens:');
   });
+  test('creates private workspace picker links with unique user and scope keys', async () => {
+    const spec = collections.find(({ name }) => name === 'userWorkspaceApps');
+    expect(spec).toEqual(expect.objectContaining({ name: 'userWorkspaceApps', skipEmbedding: true }));
+    expect(spec?.indexes).toEqual(expect.arrayContaining([
+      { fields: ['userKey', 'scopeKey'], unique: true },
+      { fields: ['userKey', 'position'] },
+    ]));
+    const registry = await Bun.file(new URL('../lib/db/registry.ts', import.meta.url)).text();
+    expect(registry).not.toContain('userWorkspaceApps:');
+  });
   test('declares private Spark ledger and hourly storage accounting indexes', async () => {
     expect(collections.find(({ name }) => name === 'sparkTransactions')?.indexes).toEqual(expect.arrayContaining([
       { fields: ['userKey', 'idempotencyKey'], unique: true },

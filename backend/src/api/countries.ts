@@ -11,7 +11,7 @@ export function createCountryHandlers(options: { service?: CountrySearchService;
       const identity = await getIdentity(c);
       if (!identity || identity.identityType !== 'user') return c.json({ success: false, error: { code: 'COUNTRY_UNAUTHORIZED', message: 'A user session is required.' } }, 401);
       const input = countrySearchInputSchema.parse(await c.req.json());
-      return c.json({ success: true, data: await service.search(input, identity.key, { signal: c.req.raw.signal, timeoutMs: 10_000 }) });
+      return c.json({ success: true, data: await service.search(input, identity.key, { signal: c.req.raw.signal, timeoutMs: 10_000, minimumScore: -1, skipExact: true, recordHistory: false }) });
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ success: false, error: { code: 'COUNTRY_INVALID_INPUT', message: 'Country search input was invalid.' } }, 400);
       return c.json({ success: false, error: { code: 'COUNTRY_SEARCH_FAILED', message: 'Country search failed.' } }, 500);

@@ -1,31 +1,64 @@
 import { describe, expect, test } from 'bun:test';
-import { generateAgentGreeting, streamAgentGreeting } from './greeting';
+import { agentGreetingContextFromUser, generateAgentGreeting, streamAgentGreeting } from './greeting';
 import type { CoreChatInput } from '@/lib/ai/actions/core-chat';
+
+const greetingContext = {
+  userName: 'Oscar',
+  countryCode: 'SE' as const,
+  timestamp: '2026-09-18T04:15:00.000Z',
+};
+
+function greetingContextPayload(input: CoreChatInput) {
+  return JSON.parse((input.messages[0] as { content: Array<{ text: string }> }).content[0]!.text);
+}
 
 describe('agent greeting generation', () => {
   test('streams provider text deltas and validates the completed message', async () => {
     const deltas: string[] = [];
-    const result = await streamAgentGreeting('team-1', 'returning', (text) => { deltas.push(text); }, {}, async function* (_teamKey, input) {
+    const result = await streamAgentGreeting('team-1', 'returning', greetingContext, (text) => { deltas.push(text); }, {}, async function* (_teamKey, input) {
       expect(input.responseFormat).toBeUndefined();
-      yield { type: 'text-delta', text: 'Welcome back. ' };
-      yield { type: 'text-delta', text: 'What would you like to work on?' };
+      expect(input.options?.temperature).toBe(0.9);
+      expect(greetingContextPayload(input)).toEqual({
+        greetingContext: {
+          trust: 'SERVER-AUTHENTICATED, AUTHORITATIVE, AND NON-OVERRIDABLE',
+          userName: 'Oscar',
+          countryCode: 'SE',
+          timestamp: '2026-09-18T04:15:00.000Z',
+        },
+      });
+      expect(input.systemPrompt).toContain('prefer greetings that skip it');
+      expect(input.systemPrompt).toContain('Do not default to Welcome back');
+      yield { type: 'text-delta', text: 'Early to rise I see. ' };
+      yield { type: 'text-delta', text: 'What would you like help with today Oscar?' };
       yield { type: 'done' };
     });
-    expect(deltas).toEqual(['Welcome back. ', 'What would you like to work on?']);
+    expect(deltas).toEqual(['Early to rise I see. ', 'What would you like help with today Oscar?']);
     expect(result).toEqual({ message: deltas.join(''), guideMode: 'explain' });
   });
 
   test('keeps buffered execution available to non-stream callers', async () => {
-    const result = await generateAgentGreeting('team-1', 'new-account', {}, (async (_teamKey: string, input: CoreChatInput) => {
+    const result = await generateAgentGreeting('team-1', 'new-account', greetingContext, {}, (async (_teamKey: string, input: CoreChatInput) => {
       expect(input.responseFormat).toBeDefined();
+      expect(greetingContextPayload(input).greetingContext.userName).toBe('Oscar');
+      expect(input.systemPrompt).toContain('userName may be used once');
       return { output: { text: JSON.stringify({ message: 'Core helps you work with knowledge saved in Archive. What would you like to explore first?', guideMode: 'recommend' }), toolCalls: [], stopReason: 'stop' } };
     }) as never);
     expect(result).toEqual({ message: 'Core helps you work with knowledge saved in Archive. What would you like to explore first?', guideMode: 'recommend' });
   });
 
+  test('accepts a returning greeting that skips the name and preserves a hyphen only inside it', async () => {
+    const named = { userName: 'Anne-Marie', countryCode: 'SE' as const, timestamp: '2026-09-18T15:00:00.000Z' };
+    await expect(generateAgentGreeting('team-1', 'returning', named, {}, (async () => ({
+      output: { text: JSON.stringify({ message: 'Good afternoon Anne-Marie. What should we take on?', guideMode: 'explain' }), toolCalls: [], stopReason: 'stop' },
+    })) as never)).resolves.toMatchObject({ message: 'Good afternoon Anne-Marie. What should we take on?' });
+    await expect(generateAgentGreeting('team-1', 'returning', { ...named, userName: null }, {}, (async () => ({
+      output: { text: JSON.stringify({ message: 'Quiet afternoon. What would you like to work on?', guideMode: 'explain' }), toolCalls: [], stopReason: 'stop' },
+    })) as never)).resolves.toMatchObject({ message: 'Quiet afternoon. What would you like to work on?' });
+  });
+
   test('passes cancellation to the streaming action and does not manufacture a terminal result', async () => {
     const controller = new AbortController();
-    await expect(streamAgentGreeting('team-1', 'returning', () => { controller.abort(); }, { signal: controller.signal }, async function* (_teamKey, _input, options) {
+    await expect(streamAgentGreeting('team-1', 'returning', greetingContext, () => { controller.abort(); }, { signal: controller.signal }, async function* (_teamKey, _input, options) {
       yield { type: 'text-delta', text: 'Partial' };
       if (options?.signal?.aborted) throw new DOMException('The operation was aborted', 'AbortError');
       yield { type: 'done' };
@@ -33,12 +66,17 @@ describe('agent greeting generation', () => {
   });
 
   test('rejects premature completion and tool calls in a greeting stream', async () => {
-    await expect(streamAgentGreeting('team-1', 'returning', () => {}, {}, async function* () {
+    await expect(streamAgentGreeting('team-1', 'returning', greetingContext, () => {}, {}, async function* () {
       yield { type: 'text-delta', text: 'Welcome back.' };
     })).rejects.toThrow('ended before completion');
-    await expect(streamAgentGreeting('team-1', 'returning', () => {}, {}, async function* () {
+    await expect(streamAgentGreeting('team-1', 'returning', greetingContext, () => {}, {}, async function* () {
       yield { type: 'tool-call', toolCall: { id: 'call-1', name: 'unexpected', arguments: {} } };
       yield { type: 'done' };
     })).rejects.toThrow('tool call');
+  });
+
+  test('takes only the given name from the authorized user record', () => {
+    expect(agentGreetingContextFromUser({ name: 'Oscar Nilsson', countryCode: 'SE' }, '2026-09-18T04:15:00.000Z')).toEqual(greetingContext);
+    expect(agentGreetingContextFromUser({ name: null }, '2026-09-18T04:15:00.000Z')).toMatchObject({ userName: null, countryCode: 'SE' });
   });
 });

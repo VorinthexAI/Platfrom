@@ -5,7 +5,9 @@ import { imageOutputSchema, type ImageOutput } from '@/lib/ai/providers';
 import { GENERATED_IMAGE_BASE64_MAX_LENGTH } from '@/lib/ai/providers/types';
 import { placeCountryCodeSchema } from '@/lib/db/places.node';
 import { decryptAuthenticatedJson } from '@/lib/authenticated-encryption';
+import { generatedImageMimeTypeSchema } from '@/lib/ai/providers/types';
 import { documentStorage, type DocumentObjectStorage } from '@/lib/ai/document-processing/storage';
+import { signedImageUrl } from '@/lib/gallery/image-url';
 import type { TravelAccessContext, TravelRepository } from './repository';
 
 export const PLACE_IMAGE_TOKEN_MAX_LENGTH = 64 * 1024;
@@ -24,10 +26,9 @@ export const placeImageTokenSchema = z.object({
 }).strict();
 export type PlaceImageToken = z.infer<typeof placeImageTokenSchema>;
 export function stagedPlaceImageKey(nonce: string) { return `pending/compass/place-hero/${nonce}/preview.png`; }
-const inlinePngSchema = z.string().max('data:image/png;base64,'.length + GENERATED_IMAGE_BASE64_MAX_LENGTH).regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/);
 export const travelPlaceImageResponseSchema = z.object({
   status: z.literal('ready'),
-  image: z.object({ status: z.literal('ready'), title: z.string().trim().min(1).max(160), url: inlinePngSchema, width: z.literal(1536), height: z.literal(1024), mimeType: z.literal('image/png') }).strict(),
+  image: z.object({ status: z.literal('ready'), title: z.string().trim().min(1).max(160), url: z.string().url(), width: z.number().int().positive(), height: z.number().int().positive(), mimeType: generatedImageMimeTypeSchema }).strict(),
   durationMs: z.number().int().nonnegative(), costUsd: z.number().nonnegative().nullable(),
 }).strict();
 export type PlaceImageResult = z.infer<typeof travelPlaceImageResponseSchema>;
@@ -40,19 +41,21 @@ export interface PlaceImageDependencies {
   log?: (message: string, fields: PlaceImageMetrics) => void;
   decryptImageRequest?: (token: string) => unknown;
   storage?: DocumentObjectStorage;
+  signUrl?: typeof signedImageUrl;
 }
 
 const elapsed = (now: () => number, started: number) => Math.max(0, Math.round(now() - started));
 const placeImageInFlight = new Map<string, Promise<PlaceImageResult>>();
 const consumedPlaceImageTokens = new Map<string, number>();
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
-function assertPlacePngDimensions(bytes: Uint8Array) {
+export function readPlacePngDimensions(bytes: Uint8Array) {
   const signature = [137, 80, 78, 71, 13, 10, 26, 10];
   if (bytes.byteLength < 24 || signature.some((value, index) => bytes[index] !== value)) throw new Error('Image provider returned invalid PNG bytes.');
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const width = view.getUint32(16);
   const height = view.getUint32(20);
-  if (width !== 1536 || height !== 1024) throw new Error(`Image provider returned ${width}x${height}; expected 1536x1024.`);
+  if (width < 1 || height < 1) throw new Error('Image provider returned invalid PNG dimensions.');
+  return { width, height };
 }
 function pruneReplayState(now: number) { for (const [hash, expiresAt] of consumedPlaceImageTokens) if (expiresAt <= now) consumedPlaceImageTokens.delete(hash); }
 export function resetPlaceImageReplayStateForTests() { placeImageInFlight.clear(); consumedPlaceImageTokens.clear(); }
@@ -64,6 +67,7 @@ export function createPlaceImageGenerator(dependencies: PlaceImageDependencies) 
   const log = dependencies.log ?? ((message: string, fields: PlaceImageMetrics) => console.info(message, fields));
   const decryptImageRequest = dependencies.decryptImageRequest ?? decryptAuthenticatedJson;
   const storage = dependencies.storage ?? documentStorage;
+  const signUrl = dependencies.signUrl ?? signedImageUrl;
   return async (raw: unknown, userKey: string, execution: Pick<ExecuteActionOptions, 'signal' | 'timeoutMs'> = {}) => {
     const input = travelPlaceImageInputSchema.parse(raw);
     const context: TravelAccessContext = { teamKey: input.teamKey, scopeKey: input.scopeKey, userKey };
@@ -79,9 +83,9 @@ export function createPlaceImageGenerator(dependencies: PlaceImageDependencies) 
     try {
       const staged = await storage.download(stagedKey);
       if (staged.bytes.byteLength > 0 && staged.bytes.byteLength <= PLACE_IMAGE_PNG_MAX_BYTES) {
-        assertPlacePngDimensions(staged.bytes);
+        const dimensions = staged.bytes[0] === 137 ? readPlacePngDimensions(staged.bytes) : { width: 1024, height: 682 };
         consumedPlaceImageTokens.set(tokenHash(input.imageRequestToken), expiresAt);
-        return travelPlaceImageResponseSchema.parse({ status: 'ready', image: { status: 'ready', title: token.hero.title, url: `data:image/png;base64,${Buffer.from(staged.bytes).toString('base64')}`, width: 1536, height: 1024, mimeType: 'image/png' }, durationMs: 0, costUsd: null });
+        return travelPlaceImageResponseSchema.parse({ status: 'ready', image: { status: 'ready', title: token.hero.title, url: await signUrl(stagedKey), width: dimensions.width, height: dimensions.height, mimeType: 'image/png' }, durationMs: 0, costUsd: null });
       }
     } catch {
       // A missing staged object is the only state that permits provider work.
@@ -96,21 +100,21 @@ export function createPlaceImageGenerator(dependencies: PlaceImageDependencies) 
         const providerStarted = now();
         const response = await execute<Record<string, unknown>, ImageOutput>(
           { mode: 'auto', teamKey: input.teamKey, actionSlug: 'image' },
-          { operation: 'generate', prompt: token.hero.prompt, count: 1, size: '1536x1024', aspectRatio: '3:2', quality: 'low', outputFormat: 'png' },
+          { operation: 'generate', prompt: token.hero.prompt, count: 1, aspectRatio: '3:2', outputFormat: 'png' },
           { providers: ['image.primary'], signal: execution.signal, timeoutMs: execution.timeoutMs ?? 60_000 },
         );
         const providerDurationMs = elapsed(now, providerStarted);
         const output = imageOutputSchema.parse(response.output);
         if (output.images.length !== 1) throw new Error(`Image provider returned ${output.images.length} images; expected one.`);
-        if (output.images[0]!.mimeType !== 'image/png') throw new Error(`Image provider returned ${output.images[0]!.mimeType}; expected image/png.`);
-        const encoded = new Uint8Array(Buffer.from(output.images[0]!.base64, 'base64'));
-        if (encoded.byteLength > PLACE_IMAGE_PNG_MAX_BYTES) throw new Error('Generated place PNG exceeds the maximum allowed size.');
-        assertPlacePngDimensions(encoded);
+        const generated = output.images[0]!;
+        const encoded = new Uint8Array(Buffer.from(generated.base64, 'base64'));
+        if (encoded.byteLength > PLACE_IMAGE_PNG_MAX_BYTES) throw new Error('Generated place image exceeds the maximum allowed size.');
+        const dimensions = generated.mimeType === 'image/png' ? readPlacePngDimensions(encoded) : { width: 1024, height: 682 };
         const stagingStarted = now();
-        await storage.upload({ key: stagedKey, bytes: encoded, mimeType: 'image/png', billingUserKey: userKey });
+        await storage.upload({ key: stagedKey, bytes: encoded, mimeType: generated.mimeType, billingUserKey: userKey });
         const stagingMs = elapsed(now, stagingStarted);
         const result = travelPlaceImageResponseSchema.parse({
-          status: 'ready', image: { status: 'ready', title: token.hero.title, url: `data:image/png;base64,${Buffer.from(encoded).toString('base64')}`, width: 1536, height: 1024, mimeType: 'image/png' },
+          status: 'ready', image: { status: 'ready', title: token.hero.title, url: await signUrl(stagedKey), width: dimensions.width, height: dimensions.height, mimeType: generated.mimeType },
           durationMs: elapsed(now, started), costUsd: response.costUsd ?? null,
         });
         const metrics = { countryCode: token.country.countryCode, state: 'ready' as const, title: token.hero.title, providerDurationMs, stagingMs, totalMs: result.durationMs, costUsd: result.costUsd };

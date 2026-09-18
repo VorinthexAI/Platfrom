@@ -4,6 +4,7 @@ import { AscendWorkspace } from "@/components/capability/AscendWorkspace";
 import { GalleryWorkspace } from "@/components/capability/GalleryWorkspace";
 import { KnowledgeWorkspace } from "@/components/capability/KnowledgeWorkspace";
 import { EmailWorkspace } from "@/components/capability/EmailWorkspace";
+import { TeamWorkspace } from "@/components/capability/TeamWorkspace";
 import { TravelWorkspace } from "@/components/capability/TravelWorkspace";
 import { capabilitySlugSchema } from "@/data/registry";
 import { communicationTabSchema } from "@/lib/communication-client";
@@ -13,9 +14,14 @@ import { useAuthStore } from "@/state/auth";
 export default function CapabilityRoute() {
   const params = useLocalSearchParams<{ slug: string; action?: string; assetKey?: string; bookKey?: string; collectionKind?: string; compose?: SupportComposeKind; connectorKey?: string; countryCode?: string; documentKey?: string; documentTitle?: string; draftKey?: string; imageKey?: string; inbox?: string; initialQuery?: string; placeKey?: string; tab?: string; thread?: string; toneKey?: string; email_connection_code?: string; email_connection_error?: string; returnTripKey?: string; returnTripName?: string; returnSignalConnectorKey?: string; returnSignalThreadKey?: string; returnSignalMessageKey?: string; signalReturn?: string; signalThreadKey?: string; signalMessageKey?: string; openSignalAttachments?: string; tripKey?: string; openTripAssets?: string }>();
   const scopeKey = useAuthStore((state) => String(state.scope?.key ?? ""));
+  const rootTeamMember = useAuthStore((state) => state.rootTeamMember);
   const parsed = capabilitySlugSchema.safeParse(params.slug);
   if (!parsed.success) {
     return <Redirect href="/capability/archive" />;
+  }
+  if (parsed.data === "hq") {
+    if (!rootTeamMember) return <Redirect href="/capability/archive" />;
+    return <TeamWorkspace />;
   }
   if (parsed.data === "archive") return <KnowledgeWorkspace initialAction={(["create", "create-folder", "create-document", "upload-files", "scan"] as const).find((action) => action === params.action)} initialCollectionKind={params.collectionKind} initialDocumentKey={params.documentKey} initialDocumentTitle={params.documentTitle} initialFolderKey={params.assetKey} initialSearchQuery={params.initialQuery} key={`${scopeKey}:${params.action ?? ""}:${params.assetKey ?? "root"}:${params.documentKey ?? ""}:${params.collectionKind ?? ""}:${params.initialQuery ?? ""}`} returnSignalConnectorKey={params.returnSignalConnectorKey} returnSignalMessageKey={params.returnSignalMessageKey} returnSignalThreadKey={params.returnSignalThreadKey} returnTripKey={params.returnTripKey} returnTripName={params.returnTripName} />;
   if (parsed.data === "gallery") return <GalleryWorkspace initialAction={params.action === "create" || params.action === "create-collection" ? params.action : undefined} initialCollectionKey={params.assetKey} initialImageKey={params.imageKey} initialSearchQuery={params.initialQuery} key={`${scopeKey}:${params.action ?? ""}:${params.assetKey ?? "root"}:${params.imageKey ?? ""}:${params.initialQuery ?? ""}`} returnSignalConnectorKey={params.returnSignalConnectorKey} returnSignalMessageKey={params.returnSignalMessageKey} returnSignalThreadKey={params.returnSignalThreadKey} returnTripKey={params.returnTripKey} returnTripName={params.returnTripName} />;

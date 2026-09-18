@@ -11,11 +11,12 @@ export interface CreateScopeInput {
   description: string | null;
   position: number;
   level?: number;
+  visibility?: 'public' | 'private';
 }
 
 export interface ScopeRepository {
   createScope(input: CreateScopeInput): Promise<Scope>;
-  updateScope(scopeKey: string, input: Partial<Pick<CreateScopeInput, 'slug' | 'name' | 'summary' | 'description' | 'position' | 'level'>>): Promise<Scope>;
+  updateScope(scopeKey: string, input: Partial<Pick<CreateScopeInput, 'slug' | 'name' | 'summary' | 'description' | 'position' | 'level' | 'visibility'>>): Promise<Scope>;
   getScopeByKey(scopeKey: string): Promise<Scope | null>;
   listScopes(teamKey: string): Promise<readonly Scope[]>;
   coverStorageKey(scopeKey: string, coverImageKey?: string | null): Promise<string | undefined>;

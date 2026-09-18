@@ -47,6 +47,7 @@ import { emailHandlers } from './email-inbox';
 import { bookHandlers } from './books';
 import { respondToAssistant } from './assistant';
 import { userHiddenHandlers } from './user-hiddens';
+import { workspacePickerHandlers } from './workspace-picker';
 import { acknowledgeFundingRequirementHandler, streamEvents } from './events';
 import { searchApp } from './app-search';
 import { appTransformationHandlers } from './app-transformation';
@@ -404,6 +405,7 @@ export function registerRoutes(app: Hono) {
   app.post('/auth/me/profile/avatar/uploads/complete', completeAccountAvatar);
   app.post('/auth/me/profile/badge-candidates', profileBadgeHandlers.generate);
   app.post('/auth/me/profile/badge-candidates/claim', profileBadgeHandlers.claim);
+  app.patch('/auth/me/workspace-apps', workspacePickerHandlers.update);
   app.get('/auth/me/hiddens', userHiddenHandlers.list);
   app.post('/auth/me/hiddens', userHiddenHandlers.hide);
   app.delete('/auth/me/hiddens', userHiddenHandlers.reveal);
@@ -513,6 +515,7 @@ export function registerRoutes(app: Hono) {
   app.post('/travel/places/open', travelHandlers.openPlace);
   app.post('/travel/places/find', travelHandlers.findPlaces);
   app.post('/travel/places/guide', travelHandlers.findPlaceGuide);
+  app.post('/travel/places/guide/stream', travelHandlers.findPlaceGuideStream);
   app.post('/travel/places/children/find', travelHandlers.findChildren);
   app.post('/travel/cities/find', travelHandlers.findCity);
   app.post('/travel/places/image', travelHandlers.generatePlaceHeroImage);

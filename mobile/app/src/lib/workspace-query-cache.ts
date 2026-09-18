@@ -280,7 +280,7 @@ export function transferCachedGalleryImages(queryClient: QueryClient, context: W
       : addToLocation ? [...added, ...overview.images] : overview.images;
     const collections = overview.collections.map((collection) => {
       if (input.mode === "move" && collection.key === input.sourceCollectionKey) return { ...collection, count: Math.max(0, collection.count - input.images.length) };
-      if (destinationKeys.has(collection.key)) return { ...collection, count: collection.count + (destinationAdditions.get(collection.key) ?? 0), coverUrl: collection.coverUrl ?? input.images[0]?.url ?? null };
+      if (destinationKeys.has(collection.key)) return { ...collection, count: collection.count + (destinationAdditions.get(collection.key) ?? 0) };
       return collection;
     });
     queryClient.setQueryData(queryKey, { ...overview, collections, images });

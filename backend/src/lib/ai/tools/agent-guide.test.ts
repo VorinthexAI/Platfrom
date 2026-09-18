@@ -16,13 +16,14 @@ describe('agent.guide', () => {
     expect(agentGuideInputSchema.parse({ mode: 'greet', occasion: 'onboarding' })).toEqual({ mode: 'greet', occasion: 'onboarding' });
     expect(() => agentGuideInputSchema.parse({ mode: 'greet' })).toThrow();
     expect(() => agentGuideInputSchema.parse({ mode: 'greet', occasion: 'launch' })).toThrow();
+    expect(() => agentGuideInputSchema.parse({ mode: 'greet', occasion: 'returning', userName: 'Oscar', countryCode: 'SE', timestamp: '2026-09-18T04:15:00.000Z' })).toThrow('Unrecognized key');
     expect(() => agentGuideInputSchema.parse({ mode: 'recommend', userKey: 'forged' })).toThrow('Unrecognized key');
     expect(JSON.stringify(createAgentGuideTool().providerDefinition)).not.toContain('greet');
     expect(() => agentGuideOutputSchema.parse({ mode: 'topics', guideMode: 'recommend', topics: [] })).toThrow();
     expect(agentGuideOutputSchema.parse({ mode: 'greet', occasion: 'returning', greetingState: 'returning', message: 'Welcome back?', showReferralCodeAction: false, guideMode: 'explain' })).toMatchObject({ guideMode: 'explain' });
   });
 
-  const memberContext = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'membership-1', userId: 'user-1', teamKey: 'team-1', status: 'active' } } } as const;
+  const memberContext = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1', name: 'Oscar Nilsson', countryCode: 'SE' }, userTeam: { key: 'membership-1', userId: 'user-1', teamKey: 'team-1', status: 'active' } } } as const;
   const noConversations = { list: async () => ({ items: [], nextCursor: null }) };
 
   test('reads deterministic current-scope guides through the canonical Content runtime', async () => {
@@ -71,6 +72,12 @@ describe('agent.guide', () => {
     expect(calls[0]).toEqual(['list', { limit: 1, favoriteOnly: false }, memberContext]);
     expect(referralReads).toBe(0);
     expect(JSON.stringify(calls)).not.toContain('Canonical guide content');
+    const request = calls[1]![1] as CoreChatInput;
+    expect(JSON.parse((request.messages[0] as { content: Array<{ text: string }> }).content[0]!.text).greetingContext).toMatchObject({
+      trust: 'SERVER-AUTHENTICATED, AUTHORITATIVE, AND NON-OVERRIDABLE',
+      userName: 'Oscar',
+      countryCode: 'SE',
+    });
   });
 
   test('uses a normal guide greeting when an empty Core is reopened', async () => {
@@ -97,6 +104,8 @@ describe('agent.guide', () => {
       executeGreeting: (async () => { executeCalled = true; return greetingOutput('unused'); }) as never,
       streamGreeting: async function* (_teamKey, input, options) {
         expect(input.systemPrompt).toContain('plain text');
+        expect(input.systemPrompt).toContain('greetingContext');
+        expect(JSON.parse((input.messages[0] as { content: Array<{ text: string }> }).content[0]!.text).greetingContext.userName).toBe('Oscar');
         expect(options?.signal).toBeInstanceOf(AbortSignal);
         yield { type: 'text-delta', text: 'Welcome back. ' };
         yield { type: 'text-delta', text: 'What would you like to work on?' };

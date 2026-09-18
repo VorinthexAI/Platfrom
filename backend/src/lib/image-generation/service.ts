@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { executeAction, executeAsk, ProviderExecutionError, type ExecuteActionOptions } from '@/lib/ai/router';
 import { imageGenerateInputSchema, imageOutputSchema, MAX_IMAGE_GENERATION_REFERENCES, type ChatOutput, type ImageOutput, type ProviderExecuteResponse } from '@/lib/ai/providers';
-import { processImages, type ImageProcessingDependencies, type ProcessImageInput } from '@/lib/ai/image-processing';
+import type { ImageProcessingDependencies } from '@/lib/ai/image-processing';
+import { ingestGalleryLibraryUploads, type GalleryLibraryIngestInput } from '@/lib/gallery/upload-processing';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { signedImageUrl } from '@/lib/gallery/image-url';
 import { getImageById, type Image } from '@/lib/db/images.node';
@@ -115,12 +116,12 @@ type DurableGenerateReplay = z.infer<typeof durableGenerateReplaySchema>;
 
 type Execute = typeof executeAction;
 type ExecuteAsk = typeof executeAsk;
-type Process = (inputs: readonly ProcessImageInput[], dependencies?: ImageProcessingDependencies) => Promise<Image[]>;
+type IngestGalleryUploads = (inputs: readonly GalleryLibraryIngestInput[]) => Promise<Image[]>;
 
 export interface ImageGenerationServiceDependencies extends ExecuteActionOptions {
   execute?: Execute;
   executeAsk?: ExecuteAsk;
-  process?: Process;
+  ingestGalleryUploads?: IngestGalleryUploads;
   processing?: ImageProcessingDependencies;
   signUrl?: (storageKey: string) => Promise<string>;
   now?: () => number;
@@ -186,7 +187,7 @@ function memberContext(context: ToolContext) {
   return { actorKey: context.principal.userTeam.key, userKey: context.principal.user.key };
 }
 
-const extensionByMimeType = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' } as const;
+
 const aspectRatioBySize = { '1024x1024': '1:1', '1024x1536': '2:3', '1536x1024': '3:2' } as const;
 export const imageGenerationRoute = (_mode: ImageGenerateModelInput['mode'], teamKey: string) => ({ mode: 'auto' as const, teamKey, actionSlug: 'image' as const });
 const inFlight = new Map<string, { hash: string; promise: Promise<ImageGenerateOutput> }>();
@@ -345,35 +346,21 @@ export function createImageGenerationService(dependencies: ImageGenerationServic
           ? await generateRaw({ prompt: input.prompt, count: missingIndices.length, size: input.size, quality: input.quality, mode: input.mode }, context.teamKey, { signal, timeoutMs: dependencies.timeoutMs }, inputReferences)
           : undefined;
         if (leaseError) throw leaseError;
-        const process = dependencies.process ?? processImages;
-        const persisted = generated ? await process(generated.output.images.map((image, position) => {
+        const ingest = dependencies.ingestGalleryUploads ?? ingestGalleryLibraryUploads;
+        const persisted = generated ? await ingest(generated.output.images.map((image, position) => {
           const index = missingIndices[position]!;
           const bytes = new Uint8Array(Buffer.from(image.base64, 'base64'));
-          const extension = extensionByMimeType[image.mimeType];
+          const jpeg = image.mimeType === 'image/jpeg';
           return {
-            scopeKey: context.runtimeScopeKey,
-            ownerKey,
-            origin: 'generated',
-            fallbackCaption: input.prompt,
+            teamKey: context.teamKey, scopeKey: context.runtimeScopeKey, actorKey: ownerKey, userKey, collectionKey,
+            filename: `generated-${index + 1}.${jpeg ? 'jpg' : 'png'}`, mimeType: jpeg ? 'image/jpeg' as const : 'image/png' as const, bytes,
             imageKey: generatedImageKey(context.runtimeScopeKey, ownerKey, idempotencyKey, index),
-             idempotencyKey: generatedImageIdempotencyKey(ownerKey, idempotencyKey, index),
-            file: { filename: `generated-${index + 1}.${extension}`, mimeType: image.mimeType, sizeBytes: bytes.byteLength, bytes },
-            signal,
           };
-        }), dependencies.processing) : [];
+        })) : [];
         const saved = [...existing];
         missingIndices.forEach((index, position) => { saved[index] = persisted[position]; });
         if (saved.length !== input.count) throw new Error(`Image persistence returned ${saved.length} images; expected ${input.count}.`);
         if (saved.some((image) => !image)) throw new Error('Image persistence did not return every requested image.');
-        try {
-          const attached = managedDestination
-            ? Boolean(gallery.attachGeneratedMedia) && await gallery.attachGeneratedMedia!(context.runtimeScopeKey, collectionKey, saved.map((image) => image!.key), ownerKey, new Date(now()).toISOString())
-            : await gallery.attachGeneratedImages(context.runtimeScopeKey, collectionKey, saved.map((image) => image!.key), ownerKey, new Date(now()).toISOString());
-          if (!attached) throw new GeneratedImageAttachmentError('Image generation collection access changed.');
-        } catch (error) {
-          if (error instanceof GeneratedImageAttachmentError) throw error;
-          throw new GeneratedImageAttachmentError('Generated images could not be attached to the collection.', { cause: error });
-        }
         renew();
         await renewal;
         if (leaseError) throw leaseError;

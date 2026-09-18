@@ -9,13 +9,9 @@ import {
   parseDocument,
   type DocumentParseDependencies,
 } from "@/lib/ai/document-processing";
-import {
-  processImage,
-  type ImageProcessingDependencies,
-} from "@/lib/ai/image-processing";
-import { sanitizeGalleryImage } from "@/lib/gallery/image-location";
+import { ingestGalleryLibraryUpload } from "@/lib/gallery/upload-processing";
 import { documentSchema, type Document } from "@/lib/db/documents.node";
-import { imageSchema } from "@/lib/db/images.node";
+
 import {
   EMAIL_ATTACHMENTS_COLLECTION,
   emailAttachmentSchema,
@@ -410,10 +406,8 @@ export interface EmailAttachmentIngestionDependencies {
   repository?: EmailAttachmentRepository;
   storage?: DocumentObjectStorage;
   parse?: typeof parseDocument;
-  processImage?: typeof processImage;
-  sanitizeImage?: typeof sanitizeGalleryImage;
+  ingestGalleryUpload?: typeof ingestGalleryLibraryUpload;
   documentDependencies?: DocumentParseDependencies;
-  imageDependencies?: ImageProcessingDependencies;
   exportDatabase?: Pick<typeof db, "query">;
   now?: () => Date;
   publishScopeEvent?: (
@@ -457,7 +451,6 @@ export function createEmailAttachmentIngestionService(
   const storage =
     dependencies.storage ??
     dependencies.documentDependencies?.storage ??
-    dependencies.imageDependencies?.storage ??
     documentStorage;
   const exportDatabase = dependencies.exportDatabase ?? db;
   const now = dependencies.now ?? (() => new Date());
@@ -536,66 +529,18 @@ export function createEmailAttachmentIngestionService(
           },
         );
       } else {
-        const sanitized = await (
-          dependencies.sanitizeImage ?? sanitizeGalleryImage
-        )(input.bytes);
         const exportKey = stableKey("email-gallery-export", input.bindingKey);
-        await (dependencies.processImage ?? processImage)(
-          {
-            scopeKey: input.scopeKey,
-            ownerKey: input.teamMembershipKey,
-            ...(input.billingUserKey
-              ? { billingUserKey: input.billingUserKey }
-              : {}),
-            origin: "uploaded",
-            imageKey: exportKey,
-            idempotencyKey: `export:${input.bindingKey}`,
-            file: {
-              filename: `${safeSegment(input.part.filename.replace(/\.[^.]+$/, ""))}.png`,
-              mimeType: "image/png",
-              sizeBytes: sanitized.bytes.byteLength,
-              bytes: sanitized.bytes,
-            },
-            mutationPolicy: "user",
-          },
-          {
-            ...dependencies.imageDependencies,
-            persistImage: async ({ image, caption }) => {
-              const bindVars = {
-                imageKey: exportKey,
-                image: toArangoDoc(
-                  imageSchema.parse({
-                    ...image,
-                    key: exportKey,
-                    mutationPolicy: "user",
-                  }),
-                ),
-                scopeKey: input.scopeKey,
-                collectionKey: containers.collectionKey,
-                relationKey: stableKey(
-                  "email-gallery-export-relation",
-                  input.bindingKey,
-                ),
-                teamMembershipKey: input.teamMembershipKey,
-                now: now().toISOString(),
-              };
-              const cursor = caption
-                ? await exportDatabase.query(
-                    "UPSERT { _key: @captionKey } INSERT @caption UPDATE {} IN imageCaptions LET stored = FIRST(UPSERT { _key: @imageKey } INSERT @image UPDATE {} IN images RETURN NEW) UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: @imageKey } INSERT { _key: @relationKey, scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: @imageKey, addedByKey: @teamMembershipKey, createdAt: @now } UPDATE {} IN collectionImages RETURN stored",
-                    {
-                      ...bindVars,
-                      captionKey: caption.key,
-                      caption: toArangoDoc(caption),
-                    },
-                  )
-                : await exportDatabase.query(
-                    "LET stored = FIRST(UPSERT { _key: @imageKey } INSERT @image UPDATE {} IN images RETURN NEW) UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: @imageKey } INSERT { _key: @relationKey, scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: @imageKey, addedByKey: @teamMembershipKey, createdAt: @now } UPDATE {} IN collectionImages RETURN stored",
-                    bindVars,
-                  );
-              return imageSchema.parse(withArangoKey(await cursor.next()));
-            },
-          },
-        );
+        await (dependencies.ingestGalleryUpload ?? ingestGalleryLibraryUpload)({
+          teamKey: input.teamKey,
+          scopeKey: input.scopeKey,
+          actorKey: input.teamMembershipKey,
+          userKey: input.userKey,
+          collectionKey: containers.collectionKey,
+          filename: `${safeSegment(input.part.filename.replace(/\.[^.]+$/, ""))}.png`,
+          mimeType: "image/png",
+          bytes: input.bytes,
+          imageKey: exportKey,
+        });
       }
       // Publish before acknowledging the durable export intent. Failed publication
       // is retried too, so an open Archive/Gallery view eventually refreshes.

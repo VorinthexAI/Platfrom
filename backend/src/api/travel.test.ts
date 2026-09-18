@@ -374,7 +374,7 @@ describe('travel HTTP handlers', () => {
     const app = new Hono();
     registerRoutes(app);
     const requests: Array<[string, string]> = [
-       ['POST', '/travel/overview'], ['POST', '/travel/places'], ['POST', '/travel/places/update'], ['POST', '/travel/places/delete'], ['POST', '/travel/places/open'], ['POST', '/travel/places/find'], ['POST', '/travel/places/guide'], ['POST', '/travel/places/children/find'], ['POST', '/travel/cities/find'], ['POST', '/travel/places/image'], ['POST', '/travel/places/search'], ['POST', '/travel/places/references/generate'], ['POST', '/travel/places/references/list'], ['POST', '/travel/trips/list'], ['POST', '/travel/trips/search'], ['POST', '/travel/trips'], ['POST', '/travel/trips/update'], ['POST', '/travel/trips/delete'], ['POST', '/travel/trips/attachments/set'],
+       ['POST', '/travel/overview'], ['POST', '/travel/places'], ['POST', '/travel/places/update'], ['POST', '/travel/places/delete'], ['POST', '/travel/places/open'], ['POST', '/travel/places/find'], ['POST', '/travel/places/guide'], ['POST', '/travel/places/guide/stream'], ['POST', '/travel/places/children/find'], ['POST', '/travel/cities/find'], ['POST', '/travel/places/image'], ['POST', '/travel/places/search'], ['POST', '/travel/places/references/generate'], ['POST', '/travel/places/references/list'], ['POST', '/travel/trips/list'], ['POST', '/travel/trips/search'], ['POST', '/travel/trips'], ['POST', '/travel/trips/update'], ['POST', '/travel/trips/delete'], ['POST', '/travel/trips/attachments/set'],
     ];
     for (const [method, path] of requests) {
       const response = await app.request(path, { method, headers: { 'content-type': 'application/json' }, body: '{}' });
