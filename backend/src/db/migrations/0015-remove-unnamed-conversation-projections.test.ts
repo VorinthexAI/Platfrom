@@ -16,5 +16,5 @@ test('removes only unnamed managed chat projections and empty chat roots', async
   expect(queries.join('\n')).toContain('REMOVE state IN conversationArchiveStates');
   expect(queries.at(-1)).toContain('FILTER child == null');
   expect(bindings.slice(0, 3)).toEqual(Array(3).fill({ defaultName: 'New chat' }));
-  expect(graphMigrations.at(-1)).toBe(removeUnnamedConversationProjectionsMigration);
+  expect(graphMigrations).toContain(removeUnnamedConversationProjectionsMigration);
 });

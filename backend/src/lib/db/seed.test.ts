@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
 test('country seeds embed only missing or stale semantic content', async () => {
-  const source = await Bun.file(new URL('./seed.ts', import.meta.url)).text();
+  const source = await Bun.file(new URL('../travel/seed-countries.ts', import.meta.url)).text();
   expect(source).toContain('current?.semanticVersion === 1 && current.semanticHash === semanticHash');
   expect(source).toContain("createHash('sha256').update(country.name)");
-  expect(source.indexOf('if (current?.semanticVersion')).toBeLessThan(source.indexOf('embedText({ text: country.name })'));
+  expect(source.indexOf('if (current?.semanticVersion')).toBeLessThan(source.indexOf('pending.map(({ country }) => country.name)'));
 });
 
 test('runtime seeds avoid re-embedding unchanged semantic records', async () => {
@@ -18,7 +18,8 @@ test('runtime seeds defer only retryable refreshes of existing semantic records'
   expect(source).toContain('if (!isProviderError(error) || !error.retryable) throw error;');
   expect(source).toContain("updateSemanticSeed('teams', existing.key");
   expect(source).toContain("updateSemanticSeed('orchestrators', existing.key");
-  expect(source).toContain('semantic seed refresh for ${country.countryCode} deferred');
+  const countries = await Bun.file(new URL('../travel/seed-countries.ts', import.meta.url)).text();
+  expect(countries).toContain('countries: semantic seed refresh deferred because');
 });
 
 test('seed command defers only normalized retryable provider outages', async () => {
