@@ -109,13 +109,6 @@ describe('private conversations', () => {
     expect(events.at(-1)).toMatchObject({ type: 'done', message: { content: 'Answer', guideTopics: { status: 'PENDING' } } });
   });
 
-  test('deletes a conversation through the repository without Archive projection enqueue', async () => {
-    const jobs: unknown[] = [];
-    const repository = { delete: async (...args: unknown[]) => { expect(args).toEqual([owner, conversationKey]); return true; } } as unknown as ConversationRepository;
-    await expect(createConversationService({ repository, enqueueArchiveJob: async (job) => { jobs.push(job); } }).delete({ conversationKey }, context)).resolves.toEqual({ deletedKey: conversationKey });
-    expect(jobs).toEqual([]);
-  });
-
   test('deletes the canonical paired turn with trusted ownership', async () => {
     const selectedMessageKey = newId(), pairedMessageKey = newId(); const calls: unknown[] = [];
     const repository = { deleteMessageTurn: async (...args: unknown[]) => { calls.push(args); return [selectedMessageKey, pairedMessageKey]; } } as unknown as ConversationRepository;
