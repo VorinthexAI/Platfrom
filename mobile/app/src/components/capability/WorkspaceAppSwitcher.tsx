@@ -16,7 +16,7 @@ import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 
 export function WorkspaceAppSwitcher({ active, backSize = "xs", identity = "active", onBeforeSelect, onSelectActive, placeholder, trigger = "identity" }: { active: CapabilitySlug; backSize?: "xs" | "sm"; identity?: "active" | "core"; onBeforeSelect?: (slug: CapabilitySlug) => boolean; onSelectActive?: () => void; placeholder?: { icon: ReactNode; name: string }; trigger?: "identity" | "back" }) {
   const router = useRouter();
-  const showToast = useToast();
+  const { showToast } = useToast();
   const [open, setOpen] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [draftKeys, setDraftKeys] = useState<string[]>([]);

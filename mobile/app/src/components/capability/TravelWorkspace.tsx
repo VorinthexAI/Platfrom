@@ -360,7 +360,7 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   const allSelectedTripsFavorite = selectedTableTripKeys.length > 0 && selectedTableTripKeys.every((key) => trips.find((trip) => trip.key === key)?.isFavorite);
   const anySelectedTripsFavorite = selectedTableTripKeys.some((key) => trips.find((trip) => trip.key === key)?.isFavorite);
   const allSelectedTripsCompleted = selectedTableTripKeys.length > 0 && selectedTableTripKeys.every((key) => trips.find((trip) => trip.key === key)?.status === "completed");
-  const allSelectedTripPlacesVisited = selectedTripPlaceKeys.length > 0 && Boolean(selectedTrip) && selectedTripPlaceKeys.every((key) => selectedTrip.places.find((place) => place.key === key)?.status === "visited");
+  const allSelectedTripPlacesVisited = selectedTripPlaceKeys.length > 0 && Boolean(selectedTrip) && selectedTripPlaceKeys.every((key) => selectedTrip?.places.find((place) => place.key === key)?.status === "visited");
   const savedCountries = useMemo(() => places.filter(({ kind }) => kind === "country"), [places]);
   const savedCities = useMemo(() => places.filter(({ kind }) => kind === "place"), [places]);
   const countryByCode = useMemo(() => new Map(COUNTRIES.features.map(({ properties }) => [properties.countryCode, properties])), []);
@@ -1434,7 +1434,10 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   }
 
   function updateSelectedTrips(patch: Partial<Pick<Trip, "status" | "isFavorite">>) {
-    const selected = selectedTableTripKeys.map((key) => trips.find((trip) => trip.key === key)).filter((trip): trip is Trip => Boolean(trip));
+    const selected = selectedTableTripKeys.flatMap((key) => {
+      const trip = trips.find((item) => item.key === key);
+      return trip ? [trip] : [];
+    });
     const selectionComplete = selected.length > 0 && selected.length === selectedTableTripKeys.length;
     const one = selectedTableTripKeys.length === 1;
     const successTitle = patch.status === "completed" ? one ? "Trip marked as completed" : "Trips marked as completed"
