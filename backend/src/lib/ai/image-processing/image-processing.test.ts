@@ -254,4 +254,9 @@ describe('MediaLibrary image processing', () => {
     expect(metrics).toMatchObject({ count: 3, generated: 2, reused: 1 });
     expect(metrics!.durationMs).toBeLessThan(5_000);
   });
+  test('does not caption through a Vertex helper', async () => {
+    const source = await Bun.file(new URL('./index.ts', import.meta.url)).text();
+    expect(source).not.toContain('captionImageWithVertex');
+    expect(source).not.toContain('executeAction');
+  });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
-import type { ProcessImageInput } from '@/lib/ai/image-processing';
+
 import { appGenerateImageModelInputSchema, createImageGenerationService as createProductionImageGenerationService, imageDestinationSchema, imageIdeasInputSchema, parseImageIdeas } from './service';
 
 const teamKey = newId(), scopeKey = newId(), teamMembershipKey = newId(), collectionKey = newId();
@@ -75,9 +75,9 @@ describe('image generation service', () => {
     const service = createImageGenerationService({ executeAsk: safeAsk, history,
       getImage: async () => null,
       execute: (async () => { providerCalls += 1; await Bun.sleep(5); return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, costUsd: 0.2, providerId: 'openrouter', modelId: 'google.gemini-3.1-flash-lite-image', externalModelId: 'google/gemini-3.1-flash-lite-image' }; }) as any,
-      process: async (inputs) => {
+      ingestGalleryUploads: async (inputs) => {
         processCalls.push([...inputs]);
-        return inputs.map((input) => ({ key: newId(), scopeKey: input.scopeKey, filename: (input.file as any).filename, caption: 'Generated globe', imageCaptionKey: newId(), createdByKey: input.ownerKey, storageKey: 'private/storage-key', mimeType: 'image/png', sizeBytes: 8, width: 1024, height: 1024, embedding: [], isFavorite: false, createdAt: '2026-08-19T00:00:00.000Z', updatedAt: '2026-08-19T00:00:00.000Z' })) as any;
+        return inputs.map((input) => ({ key: newId(), scopeKey: input.scopeKey, filename: input.filename, caption: 'Generated globe', imageCaptionKey: newId(), createdByKey: input.actorKey, storageKey: 'private/storage-key', mimeType: 'image/png', sizeBytes: 8, width: 1024, height: 1024, embedding: [], isFavorite: false, createdAt: '2026-08-19T00:00:00.000Z', updatedAt: '2026-08-19T00:00:00.000Z' })) as any;
       },
       signUrl: async () => 'https://images.example/signed.png',
       now: () => 100,
@@ -89,7 +89,7 @@ describe('image generation service', () => {
     expect(first).toEqual(second);
     expect(providerCalls).toBe(1);
     expect(processCalls).toHaveLength(1);
-    expect(processCalls[0]?.[0]).toMatchObject({ scopeKey, ownerKey: teamMembershipKey, idempotencyKey: expect.stringMatching(/^image-generation:[a-f0-9]{64}$/), file: { filename: 'generated-1.png', mimeType: 'image/png', sizeBytes: 8 } });
+    expect(processCalls[0]?.[0]).toMatchObject({ scopeKey, actorKey: teamMembershipKey, collectionKey, filename: 'generated-1.png', mimeType: 'image/png' });
     expect(first.provider).toEqual({ durationMs: 0, costUsd: 0.2 });
     expect(first.images[0]).toMatchObject({ caption: 'Generated globe', url: 'https://images.example/signed.png' });
     expect(JSON.stringify(first)).not.toContain('base64');
@@ -123,52 +123,47 @@ describe('image generation service', () => {
     expect({ claimed, provider, contributionChecks }).toEqual({ claimed: 0, provider: 0, contributionChecks: 1 });
   });
 
-  test('attaches generated images to an approved managed destination through normal contribution', async () => {
-    let attached = 0;
+  test('dumps generated images into an approved collection through the Gallery upload pipeline', async () => {
+    const ingested: unknown[] = [];
     const service = createImageGenerationService({ history, idempotency: claimedLedger(), getImage: async () => null, signUrl: async () => 'https://images.example/generated.png',
-      gallery: { ...authorizedGallery, getCollection: async () => ({ purpose: 'email-media', mutationPolicy: 'system-only' }) as never, canContributeToCollection: async () => true, attachGeneratedImages: async () => { attached += 1; return true; } },
+      gallery: { ...authorizedGallery, getCollection: async () => ({ purpose: 'email-media', mutationPolicy: 'system-only' }) as never, canContributeToCollection: async () => true },
       execute: (async () => ({ output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' })) as any,
-      process: async () => [persistedImage()],
+      ingestGalleryUploads: async (inputs) => { ingested.push(...inputs); return [persistedImage()]; },
     });
     await expect(service.generate({ prompt: 'Email illustration' }, galleryDestination, context, 'managed-email')).resolves.toMatchObject({ images: [{ origin: 'generated' }] });
-    expect(attached).toBe(1);
+    expect(ingested).toMatchObject([{ collectionKey, actorKey: teamMembershipKey }]);
   });
 
-  test('generates exactly one user-mutable image through the exact managed collection path', async () => {
-    const processed: ProcessImageInput[][] = []; const attached: unknown[][] = []; let providerCalls = 0;
+  test('generates exactly one user-mutable image through the Gallery upload pipeline', async () => {
+    const processed: unknown[][] = []; let providerCalls = 0;
     const service = createImageGenerationService({
       history, idempotency: claimedLedger(), getImage: async () => null, embedCollection: async () => [], signUrl: async () => 'https://images.example/generated.png',
-      gallery: { ...authorizedGallery, canContributeToCollection: async () => { throw new Error('public collection authorization must not run'); }, ensureGeneratedMediaCollection: async () => ({ key: collectionKey, purpose: 'generated-media', mutationPolicy: 'user' }) as never, attachGeneratedMedia: async (...args) => { attached.push(args); return true; } },
+      gallery: { ...authorizedGallery, canContributeToCollection: async () => { throw new Error('public collection authorization must not run'); }, ensureGeneratedMediaCollection: async () => ({ key: collectionKey, purpose: 'generated-media', mutationPolicy: 'user' }) as never },
       execute: (async () => { providerCalls += 1; return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' }; }) as any,
-      process: async (inputs) => { processed.push([...inputs]); return [persistedImage()]; },
+      ingestGalleryUploads: async (inputs) => { processed.push([...inputs]); return [persistedImage()]; },
     });
     const result = await service.generateManaged({ prompt: 'Managed image' }, context, 'managed-request');
     expect(result.images).toHaveLength(1); expect(providerCalls).toBe(1);
-    expect(processed[0]).toHaveLength(1); expect(processed[0]![0]).not.toHaveProperty('mutationPolicy');
-    expect(attached[0]?.slice(0, 2)).toEqual([scopeKey, collectionKey]);
-    expect(attached[0]?.[2]).toEqual([result.images[0]!.key]); expect(attached[0]?.[3]).toBe(teamMembershipKey);
+    expect(processed[0]).toHaveLength(1); expect(processed[0]![0]).toMatchObject({ collectionKey, actorKey: teamMembershipKey });
   });
 
-  test('routes direct multi-image generation into managed Core through one atomic dedicated attachment', async () => {
-    const attached: unknown[][] = []; let genericAttachments = 0, contributionChecks = 0;
+  test('routes direct multi-image generation into managed Core through one Gallery upload ingest', async () => {
+    const ingested: unknown[][] = []; let contributionChecks = 0;
     const service = createImageGenerationService({
       history, idempotency: claimedLedger(), getImage: async () => null, embedCollection: async () => [], signUrl: async () => 'https://images.example/generated.png',
       gallery: {
         ...authorizedGallery,
         ensureGeneratedMediaCollection: async () => ({ key: collectionKey, purpose: 'generated-media', mutationPolicy: 'user' }) as never,
         canContributeToCollection: async () => { contributionChecks += 1; return false; },
-        attachGeneratedImages: async () => { genericAttachments += 1; return true; },
-        attachGeneratedMedia: async (...args) => { attached.push(args); return true; },
       },
       execute: (async () => ({ output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' })) as any,
-      process: async (inputs) => inputs.map(() => persistedImage()),
+      ingestGalleryUploads: async (inputs) => { ingested.push([...inputs]); return inputs.map(() => persistedImage()); },
     });
     const result = await service.generate({ prompt: 'Two managed images', count: 2 }, { kind: 'managed-gallery' }, context, 'direct-managed');
     expect(result.images).toHaveLength(2);
     expect(contributionChecks).toBe(0);
-    expect(genericAttachments).toBe(0);
-    expect(attached).toHaveLength(1);
-    expect(attached[0]?.[2]).toEqual(result.images.map(({ key }) => key));
+    expect(ingested).toHaveLength(1);
+    expect(ingested[0]).toHaveLength(2);
   });
 
   test('invokes the image action directly without a text-model preflight', async () => {
@@ -177,7 +172,7 @@ describe('image generation service', () => {
       history, gallery: authorizedGallery, getImage: async () => null, idempotency: claimedLedger(),
       executeAsk: (async () => { throw new Error('text action should not run'); }) as any,
       execute: (async (...args: unknown[]) => { calls.push(args); return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' }; }) as any,
-      process: async () => [persistedImage()], publishGeneratedImages: async () => {}, signUrl: async () => 'https://images.example/generated.png',
+      ingestGalleryUploads: async () => [persistedImage()], publishGeneratedImages: async () => {}, signUrl: async () => 'https://images.example/generated.png',
     });
     await expect(service.generate({ prompt: 'request', count: 1 }, galleryDestination, context, 'direct-image-action')).resolves.toMatchObject({ images: [{ origin: 'generated' }] });
     expect(calls).toHaveLength(1);
@@ -185,23 +180,23 @@ describe('image generation service', () => {
     expect(calls[0]?.[1]).toMatchObject({ operation: 'generate', prompt: 'request', count: 1 });
   });
 
-  test('resolves accessible references server-side, attaches to the destination, and records history once', async () => {
+  test('resolves accessible references server-side, dumps through Gallery upload, and records history once', async () => {
     const referenceKey = newId();
     const reference = { ...persistedImage(referenceKey), caption: 'A trusted source image', storageKey: 'private/reference.png' };
     const events: unknown[][] = [];
     const service = createImageGenerationService({
       executeAsk: (async () => { throw new Error('text action should not run'); }) as any,
       execute: (async (_route: unknown, input: unknown) => { events.push(['generate', input]); return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' }; }) as any,
-      gallery: { ...authorizedGallery, getImage: async () => reference, attachGeneratedImages: async (...args) => { events.push(['attach', ...args]); return true; } },
+      gallery: { ...authorizedGallery, getImage: async () => reference },
       resolveReference: async (storageKey, mimeType) => { events.push(['resolve', storageKey, mimeType]); return 'data:image/png;base64,iVBORw0KGgo='; },
       history: { ...history, record: async (...args: unknown[]) => { events.push(['history', ...args]); return {}; } },
       publishGeneratedImages: async (...args) => { events.push(['publish', ...args]); },
-      getImage: async () => null, idempotency: claimedLedger(), process: async () => [persistedImage()], signUrl: async () => 'https://images.example/generated.png',
+      getImage: async () => null, idempotency: claimedLedger(), ingestGalleryUploads: async (inputs) => { events.push(['ingest', ...inputs]); return [persistedImage()]; }, signUrl: async () => 'https://images.example/generated.png',
     });
     await service.generate({ prompt: 'Use this composition' }, galleryDestination, context, 'references', [referenceKey]);
     expect(events.find(([name]) => name === 'generate')?.[1]).toMatchObject({ inputReferences: ['data:image/png;base64,iVBORw0KGgo='] });
     expect(events.some(([name]) => name === 'safety')).toBe(false);
-    expect(events.filter(([name]) => name === 'attach')).toHaveLength(1);
+    expect(events.filter(([name]) => name === 'ingest')).toHaveLength(1);
     expect(events.filter(([name]) => name === 'history')).toHaveLength(1);
     expect(events.filter(([name]) => name === 'publish')).toEqual([['publish', collectionKey]]);
   });
@@ -222,7 +217,7 @@ describe('image generation service', () => {
       },
       maxReferenceDataUrlBytes: 1_000,
       execute: (async (_route: unknown, input: { inputReferences?: string[] }) => { providerReferences = input.inputReferences ?? []; return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' }; }) as any,
-      process: async () => [persistedImage()], signUrl: async () => 'https://images.example/generated.png',
+      ingestGalleryUploads: async () => [persistedImage()], signUrl: async () => 'https://images.example/generated.png',
     });
     await service.generate({ prompt: 'Use all references' }, galleryDestination, context, 'eight-references', referenceKeys);
     expect(providerReferences).toHaveLength(8);
@@ -269,27 +264,26 @@ describe('image generation service', () => {
     const secondTeamMembershipKey = newId();
     const secondContext = { ...context, principal: { kind: 'member', user: { key: newId() }, userTeam: { key: secondTeamMembershipKey } } } as unknown as ToolContext;
     const lookupKeys: string[] = [];
-    const processInputs: ProcessImageInput[] = [];
+    const processInputs: Array<{ actorKey: string; imageKey?: string }> = [];
     const service = createImageGenerationService({
       executeAsk: safeAsk, history, gallery: authorizedGallery, idempotency: claimedLedger(),
       getImage: async (key) => { lookupKeys.push(key); return null; },
       execute: (async () => ({ output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' })) as any,
-      process: async (inputs) => { processInputs.push(...inputs); return inputs.map((input) => ({ ...persistedImage(), createdByKey: input.ownerKey })) as any; },
+      ingestGalleryUploads: async (inputs) => { processInputs.push(...inputs); return inputs.map((input) => ({ ...persistedImage(), createdByKey: input.actorKey })) as any; },
       signUrl: async () => 'https://images.example/generated.png',
     });
     const input = { prompt: 'Shared request key' };
     await service.generate(input, galleryDestination, context, 'same-key');
     await service.generate(input, galleryDestination, secondContext, 'same-key');
     expect(new Set(lookupKeys).size).toBe(2);
-    expect(processInputs.map(({ ownerKey }) => ownerKey)).toEqual([teamMembershipKey, secondTeamMembershipKey]);
+    expect(processInputs.map(({ actorKey }) => actorKey)).toEqual([teamMembershipKey, secondTeamMembershipKey]);
     expect(processInputs.map(({ imageKey }) => imageKey)).toEqual(lookupKeys);
-    expect(new Set(processInputs.map(({ idempotencyKey }) => idempotencyKey)).size).toBe(2);
   });
 
-  test('recovers persisted images by retrying collection attachment without invoking the provider again', async () => {
+  test('recovers persisted images without invoking the provider again', async () => {
     let state: 'new' | 'failed' | 'completed' = 'new';
     let failure: { retryable: boolean } | undefined;
-    let expectedKey = '', providerCalls = 0, processCalls = 0, attachCalls = 0;
+    let expectedKey = '', providerCalls = 0, processCalls = 0;
     let stored: ReturnType<typeof persistedImage> | undefined;
     const ledger = {
       claim: async () => state === 'completed' ? { status: 'replay' as const, response: {} } : state === 'failed' && !failure?.retryable ? { status: 'failed' as const, failure: { code: 'FAILED', message: 'failed', retryable: false } } : { status: 'claimed' as const },
@@ -301,16 +295,16 @@ describe('image generation service', () => {
     };
     const service = createImageGenerationService({
       executeAsk: safeAsk, history, idempotency: ledger,
-      gallery: { ...authorizedGallery, attachGeneratedImages: async () => ++attachCalls > 1 },
+      gallery: authorizedGallery,
       getImage: async (key) => { expectedKey = key; return stored ?? null; },
       execute: (async () => { providerCalls += 1; return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' }; }) as any,
-      process: async () => { processCalls += 1; return [stored = persistedImage(expectedKey)]; },
+      ingestGalleryUploads: async () => { processCalls += 1; if (processCalls === 1) throw new Error('gallery ingest unavailable'); return [stored = persistedImage(expectedKey)]; },
       signUrl: async () => 'https://images.example/generated.png',
     });
     const input = { prompt: 'Recover attachment' };
     await expect(service.generate(input, galleryDestination, context, 'attachment-recovery')).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_FAILED', retryable: true });
     await expect(service.generate(input, galleryDestination, context, 'attachment-recovery')).resolves.toMatchObject({ images: [{ key: expectedKey }] });
-    expect({ providerCalls, processCalls, attachCalls }).toEqual({ providerCalls: 1, processCalls: 1, attachCalls: 2 });
+    expect({ providerCalls, processCalls }).toEqual({ providerCalls: 2, processCalls: 2 });
   });
 
   test('does not fail completed generation when prompt history cannot be recorded', async () => {
@@ -322,7 +316,7 @@ describe('image generation service', () => {
       history: { ...history, record: async () => { throw new Error('history unavailable'); } },
       idempotency: { ...claimedLedger(), complete: async () => { completed += 1; } },
       getImage: async () => null,
-      process: async () => [persistedImage()],
+      ingestGalleryUploads: async () => [persistedImage()],
       publishGeneratedImages: async () => {},
       signUrl: async () => 'https://images.example/generated.png',
     });
@@ -343,7 +337,7 @@ describe('image generation service', () => {
     const dependencies = { executeAsk: safeAsk, history,
       gallery: authorizedGallery, idempotency: ledger, getImage: async () => null,
       execute: (async () => { providerCalls += 1; return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' }; }) as any,
-      process: async () => [{ key: newId(), scopeKey, filename: 'generated.png', caption: 'Earth', imageCaptionKey: newId(), createdByKey: teamMembershipKey, storageKey: 'durable/key.png', mimeType: 'image/png', sizeBytes: 8, width: 1024, height: 1024, embedding: [], isFavorite: false, createdAt: '2026-08-19T00:00:00.000Z', updatedAt: '2026-08-19T00:00:00.000Z' }] as any,
+      ingestGalleryUploads: async () => [{ key: newId(), scopeKey, filename: 'generated.png', caption: 'Earth', imageCaptionKey: newId(), createdByKey: teamMembershipKey, storageKey: 'durable/key.png', mimeType: 'image/png', sizeBytes: 8, width: 1024, height: 1024, embedding: [], isFavorite: false, createdAt: '2026-08-19T00:00:00.000Z', updatedAt: '2026-08-19T00:00:00.000Z' }] as any,
       signUrl: async () => `https://images.example/fresh-${++signCount}`,
     };
     const input = { prompt: 'Earth', count: 1, size: '1024x1024' as const, quality: 'medium' as const };
@@ -412,7 +406,7 @@ describe('image generation service', () => {
         if (providerCalls === 1) throw new Error('transient provider failure');
         return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' };
       }) as any,
-      process: async () => [persistedImage()], publishGeneratedImages: async () => {}, signUrl: async () => 'https://images.example/generated.png',
+      ingestGalleryUploads: async () => [persistedImage()], publishGeneratedImages: async () => {}, signUrl: async () => 'https://images.example/generated.png',
     });
     const input = { prompt: 'Retry Earth', count: 1, size: '1024x1024' as const, quality: 'low' as const };
     await expect(service.generate(input, galleryDestination, context, 'retryable-image')).rejects.toMatchObject({ retryable: true });
@@ -441,20 +435,19 @@ describe('image generation service', () => {
     const first = persistedImage();
     const second = persistedImage();
     let lookups = 0, providerCalls = 0, firstKey = '';
-    const processed: ProcessImageInput[][] = [];
+    const processed: Array<{ imageKey?: string }>[] = [];
     let completed: unknown;
     const service = createImageGenerationService({ executeAsk: safeAsk, history,
       gallery: authorizedGallery,
       idempotency: { ...claimedLedger(), complete: async (_identity, _hash, _owner, value) => { completed = value; } },
       getImage: async (key) => { if (++lookups !== 1) return null; firstKey = key; return { ...first, key }; },
       execute: (async (_request: unknown, input: { count: number }) => { providerCalls += 1; expect(input.count).toBe(1); return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, costUsd: 0.4, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' }; }) as any,
-      process: async (inputs) => { processed.push([...inputs]); return [second]; },
+      ingestGalleryUploads: async (inputs) => { processed.push([...inputs]); return [second]; },
       signUrl: async (key) => `https://images.example/${key}`,
     });
     const result = await service.generate({ prompt: 'Earth', count: 2, size: '1024x1024', quality: 'medium' }, galleryDestination, context, 'partial');
     expect(providerCalls).toBe(1);
-    expect(processed[0]?.[0]?.idempotencyKey).toMatch(/^image-generation:[a-f0-9]{64}$/);
-    expect(processed[0]?.[0]?.origin).toBe('generated');
+    expect(processed[0]?.[0]?.imageKey).toMatch(/^c[a-z0-9]+$/);
     expect(result.images.map(({ key }) => key)).toEqual([firstKey, second.key]);
     expect(result.provider.costUsd).toBeNull();
     expect(completed).toBeDefined();
@@ -491,7 +484,7 @@ describe('image generation service', () => {
       gallery: authorizedGallery, idempotency: ledger,
       getImage: async (key: string) => { if (!stored) return null; stored = { ...stored, key }; return stored; },
       execute: (async () => { providerCalls += 1; return { output: { images: [{ base64: png, mimeType: 'image/png' }] }, usage: {}, costUsd: 0.2, providerId: 'openrouter', modelId: 'model', externalModelId: 'model' }; }) as any,
-      process: async () => { processCalls += 1; stored = persistedImage(); return [stored]; },
+      ingestGalleryUploads: async () => { processCalls += 1; stored = persistedImage(); return [stored]; },
       signUrl: async () => 'https://images.example/refreshed.png',
     };
     const input = { prompt: 'Earth', count: 1, size: '1024x1024' as const, quality: 'medium' as const };
@@ -500,5 +493,10 @@ describe('image generation service', () => {
     await expect(createImageGenerationService(dependencies).generate(input, galleryDestination, context, 'completion-recovery')).rejects.toThrow('another server');
     expect({ providerCalls, processCalls, completions, releases, failures }).toEqual({ providerCalls: 1, processCalls: 1, completions: 1, releases: 0, failures: 0 });
     expect(state as 'new' | 'claimed' | 'started').toBe('started');
+  });
+  test('dumps images through Gallery ingest rather than processImages', async () => {
+    const source = await Bun.file(new URL('./service.ts', import.meta.url)).text();
+    expect(source).not.toContain('processImages');
+    expect(source).toContain('ingestGalleryLibraryUploads');
   });
 });

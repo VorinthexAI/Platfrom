@@ -84,6 +84,23 @@ export const CANONICAL_APPS = [
   updatedAt: string;
 }>;
 
+export const PRIVATE_APP_KEYS = {
+  HQ: 'cmtlinos60007w07khqprvt01',
+} as const;
+
+export const PRIVATE_APPS = [
+  {
+    key: PRIVATE_APP_KEYS.HQ,
+    slug: 'hq',
+    name: 'HQ',
+    description: 'Your workspace to manage teams and collaboration.',
+    detailedDescription: 'HQ is your private workspace for managing teams and collaboration. Coordinate people, membership, and shared work in one headquarters. It is available only to members of the Founders team and is not part of the public Vorinthex catalog.',
+    version: '1.0.0',
+    createdAt: CATALOG_TIMESTAMP,
+    updatedAt: CATALOG_TIMESTAMP,
+  },
+] as const;
+
 export const APP_KEYS_BY_SLUG = Object.freeze(Object.fromEntries(CANONICAL_APPS.map(({ slug, key }) => [slug, key])) as Record<(typeof CANONICAL_APPS)[number]['slug'], string>);
 export const PRODUCT_SCOPE_SLUGS = Object.freeze(CANONICAL_APPS.map(({ slug }) => slug));
 export const CANONICAL_APP_BY_ALIAS = new Map(CANONICAL_APPS.map((app) => [app.key, app]));

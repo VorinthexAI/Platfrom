@@ -5,7 +5,7 @@ import { createAppsService } from '@/lib/apps/service';
 import { createListApps } from './apps';
 
 describe('GET /api/v1/apps', () => {
-  const scopes = CANONICAL_APPS.map((app, index) => ({ key: `cm00000000000000000000${String(index).padStart(2, '0')}`, teamKey: 'root', slug: app.slug, name: app.name, summary: app.description, description: app.detailedDescription, position: index + 1, level: 1, embedding: [] }));
+  const scopes = CANONICAL_APPS.map((app, index) => ({ key: `cm00000000000000000000${String(index).padStart(2, '0')}`, teamKey: 'root', slug: app.slug, name: app.name, summary: app.description, description: app.detailedDescription, position: index + 1, level: 1, visibility: 'public' as const, embedding: [] }));
   const readCatalog = async () => CANONICAL_APPS.map(({ key, name, description, detailedDescription }) => ({ key, name, description, detailedDescription }));
   test('returns strict sorted public apps without caching or an app-key header', async () => {
     const apps = [...CANONICAL_APPS].sort((a, b) => a.slug.localeCompare(b.slug));
@@ -18,6 +18,7 @@ describe('GET /api/v1/apps', () => {
     expect(body.apps.map(({ slug }) => slug)).toEqual(apps.map(({ slug }) => slug));
     expect(body.apps[0].logoUrl).toBe(`https://assets.example/${apps[0].logoStorageKey}`);
     expect(body.apps[0]).not.toHaveProperty('logoStorageKey');
+    expect(body.apps.map(({ slug }) => slug)).not.toContain('hq');
   });
 
   test('allows only the app-key header through CORS and leaves health unchanged', async () => {

@@ -11,8 +11,8 @@ import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared
 import { Button } from "@vorinthex/shared/ui/button";
 import { PersistentCoreComposer as CoreComposer } from "@/components/PersistentCoreComposer";
 import { ProfileHeaderRight } from "@/components/ProfileAvatarButton";
-import { BrainIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon, CloseIcon, FilterIcon, FolderIcon, GlobeIcon, GlobeViewIcon, LocationPinIcon, MoreHorizontalIcon, PlusIcon, SearchIcon, SendIcon, StarIcon, TableViewIcon } from "@vorinthex/shared/ui/icons-mobile";
-import { LoadingText } from "@vorinthex/shared/ui/loading-text";
+import { BrainIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon, CloseIcon, FilterIcon, FolderIcon, GlobeIcon, GlobeViewIcon, LocationPinIcon, MoreHorizontalIcon, PlusIcon, SearchIcon, SendIcon, TableViewIcon } from "@vorinthex/shared/ui/icons-mobile";
+
 import { PullToRefresh } from "@vorinthex/shared/ui/pull-to-refresh";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
@@ -29,7 +29,7 @@ import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitch
 import { InteractiveGlobe } from "@/components/three/InteractiveGlobe";
 import { assistantIconSource, capabilityIconSource } from "@/data/capability-icons";
 import { isSparkFundingError } from "@/lib/domain-error-observer";
-import { COUNTRIES, type CountryProperties } from "@/lib/globe-data";
+import { COUNTRIES, globeCountryByCode, type CountryProperties } from "@/lib/globe-data";
 import { normalizeCapturedPng, type CapturedImage } from "@/lib/captured-image";
 import { deleteContentDocument, deleteContentSearchHistory, getContentContext, type ContentContext, type ContentFolder, type ContentSearchHistoryItem } from "@/lib/content-client";
 import { contentQueryKeys, getContentFolderTree } from "@/lib/content-query-cache";
@@ -43,7 +43,7 @@ import {
   deleteTrip,
   fetchTravelOverview,
   findCity,
-  findPlace,
+  extractGuideSections,
   findPlaceChildren,
   findPlaces,
   generatePlaceReference,
@@ -54,8 +54,9 @@ import {
   listTripGuides,
   listTrips,
   openPlace,
-  setTripAttachments,
   searchCountries,
+  streamFindPlace,
+  setTripAttachments,
   searchPlaces,
   searchTrips,
   updatePlace,
@@ -124,22 +125,8 @@ function errorMessage(error: unknown, fallback = "The request could not be compl
   return error instanceof Error && error.message.trim() ? error.message : fallback;
 }
 
-function waitForImageRetry(signal: AbortSignal) {
-  return new Promise<void>((resolve, reject) => {
-    const onAbort = () => { clearTimeout(timer); reject(new Error("Image generation cancelled.")); };
-    const timer = setTimeout(() => { signal.removeEventListener("abort", onAbort); resolve(); }, 500);
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-}
-
 async function generatePlaceHeroUntilReady(imageRequestToken: string, signal: AbortSignal) {
-  for (;;) {
-    try { return await generatePlaceHeroImage({ imageRequestToken }, signal); }
-    catch (error) {
-      if (signal.aborted) throw error;
-      await waitForImageRetry(signal);
-    }
-  }
+  return generatePlaceHeroImage({ imageRequestToken }, signal);
 }
 
 export function normalizePlaceName(value: string) {
@@ -202,7 +189,12 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   const [placeHistoryOpen, setPlaceHistoryOpen] = useState(false);
   const placeHistoryGeneration = useRef(0);
   const [selectedTablePlaceKeys, setSelectedTablePlaceKeys] = useState<string[]>([]);
+  const [selectedTableTripKeys, setSelectedTableTripKeys] = useState<string[]>([]);
   const [placeBulkMenuOpen, setPlaceBulkMenuOpen] = useState(false);
+  const [placeBulkDeleteOpen, setPlaceBulkDeleteOpen] = useState(false);
+  const [tripTableBulkMenuOpen, setTripTableBulkMenuOpen] = useState(false);
+  const [tripTableBulkDeleteOpen, setTripTableBulkDeleteOpen] = useState(false);
+  const [tripTableDeleting, setTripTableDeleting] = useState(false);
   const [resourceTagsOpen, setResourceTagsOpen] = useState(false);
   const [resourceTagTargets, setResourceTagTargets] = useState<ResourceTagTarget[]>([]);
   const [selectedPlaceKey, setSelectedPlaceKey] = useState<string>();
@@ -282,10 +274,11 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   const [countryOpenRequest, setCountryOpenRequest] = useState(0);
   const [cityOpenRequest, setCityOpenRequest] = useState(0);
   const [globeFocusRequest, setGlobeFocusRequest] = useState(0);
+  const [countryGuideDraft, setCountryGuideDraft] = useState<{ summary: string; culture: string; food: string; whyVisit: string }>();
   const assistantRequestKey = useRef<string | undefined>(undefined);
   const countryScrollRef = useRef<ScrollView>(null);
+  const countryScrollOffset = useRef(0);
   const pendingPlaceSaveRef = useRef(new Set<string>());
-  const countrySearchRequest = useRef(0);
   const placeSearchGeneration = useRef(0);
   const countrySearchInput = useRef<NativeTextInput>(null);
   const placeSearchInput = useRef<NativeTextInput>(null);
@@ -296,6 +289,7 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   const optimisticTripDeleteVersion = useRef(new Map<string, number>());
   const tripMutationQueue = useRef(new Map<string, Promise<void>>());
   const optimisticTripRef = useRef(new Map<string, Trip>());
+  const tripCardKeyRef = useRef(new Map<string, string>());
   const placeMutationVersion = useRef(new Map<string, number>());
   const placeMutationQueue = useRef(new Map<string, Promise<void>>());
   const optimisticPlaceRef = useRef(new Map<string, Place>());
@@ -315,7 +309,10 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   const savedPlaceSearchQuery = useQuery({ queryKey: compassQueryKeys.placeSearch(travelContext, tableSearchTerm, selectedTagKeys), queryFn: ({ signal }) => searchPlaces(tableSearchTerm, signal, false, selectedTagKeys), enabled: rootView === "table" && tableTab === "places" && savedTableSearchActive });
   const tripSearchQuery = useQuery({ queryKey: compassQueryKeys.tripSearch(travelContext, tableSearchTerm, selectedTagKeys), queryFn: ({ signal }) => searchTrips(tableSearchTerm, signal, false, selectedTagKeys), enabled: rootView === "table" && tableTab === "trips" && savedTableSearchActive });
   const places = useMemo(() => overviewQuery.data?.places ?? [], [overviewQuery.data]);
-  const trips = useMemo(() => tripsQuery.data ?? [], [tripsQuery.data]);
+  const trips = useMemo(() => (tripsQuery.data ?? []).map((trip) => {
+    const cached = optimisticTripRef.current.get(trip.key);
+    return cached?.coverUrl ? { ...trip, coverUrl: cached.coverUrl } : trip;
+  }), [tripsQuery.data]);
   const visiblePlaces = useMemo(() => {
     const candidates = savedTableSearchActive ? savedPlaceSearchQuery.data ?? [] : places;
     return candidates.filter((place) => (!placeFavoritesOnly || place.isFavorite) && (placeStatusFilter === "all" || place.status === placeStatusFilter));
@@ -358,6 +355,12 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     if (image) setImageViewerKey(image.key);
   };
   const allSelectedPlacesFavorite = selectedTablePlaceKeys.length > 0 && selectedTablePlaceKeys.every((key) => places.find((place) => place.key === key)?.isFavorite);
+  const anySelectedPlacesFavorite = selectedTablePlaceKeys.some((key) => places.find((place) => place.key === key)?.isFavorite);
+  const allSelectedPlacesVisited = selectedTablePlaceKeys.length > 0 && selectedTablePlaceKeys.every((key) => places.find((place) => place.key === key)?.status === "visited");
+  const allSelectedTripsFavorite = selectedTableTripKeys.length > 0 && selectedTableTripKeys.every((key) => trips.find((trip) => trip.key === key)?.isFavorite);
+  const anySelectedTripsFavorite = selectedTableTripKeys.some((key) => trips.find((trip) => trip.key === key)?.isFavorite);
+  const allSelectedTripsCompleted = selectedTableTripKeys.length > 0 && selectedTableTripKeys.every((key) => trips.find((trip) => trip.key === key)?.status === "completed");
+  const allSelectedTripPlacesVisited = selectedTripPlaceKeys.length > 0 && Boolean(selectedTrip) && selectedTripPlaceKeys.every((key) => selectedTrip.places.find((place) => place.key === key)?.status === "visited");
   const savedCountries = useMemo(() => places.filter(({ kind }) => kind === "country"), [places]);
   const savedCities = useMemo(() => places.filter(({ kind }) => kind === "place"), [places]);
   const countryByCode = useMemo(() => new Map(COUNTRIES.features.map(({ properties }) => [properties.countryCode, properties])), []);
@@ -383,7 +386,11 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     queryKey: compassQueryKeys.countryDetail(travelContext, selectedCountry?.countryCode ?? ""),
     queryFn: ({ signal }) => {
       if (!selectedCountry) throw new Error("Select a country to continue.");
-      return findPlace(`${selectedCountry.name} (${selectedCountry.countryCode}), ${selectedCountry.continent}`, { name: selectedCountry.name, code: selectedCountry.countryCode, continent: selectedCountry.continent, lat: selectedCountry.latitude, lon: selectedCountry.longitude }, signal);
+      let accumulated = "";
+      return streamFindPlace(`${selectedCountry.name} (${selectedCountry.countryCode}), ${selectedCountry.continent}`, { name: selectedCountry.name, code: selectedCountry.countryCode, continent: selectedCountry.continent, lat: selectedCountry.latitude, lon: selectedCountry.longitude }, (text) => {
+        accumulated += text;
+        setCountryGuideDraft(extractGuideSections(accumulated));
+      }, signal);
     },
     enabled: countryDetailEnabled,
     staleTime: COUNTRY_SHEET_CACHE_MS,
@@ -400,8 +407,9 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     gcTime: COUNTRY_SHEET_CACHE_MS,
     retry: false,
   });
-  const countryDetail = countryDetailQuery.isFetching || countryDetailQuery.isError ? undefined : countryDetailQuery.data;
-  const countryDetailLoading = countryDetailEnabled && countryDetailQuery.isFetching;
+  const countryDetail = countryDetailQuery.isError ? undefined : countryDetailQuery.data;
+  const visibleCountryGuide = countryDetail ?? countryGuideDraft;
+  const countryDetailLoading = countryDetailEnabled && !visibleCountryGuide && (countryDetailQuery.isPending || countryDetailQuery.isFetching);
   const countryDetailError = countryDetailQuery.error ? errorMessage(countryDetailQuery.error) : undefined;
   const countryImage = countryDetail ? savedCountryImage ?? countryImageQuery.data : undefined;
   const childrenRequestToken = countryDetailQuery.data?.childrenRequestToken ?? "";
@@ -441,22 +449,39 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     gcTime: COUNTRY_SHEET_CACHE_MS,
     retry: false,
   });
-  const cityDetail = cityDetailQuery.isFetching || cityDetailQuery.isError ? undefined : cityDetailQuery.data;
-  const cityDetailLoading = cityDetailEnabled && (cityDetailQuery.isPending || cityDetailQuery.isFetching);
+  const cityDetail = cityDetailQuery.isError ? undefined : cityDetailQuery.data;
+  const cityDetailLoading = cityDetailEnabled && !cityDetail && (cityDetailQuery.isPending || cityDetailQuery.isFetching);
   const cityDetailError = cityDetailQuery.error ? errorMessage(cityDetailQuery.error) : undefined;
   const cityImage = cityDetail ? savedCityImage ?? cityImageQuery.data : undefined;
 
   useEffect(() => {
+    setCountryGuideDraft(undefined);
+  }, [selectedCountry?.countryCode]);
+
+  useEffect(() => {
+    if (cityDetailOpen) return;
+    const y = countryScrollOffset.current;
+    if (y <= 0) return;
+    requestAnimationFrame(() => countryScrollRef.current?.scrollTo({ y, animated: false }));
+  }, [cityDetailOpen]);
+
+  useEffect(() => {
     const query = countryQuery.trim();
-    const request = ++countrySearchRequest.current;
-    if (!query) return;
+    if (!query) {
+      setSearchFocus(undefined);
+      return;
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => {
       void searchCountries(query, controller.signal).then((match) => {
-        if (request !== countrySearchRequest.current) return;
-        setSearchFocus(match ?? undefined);
-        if (match) { setGlobeFocusTarget(match); setGlobeFocusRequest((current) => current + 1); }
-      }).catch(() => { if (request === countrySearchRequest.current) setSearchFocus(undefined); });
+        if (!match) return;
+        const focused = globeCountryByCode(match.countryCode) ?? match;
+        setSearchFocus(focused);
+        setGlobeFocusTarget(focused);
+        setGlobeFocusRequest((current) => current + 1);
+      }).catch((error: unknown) => {
+        if (error instanceof Error && (error.name === "CanceledError" || error.name === "AbortError")) return;
+      });
     }, COUNTRY_SEARCH_DEBOUNCE_MS);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [countryQuery]);
@@ -645,7 +670,6 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     setPendingPlaceSaves((current) => [...current, saveIdentity]);
     const input = { name: cityDetail.location.name, summary: cityDetail.summary, countryCode: cityDetail.location.countryCode, latitude: cityDetail.location.latitude, longitude: cityDetail.location.longitude, imageRequestToken: cityDetail.imageRequestToken };
     setCityDetailOpen(false);
-    requestAnimationFrame(() => countryScrollRef.current?.scrollTo({ y: 0, animated: true }));
     void persistGeneratedPlace(input, `optimistic-${randomUUID()}`, "place", cityImage.image.url, "City could not be saved", saveIdentity);
   }
 
@@ -692,18 +716,67 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     if (enteringSelection) void Haptics.selectionAsync();
   }
 
-  function updateSelectedPlaces(patch: Partial<Pick<Place, "status" | "isFavorite">>) {
-    const selectedByKey = new Map([...places, ...visiblePlaces].map((place) => [place.key, place]));
-    const selected = selectedTablePlaceKeys.map((key) => selectedByKey.get(key)).filter((place): place is Place => Boolean(place));
-    const selectionComplete = selected.length > 0 && selected.length === selectedTablePlaceKeys.length;
-    const successTitle = patch.status === "visited" ? "Places marked as visited"
-      : patch.status === "wishlist" ? "Places marked as want to go"
-        : patch.isFavorite ? "Places favorited" : "Places unfavorited";
-    setSelectedTablePlaceKeys([]);
+  function openBulkPlaceDelete() {
+    if (anySelectedPlacesFavorite) {
+      setPlaceBulkMenuOpen(false);
+      showToast({ title: "Favorite places must be unfavorited before deletion.", duration: 2_000 });
+      return;
+    }
     setPlaceBulkMenuOpen(false);
-    showToast({ title: selectionComplete ? successTitle : "Some places could not be updated", duration: 2_000 });
+    delaySheetTransition(() => setPlaceBulkDeleteOpen(true));
+  }
+
+  function confirmDeleteSelectedPlaces() {
+    const keys = selectedTablePlaceKeys.filter((key) => !places.find((place) => place.key === key)?.isFavorite);
+    if (!keys.length || placeDeleting) return;
+    setPlaceDeleting(true);
+    setPlaceBulkDeleteOpen(false);
+    setPlaceBulkMenuOpen(false);
+    setSelectedTablePlaceKeys([]);
+    showToast({ title: keys.length === 1 ? "Place deleted" : "Places deleted", duration: 2_000 });
+    const optimisticReady = queryClient.cancelQueries({ queryKey: compassQueryKeys.all(travelContext) }).catch(() => undefined).then(() => {
+      keys.forEach((placeKey) => removeCachedCompassPlace(queryClient, travelContext, placeKey));
+    });
+    void optimisticReady.then(() => Promise.allSettled(keys.map(async (placeKey) => {
+      await placeMutationQueue.current.get(placeKey);
+      await deletePlace(placeKey);
+      optimisticPlaceRef.current.delete(placeKey);
+      authoritativePlaceRef.current.delete(placeKey);
+      placeMutationVersion.current.delete(placeKey);
+    }))).then((results) => {
+      if (results.some((result) => result.status === "rejected")) {
+        void queryClient.invalidateQueries({ queryKey: compassQueryKeys.all(travelContext) });
+        showToast({ title: "Some places could not be deleted", duration: 2_000 });
+      }
+    }).finally(() => setPlaceDeleting(false));
+  }
+
+  function applyPlacePatch(keys: string[], patch: Partial<Pick<Place, "status" | "isFavorite">>, onApplied: () => void) {
+    const selectedByKey = new Map([...places, ...visiblePlaces, ...(selectedTrip?.places ?? [])].map((place) => [place.key, place]));
+    const selected = keys.map((key) => selectedByKey.get(key)).filter((place): place is Place => Boolean(place));
+    const selectionComplete = selected.length > 0 && selected.length === keys.length;
+    const one = keys.length === 1;
+    const successTitle = patch.status === "visited" ? one ? "Place marked as visited" : "Places marked as visited"
+      : patch.status === "wishlist" ? one ? "Place marked as want to go" : "Places marked as want to go"
+        : patch.isFavorite ? one ? "Place favorited" : "Places favorited" : one ? "Place unfavorited" : "Places unfavorited";
+    onApplied();
+    showToast({ title: selectionComplete ? successTitle : one ? "Place could not be updated" : "Some places could not be updated", duration: 2_000 });
     void Promise.allSettled(selected.map((place) => updateSavedPlace(place, patch))).then((results) => {
-      if (selectionComplete && results.some(({ status }) => status === "rejected")) showToast({ title: "Some places could not be updated", duration: 2_000 });
+      if (selectionComplete && results.some(({ status }) => status === "rejected")) showToast({ title: one ? "Place could not be updated" : "Some places could not be updated", duration: 2_000 });
+    });
+  }
+
+  function updateSelectedPlaces(patch: Partial<Pick<Place, "status" | "isFavorite">>) {
+    applyPlacePatch(selectedTablePlaceKeys, patch, () => {
+      setSelectedTablePlaceKeys([]);
+      setPlaceBulkMenuOpen(false);
+    });
+  }
+
+  function updateSelectedTripPlaces(patch: Partial<Pick<Place, "status" | "isFavorite">>) {
+    applyPlacePatch(selectedTripPlaceKeys, patch, () => {
+      setSelectedTripPlaceKeys([]);
+      setTripBulkMenuOpen(false);
     });
   }
 
@@ -724,12 +797,17 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   }
 
   function openPlaceDelete() {
+    if (selectedPlace?.isFavorite) {
+      setPlaceMenuOpen(false);
+      showToast({ title: "Favorite places must be unfavorited before deletion.", duration: 2_000 });
+      return;
+    }
     setPlaceMenuOpen(false);
     delaySheetTransition(() => setPlaceDeleteOpen(true));
   }
 
   async function confirmDeletePlace() {
-    if (!selectedPlace || placeDeleting) return;
+    if (!selectedPlace || selectedPlace.isFavorite || placeDeleting) return;
     const previous = selectedPlace;
     const placeKey = selectedPlace.key;
     setPlaceDeleting(true);
@@ -843,17 +921,15 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
 
   function advanceTripCreation() {
     if (!selectedPlaceKeys.length || selectedPlaceKeys.some((key) => key.startsWith("optimistic-"))) return;
-    setTripSelectionOpen(false);
     setOrderPlaceKeys(selectedPlaceKeys);
     setSelectedOrderPlaceKeys([]);
-    delaySheetTransition(() => setTripOrderOpen(true));
+    setTripOrderOpen(true);
   }
 
   function advanceTripOrder() {
     if (!orderPlaceKeys.length) return;
     setSelectedPlaceKeys(orderPlaceKeys);
-    setTripOrderOpen(false);
-    delaySheetTransition(() => setTripDetailsOpen(true));
+    setTripDetailsOpen(true);
   }
 
   function submitTrip() {
@@ -870,10 +946,13 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     const optimisticTrip: Trip = { key: optimisticKey, name, ...(tripDescription.trim() ? { description: tripDescription.trim() } : {}), createdAt: now, updatedAt: now, status: "planned", isFavorite: false, attachments: [], places: selectedPlaces, ...(selectedPlaces[0]?.coverUrl ? { coverUrl: selectedPlaces[0].coverUrl } : {}) };
     const tripsKey = compassQueryKeys.trips(travelContext);
     setTripDetailsOpen(false);
+    setTripOrderOpen(false);
+    setTripSelectionOpen(false);
     setTripName("");
     setTripDescription("");
     setSelectedPlaceKeys([]);
     optimisticTripRef.current.set(optimisticKey, optimisticTrip);
+    tripCardKeyRef.current.set(optimisticKey, optimisticKey);
     showToast({ title: "Trip created", duration: 2_000 });
     void (async () => {
       await queryClient.cancelQueries({ queryKey: tripsKey, exact: true }).catch(() => undefined);
@@ -881,9 +960,13 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
       try {
         const trip = await createTrip({ name, ...(tripDescription.trim() ? { description: tripDescription.trim() } : {}), placeKeys: selectedPlaces.map(({ key }) => key), idempotencyKey });
         await queryClient.cancelQueries({ queryKey: tripsKey, exact: true }).catch(() => undefined);
+        const previous = queryClient.getQueryData<Trip[]>(tripsKey)?.find(({ key }) => key === optimisticKey);
+        const nextTrip = previous?.coverUrl ? { ...trip, coverUrl: previous.coverUrl } : trip;
+        const cardKey = tripCardKeyRef.current.get(optimisticKey) ?? optimisticKey;
+        tripCardKeyRef.current.set(nextTrip.key, cardKey);
         optimisticTripRef.current.delete(optimisticKey);
-        optimisticTripRef.current.set(trip.key, trip);
-        queryClient.setQueryData(tripsKey, (current: Trip[] | undefined) => reconcileOptimisticCompassTrip(current, optimisticKey, trip));
+        optimisticTripRef.current.set(nextTrip.key, nextTrip);
+        queryClient.setQueryData(tripsKey, (current: Trip[] | undefined) => reconcileOptimisticCompassTrip(current, optimisticKey, nextTrip));
       } catch (error) {
         await queryClient.cancelQueries({ queryKey: tripsKey, exact: true }).catch(() => undefined);
         optimisticTripRef.current.delete(optimisticKey);
@@ -1172,8 +1255,18 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     }, "Trip could not be updated", editTripCompleted && selectedTrip.status !== "completed" ? "Trip completed and places marked as visited" : "Trip updated");
   }
 
+  function openTripDelete() {
+    if (selectedTrip?.isFavorite) {
+      setTripMenuOpen(false);
+      showToast({ title: "Favorite trips must be unfavorited before deletion.", duration: 2_000 });
+      return;
+    }
+    setTripMenuOpen(false);
+    delaySheetTransition(() => setTripDeleteOpen(true));
+  }
+
   function confirmDeleteTrip() {
-    if (!selectedTrip) return;
+    if (!selectedTrip || selectedTrip.isFavorite) return;
     const tripKey = selectedTrip.key;
     const tripsKey = compassQueryKeys.trips(travelContext);
     const version = nextTripMutationVersion(tripKey);
@@ -1324,6 +1417,78 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     delaySheetTransition(() => setResourceTagsOpen(true));
   }
 
+  function openTripTags(keys: readonly string[], closeMenu: () => void) {
+    closeMenu();
+    setResourceTagTargets(keys.map((key) => ({ type: "trip", key })));
+    delaySheetTransition(() => setResourceTagsOpen(true));
+  }
+
+  function toggleTableTripSelection(key: string) {
+    setSelectedTableTripKeys((current) => current.includes(key) ? current.filter((candidate) => candidate !== key) : [...current, key]);
+  }
+
+  function handleTableTripLongPress(key: string) {
+    const enteringSelection = selectedTableTripKeys.length === 0 && !selectedTableTripKeys.includes(key);
+    toggleTableTripSelection(key);
+    if (enteringSelection) void Haptics.selectionAsync();
+  }
+
+  function updateSelectedTrips(patch: Partial<Pick<Trip, "status" | "isFavorite">>) {
+    const selected = selectedTableTripKeys.map((key) => trips.find((trip) => trip.key === key)).filter((trip): trip is Trip => Boolean(trip));
+    const selectionComplete = selected.length > 0 && selected.length === selectedTableTripKeys.length;
+    const one = selectedTableTripKeys.length === 1;
+    const successTitle = patch.status === "completed" ? one ? "Trip marked as completed" : "Trips marked as completed"
+      : patch.status === "planned" ? one ? "Trip marked as planned" : "Trips marked as planned"
+        : patch.isFavorite ? one ? "Trip favorited" : "Trips favorited" : one ? "Trip unfavorited" : "Trips unfavorited";
+    setSelectedTableTripKeys([]);
+    setTripTableBulkMenuOpen(false);
+    showToast({ title: selectionComplete ? successTitle : one ? "Trip could not be updated" : "Some trips could not be updated", duration: 2_000 });
+    for (const trip of selected) {
+      const status = patch.status;
+      optimisticTripUpdate(trip.key, (current) => ({
+        ...current,
+        ...patch,
+        ...(status === "completed" ? { places: current.places.map((place) => ({ ...place, status: "visited" as const })) } : {}),
+        updatedAt: new Date().toISOString(),
+      }), () => updateTrip({ tripKey: trip.key, ...patch }), "Some trips could not be updated", "");
+    }
+  }
+
+  function openBulkTripDelete() {
+    if (anySelectedTripsFavorite) {
+      setTripTableBulkMenuOpen(false);
+      showToast({ title: "Favorite trips must be unfavorited before deletion.", duration: 2_000 });
+      return;
+    }
+    setTripTableBulkMenuOpen(false);
+    delaySheetTransition(() => setTripTableBulkDeleteOpen(true));
+  }
+
+  function confirmDeleteSelectedTrips() {
+    const keys = selectedTableTripKeys.filter((key) => !trips.find((trip) => trip.key === key)?.isFavorite);
+    if (!keys.length || tripTableDeleting) return;
+    setTripTableDeleting(true);
+    setTripTableBulkDeleteOpen(false);
+    setTripTableBulkMenuOpen(false);
+    setSelectedTableTripKeys([]);
+    showToast({ title: keys.length === 1 ? "Trip deleted" : "Trips deleted", duration: 2_000 });
+    const tripsKey = compassQueryKeys.trips(travelContext);
+    void Promise.allSettled(keys.map(async (tripKey) => {
+      const version = nextTripMutationVersion(tripKey);
+      optimisticTripDeleteVersion.current.set(tripKey, version);
+      optimisticTripRef.current.delete(tripKey);
+      await queryClient.cancelQueries({ queryKey: tripsKey, exact: true }).catch(() => undefined);
+      removeCachedCompassTrip(queryClient, travelContext, tripKey);
+      await deleteTrip(tripKey);
+      optimisticTripDeleteVersion.current.delete(tripKey);
+    })).then((results) => {
+      if (results.some((result) => result.status === "rejected")) {
+        void queryClient.invalidateQueries({ queryKey: tripsKey, exact: true });
+        showToast({ title: "Some trips could not be deleted", duration: 2_000 });
+      }
+    }).finally(() => setTripTableDeleting(false));
+  }
+
   const loadError = overviewQuery.error ? errorMessage(overviewQuery.error) : undefined;
   const tripsError = tripsQuery.error ? errorMessage(tripsQuery.error) : undefined;
   const semanticSearchActive = savedTableSearchActive;
@@ -1344,14 +1509,13 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     <View style={[styles.header, { paddingTop: insets.top + 6, paddingLeft: Math.max(insets.left, spacing.md), paddingRight: Math.max(insets.right, spacing.md) }]}><WorkspaceAppSwitcher active="compass" /><ProfileHeaderRight /></View>
     <View style={[styles.workspaceViewport, { paddingLeft: Math.max(insets.left, spacing.md), paddingRight: Math.max(insets.right, spacing.md) }]}>
       {selectedPlace ? <>
-        <View style={styles.titleRow}><Button accessibilityLabel={selectedTrip ? `Back to ${selectedTrip.name}` : "Back to Places"} contentMode="raw" onPress={() => { setSelectedPlaceKey(undefined); setSelectedPlaceSnapshot(undefined); }} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button><Text numberOfLines={1} style={styles.workspaceTitle}>{selectedPlace.name}</Text><Button accessibilityLabel="Place menu" contentMode="raw" onPress={() => setPlaceMenuOpen(true)} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button></View>
-        <View style={styles.detailHeaderActions}><Button accessibilityLabel="AI place actions" contentMode="raw" onPress={() => setPlaceAiMenuOpen(true)} size="sm" variant="icon"><BrainIcon size="sm" /></Button></View>
-        <ScrollView accessibilityLabel={`${selectedPlace.name} place details`} alwaysBounceVertical contentContainerStyle={styles.savedPlaceDetail} refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />} showsVerticalScrollIndicator={false}>{selectedPlace.kind === "country" ? countryDetailLoading ? <GuideLoading label={`Loading information about ${selectedPlace.name}`} text="Generating country guide..." /> : countryDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{countryDetailError}</Text></View> : countryDetail ? <GuideHero detail={countryDetail} image={countryImage?.image} onImageError={() => void overviewQuery.refetch()} /> : null : cityDetailLoading ? <GuideLoading label={`Loading information about ${selectedPlace.name}`} text="Generating city guide..." /> : cityDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{cityDetailError}</Text></View> : cityDetail ? <GuideHero detail={cityDetail} image={cityImage?.image} onImageError={() => void overviewQuery.refetch()} /> : null}</ScrollView>
+        <View style={styles.rootTitleRow}><Button accessibilityLabel={selectedTrip ? `Back to ${selectedTrip.name}` : "Back to Places"} contentMode="raw" onPress={() => { setSelectedPlaceKey(undefined); setSelectedPlaceSnapshot(undefined); }} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button><Text numberOfLines={1} style={styles.rootTitle}>{selectedPlace.name}</Text><Button accessibilityLabel="Place menu" contentMode="raw" onPress={() => setPlaceMenuOpen(true)} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button><Button accessibilityLabel="AI place actions" contentMode="raw" onPress={() => setPlaceAiMenuOpen(true)} size="xs" variant="icon"><BrainIcon size="sm" /></Button></View>
+        <ScrollView accessibilityLabel={`${selectedPlace.name} place details`} alwaysBounceVertical contentContainerStyle={styles.savedPlaceDetail} refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />} showsVerticalScrollIndicator={false}>{selectedPlace.kind === "country" ? countryDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{countryDetailError}</Text></View> : visibleCountryGuide || savedCountryImage ? <GuideHero cacheKey={`compass-place-cover:${selectedPlace.key}`} detail={visibleCountryGuide ?? { summary: selectedPlace.summary, culture: "", food: "", whyVisit: "" }} image={(countryImage ?? savedCountryImage)?.image} onImageError={() => void overviewQuery.refetch()} /> : countryDetailLoading ? <GuideLoading label={`Loading information about ${selectedPlace.name}`} /> : null : cityDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{cityDetailError}</Text></View> : cityDetail || savedCityImage ? <GuideHero cacheKey={`compass-place-cover:${selectedPlace.key}`} detail={cityDetail ?? { summary: selectedPlace.summary, culture: "", food: "", whyVisit: "" }} image={(cityImage ?? savedCityImage)?.image} onImageError={() => void overviewQuery.refetch()} /> : cityDetailLoading ? <GuideLoading label={`Loading information about ${selectedPlace.name}`} /> : null}</ScrollView>
       </> : selectedTrip ? <>
-        <View style={styles.titleRow}><Button accessibilityLabel="Back to trips" contentMode="raw" onPress={() => { setSelectedTripKey(undefined); setSelectedTripPlaceKeys([]); }} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button><Text numberOfLines={1} style={styles.workspaceTitle}>{selectedTrip.name}</Text><Button accessibilityLabel="Trip menu" contentMode="raw" onPress={() => setTripMenuOpen(true)} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button><Button accessibilityLabel="Add to trip" contentMode="raw" onPress={() => setTripAddMenuOpen(true)} size="sm" variant="icon"><PlusIcon size="sm" /></Button></View>
-        <View style={styles.detailHeaderActions}><Button accessibilityLabel="AI trip actions" contentMode="raw" onPress={() => setTripAiMenuOpen(true)} size="sm" variant="icon"><BrainIcon size="sm" /></Button>{tripDetailTab === "places" ? <Button accessibilityLabel={tripView === "globe" ? "Show trip table" : "Show trip globe"} contentMode="raw" onPress={() => setTripView((current) => current === "globe" ? "table" : "globe")} size="sm" variant="icon">{tripView === "globe" ? <TableViewIcon size="sm" /> : <GlobeViewIcon size="sm" />}</Button> : null}</View>
+        <View style={styles.rootTitleRow}><Button accessibilityLabel="Back to trips" contentMode="raw" onPress={() => { setSelectedTripKey(undefined); setSelectedTripPlaceKeys([]); }} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button><Text numberOfLines={1} style={styles.rootTitle}>{selectedTrip.name}</Text><Button accessibilityLabel="Trip menu" contentMode="raw" onPress={() => setTripMenuOpen(true)} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button><Button accessibilityLabel="Add to trip" contentMode="raw" onPress={() => setTripAddMenuOpen(true)} size="xs" variant="icon"><PlusIcon size="sm" /></Button></View>
+        <View style={styles.detailHeaderActions}><Button accessibilityLabel="AI trip actions" contentMode="raw" onPress={() => setTripAiMenuOpen(true)} size="xs" variant="icon"><BrainIcon size="sm" /></Button>{tripDetailTab === "places" ? <Button accessibilityLabel={tripView === "globe" ? "Show trip table" : "Show trip globe"} contentMode="raw" onPress={() => setTripView((current) => current === "globe" ? "table" : "globe")} size="xs" variant="icon">{tripView === "globe" ? <TableViewIcon size="sm" /> : <GlobeViewIcon size="sm" />}</Button> : null}</View>
         {selectedTripPlaceKeys.length ? <BulkToolbar count={selectedTripPlaceKeys.length} onClear={() => setSelectedTripPlaceKeys([])} onMore={() => setTripBulkMenuOpen(true)} /> : null}
-        <Tabs accessibilityLabel="Trip detail categories" accessibilityRole="tablist" role="tablist" style={styles.rootTabs}><Button accessibilityRole="tab" accessibilityState={{ selected: tripDetailTab === "places" }} onPress={() => setTripDetailTab("places")} size="xs" style={styles.rootTab} variant={tripDetailTab === "places" ? "secondary" : "ghost"}>Places</Button><Button accessibilityRole="tab" accessibilityState={{ selected: tripDetailTab === "images" }} onPress={() => setTripDetailTab("images")} size="xs" style={styles.rootTab} variant={tripDetailTab === "images" ? "secondary" : "ghost"}>Generated Images</Button></Tabs>
+        <Tabs accessibilityLabel="Trip detail categories" accessibilityRole="tablist" role="tablist" style={styles.rootTabs}><Button accessibilityRole="tab" accessibilityState={{ selected: tripDetailTab === "places" }} onPress={() => setTripDetailTab("places")} size="xs" style={styles.rootTab} variant={tripDetailTab === "places" ? "secondary" : "ghost"}>Places</Button><Button accessibilityRole="tab" accessibilityState={{ selected: tripDetailTab === "images" }} onPress={() => setTripDetailTab("images")} size="xs" style={styles.rootTab} variant={tripDetailTab === "images" ? "secondary" : "ghost"}>Images</Button></Tabs>
         {tripDetailTab === "images" ? <ScrollView accessibilityLabel="Trip images" alwaysBounceVertical contentContainerStyle={styles.imageGrid} onLayout={({ nativeEvent }) => setTripGridWidth(nativeEvent.layout.width)} refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />} showsVerticalScrollIndicator={false}>{tripImages.map((image) => <Button accessibilityLabel={`Open ${image.title} image`} contentMode="raw" key={image.key} onPress={() => setImageViewerKey(image.key)} shape="rounded" size="xl" style={[styles.imageCard, { width: imageCardSize, height: imageCardSize }]} variant="ghost"><Image contentFit="cover" source={image.url} style={StyleSheet.absoluteFill} /></Button>)}</ScrollView> : tripView === "globe" ? <View style={styles.tripGlobe}><InteractiveGlobe autoRotate={false} focusRequest={tripGlobeFocusRequest} focusTarget={tripGlobePlace} markers={selectedTrip.places} onMarkerPress={selectTripGlobePlace} /><TripPlaceArc onFocus={selectTripGlobePlace} onOpen={handleTripPlacePress} places={selectedTrip.places} selectedKey={tripGlobePlace?.key} /></View> : <ScrollView accessibilityLabel="Trip places" alwaysBounceVertical contentContainerStyle={styles.cardGrid} onLayout={({ nativeEvent }) => setTripGridWidth(nativeEvent.layout.width)} refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />} showsVerticalScrollIndicator={false}>{selectedTrip.places.map((place) => <PlaceCard accessibilityLongPress cardSize={tripCardSize} key={place.key} onLongPress={() => handleTripPlaceLongPress(place.key)} onPress={() => handleTripPlacePress(place)} place={place} selectable selected={selectedTripPlaceKeys.includes(place.key)} />)}</ScrollView>}
       </> : <View style={styles.compassRoot}><View style={styles.rootTitleRow}>
         <WorkspaceAppSwitcher active="compass" trigger="back" />
@@ -1359,37 +1523,38 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
         <Button accessibilityLabel={rootView === "globe" ? "Show Compass table" : "Show Compass globe"} contentMode="raw" onPress={() => setRootView((current) => current === "globe" ? "table" : "globe")} size="xs" variant="icon">{rootView === "globe" ? <TableViewIcon size="sm" /> : <GlobeViewIcon size="sm" />}</Button>
         <Button accessibilityLabel={rootView === "globe" ? "Add in Compass" : "Compass actions"} contentMode="raw" onPress={() => setActionsOpen(true)} size="xs" variant="icon">{rootView === "globe" ? <PlusIcon size="sm" /> : <MoreHorizontalIcon size="sm" />}</Button>
       </View>
-      {rootView === "globe" ? <>
-        <View style={styles.rootActions}><View style={styles.rootSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search Compass countries" editable={!countrySearchFocusBlocked} focusable={!countrySearchFocusBlocked} onChangeText={(value) => { setCountryQuery(value); setSearchFocus(undefined); }} onFocus={() => { if (countrySearchFocusBlocked) { countrySearchInput.current?.blur(); Keyboard.dismiss(); } }} placeholder="Search countries..." ref={countrySearchInput} style={styles.rootSearchInput} value={countryQuery} />{countryQuery.trim() ? <Button accessibilityLabel="Clear Compass search" contentMode="raw" iconOnly onPress={() => { setCountryQuery(""); setSearchFocus(undefined); }} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}</View></View>
-        <View style={styles.globe}><InteractiveGlobe autoRotate={!countryQuery.trim()} focusRequest={globeFocusRequest} focusTarget={globeFocusTarget} onCountryPress={(country) => { if (country) openCountryDetail(country.properties); }} savedCountryCodes={savedCountryCodes} selectedCountryCode={activeCountryCode} />{loadError && !overviewQuery.isPending ? <View style={styles.loadFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{loadError}</Text><Button onPress={() => void overviewQuery.refetch()} size="sm" variant="secondary">Retry</Button></View> : null}</View>
-      </> : <View style={styles.tableView}>
-        {tableTab === "places" && selectedTablePlaceKeys.length ? <BulkToolbar count={selectedTablePlaceKeys.length} onClear={() => setSelectedTablePlaceKeys([])} onMore={() => setPlaceBulkMenuOpen(true)} /> : <View style={styles.rootActions}><View style={styles.rootSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel={tableTab === "places" ? "Search Places" : "Search Trips"} maxLength={500} onChangeText={setPlaceTableQuery} placeholder="Search..." returnKeyType="search" style={styles.rootSearchInput} value={placeTableQuery} />{placeTableQuery.trim() ? <Button accessibilityLabel={`Clear ${tableTab === "places" ? "Places" : "Trips"} search`} contentMode="raw" iconOnly onPress={() => setPlaceTableQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}</View><Button accessibilityLabel={`Filter ${tableTab === "places" ? "Places" : "Trips"}`} contentMode="raw" onPress={() => setTableFilterOpen(true)} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={selectedTags.length || (tableTab === "places" ? placeFavoritesOnly || placeStatusFilter !== "all" : tripFavoritesOnly || tripCompletedOnly) ? "accent" : "default"} /></Button></View>}
+      {rootView === "globe" ? <View style={styles.globePane}><View style={styles.rootActions}><View style={styles.rootSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search Compass countries" autoCapitalize="none" autoCorrect={false} blurOnSubmit={false} editable={!countrySearchFocusBlocked} focusable={!countrySearchFocusBlocked} onChangeText={setCountryQuery} onFocus={() => { if (countrySearchFocusBlocked) { countrySearchInput.current?.blur(); Keyboard.dismiss(); } }} placeholder="Search countries..." ref={countrySearchInput} returnKeyType="search" style={styles.rootSearchInput} value={countryQuery} />{countryQuery.trim() ? <Button accessibilityLabel="Clear Compass search" contentMode="raw" iconOnly onPress={() => setCountryQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}</View></View><View style={styles.globe}><InteractiveGlobe autoRotate={!searchFocus} focusRequest={globeFocusRequest} focusTarget={globeFocusTarget} onCountryPress={(country) => { if (country) openCountryDetail(country.properties); }} savedCountryCodes={savedCountryCodes} selectedCountryCode={activeCountryCode} />{loadError && !overviewQuery.isPending ? <View style={styles.loadFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{loadError}</Text><Button onPress={() => void overviewQuery.refetch()} size="sm" variant="secondary">Retry</Button></View> : null}</View></View> : <View style={styles.tableView}>
+        <View style={styles.rootActions}><View style={styles.rootSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel={tableTab === "places" ? "Search Places" : "Search Trips"} maxLength={500} onChangeText={setPlaceTableQuery} placeholder="Search..." returnKeyType="search" style={styles.rootSearchInput} value={placeTableQuery} />{placeTableQuery.trim() ? <Button accessibilityLabel={`Clear ${tableTab === "places" ? "Places" : "Trips"} search`} contentMode="raw" iconOnly onPress={() => setPlaceTableQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}</View><Button accessibilityLabel={`Filter ${tableTab === "places" ? "Places" : "Trips"}`} contentMode="raw" onPress={() => setTableFilterOpen(true)} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={selectedTags.length || (tableTab === "places" ? placeFavoritesOnly || placeStatusFilter !== "all" : tripFavoritesOnly || tripCompletedOnly) ? "accent" : "default"} /></Button></View>
+        {tableTab === "places" && selectedTablePlaceKeys.length ? <BulkToolbar count={selectedTablePlaceKeys.length} onClear={() => setSelectedTablePlaceKeys([])} onMore={() => setPlaceBulkMenuOpen(true)} /> : tableTab === "trips" && selectedTableTripKeys.length ? <BulkToolbar count={selectedTableTripKeys.length} onClear={() => setSelectedTableTripKeys([])} onMore={() => setTripTableBulkMenuOpen(true)} /> : null}
         <TagFilterLane context={contentContext} />
-        <Tabs accessibilityLabel="Compass table categories" accessibilityRole="tablist" role="tablist" style={styles.rootTabs}><Button accessibilityRole="tab" accessibilityState={{ selected: tableTab === "places" }} onPress={() => setTableTab("places")} size="xs" style={styles.rootTab} variant={tableTab === "places" ? "secondary" : "ghost"}>Places</Button><Button accessibilityRole="tab" accessibilityState={{ selected: tableTab === "trips" }} onPress={() => { setSelectedTablePlaceKeys([]); setTableTab("trips"); }} size="xs" style={styles.rootTab} variant={tableTab === "trips" ? "secondary" : "ghost"}>Trips</Button></Tabs>
-        {tableTab === "places" ? <ScrollView accessibilityLabel="My Places" accessibilityLiveRegion="polite" accessibilityState={{ busy: placeTablePending }} alwaysBounceVertical contentContainerStyle={[styles.cardGrid, !placeTablePending && !placeTableError && visiblePlaces.length === 0 && styles.emptyGrid]} onLayout={({ nativeEvent }) => setTableGridWidth(nativeEvent.layout.width)} refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />} role="tabpanel" showsVerticalScrollIndicator={false}>{placeTablePending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.squareCard, { width: tableCardSize, height: tableCardSize }]} />) : placeTableError ? <QueryFailure message={placeTableError} onRetry={() => void (semanticSearchActive ? savedPlaceSearchQuery.refetch() : overviewQuery.refetch())} /> : visiblePlaces.map((place) => <PlaceCard accessibilityLongPress cardSize={tableCardSize} key={place.key} onLongPress={() => handleTablePlaceLongPress(place.key)} onPress={() => { if (selectedTablePlaceKeys.length) toggleTablePlaceSelection(place.key); else openSavedPlace(place); }} place={place} selectable={selectedTablePlaceKeys.length > 0} selected={selectedTablePlaceKeys.includes(place.key)} />)}{!placeTablePending && !placeTableError && visiblePlaces.length === 0 ? <Text style={styles.emptyText}>{tableSearchTerm ? "No saved places matched this search." : places.length ? "No places match these filters." : "No saved places yet. Create one to start mapping your world."}</Text> : null}</ScrollView> : <ScrollView accessibilityLabel="Trips" accessibilityLiveRegion="polite" accessibilityState={{ busy: tripTablePending }} alwaysBounceVertical contentContainerStyle={[styles.cardGrid, !tripTablePending && !tripTableError && visibleTrips.length === 0 && styles.emptyGrid]} onLayout={({ nativeEvent }) => setTableGridWidth(nativeEvent.layout.width)} refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />} role="tabpanel" showsVerticalScrollIndicator={false}>{tripTablePending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.squareCard, { width: tableCardSize, height: tableCardSize }]} />) : tripTableError ? <QueryFailure message={tripTableError} onRetry={() => void (semanticSearchActive ? tripSearchQuery.refetch() : tripsQuery.refetch())} /> : visibleTrips.map((trip) => <TripCard cardSize={tableCardSize} key={trip.key} onPress={() => { setTripView("globe"); setSelectedTripKey(trip.key); setTripDetailTab("places"); }} trip={trip} />)}{!tripTablePending && !tripTableError && visibleTrips.length === 0 ? <Text style={styles.emptyText}>{tableSearchTerm ? "No trips matched this search." : "No trips yet. Group saved places into your first trip."}</Text> : null}</ScrollView>}
-        {tableTab === "trips" && !tripTablePending && !tripTableError && !tableSearchTerm && (tripFavoritesOnly || tripCompletedOnly) && visibleTrips.length === 0 ? <View style={styles.filteredTripEmpty}><Text style={styles.emptyText}>No trips match these filters.</Text></View> : null}
+        <Tabs accessibilityLabel="Compass table categories" accessibilityRole="tablist" role="tablist" style={styles.rootTabs}><Button accessibilityRole="tab" accessibilityState={{ selected: tableTab === "places" }} onPress={() => { setSelectedTableTripKeys([]); setTableTab("places"); }} size="xs" style={styles.rootTab} variant={tableTab === "places" ? "secondary" : "ghost"}>Places</Button><Button accessibilityRole="tab" accessibilityState={{ selected: tableTab === "trips" }} onPress={() => { setSelectedTablePlaceKeys([]); setTableTab("trips"); }} size="xs" style={styles.rootTab} variant={tableTab === "trips" ? "secondary" : "ghost"}>Trips</Button></Tabs>
+        {tableTab === "places" ? <ScrollView accessibilityLabel="My Places" accessibilityLiveRegion="polite" accessibilityState={{ busy: placeTablePending }} alwaysBounceVertical contentContainerStyle={[styles.cardGrid, !placeTablePending && !placeTableError && visiblePlaces.length === 0 && styles.emptyGrid]} onLayout={({ nativeEvent }) => setTableGridWidth(nativeEvent.layout.width)} refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />} role="tabpanel" showsVerticalScrollIndicator={false}>{placeTablePending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.squareCard, styles.skeletonBlock, { width: tableCardSize, height: tableCardSize }]} />) : placeTableError ? <QueryFailure message={placeTableError} onRetry={() => void (semanticSearchActive ? savedPlaceSearchQuery.refetch() : overviewQuery.refetch())} /> : visiblePlaces.map((place) => <PlaceCard accessibilityLongPress cardSize={tableCardSize} key={place.key} onLongPress={() => handleTablePlaceLongPress(place.key)} onPress={() => { if (selectedTablePlaceKeys.length) toggleTablePlaceSelection(place.key); else openSavedPlace(place); }} place={place} selectable={selectedTablePlaceKeys.length > 0} selected={selectedTablePlaceKeys.includes(place.key)} />)}{!placeTablePending && !placeTableError && visiblePlaces.length === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>{tableSearchTerm || selectedTags.length || placeFavoritesOnly || placeStatusFilter !== "all" || places.length ? "No places matching these filters." : "No places yet."}</Text>{tableSearchTerm || selectedTags.length || placeFavoritesOnly || placeStatusFilter !== "all" || places.length ? null : <Button accessibilityLabel="Find place" contentMode="raw" onPress={() => { updatePlaceSearch(""); setCreatePlaceOpen(true); }} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button>}</View> : null}</ScrollView> : <ScrollView accessibilityLabel="Trips" accessibilityLiveRegion="polite" accessibilityState={{ busy: tripTablePending }} alwaysBounceVertical contentContainerStyle={[styles.cardGrid, !tripTablePending && !tripTableError && visibleTrips.length === 0 && styles.emptyGrid]} onLayout={({ nativeEvent }) => setTableGridWidth(nativeEvent.layout.width)} refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />} role="tabpanel" showsVerticalScrollIndicator={false}>{tripTablePending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.squareCard, styles.skeletonBlock, { width: tableCardSize, height: tableCardSize }]} />) : tripTableError ? <QueryFailure message={tripTableError} onRetry={() => void (semanticSearchActive ? tripSearchQuery.refetch() : tripsQuery.refetch())} /> : visibleTrips.map((trip) => <TripCard accessibilityLongPress cardSize={tableCardSize} key={tripCardKeyRef.current.get(trip.key) ?? trip.key} onLongPress={() => handleTableTripLongPress(trip.key)} onPress={() => { if (selectedTableTripKeys.length) toggleTableTripSelection(trip.key); else { setTripView("globe"); setSelectedTripKey(trip.key); setTripDetailTab("places"); } }} selectable={selectedTableTripKeys.length > 0} selected={selectedTableTripKeys.includes(trip.key)} trip={trip} />)}{!tripTablePending && !tripTableError && visibleTrips.length === 0 ? <View style={styles.emptyState}><Text style={styles.emptyText}>{tableSearchTerm || selectedTags.length || tripFavoritesOnly || tripCompletedOnly || trips.length ? "No trips matching these filters." : "No trips yet."}</Text>{tableSearchTerm || selectedTags.length || tripFavoritesOnly || tripCompletedOnly || trips.length ? null : <Button accessibilityLabel="Create trip" contentMode="raw" onPress={() => { setSelectedPlaceKeys([]); setTripName(""); setTripDescription(""); setTripSelectionOpen(true); }} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button>}</View> : null}</ScrollView>}
+
       </View>}</View>}
     </View>
 
     <CoreComposer accessory={rootView === "globe" && !selectedPlace && !selectedTrip && selectedCountry && !countryDetailOpen && !cityDetailOpen ? <Button accessibilityLabel={`Reopen ${selectedCountry.name}`} contentMode="raw" onPress={() => openCountryDetail(selectedCountry, "globe", true)} size="sm" style={styles.placeIsland} variant="secondary"><LocationPinIcon size="sm" /><Text numberOfLines={1} style={styles.placeIslandText}>{selectedCountry.name}</Text><ChevronRightIcon size="sm" /></Button> : undefined} accessibilityLabel="Ask Core about saved cities" disabled={assistantBusy} editable={!assistantBusy} leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />} loading={assistantBusy} message={assistantMessage ? <View style={assistantFailed ? styles.inlineError : styles.inlineNotice}><Text style={styles.messageText}>{assistantMessage}</Text></View> : null} onChangeText={(value) => { setAssistantInput(value); assistantRequestKey.current = undefined; }} onFocusChange={handleCoreFocusChange} onSubmit={() => void askAssistant()} pageIdentity={(closeCore) => <WorkspaceAppSwitcher active="compass" identity="core" onSelectActive={closeCore} />} prompts={CORE_PROMPTS} sendIcon={<SendIcon size="sm" />} value={assistantInput} />
 
     <BottomSheet footer={<View style={styles.sheetFooter}>{!countryAlreadySaved && countryDetail ? <Button disabled={countryImage?.status !== "ready"} onPress={saveCountry} size="md" variant="primary">Save</Button> : null}<Button onPress={() => setCountryDetailOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} height="full" onOpenChange={setCountryDetailOpen} open={countryDetailOpen} title={selectedCountry?.name ?? "Country"}>
-      <ScrollView contentContainerStyle={[styles.sheetContent, countryDetailError && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" ref={countryScrollRef} showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}><View style={[styles.countryDetail, countryDetailError && styles.sheetEmptyContent]}>{countryDetailLoading ? <GuideLoading label={`Loading information about ${selectedCountry?.name ?? "country"}`} text="Generating country guide..." /> : countryDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{countryDetailError}</Text></View> : countryDetail ? <><GuideHero detail={countryDetail} image={countryImage?.image} onImageError={() => { if (savedCountryImage) void overviewQuery.refetch(); }} />{detailSource === "globe" ? <><Text style={styles.popularCitiesTitle}>Popular cities</Text><View style={[styles.cityList, styles.countryCityList]}>{countryDetail.popularCities.map((city) => <Button accessibilityLabel={`Open ${city.name}, ${selectedCountry?.name ?? "country"}`} contentMode="raw" key={city.name} onPress={() => { if (selectedCountry) openCityDetail(city, selectedCountry, detailSource); }} size="md" style={[styles.cityPill, styles.sheetSecondary]} variant="secondary"><Text style={styles.cityName}>{city.name}</Text><ChevronRightIcon size="sm" /></Button>)}</View></> : null}</> : null}</View></ScrollView>
+      <ScrollView contentContainerStyle={[styles.sheetContent, countryDetailError && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" onScroll={({ nativeEvent }) => { countryScrollOffset.current = nativeEvent.contentOffset.y; }} ref={countryScrollRef} scrollEventThrottle={16} showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}><View style={[styles.countryDetail, countryDetailError && styles.sheetEmptyContent]}>{countryDetailLoading ? <GuideLoading label={`Loading information about ${selectedCountry?.name ?? "country"}`} /> : countryDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{countryDetailError}</Text></View> : visibleCountryGuide ? <><GuideHero cacheKey={savedCountryDetail ? `compass-place-cover:${savedCountryDetail.key}` : `compass-country-hero:${selectedCountry?.countryCode ?? ""}`} detail={visibleCountryGuide} image={countryImage?.image} onImageError={() => { if (savedCountryImage) void overviewQuery.refetch(); }} />{detailSource === "globe" && countryDetail ? <><Text style={styles.popularCitiesTitle}>Popular cities</Text><View style={[styles.cityList, styles.countryCityList]}>{countryDetail.popularCities.map((city) => <Button accessibilityLabel={`Open ${city.name}, ${selectedCountry?.name ?? "country"}`} contentMode="raw" key={city.name} onPress={() => { if (selectedCountry) openCityDetail(city, selectedCountry, detailSource); }} size="md" style={[styles.cityPill, styles.sheetSecondary]} variant="secondary"><Text style={styles.cityName}>{city.name}</Text><ChevronRightIcon size="sm" /></Button>)}</View></> : null}</> : null}</View></ScrollView>
     </BottomSheet>
     <BottomSheet footer={<View style={styles.sheetFooter}>{!cityAlreadySaved && cityDetail ? <Button disabled={cityImage?.status !== "ready"} onPress={saveCity} size="md" variant="primary">Save</Button> : null}<Button onPress={() => setCityDetailOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} height="full" onOpenChange={setCityDetailOpen} open={cityDetailOpen} title={selectedCity?.name ?? "City"}>
-      <ScrollView contentContainerStyle={[styles.sheetContent, cityDetailError && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}><View style={[styles.countryDetail, cityDetailError && styles.sheetEmptyContent]}>{cityDetailLoading ? <GuideLoading label={`Loading information about ${selectedCity?.name ?? "city"}`} text="Generating city guide..." /> : cityDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{cityDetailError}</Text></View> : cityDetail ? <GuideHero detail={cityDetail} image={cityImage?.image} onImageError={() => { if (savedCityImage) void overviewQuery.refetch(); }} /> : null}</View></ScrollView>
+      <ScrollView contentContainerStyle={[styles.sheetContent, cityDetailError && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}><View style={[styles.countryDetail, cityDetailError && styles.sheetEmptyContent]}>{cityDetailLoading ? <GuideLoading label={`Loading information about ${selectedCity?.name ?? "city"}`} /> : cityDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{cityDetailError}</Text></View> : cityDetail ? <GuideHero cacheKey={savedCityDetail ? `compass-place-cover:${savedCityDetail.key}` : `compass-city-hero:${selectedCountry?.countryCode ?? ""}:${selectedCity?.name ?? ""}`} detail={cityDetail} image={cityImage?.image} onImageError={() => { if (savedCityImage) void overviewQuery.refetch(); }} /> : null}</View></ScrollView>
     </BottomSheet>
     <BottomSheet hideHeading onOpenChange={setActionsOpen} open={actionsOpen} title=""><BottomSheetMenu><BottomSheetItem onPress={() => { setActionsOpen(false); updatePlaceSearch(""); delaySheetTransition(() => setCreatePlaceOpen(true)); }} style={styles.sheetAction} variant="secondary">Find place</BottomSheetItem><BottomSheetItem onPress={() => { setActionsOpen(false); setSelectedPlaceKeys([]); setTripName(""); setTripDescription(""); delaySheetTransition(() => setTripSelectionOpen(true)); }} style={styles.sheetAction} variant="secondary">Create trip</BottomSheetItem></BottomSheetMenu></BottomSheet>
-    <BottomSheet hideHeading onOpenChange={setPlaceBulkMenuOpen} open={placeBulkMenuOpen} title=""><BottomSheetMenu><BottomSheetItem onPress={() => openPlaceTags(selectedTablePlaceKeys, () => setPlaceBulkMenuOpen(false))} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem><BottomSheetItem onPress={() => updateSelectedPlaces({ status: "visited" })} style={styles.sheetAction} variant="secondary">Mark as visited</BottomSheetItem><BottomSheetItem onPress={() => updateSelectedPlaces({ status: "wishlist" })} style={styles.sheetAction} variant="secondary">Mark as want to go</BottomSheetItem><BottomSheetItem onPress={() => updateSelectedPlaces({ isFavorite: !allSelectedPlacesFavorite })} style={styles.sheetAction} variant="secondary">{allSelectedPlacesFavorite ? "Unfavorite" : "Favorite"}</BottomSheetItem></BottomSheetMenu></BottomSheet>
+    <BottomSheet hideHeading onOpenChange={setPlaceBulkMenuOpen} open={placeBulkMenuOpen} title=""><BottomSheetMenu><BottomSheetItem onPress={() => updateSelectedPlaces({ isFavorite: !allSelectedPlacesFavorite })} style={styles.sheetAction} variant="secondary">{allSelectedPlacesFavorite ? "Unfavorite" : "Favorite"}</BottomSheetItem><BottomSheetItem onPress={() => openPlaceTags(selectedTablePlaceKeys, () => setPlaceBulkMenuOpen(false))} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem><BottomSheetItem onPress={() => updateSelectedPlaces({ status: allSelectedPlacesVisited ? "wishlist" : "visited" })} style={styles.sheetAction} variant="secondary">{allSelectedPlacesVisited ? "Mark as want to go" : "Mark as visited"}</BottomSheetItem><BottomSheetItem onPress={openBulkPlaceDelete} style={styles.sheetAction} variant="secondary">Delete</BottomSheetItem></BottomSheetMenu></BottomSheet>
     <BottomSheet hideHeading onOpenChange={setPlaceAiMenuOpen} open={placeAiMenuOpen} title="AI actions"><BottomSheetMenu>{PLACE_REFERENCE_OPTIONS.map((option) => <BottomSheetItem key={option.kind} onPress={() => openPlaceReferences(option.kind)} style={styles.sheetAction} variant="secondary">{option.label}</BottomSheetItem>)}</BottomSheetMenu></BottomSheet>
     <BottomSheet hideHeading onOpenChange={setPlaceMenuOpen} open={placeMenuOpen} title=""><BottomSheetMenu><BottomSheetItem onPress={() => updateSelectedPlace({ status: selectedPlace?.status === "visited" ? "wishlist" : "visited" }, selectedPlace?.status === "visited" ? "Place marked as want to go" : "Place marked as visited")} style={styles.sheetAction} variant="secondary">{selectedPlace?.status === "visited" ? "Mark as want to go" : "Mark as visited"}</BottomSheetItem><BottomSheetItem onPress={() => updateSelectedPlace({ isFavorite: !selectedPlace?.isFavorite }, selectedPlace?.isFavorite ? "Place unfavorited" : "Place favorited")} style={styles.sheetAction} variant="secondary">{selectedPlace?.isFavorite ? "Unfavorite" : "Favorite"}</BottomSheetItem><BottomSheetItem onPress={() => { setPlaceMenuOpen(false); openSelectedPlaceOnWeb(); }} style={styles.sheetAction} variant="secondary">Web search</BottomSheetItem><BottomSheetItem onPress={openPlaceDelete} style={styles.sheetAction} variant="secondary">Delete</BottomSheetItem></BottomSheetMenu></BottomSheet>
     <BottomSheet footer={<View style={styles.sheetFooter}><Button disabled={placeDeleting} onPress={() => void confirmDeletePlace()} size="md" variant="primary">Delete</Button><Button disabled={placeDeleting} onPress={() => setPlaceDeleteOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} onOpenChange={setPlaceDeleteOpen} open={placeDeleteOpen} title="Delete place?" />
-    <BottomSheet hideHeading onOpenChange={setTableFilterOpen} open={tableFilterOpen} title=""><View style={styles.filterSheet}>{tableTab === "places" ? <><View style={styles.filterSwitchRow}><Switch accessibilityLabel="Filter by favorite places" checked={placeFavoritesOnly} onCheckedChange={(checked) => { setPlaceFavoritesOnly(checked); setTableFilterOpen(false); }} /><Text style={styles.filterSwitchLabel}>Favorites</Text></View><View style={styles.filterSwitchRow}><Switch accessibilityLabel="Filter by places you want to go" checked={placeStatusFilter === "wishlist"} onCheckedChange={(checked) => { setPlaceStatusFilter(checked ? "wishlist" : "all"); setTableFilterOpen(false); }} /><Text style={styles.filterSwitchLabel}>Want to go</Text></View><View style={styles.filterSwitchRow}><Switch accessibilityLabel="Filter by visited places" checked={placeStatusFilter === "visited"} onCheckedChange={(checked) => { setPlaceStatusFilter(checked ? "visited" : "all"); setTableFilterOpen(false); }} /><Text style={styles.filterSwitchLabel}>Visited</Text></View></> : <><View style={styles.filterSwitchRow}><Switch accessibilityLabel="Filter by favorite trips" checked={tripFavoritesOnly} onCheckedChange={(checked) => { setTripFavoritesOnly(checked); setTableFilterOpen(false); }} /><Text style={styles.filterSwitchLabel}>Favorites</Text></View><View style={styles.filterSwitchRow}><Switch accessibilityLabel="Filter by completed trips" checked={tripCompletedOnly} onCheckedChange={(checked) => { setTripCompletedOnly(checked); setTableFilterOpen(false); }} /><Text style={styles.filterSwitchLabel}>Completed trips</Text></View></>}<BottomSheetItem onPress={openTagFilters} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem><Button onPress={() => void openPlaceSearchHistory()} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button></View></BottomSheet>
+    <BottomSheet footer={<View style={styles.sheetFooter}><Button disabled={placeDeleting} onPress={confirmDeleteSelectedPlaces} size="md" variant="primary">Delete</Button><Button disabled={placeDeleting} onPress={() => setPlaceBulkDeleteOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} onOpenChange={setPlaceBulkDeleteOpen} open={placeBulkDeleteOpen} title={selectedTablePlaceKeys.length === 1 ? "Delete place?" : `Delete ${selectedTablePlaceKeys.length} places?`} />
+    <BottomSheet hideHeading onOpenChange={setTripTableBulkMenuOpen} open={tripTableBulkMenuOpen} title=""><BottomSheetMenu><BottomSheetItem onPress={() => updateSelectedTrips({ isFavorite: !allSelectedTripsFavorite })} style={styles.sheetAction} variant="secondary">{allSelectedTripsFavorite ? "Unfavorite" : "Favorite"}</BottomSheetItem><BottomSheetItem onPress={() => openTripTags(selectedTableTripKeys, () => setTripTableBulkMenuOpen(false))} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem><BottomSheetItem onPress={() => updateSelectedTrips({ status: allSelectedTripsCompleted ? "planned" : "completed" })} style={styles.sheetAction} variant="secondary">{allSelectedTripsCompleted ? "Mark as planned" : "Mark as completed"}</BottomSheetItem><BottomSheetItem onPress={openBulkTripDelete} style={styles.sheetAction} variant="secondary">Delete</BottomSheetItem></BottomSheetMenu></BottomSheet>
+    <BottomSheet footer={<View style={styles.sheetFooter}><Button disabled={tripTableDeleting} onPress={confirmDeleteSelectedTrips} size="md" variant="primary">Delete</Button><Button disabled={tripTableDeleting} onPress={() => setTripTableBulkDeleteOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} onOpenChange={setTripTableBulkDeleteOpen} open={tripTableBulkDeleteOpen} title={selectedTableTripKeys.length === 1 ? "Delete trip?" : `Delete ${selectedTableTripKeys.length} trips?`} />
+    <BottomSheet hideHeading onOpenChange={setTableFilterOpen} open={tableFilterOpen} title=""><View style={styles.filterSheet}>{tableTab === "places" ? <><View style={styles.filterSwitchRow}><Switch accessibilityLabel="Filter by favorite places" checked={placeFavoritesOnly} onCheckedChange={(checked) => { setPlaceFavoritesOnly(checked); setTableFilterOpen(false); }} /><Text style={styles.filterSwitchLabel}>Favorites</Text></View><View style={styles.filterSwitchRow}><Switch accessibilityLabel="Filter by places you want to go" checked={placeStatusFilter === "wishlist"} onCheckedChange={(checked) => { setPlaceStatusFilter(checked ? "wishlist" : "all"); setTableFilterOpen(false); }} /><Text style={styles.filterSwitchLabel}>Want to go</Text></View><View style={styles.filterSwitchRow}><Switch accessibilityLabel="Filter by visited places" checked={placeStatusFilter === "visited"} onCheckedChange={(checked) => { setPlaceStatusFilter(checked ? "visited" : "all"); setTableFilterOpen(false); }} /><Text style={styles.filterSwitchLabel}>Visited</Text></View></> : <><View style={styles.filterSwitchRow}><Switch accessibilityLabel="Filter by favorite trips" checked={tripFavoritesOnly} onCheckedChange={(checked) => { setTripFavoritesOnly(checked); setTableFilterOpen(false); }} /><Text style={styles.filterSwitchLabel}>Favorites</Text></View><View style={styles.filterSwitchRow}><Switch accessibilityLabel="Filter by completed trips" checked={tripCompletedOnly} onCheckedChange={(checked) => { setTripCompletedOnly(checked); setTableFilterOpen(false); }} /><Text style={styles.filterSwitchLabel}>Completed trips</Text></View></>}<BottomSheetItem onPress={openTagFilters} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem><BottomSheetItem onPress={() => void openPlaceSearchHistory()} style={styles.sheetAction} variant="secondary">Search history</BottomSheetItem></View></BottomSheet>
     <TagFilterSheet context={contentContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />
-    <ResourceTagsSheet context={contentContext} onApply={() => { setSelectedTablePlaceKeys([]); setSelectedOrderPlaceKeys([]); setSelectedTripPlaceKeys([]); }} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />
+    <ResourceTagsSheet context={contentContext} onApply={() => { setSelectedTablePlaceKeys([]); setSelectedTableTripKeys([]); setSelectedOrderPlaceKeys([]); setSelectedTripPlaceKeys([]); }} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />
     <SearchHistorySheet history={placeSearchHistory} loading={placeHistoryLoading} onClose={closePlaceSearchHistory} onOpenChange={(open) => { if (!open) closePlaceSearchHistory(); }} onRemove={(item) => void removePlaceHistoryQuery(item)} onSelect={applyPlaceHistoryQuery} open={placeHistoryOpen} removingQuery={removingPlaceHistoryQuery} />
     <BottomSheet focusKey="findPlace" footer={<Button onPress={() => setFindPlaceOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button>} height="full" onOpenChange={setFindPlaceOpen} open={createPlaceOpen} title="Find place">
-      <View style={styles.createPlaceContent}><View style={styles.workspaceSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search places" maxLength={500} onChangeText={updatePlaceSearch} placeholder="Search any country or city..." ref={placeSearchInput} style={styles.workspaceSearchInput} value={placeSearchQuery} />{placeSearchQuery.trim() ? <Button accessibilityLabel="Clear place search" contentMode="raw" iconOnly onPress={() => updatePlaceSearch("")} size="md" style={[styles.sheetSearchClear, styles.sheetSecondary]} variant="secondary"><CloseIcon size="sm" /></Button> : null}</View><ScrollView accessibilityLabel={placeSearchLoading ? "Searching places" : `${placeSearchResults.length} places found`} accessibilityLiveRegion="polite" accessibilityState={{ busy: placeSearchLoading }} contentContainerStyle={[styles.cityList, !placeSearchLoading && placeSearchQuery.trim().length >= 2 && placeSearchResults.length === 0 && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}>{placeSearchLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.cityPillSkeleton} />) : placeSearchResults.map((result) => <Button accessibilityLabel={`Open ${result.name}, ${result.country}`} contentMode="raw" key={`${result.kind}-${result.countryCode}-${normalizePlaceName(result.name)}`} onPress={() => openSearchResult(result)} size="md" style={[styles.cityPill, styles.sheetSecondary]} variant="secondary"><Text numberOfLines={1} style={styles.cityName}>{result.name}</Text><ChevronRightIcon size="sm" /></Button>)}{!placeSearchLoading && placeSearchQuery.trim().length >= 2 && placeSearchResults.length === 0 ? <Text style={styles.emptyText}>No places found.</Text> : null}</ScrollView></View>
+      <View style={styles.createPlaceContent}><View style={styles.workspaceSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search places" maxLength={500} onChangeText={updatePlaceSearch} placeholder="Search any country or city..." ref={placeSearchInput} style={styles.workspaceSearchInput} value={placeSearchQuery} />{placeSearchQuery.trim() ? <Button accessibilityLabel="Clear place search" contentMode="raw" iconOnly onPress={() => updatePlaceSearch("")} size="md" style={[styles.sheetSearchClear, styles.sheetSecondary]} variant="secondary"><CloseIcon size="sm" /></Button> : null}</View><ScrollView accessibilityLabel={placeSearchLoading ? "Searching places" : `${placeSearchResults.length} places found`} accessibilityLiveRegion="polite" accessibilityState={{ busy: placeSearchLoading }} contentContainerStyle={[styles.cityList, !placeSearchLoading && placeSearchQuery.trim().length >= 2 && placeSearchResults.length === 0 && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}>{placeSearchLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.cityPillSkeleton, styles.skeletonBlock]} />) : placeSearchResults.map((result) => <Button accessibilityLabel={`Open ${result.name}, ${result.country}`} contentMode="raw" key={`${result.kind}-${result.countryCode}-${normalizePlaceName(result.name)}`} onPress={() => openSearchResult(result)} shape="pill" size="md" style={[styles.cityPill, styles.sheetSecondary]} variant="secondary"><Text numberOfLines={1} style={styles.cityName}>{result.name}</Text></Button>)}{!placeSearchLoading && placeSearchQuery.trim().length >= 2 && placeSearchResults.length === 0 ? <Text style={styles.emptyText}>No places found.</Text> : null}</ScrollView></View>
     </BottomSheet>
     <BottomSheet footer={<View style={styles.sheetFooter}><Button disabled={selectedPlaceKeys.length === 0 || selectedPlaceKeys.some((key) => key.startsWith("optimistic-"))} onPress={advanceTripCreation} size="md" variant="primary">Next</Button><Button onPress={() => setTripSelectionOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} height="full" onOpenChange={setTripSelectionOpen} open={tripSelectionOpen} title="Choose places">
       <ScrollView accessibilityLabel="Places available for this trip" accessibilityLiveRegion="polite" accessibilityState={{ busy: overviewQuery.isPending }} contentContainerStyle={[styles.cardGrid, !overviewQuery.isPending && (Boolean(loadError) || places.length === 0) && styles.emptyGrid]} onLayout={({ nativeEvent }) => setTripGridWidth(nativeEvent.layout.width)} showsVerticalScrollIndicator={false}>{overviewQuery.isPending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.squareCard, { width: tripCardSize, height: tripCardSize }]} />) : loadError ? <QueryFailure message={loadError} onRetry={() => void overviewQuery.refetch()} /> : places.map((place) => { const saving = place.key.startsWith("optimistic-"); return <PlaceCard cardSize={tripCardSize} disabled={saving} key={place.key} onPress={() => toggleTripPlace(place.key)} place={place} selectable selected={selectedPlaceKeys.includes(place.key)} />; })}{!overviewQuery.isPending && !loadError && places.length === 0 ? <Text style={styles.emptyText}>Save a place before creating a trip.</Text> : null}</ScrollView>
@@ -1402,30 +1567,30 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
 
     <BottomSheet hideHeading onOpenChange={setOrderBulkMenuOpen} open={orderBulkMenuOpen} title=""><BottomSheetMenu><BottomSheetItem onPress={() => openPlaceTags(selectedOrderPlaceKeys, () => setOrderBulkMenuOpen(false))} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem><BottomSheetItem onPress={() => { setOrderBulkMenuOpen(false); delaySheetTransition(() => setOrderRemoveOpen(true)); }} style={styles.sheetAction} variant="secondary">Remove</BottomSheetItem></BottomSheetMenu></BottomSheet>
     <BottomSheet footer={<View style={styles.sheetFooter}><Button onPress={removeSelectedOrderPlaces} size="md" variant="primary">Remove</Button><Button onPress={() => setOrderRemoveOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} onOpenChange={setOrderRemoveOpen} open={orderRemoveOpen} title="Remove places?" />
-    <BottomSheet footer={<Button onPress={() => setTripBulkMenuOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button>} onOpenChange={setTripBulkMenuOpen} open={tripBulkMenuOpen} title="Selected places"><BottomSheetMenu><BottomSheetItem onPress={() => openPlaceTags(selectedTripPlaceKeys, () => setTripBulkMenuOpen(false))} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem><BottomSheetItem onPress={() => { setTripBulkMenuOpen(false); delaySheetTransition(() => setTripRemoveOpen(true)); }} style={styles.sheetAction} variant="secondary">Remove</BottomSheetItem></BottomSheetMenu></BottomSheet>
+    <BottomSheet footer={<Button onPress={() => setTripBulkMenuOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button>} onOpenChange={setTripBulkMenuOpen} open={tripBulkMenuOpen} title="Selected places"><BottomSheetMenu><BottomSheetItem onPress={() => updateSelectedTripPlaces({ status: allSelectedTripPlacesVisited ? "wishlist" : "visited" })} style={styles.sheetAction} variant="secondary">{allSelectedTripPlacesVisited ? "Mark as want to go" : "Mark as visited"}</BottomSheetItem><BottomSheetItem onPress={() => openPlaceTags(selectedTripPlaceKeys, () => setTripBulkMenuOpen(false))} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem><BottomSheetItem onPress={() => { setTripBulkMenuOpen(false); delaySheetTransition(() => setTripRemoveOpen(true)); }} style={styles.sheetAction} variant="secondary">Remove</BottomSheetItem></BottomSheetMenu></BottomSheet>
     <BottomSheet footer={<View style={styles.sheetFooter}><Button onPress={removeTripPlaces} size="md" variant="primary">Remove</Button><Button onPress={() => setTripRemoveOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} onOpenChange={setTripRemoveOpen} open={tripRemoveOpen} title="Remove places?" />
 
-    <BottomSheet hideHeading onOpenChange={setTripMenuOpen} open={tripMenuOpen} title=""><BottomSheetMenu><BottomSheetItem onPress={openTripEdit} style={styles.sheetAction} variant="secondary">Edit</BottomSheetItem><BottomSheetItem onPress={toggleTripCompleted} style={styles.sheetAction} variant="secondary">{selectedTrip?.status === "completed" ? "Mark as planned" : "Mark as completed"}</BottomSheetItem><BottomSheetItem onPress={openAssets} style={styles.sheetAction} variant="secondary">Show assets</BottomSheetItem><BottomSheetItem onPress={() => { setTripMenuOpen(false); delaySheetTransition(() => setTripDeleteOpen(true)); }} style={styles.sheetAction} variant="secondary">Delete</BottomSheetItem></BottomSheetMenu></BottomSheet>
+    <BottomSheet hideHeading onOpenChange={setTripMenuOpen} open={tripMenuOpen} title=""><BottomSheetMenu><BottomSheetItem onPress={openTripEdit} style={styles.sheetAction} variant="secondary">Edit</BottomSheetItem><BottomSheetItem onPress={toggleTripCompleted} style={styles.sheetAction} variant="secondary">{selectedTrip?.status === "completed" ? "Mark as planned" : "Mark as completed"}</BottomSheetItem><BottomSheetItem onPress={openAssets} style={styles.sheetAction} variant="secondary">Show assets</BottomSheetItem><BottomSheetItem onPress={openTripDelete} style={styles.sheetAction} variant="secondary">Delete</BottomSheetItem></BottomSheetMenu></BottomSheet>
     <BottomSheet hideHeading onOpenChange={setTripAddMenuOpen} open={tripAddMenuOpen} title=""><BottomSheetMenu><BottomSheetItem onPress={openTripAddPlaces} style={styles.sheetAction} variant="secondary">Add places</BottomSheetItem></BottomSheetMenu></BottomSheet>
     <BottomSheet hideHeading onOpenChange={setTripAiMenuOpen} open={tripAiMenuOpen} title=""><BottomSheetMenu><BottomSheetItem onPress={openTripGuides} style={styles.sheetAction} variant="secondary">Travel guides</BottomSheetItem></BottomSheetMenu></BottomSheet>
     <BottomSheet footer={<View style={styles.sheetFooter}><Button disabled={selectedTripAddPlaceKeys.length === 0 || selectedTripAddPlaceKeys.some((key) => key.startsWith("optimistic-"))} onPress={addSelectedTripPlaces} size="md" variant="primary">Add places</Button><Button onPress={() => setTripAddPlacesOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} height="full" onOpenChange={setTripAddPlacesOpen} open={tripAddPlacesOpen} title="Choose places">
       <ScrollView accessibilityLabel="Places available to add to this trip" accessibilityLiveRegion="polite" accessibilityState={{ busy: overviewQuery.isPending }} contentContainerStyle={[styles.cardGrid, !overviewQuery.isPending && (Boolean(loadError) || availableTripAddPlaces.length === 0) && styles.emptyGrid]} onLayout={({ nativeEvent }) => setTripGridWidth(nativeEvent.layout.width)} showsVerticalScrollIndicator={false}>{overviewQuery.isPending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.squareCard, { width: tripCardSize, height: tripCardSize }]} />) : loadError ? <QueryFailure message={loadError} onRetry={() => void overviewQuery.refetch()} /> : availableTripAddPlaces.map((place) => { const saving = place.key.startsWith("optimistic-"); return <PlaceCard cardSize={tripCardSize} disabled={saving} key={place.key} onPress={() => toggleTripAddPlace(place.key)} place={place} selectable selected={selectedTripAddPlaceKeys.includes(place.key)} />; })}{!overviewQuery.isPending && !loadError && availableTripAddPlaces.length === 0 ? <Text style={styles.emptyText}>All saved places are already in this trip.</Text> : null}</ScrollView>
     </BottomSheet>
     <BottomSheet footer={<View style={styles.sheetFooter}><Button onPress={confirmDeleteTrip} size="md" variant="primary">Delete</Button><Button onPress={() => setTripDeleteOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} onOpenChange={setTripDeleteOpen} open={tripDeleteOpen} title="Delete trip?" />
-    <BottomSheet footer={<View style={styles.sheetFooter}><Button disabled={!editTripName.trim()} onPress={saveTripEdit} size="md" variant="primary">Save</Button><Button onPress={() => setTripEditOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} height="full" onOpenChange={setTripEditOpen} open={tripEditOpen} title="Edit trip"><ScrollView contentContainerStyle={styles.tripDetailsForm} ref={orderScrollRef} showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}><TextInput accessibilityLabel="Trip name" maxLength={255} onChangeText={setEditTripName} placeholder="Trip name" value={editTripName} /><Text style={styles.inputLabel}>Description (Optional)</Text><TextInput accessibilityLabel="Trip description" maxLength={10000} multiline onChangeText={setEditTripDescription} placeholder="What belongs in this trip?" style={styles.tripDescriptionInput} textAlignVertical="top" value={editTripDescription} /><View style={styles.tripDetailsCoverControl}><Button accessibilityLabel={(editTripCover === undefined ? selectedTrip?.coverUrl : editTripCover?.uri) ? "Change trip cover" : "Set trip cover"} contentMode="raw" onPress={() => void chooseTripCover()} shape="rounded" size="md" style={styles.tripDetailsCoverButton} variant="secondary">{(editTripCover === undefined ? selectedTrip?.coverUrl : editTripCover?.uri) ? <Image contentFit="cover" source={editTripCover === undefined ? selectedTrip?.coverUrl : editTripCover?.uri} style={styles.tripCover} /> : <GlobeIcon size="lg" />}</Button>{(editTripCover === undefined ? selectedTrip?.coverUrl : editTripCover?.uri) ? <Button accessibilityLabel="Remove trip cover" contentMode="raw" onPress={() => setEditTripCover(null)} size="md" style={styles.tripDetailsCoverRemove} variant="secondary"><CloseIcon size="sm" /></Button> : null}</View><View style={styles.switchRow}><Switch accessibilityLabel="Favorite trip" checked={editTripFavorite} onCheckedChange={setEditTripFavorite} /><Text style={styles.inputLabel}>Favorite</Text></View><Text style={styles.inputLabel}>Place order</Text><View style={styles.editOrderList}>{editOrderedPlaces.map((place, index) => <View key={place.key} style={styles.orderPill}><View style={[styles.orderMain, styles.editOrderMain]}>{place.coverUrl ? <Image contentFit="cover" source={place.coverUrl} style={styles.orderHero} /> : <View style={styles.orderHeroFallback}><LocationPinIcon size="sm" /></View>}<Text numberOfLines={1} style={styles.orderName}>{place.name}</Text></View><View style={styles.orderButtons}><Button accessibilityLabel={`Move ${place.name} up`} contentMode="raw" iconOnly onPress={() => moveOrderPlace(index, "up")} size="md" style={[styles.orderControl, styles.sheetSecondary]} variant="secondary"><ChevronUpIcon size="sm" /></Button><Button accessibilityLabel={`Move ${place.name} down`} contentMode="raw" iconOnly onPress={() => moveOrderPlace(index, "down")} size="md" style={[styles.orderControl, styles.sheetSecondary]} variant="secondary"><ChevronDownIcon size="sm" /></Button></View></View>)}</View></ScrollView></BottomSheet>
+    <BottomSheet footer={<View style={styles.sheetFooter}><Button disabled={!editTripName.trim()} onPress={saveTripEdit} size="md" variant="primary">Save</Button><Button onPress={() => setTripEditOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} height="full" onOpenChange={setTripEditOpen} open={tripEditOpen} title="Edit trip"><ScrollView contentContainerStyle={styles.tripDetailsForm} ref={orderScrollRef} showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}><TextInput accessibilityLabel="Trip name" maxLength={255} onChangeText={setEditTripName} placeholder="Trip name" value={editTripName} /><Text style={styles.inputLabel}>Description (Optional)</Text><TextInput accessibilityLabel="Trip description" maxLength={10000} multiline onChangeText={setEditTripDescription} placeholder="What belongs in this trip?" style={styles.tripDescriptionInput} textAlignVertical="top" value={editTripDescription} /><View style={styles.tripDetailsCoverControl}><Button accessibilityLabel={(editTripCover === undefined ? selectedTrip?.coverUrl : editTripCover?.uri) ? "Change trip cover" : "Set trip cover"} contentMode="raw" onPress={() => void chooseTripCover()} shape="rounded" size="md" style={styles.tripDetailsCoverButton} variant="secondary">{(editTripCover === undefined ? selectedTrip?.coverUrl : editTripCover?.uri) ? <Image contentFit="cover" source={editTripCover === undefined ? selectedTrip?.coverUrl : editTripCover?.uri} style={styles.tripCover} /> : <GlobeIcon size="lg" />}</Button></View><View style={styles.switchRow}><Switch accessibilityLabel="Favorite trip" checked={editTripFavorite} onCheckedChange={setEditTripFavorite} /><Text style={styles.inputLabel}>Favorite</Text></View><Text style={styles.inputLabel}>Place order</Text><View style={styles.editOrderList}>{editOrderedPlaces.map((place, index) => <View key={place.key} style={styles.orderPill}><View style={[styles.orderMain, styles.editOrderMain]}>{place.coverUrl ? <Image contentFit="cover" source={place.coverUrl} style={styles.orderHero} /> : <View style={styles.orderHeroFallback}><LocationPinIcon size="sm" /></View>}<Text numberOfLines={1} style={styles.orderName}>{place.name}</Text></View><View style={styles.orderButtons}><Button accessibilityLabel={`Move ${place.name} up`} contentMode="raw" iconOnly onPress={() => moveOrderPlace(index, "up")} size="md" style={[styles.orderControl, styles.sheetSecondary]} variant="secondary"><ChevronUpIcon size="sm" /></Button><Button accessibilityLabel={`Move ${place.name} down`} contentMode="raw" iconOnly onPress={() => moveOrderPlace(index, "down")} size="md" style={[styles.orderControl, styles.sheetSecondary]} variant="secondary"><ChevronDownIcon size="sm" /></Button></View></View>)}</View></ScrollView></BottomSheet>
 
-    <BottomSheet description="Press and hold to edit linked assets." footer={<View style={styles.sheetFooter}><Button onPress={saveAssetAttachments} size="md" variant="primary">Save</Button><Button onPress={closeAssets} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} height="full" onOpenChange={(open) => { if (!open) closeAssets(); }} open={assetsOpen} title="Show Assets"><Tabs accessibilityLabel="Trip asset categories" accessibilityRole="tablist" role="tablist" style={styles.assetTabs}><Button accessibilityRole="tab" accessibilityState={{ selected: assetTab === "folders" }} onPress={() => setAssetTab("folders")} size="md" style={[styles.assetTab, assetTab === "folders" && styles.sheetSecondary]} textStyle={styles.assetTabText} variant={assetTab === "folders" ? "secondary" : "ghost"}>Folders</Button><Button accessibilityRole="tab" accessibilityState={{ selected: assetTab === "collections" }} onPress={() => setAssetTab("collections")} size="md" style={[styles.assetTab, assetTab === "collections" && styles.sheetSecondary]} textStyle={styles.assetTabText} variant={assetTab === "collections" ? "secondary" : "ghost"}>Collections</Button></Tabs><ScrollView accessibilityLabel={assetTab === "folders" ? "Trip asset folders" : "Trip asset collections"} contentContainerStyle={styles.assetGrid} onLayout={({ nativeEvent }) => setAssetGridWidth(nativeEvent.layout.width)} showsVerticalScrollIndicator={false}>{assetsLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.assetCard, { width: assetCardSize, height: assetCardSize }]} />) : assetTab === "folders" ? assetFolders.map((folder) => { const attachment = { type: "folder" as const, key: folder.key }; const selected = selectedAssetAttachments.some(({ type, key }) => type === attachment.type && key === attachment.key); return <AssetCard coverUrl={folder.coverUrl} key={folder.key} name={folder.name} onLongPress={() => handleAssetLongPress(attachment)} onPress={() => openAsset(attachment)} selected={selected} size={assetCardSize} />; }) : assetCollections.map((collection) => { const attachment = { type: "collection" as const, key: collection.key }; const selected = selectedAssetAttachments.some(({ type, key }) => type === attachment.type && key === attachment.key); return <AssetCard coverUrl={collection.coverUrl ?? undefined} key={collection.key} name={collection.name} onLongPress={() => handleAssetLongPress(attachment)} onPress={() => openAsset(attachment)} selected={selected} size={assetCardSize} />; })}</ScrollView></BottomSheet>
+    <BottomSheet description="Press and hold to edit linked assets." footer={<View style={styles.sheetFooter}><Button onPress={saveAssetAttachments} size="md" variant="primary">Save</Button><Button onPress={closeAssets} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} height="full" onOpenChange={(open) => { if (!open) closeAssets(); }} open={assetsOpen} title="Show Assets"><Tabs accessibilityLabel="Trip asset categories" accessibilityRole="tablist" role="tablist" style={styles.assetTabs}><Button accessibilityRole="tab" accessibilityState={{ selected: assetTab === "folders" }} onPress={() => setAssetTab("folders")} size="md" style={[styles.assetTab, assetTab === "folders" && styles.sheetSecondary]} textStyle={styles.assetTabText} variant={assetTab === "folders" ? "secondary" : "ghost"}>Folders</Button><Button accessibilityRole="tab" accessibilityState={{ selected: assetTab === "collections" }} onPress={() => setAssetTab("collections")} size="md" style={[styles.assetTab, assetTab === "collections" && styles.sheetSecondary]} textStyle={styles.assetTabText} variant={assetTab === "collections" ? "secondary" : "ghost"}>Collections</Button></Tabs><ScrollView accessibilityLabel={assetTab === "folders" ? "Trip asset folders" : "Trip asset collections"} contentContainerStyle={styles.assetGrid} onLayout={({ nativeEvent }) => setAssetGridWidth(nativeEvent.layout.width)} showsVerticalScrollIndicator={false}>{assetsLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.assetCard, styles.skeletonBlock, { width: assetCardSize, height: assetCardSize }]} />) : assetTab === "folders" ? assetFolders.map((folder) => { const attachment = { type: "folder" as const, key: folder.key }; const selected = selectedAssetAttachments.some(({ type, key }) => type === attachment.type && key === attachment.key); return <AssetCard coverUrl={folder.coverUrl} key={folder.key} name={folder.name} onLongPress={() => handleAssetLongPress(attachment)} onPress={() => openAsset(attachment)} selected={selected} size={assetCardSize} />; }) : assetCollections.map((collection) => { const attachment = { type: "collection" as const, key: collection.key }; const selected = selectedAssetAttachments.some(({ type, key }) => type === attachment.type && key === attachment.key); return <AssetCard coverUrl={collection.coverUrl ?? undefined} key={collection.key} name={collection.name} onLongPress={() => handleAssetLongPress(attachment)} onPress={() => openAsset(attachment)} selected={selected} size={assetCardSize} />; })}</ScrollView></BottomSheet>
 
-    <GeneratedDocumentSheets appendGeneration contentContext={contentContext} createLabel="Request new" documents={placeReferencesQuery.data} emptyMessage={`No ${PLACE_REFERENCE_OPTIONS.find((option) => option.kind === placeReferenceKind)?.label.toLocaleLowerCase() ?? "references"} yet. Request one for this place.`} error={placeReferencesQuery.error} generating={placeReferenceGenerating} label={PLACE_REFERENCE_OPTIONS.find((option) => option.kind === placeReferenceKind)?.label ?? "References"} loading={placeReferencesQuery.isPending} onClose={closePlaceReferences} onCreate={() => void createPlaceReference()} onDetailClose={() => setSelectedPlaceReference(undefined)} onOpen={setSelectedPlaceReference} onRetry={() => void placeReferencesQuery.refetch()} open={placeReferencesOpen} selected={currentPlaceReference} singularLabel={PLACE_REFERENCE_OPTIONS.find((option) => option.kind === placeReferenceKind)?.singular}>{currentPlaceReference && selectedPlace ? <GeneratedDocumentDetail document={currentPlaceReference} hero={<PlaceReferenceHero onImageError={() => void overviewQuery.refetch()} place={selectedPlace} />} /> : null}</GeneratedDocumentSheets>
+    <GeneratedDocumentSheets appendGeneration contentContext={contentContext} createLabel="Request new" documents={placeReferencesQuery.data} emptyMessage={`No ${PLACE_REFERENCE_OPTIONS.find((option) => option.kind === placeReferenceKind)?.label.toLocaleLowerCase() ?? "references"} yet.`} error={placeReferencesQuery.error} generating={placeReferenceGenerating} label={PLACE_REFERENCE_OPTIONS.find((option) => option.kind === placeReferenceKind)?.label ?? "References"} loading={placeReferencesQuery.isPending} onClose={closePlaceReferences} onCreate={() => void createPlaceReference()} onDetailClose={() => setSelectedPlaceReference(undefined)} onOpen={setSelectedPlaceReference} onRetry={() => void placeReferencesQuery.refetch()} open={placeReferencesOpen} selected={currentPlaceReference} singularLabel={PLACE_REFERENCE_OPTIONS.find((option) => option.kind === placeReferenceKind)?.singular}>{currentPlaceReference && selectedPlace ? <GeneratedDocumentDetail document={currentPlaceReference} hero={<PlaceReferenceHero onImageError={() => void overviewQuery.refetch()} place={selectedPlace} />} /> : null}</GeneratedDocumentSheets>
 
-    <GeneratedDocumentSheets appendGeneration contentContext={contentContext} createLabel="Request new" documents={tripGuidesQuery.data} emptyMessage="No travel guides yet. Request one for this trip." error={tripGuidesQuery.error} generating={tripGuideGenerating} label="Travel guides" loading={tripGuidesQuery.isPending} onClose={closeTripGuides} onCreate={() => void createTripGuide()} onDetailClose={() => setSelectedTripGuide(undefined)} onOpen={setSelectedTripGuide} onRetry={() => void tripGuidesQuery.refetch()} open={tripGuidesOpen} selected={currentTripGuide}>{currentTripGuide ? <GeneratedDocumentDetail document={currentTripGuide} hero={<TripGuideHero places={selectedTrip?.places ?? []} />} /> : null}</GeneratedDocumentSheets>
+    <GeneratedDocumentSheets appendGeneration contentContext={contentContext} createLabel="Request new" documents={tripGuidesQuery.data} emptyMessage="No travel guide yet." error={tripGuidesQuery.error} generating={tripGuideGenerating} label="Travel guides" loading={tripGuidesQuery.isPending} onClose={closeTripGuides} onCreate={() => void createTripGuide()} onDetailClose={() => setSelectedTripGuide(undefined)} onOpen={setSelectedTripGuide} onRetry={() => void tripGuidesQuery.refetch()} open={tripGuidesOpen} selected={currentTripGuide}>{currentTripGuide ? <GeneratedDocumentDetail document={currentTripGuide} hero={<TripGuideHero places={selectedTrip?.places ?? []} />} /> : null}</GeneratedDocumentSheets>
 
     <BottomSheet footer={<Button onPress={() => setImageViewerKey(undefined)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setImageViewerKey(undefined); }} onSwipeLeft={tripImages.length > 1 ? () => focusTripImage(1) : undefined} onSwipeRight={tripImages.length > 1 ? () => focusTripImage(-1) : undefined} open={Boolean(imageViewer)} pageKey={imageViewer?.key} title={imageViewer?.title ?? "Image"}>{imageViewer ? <View style={styles.viewerContent}><View accessibilityActions={tripImages.length > 1 ? [{ name: "decrement", label: "Previous image" }, { name: "increment", label: "Next image" }] : undefined} accessibilityLabel={`${imageViewer.title} trip image`} accessibilityRole="adjustable" accessibilityValue={{ text: `${imageViewerIndex + 1} of ${tripImages.length}` }} onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "decrement") focusTripImage(-1); if (nativeEvent.actionName === "increment") focusTripImage(1); }} style={styles.viewerFrame}><Image contentFit="contain" source={imageViewer.url} style={styles.viewerImage} /></View></View> : null}</BottomSheet>
   </View>;
 }
 
 function PlaceCard({ accessibilityLongPress = false, cardSize, disabled = false, onLongPress, onPress, place, selectable = false, selected = false }: { accessibilityLongPress?: boolean; cardSize?: number; disabled?: boolean; onLongPress?: () => void; onPress: () => void; place: Place; selectable?: boolean; selected?: boolean }) {
-  return <View style={[styles.squareCard, selected && styles.squareCardSelected, { width: cardSize, height: cardSize }]}>{place.coverUrl ? <Image cachePolicy="memory-disk" contentFit="cover" priority="high" source={{ uri: place.coverUrl, cacheKey: `compass-place-cover:${place.key}` }} style={StyleSheet.absoluteFill} /> : null}<Button accessibilityActions={accessibilityLongPress ? [{ name: "longpress", label: selected ? `Deselect ${place.name}` : `Select ${place.name}` }] : undefined} accessibilityLabel={`${disabled ? "Saving" : selectable ? selected ? "Deselect" : "Select" : "Open"} ${place.name}, ${place.status === "wishlist" ? "want to go" : "visited"}${place.isFavorite ? ", favorite" : ""}`} accessibilityState={selectable ? { disabled, selected } : undefined} contentMode="raw" disabled={disabled} onAccessibilityAction={accessibilityLongPress ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") onLongPress?.(); } : undefined} onLongPress={onLongPress} onPress={onPress} shape="rounded" size="md" style={[styles.cardMain, place.coverUrl && styles.coveredCardMain]} variant="ghost">{place.coverUrl ? null : place.kind === "country" ? <GlobeIcon size="lg" /> : <LocationPinIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.cardLabel, place.coverUrl && styles.coveredCardLabel]}>{place.name}</Text></Button>{place.isFavorite || place.status === "visited" ? <View pointerEvents="none" style={styles.stateBadges}>{place.isFavorite ? <StarIcon size="sm" variant="accent" /> : null}{place.status === "visited" ? <CheckIcon size="sm" variant="accent" /> : null}</View> : null}{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>;
+  return <View style={[styles.squareCard, selected && styles.squareCardSelected, { width: cardSize, height: cardSize }]}>{place.coverUrl ? <Image cachePolicy="memory-disk" contentFit="cover" priority="high" source={{ uri: place.coverUrl, cacheKey: `compass-place-cover:${place.key}` }} style={StyleSheet.absoluteFill} /> : null}<Button accessibilityActions={accessibilityLongPress ? [{ name: "longpress", label: selected ? `Deselect ${place.name}` : `Select ${place.name}` }] : undefined} accessibilityLabel={`${disabled ? "Saving" : selectable ? selected ? "Deselect" : "Select" : "Open"} ${place.name}, ${place.status === "wishlist" ? "want to go" : "visited"}${place.isFavorite ? ", favorite" : ""}`} accessibilityState={selectable ? { disabled, selected } : undefined} contentMode="raw" disabled={disabled} onAccessibilityAction={accessibilityLongPress ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") onLongPress?.(); } : undefined} onLongPress={onLongPress} onPress={onPress} shape="rounded" size="md" style={[styles.cardMain, place.coverUrl && styles.coveredCardMain]} variant="ghost">{place.coverUrl ? null : place.kind === "country" ? <GlobeIcon size="lg" /> : <LocationPinIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.cardLabel, place.coverUrl && styles.coveredCardLabel]}>{place.name}</Text></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>;
 }
 
 function TripPlaceArc({ onFocus, onOpen, places, selectedKey }: { onFocus: (key: string) => void; onOpen: (place: Place) => void; places: Place[]; selectedKey?: string }) {
@@ -1454,8 +1619,8 @@ function QueryFailure({ message, onRetry, sheet = false }: { message: string; on
   return <View accessibilityRole="alert" style={styles.tableFailure}><Text style={styles.loadFailureText}>{message}</Text><Button onPress={onRetry} size={sheet ? "md" : "sm"} variant="secondary">Retry</Button></View>;
 }
 
-function TripCard({ cardSize, onPress, trip }: { cardSize?: number; onPress: () => void; trip: Trip }) {
-  return <View style={[styles.squareCard, { width: cardSize, height: cardSize }]}>{trip.coverUrl ? <Image contentFit="cover" source={trip.coverUrl} style={StyleSheet.absoluteFill} /> : null}<Button accessibilityLabel={`Open ${trip.name}, ${trip.status}${trip.isFavorite ? ", favorite" : ""}`} contentMode="raw" onPress={onPress} shape="rounded" size="md" style={[styles.cardMain, trip.coverUrl && styles.coveredCardMain]} variant="ghost">{trip.coverUrl ? null : <GlobeIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.cardLabel, trip.coverUrl && styles.coveredCardLabel]}>{trip.name}</Text></Button>{trip.isFavorite ? <View pointerEvents="none" style={styles.stateBadges}><StarIcon size="sm" variant="accent" /></View> : null}</View>;
+function TripCard({ accessibilityLongPress = false, cardSize, onLongPress, onPress, selectable = false, selected = false, trip }: { accessibilityLongPress?: boolean; cardSize?: number; onLongPress?: () => void; onPress: () => void; selectable?: boolean; selected?: boolean; trip: Trip }) {
+  return <View style={[styles.squareCard, selected && styles.squareCardSelected, { width: cardSize, height: cardSize }]}>{trip.coverUrl ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: trip.coverUrl, cacheKey: `compass-trip-cover:${trip.places[0]?.key ?? trip.key}` }} style={StyleSheet.absoluteFill} /> : null}<Button accessibilityActions={accessibilityLongPress ? [{ name: "longpress", label: selected ? `Deselect ${trip.name}` : `Select ${trip.name}` }] : undefined} accessibilityLabel={`${selectable ? selected ? "Deselect" : "Select" : "Open"} ${trip.name}, ${trip.status}${trip.isFavorite ? ", favorite" : ""}`} accessibilityState={selectable ? { selected } : undefined} contentMode="raw" onAccessibilityAction={accessibilityLongPress ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") onLongPress?.(); } : undefined} onLongPress={onLongPress} onPress={onPress} shape="rounded" size="md" style={[styles.cardMain, trip.coverUrl && styles.coveredCardMain]} variant="ghost">{trip.coverUrl ? null : <GlobeIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.cardLabel, trip.coverUrl && styles.coveredCardLabel]}>{trip.name}</Text></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>;
 }
 
 function BulkToolbar({ count, onClear, onMore }: { count: number; onClear: () => void; onMore: () => void }) {
@@ -1502,7 +1667,6 @@ function GeneratedDocumentSheets<T extends GeneratedDocument>({ appendGeneration
   const [selectedDocumentKeys, setSelectedDocumentKeys] = useState<string[]>([]);
   const [removedDocumentKeys, setRemovedDocumentKeys] = useState<string[]>([]);
   const [documentActionsOpen, setDocumentActionsOpen] = useState(false);
-  const [resourceTagsOpen, setResourceTagsOpen] = useState(false);
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
   const longPressedDocument = useRef<string | undefined>(undefined);
@@ -1530,50 +1694,51 @@ function GeneratedDocumentSheets<T extends GeneratedDocument>({ appendGeneration
     if (appendGeneration && activeSelectedKeys.length) toggleSelection(document.key);
     else onOpen(document);
   };
-  const closeList = () => { setSelectedDocumentKeys([]); setDocumentActionsOpen(false); setResourceTagsOpen(false); setRemoveConfirmOpen(false); onClose(); };
-  const removeSelected = async () => {
-    if (!appendGeneration || activeSelectedKeys.length === 0) return;
+  const closeList = () => { setSelectedDocumentKeys([]); setDocumentActionsOpen(false); setRemoveConfirmOpen(false); onClose(); };
+  const removeSelected = () => {
+    if (!appendGeneration || activeSelectedKeys.length === 0 || removing) return;
     const keys = [...activeSelectedKeys];
+    const one = keys.length === 1;
+    setRemovedDocumentKeys((current) => [...new Set([...current, ...keys])]);
+    setSelectedDocumentKeys([]);
+    setRemoveConfirmOpen(false);
+    showToast({ title: one ? `${singular} deleted` : `${label} deleted`, duration: 2_000 });
     setRemoving(true);
-    try {
-      const outcomes = await Promise.allSettled(keys.map((key) => deleteContentDocument(key)));
-      const removed = keys.filter((_, index) => outcomes[index]?.status === "fulfilled");
+    void Promise.allSettled(keys.map((key) => deleteContentDocument(key))).then((outcomes) => {
       const failed = keys.filter((_, index) => outcomes[index]?.status === "rejected");
-      setRemovedDocumentKeys((current) => [...new Set([...current, ...removed])]);
-      setSelectedDocumentKeys(failed);
-      setRemoveConfirmOpen(false);
-      if (removed.length) showToast({ title: removed.length === 1 ? `${singular} removed` : `${removed.length} ${label.toLocaleLowerCase()} removed`, duration: 2_000 });
-      if (failed.length) showToast({ title: failed.length === 1 ? `${singular} could not be removed` : `${failed.length} ${label.toLocaleLowerCase()} could not be removed`, duration: 2_000 });
+      if (failed.length) {
+        setRemovedDocumentKeys((current) => current.filter((key) => !failed.includes(key)));
+        showToast({ title: failed.length === 1 ? `${singular} could not be deleted` : `${label} could not be deleted`, duration: 2_000 });
+      }
       onRetry();
-    } finally {
-      setRemoving(false);
-    }
+    }).finally(() => setRemoving(false));
   };
-  return <>
-    <BottomSheet footer={<View style={styles.sheetFooter}><Button disabled={generating || removing} onPress={onCreate} size="md" variant="primary">{createLabel}</Button><Button disabled={generating || removing} onPress={closeList} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} height="full" onOpenChange={(nextOpen) => { if (!nextOpen && open && !generating && !selected) closeList(); }} open={open && (!generating || appendGeneration)} title={label}>
-      <ScrollView accessibilityLabel={label} accessibilityLiveRegion="polite" accessibilityState={{ busy: loading || generating || removing }} contentContainerStyle={[styles.tripGuideList, !loading && !generating && (Boolean(error) || !visibleDocuments?.length) && styles.tripGuideEmpty]} showsVerticalScrollIndicator={false}>{activeSelectedKeys.length ? <Tabs style={styles.bulkToolbar}><View style={styles.bulkToolbarSelection}><Button accessibilityLabel="Clear reference selection" contentMode="raw" disabled={removing} onPress={() => setSelectedDocumentKeys([])} size="md" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text style={styles.bulkSelectionText}>{activeSelectedKeys.length} selected</Text></View><Button accessibilityLabel="Selected document actions" contentMode="raw" disabled={removing} onPress={() => setDocumentActionsOpen(true)} size="md" variant="icon"><MoreHorizontalIcon size="sm" /></Button></Tabs> : null}{loading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.tripGuidePillSkeleton} />) : error ? <QueryFailure message={errorMessage(error)} onRetry={onRetry} sheet /> : visibleDocuments?.map((document) => { const documentSelected = activeSelectedKeys.includes(document.key); return <Button accessibilityActions={appendGeneration ? [{ name: "longpress", label: documentSelected ? `Deselect ${document.name}` : `Select ${document.name}` }] : undefined} accessibilityLabel={activeSelectedKeys.length ? `${documentSelected ? "Deselect" : "Select"} ${document.name}` : `Open ${document.name}`} accessibilityState={appendGeneration ? { selected: documentSelected } : undefined} contentMode="raw" disabled={removing} key={document.key} onAccessibilityAction={appendGeneration ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") toggleSelection(document.key); } : undefined} onLongPress={appendGeneration ? () => handleLongPress(document.key) : undefined} onPress={() => handlePress(document)} shape="pill" size="md" style={[styles.tripGuidePill, styles.sheetSecondary, documentSelected && styles.tripGuidePillSelected]} variant="secondary"><Text ellipsizeMode="tail" numberOfLines={1} style={styles.tripGuidePillName}>{document.name}</Text><View style={styles.tripGuidePillAccessory}><ChevronRightIcon size="sm" /></View></Button>; })}{appendGeneration && !loading && generating ? <Skeleton accessibilityLabel={`Generating ${singular.toLocaleLowerCase()}`} accessibilityRole="progressbar" style={styles.tripGuidePillSkeleton} /> : null}{!loading && !generating && !error && !visibleDocuments?.length ? <Text style={styles.emptyText}>{emptyMessage}</Text> : null}</ScrollView>
-    </BottomSheet>
-    <BottomSheet footer={<Button onPress={closeDetail} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button>} height="full" onOpenChange={(nextOpen) => { if (!nextOpen && open && ((!appendGeneration && generating) || selected)) closeDetail(); }} open={open && ((!appendGeneration && generating) || Boolean(selected))} title={generating && !appendGeneration ? `Creating ${singular.toLocaleLowerCase()}` : selected?.name ?? singular}>
+  const openDocumentActions = () => setDocumentActionsOpen(true);
+  return <>{[
+    <BottomSheet footer={<View style={styles.sheetFooter}><Button disabled={generating || removing} onPress={onCreate} size="md" variant="primary">{createLabel}</Button><Button disabled={generating || removing} onPress={closeList} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} height="full" key="list" onOpenChange={(nextOpen) => { if (!nextOpen && open && !generating && !selected) closeList(); }} open={open && (!generating || appendGeneration)} title={label}>
+      <ScrollView accessibilityLabel={label} accessibilityLiveRegion="polite" accessibilityState={{ busy: loading || generating || removing }} contentContainerStyle={[styles.tripGuideList, !loading && !generating && (Boolean(error) || !visibleDocuments?.length) && styles.tripGuideEmpty]} showsVerticalScrollIndicator={false}>{activeSelectedKeys.length ? <Tabs style={styles.bulkToolbar}><View style={styles.bulkToolbarSelection}><Button accessibilityLabel="Clear reference selection" contentMode="raw" disabled={removing} onPress={() => setSelectedDocumentKeys([])} size="md" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text style={styles.bulkSelectionText}>{activeSelectedKeys.length} selected</Text></View><Button accessibilityLabel="Selected document actions" contentMode="raw" disabled={removing} onPress={openDocumentActions} size="md" variant="icon"><MoreHorizontalIcon size="sm" /></Button></Tabs> : null}{loading ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.tripGuidePillSkeleton} />) : error ? <QueryFailure message={errorMessage(error)} onRetry={onRetry} sheet /> : visibleDocuments?.map((document) => { const documentSelected = activeSelectedKeys.includes(document.key); return <Button accessibilityActions={appendGeneration ? [{ name: "longpress", label: documentSelected ? `Deselect ${document.name}` : `Select ${document.name}` }] : undefined} accessibilityLabel={activeSelectedKeys.length ? `${documentSelected ? "Deselect" : "Select"} ${document.name}` : `Open ${document.name}`} accessibilityState={appendGeneration ? { selected: documentSelected } : undefined} contentMode="raw" disabled={removing} key={document.key} onAccessibilityAction={appendGeneration ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") toggleSelection(document.key); } : undefined} onLongPress={appendGeneration ? () => handleLongPress(document.key) : undefined} onPress={() => handlePress(document)} shape="pill" size="md" style={[styles.tripGuidePill, styles.sheetSecondary, documentSelected && styles.tripGuidePillSelected]} variant="secondary"><Text ellipsizeMode="tail" numberOfLines={1} style={styles.tripGuidePillName}>{document.name}</Text></Button>; })}{appendGeneration && !loading && generating ? <Skeleton accessibilityLabel={`Generating ${singular.toLocaleLowerCase()}`} accessibilityRole="progressbar" style={styles.tripGuidePillSkeleton} /> : null}{!loading && !generating && !error && !visibleDocuments?.length ? <Text style={styles.emptyText}>{emptyMessage}</Text> : null}</ScrollView>
+    </BottomSheet>,
+    <BottomSheet footer={<Button onPress={closeDetail} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button>} height="full" key="detail" onOpenChange={(nextOpen) => { if (!nextOpen && open && ((!appendGeneration && generating) || selected)) closeDetail(); }} open={open && ((!appendGeneration && generating) || Boolean(selected))} title={generating && !appendGeneration ? `Creating ${singular.toLocaleLowerCase()}` : selected?.name ?? singular}>
       {generating && !appendGeneration ? <View accessibilityLabel={`Generating ${singular.toLocaleLowerCase()}`} accessibilityRole="progressbar" style={styles.tripGuideGenerationLoading}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.tripGuidePillSkeleton} />)}</View> : children}
-    </BottomSheet>
-    <ResourceTagsSheet context={contentContext} onApply={() => setSelectedDocumentKeys([])} onClose={() => setResourceTagsOpen(false)} open={open && resourceTagsOpen} targets={activeSelectedKeys.map((key) => ({ type: "document", key }))} />
-    <BottomSheet hideHeading onOpenChange={setDocumentActionsOpen} open={open && appendGeneration && activeSelectedKeys.length > 0 && documentActionsOpen} title=""><BottomSheetMenu><BottomSheetItem onPress={() => { setDocumentActionsOpen(false); requestAnimationFrame(() => setResourceTagsOpen(true)); }} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem><BottomSheetItem disabled={removing} onPress={() => { setDocumentActionsOpen(false); requestAnimationFrame(() => setRemoveConfirmOpen(true)); }} style={styles.sheetAction} variant="secondary">Remove</BottomSheetItem></BottomSheetMenu></BottomSheet>
-    <BottomSheet dismissible={!removing} onOpenChange={(nextOpen) => { if (!nextOpen) setRemoveConfirmOpen(false); }} open={open && appendGeneration && activeSelectedKeys.length > 0 && removeConfirmOpen} title={`Remove ${activeSelectedKeys.length === 1 ? singular.toLocaleLowerCase() : `${activeSelectedKeys.length} ${label.toLocaleLowerCase()}`}?`}><View style={styles.sheetFooter}><Button disabled={removing} loading={removing} onPress={() => void removeSelected()} size="md" variant="primary">Remove</Button><Button disabled={removing} onPress={() => setRemoveConfirmOpen(false)} size="md" variant="secondary">Close</Button></View></BottomSheet>
-  </>;
+    </BottomSheet>,
+    <BottomSheet hideHeading key="actions" onOpenChange={setDocumentActionsOpen} open={open && appendGeneration && activeSelectedKeys.length > 0 && documentActionsOpen} title=""><BottomSheetMenu><BottomSheetItem disabled={removing} onPress={() => { setDocumentActionsOpen(false); requestAnimationFrame(() => setRemoveConfirmOpen(true)); }} style={styles.sheetAction} variant="secondary">Delete</BottomSheetItem></BottomSheetMenu></BottomSheet>,
+    <BottomSheet dismissible={!removing} key="confirm" onOpenChange={(nextOpen) => { if (!nextOpen) setRemoveConfirmOpen(false); }} open={open && appendGeneration && activeSelectedKeys.length > 0 && removeConfirmOpen} title={activeSelectedKeys.length === 1 ? `Delete ${singular.toLocaleLowerCase()}?` : `Delete ${activeSelectedKeys.length} ${label.toLocaleLowerCase()}?`}><View style={styles.sheetFooter}><Button disabled={removing} onPress={removeSelected} size="md" variant="primary">Delete</Button><Button disabled={removing} onPress={() => setRemoveConfirmOpen(false)} size="md" variant="secondary">Close</Button></View></BottomSheet>,
+  ]}</>;
 }
 
-function GuideLoading({ label, text }: { label: string; text: string }) {
-  return <View accessibilityLabel={label} accessibilityRole="progressbar" style={styles.countryDetailSkeleton}><LoadingText text={text} /><Skeleton style={[styles.skeletonBlock, styles.skeletonHero]} /><Skeleton style={[styles.skeletonBlock, styles.skeletonText]} /></View>;
+function GuideLoading({ label }: { label: string }) {
+  return <View accessibilityLabel={label} accessibilityRole="progressbar" style={styles.countryDetailSkeleton}><Skeleton style={[styles.skeletonBlock, styles.skeletonHero]} /><Skeleton style={[styles.skeletonBlock, styles.skeletonText]} /></View>;
 }
 
-function GuideHero({ detail, image, onImageError }: { detail: Pick<CityDetail, "summary" | "culture" | "food" | "whyVisit">; image?: PlaceImageResponse["image"]; onImageError: () => void }) {
+function GuideHero({ cacheKey, detail, image, onImageError }: { cacheKey?: string; detail: Pick<CityDetail, "summary" | "culture" | "food" | "whyVisit">; image?: PlaceImageResponse["image"]; onImageError: () => void }) {
   const sections = [["summary", detail.summary], ["culture", detail.culture], ["food", detail.food], ["whyVisit", detail.whyVisit]] as const;
-  return <View accessibilityLabel={image ? "Destination hero" : "Generating destination hero"} accessibilityRole={!image ? "progressbar" : undefined} style={styles.guideHero}>{!image ? <LoadingText text="Generating image..." /> : null}<PlaceImageFrame image={image} key={image?.url ?? "hero"} onError={onImageError} /><View style={styles.guideSections}>{sections.map(([key, section]) => <Text key={key} style={styles.guideText}>{section}</Text>)}</View></View>;
+  return <View accessibilityLabel={image ? "Destination hero" : "Generating destination hero"} accessibilityRole={!image ? "progressbar" : undefined} style={styles.guideHero}><PlaceImageFrame cacheKey={cacheKey} image={image} onError={onImageError} /><View style={styles.guideSections}>{sections.map(([key, section]) => section ? <Text key={key} style={styles.guideText}>{section}</Text> : <Skeleton key={key} style={[styles.skeletonBlock, styles.skeletonText]} />)}</View></View>;
 }
 
-function PlaceImageFrame({ image, onError }: { image?: PlaceImageResponse["image"]; onError: () => void }) {
-  const [loaded, setLoaded] = useState(false);
-  return <View style={styles.imageFrame}>{image ? <Image accessibilityLabel={image.title} cachePolicy="none" contentFit="cover" onError={() => { setLoaded(false); onError(); }} onLoad={() => setLoaded(true)} source={{ uri: image.url }} style={styles.placeImage} transition={250} /> : null}{!loaded ? <Skeleton style={styles.imageSkeleton} /> : null}</View>;
+function PlaceImageFrame({ cacheKey, image, onError }: { cacheKey?: string; image?: PlaceImageResponse["image"]; onError: () => void }) {
+  const url = image?.url;
+  const [loaded, setLoaded] = useState(Boolean(url));
+  return <View style={styles.imageFrame}>{url ? <Image accessibilityLabel={image.title} cachePolicy="memory-disk" contentFit="cover" onError={() => { setLoaded(false); onError(); }} onLoad={() => setLoaded(true)} source={{ uri: url, ...(cacheKey ? { cacheKey } : {}) }} style={styles.placeImage} transition={0} /> : null}{!url || !loaded ? <Skeleton style={styles.imageSkeleton} /> : null}</View>;
 }
 
 const styles = StyleSheet.create({
@@ -1581,6 +1746,7 @@ const styles = StyleSheet.create({
   header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.md, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomColor: palette.hairline, borderBottomWidth: 1, backgroundColor: palette.page, zIndex: 4 },
   workspaceViewport: { flex: 1, minHeight: 0, gap: spacing.sm, paddingTop: spacing.md },
   compassRoot: { flex: 1, minHeight: 0, gap: spacing.md },
+  globePane: { flex: 1, minHeight: 0, gap: spacing.md },
   rootTitleRow: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 8 },
   rootTitle: { minWidth: 0, flex: 1, color: palette.silver50, fontFamily: fonts.medium, fontSize: 24 },
   titleRow: { minHeight: 40, minWidth: 0, flexDirection: "row", alignItems: "center", gap: spacing.xs },
@@ -1604,7 +1770,7 @@ const styles = StyleSheet.create({
   tripPlaceArcOverlap: { marginLeft: -13 },
   tripPlaceArcLogo: { width: 48, height: 48 },
   tableView: { flex: 1, minHeight: 0, position: "relative", gap: spacing.md },
-  filteredTripEmpty: { position: "absolute", top: 116, right: 0, bottom: 0, left: 0, alignItems: "center", justifyContent: "center", backgroundColor: palette.voidBlack, zIndex: 2 },
+
   rootTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel },
   rootTab: { flex: 1 },
   cardGrid: { flexGrow: 1, alignContent: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: GRID_GAP, paddingVertical: spacing.sm, paddingBottom: spacing.xl },
@@ -1618,8 +1784,10 @@ const styles = StyleSheet.create({
   coveredCardMain: { justifyContent: "flex-end", paddingBottom: 10 },
   cardLabel: { width: "100%", color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "center" },
   coveredCardLabel: { paddingHorizontal: 5, paddingVertical: 4, borderRadius: radii.sm, backgroundColor: "rgba(0, 0, 0, 0.68)", color: "#FFFFFF" },
-  emptyGrid: { alignItems: "center", justifyContent: "center" },
-  emptyText: { width: "100%", paddingVertical: 18, color: palette.silver500, fontFamily: fonts.regular, fontSize: 13, textAlign: "center" },
+  emptyGrid: { flexGrow: 1, minHeight: 360, alignItems: "center", justifyContent: "center" },
+  emptyState: { flexGrow: 1, minHeight: 360, width: "100%", alignItems: "center", justifyContent: "center", gap: 14 },
+  emptyPlusButton: { width: 44, height: 44 },
+  emptyText: { width: "100%", color: palette.silver500, fontFamily: fonts.regular, fontSize: 13, textAlign: "center" },
   loadFailure: { position: "absolute", top: 0, right: spacing.xl, bottom: 0, left: spacing.xl, alignItems: "center", justifyContent: "center", gap: 14 },
   tableFailure: { width: "100%", minHeight: 240, alignItems: "center", justifyContent: "center", gap: 14 },
   loadFailureText: { maxWidth: 320, color: palette.silver300, fontFamily: fonts.regular, fontSize: 13, lineHeight: 19, textAlign: "center" },
@@ -1673,15 +1841,14 @@ const styles = StyleSheet.create({
   orderButtons: { flexDirection: "row", gap: 4, paddingRight: spacing.xs },
   orderControl: { width: 32, height: 32, minHeight: 32, paddingHorizontal: 0, paddingVertical: 0 },
   switchRow: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  filterSheet: { gap: 6 },
-  searchHistoryOption: { backgroundColor: palette.page },
+  filterSheet: { gap: 12 },
   filterSwitchRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   filterSwitchLabel: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12 },
   sheetEmptyContent: { flexGrow: 1, alignContent: "center", alignItems: "center", justifyContent: "center" },
   tripDetailsForm: { gap: spacing.lg, paddingBottom: spacing.xs },
   tripDetailsCoverControl: { width: 88, height: 88, position: "relative", alignSelf: "flex-start" },
   tripDetailsCoverButton: { width: 88, height: 88, paddingHorizontal: 0, paddingVertical: 0, overflow: "hidden" },
-  tripDetailsCoverRemove: { width: 42, height: 42, minHeight: 42, paddingHorizontal: 0, paddingVertical: 0, position: "absolute", right: -12, top: -12 },
+
   tripCover: StyleSheet.absoluteFill,
   assetTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel },
   assetTab: { flex: 1, height: 28, minHeight: 28, paddingVertical: 0 },
@@ -1697,8 +1864,7 @@ const styles = StyleSheet.create({
   tripGuidePill: { width: "100%", minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "flex-start", paddingHorizontal: spacing.md },
   tripGuidePillSelected: { borderColor: palette.silver50, borderWidth: 2 },
   tripGuidePillName: { minWidth: 0, flex: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 14, textAlign: "left" },
-  tripGuidePillAccessory: { marginLeft: "auto", flexShrink: 0 },
-  tripGuidePillSkeleton: { width: "100%", height: 44, borderRadius: 999 },
+  tripGuidePillSkeleton: { width: "100%", height: 44, borderRadius: 999, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   tripGuideGenerationLoading: { gap: spacing.sm, paddingVertical: spacing.sm },
   tripGuideDetail: { gap: spacing.md, paddingVertical: spacing.sm, paddingBottom: spacing.xl },
   tripGuideCollage: { width: "100%", aspectRatio: 1.45, overflow: "hidden", flexDirection: "row", flexWrap: "wrap", gap: 2, borderRadius: radii.lg, backgroundColor: palette.panelRaised },

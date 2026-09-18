@@ -49,10 +49,23 @@ function refreshProducts(set: (patch: Partial<AppsState>) => void) {
   return productsPromise;
 }
 
+const PRIVATE_WORKSPACE_APP: ServerApp = {
+  key: "cmtlinos60007w07khqprvt01",
+  slug: "hq",
+  name: "HQ",
+  description: "Your workspace to manage teams and collaboration.",
+  detailedDescription: "HQ is your private workspace for managing teams and collaboration.",
+  logoUrl: "https://vorinthex.com/logos/entities/product-hq.png",
+  version: "1.0.0",
+  createdAt: "2026-09-01T00:00:00.000Z",
+  updatedAt: "2026-09-01T00:00:00.000Z",
+};
+
 function appForSlug(apps: ServerApp[], slug: string): ServerApp {
   const app = apps.find((candidate) => candidate.slug === slug);
-  if (!app) throw new Error(`App registry has no app for ${slug}.`);
-  return app;
+  if (app) return app;
+  if (slug === PRIVATE_WORKSPACE_APP.slug) return PRIVATE_WORKSPACE_APP;
+  throw new Error(`App registry has no app for ${slug}.`);
 }
 
 function selectedAppState(app: ServerApp, previousAppKey: string | null) {

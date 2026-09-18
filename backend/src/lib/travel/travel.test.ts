@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { placeSchema, type Place } from '@/lib/db/places.node';
 import { tripSchema } from '@/lib/db/trips.node';
-import { imageSchema } from '@/lib/db/images.node';
 import { tripGuideSchema } from '@/lib/db/trip-guides.node';
 import { placeReferenceSchema } from '@/lib/db/place-references.node';
 import { placeHeroMediaSchema } from '@/lib/db/place-hero-media.node';
@@ -340,15 +339,15 @@ describe('travel contracts and service', () => {
     let providerCalls = 0, converges = 0;
     const exportOrder: string[] = [];
     let canonicalStorageKey = '';
-    const repository = { authorizeRead: async () => {}, authorizeWrite: async () => key, convergePlace: async ({ place, hero }: any) => { converges += 1; canonicalStorageKey = hero.storageKey; return { place, heroStorageKey: hero.storageKey }; }, ensureGalleryExportCollection: async () => { exportOrder.push('ensure'); }, linkGalleryExport: async () => { exportOrder.push('link'); } } as unknown as TravelRepository;
+    const repository = { authorizeRead: async () => {}, authorizeWrite: async () => key, convergePlace: async ({ place, hero }: any) => { converges += 1; canonicalStorageKey = hero.storageKey; return { place, heroStorageKey: hero.storageKey }; }, ensureGalleryExportCollection: async () => { exportOrder.push('ensure'); return key; } } as unknown as TravelRepository;
     const service = createTravelService({ repository, storage, decryptImageRequest: () => token, embed: async () => embedding, now: () => timestamp, signImageUrl: async (storageKey) => `https://signed.test/${storageKey}`,
       placeImages: { execute: (async () => { providerCalls += 1; return { output: { images: [{ base64: placePngBase64, mimeType: 'image/png' }] }, costUsd: 0.01 }; }) as any, now: () => Date.parse(timestamp), log: () => {} },
-      process: (async (input: any) => { exportOrder.push('dump'); processed.push(input.file.bytes); expect(input).toMatchObject({ origin: 'generated', mutationPolicy: 'user' }); return imageSchema.parse({ key: input.imageKey, scopeKey, filename: input.file.filename, caption: 'Japan landscape', imageCaptionKey: key, createdByKey: key, storageKey: 'media/japan.png', mimeType: 'image/png', sizeBytes: 3, width: 1536, height: 1024, embedding, origin: 'generated', mutationPolicy: 'user', isFavorite: false, createdAt: timestamp, updatedAt: timestamp }); }) as any });
+      ingestGalleryUpload: async (input) => { exportOrder.push('dump'); processed.push(input.bytes); expect(input).toMatchObject({ collectionKey: key, mimeType: 'image/png', filename: 'japan.png' }); } });
     const input = { teamKey: 'team', scopeKey, name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2, imageRequestToken: 'token' };
     await expect(service.createPlace(input, key)).resolves.toMatchObject({ place: { name: 'Japan', kind: 'country', coverUrl: expect.stringContaining('https://signed.test/compass/') } });
     expect(providerCalls).toBe(1); expect(processed).toEqual([placePngBytes]); expect(converges).toBe(1);
     expect(canonicalStorageKey).toMatch(/^compass\//); expect(canonicalStorageKey).not.toBe('media/japan.png');
-    expect(exportOrder).toEqual(['ensure', 'dump', 'link']);
+    expect(exportOrder).toEqual(['ensure', 'dump']);
     expect(deleted).toContain('pending/compass/place-hero/' + 'A'.repeat(43) + '/preview.png');
   });
 
@@ -356,8 +355,8 @@ describe('travel contracts and service', () => {
     const stagedKey = `pending/compass/place-hero/${'B'.repeat(43)}/preview.png`, deleted: string[] = [];
     const storage = { upload: async ({ key }: any) => ({ storageKey: key }), download: async () => ({ bytes: new Uint8Array([1, 2, 3]) }), delete: async (key: string) => { deleted.push(key); }, copy: async () => ({ storageKey: '' }) };
     const token = { version: 5, issuedAt: Date.parse(timestamp), nonce: 'B'.repeat(43), teamKey: 'team', scopeKey, country: { name: 'Japan', countryCode: 'JP', continent: 'Asia', latitude: 36.2, longitude: 138.2 }, place: { kind: 'country', name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2 }, hero: { title: 'Japan', prompt: 'Japan' } } as const;
-    const repository = { authorizeWrite: async () => key, convergePlace: async ({ place, hero }: any) => ({ place, heroStorageKey: hero.storageKey }), ensureGalleryExportCollection: async () => {}, linkGalleryExport: async () => {} } as unknown as TravelRepository;
-    const service = createTravelService({ repository, storage, decryptImageRequest: () => token, process: async () => { throw new Error('gallery unavailable'); }, embed: async () => embedding, now: () => timestamp });
+    const repository = { authorizeWrite: async () => key, convergePlace: async ({ place, hero }: any) => ({ place, heroStorageKey: hero.storageKey }), ensureGalleryExportCollection: async () => key } as unknown as TravelRepository;
+    const service = createTravelService({ repository, storage, decryptImageRequest: () => token, ingestGalleryUpload: async () => { throw new Error('gallery unavailable'); }, embed: async () => embedding, now: () => timestamp });
     await expect(service.createPlace({ teamKey: 'team', scopeKey, name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2, imageRequestToken: 'token' }, key)).resolves.toMatchObject({ place: { name: 'Japan' } });
     expect(stagedKey).toContain('pending/compass'); expect(deleted).toContain(stagedKey);
   });
@@ -406,14 +405,12 @@ describe('travel contracts and service', () => {
     const repository = {
       authorizeWrite: async (context: TravelAccessContext) => { calls.push(['authorizeWrite', context]); return key; },
       convergePlace: async (value: any) => { calls.push(['converge', value]); return { place: value.place, heroStorageKey: value.hero.storageKey }; },
-      ensureGalleryExportCollection: async (context: unknown, collection: unknown) => { calls.push(['ensure-gallery', context, collection]); },
-      linkGalleryExport: async (context: unknown, relation: unknown) => { calls.push(['link-gallery', context, relation]); },
+      ensureGalleryExportCollection: async (context: unknown, collection: unknown) => { calls.push(['ensure-gallery', context, collection]); return key; },
     } as unknown as TravelRepository;
     const input = { teamKey: 'team', scopeKey, name: ' Japan ', summary: ' Island country. ', countryCode: 'jp', latitude: 36.2048, longitude: 138.2529, imageRequestToken: 'token' };
-    const image = { key, scopeKey, filename: 'japan.png', caption: 'Japan', imageCaptionKey: key, createdByKey: key, storageKey: 'media/japan.png', mimeType: 'image/png', sizeBytes: 1, width: 1536, height: 1024, embedding, mutationPolicy: 'system-only', isFavorite: false, createdAt: timestamp, updatedAt: timestamp } as any;
-    const service = createTravelService({ repository, process: async () => image, storage: { delete: async () => {}, upload: async ({ key: storageKey }: any) => ({ storageKey }), download: async () => ({ bytes: placePngBytes }), copy: async () => ({ storageKey: '' }) }, decryptImageRequest: () => ({ version: 5, issuedAt: Date.parse(timestamp), nonce: 'A'.repeat(43), teamKey: 'team', scopeKey, country: { name: 'Japan', countryCode: 'JP', continent: 'Asia', latitude: 36.2, longitude: 138.2 }, place: { kind: 'country', name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2048, longitude: 138.2529 }, hero: { title: 'Japan', prompt: 'prompt' } }), embed: async (value) => { calls.push(['embed', value]); return embedding; }, now: () => timestamp, signImageUrl: async (storageKey) => `https://signed.test/${storageKey}` });
+    const service = createTravelService({ repository, ingestGalleryUpload: async (value) => { calls.push(['ingest-gallery', value]); }, storage: { delete: async () => {}, upload: async ({ key: storageKey }: any) => ({ storageKey }), download: async () => ({ bytes: placePngBytes }), copy: async () => ({ storageKey: '' }) }, decryptImageRequest: () => ({ version: 5, issuedAt: Date.parse(timestamp), nonce: 'A'.repeat(43), teamKey: 'team', scopeKey, country: { name: 'Japan', countryCode: 'JP', continent: 'Asia', latitude: 36.2, longitude: 138.2 }, place: { kind: 'country', name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2048, longitude: 138.2529 }, hero: { title: 'Japan', prompt: 'prompt' } }), embed: async (value) => { calls.push(['embed', value]); return embedding; }, now: () => timestamp, signImageUrl: async (storageKey) => `https://signed.test/${storageKey}` });
     const result = await service.createPlace(input, key);
-    expect(calls.map(([name]) => name)).toEqual(['authorizeWrite', 'embed', 'converge', 'embed', 'ensure-gallery', 'link-gallery']);
+    expect(calls.map(([name]) => name)).toEqual(['authorizeWrite', 'embed', 'converge', 'embed', 'ensure-gallery', 'ingest-gallery']);
     expect(calls[0]?.[1]).toEqual({ teamKey: 'team', scopeKey, userKey: key });
     expect((calls[2]?.[1] as any).place).toMatchObject({ scopeKey, kind: 'country', name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2048, longitude: 138.2529, embedding, createdAt: timestamp });
     expect(result.place).toMatchObject({ name: 'Japan', kind: 'country', countryCode: 'JP', coverUrl: expect.stringContaining('https://signed.test/compass/') });
@@ -424,12 +421,11 @@ describe('travel contracts and service', () => {
     const repository = {
       authorizeWrite: async () => key,
       convergePlace: async (value: any) => { converged = value; return { place: value.place, heroStorageKey: value.hero.storageKey }; },
-      ensureGalleryExportCollection: async () => {}, linkGalleryExport: async () => {},
+      ensureGalleryExportCollection: async () => key,
     } as unknown as TravelRepository;
-    const image = { key, scopeKey, filename: 'singapore.png', caption: 'Singapore', imageCaptionKey: key, createdByKey: key, storageKey: 'media/singapore.png', mimeType: 'image/png', sizeBytes: 1, width: 1536, height: 1024, embedding, mutationPolicy: 'system-only', isFavorite: false, createdAt: timestamp, updatedAt: timestamp } as any;
     const input = { teamKey: 'team', scopeKey, name: 'Singapore', summary: 'A city destination.', countryCode: 'SG', latitude: 1.3521, longitude: 103.8198, imageRequestToken: 'token' };
     const service = createTravelService({
-      repository, process: async () => image, embed: async () => embedding, now: () => timestamp,
+      repository, ingestGalleryUpload: async () => {}, embed: async () => embedding, now: () => timestamp,
       storage: { delete: async () => {}, upload: async ({ key: storageKey }: any) => ({ storageKey }), download: async () => ({ bytes: placePngBytes }), copy: async () => ({ storageKey: '' }) },
       decryptImageRequest: () => ({ version: 5, issuedAt: Date.parse(timestamp), nonce: 'S'.repeat(43), teamKey: 'team', scopeKey, country: { name: 'Singapore', countryCode: 'SG', continent: 'Asia', latitude: 1.3521, longitude: 103.8198 }, place: { kind: 'place', name: 'Singapore', summary: 'A city destination.', countryCode: 'SG', latitude: 1.3521, longitude: 103.8198 }, hero: { title: 'Singapore', prompt: 'prompt' } }),
       signImageUrl: async (storageKey) => `https://signed.test/${storageKey}`,
@@ -473,6 +469,8 @@ describe('travel contracts and service', () => {
     expect(briefCall?.[1]).toBe('team');
     const guideInput = guideCall?.[2] as any;
     expect(guideInput.systemPrompt).toContain('Do not browse');
+    expect(guideInput.systemPrompt).not.toContain('refer to the platform only as Vorinthex AI');
+    expect(guideInput.systemPrompt).toContain('Never mention Vorinthex');
     expect(chatPrompt(guideInput)).toContain('four separate display sections');
     expect(chatPrompt(guideInput)).toContain('1-2 short sentences and 20-45 words in each field');
     expect(chatPrompt(guideInput)).not.toContain('heroImagePrompt');
@@ -694,7 +692,7 @@ describe('travel contracts and service', () => {
         await guideGate;
         return chatResponse(JSON.stringify(cityModel));
       }) as any,
-      placeImages: { execute: (async () => { imageCalls += 1; return { output: { images: [{ base64: placePngBase64, mimeType: 'image/png' }] }, costUsd: 0.01 }; }) as any, log: () => {}, now: () => issuedAt },
+      placeImages: { execute: (async () => { imageCalls += 1; return { output: { images: [{ base64: placePngBase64, mimeType: 'image/png' }] }, costUsd: 0.01 }; }) as any, log: () => {}, now: () => issuedAt, signUrl: async (key: string) => `https://signed.test/${key}` },
     });
     const countryResult = await service.findPlaceGuide({ teamKey: 'team', scopeKey, query: 'Japan', country: { name: 'Japan', code: 'JP', continent: 'Asia', lat: 36.2, lon: 138.2 } }, key);
     expect(countryResult.place).toMatchObject({ childrenRequestToken: 'children-token', popularCities: cities });
@@ -749,7 +747,7 @@ describe('travel contracts and service', () => {
         if (isBrief(input)) { briefStarted = true; await briefGate; return chatResponse(imageBriefFor('Japan')); }
         guideStarted = true; await guideGate; return chatResponse(JSON.stringify(modelGuideDetail));
       }) as any,
-      placeImages: { execute: (async () => { imageCalls += 1; imageStarted = true; return { output: { images: [{ base64: placePngBase64, mimeType: 'image/png' }] } }; }) as any, log: () => {}, now: () => Date.parse(timestamp) },
+      placeImages: { execute: (async () => { imageCalls += 1; imageStarted = true; return { output: { images: [{ base64: placePngBase64, mimeType: 'image/png' }] } }; }) as any, log: () => {}, now: () => Date.parse(timestamp), signUrl: async (key: string) => `https://signed.test/${key}` },
     });
     const finding = service.findPlaceGuide({ teamKey: 'team', scopeKey, query: 'Japan', country: { name: 'Japan', code: 'JP', continent: 'Asia', lat: 36.2, lon: 138.2 } }, key);
     while (!guideStarted) await Promise.resolve();
@@ -797,23 +795,27 @@ describe('travel repository', () => {
     expect(calls[2]!.bindVars).not.toHaveProperty('teamKey');
     expect(calls.every(({ query }) => !/\b(?:images|placeImages|collections|collectionImages)\b/.test(query))).toBe(true);
   });
-  test('recreates an ordinary deterministic Gallery destination before linking without overwrites', async () => {
+  test('recreates a managed Compass Gallery destination before linking without overwrites', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
-    const database: TravelDatabase = { async query(query, bindVars) { calls.push({ query, bindVars }); return { async all() { return query.includes('RETURN membership._key') ? [key] : [true]; } }; } };
+    const database: TravelDatabase = { async query(query, bindVars) { calls.push({ query, bindVars }); return { async all() { return query.includes('RETURN NEW._key') || query.includes('RETURN relation.imageKey') || query.includes('RETURN membership._key') ? [key] : [true]; } }; } };
     const repository = createTravelRepository(database, async (_collections, operation) => operation(database));
     const context = { teamKey: 'team', scopeKey, userKey: key };
     await repository.ensureGalleryExportCollection(context, { key, scopeKey, ownerKey: key, name: 'Compass', embedding, createdAt: timestamp, updatedAt: timestamp });
     await repository.ensureGalleryExportCollection(context, { key, scopeKey, ownerKey: key, name: 'Compass', embedding, createdAt: timestamp, updatedAt: timestamp });
     await repository.linkGalleryExport(context, { key, scopeKey, collectionKey: key, imageKey: key, addedByKey: key, createdAt: timestamp });
-    expect(calls).toHaveLength(3);
-    expect(calls[0]!.query).toContain('UPSERT { _key: @collectionKey }');
-    expect(calls[0]!.query).toContain('UPDATE { ownerKey: @ownerKey, presentation: "travel" } IN collections');
-    expect(calls[0]!.query).toContain('mutationPolicy: "user"');
-    expect(calls[0]!.bindVars).not.toHaveProperty('legacyFields');
+    expect(calls).toHaveLength(6);
+    expect(calls[1]!.query).toContain('collection.purpose == "place-media" || collection.name == "Compass"');
+    expect(calls[1]!.query).toContain('purpose: "place-media"');
+    expect(calls[1]!.query).toContain('mutationPolicy: "user"');
+    expect(calls[1]!.query).toContain('UPDATE { purpose: "place-media", mutationPolicy: "user", ownerKey: @ownerKey, presentation: "travel", name: @name }');
+    expect(calls[1]!.bindVars).not.toHaveProperty('legacyFields');
     expect(calls.some(({ query }) => query.includes('collectionMembers'))).toBe(false);
-    expect(calls[0]!.bindVars?.collectionKey).toBe(calls[1]!.bindVars?.collectionKey);
-    expect(calls[2]!.query).toContain('UPSERT { _key: @relationKey } INSERT @relation UPDATE {} IN collectionImages');
-    expect(calls[2]!.query).toContain('image.createdByKey == @addedByKey');
+    expect(calls[1]!.bindVars?.collectionKey).toBe(key);
+    expect(calls[3]!.bindVars?.collectionKey).toBe(key);
+    expect(calls[5]!.query).toContain('collection.purpose == "place-media"');
+    expect(calls[5]!.query).toContain('image.origin == "generated"');
+    expect(calls[5]!.query).toContain('image.createdByKey == @actorKey');
+    expect(calls[5]!.query).toContain('UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: relation.imageKey }');
   });
   test('lists authorized places and exposes the same read authorization', async () => {
     const queries: string[] = [];
@@ -1082,6 +1084,22 @@ describe('travel repository', () => {
     const callsAfterDelete = calls.length;
     await expect(repository.deletePlace(context, key, timestamp)).resolves.toEqual({ placeKey: key });
     expect(calls).toHaveLength(callsAfterDelete + 1);
+  });
+
+  test('lists owned place references without a second RETURN after authorization', async () => {
+    const calls: string[] = [];
+    const database: TravelDatabase = { async query(query, bindVars) {
+      const declaredBindVars = [...new Set([...query.matchAll(/@([A-Za-z]\w*)/g)].map((match) => match[1]))].sort();
+      expect(Object.keys(bindVars ?? {}).sort()).toEqual(declaredBindVars);
+      calls.push(query);
+      return { async all() { return []; } };
+    } };
+    await expect(createTravelRepository(database).listPlaceReferences({ teamKey: 'team', scopeKey, userKey: key }, key, 'brief')).resolves.toEqual([]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).not.toContain('RETURN membership._key');
+    expect(calls[0]).toContain('FOR reference IN placeReferences');
+    expect(calls[0]).toContain('RETURN reference');
+    expect(calls[0]).toContain('reference.kind == @kind');
   });
 
   test('uses member-but-not-viewer policy for private Compass writes without broadening Gallery elevation', async () => {

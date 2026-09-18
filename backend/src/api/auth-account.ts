@@ -1,7 +1,9 @@
 import type { Context } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { getPersonalAuthContext, provisionPersonalAuthContext } from '@/lib/db/personal-auth-context.node';
+import { hasActiveRootTeamMembership } from '@/lib/db/user-team.node';
 import { getUserByEmailHash, getUserById, updateUser } from '@/lib/db/users.node';
+import { workspacePickerService, type WorkspacePickerState } from '@/lib/workspace-picker/service';
 import { sha256, timingSafeEqual } from '@/lib/crypto';
 import { getAuthIdentity } from './security';
 import { issueUserTokens, revokeRefreshSession, revokeSession } from './auth';
@@ -16,6 +18,8 @@ export async function buildAuthAccountResponse(
   user: NonNullable<Awaited<ReturnType<typeof getUserById>>>,
   context: NonNullable<Awaited<ReturnType<typeof getPersonalAuthContext>>>,
   signAvatar: typeof signProfileAvatarUrl = signProfileAvatarUrl,
+  rootTeamMember = false,
+  workspacePicker: WorkspacePickerState = { apps: [], selectedScopeKeys: null },
 ) {
   const avatarUrl = user.profileStorageKey ? await trySignProfileAvatarUrl(user.profileStorageKey, signAvatar) : null;
   const selectedScope = {
@@ -26,6 +30,8 @@ export async function buildAuthAccountResponse(
     membership_key: context.scopeMembership.key,
   };
   return {
+    rootTeamMember,
+    workspacePicker,
     user: {
       key: user.key,
       email: user.email,
@@ -75,8 +81,9 @@ export async function bootstrapGuestAuth(c: Context) {
   const context = await provisionPersonalAuthContext(user);
   const tokens = await issueUserTokens(user);
   setSessionForRequest(c, tokens);
+  const rootTeamMember = await hasActiveRootTeamMembership(user.key);
   return c.json({
-    ...await buildAuthAccountResponse(user, context),
+    ...await buildAuthAccountResponse(user, context, signProfileAvatarUrl, rootTeamMember, await workspacePickerService.read(user.key)),
     ...camelSessionTokenPayload(c, tokens),
   }, 201);
 }
@@ -92,7 +99,8 @@ export async function patchAuthAccount(c: Context) {
     isOnboarded: body.isOnboarded,
     updatedAt: new Date().toISOString(),
   });
-  return c.json(await buildAuthAccountResponse(user, context));
+  const rootTeamMember = await hasActiveRootTeamMembership(user.key);
+  return c.json(await buildAuthAccountResponse(user, context, signProfileAvatarUrl, rootTeamMember, await workspacePickerService.read(user.key)));
 }
 
 export const patchAuthAccountSchema = strictObject({ isOnboarded: z.literal(true) });
@@ -103,7 +111,8 @@ export async function getAuthAccount(c: Context) {
   const user = await getUserById(identity.key);
   if (!user?.isVerified) return c.json({ error: 'verified authentication required' }, 403);
   const context = await provisionPersonalAuthContext(user);
-  return c.json(await buildAuthAccountResponse(user, context));
+  const rootTeamMember = await hasActiveRootTeamMembership(user.key);
+  return c.json(await buildAuthAccountResponse(user, context, signProfileAvatarUrl, rootTeamMember, await workspacePickerService.read(user.key)));
 }
 
 export async function logoutAuthAccount(c: Context) {

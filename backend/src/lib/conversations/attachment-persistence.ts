@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { CORE_CHAT_DOCUMENT_MIME_TYPES, CORE_CHAT_IMAGE_MIME_TYPES, CORE_CHAT_MAX_FILE_BYTES_TOTAL } from '@/lib/ai/actions/core-chat';
 import { parseDocument, documentStorage, type DocumentObjectStorage, type DocumentParseDependencies } from '@/lib/ai/document-processing';
-import { processImages, type ImageProcessingDependencies } from '@/lib/ai/image-processing';
+import { ingestGalleryLibraryUpload, type GalleryUploadProcessingDependencies } from '@/lib/gallery/upload-processing';
 import { evaluateScopeAccess } from '@/lib/ai/tools/domain-access-engine';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { contentPersistence } from '@/lib/db/content-persistence.node';
@@ -20,9 +20,9 @@ export interface ConversationAttachmentPersistenceDependencies {
   authorize?: typeof evaluateScopeAccess;
   parse?: typeof parseDocument;
   document?: DocumentParseDependencies;
-  process?: typeof processImages;
-  image?: ImageProcessingDependencies;
-  gallery?: Pick<GalleryRepository, 'ensureGeneratedMediaCollection' | 'attachConversationMedia' | 'deleteImages'>;
+  ingestGalleryUpload?: typeof ingestGalleryLibraryUpload;
+  image?: GalleryUploadProcessingDependencies;
+  gallery?: Pick<GalleryRepository, 'ensureGeneratedMediaCollection'>;
   embedCollection?: typeof embedText;
   now?: () => string;
   signal?: AbortSignal;
@@ -71,12 +71,11 @@ export async function persistConversationAttachment(record: ConversationAttachme
   const now = dependencies.now ?? (() => new Date().toISOString());
   const collection = await gallery.ensureGeneratedMediaCollection(identity.scopeKey, identity.actorKey, await (dependencies.embedCollection ?? embedText)({ text: 'Core', purpose: 'document' }), now());
   if (!collection) throw new Error('Conversation image attachment destination is unavailable.');
-  const [image] = await (dependencies.process ?? processImages)([{ scopeKey: identity.scopeKey, ownerKey: identity.actorKey, billingUserKey: identity.userKey, origin: 'uploaded', mutationPolicy: 'user', idempotencyKey: `conversation-attachment:${artifact!.key}`, file: { filename: artifact!.filename, mimeType: artifact!.mimeType, sizeBytes: artifact!.sizeBytes, bytes: object.bytes }, ...(dependencies.signal ? { signal: dependencies.signal } : {}) }], dependencies.image);
+  const jpeg = artifact!.mimeType === 'image/jpeg';
+  const image = await (dependencies.ingestGalleryUpload ?? ingestGalleryLibraryUpload)({
+    teamKey: identity.teamKey, scopeKey: identity.scopeKey, actorKey: identity.actorKey, userKey: identity.userKey, collectionKey: collection.key,
+    filename: artifact!.filename, mimeType: jpeg ? 'image/jpeg' : 'image/png', bytes: object.bytes, imageKey: artifact!.key,
+  }, dependencies.image);
   if (!image || image.mimeType !== 'image/png') throw new Error('Conversation image attachment was not persisted as canonical PNG media.');
-  if (!await gallery.attachConversationMedia(identity.scopeKey, collection.key, [image.key], identity.actorKey, now())) {
-    const cleanup = await gallery.deleteImages(identity.scopeKey, [image.key], identity.actorKey, now()).catch(() => null);
-    await Promise.all((cleanup?.storageKeys ?? []).map((key) => storage.delete(key).catch(() => undefined)));
-    throw new Error('Conversation image could not be attached to its managed collection.');
-  }
   return conversationAttachmentReferenceSchema.parse({ key: image.key, kind: 'image', ...(artifact!.displayKey ? { displayKey: artifact!.displayKey } : {}), filename: image.filename, mimeType: 'image/png', sizeBytes: image.sizeBytes, width: image.width, height: image.height });
 }

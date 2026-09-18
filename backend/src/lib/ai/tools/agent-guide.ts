@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { agentGreetingOccasionSchema, agentGreetingStateSchema, generateAgentGreeting, streamAgentGreeting, type AgentGreetingExecutor, type AgentGreetingOccasion, type AgentGreetingState, type AgentGreetingStreamExecutor } from '@/lib/ai/agents/greeting';
+import { agentGreetingContextFromUser, agentGreetingOccasionSchema, agentGreetingStateSchema, generateAgentGreeting, streamAgentGreeting, type AgentGreetingExecutor, type AgentGreetingOccasion, type AgentGreetingState, type AgentGreetingStreamExecutor } from '@/lib/ai/agents/greeting';
 import type { PublicToolDependencies } from './tool-definition';
 import { referralService, type ReferralService } from '@/lib/referrals/service';
 import type { ConversationService } from '@/lib/conversations/service';
@@ -144,9 +144,10 @@ export function createAgentGuideTool(options: {
         if (!dependencies) throw new Error('agent.guide greeting requires trusted execution context.');
         const greetingState = await classifyGreeting(dependencies, input.occasion);
         const showReferralCodeAction = greetingState === 'referral-onboarding';
+        const greetingContext = agentGreetingContextFromUser(dependencies.context.principal.kind === 'member' ? dependencies.context.principal.user : null);
         const generated = dependencies.onGreetingDelta
-          ? await streamAgentGreeting(dependencies.context.teamKey, greetingState, dependencies.onGreetingDelta, { signal: dependencies.signal, timeoutMs: dependencies.timeoutMs }, options.streamGreeting)
-          : await generateAgentGreeting(dependencies.context.teamKey, greetingState, { signal: dependencies.signal, timeoutMs: dependencies.timeoutMs }, options.executeGreeting);
+          ? await streamAgentGreeting(dependencies.context.teamKey, greetingState, greetingContext, dependencies.onGreetingDelta, { signal: dependencies.signal, timeoutMs: dependencies.timeoutMs }, options.streamGreeting)
+          : await generateAgentGreeting(dependencies.context.teamKey, greetingState, greetingContext, { signal: dependencies.signal, timeoutMs: dependencies.timeoutMs }, options.executeGreeting);
         return agentGuideOutputSchema.parse({ mode: input.mode, occasion: input.occasion, greetingState, message: generated.message, showReferralCodeAction, guideMode: generated.guideMode });
       }
       if (input.mode === 'topics' || input.mode === 'opening-topics') {

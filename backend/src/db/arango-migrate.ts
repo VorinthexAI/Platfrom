@@ -8,7 +8,7 @@ import { ensureTeamConnectorsCollection } from '../lib/email-inbox/indexes';
 import { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from '../lib/ai/scopes/indexes';
 import { reconcileTeamScopeMemberships } from '../lib/ai/scopes/membership-invariant';
 import { buildEmbeddingText, isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '../lib/db/base';
-import { MOTHER_SCOPE_KEY, SEEDED_SCOPES, seedCommerceCatalog } from '../lib/db/seed';
+import { MOTHER_SCOPE_KEY, SEEDED_SCOPES, seedCommerceCatalog, seededScopeVisibility } from '../lib/db/seed';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER } from './arango-migrate-indexes';
 import { htmlToPlainText } from '../lib/ai/document-processing/representation';
 import { chunkDocumentContent, chunkDocumentText, documentEmbeddingTexts, documentSemanticHash } from '../lib/ai/document-processing/chunking';
@@ -1808,6 +1808,7 @@ export const collections: CollectionSpec[] = [
   { name: 'storageRetentionStates', skipEmbedding: true, indexes: [{ fields: ['userKey'], unique: true }, { fields: ['wipeDueAt'] }, { fields: ['fundedAt', 'wipedAt'] }] },
   // Private per-user visibility overlay. Never expose through the generic node registry.
   { name: 'userHiddens', skipEmbedding: true, indexes: [{ fields: ['userKey', 'source', 'sourceKey'], unique: true }, { fields: ['userKey', 'createdAt'] }, { fields: ['source', 'sourceKey'] }] },
+  { name: 'userWorkspaceApps', skipEmbedding: true, indexes: [{ fields: ['userKey', 'scopeKey'], unique: true }, { fields: ['userKey', 'position'] }] },
   { name: 'pushSubscriptions', skipEmbedding: true, indexes: [{ fields: ['userKey', 'installationKey'], unique: true }, { fields: ['tokenHash'], unique: true }, { fields: ['userKey'] }] },
   { name: 'appNotifications', embedKeys: ['title', 'message'], indexes: [{ fields: ['teamKey', 'actorUserKey', 'idempotencyKey'], unique: true }, { fields: ['teamKey', 'createdAt'] }] },
   { name: 'appNotificationRecipients', skipEmbedding: true, indexes: [{ fields: ['notificationKey', 'userKey'], unique: true }, { fields: ['userKey', 'teamKey', 'createdAt'] }, { fields: ['userKey', 'teamKey', 'readAt', 'createdAt'] }, { fields: ['notificationKey'] }] },
@@ -2442,6 +2443,7 @@ export async function migrateLegacySchema(targetDb: Database) {
         summary: seed.summary,
         description: seed.description,
         position: seed.position,
+        visibility: seededScopeVisibility(seed.slug),
       });
     } else {
       const embedding = await generateEmbedding(buildEmbeddingText(['summary'], seed)!);
@@ -2453,6 +2455,7 @@ export async function migrateLegacySchema(targetDb: Database) {
         summary: seed.summary,
         description: seed.description,
         position: seed.position,
+        visibility: seededScopeVisibility(seed.slug),
         embedding,
       });
     }
@@ -2524,6 +2527,13 @@ export async function migrateLegacySchema(targetDb: Database) {
     FOR relation IN scopeScopes
       LET child = DOCUMENT("scopes", relation.childKey)
       UPDATE relation WITH { level: child == null ? 1 : child.level } IN scopeScopes
+  `);
+  await targetDb.query(`
+    FOR scope IN scopes
+      LET team = DOCUMENT(teams, scope.teamKey)
+      LET visibility = team != null && team.is_root == true && scope.slug == "hq" ? "private" : "public"
+      FILTER !HAS(scope, "visibility") || scope.visibility != visibility
+      UPDATE scope WITH { visibility } IN scopes
   `);
   console.log('Seeded canonical Vorinthex AI scope hierarchy');
 

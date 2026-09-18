@@ -6,9 +6,12 @@ export const capabilitySlugSchema = z.enum([
   "signal",
   "compass",
   "ascend",
+  "hq",
 ]);
 
 export type CapabilitySlug = z.infer<typeof capabilitySlugSchema>;
+
+export const PUBLIC_WORKSPACE_SLUGS = ["archive", "gallery", "compass", "signal", "ascend"] as const satisfies readonly CapabilitySlug[];
 
 const capabilitySchema = z.strictObject({
   slug: capabilitySlugSchema,
@@ -22,7 +25,7 @@ const capabilitySchema = z.strictObject({
 
 export type Capability = z.infer<typeof capabilitySchema>;
 
-const registrySchema = z.array(capabilitySchema).length(5);
+const registrySchema = z.array(capabilitySchema).length(6);
 
 export const CAPABILITIES: readonly Capability[] = registrySchema.parse([
   {
@@ -59,6 +62,12 @@ export const CAPABILITIES: readonly Capability[] = registrySchema.parse([
     searchPlaceholder: "Search ascend...",
     sectionLabel: "Active goals",
   },
+  {
+    slug: "hq",
+    name: "HQ",
+    tagline: "Your workspace to manage\nteams and collaboration.",
+    searchPlaceholder: "Search HQ...",
+  },
 ]);
 
 export function getCapability(slug: CapabilitySlug): Capability {
@@ -67,4 +76,42 @@ export function getCapability(slug: CapabilitySlug): Capability {
     throw new Error(`Unknown capability: ${slug}`);
   }
   return capability;
+}
+
+export function workspaceSlugsForMember(rootTeamMember: boolean): CapabilitySlug[] {
+  return rootTeamMember ? [...PUBLIC_WORKSPACE_SLUGS, "hq"] : [...PUBLIC_WORKSPACE_SLUGS];
+}
+
+export type WorkspacePickerApp = {
+  scopeKey: string;
+  slug: string;
+  name: string;
+};
+
+export type WorkspacePickerState = {
+  apps: WorkspacePickerApp[];
+  selectedScopeKeys: string[] | null;
+};
+
+export const emptyWorkspacePicker: WorkspacePickerState = { apps: [], selectedScopeKeys: null };
+
+function asCapabilitySlug(slug: string): CapabilitySlug | null {
+  const parsed = capabilitySlugSchema.safeParse(slug);
+  return parsed.success ? parsed.data : null;
+}
+
+export function entitledPickerApps(picker: WorkspacePickerState, rootTeamMember: boolean): Array<WorkspacePickerApp & { slug: CapabilitySlug }> {
+  const apps = picker.apps.flatMap((app) => {
+    const slug = asCapabilitySlug(app.slug);
+    return slug ? [{ ...app, slug }] : [];
+  }).filter((app) => app.slug !== "hq" || rootTeamMember);
+  if (apps.length) return apps;
+  return workspaceSlugsForMember(rootTeamMember).map((slug) => ({ scopeKey: "", slug, name: getCapability(slug).name }));
+}
+
+export function visibleWorkspaceSlugs(picker: WorkspacePickerState, rootTeamMember: boolean): CapabilitySlug[] {
+  const entitled = entitledPickerApps(picker, rootTeamMember);
+  if (!picker.selectedScopeKeys) return entitled.map(({ slug }) => slug);
+  const selected = entitled.filter((app) => picker.selectedScopeKeys!.includes(app.scopeKey));
+  return (selected.length ? selected : entitled).map(({ slug }) => slug);
 }

@@ -302,7 +302,7 @@ const styles = StyleSheet.create({
   error: { marginTop: spacing.sm, padding: spacing.sm, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderRadius: radii.md, backgroundColor: "rgba(64,20,20,0.9)" },
   errorText: { minWidth: 0, flex: 1, color: palette.silver100, fontFamily: fonts.regular, fontSize: 12 },
   footer: { gap: spacing.sm },
-  filterPanel: { gap: 6 },
+  filterPanel: { gap: 12 },
   favoriteSwitchRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   favoriteSwitchLabel: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12 },
   searchHistoryOption: { backgroundColor: palette.page },

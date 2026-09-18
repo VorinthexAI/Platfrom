@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { apiClient } from "@/lib/api-client";
+import { apiClient, postEventStream } from "@/lib/api-client";
 import { appSearchResults, searchApp } from "@/lib/app-search-client";
 import { assistantChangesSchema } from "@/lib/assistant-changes";
 import { useAuthStore } from "@/state/auth";
@@ -20,7 +20,7 @@ export const placeSchema = z.strictObject({
   createdAt: z.iso.datetime(),
   coverUrl: z.url().optional(),
 });
-const appSearchPlaceSchema = placeSchema.extend({ trips: z.array(z.strictObject({ key: keySchema, name: z.string().min(1) })).optional() });
+const appSearchPlaceSchema = placeSchema.extend({ trips: z.array(z.strictObject({ key: keySchema, name: z.string().min(1) })).optional(), tags: z.array(z.unknown()).optional(), score: z.number().optional() });
 
 export type Place = z.infer<typeof placeSchema>;
 
@@ -147,21 +147,13 @@ const authoritativeCountrySchema = z.strictObject({
 export type AuthoritativeCountry = z.input<typeof authoritativeCountrySchema>;
 
 export const PLACE_IMAGE_PNG_MAX_BYTES = 12 * 1024 * 1024;
-const pngDataUrlSchema = z.string()
-  .max("data:image/png;base64,".length + Math.ceil(PLACE_IMAGE_PNG_MAX_BYTES / 3) * 4)
-  .regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/)
-  .superRefine((url, context) => {
-    const encoded = url.slice("data:image/png;base64,".length);
-    const decodedBytes = Math.floor(encoded.length * 3 / 4) - (encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0);
-    if (decodedBytes > PLACE_IMAGE_PNG_MAX_BYTES) context.addIssue({ code: "custom", message: "Place image exceeds 12 MiB." });
-  });
 const readyPlaceImageSchema = z.strictObject({
   status: z.literal("ready"),
   title: z.string().trim().min(1).max(160),
-  url: pngDataUrlSchema,
-  width: z.literal(1536),
-  height: z.literal(1024),
-  mimeType: z.literal("image/png"),
+  url: z.url(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
 });
 export const placeImageResponseSchema = z.strictObject({
   status: z.literal("ready"),
@@ -237,7 +229,6 @@ const setTripAttachmentsInputSchema = z.strictObject({
   if (new Set(attachments.map(({ type, key }) => `${type}:${key}`)).size !== attachments.length) context.addIssue({ code: "custom", message: "Trip attachments must be distinct.", path: ["attachments"] });
 });
 export type SetTripAttachmentsInput = z.input<typeof setTripAttachmentsInputSchema>;
-const countrySearchInputSchema = z.strictObject({ teamKey: keySchema, query: z.string().trim().min(1).max(200) });
 export const countrySearchResultSchema = z.strictObject({
   country: z.strictObject({
     name: z.string().trim().min(1).max(160),
@@ -373,11 +364,20 @@ function savedTravelSearchInput(query: string, recordHistory: boolean, tagKeys: 
 
 export async function searchPlaces(query: string, signal?: AbortSignal, recordHistory = true, tagKeys: string[] = []) {
   const output = await searchApp({ ...savedTravelSearchInput(query, recordHistory, tagKeys), collectionSlugs: ["places"], limit: 50 }, signal);
-  return appSearchResults(output, "places", appSearchPlaceSchema).map(({ trips: _trips, ...place }) => place);
+  return appSearchResults(output, "places", appSearchPlaceSchema).map(({ trips: _trips, tags: _tags, score: _score, ...place }) => place);
 }
 
 export function searchTrips(query: string, signal?: AbortSignal, recordHistory = true, tagKeys: string[] = []) {
-  return searchApp({ ...savedTravelSearchInput(query, recordHistory, tagKeys), collectionSlugs: ["trips"], limit: 50 }, signal).then((output) => appSearchResults(output, "trips", tripSchema));
+  return searchApp({ ...savedTravelSearchInput(query, recordHistory, tagKeys), collectionSlugs: ["trips"], limit: 50 }, signal).then((output) => appSearchResults(output, "trips", tripSchema.extend({ tags: z.array(z.unknown()).optional(), score: z.number().optional() })).map(({ tags: _tags, score: _score, ...trip }) => trip));
+}
+
+export async function searchCountries(query: string, signal?: AbortSignal) {
+  try {
+    const response = await apiClient.post("/travel/countries/search", { teamKey: getTravelContext().teamKey, query }, { timeout: 20_000, signal });
+    return unwrap(response.data, countrySearchResultSchema).country;
+  } catch (error) {
+    throw responseError(error);
+  }
 }
 
 export async function createTrip(input: CreateTripInput, signal?: AbortSignal) {
@@ -448,8 +448,49 @@ export function findPlace(query: string, country: AuthoritativeCountry, signal?:
     "/travel/places/guide",
     z.strictObject({ query: z.string().trim().min(2).max(200), country: authoritativeCountrySchema }).parse({ query, country }),
     z.strictObject({ place: placeDetailSchema }),
-    { timeout: 30_000, signal },
+    { timeout: 90_000, signal },
   ).then(({ place }) => place);
+}
+
+export function extractGuideSections(text: string) {
+  const read = (key: string) => {
+    const match = new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`).exec(text);
+    if (!match?.[1]) return undefined;
+    try { return JSON.parse(`"${match[1]}"`) as string; } catch { return undefined; }
+  };
+  const summary = read("summary");
+  const culture = read("culture");
+  const food = read("food");
+  const whyVisit = read("whyVisit");
+  if (!summary && !culture && !food && !whyVisit) return undefined;
+  return { summary: summary ?? "", culture: culture ?? "", food: food ?? "", whyVisit: whyVisit ?? "" };
+}
+
+export async function streamFindPlace(query: string, country: AuthoritativeCountry, onDelta: (text: string) => void, signal?: AbortSignal) {
+  const body = { ...getTravelContext(), ...z.strictObject({ query: z.string().trim().min(2).max(200), country: authoritativeCountrySchema }).parse({ query, country }) };
+  let place: PlaceDetail | undefined;
+  let failed: Error | undefined;
+  await postEventStream("/travel/places/guide/stream", body, (frame) => {
+    if (frame.event === "start") return;
+    const data: unknown = JSON.parse(frame.data);
+    if (frame.event === "delta") {
+      onDelta(z.object({ text: z.string() }).parse(data).text);
+      return;
+    }
+    if (frame.event === "done") {
+      place = z.object({ place: placeDetailSchema }).parse(data).place;
+      return;
+    }
+    if (frame.event === "error") {
+      const parsed = z.object({ message: z.string(), code: z.string() }).parse(data);
+      failed = Object.assign(new Error(parsed.message), { code: parsed.code });
+      return;
+    }
+    throw new Error(`Unknown country guide stream event: ${frame.event}.`);
+  }, signal);
+  if (failed) throw failed;
+  if (!place) throw new Error("Country guide stream ended before completion.");
+  return place;
 }
 
 export function findCity(city: string, country: AuthoritativeCountry, signal?: AbortSignal) {
@@ -468,12 +509,6 @@ export function findPlaceChildren(childrenRequestToken: string, signal?: AbortSi
     z.strictObject({ cities: z.array(cityDetailSchema).length(10) }),
     { timeout: 30_000, signal },
   ).then(({ cities }) => cities);
-}
-
-export async function searchCountries(query: string, signal?: AbortSignal) {
-  countrySearchInputSchema.parse({ teamKey: getTravelContext().teamKey, query });
-  const output = await searchApp({ query, collectionSlugs: ["countries"], limit: 1 }, signal);
-  return appSearchResults(output, "countries", countrySearchResultSchema.shape.country.unwrap()).at(0) ?? null;
 }
 
 const createPlaceInputSchema = placeSchema.pick({ name: true, summary: true, countryCode: true, latitude: true, longitude: true }).extend({
@@ -496,7 +531,7 @@ export function generatePlaceHeroImage(input: z.input<typeof placeImagesInputSch
     "/travel/places/image",
     placeImagesInputSchema.parse(input),
     placeImageResponseSchema,
-    { timeout: 15_000, signal },
+    { timeout: 90_000, signal },
   );
 }
 

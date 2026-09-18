@@ -49,4 +49,15 @@ describe('country search', () => {
     expect(embeds).toBe(1);
     expect(order.filter((entry) => entry === 'history')).toHaveLength(2);
   });
+
+  test('returns the top semantic country when exact matching is skipped', async () => {
+    clearCountrySearchEmbeddingCache();
+    const country = { key: newId(), name: 'Japan', countryCode: 'JP' as const, latitude: 36.2, longitude: 138.25, embedding: Array(EMBEDDING_DIMENSIONS).fill(0), semanticVersion: 1 as const, semanticHash: 'a'.repeat(64) };
+    const service = createCountrySearchService({
+      repository: { authorize: async () => undefined, findExact: async () => { throw new Error('exact not expected'); }, search: async () => ({ country, score: 0.2 }) },
+      embed: async () => country.embedding,
+      userSearches: { record: async () => ({} as never) } as never,
+    });
+    await expect(service.search({ teamKey: 'team', query: '日本' }, 'user', { skipExact: true, minimumScore: -1 })).resolves.toEqual({ country: { name: 'Japan', countryCode: 'JP', latitude: 36.2, longitude: 138.25 } });
+  });
 });

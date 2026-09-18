@@ -12,7 +12,7 @@ const hero = { title: 'Japan travel interpretation', prompt: 'Authoritative dest
 const tokenPayload = { version: 5, issuedAt, nonce: 'A'.repeat(43), teamKey, scopeKey, country: { name: 'Japan', countryCode: 'JP', continent: 'Asia', latitude: 36.2, longitude: 138.2 }, place: { kind: 'country', name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2 }, hero } as const;
 const staged = new Map<string, Uint8Array>();
 const storage = { upload: async ({ key, bytes }: { key: string; bytes: Uint8Array }) => { staged.set(key, bytes); return { storageKey: key }; }, download: async (key: string) => { const bytes = staged.get(key); if (!bytes) throw new Error('missing'); return { bytes }; }, delete: async (key: string) => { staged.delete(key); } } as any;
-const token = { storage, decryptImageRequest: (value: string) => { if (!value.startsWith(input.imageRequestToken)) throw new Error('tampered token'); return tokenPayload; } };
+const token = { storage, decryptImageRequest: (value: string) => { if (!value.startsWith(input.imageRequestToken)) throw new Error('tampered token'); return tokenPayload; }, signUrl: async (key: string) => `https://signed.test/${key}` };
 const repository = { authorizeRead: async () => {} };
 function png(width = 1536, height = 1024) {
   const bytes = new Uint8Array(24);
@@ -53,9 +53,9 @@ describe('transient place hero generation', () => {
     })(input, userKey, { signal: controller.signal, timeoutMs: 12_345 });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.[0]).toEqual({ mode: 'auto', teamKey, actionSlug: 'image' });
-    expect(calls[0]?.[1]).toEqual({ operation: 'generate', prompt: hero.prompt, count: 1, size: '1536x1024', aspectRatio: '3:2', quality: 'low', outputFormat: 'png' });
+    expect(calls[0]?.[1]).toEqual({ operation: 'generate', prompt: hero.prompt, count: 1, aspectRatio: '3:2', outputFormat: 'png' });
     expect(calls[0]?.[2]).toEqual({ providers: ['image.primary'], signal: controller.signal, timeoutMs: 12_345 });
-    expect(result).toEqual({ status: 'ready', image: { status: 'ready', title: hero.title, url: `data:image/png;base64,${Buffer.from(png()).toString('base64')}`, width: 1536, height: 1024, mimeType: 'image/png' }, durationMs: expect.any(Number), costUsd: 0.04 });
+    expect(result).toEqual({ status: 'ready', image: { status: 'ready', title: hero.title, url: 'https://signed.test/pending/compass/place-hero/' + 'A'.repeat(43) + '/preview.png', width: 1536, height: 1024, mimeType: 'image/png' }, durationMs: expect.any(Number), costUsd: 0.04 });
     expect([...staged.values()][0]).toEqual(png());
     expect(metrics).toHaveLength(1);
     expect(JSON.stringify(metrics)).not.toContain(hero.prompt);
@@ -65,9 +65,9 @@ describe('transient place hero generation', () => {
   test('rejects invalid provider counts and non-PNG provider output', async () => {
     await expect(createPlaceImageGenerator({ repository, ...token, execute: (async () => generated(2)) as any, log: () => {} })(input, userKey)).rejects.toThrow('expected one');
     resetPlaceImageReplayStateForTests();
-    await expect(createPlaceImageGenerator({ repository, ...token, execute: (async () => ({ output: { images: [{ base64: 'AQ==', mimeType: 'image/jpeg' }] } })) as any, log: () => {} })(input, userKey)).rejects.toThrow('expected image/png');
+    await expect(createPlaceImageGenerator({ repository, ...token, execute: (async () => ({ output: { images: [{ base64: 'AQ==', mimeType: 'image/gif' }] } })) as any, log: () => {} })(input, userKey)).rejects.toThrow();
     resetPlaceImageReplayStateForTests();
-    await expect(createPlaceImageGenerator({ repository, ...token, execute: (async () => generated(1, null, png(1024, 1024))) as any, log: () => {} })(input, userKey)).rejects.toThrow('expected 1536x1024');
+    await expect(createPlaceImageGenerator({ repository, ...token, execute: (async () => generated(1, null, new Uint8Array(24))) as any, log: () => {} })(input, userKey)).rejects.toThrow('invalid PNG');
     expect(PLACE_IMAGE_PNG_MAX_BYTES).toBe(12 * 1024 * 1024);
   });
 

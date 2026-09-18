@@ -13,7 +13,8 @@ import { retireNavigationVisitsMigration } from './0012-retire-navigation-visits
 import { conversationArchiveProjectionMigration } from './0013-conversation-archive-projection';
 import { repairConversationArchiveProjectionMigration } from './0014-repair-conversation-archive-projection';
 import { removeUnnamedConversationProjectionsMigration } from './0015-remove-unnamed-conversation-projections';
+import { seedCountryEmbeddingsMigration } from './0016-country-embeddings';
 import type { GraphMigration } from './types';
 
 // Add each new migration here once. Applied entries are immutable.
-export const graphMigrations: readonly GraphMigration[] = [legacySchemaMigration, sparkEventIndexMigration, fundingRequirementIndexMigration, eventDeviceMigration, canonicalManagedArchiveFoldersMigration, initialAudiobookMigration, managedAudiobookLiveCoverMigration, privateEmailOwnershipMigration, userInboxMigration, conversationMessageRecallIndexMigration, conversationAttachmentArtifactsMigration, retireNavigationVisitsMigration, conversationArchiveProjectionMigration, repairConversationArchiveProjectionMigration, removeUnnamedConversationProjectionsMigration];
+export const graphMigrations: readonly GraphMigration[] = [legacySchemaMigration, sparkEventIndexMigration, fundingRequirementIndexMigration, eventDeviceMigration, canonicalManagedArchiveFoldersMigration, initialAudiobookMigration, managedAudiobookLiveCoverMigration, privateEmailOwnershipMigration, userInboxMigration, conversationMessageRecallIndexMigration, conversationAttachmentArtifactsMigration, retireNavigationVisitsMigration, conversationArchiveProjectionMigration, repairConversationArchiveProjectionMigration, removeUnnamedConversationProjectionsMigration, seedCountryEmbeddingsMigration];

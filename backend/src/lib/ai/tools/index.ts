@@ -188,7 +188,7 @@ export async function runTrustedTool(name: TrustedToolName, rawInput: unknown, d
   const definition = trustedToolDefinitionsByName.get(name);
   if (!definition) throw new Error(`Unknown trusted tool ${name}`);
   definition.inputSchema.parse(rawInput);
-  if (name === 'account.delete' || name === 'communication.staff.reply') {
+  if (name === 'account.delete' || name === 'workspace.picker.update' || name === 'communication.staff.reply') {
     return (definition.execute as (input: unknown, dependencies: TrustedToolDependencies) => Promise<unknown>)(rawInput, dependencies);
   }
   return observeToolExecution(name, dependencies.context, () => (definition.execute as (input: unknown, dependencies: TrustedToolDependencies) => Promise<unknown>)(rawInput, dependencies), { appKey: APP_KEYS.SIGNAL, appScopeKey: 'appScopeKey' in dependencies ? dependencies.appScopeKey as string | undefined : undefined, recorder: dependencies.recordEvent, input: rawInput });

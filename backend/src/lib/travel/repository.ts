@@ -40,7 +40,7 @@ const readAuthorizationQuery = `
   RETURN membership._key
 `;
 const writeAuthorizationQuery = readAuthorizationQuery.replace('["owner", "admin", "moderator", "member", "viewer"]', '["owner", "admin", "moderator", "member"]');
-const writeAuthorizationFilter = writeAuthorizationQuery.replace('RETURN membership._key', '');
+const readAuthorizationFilter = readAuthorizationQuery.replace('RETURN membership._key', '');
 
 async function authorizeRead(database: TravelDatabase, context: TravelAccessContext): Promise<void> {
   const rows = await (await database.query(readAuthorizationQuery, { ...context })).all();
@@ -75,7 +75,7 @@ export interface TravelRepository {
   listTripGuides(context: TravelAccessContext, tripKey: string): Promise<TripGuide[]>;
   listPlaceReferences(context: TravelAccessContext, placeKey: string, kind: PlaceReference['kind']): Promise<PlaceReference[]>;
   copyGeneratedDocument(context: TravelAccessContext, record: GeneratedDocumentRecord): Promise<void>;
-  ensureGalleryExportCollection(context: TravelAccessContext, collection: GalleryExportCollection): Promise<void>;
+  ensureGalleryExportCollection(context: TravelAccessContext, collection: GalleryExportCollection): Promise<string>;
   linkGalleryExport(context: TravelAccessContext, relation: CollectionImage): Promise<void>;
   convergePlace(input: { context: TravelAccessContext; place: Place; hero: PlaceHeroMedia }): Promise<PlacePresentationRecord>;
 }
@@ -655,12 +655,14 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
       return (await cursor.all()).map((value) => tripGuideSchema.parse(withArangoKey(value as Record<string, unknown>)));
     },
     async listPlaceReferences(context, placeKey, kind) {
-      const cursor = await database.query(`${readAuthorizationQuery}
+      const cursor = await database.query(`${readAuthorizationFilter}
         LET place = DOCUMENT(places, @placeKey)
         FILTER place != null && place.scopeKey == @scopeKey && place.userKey == @userKey && place.saved == true
         FOR reference IN placeReferences
           FILTER reference.scopeKey == @scopeKey && reference.userKey == @userKey && reference.placeKey == @placeKey && reference.kind == @kind
-          SORT reference.createdAt DESC, reference._key DESC LIMIT 100 RETURN reference
+          SORT reference.createdAt DESC, reference._key DESC
+          LIMIT 100
+          RETURN reference
       `, { ...context, placeKey, kind });
       return (await cursor.all()).map((value) => placeReferenceSchema.parse(withArangoKey(value as Record<string, unknown>)));
     },
@@ -678,30 +680,40 @@ export function createTravelRepository(database: TravelDatabase = db, transactio
     async ensureGalleryExportCollection(context, collection) {
       const valid = z.object({ key: z.string().cuid(), scopeKey: z.string().cuid(), ownerKey: z.string().cuid(), name: z.string().trim().min(1), embedding: currentEmbeddingSchema, createdAt: z.string().datetime(), updatedAt: z.string().datetime() }).strict().parse(collection);
       if (valid.scopeKey !== context.scopeKey) throw new TravelRepositoryError('forbidden');
-      await transaction({ read: ['userTeams', 'scopes', 'scopeMembers'], write: ['collections'] }, async (executor) => {
-        const cursor = await executor.query(`${writeAuthorizationFilter}
-          UPSERT { _key: @collectionKey }
-            INSERT { _key: @collectionKey, scopeKey: @scopeKey, ownerKey: @ownerKey, name: @name, presentation: "travel", mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @createdAt, updatedAt: @updatedAt }
-            UPDATE { ownerKey: @ownerKey, presentation: "travel" } IN collections
-          RETURN membership._key
-        `, { ...context, collectionKey: valid.key, ownerKey: valid.ownerKey, name: valid.name, embedding: valid.embedding, createdAt: valid.createdAt, updatedAt: valid.updatedAt });
-        if ((await cursor.all())[0] !== valid.ownerKey) throw new TravelRepositoryError('forbidden');
+      const saved = await transaction({ read: ['userTeams', 'scopes', 'scopeMembers'], write: ['collections'] }, async (executor) => {
+        const authorization = await executor.query(writeAuthorizationQuery, { ...context });
+        if ((await authorization.all())[0] !== valid.ownerKey) return null;
+        const cursor = await executor.query(`
+          LET existing = FIRST(FOR collection IN collections FILTER collection.scopeKey == @scopeKey && (collection.purpose == "place-media" || collection.name == "Compass") SORT collection.purpose == "place-media" DESC, collection.createdAt ASC LIMIT 1 RETURN collection._key)
+          UPSERT { _key: existing == null ? @collectionKey : existing }
+            INSERT { _key: @collectionKey, scopeKey: @scopeKey, ownerKey: @ownerKey, name: @name, presentation: "travel", purpose: "place-media", mutationPolicy: "user", embedding: @embedding, isFavorite: false, createdAt: @createdAt, updatedAt: @updatedAt }
+            UPDATE { purpose: "place-media", mutationPolicy: "user", ownerKey: @ownerKey, presentation: "travel", name: @name } IN collections
+          RETURN NEW._key
+        `, { scopeKey: context.scopeKey, collectionKey: valid.key, ownerKey: valid.ownerKey, name: valid.name, embedding: valid.embedding, createdAt: valid.createdAt, updatedAt: valid.updatedAt });
+        return (await cursor.all())[0];
       });
+      const collectionKey = z.string().cuid().safeParse(saved).data;
+      if (!collectionKey) throw new TravelRepositoryError('forbidden');
+      return collectionKey;
     },
     async linkGalleryExport(context, relation) {
       const valid = collectionImageSchema.parse(relation);
       if (valid.scopeKey !== context.scopeKey) throw new TravelRepositoryError('forbidden');
-      await transaction({ read: ['userTeams', 'scopes', 'scopeMembers', 'collections', 'images'], write: ['collectionImages'] }, async (executor) => {
-        const cursor = await executor.query(`${writeAuthorizationFilter}
+      const relations = [toArangoDoc(valid)];
+      const attached = await transaction({ read: ['userTeams', 'scopes', 'scopeMembers', 'collections', 'images'], write: ['collectionImages'] }, async (executor) => {
+        const authorization = await executor.query(writeAuthorizationQuery, { ...context });
+        if ((await authorization.all())[0] !== valid.addedByKey) return null;
+        const cursor = await executor.query(`
           LET collection = DOCUMENT(collections, @collectionKey)
-          LET image = DOCUMENT(images, @imageKey)
-          FILTER collection != null && collection.scopeKey == @scopeKey
-          FILTER image != null && image.scopeKey == @scopeKey && image.createdByKey == @addedByKey
-          UPSERT { _key: @relationKey } INSERT @relation UPDATE {} IN collectionImages
-          RETURN true
-        `, { ...context, collectionKey: valid.collectionKey, imageKey: valid.imageKey, addedByKey: valid.addedByKey, relationKey: valid.key, relation: toArangoDoc(valid) });
-        if ((await cursor.all())[0] !== true) throw new TravelRepositoryError('forbidden');
+          LET eligible = collection != null && collection.scopeKey == @scopeKey && collection.purpose == "place-media" ? (FOR relation IN @relations LET image = DOCUMENT(images, relation.imageKey) FILTER image != null && image.scopeKey == @scopeKey && image.origin == "generated" && image.mutationPolicy == "user" && image.createdByKey == @actorKey RETURN relation) : []
+          FILTER LENGTH(eligible) == LENGTH(@relations)
+          FOR relation IN eligible
+            UPSERT { scopeKey: @scopeKey, collectionKey: @collectionKey, imageKey: relation.imageKey } INSERT relation UPDATE {} IN collectionImages
+            RETURN relation.imageKey
+        `, { scopeKey: context.scopeKey, collectionKey: valid.collectionKey, actorKey: valid.addedByKey, relations });
+        return (await cursor.all())[0];
       });
+      if (attached !== valid.imageKey) throw new TravelRepositoryError('forbidden');
     },
     async convergePlace(input) {
       const place = placeSchema.parse(input.place);

@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { cleanupRemoteSession, deleteRemoteAccount, fetchReferralSummary, getJson, onUnauthorized, patchJson, revokeRemoteSession } from "@/lib/auth-transport";
 import { clearAuthContext, readAuthContext, writeAuthContext } from "@/lib/auth-context-vault";
 import { hasCompleteAuthContext, normalizeAuthContext, type AuthUser } from "@/lib/auth-helpers";
+import { emptyWorkspacePicker, type WorkspacePickerState } from "@/data/registry";
 import { clearPendingReferralCode } from "@/lib/pending-referral-vault";
 import { tokenVault } from "@/lib/token-vault";
 import { markOnboardingComplete, markPostDeletionOnboarding, resetOnboardingSession } from "@/lib/onboarding-state";
@@ -22,6 +23,8 @@ type AuthState = {
   team: Record<string, unknown> | null;
   teamMembership: Record<string, unknown> | null;
   scope: Record<string, unknown> | null;
+  rootTeamMember: boolean;
+  workspacePicker: WorkspacePickerState;
   referralSummary: ReferralSummary | null;
   bootstrap: () => Promise<void>;
   hydrate: () => Promise<void>;
@@ -29,6 +32,7 @@ type AuthState = {
   completeOnboarding: () => Promise<void>;
   optimisticScope: (scope: ScopeSummary) => OptimisticScopeUpdate;
   optimisticProfile: (patch: ProfilePatch) => OptimisticProfileUpdate;
+  applyWorkspacePicker: (picker: WorkspacePickerState) => void;
   deleteAccount: () => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -54,9 +58,9 @@ function profileKeys(patch: ProfilePatch) {
   return Object.keys(patch) as (keyof ProfilePatch)[];
 }
 
-function queueProfileContextWrite(state: Pick<AuthState, "team" | "teamMembership" | "scope" | "status" | "user">, operation: number) {
+function queueProfileContextWrite(state: Pick<AuthState, "team" | "teamMembership" | "scope" | "status" | "user" | "rootTeamMember" | "workspacePicker">, operation: number) {
   if (state.status !== "authenticated" || !state.user) return Promise.resolve();
-  const context = { user: state.user, team: state.team, teamMembership: state.teamMembership, scope: confirmedScope ?? state.scope };
+  const context = { user: state.user, team: state.team, teamMembership: state.teamMembership, scope: confirmedScope ?? state.scope, rootTeamMember: state.rootTeamMember, workspacePicker: state.workspacePicker };
   profileVaultWrites = profileVaultWrites.then(async () => {
     if (operation === authOperation) await writeAuthContext(context);
   }).catch(() => undefined);
@@ -79,6 +83,8 @@ const signedOutState = {
   team: null,
   teamMembership: null,
   scope: null,
+  rootTeamMember: false,
+  workspacePicker: emptyWorkspacePicker,
   referralSummary: null,
 };
 
@@ -92,6 +98,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   team: null,
   teamMembership: null,
   scope: null,
+  rootTeamMember: false,
+  workspacePicker: emptyWorkspacePicker,
   referralSummary: null,
   bootstrap: async () => {
     const operation = ++authOperation;
@@ -200,6 +208,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       reconcile: (selected) => apply(selected, true),
       rollback: () => apply(previous, false),
     };
+  },
+  applyWorkspacePicker: (picker) => {
+    set({ workspacePicker: picker });
+    queueProfileContextWrite(get(), authOperation);
   },
   optimisticProfile: (patch) => {
     const keys = profileKeys(patch);

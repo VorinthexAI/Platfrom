@@ -54,6 +54,23 @@ export async function getUserTeamByTeamAndUser(
   return doc ? userTeamSchema.parse(withArangoKey(doc)) : null;
 }
 
+export async function hasActiveRootTeamMembership(userId: string): Promise<boolean> {
+  const cursor = await db.query(aql`
+    LET roots = (
+      FOR team IN teams
+        FILTER team.is_root == true && team.isActive == true
+        RETURN team._key
+    )
+    RETURN LENGTH(roots) == 1 && LENGTH(
+      FOR membership IN ${db.collection(USER_TEAM_COLLECTION)}
+        FILTER membership.userId == ${userId} && membership.teamKey == roots[0] && membership.status == "active"
+        LIMIT 1
+        RETURN 1
+    ) > 0
+  `);
+  return (await cursor.next()) === true;
+}
+
 export async function listActiveUserTeamsByUser(
   userId: string,
 ): Promise<UserTeam[]> {

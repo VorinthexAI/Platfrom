@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { strictObject } from '@/api/validation';
 import { db } from '@/lib/db/client';
-import { countrySchema, type Country } from '@/lib/db/countries.node';
+import { countrySchema } from '@/lib/db/countries.node';
 import { withArangoKey } from '@/lib/db/base';
 import { embedText } from '@/lib/embeddings';
 import { getDefaultUserSearchService, type UserSearchService } from '@/lib/user-searches/service';
@@ -11,12 +11,22 @@ export const countrySearchInputSchema = strictObject({
 });
 export type CountrySearchContext = { teamKey: string; userKey: string };
 export const COUNTRY_SEMANTIC_THRESHOLD = 0.72;
+const countryHitSchema = z.object({
+  name: z.string().trim().min(1),
+  countryCode: countrySchema.shape.countryCode,
+  latitude: z.number().finite().min(-90).max(90),
+  longitude: z.number().finite().min(-180).max(180),
+});
+type CountryHit = z.infer<typeof countryHitSchema>;
 export interface CountrySearchRepository {
   authorize(context: CountrySearchContext): Promise<void>;
-  findExact(query: string): Promise<Country | null>;
-  search(context: CountrySearchContext, embedding: number[]): Promise<{ country: Country; score: number } | null>;
+  findExact(query: string): Promise<CountryHit | null>;
+  search(context: CountrySearchContext, embedding: number[]): Promise<{ country: CountryHit; score: number } | null>;
 }
 export class CountrySearchAccessError extends Error {}
+function projectCountry(value: unknown): CountryHit {
+  return countryHitSchema.parse(withArangoKey(value as Record<string, unknown>));
+}
 export function createCountrySearchRepository(database = db): CountrySearchRepository {
   return {
     async authorize(context) {
@@ -27,7 +37,7 @@ export function createCountrySearchRepository(database = db): CountrySearchRepos
       const normalized = query.trim().toLocaleLowerCase();
       const cursor = await database.query('FOR country IN countries LET name = LOWER(country.name) LET code = LOWER(country.countryCode) FILTER name == @query || code == @query || STARTS_WITH(name, @query) SORT (name == @query || code == @query) DESC, LENGTH(country.name) ASC, country.name ASC LIMIT 1 RETURN country', { query: normalized });
       const value = await cursor.next();
-      return value ? countrySchema.parse(withArangoKey(value as Record<string, unknown>)) : null;
+      return value ? projectCountry(value) : null;
     },
     async search(context, embedding) {
     const cursor = await database.query(`
@@ -38,19 +48,20 @@ export function createCountrySearchRepository(database = db): CountrySearchRepos
         FILTER IS_NUMBER(score) SORT score DESC, country.name ASC LIMIT 1 RETURN { country, score }
     `, { ...context, embedding, dimensions: embedding.length });
     const value = await cursor.next() as { country?: unknown; score?: unknown } | undefined;
-    return value?.country && typeof value.score === 'number' ? { country: countrySchema.parse(withArangoKey(value.country as Record<string, unknown>)), score: value.score } : null;
+    const country = value?.country ? projectCountry(value.country) : null;
+    return country && typeof value?.score === 'number' ? { country, score: value.score } : null;
   } };
 }
 const embeddingCache = new Map<string, number[]>();
 export function createCountrySearchService(options: { repository?: CountrySearchRepository; embed?: typeof embedText; userSearches?: UserSearchService } = {}) {
   const repository = options.repository ?? createCountrySearchRepository();
   const userSearches = options.userSearches ?? getDefaultUserSearchService();
-  return { async search(raw: unknown, userKey: string, execution: { signal?: AbortSignal; timeoutMs?: number; queryEmbedding?: number[]; recordHistory?: boolean; minimumScore?: number } = {}) {
+  return { async search(raw: unknown, userKey: string, execution: { signal?: AbortSignal; timeoutMs?: number; queryEmbedding?: number[]; recordHistory?: boolean; minimumScore?: number; skipExact?: boolean } = {}) {
     const input = countrySearchInputSchema.parse(raw);
     const context = { teamKey: input.teamKey, userKey };
     await repository.authorize(context);
     if (execution.recordHistory !== false) await userSearches.record(userKey, input.query);
-    let country = await repository.findExact(input.query);
+    let country = execution.skipExact ? null : await repository.findExact(input.query);
     if (!country) {
       const cacheKey = input.query.toLocaleLowerCase();
       let embedding = execution.queryEmbedding ?? embeddingCache.get(cacheKey);

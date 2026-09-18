@@ -9,9 +9,7 @@ import { createScopeRepository, MOTHER_SCOPE_KEY } from '@/lib/ai/scopes';
 import { reconcileTeamScopeMemberships } from '@/lib/ai/scopes/membership-invariant';
 import { SEEDED_ORCHESTRATOR_SKILLS } from '@/lib/orchestrators/seeded-skills';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
-import { COUNTRY_CATALOG } from '@/lib/travel/country-catalog';
-import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
-import { createHash } from 'node:crypto';
+import { seedCountryCatalog } from '@/lib/travel/seed-countries';
 import { isDeepStrictEqual } from 'node:util';
 import { isProviderError } from '@/lib/ai/providers/errors';
 import { CANONICAL_APP_BY_SLUG, CANONICAL_APPS } from '@/lib/apps/registry';
@@ -110,8 +108,9 @@ export const SEEDED_SCOPES = [
     key: 'cmrnlzf640005qc7kefvra0bn',
     slug: 'hq',
     name: 'HQ',
-    summary: 'The team workspace for communication, collaboration, planning, and coordinated work.',
-    description: 'HQ is the shared operating space for a team. Bring conversations, plans, projects, decisions, knowledge, and coordinated work into one focused headquarters.',
+    summary: 'Your workspace to manage teams and collaboration.',
+    description: 'HQ is your private workspace for managing teams and collaboration. Coordinate people, membership, and shared work in one headquarters.',
+    visibility: 'private' as const,
     position: 3,
     level: 2,
     parentKey: MOTHER_SCOPE_KEY,
@@ -185,6 +184,10 @@ export const SEEDED_SCOPES = [
   { key: 'cmrnlzf650024qc7k4p5zem5w', slug: 'vulcan', name: 'Vulcan', summary: 'Observable, safe, maintainable automation that removes repeatable operational drag.', description: 'Observable, safe, maintainable automation that removes repeatable operational drag.', position: 19, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
   { key: 'cmrnlzf650025qc7k4p5zem5w', slug: 'themis', name: 'Themis', summary: 'Legal, governance, ethics, contracts, compliance, and policy.', description: 'Legal, governance, ethics, contracts, compliance, and policy.', position: 20, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
 ] as const;
+
+export function seededScopeVisibility(slug: string): 'public' | 'private' {
+  return slug === 'hq' ? 'private' : 'public';
+}
 
 type SeededOrchestratorSource = {
   name: string;
@@ -283,26 +286,7 @@ async function assignSeededFounderOrchestrators(rootTeamKey: string): Promise<Se
 export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   const results: SeedResult[] = [];
   results.push(...await seedCommerceCatalog());
-  for (const country of COUNTRY_CATALOG) {
-    const semanticHash = createHash('sha256').update(country.name).digest('hex');
-    const currentCursor = await db.query<{ key: string; semanticVersion?: number; semanticHash?: string }>('FOR country IN countries FILTER country.countryCode == @countryCode LIMIT 1 RETURN { key: country._key, semanticVersion: country.semanticVersion, semanticHash: country.semanticHash }', { countryCode: country.countryCode });
-    const current = await currentCursor.next();
-    if (current?.semanticVersion === 1 && current.semanticHash === semanticHash) {
-      await db.query('UPDATE @key WITH { name: @name, latitude: @latitude, longitude: @longitude } IN countries', { key: current.key, name: country.name, latitude: country.latitude, longitude: country.longitude });
-      results.push({ collection: 'countries', key: current.key, status: 'updated' });
-      continue;
-    }
-    let embedding: number[];
-    try {
-      embedding = currentEmbeddingSchema.parse(await embedText({ text: country.name }));
-    } catch (error) {
-      if (!isProviderError(error) || !error.retryable) throw error;
-      console.warn(`countries: semantic seed refresh for ${country.countryCode} deferred because ${error.providerId} is unavailable (${error.code}).`);
-      continue;
-    }
-    const cursor = await db.query(`UPSERT { countryCode: @countryCode } INSERT @country UPDATE { name: @name, latitude: @latitude, longitude: @longitude, embedding: @embedding, semanticVersion: 1, semanticHash: @semanticHash } IN countries RETURN NEW._key`, { countryCode: country.countryCode, name: country.name, latitude: country.latitude, longitude: country.longitude, semanticHash, country: { _key: country.key, ...country, embedding, semanticVersion: 1, semanticHash }, embedding });
-    results.push({ collection: 'countries', key: String(await cursor.next()), status: current ? 'updated' : 'created' });
-  }
+  results.push(...await seedCountryCatalog(db, { skipRetryable: true }));
 
   results.push(await upsertSeedTeam(SEEDED_TEAM));
   const rootTeam = await getRootTeam();
@@ -329,8 +313,9 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
     // of attempting a duplicate insert during deployment.
     let existing = scopesBySlug.get(seed.slug) ?? await scopes.getScopeByKey(seed.key);
     if (existing) {
-      if (existing.slug !== seed.slug || existing.name !== seed.name || existing.summary !== seed.summary || existing.description !== seed.description || existing.position !== seed.position || existing.level !== seed.level) {
-        existing = await scopes.updateScope(existing.key, { slug: seed.slug, name: seed.name, summary: seed.summary, description: seed.description, position: seed.position, level: seed.level });
+      const visibility = seededScopeVisibility(seed.slug);
+      if (existing.slug !== seed.slug || existing.name !== seed.name || existing.summary !== seed.summary || existing.description !== seed.description || existing.position !== seed.position || existing.level !== seed.level || existing.visibility !== visibility) {
+        existing = await scopes.updateScope(existing.key, { slug: seed.slug, name: seed.name, summary: seed.summary, description: seed.description, position: seed.position, level: seed.level, visibility });
         scopesBySlug.set(existing.slug, existing);
         const index = teamScopes.findIndex((scope) => scope.key === existing!.key);
         if (index >= 0) teamScopes[index] = existing;
@@ -348,6 +333,7 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
       description: seed.description,
       position: seed.position,
       level: seed.level,
+      visibility: seededScopeVisibility(seed.slug),
     });
     teamScopes.push(scope);
     scopesBySlug.set(scope.slug, scope);

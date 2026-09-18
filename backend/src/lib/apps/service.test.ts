@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { CANONICAL_APPS } from './registry';
 import { createAppsService } from './service';
 
-const scopes = CANONICAL_APPS.map((app, index) => ({ key: `cm00000000000000000000${String(index).padStart(2, '0')}`, teamKey: 'root', slug: app.slug, name: app.name, summary: app.description, description: app.detailedDescription, position: index + 1, level: 1, embedding: [] }));
+const scopes = CANONICAL_APPS.map((app, index) => ({ key: `cm00000000000000000000${String(index).padStart(2, '0')}`, teamKey: 'root', slug: app.slug, name: app.name, summary: app.description, description: app.detailedDescription, position: index + 1, level: 1, visibility: 'public' as const, embedding: [] }));
 const catalog = CANONICAL_APPS.map((app) => ({ key: app.key, name: app.name, description: app.description, detailedDescription: app.detailedDescription }));
 const readCatalog = async () => catalog;
 

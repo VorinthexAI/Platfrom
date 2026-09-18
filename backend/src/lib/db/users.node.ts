@@ -62,12 +62,13 @@ const helpers = createNodeHelpers(USERS_COLLECTION, userSchema, usersEmbedKeys.o
 export const insertUser = helpers.insert;
 export const getUserById = helpers.getById;
 export const updateUser = helpers.updateById;
-const USER_DELETE_COLLECTIONS = ['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages', 'conversationArchiveStates', 'folders', 'documents', 'userInboxThreads', 'userInboxMessages', 'tickets', 'events', 'sparkTransactions', 'referralCodes', 'referralAttributions', 'referralRewards', 'checkoutHandoffs', 'paymentCheckouts', 'paymentOrders', 'subscriptions', 'storageDeletionJobs', 'tags', 'tagAssignments'] as const;
+const USER_DELETE_COLLECTIONS = ['users', 'userHiddens', 'userWorkspaceApps', 'userGenerations', 'conversations', 'conversationMessages', 'conversationArchiveStates', 'folders', 'documents', 'userInboxThreads', 'userInboxMessages', 'tickets', 'events', 'sparkTransactions', 'referralCodes', 'referralAttributions', 'referralRewards', 'checkoutHandoffs', 'paymentCheckouts', 'paymentOrders', 'subscriptions', 'storageDeletionJobs', 'tags', 'tagAssignments'] as const;
 export async function deleteUser(userKey: string): Promise<void> {
   await withTransaction([...USER_DELETE_COLLECTIONS], async (transaction) => {
     await transaction.query('LET tagKeys = (FOR tag IN tags FILTER tag.userKey == @userKey RETURN tag._key) FOR assignment IN tagAssignments FILTER assignment.tagKey IN tagKeys REMOVE assignment IN tagAssignments', { userKey });
     await transaction.query('FOR tag IN tags FILTER tag.userKey == @userKey REMOVE tag IN tags', { userKey });
     await transaction.query('FOR hidden IN userHiddens FILTER hidden.userKey == @userKey REMOVE hidden IN userHiddens', { userKey });
+    await transaction.query('FOR item IN userWorkspaceApps FILTER item.userKey == @userKey REMOVE item IN userWorkspaceApps', { userKey });
     await transaction.query('FOR generation IN userGenerations FILTER generation.userKey == @userKey REMOVE generation IN userGenerations', { userKey });
     await transaction.query('FOR message IN conversationMessages FILTER message.userKey == @userKey REMOVE message IN conversationMessages', { userKey });
     await transaction.query('FOR state IN conversationArchiveStates FILTER state.userKey == @userKey REMOVE state IN conversationArchiveStates', { userKey });

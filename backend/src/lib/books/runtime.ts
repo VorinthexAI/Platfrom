@@ -13,7 +13,8 @@ import { documentStorage, type DocumentObjectStorage } from '@/lib/ai/document-p
 import { executeAction, executeAsk } from '@/lib/ai/router';
 import { USER_VISIBLE_AI_PROSE_POLICY } from '@/lib/ai/prose-style';
 import type { ChatOutput } from '@/lib/ai/providers';
-import { canonicalizeImageToPng, processImages } from '@/lib/ai/image-processing';
+import { canonicalizeImageToPng } from '@/lib/ai/image-processing';
+import { ingestGalleryLibraryUploads } from '@/lib/gallery/upload-processing';
 import { speechOutputSchema, type SpeechInput } from '@/lib/ai/actions/speech';
 import { createImageGenerationService, type ImageGenerationService } from '@/lib/image-generation/service';
 import { APP_SPEECH_WORDS_PER_MINUTE, createAppSpeechService, type AppSpeechService } from '@/lib/app-speech/service';
@@ -102,7 +103,7 @@ export interface BookRuntimeDependencies {
   speech?: (input: SpeechInput, teamKey: string, signal?: AbortSignal) => Promise<{ bytes: Uint8Array; mimeType: string; durationSeconds?: number }>;
   appSpeech?: Pick<AppSpeechService, 'generateForTarget'>;
   storage?: DocumentObjectStorage; embed?: (text: string, teamKey: string, signal?: AbortSignal) => Promise<number[]>;
-  processImageBatch?: typeof processImages;
+  ingestGalleryUploads?: typeof ingestGalleryLibraryUploads;
   publishChanged?: (scopeKey: string) => Promise<unknown>; publishContentChanged?: (scopeKey: string) => Promise<unknown>; publishGalleryChanged?: (collectionKey: string) => Promise<unknown>; id?: () => string; now?: () => string;
 }
 
@@ -114,7 +115,7 @@ export function createBookRuntime(options: BookRuntimeDependencies = {}): BookGe
   const image: Media = async (prompt, teamKey, signal) => { const generated = await imageService.generateRaw({ prompt, count: 1, size: '1024x1536', quality: 'high', mode: 'fast' }, teamKey, { signal, timeoutMs: 90_000 }); const output = generated.output.images[0]; return output ? { bytes: Buffer.from(output.base64, 'base64'), mimeType: output.mimeType } : null; };
   const speech = options.speech ?? (async (input, teamKey, signal) => { const output = speechOutputSchema.parse((await executeAction({ mode: 'auto', teamKey, actionSlug: 'speech' }, input, { providers: ['speech.primary'], signal, timeoutMs: 180_000 })).output); return { bytes: Buffer.from(output.base64, 'base64'), mimeType: output.mimeType, durationSeconds: output.durationSeconds }; });
   const appSpeech = options.appSpeech ?? createAppSpeechService({ storage, speech: async (input, teamKey, actionOptions) => speech(input, teamKey, actionOptions?.signal) as Promise<{ bytes: Uint8Array; mimeType: 'audio/mpeg'; durationSeconds?: number }> });
-  const processImageBatch = options.processImageBatch ?? processImages;
+  const ingestGalleryUploads = options.ingestGalleryUploads ?? ingestGalleryLibraryUploads;
   const notify = options.publishChanged ?? (async (scopeKey) => (await import('@/api/events')).publishScopeEvent(scopeKey, 'book.changed'));
   const notifyContent = options.publishContentChanged ?? (async (scopeKey) => (await import('@/api/events')).publishScopeEvent(scopeKey, 'content.changed'));
   const notifyGallery = options.publishGalleryChanged ?? (async (collectionKey) => { const { mutationEventTargets, publishGalleryEvents } = await import('@/lib/gallery/mutation-events'); await publishGalleryEvents(mutationEventTargets('uploadCompleted', { collections: [collectionKey] })); });
@@ -149,22 +150,14 @@ export function createBookRuntime(options: BookRuntimeDependencies = {}): BookGe
     const exports = detail.book.coverStorageKey ? [{ sourceKey: detail.book.coverStorageKey, filename: `${detail.book.title}.png`, identity: `book:${detail.book.key}`, version: detail.book.coverInputHash ?? hash(detail.book.coverStorageKey), caption: `Cover artwork for ${detail.book.title}. ${detail.book.description}` }] : [];
     if (!exports.length) return;
     const { collectionKey, ownerKey } = await repository.ensureGalleryExportCollection(context, detail.book.key, detail.book.title, detail.book.embedding, now());
-    const imageKeys: string[] = [];
     for (let offset = 0; offset < exports.length; offset += 20) {
       const batch = exports.slice(offset, offset + 20);
-      const inputs = await Promise.all(batch.map(async (item) => {
+      await ingestGalleryUploads(await Promise.all(batch.map(async (item) => {
         const object = await storage.download(item.sourceKey);
         const filename = `${item.filename.replace(/\.png$/i, '').replace(/[\\/]/g, '-').slice(0, 251) || 'image'}.png`;
-        return { scopeKey: context.scopeKey, ownerKey, billingUserKey: context.userKey, origin: 'generated' as const, imageKey: `c${hash(`book-gallery-image\0${item.identity}\0${item.version}`).slice(0, 24)}`, idempotencyKey: `book-image-export:${hash(`${item.identity}\0${item.version}`)}`, mutationPolicy: 'user' as const, file: { filename, mimeType: object.mimeType ?? 'image/png', sizeBytes: object.bytes.byteLength, bytes: object.bytes }, signal: context.signal };
-      }));
-      const images = await processImageBatch(inputs, {
-        storage,
-        captionBatch: async () => batch.map(({ caption }) => ({ caption, score: 1 })),
-        embed: (text, signal) => embed(text, context.teamKey, signal),
-      });
-      imageKeys.push(...images.map(({ key }) => key));
+        return { teamKey: context.teamKey, scopeKey: context.scopeKey, actorKey: ownerKey, userKey: context.userKey, collectionKey, filename, mimeType: 'image/png' as const, bytes: object.bytes, imageKey: `c${hash(`book-gallery-image\0${item.identity}\0${item.version}`).slice(0, 24)}` };
+      })), { storage });
     }
-    await repository.linkGalleryExportImages(context, detail.book.key, collectionKey, ownerKey, imageKeys, now());
     await notifyGallery(collectionKey);
   };
   return {

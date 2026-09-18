@@ -9,6 +9,8 @@ const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
 describe('initial workspace content', () => {
   test('defines one connected guide tree with concise documents', () => {
     expect(INITIAL_WORKSPACE_FOLDERS.map(({ name }) => name)).toEqual(['Vorinthex AI', 'Core', 'Archive', 'Gallery', 'Signal', 'Compass', 'Ascend']);
+    expect([...INITIAL_WORKSPACE_FOLDER_IDS, ...INITIAL_WORKSPACE_DOCUMENT_IDS].join(' ')).not.toMatch(/\bhq\b/i);
+    expect(INITIAL_WORKSPACE_DOCUMENTS.map(({ content }) => content).join('\n')).not.toMatch(/\bHQ\b/);
     expect(INITIAL_WORKSPACE_FOLDERS.map(({ presentation }) => presentation)).toEqual(['platform', 'assistant', 'knowledge', 'media', 'communication', 'travel', 'learning']);
     expect(INITIAL_WORKSPACE_FOLDERS.map(({ id }) => id)).toEqual([...INITIAL_WORKSPACE_FOLDER_IDS]);
     expect(INITIAL_WORKSPACE_DOCUMENTS).toHaveLength(22);

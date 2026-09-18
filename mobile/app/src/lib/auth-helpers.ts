@@ -1,3 +1,5 @@
+import { emptyWorkspacePicker, type WorkspacePickerState } from "@/data/registry";
+
 export type AuthUser = {
   key?: string;
   email?: string;
@@ -14,6 +16,8 @@ export type AuthContext = {
   team: Record<string, unknown> | null;
   teamMembership: Record<string, unknown> | null;
   scope: Record<string, unknown> | null;
+  rootTeamMember: boolean;
+  workspacePicker: WorkspacePickerState;
 };
 
 export type SessionTokens = {
@@ -98,7 +102,25 @@ export function normalizeAuthContext(value: unknown): AuthContext {
     team: record(body?.team),
     teamMembership: record(body?.teamMembership),
     scope: record(body?.scope),
+    rootTeamMember: booleanValue(body, "rootTeamMember", "root_team_member"),
+    workspacePicker: parseWorkspacePicker(body?.workspacePicker),
   };
+}
+
+function parseWorkspacePicker(value: unknown): WorkspacePickerState {
+  const picker = record(value);
+  if (!picker) return emptyWorkspacePicker;
+  const apps = Array.isArray(picker.apps) ? picker.apps.flatMap((item) => {
+    const app = record(item);
+    const scopeKey = stringValue(app, "scopeKey");
+    const slug = stringValue(app, "slug");
+    const name = stringValue(app, "name");
+    return scopeKey && slug && name ? [{ scopeKey, slug, name }] : [];
+  }) : [];
+  const selected = Array.isArray(picker.selectedScopeKeys)
+    ? picker.selectedScopeKeys.filter((key): key is string => typeof key === "string" && key.length > 0)
+    : null;
+  return { apps, selectedScopeKeys: selected };
 }
 
 export function hasCompleteAuthContext(context: AuthContext | null) {

@@ -1127,7 +1127,7 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
               })}
             </View>
           )}
-          {(!overviewQuery.isPending || searchActive) && !searchPending && (!overviewQuery.error || searchActive) && !searchError && filteredBooks.length === 0 ? <View style={[styles.state, searchActive && styles.searchEmptyState]}><Text style={styles.stateTitle}>{searchActive ? "No audio books matched these filters." : showOnlyFavorites ? "No favorite audio books." : books.length ? "No audio books match this view." : "No audio books yet."}</Text>{!books.length && !searchActive && !showOnlyFavorites ? <Button accessibilityLabel="Create audio book" contentMode="raw" onPress={beginCreate} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : null}
+          {(!overviewQuery.isPending || searchActive) && !searchPending && (!overviewQuery.error || searchActive) && !searchError && filteredBooks.length === 0 ? <View style={[styles.state, searchActive && styles.searchEmptyState]}><Text style={styles.stateTitle}>{searchActive || showOnlyFavorites || books.length ? "No audio books matching these filters." : "No audio books yet."}</Text>{!books.length && !searchActive && !showOnlyFavorites ? <Button accessibilityLabel="Create audio book" contentMode="raw" onPress={beginCreate} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : null}
         </ScrollView>
       </>}
       <CoreComposer
@@ -1199,8 +1199,8 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
               <Switch accessibilityLabel="Show only favorite audio books" checked={showOnlyFavorites} onCheckedChange={(checked) => { setShowOnlyFavorites(checked); setSheetOpen(false); setSheet(undefined); }} />
               <Text style={styles.favoriteSwitchLabel}>Favorites</Text>
             </View>
-            <Button onPress={openTagFilters} size="md" style={styles.searchHistoryOption} variant="secondary">Tags</Button>
-            <Button onPress={() => void openSearchHistory()} size="md" style={styles.searchHistoryOption} variant="secondary">Search history</Button>
+            <BottomSheetItem onPress={openTagFilters} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem>
+            <BottomSheetItem onPress={() => void openSearchHistory()} style={styles.sheetAction} variant="secondary">Search history</BottomSheetItem>
           </View>
         ) : null}
         {sheet === "bookActions" && selectedBook ? (
@@ -1525,7 +1525,7 @@ const styles = StyleSheet.create({
   sheetList: { gap: spacing.sm },
   bulkActionList: { width: "100%", gap: spacing.sm },
   compactSheetActions: { width: "100%", gap: spacing.sm, padding: 2 },
-  filterPanel: { gap: 6 },
+  filterPanel: { gap: 12 },
   searchHistoryOption: { backgroundColor: palette.page },
   favoriteSwitchRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   favoriteSwitchLabel: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12 },

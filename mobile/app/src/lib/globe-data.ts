@@ -97,6 +97,25 @@ export function isSelectableCountryFeature(feature: CountryFeature) {
   return !NON_SELECTABLE_COUNTRY_CODES.has(feature.properties.countryCode);
 }
 
+export function globeCountryByCode(countryCode: string): CountryProperties | undefined {
+  return COUNTRIES.features.find((feature) => feature.properties.countryCode === countryCode && isSelectableCountryFeature(feature))?.properties;
+}
+
+export function findCountryByQuery(query: string): CountryProperties | undefined {
+  const normalized = query.trim().toLocaleLowerCase();
+  if (!normalized) return undefined;
+  const matches = COUNTRIES.features.filter(isSelectableCountryFeature).flatMap(({ properties }) => {
+    const name = properties.name.toLocaleLowerCase();
+    const code = properties.countryCode.toLocaleLowerCase();
+    if (name === normalized || code === normalized) return [{ properties, rank: 0 }];
+    if (name.startsWith(normalized) || code.startsWith(normalized)) return [{ properties, rank: 1 }];
+    if (name.includes(normalized)) return [{ properties, rank: 2 }];
+    return [];
+  });
+  matches.sort((left, right) => left.rank - right.rank || left.properties.name.length - right.properties.name.length || left.properties.name.localeCompare(right.properties.name));
+  return matches[0]?.properties;
+}
+
 export function findCountryAtCoordinates(
   collection: CountryFeatureCollection,
   latitude: number,

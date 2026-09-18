@@ -14,7 +14,7 @@ describe('country HTTP adapter', () => {
     const input = { teamKey: 'team', query: 'Portugal' };
     const response = await app.request('/travel/countries/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
     expect(response.status).toBe(200);
-    expect(calls).toEqual([[input, 'trusted-user', { signal: expect.any(AbortSignal), timeoutMs: 10_000 }]]);
+    expect(calls).toEqual([[input, 'trusted-user', { signal: expect.any(AbortSignal), timeoutMs: 10_000, minimumScore: -1, skipExact: true, recordHistory: false }]]);
     expect((await app.request('/travel/countries/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...input, userKey: 'untrusted' }) })).status).toBe(400);
   });
 

@@ -31,13 +31,19 @@ test('seed command defers only normalized retryable provider outages', async () 
 import { scopeSchema, scopeScopeSchema } from '@/lib/ai/scopes';
 import { newId } from '@/lib/ids';
 import { join } from 'node:path';
-import { MOTHER_SCOPE_KEY, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_TEAM, SEEDED_SCOPES } from './seed';
+import { MOTHER_SCOPE_KEY, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_TEAM, SEEDED_SCOPES, seededScopeVisibility } from './seed';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
 import { CANONICAL_APP_BY_SLUG } from '@/lib/apps/registry';
 
 describe('scope seeds', () => {
   test('defines the seeded root team with MFA enforcement', () => {
     expect(SEEDED_TEAM).toMatchObject({ name: 'Founders', slug: 'founders', is_root: true, mfa_enabled: true });
+  });
+
+  test('migrate backfills HQ as private and other scopes as public', async () => {
+    const source = await Bun.file(new URL('../../db/arango-migrate.ts', import.meta.url)).text();
+    expect(source).toContain('team.is_root == true && scope.slug == "hq" ? "private" : "public"');
+    expect(source).toContain('visibility: seededScopeVisibility(seed.slug)');
   });
 
   test('places products and their Core capability and Command orchestrator children in the Vorinthex AI hierarchy', () => {
@@ -72,7 +78,15 @@ describe('scope seeds', () => {
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'compass')).toMatchObject({ summary: CANONICAL_APP_BY_SLUG.get('compass')!.description, description: CANONICAL_APP_BY_SLUG.get('compass')!.detailedDescription });
     expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === command.key).sort((left, right) => left.position - right.position).map(({ slug }) => slug)).toEqual(['atlas', 'hermes', 'metis', 'phoenix', 'apollo', 'iris', 'echo', 'matrix', 'harmony', 'ledger', 'orbit', 'mercury', 'sentinel', 'athena', 'forge', 'aura', 'pillar', 'helios', 'vulcan', 'themis']);
     expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === core.key || parentKey === command.key).every(({ level }) => level === 3)).toBe(true);
-    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'hq')).toMatchObject({ name: 'HQ', key: 'cmrnlzf640005qc7kefvra0bn' });
+    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'hq')).toMatchObject({
+      name: 'HQ',
+      key: 'cmrnlzf640005qc7kefvra0bn',
+      visibility: 'private',
+      summary: 'Your workspace to manage teams and collaboration.',
+      description: 'HQ is your private workspace for managing teams and collaboration. Coordinate people, membership, and shared work in one headquarters.',
+    });
+    expect(seededScopeVisibility('hq')).toBe('private');
+    expect(SEEDED_SCOPES.filter(({ slug }) => slug !== 'hq').every(({ slug }) => seededScopeVisibility(slug) === 'public')).toBe(true);
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'archive')).toMatchObject({ summary: CANONICAL_APP_BY_SLUG.get('archive')!.description, description: CANONICAL_APP_BY_SLUG.get('archive')!.detailedDescription });
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'atlas')).toMatchObject({ summary: 'Vision, leadership, direction, executive strategy, and company wide decisions.', description: 'Vision, leadership, direction, executive strategy, and company wide decisions.' });
   });

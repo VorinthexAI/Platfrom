@@ -1,8 +1,6 @@
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { z } from 'zod';
-import { executeAction } from '@/lib/ai/router';
-import { imageCaptionOutputSchema, type ImageCaptionInput, type ImageCaptionOutput } from '@/lib/ai/providers';
 import { documentStorage, type DocumentStorage } from '@/lib/ai/document-processing/storage';
 import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema, embedText } from '@/lib/embeddings';
 import { type Image, type imageOriginSchema, getImageById, insertPreparedImageWithCaption } from '@/lib/db/images.node';
@@ -137,13 +135,6 @@ function persistedImageMatches(existing: Image, input: ProcessImageInput, image:
   return existing.origin === input.origin && existing.width === image.width && existing.height === image.height && (canonical || legacy);
 }
 
-export async function captionImageWithVertex(teamKey: string, input: { filename: string; mimeType: string; bytes: Uint8Array; signal?: AbortSignal }) {
-  const providerInput: ImageCaptionInput = { imageUrls: [`data:${input.mimeType};base64,${Buffer.from(input.bytes).toString('base64')}`], purpose: 'caption' };
-  const response = await executeAction<ImageCaptionInput & { operation: 'caption' }, ImageCaptionOutput>({ mode: 'auto', teamKey, actionSlug: 'image' }, { operation: 'caption', ...providerInput }, { providers: ['image.secondary'], signal: input.signal, timeoutMs: 180_000 });
-  const output = imageCaptionOutputSchema.parse(response.output);
-  return generatedImageCaptionSchema.parse(output.results[0]);
-}
-
 async function removeWithRetry(storage: DocumentStorage, key: string) { let last: unknown; for (let attempt = 0; attempt < 3; attempt += 1) try { await storage.delete(key); return; } catch (error) { last = error; if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 25 * 2 ** attempt)); } throw last; }
 async function replayPersistedImage(input: ProcessImageInput, image: ValidatedImage, dependencies: ImageProcessingDependencies): Promise<Image | null> {
   if (!input.idempotencyKey && !input.imageKey) return null;
@@ -185,7 +176,12 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, perceptu
       embedding = canonical.embedding;
     } else {
       let generated: GeneratedImageCaption;
-      try { generated = prepared?.generated ?? generatedImageCaptionSchema.parse(await (dependencies.caption ? dependencies.caption({ filename: image.filename, mimeType: image.mimeType, bytes: image.bytes, signal: input.signal }) : captionImageWithVertex(input.scopeKey, { filename: image.filename, mimeType: image.mimeType, bytes: image.bytes, signal: input.signal }))); } catch (error) { if (!input.fallbackCaption) throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption and score could not be generated.', { cause: error }); generated = generatedImageCaptionSchema.parse({ caption: input.fallbackCaption, score: 50 }); }
+      if (prepared?.generated) generated = prepared.generated;
+      else if (dependencies.caption) {
+        try { generated = generatedImageCaptionSchema.parse(await dependencies.caption({ filename: image.filename, mimeType: image.mimeType, bytes: image.bytes, signal: input.signal })); }
+        catch (error) { if (!input.fallbackCaption) throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption and score could not be generated.', { cause: error }); generated = generatedImageCaptionSchema.parse({ caption: input.fallbackCaption, score: 50 }); }
+      } else if (input.fallbackCaption) generated = generatedImageCaptionSchema.parse({ caption: input.fallbackCaption, score: 50 });
+      else throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption and score could not be generated.');
       await heartbeat.checkpoint();
       caption = generated.caption;
       if (!caption) throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption must not be blank.');
@@ -290,7 +286,9 @@ export async function processImages(inputs: readonly ProcessImageInput[], depend
     try {
       generatedCaptions = dependencies.captionBatch
         ? (await dependencies.captionBatch(captionInputs)).map((result) => generatedImageCaptionSchema.parse(result))
-        : await Promise.all(captionInputs.map((value, position) => (dependencies.caption ? dependencies.caption(value) : captionImageWithVertex(inputs[representatives[position]!.index]!.scopeKey, value)).then((result) => generatedImageCaptionSchema.parse(result))));
+        : dependencies.caption
+          ? await Promise.all(captionInputs.map((value) => dependencies.caption!(value).then((result) => generatedImageCaptionSchema.parse(result))))
+          : representatives.map(({ index }) => { const caption = inputs[index]!.fallbackCaption; if (!caption) throw new Error('Image captioning requires a captioner or fallback caption.'); return generatedImageCaptionSchema.parse({ caption, score: 50 }); });
     } catch (error) {
       const fallbacks = representatives.map(({ index }) => inputs[index]!.fallbackCaption);
       if (fallbacks.some((caption) => !caption)) throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption batch could not be generated.', { cause: error });

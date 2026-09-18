@@ -52,6 +52,10 @@ describe('Gallery repository collection access', () => {
     const overview = queries.find((query) => query.includes('RETURN { collection, count:')) ?? '';
     expect(overview).toContain('SORT collection.createdAt ASC, collection._key ASC');
     expect(overview).not.toContain('SORT collection.name ASC');
+    for (const query of queries.filter((value) => value.includes('LET cover = collection.coverImageKey'))) {
+      expect(query).toContain('LET cover = collection.coverImageKey == null ? null : DOCUMENT(images, collection.coverImageKey)');
+      expect(query).not.toContain('imageKeys[0]');
+    }
 
     const readablePolicy = 'collection.purpose IN ["email-media","generated-media","place-media","scope-directory"]';
     expect(queries).toHaveLength(4);

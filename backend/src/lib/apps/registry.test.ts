@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { APP_KEYS, APP_KEYS_BY_SLUG, CANONICAL_APPS, parseAppAliasKey, PRODUCT_SCOPE_SLUGS } from './registry';
+import { APP_KEYS, APP_KEYS_BY_SLUG, CANONICAL_APPS, parseAppAliasKey, PRIVATE_APPS, PRODUCT_SCOPE_SLUGS } from './registry';
 
 describe('canonical apps registry', () => {
   test('defines the exact stable app identities and detailed product guidance', () => {
@@ -28,6 +28,10 @@ describe('canonical apps registry', () => {
     expect(signal?.detailedDescription).toContain('communication from Vorinthex apps and support');
     expect(`${CANONICAL_APPS[0]?.detailedDescription} ${signal?.detailedDescription}`).not.toMatch(/Gmail/i);
     expect(APP_KEYS_BY_SLUG.signal).toBe(APP_KEYS.SIGNAL);
+    expect(PRIVATE_APPS.map(({ slug }) => slug)).toEqual(['hq']);
+    expect(CANONICAL_APPS.map(({ slug }) => slug)).not.toContain('hq');
+    expect(PRODUCT_SCOPE_SLUGS).not.toContain('hq');
+    expect(PRIVATE_APPS[0]?.description).toBe('Your workspace to manage teams and collaboration.');
   });
 
   test('accepts only the seven stable transport aliases', () => {

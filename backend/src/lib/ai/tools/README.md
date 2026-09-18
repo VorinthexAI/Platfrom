@@ -16,9 +16,9 @@ expresses domain intent such as `folder.create`, `email.draft.send`, or
 - `email-ingestion-tool-definitions.ts` owns system-only inbox ingestion tools.
   They are registered canonical tools but excluded from model/provider
   definitions and every Core surface.
-- `account-tool-definitions.ts` owns authenticated permanent account deletion.
-  It is registered for transport parity but intentionally excluded from every
-  model/provider definition and Core surface.
+- `account-tool-definitions.ts` owns authenticated permanent account deletion
+  and workspace picker updates. They are registered for transport parity but
+  intentionally excluded from every model/provider definition and Core surface.
 
 ## Required Layering
 

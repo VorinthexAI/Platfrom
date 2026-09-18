@@ -12,6 +12,7 @@ export const capabilityIconSource: Record<CapabilitySlug, ImageSource> = {
   signal: require("../../assets/brand/capability-signal.png"),
   compass: require("../../assets/brand/capability-compass.png"),
   ascend: require("../../assets/brand/capability-ascend.png"),
+  hq: require("../../assets/brand/product-hq.png"),
 };
 
 /** The real Vorinthex mark from web/app/public/logos. */

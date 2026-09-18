@@ -10,7 +10,6 @@ import { recoverAttachmentExports } from './attachment-export-queue';
 import { createConnectorRepository } from './connector-repository';
 import { createInboxRepository } from './inbox-repository';
 import { imageSchema } from '@/lib/db/images.node';
-import { imageCaptionRecordSchema } from '@/lib/db/image-captions.node';
 
 const liveArangoSuite = process.env.ARANGO_URL && process.env.ARANGO_USERNAME && process.env.ARANGO_ROOT_PASSWORD !== undefined ? describe : describe.skip;
 
@@ -105,13 +104,11 @@ liveArangoSuite('canonical email persistence live Arango', () => {
       const imageIngestion = createEmailAttachmentIngestionService({
         repository, exportDatabase: database, publishScopeEvent: async () => undefined,
         storage: { upload: async ({ key }) => ({ storageKey: key }), download: async () => ({ bytes: new Uint8Array([1]) }), delete: async () => undefined, copy: async ({ destinationKey }) => ({ storageKey: destinationKey }) },
-        sanitizeImage: async (bytes) => ({ bytes: Uint8Array.from(bytes), coordinates: undefined }),
-        processImage: async (input, dependencies) => {
+        ingestGalleryUpload: async (input) => {
           const captionKey = newId();
-          return dependencies!.persistImage!({ actorKey: teamMembershipKey,
-            image: imageSchema.parse({ key: input.imageKey, scopeKey, filename: 'photo.png', caption: 'A photo', imageCaptionKey: captionKey, storageKey: 'export/photo.png', mimeType: 'image/png', sizeBytes: 1, width: 1, height: 1, embedding, origin: 'uploaded', createdAt: now, updatedAt: now }),
-            caption: imageCaptionRecordSchema.parse({ key: captionKey, scopeKey, sourceImageKey: input.imageKey, caption: 'A photo', embedding, perceptualHash: null, hashAlgorithm: null, hashSegment0: null, hashSegment1: null, hashSegment2: null, hashSegment3: null, createdAt: now, updatedAt: now }),
-          });
+          const image = imageSchema.parse({ key: input.imageKey, scopeKey, filename: 'photo.png', caption: 'A photo', imageCaptionKey: captionKey, storageKey: 'export/photo.png', mimeType: 'image/png', sizeBytes: 1, width: 1, height: 1, embedding, origin: 'uploaded', createdAt: now, updatedAt: now });
+          await database.collection('images').save(toArangoDoc(image));
+          return image;
         },
       });
       const photo = await imageIngestion.ingest({ userKey, teamKey, scopeKey, connectorKey, teamMembershipKey, providerMessageId: 'photo', part: { path: '0.1', type: 'image', filename: 'photo.png', mimeType: 'image/png', size: 1 }, bytes: new Uint8Array([1]) });

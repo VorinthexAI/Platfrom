@@ -9,6 +9,10 @@ export const SCOPE_MEMBER_ROLES = ['owner', 'admin', 'moderator', 'viewer'] as c
 export const scopeMemberRoleSchema = z.enum(SCOPE_MEMBER_ROLES);
 export type ScopeMemberRole = z.infer<typeof scopeMemberRoleSchema>;
 
+export const SCOPE_VISIBILITIES = ['public', 'private'] as const;
+export const scopeVisibilitySchema = z.enum(SCOPE_VISIBILITIES);
+export type ScopeVisibility = z.infer<typeof scopeVisibilitySchema>;
+
 export const scopeSlugSchema = z
   .string()
   .trim()
@@ -27,6 +31,7 @@ export const scopeSchema = z.object({
   coverImageKey: z.string().cuid().nullable().optional(),
   position: z.number().int().positive(),
   level: z.number().int().positive().default(1),
+  visibility: scopeVisibilitySchema.default('public'),
   embedding: z.array(z.number().finite()).default([]),
 });
 
