@@ -1346,7 +1346,7 @@ describe('email synchronization', () => {
         ensureImageCollection: async () => scopeKey,
         release: async () => undefined,
       } as never,
-      sanitizeImage: async () => { throw sanitizerFailure; },
+      ingestGalleryUpload: async () => { throw sanitizerFailure; },
       publishScopeEvent: async () => undefined,
       publishCollectionEvent: async () => undefined,
     });

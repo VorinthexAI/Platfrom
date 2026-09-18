@@ -24,7 +24,7 @@ test('does not re-embed countries whose catalog hash is current', async () => {
   await seedCountryCatalog({
     query: async (query: string, bindVars?: Record<string, unknown>) => {
       if (query.includes('FILTER country.countryCode')) {
-        const country = catalog.get(String(bindVars?.countryCode));
+        const country = catalog.get(bindVars?.countryCode as (typeof COUNTRY_CATALOG)[number]['countryCode']);
         return { next: async () => ({ key: 'k', semanticVersion: 1, semanticHash: createHash('sha256').update(country!.name).digest('hex') }) };
       }
       return { next: async () => 'k' };
