@@ -65,12 +65,15 @@ export function mailDevFixtures(scopeKey: string, accountKeys?: readonly string[
           : accountIndex === 2 && scenarioIndex === 1
             ? [[{ type: 'document', filename: 'Volunteer-brief.pdf' }], [{ type: 'image', filename: 'Event.png' }]]
             : [[], []];
-    const attachmentFields = (attachments: MailDevAttachmentSpec[]) => attachments.length
-      ? { hasAttachments: true, attachmentAvailability: 'complete' as const, attachments }
-      : { hasAttachments: false, attachmentAvailability: 'none' as const };
+    const attachmentFields = (attachments: MailDevAttachmentSpec[]) => ({
+      hasAttachments: attachments.length > 0,
+      attachmentAvailability: attachments.length ? 'complete' as const : 'none' as const,
+      attachments,
+    });
+    const copied = scenarioIndex % 3 === 0 ? ['alex@example.com', 'team@example.com'] : [];
     const messages = [
-      { scopeKey, accountKey: account.accountKey, providerMessageId: `${providerThreadId}:1`, from: sender, fromName: `${account.name} Correspondent`, to: [MAIL_DEV_SEED_EMAIL], ...(scenarioIndex % 3 === 0 ? { cc: ['alex@example.com', 'team@example.com'] } : {}), subject, body: inboundBody, summary: inboundBody, direction: 'inbound' as const, sentAt: firstAt, ...attachmentFields(attachmentRefs[0]!), labels: [...scenario.labels], unread: scenario.unread, replyDepth: 0, messageIdHeader: rootHeader, inboxCategory: scenario.inboxCategory, embedding, embeddingContentVersion: 4 as const },
-      { scopeKey, accountKey: account.accountKey, providerMessageId: `${providerThreadId}:2`, from: MAIL_DEV_SEED_EMAIL, to: [sender], ...(scenarioIndex % 3 === 0 ? { cc: ['alex@example.com', 'team@example.com'] } : {}), subject: `Re: ${subject}`, body: outboundBody, summary: outboundBody, direction: 'outbound' as const, sentAt: secondAt, ...attachmentFields(attachmentRefs[1]!), labels: ['SENT'], unread: false, replyDepth: 1, messageIdHeader: SIGNAL_SENT_REPLY_SLUGS.has(scenario.slug) ? signalSentMessageId(`${providerThreadId}:2`) : `<${providerThreadId}:2@example.com>`, inReplyTo: rootHeader, references: [rootHeader], parentMessageId: rootHeader, inboxCategory: scenario.inboxCategory, embedding, embeddingContentVersion: 4 as const },
+      { scopeKey, accountKey: account.accountKey, providerMessageId: `${providerThreadId}:1`, from: sender, fromName: `${account.name} Correspondent`, to: [MAIL_DEV_SEED_EMAIL], cc: copied, subject, body: inboundBody, summary: inboundBody, direction: 'inbound' as const, sentAt: firstAt, ...attachmentFields(attachmentRefs[0]!), labels: [...scenario.labels], unread: scenario.unread, replyDepth: 0, messageIdHeader: rootHeader, inReplyTo: '', references: [] as string[], parentMessageId: '', inboxCategory: scenario.inboxCategory, embedding, embeddingContentVersion: 4 as const },
+      { scopeKey, accountKey: account.accountKey, providerMessageId: `${providerThreadId}:2`, from: MAIL_DEV_SEED_EMAIL, to: [sender], cc: copied, subject: `Re: ${subject}`, body: outboundBody, summary: outboundBody, direction: 'outbound' as const, sentAt: secondAt, ...attachmentFields(attachmentRefs[1]!), labels: ['SENT'], unread: false, replyDepth: 1, messageIdHeader: SIGNAL_SENT_REPLY_SLUGS.has(scenario.slug) ? signalSentMessageId(`${providerThreadId}:2`) : `<${providerThreadId}:2@example.com>`, inReplyTo: rootHeader, references: [rootHeader], parentMessageId: rootHeader, inboxCategory: scenario.inboxCategory, embedding, embeddingContentVersion: 4 as const },
     ];
     return {
       fixtureId: providerThreadId,
@@ -88,7 +91,7 @@ export function mailDevFixtures(scopeKey: string, accountKeys?: readonly string[
     return {
       fixtureId: providerThreadId,
       thread: { scopeKey, accountKey: account.accountKey, providerThreadId, subject, summary: body, intent: 'Awaiting a response', priority: 'normal' as const, state: 'waiting' as const, category: 'primary' as const, inboxCategory: 'Important' as const, snippet: body, unread: false, starred: false, labels: ['SENT'], latestFrom: MAIL_DEV_SEED_EMAIL, inInbox: false, lastMessageAt: sentAt, embedding, embeddingContentVersion: 4 as const, isFavorite: false },
-      messages: [{ scopeKey, accountKey: account.accountKey, providerMessageId: `${providerThreadId}:1`, from: MAIL_DEV_SEED_EMAIL, to: [recipient], subject, body, summary: body, direction: 'outbound' as const, sentAt, hasAttachments: false, attachmentAvailability: 'none' as const, labels: ['SENT'], unread: false, replyDepth: 0, messageIdHeader: signalSentMessageId(`${providerThreadId}:1`), inboxCategory: 'Important' as const, embedding, embeddingContentVersion: 4 as const }],
+      messages: [{ scopeKey, accountKey: account.accountKey, providerMessageId: `${providerThreadId}:1`, from: MAIL_DEV_SEED_EMAIL, to: [recipient], cc: [] as string[], subject, body, summary: body, direction: 'outbound' as const, sentAt, hasAttachments: false, attachmentAvailability: 'none' as const, attachments: [] as MailDevAttachmentSpec[], labels: ['SENT'], unread: false, replyDepth: 0, messageIdHeader: signalSentMessageId(`${providerThreadId}:1`), inReplyTo: '', references: [] as string[], parentMessageId: '', inboxCategory: 'Important' as const, embedding, embeddingContentVersion: 4 as const }],
     };
   });
   const threads = [...inboxThreads, ...sentThreads];
