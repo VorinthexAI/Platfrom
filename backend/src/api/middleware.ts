@@ -13,6 +13,7 @@ import { APP_KEYS } from '@/lib/apps/registry';
 import { appsService } from '@/lib/apps/service';
 import { EVENT_IDENTIFIER_HEADER, eventIdentifierSchema, runWithEventIdentifier } from '@/lib/ai/events/event-identifier';
 import { deviceSchema, DEVICE_IDENTIFIER_HEADER, runWithDevice } from '@/lib/ai/events/device';
+import { sparkTransactionKindSchema } from '@/lib/sparks/contracts';
 
 export const ACCESS_COOKIE = 'vorinthex_access';
 export const REFRESH_COOKIE = 'vorinthex_refresh';
@@ -203,11 +204,11 @@ function querySchemaForPath(path: string, method: string) {
   if (method === 'DELETE' && apiPath === '/auth/me/hiddens') return strictObject({ source: z.enum(['collection', 'document', 'image', 'folder']), sourceKey: z.string().cuid() });
   if (method === 'GET' && apiPath === '/gallery/highlights') return strictObject({ teamKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
   if (method === 'GET' && apiPath === '/gallery/memories') return strictObject({ teamKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
-  if (method === 'GET' && apiPath === '/billing/summary') return strictObject({ limit: z.string().regex(/^\d+$/).optional(), beforeCreatedAt: z.string().datetime({ offset: true }).optional(), beforeKey: z.string().trim().min(1).max(200).optional() });
+  if (method === 'GET' && apiPath === '/billing/summary') return strictObject({ limit: z.string().regex(/^\d+$/).optional(), beforeCreatedAt: z.string().datetime({ offset: true }).optional(), beforeKey: z.string().trim().min(1).max(200).optional(), kind: sparkTransactionKindSchema.optional() });
   if (method === 'GET' && apiPath === '/images/generation-history') return strictObject({ teamKey: z.string().trim().min(1), scopeKey: z.string().cuid(), limit: z.string().regex(/^\d+$/).optional() });
   if (method === 'POST' && apiPath === '/tags/assignments') return strictObject({ action: z.enum(['tag', 'untag']) });
   if (/^\/content\/tools\/[^/]+$/.test(apiPath)) return strictObject({});
-  if (apiPath === '/books' || apiPath === '/books/overview' || apiPath === '/books/topic-suggestions' || apiPath === '/books/goal-suggestions' || /^\/books\/[^/]+(?:\/detail|\/(?:retry|cancel|favorite))?$/.test(apiPath) || /^\/books\/[^/]+\/chapters\/[^/]+\/progress$/.test(apiPath)) return strictObject({});
+  if (apiPath === '/books' || apiPath === '/books/overview' || apiPath === '/books/topic-suggestions' || apiPath === '/books/goal-suggestions' || apiPath === '/books/preview' || /^\/books\/[^/]+(?:\/detail|\/(?:retry|cancel|favorite))?$/.test(apiPath) || /^\/books\/[^/]+\/chapters\/[^/]+\/progress$/.test(apiPath)) return strictObject({});
   return strictObject({});
 }
 

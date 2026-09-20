@@ -111,17 +111,19 @@ export function createSparkService({ repository, createKey = newId, now = () => 
     },
     async getSummary(trustedUserKey: string, input?: SparkHistoryInput) {
       const valid = sparkHistoryInputSchema.parse(input ?? {});
-      const [microSparkBalance, microSparkDebt, transactions, storageBytes] = await Promise.all([
+      const [microSparkBalance, microSparkDebt, transactions, storageBytes, aiUsageMicroSparks] = await Promise.all([
         repository.getBalance(trustedUserKey),
         repository.getDebt?.(trustedUserKey) ?? Promise.resolve(0),
         repository.listHistory(trustedUserKey, valid),
         getActiveStoredBytes(trustedUserKey),
+        repository.sumDebits?.(trustedUserKey, 'action') ?? Promise.resolve(0),
       ]);
       if (microSparkBalance === null) throw new SparkRepositoryError('USER_NOT_FOUND', 'Spark account user was not found.');
       return {
         microSparkBalance,
         microSparkDebt: microSparkDebt ?? 0,
         spendingBlocked: (microSparkDebt ?? 0) > 0,
+        aiUsageMicroSparks,
         storage: {
           bytes: storageBytes,
           estimatedMonthlyMicroSparks: storageCostMicroSparksExact(calculateByteHours(BigInt(storageBytes), HOURS_PER_BILLING_MONTH)),

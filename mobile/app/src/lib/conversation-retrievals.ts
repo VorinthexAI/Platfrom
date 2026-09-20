@@ -26,6 +26,8 @@ export const RETRIEVAL_LABELS: Record<ConversationRetrievalCollectionSlug, Reado
   books: { singular: "audio book", plural: "audio books" },
   tags: { singular: "tag", plural: "tags" },
   "tag-assignments": { singular: "tagged resource", plural: "tagged resources" },
+  tickets: { singular: "ticket", plural: "tickets" },
+  notifications: { singular: "notification", plural: "notifications" },
 };
 
 export function mergeConversationRetrievalResults(retrievals: readonly ConversationRetrieval[]) {

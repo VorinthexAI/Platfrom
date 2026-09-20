@@ -1,9 +1,8 @@
 import { z } from 'zod';
-import { hasActiveRootTeamMembership } from '@/lib/db/user-team.node';
 import { createWorkspacePickerRepository, type WorkspacePickerRepository, type WorkspacePickerScope } from './repository';
 
 export const workspacePickerUpdateInputSchema = z.object({
-  scopeKeys: z.array(z.string().cuid()).min(1).max(6),
+  scopeKeys: z.array(z.string().cuid()).min(1).max(5),
 }).strict();
 
 export class WorkspacePickerError extends Error {
@@ -33,8 +32,8 @@ function project(scope: WorkspacePickerScope): WorkspacePickerApp {
   return { scopeKey: scope.key, slug: scope.slug, name: scope.name };
 }
 
-function entitledScopes(scopes: readonly WorkspacePickerScope[], rootTeamMember: boolean) {
-  return scopes.filter((scope) => scope.visibility === 'public' || (scope.slug === 'hq' && rootTeamMember));
+function entitledScopes(scopes: readonly WorkspacePickerScope[]) {
+  return scopes.filter((scope) => scope.visibility === 'public');
 }
 
 function selectedFromStored(entitled: readonly WorkspacePickerApp[], storedKeys: readonly string[]) {
@@ -46,11 +45,9 @@ function selectedFromStored(entitled: readonly WorkspacePickerApp[], storedKeys:
 
 export function createWorkspacePickerService(
   repository: WorkspacePickerRepository = createWorkspacePickerRepository(),
-  hasRootMembership: (userKey: string) => Promise<boolean> = hasActiveRootTeamMembership,
 ): WorkspacePickerService {
   const snapshot = async (userKey: string): Promise<WorkspacePickerState> => {
-    const rootTeamMember = await hasRootMembership(userKey);
-    const entitled = entitledScopes(await repository.listRootPickerScopes(), rootTeamMember).map(project);
+    const entitled = entitledScopes(await repository.listRootPickerScopes()).map(project);
     const stored = await repository.listUserScopeKeys(userKey);
     if (stored.length === 0) return { apps: entitled, selectedScopeKeys: null };
     const selectedScopeKeys = selectedFromStored(entitled, stored);
@@ -60,8 +57,7 @@ export function createWorkspacePickerService(
     read: snapshot,
     async update(userKey, rawScopeKeys) {
       const input = workspacePickerUpdateInputSchema.parse({ scopeKeys: rawScopeKeys });
-      const rootTeamMember = await hasRootMembership(userKey);
-      const entitled = entitledScopes(await repository.listRootPickerScopes(), rootTeamMember).map(project);
+      const entitled = entitledScopes(await repository.listRootPickerScopes()).map(project);
       if (entitled.length === 0) throw new WorkspacePickerError('NOT_FOUND', 'Workspace apps are unavailable.');
       const selectedScopeKeys = selectedFromStored(entitled, input.scopeKeys);
       if (selectedScopeKeys.length !== [...new Set(input.scopeKeys)].length) {

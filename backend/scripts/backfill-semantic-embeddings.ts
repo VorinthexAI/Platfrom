@@ -12,7 +12,7 @@ const MAX_CATCHUP_PASSES = 5;
 export const SEMANTIC_COLLECTION_ALLOWLIST = [
   'users', 'orchestrators', 'voices',
   'teams', 'scopes', 'channels', 'threads', 'messages', 'messageReactions', 'polls', 'pollOptions', 'folders',
-  'documents', 'documentVersions', 'places', 'trips', 'tickets', 'appNotifications', 'conversationMessages',
+  'documents', 'documentVersions', 'places', 'trips', 'tickets', 'appNotifications', 'userNotifications', 'conversationMessages',
 ] as const;
 
 type SemanticSpec = { name: string; embedKeys: string[]; includeMetadata: boolean };

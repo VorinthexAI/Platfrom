@@ -64,6 +64,7 @@
         "axios": "^1.18.1",
         "expo": "~57.0.18",
         "expo-apple-authentication": "~57.0.1",
+        "expo-application": "~57.0.2",
         "expo-asset": "~57.0.15",
         "expo-audio": "~57.0.4",
         "expo-blob": "^57.0.1",

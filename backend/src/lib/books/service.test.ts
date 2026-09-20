@@ -58,6 +58,15 @@ describe('book service asynchronous lifecycle', () => {
     expect(prompt).toMatchObject({ options: { maxTokens: 2_000 }, responseFormat: { name: 'book_goal_suggestions', schema: { required: ['goals'], properties: { goals: { minItems: 10, maxItems: 10 } } } } });
   });
 
+  test('previews a title and description from the topic and goal', async () => {
+    let prompt: unknown;
+    const service = createBookService({ repository: { authorize: async () => {} } as never, suggestTopics: async (input) => { prompt = input; return JSON.stringify({ title: 'Clear Decisions', description: 'Learn to decide well under pressure without second-guessing every move.' }); } });
+    await expect(service.preview({ teamKey, scopeKey, topic: 'Decision making', goal: 'Decide well' }, userKey)).resolves.toEqual({ title: 'Clear Decisions', description: 'Learn to decide well under pressure without second-guessing every move.' });
+    expect(JSON.stringify(prompt)).toContain('Decision making');
+    expect(JSON.stringify(prompt)).toContain('Decide well');
+    expect(prompt).toMatchObject({ options: { maxTokens: 800 }, responseFormat: { name: 'book_create_preview' } });
+  });
+
   test('accepts and detaches without awaiting generation', async () => {
     let current: any; let generationInput: unknown; const detached: Array<() => Promise<void>> = [];
     const repository: any = { authorize: async () => {}, findByGenerationRequest: async () => null, detail: async () => current };
@@ -167,15 +176,17 @@ describe('book service asynchronous lifecycle', () => {
     await expect(service.delete(bookKey, { teamKey, scopeKey }, userKey)).resolves.toEqual({ key: bookKey }); expect(calls).toEqual(['delete', 'publish']);
   });
 
-  test('keeps the managed workspace introduction non-extendable and non-deletable', async () => {
+  test('keeps the managed workspace introduction non-extendable and deletable', async () => {
     const current: any = row('ready');
     current.book.key = initialWorkspaceBookKey(scopeKey);
     delete current.book.generationInput;
     delete current.book.generationOwnerKey;
-    const service = createBookService({ repository: { detail: async () => current, deleteBook: async () => { throw new Error('must not delete'); } } as never, signUrl: async () => 'signed' });
+    const calls: string[] = [];
+    const service = createBookService({ repository: { detail: async () => current, deleteBook: async () => { calls.push('delete'); return { deleted: true, bookKey: current.book.key }; } } as never, signUrl: async () => 'signed', publishChanged: async () => { calls.push('publish'); } });
     await expect(service.detail(current.book.key, { teamKey, scopeKey }, userKey)).resolves.toMatchObject({ book: { managed: true, canExtend: false } });
     await expect(service.extend(current.book.key, { teamKey, scopeKey, mode: 'preview', chapterCount: 1 }, userKey)).rejects.toThrow('fixed chapter set');
-    await expect(service.delete(current.book.key, { teamKey, scopeKey }, userKey)).rejects.toThrow('cannot be deleted');
+    await expect(service.delete(current.book.key, { teamKey, scopeKey }, userKey)).resolves.toEqual({ key: current.book.key });
+    expect(calls).toEqual(['delete', 'publish']);
   });
 
   test('computes listening progress from audio duration rather than chapter count', async () => {

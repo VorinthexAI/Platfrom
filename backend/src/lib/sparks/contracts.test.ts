@@ -31,6 +31,8 @@ describe('Spark contracts', () => {
     expect(sparkHistoryInputSchema.parse({})).toEqual({ limit: 50 });
     expect(sparkHistoryInputSchema.parse({ limit: 1 })).toEqual({ limit: 1 });
     expect(sparkHistoryInputSchema.parse({ limit: 200, beforeCreatedAt: base.createdAt, beforeKey: base.key })).toEqual({ limit: 200, beforeCreatedAt: base.createdAt, beforeKey: base.key });
+    expect(sparkHistoryInputSchema.parse({ limit: 25, kind: 'tool' })).toEqual({ limit: 25, kind: 'tool' });
+    expect(() => sparkHistoryInputSchema.parse({ kind: 'unknown' })).toThrow();
     for (const limit of [0, 1.5, 201]) expect(() => sparkHistoryInputSchema.parse({ limit })).toThrow();
     expect(() => sparkHistoryInputSchema.parse({ beforeCreatedAt: base.createdAt })).toThrow('provided together');
     expect(() => sparkHistoryInputSchema.parse({ beforeKey: base.key })).toThrow('provided together');

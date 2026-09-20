@@ -7,7 +7,7 @@ import { createTravelService, travelChildrenFindInputSchema, travelCityFindInput
 import { createCountrySearchService } from '@/lib/travel/country-search';
 import { createEmailService, emailDraftComposeInputSchema, emailDraftCreateInputSchema, emailDraftDeleteInputSchema, emailMessageGeneratedListInputSchema, emailMessageSummarizeInputSchema, emailMessageSummaryDeleteInputSchema, emailMessageTranslateInputSchema, emailMessageTranslationDeleteInputSchema, emailOverviewInputSchema, emailReplyContextCreateInputSchema, emailReplyContextDeleteInputSchema, emailReplyContextUpdateInputSchema, emailSemanticSearchInputSchema, emailSimilarFindInputSchema, emailThreadFavoriteInputSchema, emailThreadReadStateInputSchema, emailThreadTrashInputSchema, emailToneCreateInputSchema, emailToneDeleteInputSchema, emailToneUpdateInputSchema, emailTrashClearInputSchema, inboxSortInputSchema, inboxUpdateInputSchema, publicEmailCoreDraftSchema, publicEmailGeneratedDeleteResultSchema, publicEmailSummaryListResultSchema, publicEmailSummaryResultSchema, publicEmailTranslationListResultSchema, publicEmailTranslationResultSchema } from '@/lib/email-inbox/service';
 import { defaultBookService } from '@/lib/books/default-service';
-import { bookExtendToolInputSchema, bookFavoriteToolInputSchema, bookGoalSuggestToolInputSchema, bookTopicSuggestToolInputSchema } from '@/lib/books/service';
+import { bookExtendToolInputSchema, bookFavoriteToolInputSchema, bookGoalSuggestToolInputSchema, bookPreviewToolInputSchema, bookTopicSuggestToolInputSchema } from '@/lib/books/service';
 import { emailDraftUpdateInputSchema } from '@/lib/email-inbox/service';
 import type { EmailActor } from '@/lib/email-inbox/service';
 import { newId } from '@/lib/ids';
@@ -19,16 +19,16 @@ import { appTextEnhanceInputSchema, appTextTranslateInputSchema, createAppTransf
 import { appSpeechInputSchema, createAppSpeechService } from '@/lib/app-speech/service';
 import { accountProfileService, profileNameUpdateInputSchema, safeProfileUpdateResultSchema } from '@/lib/account-profile/service';
 import { profileBadgeClaimInputSchema, profileBadgeGenerateInputSchema, profileBadgeService } from '@/lib/account-profile/badge';
-import { getDefaultTicketService, ticketSubmitInputSchema } from '@/lib/tickets/service';
+import { getDefaultTicketService, ticketListInputSchema, ticketSubmitInputSchema } from '@/lib/tickets/service';
 import { scopeTagCreateInputSchema, scopeTagDeleteInputSchema, scopeTagListInputSchema, scopeTagService, scopeTagSetAssignmentsInputSchema, scopeTagUpdateInputSchema } from '@/lib/scope-tags/service';
 import { referralRedeemInputSchema, referralRedeemResultSchema, referralSummaryReadInputSchema, referralSummarySchema } from '@/lib/referrals/contracts';
 import { referralService } from '@/lib/referrals/service';
 import { checkoutCreateInputSchema, subscriptionMutationInputSchema } from '@/lib/commerce/contracts';
 import { commerceService } from '@/lib/commerce/service';
 import { scopeCreateInputSchema, scopeDeleteInputSchema, scopeListInputSchema, scopePrioritizeInputSchema, scopeSelectInputSchema, scopeUpdateInputSchema, scopeService } from '@/lib/ai/scopes';
-import { appNotifyInputSchema, notificationListInputSchema } from '@/lib/app-notifications/contracts';
-import { communicationMarkReadInputSchema, communicationSendInputSchema, communicationThreadInputSchema } from '@/lib/user-inbox/schemas';
-import { userInboxService } from '@/lib/user-inbox/service';
+import { appNotifyInputSchema } from '@/lib/app-notifications/contracts';
+import { userNotificationListInputSchema, userNotificationMarkReadInputSchema } from '@/lib/user-notifications/schemas';
+import { userNotificationService } from '@/lib/user-notifications/service';
 import { appNotificationService } from '@/lib/app-notifications/service';
 import { costService } from '@/lib/costs/service';
 
@@ -183,10 +183,8 @@ export const hiddenListCapability = capability('content.hidden.list', 'List cont
 
 export const platformCapabilities = [
   capability('app.notify', 'Send a notification with a dynamic title and message to specific eligible users by user key, or to every eligible user in the current team. Set notifyAll true only when every team user should be notified.', appNotifyInputSchema, async (input, context) => (context.appNotifications ?? appNotificationService).notify(input, context.domain, `${context.requestKey ?? newId()}:app.notify`), undefined, 'write'),
-  capability('app.history', "List and search the authenticated user's internal communication Messages or Sent history, optionally filtered by read state.", notificationListInputSchema, async (input, context) => context.userInbox ? context.userInbox.list(input, context.domain) : (context.appNotifications ?? appNotificationService).list(input, context.domain), undefined, 'read'),
-  capability('communication.thread.read', 'Read one internal communication thread and its messages.', communicationThreadInputSchema, async (input, context) => (context.userInbox ?? userInboxService).read(input, context.domain), undefined, 'read'),
-  capability('communication.thread.mark-read', 'Mark one internal communication thread read or unread.', communicationMarkReadInputSchema, async (input, context) => (context.userInbox ?? userInboxService).markRead(input, context.domain), undefined, 'write'),
-  capability('communication.message.send', 'Send a user follow-up in an internal communication thread.', communicationSendInputSchema, async (input, context) => (context.userInbox ?? userInboxService).send(input, context.domain, context.requestKey ?? newId()), undefined, 'write'),
+  capability('notification.list', 'List the authenticated user\'s Vorinthex notifications filtered by read or unread state.', userNotificationListInputSchema, async (input, context) => (context.userNotifications ?? userNotificationService).list(input, context.domain), undefined, 'read'),
+  capability('notification.mark-read', 'Mark one Vorinthex notification read or unread.', userNotificationMarkReadInputSchema, async (input, context) => (context.userNotifications ?? userNotificationService).markRead(input, context.domain), undefined, 'write'),
   capability('scope.list', 'List the active scopes the authenticated user can access in the current team.', scopeListInputSchema, async (input, context) => (context.scopes ?? scopeService).list(input, context.domain), undefined, 'read'),
   capability('pricing.read', 'Read the current Spark charges without purchase grants or free capabilities.', z.object({}).strict(), async (_input, context) => {
     identity(context);
@@ -234,14 +232,14 @@ export const platformCapabilities = [
     await (context.profileBadges ?? profileBadgeService).claim(input, userKey);
     return { claimed: true };
   }, undefined, 'write'),
-  capability('ticket.create', 'Submit an issue ticket for the authenticated user in the current team and scope.', ticketSubmitInputSchema, async (input, context) => {
+  capability('ticket.create', 'Submit an issue or product-feedback ticket for the authenticated user in the current team and scope. Set kind to feedback for product feedback.', ticketSubmitInputSchema, async (input, context) => {
     identity(context);
     return (context.tickets ?? getDefaultTicketService()).submit(input, context.domain, context.requestKey ?? newId());
   }, undefined, 'write'),
-  capability('feedback.create', 'Submit product feedback for the authenticated user in the current team and scope.', ticketSubmitInputSchema, async (input, context) => {
+  capability('ticket.list', 'List the authenticated user\'s submitted issue and feedback tickets in the current team and scope.', ticketListInputSchema, async (input, context) => {
     identity(context);
-    return (context.tickets ?? getDefaultTicketService()).createFeedback(input, context.domain, context.requestKey ?? newId());
-  }, undefined, 'write'),
+    return (context.tickets ?? getDefaultTicketService()).list(input, context.domain);
+  }, undefined, 'read'),
 ] as const;
 
 // Trusted adapters can dispatch these unified tools, but Core must not select a
@@ -329,7 +327,7 @@ export const compassCapabilities = [
 ];
 
 export const signalCapabilities = [
-  capability('email.overview', 'List connected email accounts, or query one selected account by read state and enabled facets with stable cursor pagination.', emailOverviewInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).overview(actor.emailActor, input); }),
+  capability('email.overview', 'List connected email accounts, or query one selected account by read state and enabled facets, or list Signal-sent mail, with stable cursor pagination.', emailOverviewInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).overview(actor.emailActor, input); }),
   capability('inbox.refresh', 'Refresh one connected inbox from its email provider.', z.object({ connectorKey: key }).strict(), async ({ connectorKey }, context) => { const actor = identity(context); return (context.email ?? createEmailService()).sync(actor.emailActor, connectorKey); }, 'signal'),
   capability('inbox.search', 'Semantically search connected Signal inboxes by their names and descriptions.', emailSemanticSearchInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).searchInboxes(actor.emailActor, input, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
   capability('email.tone.search', 'Semantically search available Signal email tones by name.', emailSemanticSearchInputSchema, async (input, context) => { const actor = identity(context); return (context.email ?? createEmailService()).searchTones(actor.emailActor, input, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
@@ -366,6 +364,7 @@ export const ascendCapabilities = [
   capability('book.list', 'List Ascend books and reading progress.', z.object({}).strict(), async (_input, context) => { const actor = identity(context); return (context.books ?? defaultBookService).overview(actor.serviceContext, actor.userKey); }),
   capability('book.topic.suggest', 'Suggest ten distinct, creative audiobook topics.', bookTopicSuggestToolInputSchema, async (input, context) => { const actor = identity(context); return (context.books ?? defaultBookService).suggestTopics({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
   capability('book.goal.suggest', 'Suggest ten distinct reader goals for an audiobook topic.', bookGoalSuggestToolInputSchema, async (input, context) => { const actor = identity(context); return (context.books ?? defaultBookService).suggestGoals({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
+  capability('book.preview', 'Preview a generated audiobook title and description from a topic and goal.', bookPreviewToolInputSchema, async (input, context) => { const actor = identity(context); return (context.books ?? defaultBookService).preview({ ...actor.serviceContext, ...input }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs }); }),
   capability('book.detail', 'Read an Ascend book, chapters, and progress.', z.object({ bookKey: key }).strict(), async ({ bookKey }, context) => { const actor = identity(context); return (context.books ?? defaultBookService).detail(bookKey, actor.serviceContext, actor.userKey); }),
   capability('book.extend', 'Preview unique continuation chapter titles or accept selected titles for durable background generation.', bookExtendToolInputSchema, async ({ bookKey, ...input }, context) => {
     const actor = identity(context);
@@ -374,7 +373,7 @@ export const ascendCapabilities = [
     return (context.books ?? defaultBookService).extend(bookKey, { ...actor.serviceContext, ...input, ...(input.mode === 'generate' ? { requestKey } : {}) }, actor.userKey, { signal: context.signal, timeoutMs: context.timeoutMs });
   }, (input) => (input as { mode?: unknown }).mode === 'generate' ? 'ascend' : undefined),
   capability('book.chapter.progress', 'Update progress for an Ascend chapter.', z.object({ bookKey: key, chapterKey: key, progressSeconds: z.number().int().nonnegative(), isCompleted: z.boolean() }).strict(), async ({ bookKey, chapterKey, ...input }, context) => { const actor = identity(context); return (context.books ?? defaultBookService).progress(bookKey, chapterKey, { ...actor.serviceContext, ...input }, actor.userKey); }, 'ascend'),
-  capability('book.create', 'Accept a personalized ten-chapter audiobook for durable background generation.', z.object({ topic: z.string().trim().min(3).max(500), goal: z.string().trim().min(3).max(1_000), currentKnowledge: z.string().trim().max(2_000), writingTone: z.string().trim().min(2).max(200), language: z.string().trim().min(2).max(100), archiveDocumentKeys: z.array(key).max(50), narratorVoiceKey: z.enum(['calm', 'clear', 'warm']), narrationPace: z.number().min(0.75).max(2), additionalInstructions: z.string().trim().max(12_000).optional() }).strict(), async (input, context) => {
+  capability('book.create', 'Accept a personalized ten-chapter audiobook for durable background generation.', z.object({ topic: z.string().trim().min(3).max(500), goal: z.string().trim().min(3).max(1_000), currentKnowledge: z.string().trim().max(2_000), writingTone: z.string().trim().min(2).max(200), language: z.string().trim().min(2).max(100), archiveDocumentKeys: z.array(key).max(50), narratorVoiceKey: z.enum(['calm', 'clear', 'warm']), narrationPace: z.number().min(0.75).max(2), additionalInstructions: z.string().trim().max(12_000).optional(), title: z.string().trim().min(1).max(120).optional(), description: z.string().trim().min(1).max(800).optional() }).strict(), async (input, context) => {
     const actor = identity(context);
     const requestKey = ('clientRequestKey' in context ? context.clientRequestKey : context.requestKey)?.trim();
     const generationRequestKey = !requestKey ? newId() : requestKey.length <= 200 ? requestKey : createHash('sha256').update(requestKey).digest('hex');

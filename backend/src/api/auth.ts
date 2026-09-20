@@ -39,6 +39,7 @@ import { rawReferralCodeSchema } from '@/lib/referrals/contracts';
 import { normalizeReferralCode } from '@/lib/referrals/service';
 import { completeReferralForNewlyVerifiedUser } from './auth-referrals';
 import { recordAuthCompletion } from '@/lib/ai/events/auth-events';
+import { currentEventIdentifier, eventIdentifierSchema, runWithEventIdentifier } from '@/lib/ai/events/event-identifier';
 
 const EMAIL_LINK_TTL_MS = 15 * 60 * 1000;
 const TOTP_CHALLENGE_TTL_MS = 10 * 60 * 1000;
@@ -143,6 +144,7 @@ const signedOAuthStateSchema = z.object({
   redirectUri: z.string().url(),
   mobileRedirectUri: z.string().url().optional(),
   referralCode: rawReferralCodeSchema.nullable().default(null),
+  eventIdentifier: eventIdentifierSchema.nullable().default(null),
   nonce: z.string().min(1),
   exp: z.number(),
 }).strict();
@@ -153,6 +155,7 @@ async function createSignedOAuthState(provider: OAuthProvider, redirectUri: stri
     redirectUri,
     mobileRedirectUri,
     referralCode: referralCode ?? null,
+    eventIdentifier: currentEventIdentifier(),
     nonce: randomToken('oauth_'),
     exp: Date.now() + 10 * 60 * 1000,
   });
@@ -934,7 +937,9 @@ async function completeOAuthProfile(
   provider: OAuthProvider,
   mobileRedirectUri?: string,
   referralCode?: string | null,
+  eventIdentifier?: string | null,
 ) {
+  const complete = async () => {
   const normalized = normalizeEmail(profile.email);
 
   const existingUser = await getUserByEmailHash(await hashUserEmail(normalized));
@@ -963,6 +968,8 @@ async function completeOAuthProfile(
     welcomeLine: pickWelcomeLine(user.key, alias),
     mobileRedirectUri,
   };
+  };
+  return eventIdentifier ? runWithEventIdentifier(eventIdentifier, complete) : complete();
 }
 
 export async function completeOAuthSignIn(input: {
@@ -976,7 +983,7 @@ export async function completeOAuthSignIn(input: {
   const profile = input.provider === 'google'
     ? await exchangeGoogleCode(input.code, input.redirectUri)
     : await exchangeAppleCode(input.code, input.redirectUri);
-  return profile ? completeOAuthProfile(profile, input.provider, state.mobileRedirectUri, state.referralCode) : null;
+  return profile ? completeOAuthProfile(profile, input.provider, state.mobileRedirectUri, state.referralCode, state.eventIdentifier) : null;
 }
 
 export async function completeNativeGoogleSignIn(idToken: string, referralCode?: string) {

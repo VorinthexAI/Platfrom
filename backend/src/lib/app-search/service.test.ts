@@ -72,7 +72,7 @@ describe('app search service', () => {
   });
 
   test('publishes distinct field, filter, operation, and status metadata for every collection adapter', () => {
-    expect(Object.keys(APP_SEARCH_COLLECTION_ADAPTERS)).toHaveLength(15);
+    expect(Object.keys(APP_SEARCH_COLLECTION_ADAPTERS)).toHaveLength(17);
     for (const [slug, adapter] of Object.entries(APP_SEARCH_COLLECTION_ADAPTERS)) {
       expect(adapter.description.length, `${slug} semantic description`).toBeGreaterThan(30);
       expect(adapter.operations.length, `${slug} operations`).toBeGreaterThan(0);

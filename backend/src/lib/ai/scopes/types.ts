@@ -1,5 +1,5 @@
 import { AiError } from '@/lib/ai/shared/result';
-import type { Scope, ScopeScope } from './schema';
+import type { Scope, ScopeScope, ScopeVisibility } from './schema';
 import type { db } from '@/lib/db/client';
 
 export interface CreateScopeInput {
@@ -11,7 +11,7 @@ export interface CreateScopeInput {
   description: string | null;
   position: number;
   level?: number;
-  visibility?: 'public' | 'private';
+  visibility?: ScopeVisibility;
 }
 
 export interface ScopeRepository {

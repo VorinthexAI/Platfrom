@@ -1,8 +1,9 @@
 import type { QueryClient } from "@tanstack/react-query";
 
-import { billingSummaryQueryKey, currentSubscriptionQueryKey } from "./billing-client";
+import { billingSummaryQueryKey, currentSubscriptionQueryKey, walletHistoryQueryKey } from "./billing-client";
 
 export async function refreshAuthoritativeBilling(queryClient: QueryClient, userKey: string) {
+  void queryClient.invalidateQueries({ queryKey: walletHistoryQueryKey(userKey), exact: true });
   const keys = [billingSummaryQueryKey(userKey), currentSubscriptionQueryKey(userKey)] as const;
   await Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey, exact: true })));
   await Promise.all(keys.map((queryKey) => queryClient.refetchQueries({ queryKey, exact: true }, { throwOnError: true })));

@@ -252,8 +252,8 @@ export function EmailAttachmentPicker({ archiveOnly = false, galleryOnly = false
     >
       <View style={styles.rootActions}><View style={styles.rootSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel={`Search ${activeTab}`} onChangeText={changeQuery} onSubmitEditing={() => void load(activeTab, query)} placeholder="Search..." ref={searchInputRef} returnKeyType="search" style={styles.rootSearchInput} value={query} />{query.trim() ? <ButtonSizeProvider overrideParent size="xs"><Button accessibilityLabel="Clear attachment search" contentMode="raw" iconOnly onPress={() => changeQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button></ButtonSizeProvider> : null}</View><Button accessibilityLabel="Filter attachments" contentMode="raw" onPress={() => setFilterOpen(true)} size="md" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={filters.favoritesOnly || filters.showHidden ? "accent" : "default"} /></Button></View>
       {!archiveOnly && !galleryOnly ? <Tabs accessibilityLabel="Attachment sources" accessibilityRole="tablist" style={styles.folderTabs}>
-        <Button accessibilityRole="tab" accessibilityState={{ selected: tab === "archive" }} onPress={() => changeTab("archive")} style={styles.folderTab} variant={tab === "archive" ? "secondary" : "ghost"}>Archive</Button>
-        <Button accessibilityRole="tab" accessibilityState={{ selected: tab === "gallery" }} onPress={() => changeTab("gallery")} style={styles.folderTab} variant={tab === "gallery" ? "secondary" : "ghost"}>Gallery</Button>
+        <Button accessibilityRole="tab" accessibilityState={{ selected: tab === "archive" }} onPress={() => changeTab("archive")} style={styles.folderTab} variant={tab === "archive" ? "secondary" : "ghost"}>Folders</Button>
+        <Button accessibilityRole="tab" accessibilityState={{ selected: tab === "gallery" }} onPress={() => changeTab("gallery")} style={styles.folderTab} variant={tab === "gallery" ? "secondary" : "ghost"}>Collections</Button>
       </Tabs> : null}
       {selectionNotice ? <Text accessibilityLiveRegion="assertive" style={styles.notice}>{selectionNotice}</Text> : null}
       {error ? <View accessibilityRole="alert" style={styles.error}><Text style={styles.errorText}>{error}</Text><Button onPress={() => void load(activeTab, query)} size="md" variant="secondary">Retry</Button></View> : null}
@@ -296,7 +296,7 @@ const styles = StyleSheet.create({
   selectionBadge: { position: "absolute", top: 4, right: 4, width: 20, height: 20, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: palette.silver50 },
   image: { width: "100%", height: "100%" },
   imageSkeleton: { borderRadius: radii.md, backgroundColor: palette.hairlineBright, opacity: 0.72 },
-  documentSkeleton: { width: "100%", height: 38, borderRadius: 999 },
+  documentSkeleton: { width: "100%", height: 38, borderRadius: 999, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   empty: { paddingVertical: 60, color: palette.silver700, fontFamily: fonts.regular, fontSize: 13, textAlign: "center" },
   searchEmptyText: { paddingVertical: 0 },
   error: { marginTop: spacing.sm, padding: spacing.sm, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderRadius: radii.md, backgroundColor: "rgba(64,20,20,0.9)" },

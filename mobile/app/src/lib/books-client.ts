@@ -63,6 +63,8 @@ export const createBookRequestSchema = contextSchema.extend({
   narrationPace: z.number().min(0.75).max(2),
   archiveDocumentKeys: z.array(keySchema).max(10),
   additionalInstructions: z.string().trim().max(12_000).optional(),
+  title: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().min(1).max(800).optional(),
 });
 const detailRequestSchema = contextSchema;
 const mutationRequestSchema = contextSchema.extend({ requestKey: z.string().trim().min(1).max(200) });
@@ -79,6 +81,8 @@ export const bookGoalSuggestionsRequestSchema = contextSchema.extend({ topic: z.
 export const bookGoalSuggestionsResponseSchema = z.strictObject({ goals: z.array(z.string().trim().min(3).max(160)).length(10).superRefine((goals, context) => {
   if (new Set(goals.map((goal) => goal.toLocaleLowerCase())).size !== goals.length) context.addIssue({ code: "custom", message: "Goals must be unique." });
 }) });
+export const bookPreviewRequestSchema = contextSchema.extend({ topic: z.string().trim().min(3).max(2_000), goal: z.string().trim().min(3).max(2_000), additionalInstructions: z.string().trim().max(12_000).optional() });
+export const bookPreviewResponseSchema = z.strictObject({ title: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(800) });
 export const bookExtensionPreviewRequestSchema = contextSchema.extend({ chapterCount: extensionChapterCountSchema });
 export const bookExtensionPreviewResponseSchema = z.strictObject({ titles: z.array(z.string().trim().min(1)) });
 export const bookExtensionRequestSchema = contextSchema.extend({
@@ -167,10 +171,11 @@ export async function searchBooks(query: string, signal?: AbortSignal, recordHis
     limit: 50,
     ...(normalizedTagKeys.length ? { filters: { tagKeys: normalizedTagKeys, tagMatch: "all" as const } } : {}),
   }, signal);
-  return appSearchResults(output, "books", bookSchema.extend({ score: z.number() })).map(({ score: _score, ...book }) => book);
+  return appSearchResults(output, "books", bookSchema.extend({ score: z.number().optional(), tags: z.array(z.unknown()).optional(), content: z.string().optional(), contentTruncated: z.boolean().optional() })).map(({ score: _score, tags: _tags, content: _content, contentTruncated: _contentTruncated, ...book }) => book);
 }
 export function suggestBookTopics(excludeTopics: string[] = []) { return request("post", "/books/topic-suggestions", { excludeTopics }, bookTopicSuggestionsRequestSchema, bookTopicSuggestionsResponseSchema, 50_000); }
 export function suggestBookGoals(topic: string, excludeGoals: string[] = []) { return request("post", "/books/goal-suggestions", { topic, excludeGoals }, bookGoalSuggestionsRequestSchema, bookGoalSuggestionsResponseSchema, 50_000); }
+export function previewBookCreate(input: { topic: string; goal: string; additionalInstructions?: string }) { return request("post", "/books/preview", input, bookPreviewRequestSchema, bookPreviewResponseSchema, 50_000); }
 export function createBook(input: CreateBookInput, generationRequestKey: string) { return request("post", "/books", { ...input, generationRequestKey }, createBookRequestSchema, bookSchema, 15 * 60_000); }
 export function fetchBookDetail(bookKey: string) { return request("post", `/books/${keySchema.parse(bookKey)}/detail`, {}, detailRequestSchema, detailResponseSchema); }
 export function previewBookExtension(bookKey: string, chapterCount: ExtensionChapterCount) { return request("post", `/books/${keySchema.parse(bookKey)}/extension/preview`, { chapterCount }, bookExtensionPreviewRequestSchema, bookExtensionPreviewResponseSchema, 30_000); }

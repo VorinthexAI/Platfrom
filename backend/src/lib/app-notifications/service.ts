@@ -3,10 +3,9 @@ import { rankAccessRole } from '@/lib/ai/tools/domain-access-engine';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { currentEmbeddingSchema, embedText } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
-import { appNotifyInputSchema, type AppNotifyInput, notificationListInputSchema, type NotificationListInput, pushRegistrationInputSchema, type PushRegistrationInput } from './contracts';
+import { appNotifyInputSchema, type AppNotifyInput, pushRegistrationInputSchema, type PushRegistrationInput } from './contracts';
 import { appNotificationRepository, type AppNotificationRepository } from './repository';
 import { enqueueAppNotification } from './queue';
-import { createUserInboxService, type UserInboxService } from '@/lib/user-inbox/service';
 
 export class AppNotificationAccessError extends Error {}
 
@@ -32,7 +31,7 @@ export function storageRetentionWarningContent(monthlyCostSparks: string, wipeDu
 
 type PublishCommunicationChanged = (userKey: string, event: 'communication.changed') => Promise<unknown>;
 
-export function createAppNotificationService(dependencies: { repository?: AppNotificationRepository; inbox?: UserInboxService; enqueue?: typeof enqueueAppNotification; embed?: (text: string) => Promise<number[]>; publishChanged?: PublishCommunicationChanged } = {}) {
+export function createAppNotificationService(dependencies: { repository?: AppNotificationRepository; enqueue?: typeof enqueueAppNotification; embed?: (text: string) => Promise<number[]>; publishChanged?: PublishCommunicationChanged } = {}) {
   const repository = dependencies.repository ?? appNotificationRepository;
   const enqueue = dependencies.enqueue ?? enqueueAppNotification;
   const publishChanged = dependencies.publishChanged ?? ((userKey: string) => import('@/api/events').then(({ publishUserEvent }) => publishUserEvent(userKey, 'communication.changed')));
@@ -79,10 +78,6 @@ export function createAppNotificationService(dependencies: { repository?: AppNot
       if (result) await publishChanged(input.userKey, 'communication.changed').catch(() => undefined);
       if (result && result.deliveries > 0) await enqueue(result.key);
       return result;
-    },
-    async list(rawInput: NotificationListInput, context: ToolContext) {
-      activeMember(context);
-      return (dependencies.inbox ?? createUserInboxService()).list(notificationListInputSchema.parse(rawInput), context);
     },
   };
 }

@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { MAIL_DEV_SEED_EMAIL, mailDevFixtures } from './dev-fixtures';
 import { mailDevFixtureKey } from './dev-seed';
-import { emailDevelopmentAttachmentAssets } from '@/lib/development-fixture-assets';
 
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
 const accountKeys = ['studio', 'personal', 'community'].map((slug) => mailDevFixtureKey('test-account', scopeKey, slug));
@@ -12,14 +11,17 @@ describe('mail development fixture manifest', () => {
     const fixtures = mailDevFixtures(scopeKey, accountKeys);
     expect(MAIL_DEV_SEED_EMAIL).toBe('oscar.burman005@gmail.com');
     expect(fixtures.accounts).toHaveLength(3);
-    expect(fixtures.threads).toHaveLength(30);
+    expect(fixtures.threads).toHaveLength(33);
     expect(fixtures.threads.reduce((count, thread) => count + thread.messages.length, 0)).toBeGreaterThanOrEqual(40);
     expect(new Set(fixtures.threads.map(({ thread }) => thread.category))).toEqual(new Set(['primary', 'updates', 'promotions', 'social', 'forums', 'other']));
     expect(fixtures.threads.some(({ thread }) => thread.labels.includes('SPAM'))).toBe(true);
     expect(fixtures.threads.some(({ thread }) => thread.labels.includes('TRASH'))).toBe(true);
     expect(fixtures.threads.some(({ thread }) => thread.isFavorite)).toBe(true);
     expect(fixtures.threads.some(({ messages }) => messages.some(({ cc }) => (cc?.length ?? 0) > 1))).toBe(true);
-    expect(fixtures.threads.every(({ messages }) => messages.some(({ direction }) => direction === 'inbound') && messages.some(({ direction }) => direction === 'outbound'))).toBe(true);
+    expect(fixtures.threads.filter(({ thread }) => thread.inInbox !== false).every(({ messages }) => messages.some(({ direction }) => direction === 'inbound') && messages.some(({ direction }) => direction === 'outbound'))).toBe(true);
+    expect(fixtures.threads.filter(({ thread }) => thread.inInbox === false)).toHaveLength(3);
+    expect(fixtures.threads.filter(({ thread }) => thread.inInbox === false).every(({ messages }) => messages.length === 1 && messages[0]!.direction === 'outbound' && /^<vorinthex-c[0-9a-f]{24}@vorinthex\.com>$/.test(messages[0]!.messageIdHeader ?? ''))).toBe(true);
+    expect(fixtures.threads.flatMap(({ messages }) => messages).filter(({ messageIdHeader }) => /^<vorinthex-c[0-9a-f]{24}@vorinthex\.com>$/.test(messageIdHeader ?? ''))).toHaveLength(12);
   });
 
   test('keeps labels and UI state internally consistent and useful in every inbox', () => {
@@ -47,12 +49,9 @@ describe('mail development fixture manifest', () => {
     const messages = fixtures.threads.flatMap(({ messages }) => messages);
     const attached = messages.filter(({ hasAttachments }) => hasAttachments);
     const refs = attached.flatMap(({ attachments }) => attachments ?? []);
-    const assets = emailDevelopmentAttachmentAssets(scopeKey);
-    const assetRefs = new Set(assets.map(({ type, key }) => `${type}:${key}`));
 
     expect(refs.length).toBeGreaterThan(0);
-    expect(refs.every(({ type, key }) => assetRefs.has(`${type}:${key}`))).toBe(true);
-    expect(assets.every((asset) => asset.type === 'document' ? Boolean(asset.folderKey) : Boolean(asset.collectionKey))).toBe(true);
+    expect(refs.every(({ type, filename }) => (type === 'document' && filename.endsWith('.pdf')) || (type === 'image' && filename.endsWith('.png')))).toBe(true);
     expect(messages.every((message) => message.hasAttachments === Boolean(message.attachments?.length))).toBe(true);
     expect(messages.every((message) => message.attachmentAvailability === (message.hasAttachments ? 'complete' : 'none'))).toBe(true);
     expect(attached.some(({ direction }) => direction === 'inbound')).toBe(true);
@@ -60,6 +59,7 @@ describe('mail development fixture manifest', () => {
     expect(attached.some(({ attachments }) => (attachments?.length ?? 0) > 4)).toBe(true);
     expect(attached.some(({ attachments }) => new Set(attachments?.map(({ type }) => type)).size === 2)).toBe(true);
     expect(fixtures.threads.some(({ messages: threadMessages }) => threadMessages.every(({ hasAttachments }) => hasAttachments))).toBe(true);
+    expect(fixtures.drafts.some((draft) => draft.variant === 'reply' && (draft.attachments?.length ?? 0) === 1)).toBe(true);
   });
 
   test('has deterministic nonzero embeddings, drafts, tones, and reply context', () => {

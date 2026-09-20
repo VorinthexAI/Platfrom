@@ -24,6 +24,14 @@ export function createCostService(): CostService {
             unit: rule.quantity ?? 'invocation',
           })),
           {
+            key: 'app.generate-image',
+            kind: 'static' as const,
+            name: 'Generate an image',
+            description: 'Create and save a generated image.',
+            sparkCost: '10',
+            unit: 'images' as const,
+          },
+          {
             key: 'inbox.sync',
             kind: 'static' as const,
             name: 'Connect and initially sync email',

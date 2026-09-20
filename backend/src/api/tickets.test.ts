@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { newId } from '@/lib/ids';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { TicketFeedbackRejectedError, TicketIdempotencyError, type TicketService } from '@/lib/tickets/service';
-import { createFeedbackHandlers, createTicketHandler } from './tickets';
+import { createFeedbackHandlers, createTicketHandler, createTicketHandlers } from './tickets';
 
 const teamKey = newId(), scopeKey = newId(), userKey = newId();
 const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
@@ -19,10 +19,10 @@ describe('ticket HTTP API', () => {
     expect((await app.request('/tickets', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'request-1' }, body: JSON.stringify({ ...body, userKey }) })).status).toBe(400);
   });
 
-  test('authorizes selectors and invokes the canonical service with trusted context', async () => {
+  test('authorizes selectors and invokes ticket.create with trusted context', async () => {
     const calls: unknown[][] = [];
-    const ticketKey = newId(), threadKey = newId(), initialMessageKey = newId();
-    const service = { submit: async (...args: Parameters<TicketService['submit']>) => { calls.push(args); return { key: ticketKey, threadKey, initialMessageKey, message: 'Help', kind: 'issue' as const, createdAt: '2026-09-03T10:00:00.000Z' }; }, createFeedback: async () => { throw new Error('unexpected'); } } as TicketService;
+    const ticketKey = newId();
+    const service = { submit: async (...args: Parameters<TicketService['submit']>) => { calls.push(args); return { key: ticketKey, message: 'Help', kind: 'issue' as const, createdAt: '2026-09-03T10:00:00.000Z' }; }, list: async () => ({ items: [], nextCursor: null }) } as unknown as TicketService;
     let authorized: unknown;
     const app = new Hono().post('/tickets', createTicketHandler({
       getIdentity: identity,
@@ -32,10 +32,22 @@ describe('ticket HTTP API', () => {
     const response = await app.request('/tickets', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'request-1' }, body: JSON.stringify({ teamKey, scopeKey, message: 'Help' }) });
     expect(response.status).toBe(201);
     const payload = await response.json() as { data: Record<string, unknown> };
-    expect(payload.data).toEqual({ key: ticketKey, threadKey, initialMessageKey, message: 'Help', kind: 'issue', createdAt: '2026-09-03T10:00:00.000Z' });
+    expect(payload.data).toEqual({ key: ticketKey, message: 'Help', kind: 'issue', createdAt: '2026-09-03T10:00:00.000Z' });
     expect(payload.data).not.toHaveProperty('embedding');
     expect(authorized).toEqual({ selectors: { teamKey, scopeKey }, options: { authenticatedUserKey: userKey } });
-    expect(calls).toEqual([[{ message: 'Help' }, context, 'request-1']]);
+    expect(calls).toEqual([[{ message: 'Help', kind: 'issue' }, context, 'request-1']]);
+  });
+
+  test('lists tickets through ticket.list', async () => {
+    const calls: unknown[][] = [];
+    const service = { list: async (...args: unknown[]) => { calls.push(args); return { items: [], nextCursor: null }; } } as unknown as TicketService;
+    const app = new Hono().post('/tickets/list', createTicketHandlers({ getIdentity: identity, authorize: async () => ({ context }), service }).list);
+    const response = await app.request('/tickets/list', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey }) });
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([[{ limit: 10 }, context]]);
+    const paged = await app.request('/tickets/list', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamKey, scopeKey, cursor: newId(), limit: 10 }) });
+    expect(paged.status).toBe(200);
+    expect(calls[1]?.[0]).toMatchObject({ limit: 10 });
   });
 
   test('maps idempotency payload conflicts to HTTP 409', async () => {
@@ -45,21 +57,19 @@ describe('ticket HTTP API', () => {
     expect(await response.json()).toEqual({ success: false, error: { code: 'TICKET_IDEMPOTENCY_CONFLICT', message: 'different payload' } });
   });
 
-  test('feedback creation strictly authorizes selectors and calls the canonical method', async () => {
+  test('feedback HTTP uses ticket.create with kind feedback', async () => {
     const ticketKey = newId(), calls: unknown[][] = [];
-    const safe = { key: ticketKey, threadKey: newId(), initialMessageKey: newId(), message: 'Dark mode', kind: 'feedback' as const, createdAt: '2026-09-03T10:00:00.000Z' };
-    const service = {
-      createFeedback: async (...args: unknown[]) => { calls.push(['create', ...args]); return safe; },
-    } as unknown as TicketService;
-    const handlers = createFeedbackHandlers({ getIdentity: identity, authorize: async () => ({ context }), service, recordEvent: async () => {}, appScopeKey: newId() });
+    const safe = { key: ticketKey, message: 'Dark mode', kind: 'feedback' as const, createdAt: '2026-09-03T10:00:00.000Z' };
+    const service = { submit: async (...args: unknown[]) => { calls.push(['create', ...args]); return safe; } } as unknown as TicketService;
+    const handlers = createFeedbackHandlers({ getIdentity: identity, authorize: async () => ({ context }), service });
     const app = new Hono().post('/feedback', handlers.create);
     const headers = { 'content-type': 'application/json', 'idempotency-key': 'request-1' };
     expect((await app.request('/feedback', { method: 'POST', headers, body: JSON.stringify({ teamKey, scopeKey, message: 'Dark mode' }) })).status).toBe(201);
-    expect(calls).toEqual([['create', { message: 'Dark mode' }, context, 'request-1']]);
+    expect(calls).toEqual([['create', { message: 'Dark mode', kind: 'feedback' }, context, 'request-1']]);
   });
 
   test('maps AI-rejected feedback to a safe client error', async () => {
-    const handlers = createFeedbackHandlers({ getIdentity: identity, authorize: async () => ({ context }), service: { createFeedback: async () => { throw new TicketFeedbackRejectedError('Please submit a clear feature request or product improvement.'); } } as unknown as TicketService, recordEvent: async () => {}, appScopeKey: newId() });
+    const handlers = createFeedbackHandlers({ getIdentity: identity, authorize: async () => ({ context }), service: { submit: async () => { throw new TicketFeedbackRejectedError('Please submit a clear feature request or product improvement.'); } } as unknown as TicketService });
     const app = new Hono().post('/feedback', handlers.create);
     const response = await app.request('/feedback', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'request-1' }, body: JSON.stringify({ teamKey, scopeKey, message: 'asdf' }) });
     expect(response.status).toBe(400);

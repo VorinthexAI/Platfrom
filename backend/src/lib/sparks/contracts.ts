@@ -46,6 +46,7 @@ export const sparkHistoryInputSchema = z.object({
   limit: z.number().int().min(1).max(200).default(50),
   beforeCreatedAt: z.string().datetime({ offset: true }).optional(),
   beforeKey: boundedKeySchema.optional(),
+  kind: sparkTransactionKindSchema.optional(),
 }).strict().superRefine((value, context) => {
   if ((value.beforeCreatedAt === undefined) !== (value.beforeKey === undefined)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'beforeCreatedAt and beforeKey must be provided together.' });
 });

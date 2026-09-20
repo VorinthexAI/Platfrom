@@ -9,7 +9,7 @@ const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
 const teamKey = 'cmrnlzf650002qc7k4p5zem5w';
 const userKey = 'cmrnlzf670004qc7kuser00001';
 const credentials = () => ({ encryptedCredentials: 'v1:fixture:fixture:fixture', encryptionKeyId: 'fixture', accessTokenFingerprint: '0'.repeat(64) });
-const seedInput = { userKey, teamKey, scopeKey, credentials };
+const seedInput = { userKey, teamKey, scopeKey, membershipKey: userKey, credentials };
 
 describe('mail development seed safety', () => {
   test('accepts only explicit loopback URLs outside production', () => {
@@ -26,12 +26,17 @@ describe('mail development seed safety', () => {
     expect(first.connectors).toHaveLength(3);
     expect(first.connectors.every((connector) => connector.userKey === userKey)).toBe(true);
     expect(first.emailThreads.every((thread) => thread.userKey === userKey && thread.scopeKey === userKey)).toBe(true);
-    expect(first.fixtures.threads).toHaveLength(30);
-    expect(first.fixtures.threads.reduce((sum, thread) => sum + thread.messages.length, 0)).toBe(60);
+    expect(first.fixtures.threads).toHaveLength(33);
+    expect(first.fixtures.threads.reduce((sum, thread) => sum + thread.messages.length, 0)).toBe(63);
     expect(first.fixtures.drafts).toHaveLength(6);
     expect(first.fixtures.tones).toHaveLength(3);
     expect(first.fixtures.replyContext).toHaveLength(5);
-    expect(first.attachmentAssets).toHaveLength(9);
+    expect(first.emailAttachments).toHaveLength(13);
+    expect(first.emailAttachments.every((attachment) => attachment.status === 'completed' && attachment.exportPending === false && Boolean(attachment.storageKey))).toBe(true);
+    expect(first.images).toHaveLength(7);
+    expect(first.collections).toHaveLength(1);
+    expect(first.collections[0]).toMatchObject({ name: 'Signal', presentation: 'communication' });
+    expect(first.collectionImages).toHaveLength(7);
     expect(first.connectors.every((connector) => connector.status === 'error' && !connector.syncEnabled && connector.initialSyncCompleted && connector.syncStatus === 'idle' && !connector.watchRegisteredAt && !connector.historyId)).toBe(true);
     expect(first.inboxes.map(({ connectorKey }) => connectorKey)).toEqual(first.connectors.map(({ key }) => key));
     expect(first.inboxes.every(({ key }) => first.exportFolders.every(({ _key }) => _key !== key))).toBe(true);
@@ -41,11 +46,11 @@ describe('mail development seed safety', () => {
     expect(first.exportFolders.every(({ mutationPolicy, managedPurpose, managedOwnerKey }) => mutationPolicy === 'user' && managedPurpose == null && managedOwnerKey == null)).toBe(true);
     expect(first.exportFolders.every(({ parentFolderKey }) => parentFolderKey != null)).toBe(true);
     expect(first.exportFolders.filter(({ parentFolderKey }) => parentFolderKey != null).every(({ presentation }) => presentation == null)).toBe(true);
-    expect(first.exportFolders.filter(({ name }) => name === 'Files')).toHaveLength(3);
+    expect(first.exportFolders.filter(({ name }) => name === 'Files')).toHaveLength(0);
     const threadExportKeys = new Set(first.emailThreads.map((thread) => mailDevFixtureKey('email-archive-thread-export', thread.key)));
     const messageExportKeys = new Set(first.emailMessages.map((message) => mailDevFixtureKey('email-archive-message-export', message.key)));
     const threadDocuments = first.documents.filter((document) => threadExportKeys.has(document.key));
-    expect(threadDocuments).toHaveLength(30);
+    expect(threadDocuments).toHaveLength(33);
     expect(threadDocuments.every(({ key }) => !first.emailThreads.some((thread) => thread.key === key))).toBe(true);
     const inboxExportKeys = new Set(first.inboxes.map(({ connectorKey }) => mailDevFixtureKey('email-archive-export-inbox', scopeKey, connectorKey)));
     expect(threadDocuments.every(({ folderKey }) => typeof folderKey === 'string' && inboxExportKeys.has(folderKey))).toBe(true);
@@ -55,9 +60,11 @@ describe('mail development seed safety', () => {
     expect(new Set(first.documents.map(({ key }) => key)).size).toBe(first.documents.length);
     expect(first.documents.every(({ scopeKey: value, createdAt, updatedAt }) => value === scopeKey && createdAt === updatedAt)).toBe(true);
     expect(first.documents.every(({ developmentFixtureIdentifier }) => developmentFixtureIdentifier === 'vorinthex-local-signal-v1')).toBe(true);
-    const fixtureRefs = first.fixtures.threads.flatMap(({ messages }) => messages.flatMap(({ attachments }) => attachments ?? []));
-    const seededRefs = new Set(first.attachmentAssets.map(({ type, key }) => `${type}:${key}`));
-    expect(fixtureRefs.every(({ type, key }) => seededRefs.has(`${type}:${key}`))).toBe(true);
+    const seededRefs = new Set(first.emailAttachments.map(({ kind, key }) => `${kind}:${key}`));
+    expect(first.emailMessages.flatMap((message) => message.attachments ?? []).every(({ type, key }) => seededRefs.has(`${type}:${key}`))).toBe(true);
+    expect(first.emailAttachments.filter(({ kind }) => kind === 'document').every((attachment) => first.documents.some((document) => document.key === attachment.archiveDocumentKey && document.folderKey === mailDevFixtureKey('email-archive-export-inbox', scopeKey, attachment.connectorKey)))).toBe(true);
+    expect(first.emailAttachments.filter(({ kind }) => kind === 'image').every((attachment) => first.images.some((image) => image.key === attachment.galleryImageKey))).toBe(true);
+    expect(first.emailDrafts.some((draft) => draft.variant === 'reply' && (draft.attachments?.length ?? 0) === 1)).toBe(true);
     expect(mailDevFixtureKey('x', 'y')).toBe(mailDevFixtureKey('x', 'y'));
   });
 
@@ -76,7 +83,7 @@ describe('mail development seed safety', () => {
       collection() { return {}; },
     };
     const detail = await createEmailRepository(database as never).thread(userKey, threadKey);
-    expect(detail.messages.map(({ attachments }) => attachments)).toEqual(fixture.messages.map(({ attachments }) => attachments));
+    expect(detail.messages.map(({ attachments }) => attachments)).toEqual(messageRecords.map(({ attachments }) => attachments));
     expect(detail.messages.map(({ attachmentAvailability }) => attachmentAvailability)).toEqual(['complete', 'complete']);
   });
 
@@ -86,9 +93,9 @@ describe('mail development seed safety', () => {
     const manifest = buildMailDevSeedManifest(seedInput);
     await reconcileMailDevSeed(database, manifest);
     const upserts = queries.filter(({ query }) => query.includes('UPSERT'));
-    expect(upserts).toHaveLength(9);
+    expect(upserts).toHaveLength(13);
     expect(upserts.every(({ query }) => query.includes('FILTER current == null ||'))).toBe(true);
-    expect(upserts.map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['userConnectors', 'emailInboxes', 'folders', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'documents']);
+    expect(upserts.map(({ bindVars }) => bindVars?.['@collection'])).toEqual(['userConnectors', 'emailInboxes', 'folders', 'emailThreads', 'emailMessages', 'emailDrafts', 'emailTones', 'emailReplyContext', 'emailAttachments', 'documents', 'collections', 'images', 'collectionImages']);
     const staleConnectors = queries.find(({ query }) => query.includes('staleConnectorKeys'))!;
     expect(staleConnectors.query).toContain('REMOVE inbox IN emailInboxes');
     const staleDocuments = queries.find(({ query }) => query.includes('document.developmentFixtureIdentifier == @prefix'))!;
@@ -100,7 +107,7 @@ describe('mail development seed safety', () => {
     let query = '';
     const database = { async query(value: string) { query = value; return { async next() { return { connectorMismatches: 0, folderMismatches: 0, documentMismatches: 0, attachmentMismatches: 0, extraFixtureConnectors: 0, extraFixtureDocuments: 0 }; }, async all() { return []; } }; } };
     const manifest = buildMailDevSeedManifest(seedInput);
-    await expect(verifyMailDevSeed(database, manifest)).resolves.toMatchObject({ connectors: 3, threads: 30, messages: 60, attachmentReferences: 13 });
+    await expect(verifyMailDevSeed(database, manifest)).resolves.toMatchObject({ connectors: 3, threads: 33, messages: 63, attachmentReferences: 13 });
     expect(query).toContain('UNSET(current, "_id", "_rev") != desired');
     expect(query).toContain('extraFixtureDocuments');
     expect(query).toContain('folderMismatches');

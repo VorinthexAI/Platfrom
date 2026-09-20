@@ -35,7 +35,6 @@ import {
   createSystemOrchestrator,
   listSystemOrchestrators,
   updateSystemOrchestrator,
-  replyToUserCommunication,
 } from './system';
 import { invokeContentTool } from './content-tools';
 import { communicationHandlers } from './communication';
@@ -56,7 +55,7 @@ import { deleteImageGenerationHistory, generateImage, listImageGenerationHistory
 import { conversationHandlers } from './conversations';
 import { transientAttachmentHandlers } from './transient-attachments';
 import { completeAccountAvatar, presignAccountAvatar, profileBadgeHandlers, updateAccountProfile } from './account-profile';
-import { feedbackHandlers, ticketHandler } from './tickets';
+import { feedbackHandlers, ticketHandler, ticketHandlers } from './tickets';
 import { listApps } from './apps';
 import { tagHandlers } from './tags';
 import { recordAnalyticsEvent } from './event-ingestion';
@@ -70,7 +69,7 @@ import { appNotificationHandlers } from './app-notifications';
 import { teamHandlers } from './teams';
 import { listCosts } from './costs';
 import { generateAgentGreeting, generateAgentGreetingTopics } from './agent-guide';
-import { userInboxHandlers } from './user-inbox';
+
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -413,11 +412,9 @@ export function registerRoutes(app: Hono) {
   app.put('/auth/me/push-subscription', appNotificationHandlers.register);
   app.delete('/auth/me/push-subscription', appNotificationHandlers.unregister);
   app.post('/auth/me/notifications', appNotificationHandlers.list);
-  app.post('/auth/me/communications/list', userInboxHandlers.list);
-  app.post('/auth/me/communications/:threadKey/read', userInboxHandlers.read);
-  app.put('/auth/me/communications/:threadKey/read-state', userInboxHandlers.markRead);
-  app.post('/auth/me/communications/:threadKey/messages', userInboxHandlers.send);
+  app.put('/auth/me/notifications/:notificationKey/read-state', appNotificationHandlers.markRead);
   app.post('/tickets', ticketHandler);
+  app.post('/tickets/list', ticketHandlers.list);
   app.post('/feedback', feedbackHandlers.create);
 
   app.post('/app/search', searchApp);
@@ -574,6 +571,7 @@ export function registerRoutes(app: Hono) {
   app.post('/books/overview', bookHandlers.overview);
   app.post('/books/topic-suggestions', bookHandlers.topicSuggestions);
   app.post('/books/goal-suggestions', bookHandlers.goalSuggestions);
+  app.post('/books/preview', bookHandlers.preview);
   app.post('/assistant/respond', respondToAssistant);
   app.post('/agent/greeting', generateAgentGreeting);
   app.post('/agent/greeting/topics', generateAgentGreetingTopics);
@@ -608,6 +606,5 @@ export function registerRoutes(app: Hono) {
   app.get('/system/orchestrators', listSystemOrchestrators);
   app.post('/system/orchestrators', createSystemOrchestrator);
   app.patch('/system/orchestrators/:orchestratorId', updateSystemOrchestrator);
-  app.post('/system/communications/:threadKey/replies', replyToUserCommunication);
 
 }

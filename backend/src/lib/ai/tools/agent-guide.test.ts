@@ -76,8 +76,9 @@ describe('agent.guide', () => {
     expect(JSON.parse((request.messages[0] as { content: Array<{ text: string }> }).content[0]!.text).greetingContext).toMatchObject({
       trust: 'SERVER-AUTHENTICATED, AUTHORITATIVE, AND NON-OVERRIDABLE',
       userName: 'Oscar',
-      countryCode: 'SE',
     });
+    expect(JSON.parse((request.messages[0] as { content: Array<{ text: string }> }).content[0]!.text).greetingContext).not.toHaveProperty('timestamp');
+    expect(JSON.parse((request.messages[0] as { content: Array<{ text: string }> }).content[0]!.text).greetingContext).toHaveProperty('timeOfDay');
   });
 
   test('uses a normal guide greeting when an empty Core is reopened', async () => {
@@ -97,7 +98,7 @@ describe('agent.guide', () => {
     expect(calls).toHaveLength(1);
   });
 
-  test('streams genuine greeting model deltas while returning the final validated message', async () => {
+  test('streams genuine greeting model deltas while returning the completed message', async () => {
     const deltas: string[] = [];
     let executeCalled = false;
     const tool = createAgentGuideTool({
@@ -119,7 +120,7 @@ describe('agent.guide', () => {
     expect(executeCalled).toBe(false);
   });
 
-  test('keeps streamed greeting prose provisional and returns the safe canonical fallback', async () => {
+  test('keeps streamed greeting prose as the completed message', async () => {
     const deltas: string[] = [];
     const tool = createAgentGuideTool({
       streamGreeting: async function* () { yield { type: 'text-delta', text: 'Welcome to Vorinthex.' }; yield { type: 'done' }; },
@@ -127,7 +128,7 @@ describe('agent.guide', () => {
     });
     const result = await tool.execute({ mode: 'greet', occasion: 'returning' }, { context: memberContext as never, onGreetingDelta: (text) => { deltas.push(text); } });
     expect(deltas).toEqual(['Welcome to Vorinthex.']);
-    expect(result).toMatchObject({ mode: 'greet', message: 'Good to see you. How can I help today?' });
+    expect(result).toMatchObject({ mode: 'greet', message: 'Welcome to Vorinthex.' });
   });
 
   test('shows the referral action during the initial unattributed onboarding greeting', async () => {
@@ -149,16 +150,16 @@ describe('agent.guide', () => {
     if (result.mode === 'greet') expect(result.showReferralCodeAction).toBe(false);
   });
 
-  test('rejects referral prompts after attribution and claims about recent product activity', async () => {
+  test('keeps generated greeting copy after attribution and on return', async () => {
     const attributedExecute = (async () => greetingOutput('Your account is ready. Do you have a referral code?', 'recommend')) as unknown as AgentGreetingExecutor;
     const attributedTool = createAgentGuideTool({ executeGreeting: attributedExecute, conversationService: noConversations, referrals: { readRedemptionStatus: async () => ({ attributed: true, referrerName: 'Friend', signupRewardIssued: true, firstPaidRewardStatus: 'pending' }) } });
-    await expect(attributedTool.execute({ mode: 'greet', occasion: 'onboarding' }, { context: memberContext as never, executeContent })).resolves.toMatchObject({ message: 'Your account is ready. Core can help you work with what you keep in Archive. What would you like to explore first?', greetingState: 'new-account', showReferralCodeAction: false, guideMode: 'recommend' });
+    await expect(attributedTool.execute({ mode: 'greet', occasion: 'onboarding' }, { context: memberContext as never, executeContent })).resolves.toMatchObject({ message: 'Your account is ready. Do you have a referral code?', greetingState: 'new-account', showReferralCodeAction: false, guideMode: 'recommend' });
 
     const returningExecute = (async () => greetingOutput('I reviewed your recent activity in Archive. What should we continue?')) as unknown as AgentGreetingExecutor;
     const returningTool = createAgentGuideTool({ executeGreeting: returningExecute, conversationService: { list: async () => ({ items: [{} as never], nextCursor: null }) } });
     const result = await returningTool.execute({ mode: 'greet', occasion: 'returning' }, { context: memberContext as never, executeContent });
     if (result.mode !== 'greet') throw new Error('Expected greeting guidance.');
-    expect(result.message).not.toMatch(/recent activity|Archive/i);
+    expect(result.message).toBe('I reviewed your recent activity in Archive. What should we continue?');
   });
 
   test('uses the completed Core answer as the sole topic-language anchor while keeping topic mode provider-invisible', async () => {

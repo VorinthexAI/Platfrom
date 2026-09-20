@@ -10,15 +10,12 @@ test('migrates before activating backend code and running data changes', async (
   expect(databaseJob).toContain('timeout-minutes: 60');
   expect(databaseJob).toContain('needs: [changes, backend-secrets, backend-migrate]');
   expect(databaseJob).toContain("needs.backend-migrate.result == 'success'");
-  const seed = databaseJob.indexOf('- name: Seed deterministic application data');
-  const catalogSync = databaseJob.indexOf('- name: Sync Polar product catalog');
-  const backfill = databaseJob.indexOf('- name: Backfill semantic embeddings');
-  expect(databaseJob).not.toContain('- name: Apply graph migrations');
-  expect(seed).toBeGreaterThan(-1);
-  expect(catalogSync).toBeGreaterThan(seed);
-  expect(backfill).toBeGreaterThan(catalogSync);
-  expect(backfill).toBeGreaterThan(seed);
-  expect(databaseJob).toContain('run: bun run --cwd backend db:seed:ci');
+    const catalogSync = databaseJob.indexOf('- name: Sync Polar product catalog');
+    const backfill = databaseJob.indexOf('- name: Backfill semantic embeddings');
+    expect(databaseJob).not.toContain('- name: Apply graph migrations');
+    expect(databaseJob).not.toContain('db:seed:ci');
+    expect(catalogSync).toBeGreaterThan(-1);
+    expect(backfill).toBeGreaterThan(catalogSync);
   expect(databaseJob).toContain('case "$polar_env" in sandbox|production)');
   expect(databaseJob).not.toContain('POLAR_ENV must be production for a production deployment');
   expect(databaseJob).toContain('run: bun run --cwd backend db:backfill-semantic-embeddings:ci');
@@ -79,7 +76,7 @@ test('CI database scripts do not generate a development env file', async () => {
   const packageJson = await Bun.file(new URL('../package.json', import.meta.url)).json();
 
   expect(packageJson.scripts['db:migrate:ci']).toBe('bun run src/db/migration-runner.ts');
-  expect(packageJson.scripts['db:seed:ci']).toBe('bun run src/lib/db/seed.ts');
+  expect(packageJson.scripts['db:seed:ci']).toBeUndefined();
   expect(packageJson.scripts['assets:seed:ci']).toBe('bun run scripts/seed-app-logo-assets.ts --production-ci');
   expect(packageJson.scripts['db:backfill-semantic-embeddings:ci']).toBe(
     'bun run scripts/backfill-semantic-embeddings.ts',
@@ -101,9 +98,6 @@ test('normal local server scripts seed app logos before migration', async () => 
     expect(script.indexOf('seed-app-logo-assets.ts --local')).toBeLessThan(script.indexOf('migration-runner.ts'));
   }
 
-  for (const name of ['seed.ts', 'db:seed']) {
-    const script = packageJson.scripts[name] as string;
-    expect(script.indexOf('seed-app-logo-assets.ts --local')).toBeGreaterThan(-1);
-    expect(script.indexOf('seed-app-logo-assets.ts --local')).toBeLessThan(script.lastIndexOf('src/'));
-  }
+  expect(packageJson.scripts['seed.ts']).toBeUndefined();
+  expect(packageJson.scripts['db:seed']).toBeUndefined();
 });

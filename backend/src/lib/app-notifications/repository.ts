@@ -6,7 +6,7 @@ import type { AppNotifyInput, PushRegistrationInput } from './contracts';
 import { encryptPushToken, pushTokenHash } from './token-crypto';
 
 type QueryDatabase = Pick<typeof db, 'query'>;
-export interface PendingPushDelivery { key: string; userKey: string; tokenCiphertext: string; projectId: string; title: string; message: string; notificationKey: string; signalThreadKey: string; signalMessageKey: string }
+export interface PendingPushDelivery { key: string; userKey: string; tokenCiphertext: string; projectId: string; title: string; message: string; notificationKey: string }
 export interface PendingReceipt { key: string; receiptId: string }
 export interface StorageRetentionWarningPersistenceInput {
   userKey: string;
@@ -66,25 +66,23 @@ export function createAppNotificationRepository(database: QueryDatabase = db) {
       }
       const key = newId();
       const now = new Date().toISOString();
-      const recipientInboxes = recipientUserKeys.map((userKey) => ({ userKey, threadKey: newId(), messageKey: newId() }));
+      const recipients = recipientUserKeys.map((userKey) => ({ userKey, key: newId() }));
       const cursor = await database.query<{ deliveries: number }>(`
         LET subscriptions = (FOR item IN pushSubscriptions FILTER item.userKey IN @recipientUserKeys RETURN item)
         INSERT { _key: @key, actorUserKey: @actorUserKey, teamKey: @teamKey, scopeKey: @scopeKey, idempotencyKey: @idempotencyKey, requestHash: @requestHash, title: @title, message: @message, recipientCount: LENGTH(@recipientUserKeys), deliveryCount: LENGTH(subscriptions), embedding: @embedding, embeddingState: "ready", embeddedAt: @now, embeddingProvider: @embeddingProvider, embeddingModel: @embeddingModel, embeddingDimensions: @embeddingDimensions, createdAt: @now } INTO appNotifications
-        LET recipients = (FOR inbox IN @recipientInboxes
-          INSERT { _key: inbox.threadKey, teamKey: @teamKey, scopeKey: @scopeKey, userKey: inbox.userKey, kind: "notification", subject: @title, notificationKey: @key, createdBy: "system", readAt: null, lastMessageAt: @now, createdAt: @now, updatedAt: @now } INTO userInboxThreads
-          INSERT { _key: inbox.messageKey, threadKey: inbox.threadKey, teamKey: @teamKey, scopeKey: @scopeKey, userKey: inbox.userKey, sender: "system", senderUserKey: @actorUserKey, body: @message, createdAt: @now } INTO userInboxMessages
-          INSERT { _key: CONCAT(@key, "-", inbox.userKey), notificationKey: @key, userKey: inbox.userKey, teamKey: @teamKey, threadKey: inbox.threadKey, messageKey: inbox.messageKey, readAt: null, createdAt: @now, updatedAt: @now } INTO appNotificationRecipients RETURN 1)
-        LET deliveries = (FOR subscription IN subscriptions LET inbox = FIRST(FOR item IN @recipientInboxes FILTER item.userKey == subscription.userKey LIMIT 1 RETURN item) INSERT { _key: CONCAT(@key, "-", subscription._key), notificationKey: @key, subscriptionKey: subscription._key, userKey: subscription.userKey, projectId: subscription.projectId, signalThreadKey: inbox.threadKey, signalMessageKey: inbox.messageKey, status: "queued", attempts: 0, createdAt: @now, updatedAt: @now } INTO pushDeliveries RETURN 1)
+        LET stored = (FOR recipient IN @recipients
+          INSERT { _key: recipient.key, userKey: recipient.userKey, teamKey: @teamKey, scopeKey: @scopeKey, title: @title, message: @message, readAt: null, sourceKey: @key, embedding: @embedding, createdAt: @now } INTO userNotifications
+          INSERT { _key: CONCAT(@key, "-", recipient.userKey), notificationKey: @key, userKey: recipient.userKey, teamKey: @teamKey, readAt: null, createdAt: @now, updatedAt: @now } INTO appNotificationRecipients RETURN 1)
+        LET deliveries = (FOR subscription IN subscriptions INSERT { _key: CONCAT(@key, "-", subscription._key), notificationKey: @key, subscriptionKey: subscription._key, userKey: subscription.userKey, projectId: subscription.projectId, status: "queued", attempts: 0, createdAt: @now, updatedAt: @now } INTO pushDeliveries RETURN 1)
         RETURN { deliveries: LENGTH(deliveries) }
-      `, { ...trusted, key, requestHash, title: input.title, message: input.message, recipientUserKeys, recipientInboxes, embedding: currentEmbeddingSchema.parse(embedding), ...embeddingMetadata(), now });
+      `, { ...trusted, key, requestHash, title: input.title, message: input.message, recipientUserKeys, recipients, embedding: currentEmbeddingSchema.parse(embedding), ...embeddingMetadata(), now });
       const result = (await cursor.next())!;
       return { key, recipients: recipientUserKeys.length, deliveries: result.deliveries, replayed: false };
     },
 
     async createStorageRetentionWarning(input: StorageRetentionWarningPersistenceInput) {
       const key = newId();
-      const threadKey = newId();
-      const messageKey = newId();
+      const userNotificationKey = newId();
       const idempotencyKey = createHash('sha256').update(`storage-retention-warning\0${input.userKey}\0${input.expectedPaymentPastDueAt}\0${input.expectedWipeDueAt}\0${input.now}`).digest('hex');
       const requestHash = createHash('sha256').update(JSON.stringify({ title: input.title, message: input.message, userKey: input.userKey, expectedPaymentPastDueAt: input.expectedPaymentPastDueAt, expectedWipeDueAt: input.expectedWipeDueAt })).digest('hex');
       const cursor = await database.query<{ key: string; deliveries: number }>(`
@@ -100,12 +98,11 @@ export function createAppNotificationRepository(database: QueryDatabase = db) {
         UPDATE state WITH { warningPaymentPastDueAt: @expectedPaymentPastDueAt, warningWipeDueAt: @expectedWipeDueAt, warningSentAt: @now } IN storageRetentionStates
         LET subscriptions = (FOR item IN pushSubscriptions FILTER item.userKey == @userKey RETURN item)
         INSERT { _key: @key, actorUserKey: @userKey, teamKey: team._key, scopeKey: scope._key, idempotencyKey: @idempotencyKey, requestHash: @requestHash, title: @title, message: @message, recipientCount: 1, deliveryCount: LENGTH(subscriptions), embedding: @embedding, embeddingState: "ready", embeddedAt: @now, embeddingProvider: @embeddingProvider, embeddingModel: @embeddingModel, embeddingDimensions: @embeddingDimensions, createdAt: @now } INTO appNotifications
-        INSERT { _key: @threadKey, teamKey: team._key, scopeKey: scope._key, userKey: @userKey, kind: "notification", subject: @title, notificationKey: @key, createdBy: "system", readAt: null, lastMessageAt: @now, createdAt: @now, updatedAt: @now } INTO userInboxThreads
-        INSERT { _key: @messageKey, threadKey: @threadKey, teamKey: team._key, scopeKey: scope._key, userKey: @userKey, sender: "system", senderUserKey: @userKey, body: @message, createdAt: @now } INTO userInboxMessages
-        INSERT { _key: CONCAT(@key, "-", @userKey), notificationKey: @key, userKey: @userKey, teamKey: team._key, threadKey: @threadKey, messageKey: @messageKey, readAt: null, createdAt: @now, updatedAt: @now } INTO appNotificationRecipients
-        LET deliveries = (FOR subscription IN subscriptions INSERT { _key: CONCAT(@key, "-", subscription._key), notificationKey: @key, subscriptionKey: subscription._key, userKey: subscription.userKey, projectId: subscription.projectId, signalThreadKey: @threadKey, signalMessageKey: @messageKey, status: "queued", attempts: 0, createdAt: @now, updatedAt: @now } INTO pushDeliveries RETURN 1)
+        INSERT { _key: @userNotificationKey, userKey: @userKey, teamKey: team._key, scopeKey: scope._key, title: @title, message: @message, readAt: null, sourceKey: @key, embedding: @embedding, createdAt: @now } INTO userNotifications
+        INSERT { _key: CONCAT(@key, "-", @userKey), notificationKey: @key, userKey: @userKey, teamKey: team._key, readAt: null, createdAt: @now, updatedAt: @now } INTO appNotificationRecipients
+        LET deliveries = (FOR subscription IN subscriptions INSERT { _key: CONCAT(@key, "-", subscription._key), notificationKey: @key, subscriptionKey: subscription._key, userKey: subscription.userKey, projectId: subscription.projectId, status: "queued", attempts: 0, createdAt: @now, updatedAt: @now } INTO pushDeliveries RETURN 1)
         RETURN { key: @key, deliveries: LENGTH(deliveries) }
-      `, { ...input, key, threadKey, messageKey, idempotencyKey, requestHash, ...embeddingMetadata() });
+      `, { ...input, key, userNotificationKey, idempotencyKey, requestHash, ...embeddingMetadata() });
       const result = await cursor.next();
       return result ? { ...result, recipients: 1, replayed: false } : null;
     },
@@ -115,11 +112,9 @@ export function createAppNotificationRepository(database: QueryDatabase = db) {
         FOR delivery IN pushDeliveries
           FILTER delivery.notificationKey == @notificationKey && delivery.status == "queued"
           LET subscription = DOCUMENT(pushSubscriptions, delivery.subscriptionKey)
-          LET thread = DOCUMENT(userInboxThreads, delivery.signalThreadKey)
-          LET signalMessage = DOCUMENT(userInboxMessages, delivery.signalMessageKey)
-          FILTER subscription != null && thread != null && signalMessage != null
-          FILTER thread.userKey == delivery.userKey && signalMessage.userKey == delivery.userKey && signalMessage.threadKey == thread._key
-          RETURN { key: delivery._key, userKey: delivery.userKey, tokenCiphertext: subscription.tokenCiphertext, projectId: subscription.projectId, title: thread.subject, message: signalMessage.body, notificationKey: delivery.notificationKey, signalThreadKey: thread._key, signalMessageKey: signalMessage._key }
+          LET notification = FIRST(FOR item IN userNotifications FILTER item.sourceKey == delivery.notificationKey && item.userKey == delivery.userKey LIMIT 1 RETURN item)
+          FILTER subscription != null && notification != null
+          RETURN { key: delivery._key, userKey: delivery.userKey, tokenCiphertext: subscription.tokenCiphertext, projectId: subscription.projectId, title: notification.title, message: notification.message, notificationKey: delivery.notificationKey }
       `, { notificationKey });
       return await cursor.all();
     },

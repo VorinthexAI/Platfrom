@@ -13,6 +13,9 @@ import { sparkService } from '@/lib/sparks/service';
 import { ACCOUNT_GRANT_MICRO_SPARKS } from '@/lib/costs';
 import { referralService } from '@/lib/referrals/service';
 import { sendWelcomeEmail } from '@/lib/email/lifecycle';
+import { currentEventIdentifier } from '@/lib/ai/events/event-identifier';
+import { currentDevice } from '@/lib/ai/events/device';
+import { claimNewcomerGrant, releaseNewcomerGrantClaim } from '@/lib/db/newcomer-grant-claims.node';
 
 export function newcomerGrantInput(eventKey: string) {
   return {
@@ -25,15 +28,29 @@ export function newcomerGrantInput(eventKey: string) {
 }
 
 async function initializeNewAccount(user: User): Promise<User> {
-  const grant = await sparkService.adjust(user.key, newcomerGrantInput(newId()));
-  if (grant.status === 'conflict') throw new Error(`Spark account initialization conflicted for user ${user.key}.`);
-  await recordAccountCreatedEvent(user, grant.transaction);
+  const eventKey = newId();
+  const grant = await applyNewcomerGrant(user.key, eventKey);
+  await recordAccountCreatedEvent(user, grant ?? { key: null, eventKey, deltaMicroSparks: 0 });
   await referralService.ensurePersonalCode(user.key);
   if (!user.email.endsWith('@guest.vorinthex.com')) await sendWelcomeEmail(user.email).catch((error) => console.error('welcome email delivery failed', { userKey: user.key, error }));
   return await getUserById(user.key) ?? user;
 }
 
-async function recordAccountCreatedEvent(user: User, transaction: { key: string; eventKey?: string; deltaMicroSparks: number }) {
+async function applyNewcomerGrant(userKey: string, eventKey: string) {
+  const installationIdentifier = currentEventIdentifier();
+  if (currentDevice() && !installationIdentifier) return null;
+  if (installationIdentifier && await claimNewcomerGrant(installationIdentifier, userKey) === 'duplicate') return null;
+  try {
+    const grant = await sparkService.adjust(userKey, newcomerGrantInput(eventKey));
+    if (grant.status === 'conflict') throw new Error(`Spark account initialization conflicted for user ${userKey}.`);
+    return grant.transaction;
+  } catch (error) {
+    if (installationIdentifier) await releaseNewcomerGrantClaim(installationIdentifier);
+    throw error;
+  }
+}
+
+async function recordAccountCreatedEvent(user: User, transaction: { key: string | null; eventKey?: string; deltaMicroSparks: number }) {
   const eventKey = transaction.eventKey;
   if (!eventKey) throw new Error(`Spark account initialization did not retain an event key for user ${user.key}.`);
   const { scopeKey: appScopeKey } = await appsService.resolveAlias(APP_KEYS.CORE);

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { COMMERCE_CATALOG } from './catalog';
-import { seedCommerceCatalog } from '@/lib/db/seed';
+import { seedCommerceCatalog } from '@/db/migrations/0018-canonical-seed';
 
 describe('commerce catalog seed', () => {
   test('runs as part of normal database migration after the products collection exists', async () => {

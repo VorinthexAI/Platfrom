@@ -13,9 +13,6 @@ import { isArangoUniqueConstraintError } from '@/lib/db/base';
 import { newId } from '@/lib/ids';
 import { getAuthIdentity } from './security';
 import { parseJson, parseQuery, strictObject } from './validation';
-import { runTrustedTool } from '@/lib/ai/tools';
-import { communicationStaffReplyInputSchema } from '@/lib/user-inbox/schemas';
-import { userInboxService, UserInboxIdempotencyError, UserInboxNotFoundError } from '@/lib/user-inbox/service';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
@@ -70,23 +67,6 @@ export async function requireSuperAdmin(c: Context) {
     return { error: c.json({ error: 'super admin required' }, 403) };
   }
   return { key: auth.key, user };
-}
-
-export async function replyToUserCommunication(c: Context) {
-  const admin = await requireSuperAdmin(c);
-  if ('error' in admin) return admin.error;
-  try {
-    const idempotencyKey = z.string().trim().min(1).max(180).parse(c.req.header('idempotency-key'));
-    const input = communicationStaffReplyInputSchema.parse({ threadKey: c.req.param('threadKey'), ...(await parseJson(c, communicationStaffReplyInputSchema.pick({ message: true }))) });
-    const result = await runTrustedTool('communication.staff.reply', input, { context: { teamKey: newId(), runtimeScopeKey: newId(), principal: { kind: 'system' } }, staffUserKey: admin.key, requestKey: idempotencyKey, userInbox: userInboxService } as never);
-    return c.json({ success: true, data: result }, 201);
-  } catch (error) {
-    if (error instanceof UserInboxNotFoundError) return c.json({ success: false, error: error.message }, 404);
-    if (error instanceof UserInboxIdempotencyError) return c.json({ success: false, error: error.message }, 409);
-    if (error instanceof z.ZodError || error instanceof SyntaxError) return c.json({ success: false, error: 'invalid communication reply' }, 400);
-    console.error('staff communication reply failed', { error });
-    return c.json({ success: false, error: 'communication reply could not be completed' }, 500);
-  }
 }
 
 function uniqueConflict(c: Context, err: unknown, message: string) {

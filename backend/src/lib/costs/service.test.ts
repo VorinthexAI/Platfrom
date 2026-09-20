@@ -7,12 +7,13 @@ describe('public Spark costs', () => {
     const { charges } = await costService.listCharges();
     const staticCharges = charges.filter((charge) => charge.kind === 'static');
     const listedRules = Object.entries(TOOL_COST_RULES).filter(([, rule]) => rule.showInPricing !== false);
-    expect(staticCharges).toHaveLength(listedRules.length + 2);
+    expect(staticCharges).toHaveLength(listedRules.length + 3);
     expect(staticCharges.slice(0, listedRules.length).map(({ key }) => key)).toEqual(listedRules.map(([key]) => key));
     expect(charges.some(({ key }) => key === 'image.caption')).toBe(false);
     expect(charges.some(({ key }) => key === 'document.parse' || key === 'document.scan')).toBe(false);
-    expect(charges).toContainEqual(expect.objectContaining({ key: 'place.guide.find', name: 'View country' }));
-    expect(charges).toContainEqual(expect.objectContaining({ key: 'place.find-city', name: 'View city' }));
+    expect(charges).toContainEqual(expect.objectContaining({ key: 'place.guide.find', name: 'View place', sparkCost: '5' }));
+    expect(charges.some(({ key }) => key === 'place.find-city')).toBe(false);
+    expect(charges).toContainEqual(expect.objectContaining({ key: 'app.generate-image', kind: 'static', name: 'Generate an image', sparkCost: '10', unit: 'images' }));
     expect(charges.some(({ key }) => key === 'place.create' || key === 'place.find-children')).toBe(false);
     expect(charges).toContainEqual(expect.objectContaining({ key: 'book.create', name: 'Create an audio book', description: 'Generate and save a complete audio book.' }));
     expect(charges).toContainEqual(expect.objectContaining({ key: 'book.extend', name: 'Extend an audio book', description: 'Generate and save an additional audio book chapter.' }));

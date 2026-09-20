@@ -18,11 +18,11 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(190);
-    expect(MODEL_TOOL_NAMES).toHaveLength(184);
-    expect(TOOL_DEFINITIONS).toHaveLength(184);
+    expect(TOOL_NAMES).toHaveLength(188);
+    expect(MODEL_TOOL_NAMES).toHaveLength(183);
+    expect(TOOL_DEFINITIONS).toHaveLength(183);
     expect(TOOL_NAMES).not.toContain('document.scan');
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 143);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 142);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...MODEL_TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -38,15 +38,17 @@ describe('unified tool registry', () => {
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['tag.list', 'tag.create', 'tag.update', 'tag.delete', 'tag.assignment.set']));
     expect(toolInputSchemas['tag.list'].parse({})).toEqual({ limit: 50 });
     for (const name of ['tag.list', 'tag.create', 'tag.update', 'tag.delete', 'tag.assignment.set']) expect(() => toolInputSchemas[name].parse({ teamKey: 'forged' })).toThrow('Unrecognized key');
-    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['billing.summary.read', 'referral.summary.read', 'profile.update', 'ticket.create', 'feedback.create', 'app.history', 'communication.thread.read', 'communication.thread.mark-read', 'communication.message.send', 'communication.staff.reply']));
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['billing.summary.read', 'referral.summary.read', 'profile.update', 'ticket.create', 'ticket.list', 'app.notify', 'notification.list', 'notification.mark-read']));
+    expect(TOOL_NAMES).not.toEqual(expect.arrayContaining(['feedback.create', 'app.history', 'communication.thread.read', 'communication.thread.mark-read', 'communication.message.send', 'communication.staff.reply']));
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['pricing.read', 'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore']));
     expect(toolInputSchemas['payment.checkout.create'].parse({ productId: 'topup.small' })).toEqual({ productId: 'topup.small' });
     expect(() => toolInputSchemas['payment.checkout.create'].parse({ productId: 'topup.small', providerProductId: 'forged' })).toThrow('Unrecognized key');
     expect(toolInputSchemas['referral.summary.read'].parse({})).toEqual({});
     expect(() => toolInputSchemas['referral.summary.read'].parse({ userKey: newId() })).toThrow('Unrecognized key');
-    expect(toolInputSchemas['feedback.create'].parse({ message: 'Add dark mode' })).toEqual({ message: 'Add dark mode' });
-    expect(toolInputSchemas['app.history'].parse({})).toEqual({ limit: 25, mailbox: 'inbox' });
-    for (const name of ['feedback.create', 'app.history']) expect(() => toolInputSchemas[name].parse({ userKey: newId() })).toThrow('Unrecognized key');
+    expect(toolInputSchemas['ticket.create'].parse({ message: 'Add dark mode', kind: 'feedback' })).toEqual({ message: 'Add dark mode', kind: 'feedback' });
+    expect(toolInputSchemas['ticket.list'].parse({})).toEqual({ limit: 10 });
+    expect(toolInputSchemas['notification.list'].parse({ readState: 'unread' })).toEqual({ readState: 'unread', limit: 10 });
+    for (const name of ['ticket.create', 'ticket.list', 'notification.list']) expect(() => toolInputSchemas[name].parse({ userKey: newId() })).toThrow('Unrecognized key');
     for (const name of ['profile.update', 'ticket.create']) for (const field of ['teamKey', 'scopeKey', 'userKey', 'teamMembershipKey', 'idempotencyKey']) {
       const input = name === 'profile.update' ? { name: 'Ada Lovelace', [field]: 'forged' } : { message: 'Please help', [field]: 'forged' };
       expect(() => toolInputSchemas[name].parse(input)).toThrow('Unrecognized key');
@@ -148,7 +150,7 @@ describe('unified tool registry', () => {
     for (const tool of ['inbox.sync', 'inbox.subscribe']) for (const field of ['teamKey', 'scopeKey', 'userKey', 'accessToken']) expect(() => toolInputSchemas[tool].parse({ connectorKey: inboxSortConnectorKey, [field]: newId() })).toThrow('Unrecognized key');
     for (const tool of ['inbox.refresh', 'inbox.sort']) for (const field of ['teamKey', 'scopeKey', 'userKey']) expect(() => toolInputSchemas[tool].parse({ connectorKey: inboxSortConnectorKey, [field]: newId() })).toThrow('Unrecognized key');
     expect(() => toolInputSchemas['email.draft.assign'].parse({ draftKey: newId(), connectorKey: newId(), scopeKey: newId() })).toThrow('Unrecognized key');
-    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['content.hidden.list', 'book.topic.suggest', 'book.goal.suggest', 'book.create', 'book.favorite', 'email.thread.read', 'email.thread.read-state', 'email.trash.clear']));
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['content.hidden.list', 'book.topic.suggest', 'book.goal.suggest', 'book.preview', 'book.create', 'book.favorite', 'email.thread.read', 'email.thread.read-state', 'email.trash.clear']));
     expect(toolInputSchemas['book.favorite'].parse({ bookKey: newId(), isFavorite: true })).toMatchObject({ isFavorite: true });
     expect(() => toolInputSchemas['book.favorite'].parse({ bookKey: newId(), isFavorite: true, scopeKey: newId() })).toThrow('Unrecognized key');
     expect(TOOL_NAMES).not.toContain('email.thread.mark-read');
@@ -210,7 +212,8 @@ describe('unified tool registry', () => {
   test('classifies model-visible execution effects from the canonical registry', () => {
     expect(isToolReadOnly('app.search', { query: 'roadmap', collectionSlugs: ['documents'], limit: 1 })).toBe(true);
     expect(isToolReadOnly('agent.guide', { mode: 'recommend' })).toBe(true);
-    expect(isToolReadOnly('app.history', {})).toBe(true);
+    expect(isToolReadOnly('ticket.list', {})).toBe(true);
+    expect(isToolReadOnly('notification.list', { readState: 'unread' })).toBe(true);
     expect(isToolReadOnly('tag.list', {})).toBe(true);
     expect(isToolReadOnly('scope.list', {})).toBe(true);
     expect(isToolReadOnly('conversation.list', {})).toBe(true);
@@ -222,7 +225,7 @@ describe('unified tool registry', () => {
     expect(isToolReadOnly('scope.prioritize', { targetScopeKey: newId() })).toBe(false);
     expect(isToolReadOnly('scope.update', { targetScopeKey: newId(), coverImageKey: null })).toBe(false);
     expect(isToolReadOnly('scope.delete', { targetScopeKey: newId() })).toBe(false);
-    expect(isToolReadOnly('communication.thread.mark-read', { threadKey: newId(), read: true })).toBe(false);
+    expect(isToolReadOnly('notification.mark-read', { notificationKey: newId(), read: true })).toBe(false);
     expect(isToolReadOnly('tag.create', { name: 'Plan' })).toBe(false);
     expect(isToolReadOnly('tag.assignment.set', { changes: [{ tagKey: newId(), target: { type: 'document', key: newId() }, assigned: true }] })).toBe(false);
     expect(isToolReadOnly('app.generate-image', { prompt: 'A dog' })).toBe(false);
@@ -283,7 +286,7 @@ describe('unified tool registry', () => {
     await runTool('ticket.create', '', { message: 'Please help' }, { contentContext, ticketService, requestKey: 'request-1' });
     expect(calls).toEqual([
       ['profile', { name: 'Ada Lovelace' }, userKey],
-      ['ticket', { message: 'Please help' }, contentContext, 'request-1'],
+      ['ticket', { message: 'Please help', kind: 'issue' }, contentContext, 'request-1'],
     ]);
     expect(profileResult).toEqual({ profile: { name: 'Ada Lovelace' } });
     expect(profileResult).not.toHaveProperty('profile.key');
@@ -575,13 +578,15 @@ describe('unified tool registry', () => {
       setReadState: async (...args: unknown[]) => { calls.push(['setReadState', ...args]); return {}; },
       findSimilar: async (...args: unknown[]) => { calls.push(['findSimilar', ...args]); return {}; },
     } as any;
-    const bookService = { suggestTopics: async (...args: unknown[]) => { calls.push(['suggestTopics', ...args]); return { topics: [] }; }, suggestGoals: async (...args: unknown[]) => { calls.push(['suggestGoals', ...args]); return { goals: [] }; }, create: async (...args: unknown[]) => { calls.push(['create', ...args]); return {}; }, setFavorite: async (...args: unknown[]) => { calls.push(['setFavorite', ...args]); return {}; } } as any;
+    const bookService = { suggestTopics: async (...args: unknown[]) => { calls.push(['suggestTopics', ...args]); return { topics: [] }; }, suggestGoals: async (...args: unknown[]) => { calls.push(['suggestGoals', ...args]); return { goals: [] }; }, preview: async (...args: unknown[]) => { calls.push(['preview', ...args]); return { title: 'Clear Decisions', description: 'Learn to decide well.' }; }, create: async (...args: unknown[]) => { calls.push(['create', ...args]); return {}; }, setFavorite: async (...args: unknown[]) => { calls.push(['setFavorite', ...args]); return {}; } } as any;
     const brief = { topic: 'Decision making', goal: 'Decide well', currentKnowledge: 'Basic familiarity', writingTone: 'Clear', language: 'English', archiveDocumentKeys: [], narratorVoiceKey: 'clear', narrationPace: 1 };
     await expect(runTool('book.create', '', { ...brief, chapterCount: 10 }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
     await expect(runTool('book.create', '', { ...brief, scopeKey }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
     await expect(runTool('book.topic.suggest', '', { scopeKey }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
     await runTool('book.topic.suggest', '', { excludeTopics: ['Old idea'] }, { contentContext, bookService });
     await runTool('book.goal.suggest', '', { topic: 'Decision making', excludeGoals: ['Old goal'] }, { contentContext, bookService });
+    await expect(runTool('book.preview', '', { topic: 'Decision making', goal: 'Decide well', scopeKey }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
+    await runTool('book.preview', '', { topic: 'Decision making', goal: 'Decide well' }, { contentContext, bookService });
     await runTool('book.create', '', brief, { ...billingFixture, contentContext, bookService, requestKey: 'request-1' });
     const bookKey = newId();
     await expect(runTool('book.favorite', '', { bookKey, isFavorite: true, teamKey }, { contentContext, bookService })).rejects.toThrow('Unrecognized key');
@@ -593,6 +598,7 @@ describe('unified tool registry', () => {
     expect(calls).toEqual([
       ['suggestTopics', { teamKey, scopeKey, excludeTopics: ['Old idea'] }, userKey, { signal: undefined, timeoutMs: undefined }],
       ['suggestGoals', { teamKey, scopeKey, topic: 'Decision making', excludeGoals: ['Old goal'] }, userKey, { signal: undefined, timeoutMs: undefined }],
+      ['preview', { teamKey, scopeKey, topic: 'Decision making', goal: 'Decide well' }, userKey, { signal: undefined, timeoutMs: undefined }],
       ['create', { teamKey, scopeKey, generationRequestKey: 'request-1', ...brief }, userKey],
       ['setFavorite', bookKey, { teamKey, scopeKey, isFavorite: true }, userKey],
       ['threadForTool', actor, threadKey, undefined],

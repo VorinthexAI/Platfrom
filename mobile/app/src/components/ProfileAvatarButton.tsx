@@ -30,8 +30,8 @@ export function ProfileAvatar({ avatarSize = 32 }: { avatarSize?: number }) {
   const teamKey = useAuthStore((state) => String(state.team?.key ?? ""));
   const scopeKey = useAuthStore((state) => String(state.scope?.key ?? ""));
   const communicationContext = { userKey: String(user?.key ?? ""), teamKey, scopeKey };
-  const notifications = useQuery({ queryKey: [...communicationQueryKeys.lists(communicationContext), "unread-count"], queryFn: () => listCommunicationThreads({ tab: "inbox", limit: 1 }, communicationContext), enabled: Boolean(user?.key && teamKey && scopeKey), refetchInterval: 30_000 });
-  const unreadCount = notifications.data?.unreadCount ?? 0;
+  const notifications = useQuery({ queryKey: [...communicationQueryKeys.lists(communicationContext), "unread-count"], queryFn: () => listCommunicationThreads({ tab: "unread", limit: 10 }, communicationContext), enabled: Boolean(user?.key && teamKey && scopeKey), refetchInterval: 30_000 });
+  const unreadCount = notifications.data ? (notifications.data.nextCursor ? 10 : notifications.data.items.length) : 0;
   return <View style={[styles.avatarFrame, { height: avatarSize, width: avatarSize }]}>
     <Avatar fallback={profileInitial(user)} size={avatarSize} style={styles.avatar} uri={user?.avatarUrl} />
     {unreadCount > 0 ? <Badge pointerEvents="none" style={styles.notificationBadge}><Text style={styles.notificationBadgeText}>{Math.min(unreadCount, 99)}</Text></Badge> : null}

@@ -338,6 +338,8 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
     else if (collectionSlug === "places") router.push({ pathname: "/capability/[slug]", params: { slug: "compass", placeKey: key, collectionKind: "places", ...searchParams } });
     else if (collectionSlug === "countries") router.push({ pathname: "/capability/[slug]", params: { slug: "compass", countryCode: key, collectionKind: "countries", ...searchParams } });
     else if (collectionSlug === "books") router.push({ pathname: "/capability/[slug]", params: { slug: "ascend", bookKey: key, ...searchParams } });
+    else if (collectionSlug === "tickets") router.push({ pathname: "/capability/[slug]", params: { slug: "signal", inbox: "internal", tab: "sent", ...searchParams } });
+    else if (collectionSlug === "notifications") router.push({ pathname: "/capability/[slug]", params: { slug: "signal", inbox: "internal", tab: "unread", ...searchParams } });
     else router.push({ pathname: "/capability/[slug]", params: { slug: "signal" } });
   }, [closeRetrievals, router]);
 

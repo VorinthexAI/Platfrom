@@ -27,7 +27,7 @@ export const AiTextEditor = forwardRef<NativeTextInput, AiTextEditorProps>(funct
 });
 
 const styles = StyleSheet.create({
-  root: { width: "100%", height: 280, overflow: "hidden", borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.page },
+  root: { width: "100%", height: 400, overflow: "hidden", borderWidth: 1, borderColor: colors.border, borderRadius: radii.md, backgroundColor: colors.page },
   background: { backgroundColor: colors.page },
   input: { width: "100%", minHeight: 0, flex: 1, flexBasis: 0, borderWidth: 0, borderRadius: 0, backgroundColor: colors.page },
   actions: { width: "100%", height: 58, minHeight: 58, maxHeight: 58, flexShrink: 0, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", paddingHorizontal: spacing.xs },

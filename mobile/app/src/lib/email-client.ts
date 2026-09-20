@@ -23,13 +23,14 @@ export type EmailReadState = z.infer<typeof emailReadStateSchema>;
 export const emailFacetSchema = z.enum(["urgent", "important", "purchases", "filtered", "favorite"]);
 export type EmailFacet = z.infer<typeof emailFacetSchema>;
 const EMAIL_FACET_ORDER: readonly EmailFacet[] = ["urgent", "important", "purchases", "filtered", "favorite"];
-export type EmailOverviewQuery = Readonly<{ readState: EmailReadState; facets: readonly EmailFacet[]; search: string }>;
-export function normalizeEmailOverviewQuery(input: { readState?: EmailReadState; facets?: readonly EmailFacet[]; search?: string } = {}): EmailOverviewQuery {
+export type EmailOverviewQuery = Readonly<{ readState: EmailReadState; facets: readonly EmailFacet[]; search: string; mailbox?: "sent" }>;
+export function normalizeEmailOverviewQuery(input: { readState?: EmailReadState; facets?: readonly EmailFacet[]; search?: string; mailbox?: "sent" } = {}): EmailOverviewQuery {
   const selected = new Set(input.facets ?? ["urgent", "important", "purchases"]);
   return Object.freeze({
     readState: emailReadStateSchema.parse(input.readState ?? "unread"),
     facets: Object.freeze(EMAIL_FACET_ORDER.filter((facet) => selected.has(facet))),
     search: input.search?.trim() ?? "",
+    ...(input.mailbox === "sent" ? { mailbox: "sent" as const } : {}),
   });
 }
 export function setEmailOverviewReadState(query: EmailOverviewQuery, readState: EmailReadState): EmailOverviewQuery {
@@ -42,6 +43,7 @@ export function toggleEmailOverviewFacet(query: EmailOverviewQuery, facet: Email
 export const emailOverviewInputSchema = z.strictObject({
   connectorKey: keySchema.optional(),
   filter: emailFilterSchema.optional(),
+  mailbox: z.enum(["sent"]).optional(),
   readState: emailReadStateSchema.optional(),
   facets: z.array(emailFacetSchema).max(5).optional(),
   search: z.string().trim().max(200).optional(),
@@ -50,11 +52,12 @@ export const emailOverviewInputSchema = z.strictObject({
   limit: z.number().int().min(1).max(50).optional(),
 }).superRefine((value, context) => {
   const hasCompositeField = value.readState !== undefined || value.facets !== undefined;
+  if (value.mailbox === "sent" && (value.filter !== undefined || hasCompositeField)) context.addIssue({ code: "custom", message: "sent mailbox cannot be combined with filter, readState, or facets" });
   if (value.filter !== undefined && hasCompositeField) context.addIssue({ code: "custom", message: "filter cannot be combined with composite overview fields" });
   if (hasCompositeField && (value.readState === undefined || value.facets === undefined)) context.addIssue({ code: "custom", message: "readState and facets must be provided together" });
-  if (!value.connectorKey && (value.filter !== undefined || hasCompositeField || value.search !== undefined || value.cursor !== undefined || value.draftCursor !== undefined || value.limit !== undefined)) context.addIssue({ code: "custom", message: "connectorKey is required for an overview query" });
+  if (!value.connectorKey && (value.filter !== undefined || value.mailbox !== undefined || hasCompositeField || value.search !== undefined || value.cursor !== undefined || value.draftCursor !== undefined || value.limit !== undefined)) context.addIssue({ code: "custom", message: "connectorKey is required for an overview query" });
 }).transform((value) => {
-  if (value.filter || !value.readState && !value.facets) return value;
+  if (value.mailbox === "sent" || value.filter || !value.readState && !value.facets) return value;
   const normalized = normalizeEmailOverviewQuery(value);
   return { ...value, readState: normalized.readState, facets: [...normalized.facets] };
 });
@@ -200,7 +203,7 @@ const overviewSchema = z.strictObject({
   nextCursor: z.string().min(1).nullable(),
   nextDraftCursor: z.string().min(1).nullable().default(null),
 });
-const threadDetailSchema = z.strictObject({ thread: emailThreadSchema, messages: z.array(emailMessageSchema.extend({ bodyTruncated: z.boolean() }).strict()), nextCursor: z.string().min(1).nullable(), truncated: z.boolean() });
+const threadDetailSchema = z.object({ thread: emailThreadSchema, messages: z.array(emailMessageSchema.extend({ bodyTruncated: z.boolean() }).strip()), nextCursor: z.string().min(1).nullable(), truncated: z.boolean() });
 export const emailTranslationVersionSchema = z.strictObject({
   key: keySchema, documentKey: keySchema, version: z.number().int().positive(), type: z.enum(["enhancement", "translation"]).optional(), language: z.string().optional(), label: z.string().optional(), content: z.string(), createdAt: dateSchema,
 });
@@ -311,6 +314,58 @@ export async function searchEmailTonesForContext(_context: EmailContext, query: 
   const output = await searchApp({ ...emailAppSearchInput(query, recordHistory, tagKeys), collectionSlugs: ["email-tones"] }, signal);
   return emailToneSearchResponseSchema.parse({ tones: appSearchResults(output, "email-tones", emailToneRecordSchema.extend({ score: z.number().min(-1).max(1) }).strict()) });
 }
+const emailThreadSearchHitSchema = z.object({
+  key: keySchema,
+  subject: z.string().optional(),
+  summary: z.string().optional(),
+  intent: z.string().optional(),
+  action: z.string().optional(),
+  priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
+  state: z.enum(["needs_action", "waiting", "informational", "filtered", "done"]).optional(),
+  lastMessageAt: dateSchema.optional(),
+  snippet: z.string().optional(),
+  category: z.enum(["primary", "updates", "promotions", "social", "forums", "other"]).optional(),
+  unread: z.boolean().optional(),
+  starred: z.boolean().optional(),
+  labels: z.array(z.string()).optional(),
+  latestFrom: z.string().optional(),
+  inInbox: z.boolean().optional(),
+  isFavorite: z.boolean().optional(),
+  isRead: z.boolean().optional(),
+  inboxCategory: emailInboxCategorySchema.optional(),
+  createdAt: dateSchema.optional(),
+  updatedAt: dateSchema.optional(),
+  score: z.number().optional(),
+});
+
+function emailThreadFromSearchHit(hit: z.infer<typeof emailThreadSearchHitSchema>) {
+  const lastMessageAt = hit.lastMessageAt ?? hit.updatedAt ?? hit.createdAt ?? new Date().toISOString();
+  const unread = hit.unread ?? hit.isRead === false;
+  const latestFrom = z.string().email().safeParse(hit.latestFrom);
+  return emailThreadSchema.parse({
+    key: hit.key,
+    subject: hit.subject?.trim() || "Email",
+    summary: hit.summary?.trim() || hit.subject?.trim() || "Email",
+    intent: hit.intent?.trim() || "Review",
+    ...(hit.action ? { action: hit.action } : {}),
+    priority: hit.priority ?? "normal",
+    state: hit.state ?? "informational",
+    lastMessageAt,
+    ...(hit.snippet ? { snippet: hit.snippet } : {}),
+    ...(hit.category ? { category: hit.category } : {}),
+    unread,
+    isRead: !unread,
+    ...(hit.starred !== undefined ? { starred: hit.starred } : {}),
+    ...(hit.labels ? { labels: hit.labels } : {}),
+    ...(latestFrom.success ? { latestFrom: latestFrom.data } : {}),
+    ...(hit.inInbox !== undefined ? { inInbox: hit.inInbox } : {}),
+    isFavorite: hit.isFavorite ?? false,
+    inboxCategory: hit.inboxCategory ?? "Important",
+    createdAt: hit.createdAt ?? lastMessageAt,
+    updatedAt: hit.updatedAt ?? lastMessageAt,
+  });
+}
+
 export async function searchEmailMessagesForContext(_context: EmailContext, connectorKey: string, query: EmailOverviewQuery, recordHistory = true, signal?: AbortSignal, tagKeys: readonly string[] = []) {
   const normalizedTagKeys = emailSearchTagKeysSchema.parse([...new Set(tagKeys)].sort());
   const output = await searchApp({
@@ -320,12 +375,16 @@ export async function searchEmailMessagesForContext(_context: EmailContext, conn
     limit: 50,
     filters: { connectorKey, readState: query.readState, ...(query.facets.length ? { emailFacets: [...query.facets] } : {}), ...(normalizedTagKeys.length ? { tagKeys: normalizedTagKeys, tagMatch: "all" as const } : {}) },
   }, signal);
-  return appSearchResults(output, "email-messages", emailThreadSchema.extend({ score: z.number() }).strict()).map(({ score: _score, ...thread }) => thread);
+  return (output.groups.find((group) => group.collectionSlug === "email-messages")?.results ?? []).flatMap((value) => {
+    const hit = emailThreadSearchHitSchema.safeParse(value);
+    if (!hit.success) return [];
+    try { return [emailThreadFromSearchHit(hit.data)]; } catch { return []; }
+  });
 }
 export async function searchEmailDraftsForContext(_context: EmailContext, connectorKey: string, query: string, recordHistory = true, signal?: AbortSignal, tagKeys: readonly string[] = []) {
   const input = emailAppSearchInput(query, recordHistory, tagKeys);
   const output = await searchApp({ ...input, collectionSlugs: ["email-drafts"], filters: { connectorKey, ...input.filters } }, signal);
-  return appSearchResults(output, "email-drafts", z.object({ score: z.number() }).passthrough()).map(({ score: _score, ...draft }) => emailDraftSchema.parse(draft));
+  return appSearchResults(output, "email-drafts", z.object({ score: z.number().optional(), inbox: z.unknown().optional(), tags: z.unknown().optional() }).passthrough()).map(({ score: _score, inbox: _inbox, tags: _tags, ...draft }) => emailDraftSchema.parse(draft));
 }
 export async function askEmailAssistantForContext(context: EmailContext, message: string, requestKey: string) {
   try {

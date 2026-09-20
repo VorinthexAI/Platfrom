@@ -168,6 +168,7 @@ export const signalQueryKeys = {
     if (typeof query === "string") return [...signalQueryKeys.accountOverviews(context, connectorKey), "legacy", query, search?.trim() || null] as const;
     const normalized = normalizeEmailOverviewQuery(query);
     const tags = [...new Set(tagKeys)].sort();
+    if (normalized.mailbox === "sent") return [...signalQueryKeys.accountOverviews(context, connectorKey), "sent", normalized.search || null, ...(tags.length ? ["tags", tags.join(",")] : [])] as const;
     return [...signalQueryKeys.accountOverviews(context, connectorKey), "inbox", normalized.readState, normalized.facets.join(","), normalized.search || null, ...(tags.length ? ["tags", tags.join(",")] : [])] as const;
   },
   overviewPage: (context: WorkspaceContext, connectorKey: string | undefined, query: EmailOverviewQuery | EmailFilter, cursor: string, search?: string, tagKeys: readonly string[] = []) => [...signalQueryKeys.overview(context, connectorKey, query, search, tagKeys), "pages", cursor] as const,

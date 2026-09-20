@@ -82,7 +82,7 @@ describe('Spark costs', () => {
   test('keeps frozen canonical rule maps and validates all requested slugs', () => {
     expect(Object.isFrozen(TOOL_COST_RULES)).toBe(true);
     expect(Object.isFrozen(ACTION_COST_RULES)).toBe(true);
-    expect(TOOL_COST_RULES['book.create']?.microSparks).toBe(100_000_000);
+    expect(TOOL_COST_RULES['book.create']?.microSparks).toBe(70_000_000);
     expect(TOOL_COST_RULES['document.parse']).toBeUndefined();
     expect(TOOL_COST_RULES['document.scan']).toBeUndefined();
     expect(lookupToolCostPolicy('document.parse')).toEqual({ mode: 'action' });
@@ -138,7 +138,7 @@ describe('Spark costs', () => {
     expect(Object.keys(TOOL_COST_POLICIES).sort()).toEqual(publicNames);
     const assignments = [...FREE_TOOL_SLUGS, ...ACTION_PRICED_OPERATION_TOOL_SLUGS, ...OUTCOME_PRICED_OPERATION_TOOL_SLUGS, ...Object.keys(TOOL_COST_RULES).filter((slug) => !OUTCOME_PRICED_OPERATION_TOOL_SLUGS.includes(slug as never))];
     expect(new Set(assignments).size).toBe(assignments.length);
-    for (const slug of ['agents.core', 'app.enhance', 'app.generate-image', 'app.search', 'app.translate', 'book.topic.suggest', 'conversation.message.send', 'document.rewrite', 'document.summarize', 'email.draft.create', 'feedback.create', 'image.caption', 'image.create-visual-identity', 'image.ideas.create', 'inbox.sort', 'place.find', 'place.reference.generate', 'trip.guide.generate']) {
+    for (const slug of ['agents.core', 'app.enhance', 'app.generate-image', 'app.search', 'app.translate', 'book.topic.suggest', 'conversation.message.send', 'document.rewrite', 'document.summarize', 'email.draft.create', 'image.caption', 'image.create-visual-identity', 'image.ideas.create', 'inbox.sort', 'place.find', 'place.reference.generate', 'trip.guide.generate']) {
       expect(lookupToolCostPolicy(slug)).toEqual({ mode: 'action' });
     }
     expect(lookupToolCostPolicy('book.create')).toEqual({ mode: 'fixed', rule: TOOL_COST_RULES['book.create'], paidOutcome: 'queue-accepted' });

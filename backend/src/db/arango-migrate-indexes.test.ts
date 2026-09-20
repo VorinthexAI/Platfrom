@@ -54,6 +54,8 @@ describe('Arango migration indexes', () => {
     expect(byName.get('pushSubscriptions')?.indexes).toContainEqual({ fields: ['userKey', 'installationKey'], unique: true });
     expect(byName.get('pushSubscriptions')?.indexes).toContainEqual({ fields: ['tokenHash'], unique: true });
     expect(byName.get('appNotifications')).toMatchObject({ embedKeys: ['title', 'message'] });
+    expect(byName.get('userNotifications')).toMatchObject({ embedKeys: ['title', 'message'] });
+    expect(byName.get('userNotifications')?.indexes).toContainEqual({ fields: ['sourceKey', 'userKey'], unique: true, sparse: true });
     expect(byName.get('appNotifications')?.indexes).toContainEqual({ fields: ['teamKey', 'actorUserKey', 'idempotencyKey'], unique: true });
     expect(await Bun.file(new URL('../../scripts/backfill-semantic-embeddings.ts', import.meta.url)).text()).toContain("'appNotifications'");
     expect(byName.get('appNotificationRecipients')?.indexes).toContainEqual({ fields: ['notificationKey', 'userKey'], unique: true });
@@ -280,6 +282,7 @@ describe('Arango migration indexes', () => {
       { fields: ['userKey', 'idempotencyKey'], unique: true },
       { fields: ['eventKey'], unique: true, sparse: true },
     ]));
+    expect(collections.find(({ name }) => name === 'newcomerGrantClaims')).toEqual({ name: 'newcomerGrantClaims', skipEmbedding: true, indexes: [{ fields: ['userKey'] }] });
     expect(collections.find(({ name }) => name === 'billingExecutions')).toEqual({
       name: 'billingExecutions',
       skipEmbedding: true,
@@ -290,6 +293,7 @@ describe('Arango migration indexes', () => {
       ],
     });
     const registry = await Bun.file(new URL('../lib/db/registry.ts', import.meta.url)).text();
+    expect(registry).not.toContain('newcomerGrantClaims:');
     expect(registry).not.toContain('billingExecutions:');
     expect(collections.find(({ name }) => name === 'storageObjects')).toEqual({ name: 'storageObjects', skipEmbedding: true, indexes: [{ fields: ['storageKey', 'deletedAt'] }, { fields: ['userKey', 'storedAt'] }, { fields: ['storedAt'] }] });
     expect(collections.find(({ name }) => name === 'storageChargingHours')?.indexes).toContainEqual({ fields: ['userKey', 'hourStart'], unique: true, sparse: true });

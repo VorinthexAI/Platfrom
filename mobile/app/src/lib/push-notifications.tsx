@@ -7,7 +7,7 @@ import { AppState, Platform } from "react-native";
 
 import { apiClient } from "./api-client";
 import { communicationQueryKeys } from "./communication-client";
-import { isPushPermissionAllowed, signalThreadPushDataSchema } from "./notification-policy";
+import { isPushPermissionAllowed, pushNotificationDataSchema, pushNotificationHref } from "./notification-policy";
 import { useAuthStore } from "@/state/auth";
 
 const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
@@ -45,10 +45,11 @@ export function PushNotificationBridge() {
   const sync = useEffectEvent(() => { void syncPushSubscription().catch(() => undefined); });
   const receive = useEffectEvent(() => { if (userKey && teamKey && scopeKey) void queryClient.invalidateQueries({ queryKey: communicationQueryKeys.all({ userKey, teamKey, scopeKey }) }); });
   const open = useEffectEvent((response: Notifications.NotificationResponse) => {
-    const parsed = signalThreadPushDataSchema.safeParse(response.notification.request.content.data);
+    const parsed = pushNotificationDataSchema.safeParse(response.notification.request.content.data);
     if (!parsed.success) return;
     receive();
-    if (useAuthStore.getState().status === "authenticated") router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "inbox", inbox: "internal", thread: parsed.data.signalThreadKey } });
+    const href = pushNotificationHref(parsed.data);
+    if (href && useAuthStore.getState().status === "authenticated") router.push(href);
   });
 
   useEffect(() => {

@@ -334,7 +334,7 @@ describe('Gmail connector protocol', () => {
       ['text/markdown', 'document', 'md'], ['text/x-markdown', 'document', 'md'], ['application/msword', 'document', 'doc'],
       ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'document', 'docx'],
       ['IMAGE/JPEG; name=x', 'image', 'jpg'], ['image/jpg', 'image', 'jpg'], ['image/png', 'image', 'png'],
-      ['image/webp', 'image', 'webp'], ['image/gif', 'image', 'gif'],
+      ['image/webp', 'image', 'webp'],
     ] as const;
     const leaves = supported.map(([mimeType], index) => ({ mimeType, filename: `duplicate.bin`, body: { attachmentId: `id-${index}`, size: index + 1 } }));
     const payload = { mimeType: 'multipart/mixed', parts: [{ mimeType: 'multipart/related', parts: [{ mimeType: 'multipart/mixed', parts: leaves }] }, { mimeType: 'message/rfc822; name=mail', filename: 'mail.eml', parts: [leaves[0]] }, { mimeType: 'application/zip', filename: 'skip.zip', body: { attachmentId: 'zip', size: 1 } }] };
@@ -392,15 +392,18 @@ describe('Gmail connector protocol', () => {
     await expect(client.attachment('message', { ...document, size: MAX_GMAIL_ATTACHMENT_BYTES })).rejects.toMatchObject({ code: 'ATTACHMENT_SIZE_MISMATCH' });
     await expect(client.attachment('message', { ...document, size: MAX_GMAIL_ATTACHMENT_BYTES + 1 })).rejects.toMatchObject({ code: 'ATTACHMENT_INVALID_SIZE' });
     const image = { path: '1', type: 'image' as const, mimeType: 'image/jpeg', filename: 'large.jpg', attachmentId: 'image' };
-    await expect(client.attachment('message', { ...image, size: 20 * 1024 * 1024 })).rejects.toMatchObject({ code: 'ATTACHMENT_SIZE_MISMATCH' });
-    await expect(client.attachment('message', { ...image, size: 20 * 1024 * 1024 + 1 })).rejects.toMatchObject({ code: 'ATTACHMENT_INVALID_SIZE' });
-    expect(downloads).toBe(3);
+    await expect(client.attachment('message', { ...image, size: MAX_GMAIL_ATTACHMENT_BYTES })).rejects.toMatchObject({ code: 'ATTACHMENT_SIZE_MISMATCH' });
+    await expect(client.attachment('message', { ...image, size: MAX_GMAIL_ATTACHMENT_BYTES + 1 })).rejects.toMatchObject({ code: 'ATTACHMENT_INVALID_SIZE' });
+    expect(downloads).toBe(2);
   });
 
-  test('accepts JPEG, GIF87a, GIF89a, and WebP signatures and rejects MIME mismatches', async () => {
+  test('accepts JPEG and WebP signatures, skips GIFs, and rejects MIME mismatches', async () => {
+    expect(discoverGmailAttachmentParts({ mimeType: 'multipart/mixed', parts: [
+      { mimeType: 'image/gif', filename: 'motion.gif', body: { attachmentId: 'gif', size: 8 } },
+      { mimeType: 'image/png', filename: 'photo.png', body: { attachmentId: 'png', size: 4 } },
+    ] })).toMatchObject({ parts: [{ path: '0.1', mimeType: 'image/png' }], unavailableCount: 1, truncated: true });
     const cases = [
       ['image/jpeg', Uint8Array.from([0xff, 0xd8, 0xff, 0xd9])], ['image/jpg', Uint8Array.from([0xff, 0xd8, 0xff, 0xd9])],
-      ['image/gif', new TextEncoder().encode('GIF87a-data')], ['image/gif', new TextEncoder().encode('GIF89a-data')],
       ['image/webp', new TextEncoder().encode('RIFFxxxxWEBP')],
     ] as const;
     const client = createGmailClient('token', (async () => { throw new Error('inline data must not download'); }) as never);

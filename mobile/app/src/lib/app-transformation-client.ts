@@ -1,3 +1,4 @@
+import { randomUUID } from "expo-crypto";
 import { z } from "zod";
 
 import { apiClient } from "@/lib/api-client";
@@ -13,7 +14,7 @@ export type AppTransformationContext = z.output<typeof contextSchema>;
 
 async function transform(context: AppTransformationContext, path: "/app/enhance" | "/app/translate", input: Record<string, unknown>) {
   try {
-    const response = await apiClient.post(path, { ...contextSchema.parse(context), input }, { timeout: 4 * 60_000 });
+    const response = await apiClient.post(path, { ...contextSchema.parse(context), input }, { headers: { "Idempotency-Key": randomUUID() }, timeout: 4 * 60_000 });
     const result = responseSchema.parse(response.data);
     if (!result.success) throw new Error(result.error.message);
     return result.data;

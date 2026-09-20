@@ -16,11 +16,10 @@ export const ticketSchema = z.strictObject({
   teamKey: z.string().trim().min(1),
   scopeKey: z.string().trim().min(1),
   message: z.string().trim().min(1).max(8_000),
+  kind: z.enum(["issue", "feedback"]).optional(),
 });
 export const ticketThreadLinkSchema = z.strictObject({
   key: z.string().min(1),
-  threadKey: z.string().min(1),
-  initialMessageKey: z.string().min(1),
   message: z.string().min(1).max(8_000),
   kind: z.enum(["issue", "feedback"]),
   createdAt: z.string().datetime(),
@@ -101,13 +100,10 @@ export function claimProfileBadge(teamKey: string, scopeKey: string, candidateKe
 export async function createSupportTicket(rawInput: z.input<typeof ticketSchema>, idempotencyKey: string) {
   const input = ticketSchema.parse(rawInput);
   const key = z.string().trim().min(1).max(200).parse(idempotencyKey);
-  const response = await apiClient.post("/tickets", input, { headers: { "Idempotency-Key": key } });
+  const response = await apiClient.post("/tickets", { ...input, kind: input.kind ?? "issue" }, { headers: { "Idempotency-Key": key } });
   return ticketThreadLinkSchema.parse(responseData(response.data));
 }
 
 export async function createFeedback(rawInput: z.input<typeof ticketSchema>, idempotencyKey: string) {
-  const input = ticketSchema.parse(rawInput);
-  const key = z.string().trim().min(1).max(200).parse(idempotencyKey);
-  const response = await apiClient.post("/feedback", input, { headers: { "Idempotency-Key": key } });
-  return ticketThreadLinkSchema.parse(responseData(response.data));
+  return createSupportTicket({ ...rawInput, kind: "feedback" }, idempotencyKey);
 }

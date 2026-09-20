@@ -101,7 +101,27 @@ describe('Arango Spark repository', () => {
     const repository = createArangoSparkRepository(database, async (_collections, operation) => operation(database));
     await repository.listHistory('user-1', { limit: 10, beforeCreatedAt: rawRecord.createdAt, beforeKey: 'transaction-2' });
     expect(queryText).toContain('item.createdAt == @beforeCreatedAt && item._key < @beforeKey');
-    expect(bindings).toMatchObject({ beforeCreatedAt: rawRecord.createdAt, beforeKey: 'transaction-2', limit: 10 });
+    expect(bindings).toMatchObject({ beforeCreatedAt: rawRecord.createdAt, beforeKey: 'transaction-2', limit: 10, kind: null });
+  });
+
+  test('filters history by ledger kind and sums action debits', async () => {
+    let historyBindings: Record<string, unknown> = {};
+    let debitQuery = '';
+    const database: SparkDatabase = {
+      query: async (query, bind) => {
+        if (query.includes('COLLECT AGGREGATE')) {
+          debitQuery = query;
+          return cursor(-4_400);
+        }
+        historyBindings = bind ?? {};
+        return cursor(undefined, []);
+      },
+    };
+    const repository = createArangoSparkRepository(database, async (_collections, operation) => operation(database));
+    await repository.listHistory('user-1', { limit: 25, kind: 'tool' });
+    expect(historyBindings).toMatchObject({ kind: 'tool', limit: 25 });
+    await expect(repository.sumDebits!('user-1', 'action')).resolves.toBe(4_400);
+    expect(debitQuery).toContain('item.kind == @kind && item.deltaMicroSparks < 0');
   });
 
   test('advances the durable execution attempt after a linked refund', async () => {

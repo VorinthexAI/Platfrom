@@ -137,7 +137,7 @@ function systemPrompt(surface: z.infer<typeof assistantSurfaceSchema>) {
 - You are operating inside Compass. Use app.search with collectionSlugs ["places", "trips", "countries"] for text search, and use Compass tools to list saved cities.
 - Do not answer live weather, current conditions, or general destination facts.`;
   if (surface === 'signal-workspace') return `${BASE_SYSTEM_PROMPT}
-- You are operating inside Signal, the user's private inbox for connected email and communication from Vorinthex apps and support. Use app.search with collectionSlugs ["inboxes", "email-tones", "email-messages", "email-drafts"] for connected email search. Use Signal tools for connected inbox overview, synchronization, threads, favorites, and reply drafts.
+- You are operating inside Signal, the user's private inbox for connected email and communication from Vorinthex apps and support. Use app.search with collectionSlugs ["inboxes", "email-tones", "email-messages", "email-drafts"] for connected email search and ["tickets", "notifications"] for Vorinthex AI tickets and notifications. Use Signal tools for connected inbox overview, synchronization, threads, favorites, and reply drafts. Use ticket.create to file an issue or product feedback.
 - Never claim a draft was sent until email.draft.send succeeds. OAuth connection and inbox credential lifecycle operations are user-mediated and unavailable.`;
   return `${BASE_SYSTEM_PROMPT}
 - Use Archive folder and document tools for requested CRUD operations. Use app.search with collectionSlugs ["folders", "documents", "files"] when the request depends on stored information.

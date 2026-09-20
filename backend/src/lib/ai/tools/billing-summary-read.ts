@@ -8,6 +8,7 @@ export const billingSummaryReadOutputSchema = z.object({
   microSparkBalance: z.number().int().safe().nonnegative(),
   microSparkDebt: z.number().int().safe().nonnegative(),
   spendingBlocked: z.boolean(),
+  aiUsageMicroSparks: z.number().int().safe().nonnegative(),
   storage: z.object({
     bytes: z.string().regex(/^(0|[1-9]\d*)$/),
     estimatedMonthlyMicroSparks: z.string().regex(/^(0|[1-9]\d*)$/),
@@ -30,6 +31,7 @@ export function createBillingSummaryReadTool(getSummary: typeof sparkService.get
           limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
           beforeCreatedAt: { type: 'string', format: 'date-time' },
           beforeKey: { type: 'string', minLength: 1, maxLength: 200 },
+          kind: { type: 'string', enum: ['account-grant', 'referral-reward', 'purchase', 'tool', 'action', 'storage', 'recurring-service', 'refund', 'adjustment', 'expiration'] },
         },
       },
     },

@@ -481,14 +481,16 @@ export async function listContentFolderTree(signal?: AbortSignal, contentContext
 }
 
 export const ARCHIVE_LOCATION_PAGE_SIZE = 10;
+export const ARCHIVE_FILE_EXTENSIONS = ["txt", "md", "doc", "docx", "pdf"] as const;
 
-export async function listContentDocumentPage(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext(), cursor?: string, limit = ARCHIVE_LOCATION_PAGE_SIZE) {
+export async function listContentDocumentPage(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext(), cursor?: string, limit = ARCHIVE_LOCATION_PAGE_SIZE, extensions?: readonly string[]) {
   const data: { documents: ContentDocument[]; cursor?: string } = await callContentTool("document.list", {
     scopeKey: contentContext.scopeKey,
     ...(folderKey ? { folderKey } : {}),
     ...(cursor ? { cursor } : {}),
     limit,
     sort: { field: "updatedAt", direction: "desc" },
+    ...(extensions?.length ? { extensions: [...extensions] } : {}),
   }, signal, contentContext);
   return { documents: data.documents, cursor: data.cursor };
 }

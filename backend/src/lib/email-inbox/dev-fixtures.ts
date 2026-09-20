@@ -1,9 +1,16 @@
+import { createHash } from 'node:crypto';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
-import { emailDevelopmentAttachmentAssets } from '@/lib/development-fixture-assets';
+
+export type MailDevAttachmentSpec = { type: 'document' | 'image'; filename: string };
 
 export const MAIL_DEV_SEED_EMAIL = 'oscar.burman005@gmail.com';
 export const MAIL_DEV_FIXTURE_PREFIX = 'vorinthex-local-signal-v1';
 export const MAIL_DEV_FIXTURE_AT = '2026-08-20T09:00:00.000Z';
+const SIGNAL_SENT_REPLY_SLUGS = new Set(['urgent-unread', 'important-read', 'primary-read']);
+
+function signalSentMessageId(seed: string) {
+  return `<vorinthex-c${createHash('sha256').update(`mail-sent-id:${seed}`).digest('hex').slice(0, 24)}@vorinthex.com>`;
+}
 
 const inboxes = [
   { slug: 'studio', name: 'Studio', description: 'Product, design, and launch work.', email: 'oscar.studio@signal.local' },
@@ -38,8 +45,7 @@ export function mailDevFixtures(scopeKey: string, accountKeys?: readonly string[
   const keys = accountKeys ?? inboxes.map((_, index) => `cmailfixtureaccount00000${index + 1}`);
   if (keys.length !== inboxes.length) throw new Error('Mail fixture account key count is invalid.');
   const accounts = inboxes.map((inbox, index) => ({ ...inbox, accountKey: keys[index]! }));
-  const assets = emailDevelopmentAttachmentAssets(scopeKey);
-  const threads = accounts.flatMap((account, accountIndex) => scenarios.map((scenario, scenarioIndex) => {
+  const inboxThreads = accounts.flatMap((account, accountIndex) => scenarios.map((scenario, scenarioIndex) => {
     const providerThreadId = `${MAIL_DEV_FIXTURE_PREFIX}:${account.slug}:${scenario.slug}`;
     const sender = `${scenario.slug}.${account.slug}@example.com`;
     const minute = accountIndex * 180 + scenarioIndex * 13;
@@ -50,21 +56,24 @@ export function mailDevFixtures(scopeKey: string, accountKeys?: readonly string[
     const outboundBody = `Thanks, I reviewed the ${account.name.toLowerCase()} details. I will follow up with the next step and keep everyone copied.`;
     const rootHeader = `<${providerThreadId}:1@example.com>`;
     const embedding = thematicEmbedding(`${account.slug}:${scenario.category}`);
-    const attachmentRefs = accountIndex === 0 && scenarioIndex === 0
-      ? [[assets[0]!, assets[1]!], [assets[5]!]]
+    const attachmentRefs: MailDevAttachmentSpec[][] = accountIndex === 0 && scenarioIndex === 0
+      ? [[{ type: 'document', filename: 'Schedule.pdf' }, { type: 'document', filename: 'Launch-brief.pdf' }], [{ type: 'image', filename: 'Studio-photo.png' }]]
       : accountIndex === 0 && scenarioIndex === 1
-        ? [[assets[2]!, assets[3]!, assets[4]!, assets[6]!, assets[7]!, assets[8]!], []]
+        ? [[{ type: 'document', filename: 'Decision-notes.pdf' }, { type: 'document', filename: 'Agenda.pdf' }, { type: 'document', filename: 'Quarterly-plan.pdf' }, { type: 'image', filename: 'Whiteboard.png' }, { type: 'image', filename: 'Moodboard.png' }, { type: 'image', filename: 'Desk-study.png' }], []]
         : accountIndex === 1 && scenarioIndex === 0
-          ? [[], [assets[5]!, assets[6]!]]
+          ? [[], [{ type: 'image', filename: 'Family.png' }, { type: 'image', filename: 'Travel.png' }]]
           : accountIndex === 2 && scenarioIndex === 1
-            ? [[assets[4]!], [assets[8]!]]
+            ? [[{ type: 'document', filename: 'Volunteer-brief.pdf' }], [{ type: 'image', filename: 'Event.png' }]]
             : [[], []];
-    const attachmentFields = (attachments: typeof assets) => attachments.length
-      ? { hasAttachments: true, attachmentAvailability: 'complete' as const, attachments: attachments.map(({ type, key }) => ({ type, key })) }
-      : { hasAttachments: false, attachmentAvailability: 'none' as const };
+    const attachmentFields = (attachments: MailDevAttachmentSpec[]) => ({
+      hasAttachments: attachments.length > 0,
+      attachmentAvailability: attachments.length ? 'complete' as const : 'none' as const,
+      attachments,
+    });
+    const copied = scenarioIndex % 3 === 0 ? ['alex@example.com', 'team@example.com'] : [];
     const messages = [
-      { scopeKey, accountKey: account.accountKey, providerMessageId: `${providerThreadId}:1`, from: sender, fromName: `${account.name} Correspondent`, to: [MAIL_DEV_SEED_EMAIL], ...(scenarioIndex % 3 === 0 ? { cc: ['alex@example.com', 'team@example.com'] } : {}), subject, body: inboundBody, summary: inboundBody, direction: 'inbound' as const, sentAt: firstAt, ...attachmentFields(attachmentRefs[0]!), labels: [...scenario.labels], unread: scenario.unread, replyDepth: 0, messageIdHeader: rootHeader, inboxCategory: scenario.inboxCategory, embedding, embeddingContentVersion: 4 as const },
-      { scopeKey, accountKey: account.accountKey, providerMessageId: `${providerThreadId}:2`, from: MAIL_DEV_SEED_EMAIL, to: [sender], ...(scenarioIndex % 3 === 0 ? { cc: ['alex@example.com', 'team@example.com'] } : {}), subject: `Re: ${subject}`, body: outboundBody, summary: outboundBody, direction: 'outbound' as const, sentAt: secondAt, ...attachmentFields(attachmentRefs[1]!), labels: ['SENT'], unread: false, replyDepth: 1, messageIdHeader: `<${providerThreadId}:2@example.com>`, inReplyTo: rootHeader, references: [rootHeader], parentMessageId: rootHeader, inboxCategory: scenario.inboxCategory, embedding, embeddingContentVersion: 4 as const },
+      { scopeKey, accountKey: account.accountKey, providerMessageId: `${providerThreadId}:1`, from: sender, fromName: `${account.name} Correspondent`, to: [MAIL_DEV_SEED_EMAIL], cc: copied, subject, body: inboundBody, summary: inboundBody, direction: 'inbound' as const, sentAt: firstAt, ...attachmentFields(attachmentRefs[0]!), labels: [...scenario.labels], unread: scenario.unread, replyDepth: 0, messageIdHeader: rootHeader, inReplyTo: '', references: [] as string[], parentMessageId: '', inboxCategory: scenario.inboxCategory, embedding, embeddingContentVersion: 4 as const },
+      { scopeKey, accountKey: account.accountKey, providerMessageId: `${providerThreadId}:2`, from: MAIL_DEV_SEED_EMAIL, to: [sender], cc: copied, subject: `Re: ${subject}`, body: outboundBody, summary: outboundBody, direction: 'outbound' as const, sentAt: secondAt, ...attachmentFields(attachmentRefs[1]!), labels: ['SENT'], unread: false, replyDepth: 1, messageIdHeader: SIGNAL_SENT_REPLY_SLUGS.has(scenario.slug) ? signalSentMessageId(`${providerThreadId}:2`) : `<${providerThreadId}:2@example.com>`, inReplyTo: rootHeader, references: [rootHeader], parentMessageId: rootHeader, inboxCategory: scenario.inboxCategory, embedding, embeddingContentVersion: 4 as const },
     ];
     return {
       fixtureId: providerThreadId,
@@ -72,6 +81,20 @@ export function mailDevFixtures(scopeKey: string, accountKeys?: readonly string[
       messages,
     };
   }));
+  const sentThreads = accounts.map((account, accountIndex) => {
+    const providerThreadId = `${MAIL_DEV_FIXTURE_PREFIX}:${account.slug}:sent-new`;
+    const recipient = `follow-up.${account.slug}@example.com`;
+    const sentAt = new Date(Date.parse(MAIL_DEV_FIXTURE_AT) + (accountIndex * 180 + 400) * 60_000).toISOString();
+    const subject = `${account.name}: Follow-up from Oscar`;
+    const body = `Hi, I sent this from ${account.name}. Here is the next step I promised. Reply if anything is blocking.`;
+    const embedding = thematicEmbedding(`${account.slug}:sent`);
+    return {
+      fixtureId: providerThreadId,
+      thread: { scopeKey, accountKey: account.accountKey, providerThreadId, subject, summary: body, intent: 'Awaiting a response', priority: 'normal' as const, state: 'waiting' as const, category: 'primary' as const, inboxCategory: 'Important' as const, snippet: body, unread: false, starred: false, labels: ['SENT'], latestFrom: MAIL_DEV_SEED_EMAIL, inInbox: false, lastMessageAt: sentAt, embedding, embeddingContentVersion: 4 as const, isFavorite: false },
+      messages: [{ scopeKey, accountKey: account.accountKey, providerMessageId: `${providerThreadId}:1`, from: MAIL_DEV_SEED_EMAIL, to: [recipient], cc: [] as string[], subject, body, summary: body, direction: 'outbound' as const, sentAt, hasAttachments: false, attachmentAvailability: 'none' as const, attachments: [] as MailDevAttachmentSpec[], labels: ['SENT'], unread: false, replyDepth: 0, messageIdHeader: signalSentMessageId(`${providerThreadId}:1`), inReplyTo: '', references: [] as string[], parentMessageId: '', inboxCategory: 'Important' as const, embedding, embeddingContentVersion: 4 as const }],
+    };
+  });
+  const threads = [...inboxThreads, ...sentThreads];
   const tones = [
     { id: 'casual', slug: 'casual' as const, name: 'Casual', instruction: 'Use conversational language, natural contractions, and an approachable tone.', isFavorite: false },
     { id: 'formal', slug: 'formal' as const, name: 'Formal', instruction: 'Use professional language, complete sentences, and a clear conventional structure.', isFavorite: false },
@@ -85,7 +108,7 @@ export function mailDevFixtures(scopeKey: string, accountKeys?: readonly string[
     { id: 'signoff', name: 'Sign-off', text: 'Use "Best, Oscar" for formal mail and first name only for familiar correspondents.' },
   ];
   const drafts = [
-    { id: 'studio-reply', variant: 'reply' as const, accountKey: accounts[0]!.accountKey, threadFixtureId: threads[0]!.fixtureId, messageProviderId: threads[0]!.messages[1]!.providerMessageId, replyMode: 'reply_all' as const, to: ['urgent-unread.studio@example.com'], cc: ['alex@example.com', 'team@example.com'], generatedContent: 'I can approve the schedule once the final owner is named.', finalContent: 'Approved. Alex owns the final schedule and will publish it by 15:00 today.', status: 'edited' as const, tone: 'Direct' },
+    { id: 'studio-reply', variant: 'reply' as const, accountKey: accounts[0]!.accountKey, threadFixtureId: threads[0]!.fixtureId, messageProviderId: threads[0]!.messages[1]!.providerMessageId, replyMode: 'reply_all' as const, to: ['urgent-unread.studio@example.com'], cc: ['alex@example.com', 'team@example.com'], generatedContent: 'I can approve the schedule once the final owner is named.', finalContent: 'Approved. Alex owns the final schedule and will publish it by 15:00 today.', status: 'edited' as const, tone: 'Direct', attachments: threads[0]!.messages[0]!.attachments?.slice(0, 1) },
     { id: 'personal-reply', variant: 'reply' as const, accountKey: accounts[1]!.accountKey, threadFixtureId: threads[9]!.fixtureId, messageProviderId: threads[9]!.messages[1]!.providerMessageId, replyMode: 'reply' as const, to: ['urgent-unread.personal@example.com'], cc: [], generatedContent: 'Tomorrow works for me. Shall we confirm the details?', status: 'generated' as const, tone: 'Casual' },
     { id: 'community-reply', variant: 'reply' as const, accountKey: accounts[2]!.accountKey, threadFixtureId: threads[19]!.fixtureId, messageProviderId: threads[19]!.messages[1]!.providerMessageId, replyMode: 'reply_all' as const, to: ['important-unread.community@example.com'], cc: ['alex@example.com'], generatedContent: 'Thank you for the notes. I have added comments and proposed owners.', finalContent: 'Thank you for the notes. My comments and proposed owners are now included.', status: 'edited' as const, tone: 'Formal' },
     { id: 'studio-new', variant: 'new' as const, accountKey: accounts[0]!.accountKey, to: ['maya@example.com'], cc: ['team@example.com'], subject: 'Launch decision recap', generatedContent: 'Here is the launch decision recap and the three assigned owners.', status: 'generated' as const, tone: 'Direct' },

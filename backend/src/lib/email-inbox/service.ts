@@ -59,6 +59,7 @@ function createdAtRange(value: { createdFrom?: string; createdTo?: string }) { r
 export const emailOverviewInputShape = {
   connectorKey: keySchema.optional(),
   filter: z.enum(['all', 'important', 'urgent', 'purchases', 'needs_action', 'filtered', 'unread', 'favorite', 'trash']).optional(),
+  mailbox: z.enum(['sent']).optional(),
   readState: z.enum(['read', 'unread']).optional(),
   facets: z.array(z.enum(EMAIL_OVERVIEW_FACETS)).optional(),
   search: z.string().trim().max(200).optional(),
@@ -69,9 +70,10 @@ export const emailOverviewInputShape = {
 } as const;
 export const emailOverviewInputSchema = z.object(emailOverviewInputShape).strict().superRefine((value, context) => {
   const hasCompositeField = value.readState !== undefined || value.facets !== undefined;
+  if (value.mailbox === 'sent' && (value.filter !== undefined || hasCompositeField)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'sent mailbox cannot be combined with filter, readState, or facets' });
   if (value.filter !== undefined && hasCompositeField) context.addIssue({ code: z.ZodIssueCode.custom, message: 'filter cannot be combined with composite overview fields' });
   if (hasCompositeField && (value.readState === undefined || value.facets === undefined)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'readState and facets must be provided together' });
-  if (!value.connectorKey && (value.filter !== undefined || hasCompositeField || value.search !== undefined || value.cursor !== undefined || value.draftCursor !== undefined || value.limit !== undefined || value.createdFrom !== undefined || value.createdTo !== undefined)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'connectorKey is required for an overview query' });
+  if (!value.connectorKey && (value.filter !== undefined || value.mailbox !== undefined || hasCompositeField || value.search !== undefined || value.cursor !== undefined || value.draftCursor !== undefined || value.limit !== undefined || value.createdFrom !== undefined || value.createdTo !== undefined)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'connectorKey is required for an overview query' });
   rejectReversedCreatedAtRange(value, context);
 });
 const emailSemanticSearchInputShape = { query: z.string().trim().min(1).max(500), minimumScore: z.number().min(-1).max(1).default(0.55), limit: z.number().int().min(1).max(50).default(50), recordHistory: z.boolean().default(true), ...emailCreatedAtRangeShape } as const;
@@ -79,6 +81,7 @@ export const emailSemanticSearchInputSchema = z.object(emailSemanticSearchInputS
 export const emailMessageSearchInputSchema = z.object({
   ...emailSemanticSearchInputShape,
   connectorKey: keySchema,
+  mailbox: z.enum(['sent']).optional(),
   readState: z.enum(['read', 'unread']).optional(),
   facets: z.array(z.enum(EMAIL_OVERVIEW_FACETS)).max(EMAIL_OVERVIEW_FACETS.length).optional(),
 }).strict();
@@ -240,11 +243,17 @@ function publicThread(value: EmailThread) {
   const { key, subject, summary, intent, action, priority, state, lastMessageAt, snippet, category, unread, starred, labels, latestFrom, inInbox, isFavorite, inboxCategory, createdAt, updatedAt } = value;
   return { key, subject, summary, intent, ...(action ? { action } : {}), priority, state, lastMessageAt, ...(snippet !== undefined ? { snippet } : {}), ...(category ? { category } : {}), unread, isRead: !unread, ...(starred !== undefined ? { starred } : {}), ...(labels ? { labels } : {}), ...(latestFrom ? { latestFrom } : {}), ...(inInbox !== undefined ? { inInbox } : {}), isFavorite, inboxCategory, createdAt, updatedAt };
 }
-function publicMessage<T extends { embedding: number[]; bodyHtml?: string; unread: boolean }>(value: T) {
-  const { embedding: _embedding, bodyHtml: _html, scopeKey: _scopeKey, accountKey: _accountKey, providerMessageId: _providerMessageId, messageIdHeader: _messageIdHeader, inReplyTo: _inReplyTo, references: _references, parentMessageId: _parentMessageId, embeddingContentVersion: _embeddingContentVersion, developmentFixtureIdentifier: _developmentFixtureIdentifier, ...safe } = value as T & Partial<EmailMessage> & { developmentFixtureIdentifier?: string };
-  return { ...safe, isRead: !value.unread };
+function publicMessage(value: EmailMessage) {
+  const { key, threadKey, from, fromName, to, cc, bcc, subject, body, summary, replyTo, replyDepth, labels, unread, direction, sentAt, hasAttachments, attachmentAvailability, unavailableAttachmentCount, attachments, inboxCategory, createdAt, updatedAt } = value;
+  return {
+    key, threadKey, from, ...(fromName ? { fromName } : {}), to, ...(cc ? { cc } : {}), ...(bcc ? { bcc } : {}),
+    subject, body, summary, ...(replyTo ? { replyTo } : {}), ...(replyDepth !== undefined ? { replyDepth } : {}),
+    ...(labels ? { labels } : {}), unread, isRead: !unread, direction, sentAt, hasAttachments, attachmentAvailability,
+    ...(unavailableAttachmentCount !== undefined ? { unavailableAttachmentCount } : {}),
+    ...(attachments?.length ? { attachments } : {}), inboxCategory, createdAt, updatedAt,
+  };
 }
-type ReadEmailMessage = ReturnType<typeof publicMessage<EmailMessage>> & { bodyTruncated: boolean };
+type ReadEmailMessage = ReturnType<typeof publicMessage> & { bodyTruncated: boolean };
 const TOOL_THREAD_MESSAGE_LIMIT = 50;
 const TOOL_MESSAGE_BODY_LIMIT = 8_000;
 const TOOL_THREAD_BODY_LIMIT = 64_000;
@@ -902,7 +911,9 @@ export function createEmailService(options: {
       const selected = accounts.find(({ connectorKey }) => connectorKey === input.connectorKey);
       if (!selected) throw new EmailRepositoryError('not_found', 'Email connector is not available in this scope');
       const limit = input.limit ?? 25;
-      const query = input.readState !== undefined && input.facets !== undefined
+      const query = input.mailbox === 'sent'
+        ? { mailbox: 'sent' as const, search: input.search, cursor: input.cursor, limit, ...createdAtRange(input) }
+        : input.readState !== undefined && input.facets !== undefined
         ? { readState: input.readState, facets: normalizeEmailOverviewFacets(input.facets), search: input.search, cursor: input.cursor, limit, ...createdAtRange(input) }
         : { filter: (input.filter ?? 'all') as EmailOverviewLegacyFilter, search: input.search, cursor: input.cursor, limit, ...createdAtRange(input) };
       const result = await repository.overview(privateScope(actor), selected.connectorKey, query);
@@ -964,7 +975,7 @@ export function createEmailService(options: {
       const connector = await connectors.getExact(actor.userKey, input.connectorKey);
       if (!connector || connector.status === 'revoked') throw new EmailRepositoryError('not_found', 'Email connector is not available in this scope');
       const embedding = options.queryEmbedding ?? await embed({ text: input.query, purpose: 'query', signal: options.signal, timeoutMs: options.timeoutMs }, actor.teamKey);
-      const matches = await repository.searchThreads(privateScope(actor), connector.key, embedding, input.query, input.minimumScore, input.limit, { readState: input.readState, facets: input.facets, ...createdAtRange(input) });
+      const matches = await repository.searchThreads(privateScope(actor), connector.key, embedding, input.query, input.minimumScore, input.limit, { mailbox: input.mailbox, readState: input.readState, facets: input.facets, ...createdAtRange(input) });
       if (input.recordHistory) await userSearches.record(actor.userKey, input.query);
       return { threads: matches.map(({ thread, score }) => ({ ...publicThread(thread), score })) };
     },
@@ -1495,7 +1506,6 @@ export function createEmailService(options: {
       await mutate(actor, ['owner', 'admin', 'moderator']);
       const input = emailReplyContextCreateInputSchema.parse(rawInput);
       const note = await repository.createReplyContext(actor.userKey, privateScope(actor), { ...input, embedding: await embed({ text: emailReplyContextSemanticText(input) }, actor.teamKey) });
-      await publishInboxChanged(destinationScope(actor));
       return projectReplyContext(note);
     },
     async updateReplyContext(actor: EmailActor, rawInput: unknown) {
@@ -1507,7 +1517,6 @@ export function createEmailService(options: {
         const data = { name: input.name ?? current.note.name, text: input.text ?? current.note.text };
         const updated = await repository.updateReplyContext(actor.userKey, input.noteKey, current.note.updatedAt, current.revision, { ...data, embedding: await embed({ text: emailReplyContextSemanticText(data) }, actor.teamKey) });
         if (updated) {
-          await publishInboxChanged(destinationScope(actor));
           return projectReplyContext(updated);
         }
         const latest = await repository.getReplyContext(actor.userKey, input.noteKey);
@@ -1520,7 +1529,6 @@ export function createEmailService(options: {
       await mutate(actor, ['owner', 'admin', 'moderator']);
       const input = emailReplyContextDeleteInputSchema.parse(rawInput);
       const result = await repository.deleteReplyContext(actor.userKey, input.noteKeys);
-      await publishInboxChanged(destinationScope(actor));
       return result;
     },
     async createTone(actor: EmailActor, rawInput: unknown) {
@@ -1528,7 +1536,6 @@ export function createEmailService(options: {
       const input = emailToneCreateInputSchema.parse(rawInput);
       const embedding = await embed({ text: input.name }, actor.teamKey);
       const created = await repository.createTone(actor.userKey, privateScope(actor), { ...input, embedding });
-      await publishInboxChanged(destinationScope(actor));
       return projectTone(created);
     },
     async updateTone(actor: EmailActor, rawInput: unknown) {
@@ -1540,7 +1547,6 @@ export function createEmailService(options: {
         const patch = { ...input, ...(input.name !== undefined ? { embedding: await embed({ text: input.name }, actor.teamKey) } : {}) };
         const updated = await repository.updateTone(actor.userKey, input.toneKey, current.updatedAt, patch);
         if (updated) {
-          await publishInboxChanged(destinationScope(actor));
           return projectTone(updated);
         }
         const latest = await repository.getTone(actor.userKey, input.toneKey);
@@ -1557,7 +1563,6 @@ export function createEmailService(options: {
       await Promise.all(result.storageKeys.map(async (storageKey) => {
         try { await storage.delete(storageKey); await acknowledgeStorageDeletionKey(storageKey); } catch { /* Durable deletion jobs retry failed cleanup. */ }
       }));
-      await publishInboxChanged(destinationScope(actor));
       return { deletedKey: result.deletedKey };
       });
     },
@@ -1851,7 +1856,18 @@ export function createEmailService(options: {
       if (!connector || connector.status === 'revoked') return { disconnected: true };
       const disconnecting = await connectors.claimDisconnect(connector.key, connector.updatedAt);
       if (!disconnecting) throw new EmailRepositoryError('conflict', 'Email connector changed while disconnecting');
-      if (!await connectors.revoke(disconnecting.key, disconnecting.updatedAt)) throw new EmailRepositoryError('conflict', 'Email connector changed while finalizing disconnect');
+      let credentials: ReturnType<ConnectorRepository['credentials']> | undefined;
+      try { credentials = connectors.credentials(disconnecting); } catch { credentials = undefined; }
+      const remaining = (await connectors.listSyncTargetsByEmail(disconnecting.email)).filter((target) => target.connectorKey !== disconnecting.key);
+      const purged = await repository.purgeConnectorMailbox(privateScope(actor), actor.userKey, disconnecting.key);
+      await Promise.all(purged.storageKeys.map(async (storageKey) => {
+        try { await storage.delete(storageKey); await acknowledgeStorageDeletionKey(storageKey); } catch { /* Durable deletion jobs retry failed cleanup. */ }
+      }));
+      if (credentials && remaining.length === 0) {
+        const gmail = clientFactory ? clientFactory(credentials.accessToken) : createGmailClient(credentials.accessToken);
+        await gmail.stop().catch(() => undefined);
+        await gmail.revoke(credentials.refreshToken ?? credentials.accessToken).catch(() => undefined);
+      }
       await publishInboxChanged(destinationScope(actor));
       return { disconnected: true };
     },

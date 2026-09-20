@@ -16,9 +16,11 @@ import type { BookService } from '@/lib/books/service';
 import { getDefaultScopeTagRepository, type ScopeTagRepository, type ScopeTagTarget } from '@/lib/scope-tags/repository';
 import { createScopeTagService, normalizeScopeTagName, ScopeTagError } from '@/lib/scope-tags/service';
 import { getDefaultStorageChargingRepository } from '@/lib/automations/storage-charger-repository';
+import { getDefaultTicketService, type TicketService } from '@/lib/tickets/service';
+import { userNotificationService, type UserNotificationService } from '@/lib/user-notifications/service';
 
 export const appSearchCollectionSlugSchema = z.enum([
-  'folders', 'documents', 'files', 'collections', 'images', 'inboxes', 'email-tones', 'email-messages', 'email-drafts', 'places', 'trips', 'countries', 'books', 'tags', 'tag-assignments',
+  'folders', 'documents', 'files', 'collections', 'images', 'inboxes', 'email-tones', 'email-messages', 'email-drafts', 'places', 'trips', 'countries', 'books', 'tags', 'tag-assignments', 'tickets', 'notifications',
 ]);
 export type AppSearchCollectionSlug = z.infer<typeof appSearchCollectionSlugSchema>;
 
@@ -47,6 +49,8 @@ export const APP_SEARCH_COLLECTION_ADAPTERS = Object.freeze({
   books: { description: 'Generated audio books in the user library; searched by title, subtitle, topic, goal, audience, and outcome.', operations: ['search', 'list', 'count', 'sum', 'get'], filters: ['status', 'isFavorite', 'createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], fields: ['key', 'title', 'subtitle', 'description', 'content', 'status', 'isFavorite', 'isExtending', 'narrator', 'estimatedMinutes', 'chapterCount', 'progressPercent', 'createdAt', 'updatedAt', 'tags'], sumFields: { estimatedMinutes: { description: 'Estimated listening duration across books.', unit: 'minutes' }, chapterCount: { description: 'Number of chapters across books.', unit: 'chapters' } }, statuses: ['queued', 'researching', 'planning', 'writing', 'narrating', 'finalizing', 'failed', 'ready', 'cancelled'] },
   tags: { description: 'Private labels owned by the current user in this scope; searched semantically by tag name and description.', operations: ['search', 'list', 'count', 'get'], filters: ['createdFrom', 'createdTo'], fields: ['key', 'name', 'description', 'createdAt', 'updatedAt'] },
   'tag-assignments': { description: 'Private relationships between the current user\'s tags and recognizable authorized workspace resources; use one list with tagNames and tagMatch all to find resources under every named tag.', operations: ['list', 'count', 'get'], filters: ['tagNames', 'tagKeys', 'tagMatch', 'targetTypes'], fields: ['key', 'tag', 'target'] },
+  tickets: { description: 'Private support issues and product feedback submitted by the current user in Vorinthex AI; searched by ticket message.', operations: ['search', 'list', 'count', 'get'], filters: ['createdFrom', 'createdTo'], fields: ['key', 'message', 'kind', 'createdAt'] },
+  notifications: { description: 'Notifications delivered to the authenticated user in Vorinthex AI; searched by title and message.', operations: ['search', 'list', 'count', 'get'], filters: ['readState', 'createdFrom', 'createdTo'], fields: ['key', 'title', 'message', 'isRead', 'createdAt'] },
 } as const satisfies Record<AppSearchCollectionSlug, AppSearchCollectionAdapter>);
 export const APP_SEARCH_COLLECTION_OPERATIONS = Object.freeze(Object.fromEntries(Object.entries(APP_SEARCH_COLLECTION_ADAPTERS).map(([slug, adapter]) => [slug, adapter.operations]))) as { readonly [K in AppSearchCollectionSlug]: typeof APP_SEARCH_COLLECTION_ADAPTERS[K]['operations'] };
 export function describeAppSearchCollections() {
@@ -192,6 +196,8 @@ const countryResultSchema = z.object({ name: z.string(), countryCode: z.string()
 const bookResultSchema = z.object({ key: z.string(), title: z.string(), subtitle: z.string(), description: z.string(), content: z.string().optional(), contentTruncated: z.boolean().optional(), status: z.enum(['queued', 'researching', 'planning', 'writing', 'narrating', 'finalizing', 'failed', 'ready', 'cancelled']), isFavorite: z.boolean(), isExtending: z.boolean(), canExtend: z.boolean(), managed: z.boolean(), coverUrl: z.string().url().optional(), narrator: z.object({ key: z.enum(['calm', 'clear', 'warm']), name: z.string(), description: z.string().optional(), previewUrl: z.string().url().optional() }).strict().optional(), estimatedMinutes: z.number().int().nonnegative(), chapterCount: z.number().int().nonnegative(), progressPercent: z.number().min(0).max(100), createdAt: z.string().datetime(), updatedAt: z.string().datetime(), generationProgressPercent: z.number().min(0).max(100).optional(), failureMessage: z.string().optional(), currentChapterKey: z.string().optional(), score: z.number().optional(), tags: resultTagsSchema.default([]) }).strict();
 const tagResultSchema = z.object({ key: z.string().cuid(), name: z.string().min(1).max(120), description: z.string().min(1).max(2000).optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(), score: z.number().optional() }).strict();
 const tagAssignmentResultSchema = z.object({ key: z.string().cuid(), tag: z.object({ key: z.string().cuid(), name: z.string().min(1).max(120) }).strict(), target: z.object({ type: z.enum(['folder', 'document', 'image-collection', 'image', 'image-highlight', 'image-memory', 'place', 'trip', 'email-inbox', 'email-tone', 'email-thread', 'email-message', 'email-draft', 'book']), key: z.string().cuid(), label: z.string().min(1).max(4_000) }).strict() }).strict();
+const ticketResultSchema = z.object({ key: z.string().cuid(), message: z.string(), kind: z.enum(['issue', 'feedback']), createdAt: z.string().datetime(), score: z.number().optional() }).strict();
+const notificationResultSchema = z.object({ key: z.string().cuid(), title: z.string(), message: z.string(), isRead: z.boolean(), createdAt: z.string().datetime(), score: z.number().optional() }).strict();
 
 export const appSearchGroupSchema = z.discriminatedUnion('collectionSlug', [
   z.object({ collectionSlug: z.literal('folders'), results: z.array(folderResultSchema) }).strict(),
@@ -209,6 +215,8 @@ export const appSearchGroupSchema = z.discriminatedUnion('collectionSlug', [
   z.object({ collectionSlug: z.literal('books'), results: z.array(bookResultSchema) }).strict(),
   z.object({ collectionSlug: z.literal('tags'), results: z.array(tagResultSchema) }).strict(),
   z.object({ collectionSlug: z.literal('tag-assignments'), results: z.array(tagAssignmentResultSchema) }).strict(),
+  z.object({ collectionSlug: z.literal('tickets'), results: z.array(ticketResultSchema) }).strict(),
+  z.object({ collectionSlug: z.literal('notifications'), results: z.array(notificationResultSchema) }).strict(),
 ]);
 export const appSearchOutputSchema = z.object({ query: z.string(), groups: z.array(appSearchGroupSchema) }).strict();
 export type AppSearchOutput = z.infer<typeof appSearchOutputSchema>;
@@ -274,8 +282,8 @@ function compactAppSearchModelItem(collectionSlug: unknown, value: unknown, evid
   }
   const nestedThread = collectionSlug === 'email-messages' && outer.thread && typeof outer.thread === 'object' ? outer.thread as Record<string, unknown> : undefined;
   const item = nestedThread ? { ...nestedThread, messages: outer.messages, contentTruncated: outer.truncated } : outer;
-  const label = stringField(item, 'name', 'title', 'subject', 'caption', 'filename', 'email');
-  const detail = stringField(item, 'description', 'summary', 'subtitle', 'intent', 'city', 'country');
+  const label = stringField(item, 'name', 'title', 'subject', 'caption', 'filename', 'email', 'message');
+  const detail = stringField(item, 'description', 'summary', 'subtitle', 'intent', 'city', 'country', 'message');
   const evidence = nestedEvidence(collectionSlug, item);
   const content = evidence && evidenceLimit > 0 ? evidence.slice(0, evidenceLimit) : undefined;
   const copy = (field: string, type: 'string' | 'number' | 'boolean') => typeof item[field] === type ? item[field] : undefined;
@@ -450,6 +458,8 @@ export function projectAppSearchRetrieval(rawInput: unknown, rawOutput: unknown)
         continue;
       case 'books': results = group.results.map((result) => ({ key: result.key, label: retrievalLabel(result.title, 'Audio book') })); break;
       case 'tag-assignments': results = group.results.map((result) => ({ key: result.key, label: retrievalLabel(result.target.label, 'Tagged resource') })); break;
+      case 'tickets': results = group.results.map((result) => ({ key: result.key, label: retrievalLabel(result.message, result.kind === 'feedback' ? 'Product feedback' : 'Support issue') })); break;
+      case 'notifications': results = group.results.map((result) => ({ key: result.key, label: retrievalLabel(result.title, 'Notification') })); break;
       default: results = group.results.map((result) => ({ key: result.key, label: retrievalLabel(result.name, group.collectionSlug === 'trips' ? 'Trip' : 'Resource') }));
     }
     for (const result of results) add(group.collectionSlug, result);
@@ -474,6 +484,8 @@ export interface AppSearchDependencies extends Pick<ExecuteActionOptions, 'signa
   travel?: TravelService;
   countries?: CountrySearchService;
   books?: BookService;
+  tickets?: TicketService;
+  userNotifications?: UserNotificationService;
   userSearches?: UserSearchService;
   scopeTags?: ScopeTagRepository;
   accountSumResolvers?: Partial<Record<AppSearchSumField, (userKey: string) => Promise<string>>>;
@@ -483,7 +495,7 @@ export interface AppSearchDependencies extends Pick<ExecuteActionOptions, 'signa
 const APP_SEARCH_TAG_TARGET = {
   folders: 'folder', documents: 'document', files: 'document', collections: 'image-collection', images: 'image', inboxes: 'email-inbox', 'email-tones': 'email-tone',
   'email-messages': 'email-thread', 'email-drafts': 'email-draft', places: 'place', trips: 'trip', books: 'book',
-} as const satisfies Record<Exclude<AppSearchCollectionSlug, 'countries' | 'tags' | 'tag-assignments'>, ScopeTagTarget['type']>;
+} as const satisfies Record<Exclude<AppSearchCollectionSlug, 'countries' | 'tags' | 'tag-assignments' | 'tickets' | 'notifications'>, ScopeTagTarget['type']>;
 const emptyScopeTags = {
   list: async () => [],
   get: async () => null,
@@ -605,6 +617,8 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
       const emailActor = { ...trusted.serviceContext, userKey: trusted.userKey };
       const travel = dependencies.travel ?? createTravelService();
       const books = dependencies.books ?? defaultBookService;
+      const tickets = dependencies.tickets ?? getDefaultTicketService();
+      const userNotifications = dependencies.userNotifications ?? userNotificationService;
       const galleryContext = { ...trusted.serviceContext, membership: trusted.membership, signal: dependencies.signal } as GalleryOperationContext;
       const executeContent = dependencies.executeContent ?? runContentTool;
        // Tests and specialized injected adapters must supply scopeTags to opt into database-backed
@@ -613,7 +627,7 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
        const scopeTags = dependencies.scopeTags ?? (projectTags ? getDefaultScopeTagRepository() : emptyScopeTags);
        const scopeTagQueries = createScopeTagService({ repository: scopeTags as ScopeTagRepository });
       const tagOwner = { teamKey: context.teamKey, scopeKey: context.runtimeScopeKey, userKey: trusted.userKey, teamMembershipKey: trusted.membership.key };
-       const targetTypes = [...new Set(collectionSlugs.flatMap((slug) => slug === 'countries' || slug === 'tags' || slug === 'tag-assignments' ? [] : slug === 'email-messages' ? ['email-thread' as const, 'email-message' as const] : [APP_SEARCH_TAG_TARGET[slug]]))];
+        const targetTypes = [...new Set(collectionSlugs.flatMap((slug) => slug === 'countries' || slug === 'tags' || slug === 'tag-assignments' || slug === 'tickets' || slug === 'notifications' ? [] : slug === 'email-messages' ? ['email-thread' as const, 'email-message' as const] : [APP_SEARCH_TAG_TARGET[slug]]))];
        let candidateKeys: Record<string, string[]> | undefined;
        if (targetTypes.length && (input.filters?.tagNames || input.filters?.tagKeys)) {
          const owned = input.filters.tagNames
@@ -624,7 +638,7 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
           candidateKeys = await scopeTags.resolveCandidateKeys(tagOwner, owned.map((tag) => tag!.key), targetTypes, input.filters.tagMatch ?? 'any');
          if (collectionSlugs.includes('email-messages')) candidateKeys['email-thread'] = [...new Set([...(candidateKeys['email-thread'] ?? []), ...await scopeTags.resolveEmailThreadKeys(tagOwner, candidateKeys['email-message'] ?? [])])];
       }
-      const isCandidate = (slug: Exclude<AppSearchCollectionSlug, 'countries' | 'tags' | 'tag-assignments'>, value: unknown) => {
+      const isCandidate = (slug: Exclude<AppSearchCollectionSlug, 'countries' | 'tags' | 'tag-assignments' | 'tickets' | 'notifications'>, value: unknown) => {
         if (!candidateKeys) return true;
         const item = value && typeof value === 'object' ? value as Record<string, any> : {};
         const key = typeof item.key === 'string' ? item.key : typeof item.documentKey === 'string' ? item.documentKey : typeof item.thread?.key === 'string' ? item.thread.key : undefined;
@@ -632,15 +646,15 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
       };
       const tagResults = async <T extends AppSearchResult>(result: T): Promise<T> => {
          if (!projectTags || !('groups' in result) || (result as any).operation === 'count' || (result as any).operation === 'sum') return result;
-         const targets = result.groups.flatMap((group: any) => group.collectionSlug === 'countries' || group.collectionSlug === 'tags' || group.collectionSlug === 'tag-assignments' ? [] : group.results.flatMap((item: any) => {
+          const targets = result.groups.flatMap((group: any) => group.collectionSlug === 'countries' || group.collectionSlug === 'tags' || group.collectionSlug === 'tag-assignments' || group.collectionSlug === 'tickets' || group.collectionSlug === 'notifications' ? [] : group.results.flatMap((item: any) => {
           const key = item?.key ?? item?.documentKey ?? item?.thread?.key;
-           return typeof key === 'string' ? [{ type: APP_SEARCH_TAG_TARGET[group.collectionSlug as Exclude<AppSearchCollectionSlug, 'countries' | 'tags' | 'tag-assignments'>], key }] : [];
+            return typeof key === 'string' ? [{ type: APP_SEARCH_TAG_TARGET[group.collectionSlug as Exclude<AppSearchCollectionSlug, 'countries' | 'tags' | 'tag-assignments' | 'tickets' | 'notifications'>], key }] : [];
          }));
         if (!targets.length) return result;
         const tags = await scopeTags.listTargetTags(tagOwner, targets);
-        return { ...result, groups: result.groups.map((group: any) => group.collectionSlug === 'countries' || group.collectionSlug === 'tags' || group.collectionSlug === 'tag-assignments' ? group : ({ ...group, results: group.results.map((item: any) => {
+         return { ...result, groups: result.groups.map((group: any) => group.collectionSlug === 'countries' || group.collectionSlug === 'tags' || group.collectionSlug === 'tag-assignments' || group.collectionSlug === 'tickets' || group.collectionSlug === 'notifications' ? group : ({ ...group, results: group.results.map((item: any) => {
           const key = item?.key ?? item?.documentKey ?? item?.thread?.key;
-           return { ...item, tags: tags[`${APP_SEARCH_TAG_TARGET[group.collectionSlug as Exclude<AppSearchCollectionSlug, 'countries' | 'tags' | 'tag-assignments'>]}\0${key}`] ?? [] };
+           return { ...item, tags: tags[`${APP_SEARCH_TAG_TARGET[group.collectionSlug as Exclude<AppSearchCollectionSlug, 'countries' | 'tags' | 'tag-assignments' | 'tickets' | 'notifications'>]}\0${key}`] ?? [] };
         }) })) } as T;
       };
 
@@ -711,6 +725,28 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
         if (slug === 'books') return filterStructuredResources((await books.overview(trusted.serviceContext, trusted.userKey)).books, input).filter((item) => isCandidate('books', item)).slice(0, all ? undefined : input.limit);
         if (slug === 'trips') return filterStructuredResources((await travel.listTrips(trusted.serviceContext, trusted.userKey)).trips, input).filter((item) => isCandidate('trips', item)).slice(0, all ? undefined : input.limit);
         if (slug === 'places') return filterStructuredResources((await travel.overview(trusted.serviceContext, trusted.userKey)).places, input).filter((item) => isCandidate('places', item)).slice(0, all ? undefined : input.limit);
+        if (slug === 'tickets') {
+          const items: unknown[] = [];
+          let cursor: string | undefined;
+          do {
+            const page = await tickets.list({ limit: all ? 50 : input.limit, ...(cursor ? { cursor } : {}) }, context);
+            items.push(...page.items.map((item) => ticketResultSchema.parse(item)));
+            cursor = page.nextCursor ?? undefined;
+          } while (cursor && (all || items.length < input.limit));
+          return filterStructuredResources(items, input).slice(0, all ? undefined : input.limit);
+        }
+        if (slug === 'notifications') {
+          const items: unknown[] = [];
+          for (const readState of input.filters?.readState ? [input.filters.readState] as const : ['unread', 'read'] as const) {
+            let cursor: string | undefined;
+            do {
+              const page = await userNotifications.list({ readState, limit: all ? 50 : input.limit, ...(cursor ? { cursor } : {}) }, context);
+              items.push(...page.items.map((item) => notificationResultSchema.parse(item)));
+              cursor = page.nextCursor ?? undefined;
+            } while (cursor && (all || items.length < input.limit));
+          }
+          return filterStructuredResources(items, input).slice(0, all ? undefined : input.limit);
+        }
         throw new Error(`${slug} does not support ${operation}.`);
       };
 
@@ -776,6 +812,8 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
         else if (collectionSlug === 'email-messages') { const thread = await email.threadForTool(emailActor, input.key!); results = thread ? [thread] : []; }
         else if (collectionSlug === 'trips') results = (await travel.listTrips(trusted.serviceContext, trusted.userKey)).trips.filter(({ key }) => key === input.key);
         else if (collectionSlug === 'places') results = (await travel.overview(trusted.serviceContext, trusted.userKey)).places.filter(({ key }) => key === input.key);
+        else if (collectionSlug === 'tickets') results = [ticketResultSchema.parse(await tickets.get(input.key!, context))];
+        else if (collectionSlug === 'notifications') results = [notificationResultSchema.parse(await userNotifications.get(input.key!, context))];
         else throw new Error(`${collectionSlug} does not support get.`);
         if (!results.length) throw new Error(`${collectionSlug} resource was not found.`);
         return tagResults(appSearchResourceOutputSchema.parse({ operation, groups: [{ collectionSlug, results }] }));
@@ -803,7 +841,7 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
       }
       if (candidateKeys) {
         const groups = await Promise.all(collectionSlugs.map(async (collectionSlug) => {
-          if (collectionSlug === 'countries' || collectionSlug === 'tags' || collectionSlug === 'tag-assignments') return { collectionSlug, results: [] };
+          if (collectionSlug === 'countries' || collectionSlug === 'tags' || collectionSlug === 'tag-assignments' || collectionSlug === 'tickets' || collectionSlug === 'notifications') return { collectionSlug, results: [] };
           const targetType = APP_SEARCH_TAG_TARGET[collectionSlug];
           const ranked = await scopeTags.rankCandidateKeys(tagOwner, targetType, candidateKeys[targetType] ?? [], queryEmbedding!);
           const authorized = await list(collectionSlug, true);
@@ -938,6 +976,14 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
             } catch (error) { rethrowAbort(error); return result; }
           }));
           return { collectionSlug, results: enriched };
+        }
+        if (collectionSlug === 'tickets') {
+          const results = await tickets.search(queryEmbedding!, query, context, { ...creationDateRange(input), limit: input.limit });
+          return { collectionSlug, results: results.map((item) => ticketResultSchema.parse(item)) };
+        }
+        if (collectionSlug === 'notifications') {
+          const results = await userNotifications.search(queryEmbedding!, query, context, { ...creationDateRange(input), ...(input.filters?.readState ? { readState: input.filters.readState } : {}), limit: input.limit });
+          return { collectionSlug, results: results.map((item) => notificationResultSchema.parse(item)) };
         }
         const output = await countries.search({ teamKey: context.teamKey, query }, trusted.userKey, { signal: dependencies.signal, timeoutMs: dependencies.timeoutMs, queryEmbedding, recordHistory: false, minimumScore: -1 });
         return { collectionSlug, results: output.country ? [output.country] : [] };

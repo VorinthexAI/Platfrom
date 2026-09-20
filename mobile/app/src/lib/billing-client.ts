@@ -29,6 +29,7 @@ export const billingSummarySchema = z.object({
   microSparkBalance: z.number().int().safe().nonnegative(),
   microSparkDebt: z.number().int().safe().nonnegative().default(0),
   spendingBlocked: z.boolean().default(false),
+  aiUsageMicroSparks: z.number().int().safe().nonnegative(),
   storage: z.object({
     bytes: canonicalIntegerSchema,
     estimatedMonthlyMicroSparks: rolloutIntegerSchema,
@@ -61,11 +62,26 @@ export const subscriptionSchema = z.strictObject({
 const subscriptionEnvelopeSchema = z.strictObject({ success: z.literal(true), data: subscriptionSchema.nullable() });
 export type CurrentSubscription = z.infer<typeof subscriptionSchema>;
 
+export const WALLET_HISTORY_PAGE_SIZE = 25;
+export type BillingSummaryQuery = {
+  limit?: number;
+  beforeCreatedAt?: string;
+  beforeKey?: string;
+  kind?: z.infer<typeof sparkTransactionSchema>["kind"];
+};
+
 export const billingSummaryQueryKey = (userKey: string) => ["billing-summary", userKey] as const;
+export const walletHistoryQueryKey = (userKey: string) => ["billing-wallet-history", userKey] as const;
 export const currentSubscriptionQueryKey = (userKey: string) => ["billing-subscription", userKey] as const;
 
-export async function fetchBillingSummary(): Promise<BillingSummary> {
-  const response = await apiClient.get("/billing/summary");
+export async function fetchBillingSummary(query: BillingSummaryQuery = {}): Promise<BillingSummary> {
+  const params = Object.fromEntries(Object.entries({
+    limit: query.limit,
+    beforeCreatedAt: query.beforeCreatedAt,
+    beforeKey: query.beforeKey,
+    kind: query.kind,
+  }).filter(([, value]) => value !== undefined));
+  const response = await apiClient.get("/billing/summary", { params });
   return billingSummaryEnvelopeSchema.parse(response.data).data;
 }
 
@@ -97,6 +113,10 @@ export async function ensureSparkCapacity(requiredMicroSparks = 1) {
   } catch (error) {
     if (isSparkFundingError(error)) throw error;
   }
+}
+
+export function hasNewcomerAccountGrant(summary: BillingSummary) {
+  return summary.transactions.some((transaction) => transaction.idempotencyKey === "account-grant:v2" || transaction.metadata?.category === "newcomer-grant");
 }
 
 export function wholeSparks(microSparkBalance: number) {
@@ -138,4 +158,8 @@ export function formatStorageSummary(rawBytes: string, rawMonthlyMicroSparks: st
   const usage = formatStorageBytes(rawBytes);
   const sparks = formatMonthlyStorageSparks(rawMonthlyMicroSparks);
   return `${usage}, approximately ${sparks} ${sparks === "1" || sparks === "less than 1" ? "Spark" : "Sparks"} per month`;
+}
+
+export function formatSpentSparks(deltaMicroSparks: number) {
+  return formatMonthlyStorageSparks(String(Math.abs(deltaMicroSparks)));
 }

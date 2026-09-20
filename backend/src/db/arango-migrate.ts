@@ -8,7 +8,7 @@ import { ensureTeamConnectorsCollection } from '../lib/email-inbox/indexes';
 import { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from '../lib/ai/scopes/indexes';
 import { reconcileTeamScopeMemberships } from '../lib/ai/scopes/membership-invariant';
 import { buildEmbeddingText, isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '../lib/db/base';
-import { MOTHER_SCOPE_KEY, SEEDED_SCOPES, seedCommerceCatalog, seededScopeVisibility } from '../lib/db/seed';
+import { MOTHER_SCOPE_KEY, SEEDED_SCOPES, seedCommerceCatalog, seededScopeVisibility } from './migrations/0018-canonical-seed';
 import { isLegacyIndex, LEGACY_REMOVAL_MARKER } from './arango-migrate-indexes';
 import { htmlToPlainText } from '../lib/ai/document-processing/representation';
 import { chunkDocumentContent, chunkDocumentText, documentEmbeddingTexts, documentSemanticHash } from '../lib/ai/document-processing/chunking';
@@ -1760,6 +1760,7 @@ export const collections: CollectionSpec[] = [
       { fields: ['eventKey'], unique: true, sparse: true },
     ],
   },
+  { name: 'newcomerGrantClaims', skipEmbedding: true, indexes: [{ fields: ['userKey'] }] },
   { name: 'products', skipEmbedding: true, indexes: [{ fields: ['productId'], unique: true }, { fields: ['providerProductId'], unique: true, sparse: true }, { fields: ['active', 'productId'] }] },
   { name: 'paymentCheckouts', skipEmbedding: true, indexes: [{ fields: ['userKey', 'idempotencyKey'], unique: true }, { fields: ['providerCheckoutId'], unique: true, sparse: true }, { fields: ['userKey', 'createdAt'] }, { fields: ['status', 'updatedAt'] }] },
   { name: 'checkoutHandoffs', skipEmbedding: true, indexes: [{ fields: ['tokenHash'], unique: true }, { fields: ['issuanceKey'], unique: true }, { fields: ['expiresAt'] }, { fields: ['userKey', 'createdAt'] }, { fields: ['claimLeaseExpiresAt'], sparse: true }] },
@@ -1811,6 +1812,7 @@ export const collections: CollectionSpec[] = [
   { name: 'userWorkspaceApps', skipEmbedding: true, indexes: [{ fields: ['userKey', 'scopeKey'], unique: true }, { fields: ['userKey', 'position'] }] },
   { name: 'pushSubscriptions', skipEmbedding: true, indexes: [{ fields: ['userKey', 'installationKey'], unique: true }, { fields: ['tokenHash'], unique: true }, { fields: ['userKey'] }] },
   { name: 'appNotifications', embedKeys: ['title', 'message'], indexes: [{ fields: ['teamKey', 'actorUserKey', 'idempotencyKey'], unique: true }, { fields: ['teamKey', 'createdAt'] }] },
+  { name: 'userNotifications', embedKeys: ['title', 'message'], indexes: [{ fields: ['userKey', 'createdAt'] }, { fields: ['userKey', 'readAt', 'createdAt'] }, { fields: ['sourceKey', 'userKey'], unique: true, sparse: true }] },
   { name: 'appNotificationRecipients', skipEmbedding: true, indexes: [{ fields: ['notificationKey', 'userKey'], unique: true }, { fields: ['userKey', 'teamKey', 'createdAt'] }, { fields: ['userKey', 'teamKey', 'readAt', 'createdAt'] }, { fields: ['notificationKey'] }] },
   { name: 'pushDeliveries', skipEmbedding: true, indexes: [{ fields: ['notificationKey', 'subscriptionKey'], unique: true }, { fields: ['notificationKey', 'status'] }, { fields: ['status', 'receiptDueAt'], sparse: true }, { fields: ['userKey', 'createdAt'] }] },
   {

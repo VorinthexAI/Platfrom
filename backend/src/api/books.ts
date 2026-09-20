@@ -2,7 +2,7 @@ import type { Context } from 'hono';
 import { z, ZodError } from 'zod';
 import { defaultBookService } from '@/lib/books/default-service';
 import { BookRepositoryError } from '@/lib/books/repository';
-import { bookCreateInputSchema, bookExtendInputSchema, bookFavoriteInputSchema, bookGoalSuggestInputSchema, bookTopicSuggestInputSchema, type BookService } from '@/lib/books/service';
+import { bookCreateInputSchema, bookExtendInputSchema, bookFavoriteInputSchema, bookGoalSuggestInputSchema, bookPreviewInputSchema, bookTopicSuggestInputSchema, type BookService } from '@/lib/books/service';
 import { getAuthIdentity } from './security';
 import { authenticatedTeamContext, type AuthIdentity } from './auth';
 import { sparkErrorResponse } from './errors';
@@ -31,7 +31,7 @@ export function createBookHandlers(options: { service?: BookService; getIdentity
       return c.json({ success: false, error: { code: 'BOOK_FAILED', message: 'Audio book request failed.' } }, 500);
     }
   };
-  const observed = async <T>(slug: 'book.create' | 'book.extend' | 'book.topic.suggest' | 'book.goal.suggest', input: { teamKey: string; scopeKey: string }, identity: AuthIdentity, requestKey: string, execute: () => Promise<T>) => {
+  const observed = async <T>(slug: 'book.create' | 'book.extend' | 'book.topic.suggest' | 'book.goal.suggest' | 'book.preview', input: { teamKey: string; scopeKey: string }, identity: AuthIdentity, requestKey: string, execute: () => Promise<T>) => {
     const { context } = await (options.authorize ?? authorizeContentExecution)({ teamKey: input.teamKey, scopeKey: input.scopeKey }, { ...options.authorizationOptions, ...authenticatedTeamContext(identity) });
     return observeToolExecution(slug, context, execute, { recorder: options.recordEvent ?? toolEventService.record, appScopeKey: options.appScopeKey, idempotencyKey: requestKey, input, ...options.billing });
   };
@@ -40,6 +40,7 @@ export function createBookHandlers(options: { service?: BookService; getIdentity
     overview: run((c, books, identity) => c.req.json().then((body) => books.overview(body, identity.key))),
     topicSuggestions: run(async (c, books, identity) => { const input = bookTopicSuggestInputSchema.parse(await c.req.json()); return observed('book.topic.suggest', input, identity, requestKey(c, input), () => books.suggestTopics(input, identity.key, { signal: c.req.raw.signal, timeoutMs: 45_000 })); }),
     goalSuggestions: run(async (c, books, identity) => { const input = bookGoalSuggestInputSchema.parse(await c.req.json()); return observed('book.goal.suggest', input, identity, requestKey(c, input), () => books.suggestGoals(input, identity.key, { signal: c.req.raw.signal, timeoutMs: 45_000 })); }),
+    preview: run(async (c, books, identity) => { const input = bookPreviewInputSchema.parse(await c.req.json()); return observed('book.preview', input, identity, requestKey(c, input), () => books.preview(input, identity.key, { signal: c.req.raw.signal, timeoutMs: 45_000 })); }),
     // The paid result is durable acceptance into the idempotent generation queue.
     create: run(async (c, books, identity) => { const input = bookCreateInputSchema.parse(await c.req.json()); return observed('book.create', input, identity, input.generationRequestKey, () => books.create(input, identity.key)); }, 202),
     detail: run(async (c, books, identity) => books.detail(pathKeySchema.parse(c.req.param('bookKey')), await c.req.json(), identity.key)),

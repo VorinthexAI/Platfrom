@@ -92,7 +92,24 @@ describe('Spark service', () => {
 
   test('reports current tracked storage with the canonical monthly estimate', async () => {
     const service = createSparkService({ repository: createMemoryRepository(100).repository, getActiveStoredBytes: async (userKey) => userKey === 'user-1' ? '1000000000' : '0' });
-    await expect(service.getSummary('user-1')).resolves.toMatchObject({ storage: { bytes: '1000000000', estimatedMonthlyMicroSparks: '30000000' } });
+    await expect(service.getSummary('user-1')).resolves.toMatchObject({ storage: { bytes: '1000000000', estimatedMonthlyMicroSparks: '30000000' }, aiUsageMicroSparks: 0 });
+  });
+
+  test('reports lifetime AI usage from action debits independently of history filters', async () => {
+    const repository: SparkRepository = {
+      apply: async () => { throw new Error('unused'); },
+      getBalance: async () => 10,
+      listHistory: async (_userKey, input) => {
+        expect(input).toMatchObject({ kind: 'tool', limit: 25 });
+        return [];
+      },
+      sumDebits: async (_userKey, kind) => {
+        expect(kind).toBe('action');
+        return 2_400;
+      },
+    };
+    const service = createSparkService({ repository, getActiveStoredBytes: async () => '0' });
+    await expect(service.getSummary('user-1', { limit: 25, kind: 'tool' })).resolves.toMatchObject({ aiUsageMicroSparks: 2_400, transactions: [] });
   });
 
   test('keeps storage estimates exact beyond the JavaScript safe-integer boundary', async () => {

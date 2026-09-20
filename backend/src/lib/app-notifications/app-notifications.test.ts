@@ -38,10 +38,10 @@ describe('app notifications', () => {
   });
 
   test('keeps notification history pagination and read state strict', () => {
-    expect(notificationListInputSchema.parse({})).toEqual({ limit: 25, mailbox: 'inbox' });
-    expect(notificationListInputSchema.parse({ cursor: newId(), limit: 10, mailbox: 'sent', query: ' support ', readState: 'unread' })).toMatchObject({ limit: 10, mailbox: 'sent', query: 'support', readState: 'unread' });
+    expect(notificationListInputSchema.parse({ readState: 'unread' })).toEqual({ readState: 'unread', limit: 10 });
+    expect(notificationListInputSchema.parse({ cursor: newId(), limit: 10, readState: 'read' })).toMatchObject({ limit: 10, readState: 'read' });
     expect(() => notificationListInputSchema.parse({ readState: 'urgent' })).toThrow();
-    expect(() => notificationListInputSchema.parse({ userKey: newId() })).toThrow('Unrecognized key');
+    expect(() => notificationListInputSchema.parse({ userKey: newId(), readState: 'unread' })).toThrow('Unrecognized key');
   });
 
   test('accepts current and legacy Expo token forms but rejects arbitrary strings', () => {
@@ -88,9 +88,9 @@ describe('app notifications', () => {
     const result = await repository.createNotification({ title: 'Ready', message: 'Open the app.', userKeys: recipientUserKeys, notifyAll: false }, { actorUserKey: actor.userKey, teamKey: actor.value.teamKey, scopeKey: actor.value.runtimeScopeKey, idempotencyKey: 'request-1' }, recipientUserKeys, await embed());
     expect(result).toMatchObject({ recipients: 2, deliveries: 0, replayed: false });
     expect(queries[1]?.query).toContain('INTO appNotificationRecipients');
-    expect(queries[1]?.query).toContain('FOR inbox IN @recipientInboxes');
-    expect(queries[1]?.query).toContain('INTO userInboxThreads');
-    expect(queries[1]?.query).toContain('INTO userInboxMessages');
+    expect(queries[1]?.query).toContain('FOR recipient IN @recipients');
+    expect(queries[1]?.query).toContain('INTO userNotifications');
+    expect(queries[1]?.query).not.toContain('INTO userInboxMessages');
   });
 
   test('formats ceil elapsed days with friendly singular and plural grammar', () => {
@@ -191,16 +191,7 @@ describe('app notifications', () => {
     expect(attempts).toEqual(recipients);
   });
 
-  test('lists only through the authenticated member context', async () => {
-    const actor = context();
-    const calls: unknown[] = [];
-    const service = createAppNotificationService({ inbox: { list: async (...args: unknown[]) => { calls.push(args); return { items: [], unreadCount: 0, nextCursor: null }; } } as any });
-    await expect(service.list({ limit: 25, mailbox: 'sent' }, actor.value)).resolves.toMatchObject({ unreadCount: 0 });
-    expect(calls).toEqual([[{ limit: 25, mailbox: 'sent' }, actor.value]]);
-    await expect(service.list({}, { ...actor.value, principal: { kind: 'system' } })).rejects.toThrow('Active team membership');
-  });
-
-  test('sources every queued push from its managed Signal thread and message', async () => {
+  test('sources every queued push from the recipient user notification', async () => {
     let source = '';
     const repository = createAppNotificationRepository({ query: async (query: string) => {
       source = query;
@@ -208,11 +199,9 @@ describe('app notifications', () => {
     } } as never);
 
     await expect(repository.pendingDeliveries('notification-1')).resolves.toEqual([]);
-    expect(source).toContain('DOCUMENT(userInboxThreads, delivery.signalThreadKey)');
-    expect(source).toContain('DOCUMENT(userInboxMessages, delivery.signalMessageKey)');
-    expect(source).toContain('title: thread.subject, message: signalMessage.body');
-    expect(source).not.toContain('notification.title');
-    expect(source).not.toContain('notification.message');
+    expect(source).toContain('FOR item IN userNotifications FILTER item.sourceKey == delivery.notificationKey');
+    expect(source).toContain('title: notification.title, message: notification.message');
+    expect(source).not.toContain('userInboxThreads');
   });
 
   test('suppresses device deliveries for active users without removing their history', async () => {
@@ -247,12 +236,13 @@ describe('app notifications', () => {
     const result = await processAppNotificationJob({ kind: 'send', notificationKey: 'notification-1', check: 3 }, repository, async () => new Set([activeUserKey]), {
       sendPush: async (messages) => { sent.push(messages); return [{ status: 'ok', id: 'receipt-1' }, { status: 'error', details: { error: 'DeviceNotRegistered' } }]; },
       schedule: async (...args) => { scheduled.push(args); },
+      deepLinkUrl: 'https://app.example.com/capability/signal?inbox=internal&tab=unread',
     });
     expect(result).toEqual({ processed: 2, suppressed: 2 });
     expect(suppressed).toEqual([['active-1', 'active-2']]);
     expect(sent).toEqual([[
-      { to: 'ExpoPushToken[inactive-1]', title: 'Ready', body: 'Body', data: { v: '2', target: 'signal-inbox', notificationKey: 'notification-1', signalThreadKey: 'thread-1', signalMessageKey: 'message-1' } },
-      { to: 'ExpoPushToken[inactive-2]', title: 'Ready', body: 'Body', data: { v: '2', target: 'signal-inbox', notificationKey: 'notification-1', signalThreadKey: 'thread-1', signalMessageKey: 'message-1' } },
+      { to: 'ExpoPushToken[inactive-1]', title: 'Ready', body: 'Body', data: { v: '4', url: 'https://app.example.com/capability/signal?inbox=internal&tab=unread', notificationKey: 'notification-1' } },
+      { to: 'ExpoPushToken[inactive-2]', title: 'Ready', body: 'Body', data: { v: '4', url: 'https://app.example.com/capability/signal?inbox=internal&tab=unread', notificationKey: 'notification-1' } },
     ]]);
     expect(recorded).toEqual([[
       { key: 'inactive-1', status: 'receipt_pending', receiptId: 'receipt-1', deviceNotRegistered: false },

@@ -5,6 +5,7 @@ import { appNotificationRepository, type AppNotificationRepository } from './rep
 import { decryptPushToken } from './token-crypto';
 import { getExpoPushReceipts, sendExpoPush } from './expo-provider';
 import { getActivePresenceUserKeys } from '@/lib/presence/session-state';
+import { managedInboxDeepLinkUrl } from './deep-links';
 
 const QUEUE_NAME = 'app-push-notifications';
 const jobSchema = z.discriminatedUnion('kind', [
@@ -16,6 +17,7 @@ type ProcessorDependencies = {
   sendPush?: typeof sendExpoPush;
   getReceipts?: typeof getExpoPushReceipts;
   schedule?: (name: Job['kind'], data: Job, options: JobsOptions) => Promise<unknown>;
+  deepLinkUrl?: string;
 };
 const options: JobsOptions = { attempts: 5, backoff: { type: 'exponential', delay: 2_000 }, removeOnComplete: { age: 86_400, count: 25_000 }, removeOnFail: { age: 604_800, count: 25_000 } };
 const connection = () => createRedisConnection(process.env.JOB_REDIS_URL ?? process.env.REDIS_URL);
@@ -43,7 +45,7 @@ export async function processAppNotificationJob(raw: unknown, repository: AppNot
     for (const delivery of pending) byProject.set(delivery.projectId, [...(byProject.get(delivery.projectId) ?? []), delivery]);
     for (const deliveries of byProject.values()) for (let index = 0; index < deliveries.length; index += 100) {
       const group = deliveries.slice(index, index + 100);
-      const tickets = await (dependencies.sendPush ?? sendExpoPush)(group.map((item) => ({ to: decryptPushToken(item.tokenCiphertext), title: item.title, body: item.message, data: { v: '2', target: 'signal-inbox', notificationKey: item.notificationKey, signalThreadKey: item.signalThreadKey, signalMessageKey: item.signalMessageKey } })));
+      const tickets = await (dependencies.sendPush ?? sendExpoPush)(group.map((item) => ({ to: decryptPushToken(item.tokenCiphertext), title: item.title, body: item.message, data: { v: '4', url: dependencies.deepLinkUrl ?? managedInboxDeepLinkUrl(), notificationKey: item.notificationKey } })));
       await repository.recordTickets(tickets.map((ticket, ticketIndex) => {
         const error = ticket.status === 'error' ? ticket.details?.error ?? ticket.message ?? 'Expo ticket error' : undefined;
         const retry = error === 'MessageRateExceeded' && job.check < 3;
