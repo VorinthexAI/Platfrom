@@ -41,8 +41,8 @@ describe('canonical apps registry', () => {
   });
 
   test('does not persist or seed an apps collection', async () => {
-    const source = await Bun.file(new URL('../db/seed.ts', import.meta.url)).text();
+    const source = await Bun.file(new URL('../../db/migrations/0018-canonical-seed.ts', import.meta.url)).text();
     expect(source).not.toContain('seedApps');
-    expect(source).toContain('const results: SeedResult[] = []');
+    expect(source).toContain("INSERT @product");
   });
 });

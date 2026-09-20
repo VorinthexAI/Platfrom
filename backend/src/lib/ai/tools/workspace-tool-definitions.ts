@@ -53,7 +53,7 @@ export interface WorkspaceToolDependencies {
   costs?: CostService;
   scopes?: AssistantCapabilityContext['scopes'];
   appNotifications?: AssistantCapabilityContext['appNotifications'];
-  userInbox?: AssistantCapabilityContext['userInbox'];
+  userNotifications?: AssistantCapabilityContext['userNotifications'];
   signal?: AbortSignal;
   timeoutMs?: number;
 }
@@ -95,7 +95,7 @@ function publicDefinition(capability: AssistantCapability) {
         costs: dependencies.costs,
         scopes: dependencies.scopes,
         appNotifications: dependencies.appNotifications,
-        userInbox: dependencies.userInbox,
+        userNotifications: dependencies.userNotifications,
         scopeTags: dependencies.scopeTags,
         signal: dependencies.signal,
         timeoutMs: dependencies.timeoutMs,

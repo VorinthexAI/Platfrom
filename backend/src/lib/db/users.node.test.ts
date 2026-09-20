@@ -60,6 +60,7 @@ describe('user node schema', () => {
     expect(source).toContain('FOR ticket IN tickets FILTER ticket.userKey == @userKey REMOVE ticket IN tickets');
     expect(source).toContain('FOR message IN userInboxMessages FILTER message.userKey == @userKey REMOVE message IN userInboxMessages');
     expect(source).toContain('FOR thread IN userInboxThreads FILTER thread.userKey == @userKey REMOVE thread IN userInboxThreads');
+    expect(source).toContain('FOR item IN userNotifications FILTER item.userKey == @userKey REMOVE item IN userNotifications');
     expect(source).toContain('FOR event IN events FILTER event.userId == @userKey REMOVE event IN events');
     expect(source).toContain('FOR item IN sparkTransactions FILTER item.userKey == @userKey REMOVE item IN sparkTransactions');
     expect(source).toContain('FOR reward IN referralRewards FILTER reward.referrerUserKey == @userKey || reward.referredUserKey == @userKey REMOVE reward IN referralRewards');

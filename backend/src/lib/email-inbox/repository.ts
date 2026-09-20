@@ -13,7 +13,8 @@ export type EmailOverviewReadState = 'read' | 'unread';
 export type EmailOverviewLegacyFilter = 'all' | 'important' | 'urgent' | 'purchases' | 'needs_action' | 'filtered' | 'unread' | 'favorite' | 'trash';
 export type EmailCreatedAtRange = { createdFrom?: string; createdTo?: string };
 type EmailOverviewPage = EmailCreatedAtRange & { search?: string; cursor?: string; limit?: number };
-export type EmailOverviewRepositoryQuery = ({ filter: EmailOverviewLegacyFilter } | { readState: EmailOverviewReadState; facets: EmailOverviewFacet[] }) & EmailOverviewPage;
+export type EmailOverviewMailbox = 'sent';
+export type EmailOverviewRepositoryQuery = ({ filter: EmailOverviewLegacyFilter } | { readState: EmailOverviewReadState; facets: EmailOverviewFacet[] } | { mailbox: EmailOverviewMailbox }) & EmailOverviewPage;
 
 export function normalizeEmailOverviewFacets(facets: readonly EmailOverviewFacet[]) { const selected = new Set(facets); return EMAIL_OVERVIEW_FACETS.filter((facet) => selected.has(facet)); }
 export class EmailRepositoryError extends Error { constructor(readonly reason: 'not_found' | 'forbidden' | 'conflict', message: string = reason) { super(message); } }

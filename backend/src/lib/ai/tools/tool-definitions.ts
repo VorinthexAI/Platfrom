@@ -47,7 +47,7 @@ import { AGENT_TOOL_DEFINITIONS } from './agent-tool-definitions';
 import { billingSummaryReadToolDefinition } from './billing-summary-read';
 import { referralSummaryReadToolDefinition } from './referral-summary-read';
 import { agentGuideToolDefinition } from './agent-guide';
-import { TRUSTED_COMMUNICATION_TOOL_DEFINITIONS } from './communication-tool-definitions';
+
 
 export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   imageCaptionTool,
@@ -69,7 +69,6 @@ export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
 export const TRUSTED_TOOL_DEFINITIONS = Object.freeze([
   ...TRUSTED_EMAIL_TOOL_DEFINITIONS,
   ...TRUSTED_ACCOUNT_TOOL_DEFINITIONS,
-  ...TRUSTED_COMMUNICATION_TOOL_DEFINITIONS,
 ] as const);
 
 /** Every canonical business tool, including trusted protocol-triggered entries. */

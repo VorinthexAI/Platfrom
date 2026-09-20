@@ -18,7 +18,7 @@ import type { PublicToolDependencies } from './tool-definition';
 import { WORKSPACE_TOOL_DEFINITIONS, type WorkspaceToolDependencies } from './workspace-tool-definitions';
 import type { TrustedEmailToolDependencies, TrustedEmailToolName } from './email-ingestion-tool-definitions';
 import type { TrustedAccountToolDependencies, TrustedAccountToolName } from './account-tool-definitions';
-import type { TrustedCommunicationToolDependencies, TrustedCommunicationToolName } from './communication-tool-definitions';
+
 import { CONVERSATION_TOOL_DEFINITIONS } from './conversation-tool-definitions';
 import type { AgentRuntimeDependencies } from '@/lib/ai/agents';
 import { AGENT_TOOL_DEFINITIONS } from './agent-tool-definitions';
@@ -40,8 +40,8 @@ const workspaceToolDefinitionsByName = new Map(WORKSPACE_TOOL_DEFINITIONS.map((d
 const trustedToolDefinitionsByName = new Map(TRUSTED_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
 const conversationToolDefinitionsByName = new Map(CONVERSATION_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
 const agentToolDefinitionsByName = new Map(AGENT_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
-export type TrustedToolName = TrustedEmailToolName | TrustedAccountToolName | TrustedCommunicationToolName;
-export type TrustedToolDependencies = TrustedEmailToolDependencies & TrustedAccountToolDependencies & TrustedCommunicationToolDependencies;
+export type TrustedToolName = TrustedEmailToolName | TrustedAccountToolName;
+export type TrustedToolDependencies = TrustedEmailToolDependencies & TrustedAccountToolDependencies;
 
 /** Input validation for the one canonical definition of each public tool. */
 export const toolInputSchemas: Record<string, z.ZodTypeAny> = Object.fromEntries(
@@ -82,7 +82,7 @@ export interface ToolDependencies extends RouterDependencies, DocumentParseDepen
   commerceService?: WorkspaceToolDependencies['commerce'];
   costService?: CostService;
   appNotificationService?: WorkspaceToolDependencies['appNotifications'];
-  userInboxService?: WorkspaceToolDependencies['userInbox'];
+  userNotificationService?: WorkspaceToolDependencies['userNotifications'];
   scopeService?: WorkspaceToolDependencies['scopes'];
   referralService?: WorkspaceToolDependencies['referrals'];
   conversationService?: AgentToolDependencies['conversations'];
@@ -151,7 +151,7 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
       commerce: dependencies.commerceService,
       costs: dependencies.costService,
       appNotifications: dependencies.appNotificationService,
-      userInbox: dependencies.userInboxService,
+      userNotifications: dependencies.userNotificationService,
       scopes: dependencies.scopeService,
       referrals: dependencies.referralService,
       signal: dependencies.signal,
@@ -188,7 +188,7 @@ export async function runTrustedTool(name: TrustedToolName, rawInput: unknown, d
   const definition = trustedToolDefinitionsByName.get(name);
   if (!definition) throw new Error(`Unknown trusted tool ${name}`);
   definition.inputSchema.parse(rawInput);
-  if (name === 'account.delete' || name === 'workspace.picker.update' || name === 'communication.staff.reply') {
+  if (name === 'account.delete' || name === 'workspace.picker.update') {
     return (definition.execute as (input: unknown, dependencies: TrustedToolDependencies) => Promise<unknown>)(rawInput, dependencies);
   }
   return observeToolExecution(name, dependencies.context, () => (definition.execute as (input: unknown, dependencies: TrustedToolDependencies) => Promise<unknown>)(rawInput, dependencies), { appKey: APP_KEYS.SIGNAL, appScopeKey: 'appScopeKey' in dependencies ? dependencies.appScopeKey as string | undefined : undefined, recorder: dependencies.recordEvent, input: rawInput });

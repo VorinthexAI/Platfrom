@@ -33,6 +33,7 @@ export interface SparkRepository {
   renewExecution?(userKey: string, executionIdentity: string, owner: string, now: string, expiresAt: string): Promise<boolean>;
   getBalance(userKey: string): Promise<number | null>;
   getDebt?(userKey: string): Promise<number | null>;
+  sumDebits?(userKey: string, kind: SparkTransaction['kind']): Promise<number>;
   listHistory(userKey: string, input?: SparkHistoryInput): Promise<SparkTransaction[]>;
 }
 
@@ -241,16 +242,30 @@ export function createArangoSparkRepository(
       return value;
     },
 
+    async sumDebits(userKey, kind) {
+      const cursor = await database.query(`
+        FOR item IN sparkTransactions
+          FILTER item.userKey == @userKey && item.kind == @kind && item.deltaMicroSparks < 0
+          COLLECT AGGREGATE total = SUM(item.deltaMicroSparks)
+          RETURN total
+      `, { userKey, kind });
+      const value = await cursor.next();
+      if (value === null || value === undefined) return 0;
+      if (typeof value !== 'number' || !Number.isSafeInteger(value) || value > 0) throw new SparkRepositoryError('INVALID_BALANCE', 'Spark debit totals must be a nonpositive safe integer.');
+      return -value;
+    },
+
     async listHistory(userKey, input = { limit: 50 }) {
       const valid = sparkHistoryInputSchema.parse(input);
       const cursor = await database.query(`
         FOR item IN sparkTransactions
           FILTER item.userKey == @userKey
+          FILTER @kind == null || item.kind == @kind
           FILTER @beforeCreatedAt == null || item.createdAt < @beforeCreatedAt || (item.createdAt == @beforeCreatedAt && item._key < @beforeKey)
           SORT item.createdAt DESC, item._key DESC
           LIMIT @limit
           RETURN item
-      `, { userKey, beforeCreatedAt: valid.beforeCreatedAt ?? null, beforeKey: valid.beforeKey ?? null, limit: valid.limit });
+      `, { userKey, kind: valid.kind ?? null, beforeCreatedAt: valid.beforeCreatedAt ?? null, beforeKey: valid.beforeKey ?? null, limit: valid.limit });
       return (await cursor.all()).map(parseTransaction);
     },
   };

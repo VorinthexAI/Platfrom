@@ -285,7 +285,7 @@ describe('tool events', () => {
       refund: async (_userKey, input) => { order.push('refund'); refundInput = input; return { status: 'applied', transaction: { key: 'refund-1' } } as never; },
     })).rejects.toThrow('failed');
     expect(order).toEqual(['debit', 'work', 'refund']);
-    expect(refundInput).toMatchObject({ microSparks: 100_000_000, idempotencyKey: 'refund:charge-1', chargeTransactionKey: 'charge-1' });
+    expect(refundInput).toMatchObject({ microSparks: 70_000_000, idempotencyKey: 'refund:charge-1', chargeTransactionKey: 'charge-1' });
     expect(refundInput).not.toHaveProperty('eventKey');
   });
 
@@ -297,8 +297,8 @@ describe('tool events', () => {
       charge: async (_userKey, input) => ({ status, transaction: { key: 'charge-1', eventKey: input.eventKey } }) as never,
     });
     expect(seen).toEqual([
-      { userKey: 'user-1', toolSlug: 'book.create', microSparks: 100_000_000, transactionKey: 'charge-1', executionIdentity: 'a'.repeat(64), replayed: false },
-      { userKey: 'user-1', toolSlug: 'book.create', microSparks: 100_000_000, transactionKey: 'charge-1', executionIdentity: 'a'.repeat(64), replayed: true },
+      { userKey: 'user-1', toolSlug: 'book.create', microSparks: 70_000_000, transactionKey: 'charge-1', executionIdentity: 'a'.repeat(64), replayed: false },
+      { userKey: 'user-1', toolSlug: 'book.create', microSparks: 70_000_000, transactionKey: 'charge-1', executionIdentity: 'a'.repeat(64), replayed: true },
     ]);
     expect(currentFixedChargeReceipt()).toBeNull();
   });

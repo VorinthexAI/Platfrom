@@ -5,7 +5,7 @@ import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { createAppNotificationHandlers } from './app-notifications';
 
 describe('notification history HTTP transport', () => {
-  test('uses the canonical app.history service with trusted identity and strict selectors', async () => {
+  test('uses the canonical notification.list service with trusted identity and strict selectors', async () => {
     const userKey = newId();
     const teamKey = newId();
     const scopeKey = newId();
@@ -14,13 +14,15 @@ describe('notification history HTTP transport', () => {
     const handlers = createAppNotificationHandlers({
       getIdentity: async () => ({ key: userKey, identityType: 'user' }),
       authorize: async () => ({ context }) as never,
-      service: { list: async (...args: unknown[]) => { calls.push(args); return { items: [], unreadCount: 0, nextCursor: null }; } } as never,
+      userNotifications: { list: async (...args: unknown[]) => { calls.push(args); return { items: [], nextCursor: null }; } } as never,
     });
     const app = new Hono();
     app.post('/notifications', handlers.list);
     const request = (body: unknown) => app.request('/notifications', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    expect((await request({ teamKey, scopeKey, mailbox: 'sent', limit: 25 })).status).toBe(200);
-    expect(calls).toEqual([[{ mailbox: 'sent', limit: 25 }, context]]);
+    expect((await request({ teamKey, scopeKey, readState: 'unread', limit: 10 })).status).toBe(200);
+    expect(calls).toEqual([[{ readState: 'unread', limit: 10 }, context]]);
+    expect((await request({ teamKey, scopeKey, readState: 'read', cursor: newId(), limit: 10 })).status).toBe(200);
+    expect(calls[1]).toEqual([{ readState: 'read', limit: 10, cursor: expect.any(String) }, context]);
     expect((await request({ teamKey, scopeKey, userKey })).status).toBe(400);
   });
 

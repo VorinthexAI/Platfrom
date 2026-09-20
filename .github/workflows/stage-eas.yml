@@ -1,0 +1,89 @@
+name: Stage EAS
+
+# Internal Android distribution build (APK) on EAS. Manual dispatch only.
+# Queues a preview-profile build; artifacts land on expo.dev for testers.
+# --no-wait returns after queueing so the runner does not sit through EAS.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eas-stage-internal
+  cancel-in-progress: true
+
+env:
+  BUN_VERSION: "1.2.19"
+
+jobs:
+  build:
+    name: Queue EAS internal Android distribution
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+
+      - name: Load mobile build environment
+        run: |
+          set -euo pipefail
+          EXPO_TOKEN="$(jq -re '.secrets.prod.mobile.EXPO_TOKEN' .github/environments.json)"
+          EXPO_PUBLIC_API_BASE_URL="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_API_BASE_URL' .github/environments.json)"
+          EXPO_PUBLIC_FRONTEND_URL="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_FRONTEND_URL' .github/environments.json)"
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID' .github/environments.json)"
+          EXPO_PUBLIC_BACKEND_API_KEY="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_BACKEND_API_KEY' .github/environments.json)"
+          test -n "$EXPO_TOKEN" && [ "$EXPO_TOKEN" != "null" ] || { echo "::error::secrets.prod.mobile.EXPO_TOKEN is not configured in .github/environments.json."; exit 1; }
+          test -n "$EXPO_PUBLIC_API_BASE_URL" && test -n "$EXPO_PUBLIC_BACKEND_API_KEY" || { echo "::error::Mobile API environment is not configured in .github/environments.json."; exit 1; }
+          echo "::add-mask::$EXPO_TOKEN"
+          echo "::add-mask::$EXPO_PUBLIC_BACKEND_API_KEY"
+          {
+            echo "EXPO_TOKEN=$EXPO_TOKEN"
+            echo "EXPO_PUBLIC_API_BASE_URL=$EXPO_PUBLIC_API_BASE_URL"
+            echo "EXPO_PUBLIC_FRONTEND_URL=$EXPO_PUBLIC_FRONTEND_URL"
+            echo "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=$EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID"
+            echo "EXPO_PUBLIC_BACKEND_API_KEY=$EXPO_PUBLIC_BACKEND_API_KEY"
+          } >> "$GITHUB_ENV"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache Bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Setup Expo and EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript check
+        run: bun run mobile:typecheck
+
+      - name: Queue EAS internal distribution build (Android APK)
+        working-directory: mobile/app
+        run: |
+          eas env:set --name EXPO_PUBLIC_API_BASE_URL --value "$EXPO_PUBLIC_API_BASE_URL" --environment preview --visibility plaintext --non-interactive
+          eas env:set --name EXPO_PUBLIC_FRONTEND_URL --value "$EXPO_PUBLIC_FRONTEND_URL" --environment preview --visibility plaintext --non-interactive
+          eas env:set --name EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID --value "$EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID" --environment preview --visibility plaintext --non-interactive
+          eas env:set --name EXPO_PUBLIC_BACKEND_API_KEY --value "$EXPO_PUBLIC_BACKEND_API_KEY" --environment preview --visibility plaintext --non-interactive
+          eas build --platform android --profile preview --non-interactive --no-wait

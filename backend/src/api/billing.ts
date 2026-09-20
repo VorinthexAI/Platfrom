@@ -1,6 +1,6 @@
 import type { Context } from 'hono';
 import { sparksToMicroSparks } from '@/lib/costs';
-import { sparkHistoryInputSchema } from '@/lib/sparks/contracts';
+import { sparkHistoryInputSchema, sparkTransactionKindSchema } from '@/lib/sparks/contracts';
 import { sparkService } from '@/lib/sparks/service';
 import { getAuthIdentity } from './security';
 import { parseQuery } from './validation';
@@ -10,6 +10,7 @@ const billingSummaryQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   beforeCreatedAt: z.string().datetime({ offset: true }).optional(),
   beforeKey: z.string().trim().min(1).max(200).optional(),
+  kind: sparkTransactionKindSchema.optional(),
 }).strict();
 
 interface BillingHandlerDependencies {

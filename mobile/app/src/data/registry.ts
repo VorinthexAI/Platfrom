@@ -78,8 +78,8 @@ export function getCapability(slug: CapabilitySlug): Capability {
   return capability;
 }
 
-export function workspaceSlugsForMember(rootTeamMember: boolean): CapabilitySlug[] {
-  return rootTeamMember ? [...PUBLIC_WORKSPACE_SLUGS, "hq"] : [...PUBLIC_WORKSPACE_SLUGS];
+export function workspaceSlugsForMember(_rootTeamMember = false): CapabilitySlug[] {
+  return [...PUBLIC_WORKSPACE_SLUGS];
 }
 
 export type WorkspacePickerApp = {
@@ -100,11 +100,11 @@ function asCapabilitySlug(slug: string): CapabilitySlug | null {
   return parsed.success ? parsed.data : null;
 }
 
-export function entitledPickerApps(picker: WorkspacePickerState, rootTeamMember: boolean): Array<WorkspacePickerApp & { slug: CapabilitySlug }> {
+export function entitledPickerApps(picker: WorkspacePickerState, rootTeamMember = false): Array<WorkspacePickerApp & { slug: CapabilitySlug }> {
   const apps = picker.apps.flatMap((app) => {
     const slug = asCapabilitySlug(app.slug);
-    return slug ? [{ ...app, slug }] : [];
-  }).filter((app) => app.slug !== "hq" || rootTeamMember);
+    return slug && slug !== "hq" ? [{ ...app, slug }] : [];
+  });
   if (apps.length) return apps;
   return workspaceSlugsForMember(rootTeamMember).map((slug) => ({ scopeKey: "", slug, name: getCapability(slug).name }));
 }

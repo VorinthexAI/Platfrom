@@ -86,6 +86,7 @@ import {
   setContentDocumentFavorite,
   setContentFolderFavorite,
   setContentSelectionFavorite,
+  ARCHIVE_FILE_EXTENSIONS,
   ARCHIVE_LOCATION_PAGE_SIZE,
   listContentDocumentPage,
   uploadContentDocument,
@@ -129,6 +130,7 @@ import {
   refreshContentDocument,
   refreshContentDocumentAudioVersions,
   refreshContentDocumentSummaries,
+  fillContentLocationDocuments,
   refreshContentLocation,
   replaceCachedContentDocument,
   replaceCachedContentDocumentDetail,
@@ -1036,12 +1038,17 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         userHiddensQuery.refetch(),
       ]);
       if (!isCurrent()) return;
-      setFolders(location.folders);
+      const nextLocation = folderContentTab === "folders"
+        ? location
+        : await fillContentLocationDocuments(location, { folderKey, context: contentContext, tab: folderContentTab, minCount: visibleCount, signal: controller.signal });
+      if (nextLocation !== location) queryClient.setQueryData(contentQueryKeys.location(contentContext, folderKey), nextLocation);
+      if (!isCurrent()) return;
+      setFolders(nextLocation.folders);
       if (!folderKey) {
-        setRootFolders(location.folders);
-        setRootDocuments(location.documents);
+        setRootFolders(nextLocation.folders);
+        setRootDocuments(nextLocation.documents);
       }
-      setDocuments(location.documents);
+      setDocuments(nextLocation.documents);
       if (matches) {
         if (workspaceMode === "folder") setFolderSearchResults(matches);
         else setRootSearchResults(matches);
@@ -2367,14 +2374,17 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     }
     const folderKey = workspaceMode === "folder" ? currentFolder?.key : undefined;
     const cached = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, folderKey));
-    if (!cached?.documentCursor) return;
+    const files = folderContentTab === "files";
+    const cursor = files ? cached?.fileCursor : cached?.documentCursor;
+    if (!cached || !cursor) return;
+    const filling = listedDocuments.length < visibleCount;
     loadingMoreRef.current = true;
-    void listContentDocumentPage(folderKey, undefined, contentContext, cached.documentCursor).then((page) => {
+    void listContentDocumentPage(folderKey, undefined, contentContext, cursor, ARCHIVE_LOCATION_PAGE_SIZE, files ? ARCHIVE_FILE_EXTENSIONS : undefined).then((page) => {
       const documents = appendCursorItems(cached.documents, page.documents, ({ key }) => key);
-      queryClient.setQueryData<ContentLocation>(contentQueryKeys.location(contentContext, folderKey), { ...cached, documents, documentCursor: page.cursor });
+      queryClient.setQueryData<ContentLocation>(contentQueryKeys.location(contentContext, folderKey), { ...cached, documents, ...(files ? { fileCursor: page.cursor } : { documentCursor: page.cursor }) });
       if (folderKey) setDocuments(documents);
       else { setRootDocuments(documents); setDocuments(documents); }
-      setVisibleCount((count) => count + ARCHIVE_LOCATION_PAGE_SIZE);
+      if (!filling) setVisibleCount((count) => count + ARCHIVE_LOCATION_PAGE_SIZE);
     }).catch((cause) => {
       if (!isQueryCancellation(cause)) setError(cause instanceof Error ? cause.message : "More items could not be loaded.");
     }).finally(() => {
@@ -2388,9 +2398,10 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     const listed = workspaceMode === "folder" ? folderTabDocuments : rootTabDocuments;
     if (listed.length >= visibleCount) return;
     const folderKey = workspaceMode === "folder" ? currentFolder?.key : undefined;
-    if (!queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, folderKey))?.documentCursor) return;
+    const cached = queryClient.getQueryData<ContentLocation>(contentQueryKeys.location(contentContext, folderKey));
+    if (!(folderContentTab === "files" ? cached?.fileCursor : cached?.documentCursor)) return;
     loadMoreArchive();
-  }, [contentContext, currentFolder?.key, folderContentTab, folderTabDocuments.length, queryClient, rootTabDocuments.length, visibleCount, workspaceMode]);
+  }, [contentContext, currentFolder?.key, documents.length, folderContentTab, folderTabDocuments.length, queryClient, rootDocuments.length, rootTabDocuments.length, visibleCount, workspaceMode]);
 
   const openFolder = async (folder: ContentFolder) => {
     if (!hasContentContext) return;

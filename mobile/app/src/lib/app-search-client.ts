@@ -5,7 +5,7 @@ import { conversationRetrievalSchema } from "@/lib/conversation-client";
 import { publishUserSearchHistoryAppend } from "@/lib/user-search-history-events";
 import { useAuthStore } from "@/state/auth";
 
-export const appSearchCollectionSlugSchema = z.enum(["folders", "documents", "files", "collections", "images", "inboxes", "email-tones", "email-messages", "email-drafts", "places", "trips", "countries", "books", "tags", "tag-assignments"]);
+export const appSearchCollectionSlugSchema = z.enum(["folders", "documents", "files", "collections", "images", "inboxes", "email-tones", "email-messages", "email-drafts", "places", "trips", "countries", "books", "tags", "tag-assignments", "tickets", "notifications"]);
 export type AppSearchCollectionSlug = z.infer<typeof appSearchCollectionSlugSchema>;
 
 export const appSearchInputSchema = z.strictObject({

@@ -160,6 +160,7 @@ describe('scope schemas', () => {
       embedding: [],
     });
     expect(scopeSchema.parse({ ...scope, visibility: 'private' }).visibility).toBe('private');
+    expect(scopeSchema.parse({ ...scope, visibility: 'hidden' }).visibility).toBe('hidden');
     expect(scopesEmbedKeys.options).toEqual(['summary']);
     expect(scopeSchema.parse({ ...scope, description: 'x'.repeat(10_000) }).description).toHaveLength(10_000);
     expect(scopeSchema.parse({ ...scope, description: null }).description).toBeNull();
@@ -240,7 +241,7 @@ describe('scope repository', () => {
     const create = source.slice(source.indexOf('async createScope(input)'), source.indexOf('async updateScope'));
     expect(create).not.toContain('ensureGeneratedDocumentFolders');
     expect(create).not.toContain('ensureMailFolders');
-    const seed = await Bun.file(new URL('../../db/seed.ts', import.meta.url)).text();
+    const seed = await Bun.file(new URL('../../../db/migrations/0018-canonical-seed.ts', import.meta.url)).text();
     expect(seed).not.toContain('ensureGeneratedDocumentFolders');
     expect(seed).not.toContain('ensureMailFolders');
   });

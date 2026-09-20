@@ -24,6 +24,8 @@ export const APP_SEARCH_COLLECTIONS_BY_OVERLAPPING_TOOL = Object.freeze({
   'trip.list': ['trips'],
   'book.list': ['books'],
   'book.detail': ['books'],
+  'ticket.list': ['tickets'],
+  'notification.list': ['notifications'],
 } as const satisfies Record<string, readonly AppSearchCollectionSlug[]>);
 
 export const APP_SEARCH_OVERLAPPING_TOOL_NAMES = Object.freeze(Object.keys(APP_SEARCH_COLLECTIONS_BY_OVERLAPPING_TOOL));

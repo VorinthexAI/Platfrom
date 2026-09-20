@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { createEmailService as createEmailServiceImplementation, emailDraftComposeInputSchema, emailDraftCreateInputSchema, emailDraftUpdateInputSchema, emailOverviewInputSchema, emailToneCreateInputSchema, emailToneUpdateInputSchema, publishEmailAttachmentDeletionEvents, rawEmail, validateDraftIdentity } from './service';
 import { GmailApiError } from './gmail';
-import { createEmailRepository, decodeEmailCursor, emailMessageKey } from './repository';
+import { createEmailRepository, decodeEmailCursor, emailMessageKey, EmailRepositoryError } from './repository';
 import { newId } from '@/lib/ids';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { ProviderExecutionError } from '@/lib/ai/router/errors';
@@ -474,6 +474,9 @@ describe('email thread read state', () => {
     const { calls, service } = threadService('viewer', [{ ...message, body: fullBody }]);
     const result = await service.threadForTool(actor, userKey);
     expect(result).toMatchObject({ thread: { unread: true }, messages: [{ key: scopeKey, body: 'x'.repeat(8_000), bodyTruncated: true }] });
+    expect(result.messages[0]).not.toHaveProperty('userKey');
+    expect(result.messages[0]).not.toHaveProperty('scopeKey');
+    expect(result.messages[0]).not.toHaveProperty('embedding');
     expect(calls).toEqual([]);
   });
 });
@@ -2424,7 +2427,7 @@ describe('reply context', () => {
     await service.deleteReplyContext(actor, { noteKeys: [userKey] });
     expect(embedded).toEqual(['Availability\n\nNo Fridays.', 'Availability\n\nNo Mondays.', 'Availability\n\nNo Mondays.']);
     expect(updateAttempts).toBe(2);
-    expect(publications).toEqual([scopeKey, scopeKey, scopeKey]);
+    expect(publications).toEqual([]);
     expect(created).toEqual({ key: userKey, name: 'Availability', text: 'No Fridays.', createdAt: now, updatedAt: now });
     expect(updated).toMatchObject({ key: userKey, name: 'Availability', text: 'No Mondays.' });
     expect(JSON.stringify([created, updated])).not.toMatch(/scopeKey|embedding|revision/);
@@ -2762,6 +2765,8 @@ describe('multi-inbox account authorization', () => {
     expect(() => emailOverviewInputSchema.parse({ connectorKey: connector.key, readState: 'read', facets: ['unknown'] })).toThrow();
     expect(() => emailOverviewInputSchema.parse({ connectorKey: connector.key, readState: 'read', facets: [], unknown: true })).toThrow();
     expect(emailOverviewInputSchema.parse({ connectorKey: connector.key, readState: 'read', facets: [] })).toMatchObject({ facets: [] });
+    expect(emailOverviewInputSchema.parse({ connectorKey: connector.key, mailbox: 'sent' })).toMatchObject({ mailbox: 'sent' });
+    expect(() => emailOverviewInputSchema.parse({ connectorKey: connector.key, mailbox: 'sent', readState: 'read', facets: [] })).toThrow();
     expect(() => emailOverviewInputSchema.parse({ connectorKey: connector.key, createdFrom: '2026-08-12T00:00:00Z', createdTo: '2026-08-11T00:00:00Z' })).toThrow('createdTo must be on or after createdFrom');
   });
 
@@ -2861,31 +2866,60 @@ describe('multi-inbox account authorization', () => {
     expect(calls).toEqual([[userKey, userKey, connector.key], ['publish', scopeKey]]);
   });
 
-  test('disconnect destroys only local credentials without revoking shared Google account access', async () => {
+  test('disconnect purges this inbox and revokes Gmail when it is the last connector', async () => {
     const calls: string[] = [];
-    const disconnecting = { ...connector, status: 'error' as const, syncEnabled: false, updatedAt: '2026-08-11T12:01:00.000Z' };
+    const disconnecting = { ...connector, status: 'error' as const, syncEnabled: false, updatedAt: '2026-08-11T12:01:00.000Z', email: 'me@example.com' };
     const connectors = {
       getExact: async () => connector,
       claimDisconnect: async (key: string) => { calls.push(`claim:${key}`); return disconnecting; },
-      revoke: async (key: string) => { calls.push(`revoke:${key}`); return true; },
+      credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-01-01T00:00:00.000Z' }),
+      listSyncTargetsByEmail: async () => [],
     };
-    const service = createEmailService({ repository: {} as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ stop: async () => { calls.push('stop'); }, revoke: async (token: string) => { calls.push(`provider-revoke:${token}`); } }) as never, publishInboxChanged: async () => undefined });
+    const service = createEmailService({
+      repository: { purgeConnectorMailbox: async (...args: unknown[]) => { calls.push(`purge:${JSON.stringify(args)}`); return { storageKeys: ['email/object'] }; } } as never,
+      connectors: connectors as never,
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
+      storage: { delete: async (key: string) => { calls.push(`storage:${key}`); } } as never,
+      client: () => ({ stop: async () => { calls.push('stop'); }, revoke: async (token: string) => { calls.push(`provider-revoke:${token}`); } }) as never,
+      publishInboxChanged: async () => undefined,
+    });
     await expect(service.disconnect(actor, connector.key)).resolves.toEqual({ disconnected: true });
-    expect(calls).toEqual([`claim:${connector.key}`, `revoke:${connector.key}`]);
+    expect(calls).toEqual([`claim:${connector.key}`, `purge:${JSON.stringify([userKey, actor.userKey, connector.key])}`, 'storage:email/object', 'stop', 'provider-revoke:refresh']);
   });
 
-  test('keeps a failed local credential destruction blocked and retryable', async () => {
+  test('disconnect purges this inbox without stopping a shared Gmail grant', async () => {
+    const calls: string[] = [];
+    const disconnecting = { ...connector, status: 'error' as const, syncEnabled: false, updatedAt: '2026-08-11T12:01:00.000Z', email: 'me@example.com' };
+    const connectors = {
+      getExact: async () => connector,
+      claimDisconnect: async (key: string) => { calls.push(`claim:${key}`); return disconnecting; },
+      credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-01-01T00:00:00.000Z' }),
+      listSyncTargetsByEmail: async () => [{ connectorKey: 'other' }],
+    };
+    const service = createEmailService({
+      repository: { purgeConnectorMailbox: async () => { calls.push('purge'); return { storageKeys: [] }; } } as never,
+      connectors: connectors as never,
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
+      client: () => ({ stop: async () => { calls.push('stop'); }, revoke: async (token: string) => { calls.push(`provider-revoke:${token}`); } }) as never,
+      publishInboxChanged: async () => undefined,
+    });
+    await expect(service.disconnect(actor, connector.key)).resolves.toEqual({ disconnected: true });
+    expect(calls).toEqual([`claim:${connector.key}`, 'purge']);
+  });
+
+  test('keeps a failed local mailbox purge blocked and retryable', async () => {
     const disconnecting = { ...connector, status: 'error' as const, syncEnabled: false, updatedAt: '2026-08-11T12:01:00.000Z' };
     const service = createEmailService({
-      repository: {} as never,
+      repository: { purgeConnectorMailbox: async () => { throw new EmailRepositoryError('conflict', 'Email connector changed while deleting the inbox'); } } as never,
       connectors: {
         getExact: async () => connector,
         claimDisconnect: async () => disconnecting,
-        revoke: async () => false,
+        credentials: () => ({ accessToken: 'access', tokenType: 'Bearer', expiresAt: '2027-01-01T00:00:00.000Z' }),
+        listSyncTargetsByEmail: async () => [],
       } as never,
       authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
     });
-    await expect(service.disconnect(actor, connector.key)).rejects.toThrow('changed while finalizing disconnect');
+    await expect(service.disconnect(actor, connector.key)).rejects.toThrow('changed while deleting the inbox');
   });
 
   test('does not disconnect a connector while its send lease is active', async () => {

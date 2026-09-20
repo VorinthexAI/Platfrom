@@ -7,7 +7,7 @@ import { publishAppEvent } from "./app-events";
 import { appSearchQueryRoot } from "./app-search-client";
 import { publishBookChanged } from "./book-events";
 import { createCoalescedRefresh } from "./async-refresh";
-import { billingSummaryQueryKey } from "./billing-client";
+import { billingSummaryQueryKey, walletHistoryQueryKey } from "./billing-client";
 import { compassQueryKeys } from "./compass-query-keys";
 import { conversationQueryKeys } from "./conversation-cache";
 import { communicationQueryKeys } from "./communication-client";
@@ -64,7 +64,10 @@ export function AuthenticatedEventBridge() {
     const contentContext = { userKey, teamKey, scopeKey };
     const conversationContext = { userKey, teamKey, scopeKey };
     const communicationContext = { userKey, teamKey, scopeKey };
-    const invalidateBilling = () => void queryClient.invalidateQueries({ queryKey: billingSummaryQueryKey(userKey), exact: true, refetchType: "active" });
+    const invalidateBilling = () => {
+      void queryClient.invalidateQueries({ queryKey: billingSummaryQueryKey(userKey), exact: true, refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: walletHistoryQueryKey(userKey), exact: true, refetchType: "active" });
+    };
     const invalidateReferral = () => void queryClient.invalidateQueries({ queryKey: referralSummaryQueryKey(userKey), exact: true, refetchType: "active" });
     const invalidateCompassTrips = () => void queryClient.invalidateQueries({ queryKey: compassQueryKeys.trips(compassContext) });
     const invalidateAppSearch = () => void queryClient.invalidateQueries({ queryKey: appSearchQueryRoot, refetchType: "active" });

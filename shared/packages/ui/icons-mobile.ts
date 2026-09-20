@@ -84,3 +84,4 @@ export * from "./icons/terms/terms.mobile";
 export * from "./icons/privacy/privacy.mobile";
 export * from "./icons/delete-account/delete-account.mobile";
 export * from "./icons/sign-out/sign-out.mobile";
+export * from "./icons/wallet/wallet.mobile";

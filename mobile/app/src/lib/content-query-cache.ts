@@ -1,7 +1,10 @@
 import type { QueryClient } from "@tanstack/react-query";
+import { appendCursorItems } from "@vorinthex/shared/lib/pagination";
 import type { UserHiddenRecord } from "./user-hidden-client";
 
 import {
+  ARCHIVE_FILE_EXTENSIONS,
+  ARCHIVE_LOCATION_PAGE_SIZE,
   listContentDocumentPage,
   listContentFolderTree,
   listContentDocumentAudioVersions,
@@ -15,7 +18,7 @@ import {
   type ContentFolder,
 } from "./content-client";
 
-export type ContentLocation = { folders: ContentFolder[]; documents: ContentDocument[]; documentCursor?: string };
+export type ContentLocation = { folders: ContentFolder[]; documents: ContentDocument[]; documentCursor?: string; fileCursor?: string };
 export type FolderContentTab = "folders" | "documents" | "files";
 
 export function populatedContentTab(location: ContentLocation, selected: FolderContentTab): FolderContentTab {
@@ -93,11 +96,12 @@ export function getContentLocation(queryClient: QueryClient, context: ContentCon
   return queryClient.fetchQuery({
     queryKey: contentQueryKeys.location(context, folderKey),
     queryFn: async ({ signal }) => {
-      const [tree, page] = await Promise.all([
+      const [tree, page, files] = await Promise.all([
         getContentFolderTree(queryClient, context),
         listContentDocumentPage(folderKey, signal, context),
+        listContentDocumentPage(folderKey, signal, context, undefined, ARCHIVE_LOCATION_PAGE_SIZE, ARCHIVE_FILE_EXTENSIONS),
       ]);
-      return { folders: contentFolderChildren(tree, folderKey), documents: page.documents, documentCursor: page.cursor };
+      return { folders: contentFolderChildren(tree, folderKey), documents: appendCursorItems(page.documents, files.documents, ({ key }) => key), documentCursor: page.cursor, fileCursor: files.cursor };
     },
     staleTime: 30_000,
   });
@@ -107,6 +111,23 @@ export async function refreshContentLocation(queryClient: QueryClient, context: 
   await queryClient.cancelQueries({ queryKey: contentQueryKeys.location(context, folderKey), exact: true });
   await queryClient.invalidateQueries({ queryKey: contentQueryKeys.location(context, folderKey), exact: true, refetchType: "none" });
   return getContentLocation(queryClient, context, folderKey);
+}
+
+export async function fillContentLocationDocuments(location: ContentLocation, input: { folderKey?: string; context: ContentContext; tab: FolderContentTab; minCount: number; signal?: AbortSignal }) {
+  if (input.tab === "folders") return location;
+  const files = input.tab === "files";
+  const match = files ? (document: ContentDocument) => Boolean(document.extension) : (document: ContentDocument) => !document.extension;
+  let next = location;
+  let cursor = files ? next.fileCursor : next.documentCursor;
+  let started = false;
+  while (next.documents.filter(match).length < input.minCount) {
+    if (started && !cursor) break;
+    started = true;
+    const page = await listContentDocumentPage(input.folderKey, input.signal, input.context, cursor, ARCHIVE_LOCATION_PAGE_SIZE, files ? ARCHIVE_FILE_EXTENSIONS : undefined);
+    next = { folders: next.folders, documents: appendCursorItems(next.documents, page.documents, ({ key }) => key), documentCursor: files ? next.documentCursor : page.cursor, fileCursor: files ? page.cursor : next.fileCursor };
+    cursor = page.cursor;
+  }
+  return next;
 }
 
 export function getContentDocument(queryClient: QueryClient, context: ContentContext, documentKey: string) {

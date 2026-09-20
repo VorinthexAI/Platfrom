@@ -195,7 +195,7 @@ const DOCUMENT_MIME_TYPES = new Map<string, string>([
   ['application/pdf', 'pdf'], ['text/plain', 'txt'], ['text/markdown', 'md'], ['text/x-markdown', 'md'], ['application/msword', 'doc'],
   ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'docx'],
 ] as const);
-const IMAGE_MIME_TYPES = new Map<string, string>([['image/jpeg', 'jpg'], ['image/jpg', 'jpg'], ['image/png', 'png'], ['image/webp', 'webp'], ['image/gif', 'gif']]);
+const IMAGE_MIME_TYPES = new Map<string, string>([['image/jpeg', 'jpg'], ['image/jpg', 'jpg'], ['image/png', 'png'], ['image/webp', 'webp']]);
 const INVALID_ATTACHMENT_FILENAME = /[<>:"/\\|?*\p{Cc}\p{Cf}]/u;
 const RESERVED_ATTACHMENT_FILENAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
 
@@ -307,9 +307,7 @@ function validateGmailAttachmentPayload(part: GmailAttachmentPart, bytes: Uint8A
     ? bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
     : part.mimeType === 'image/png'
       ? bytes.length >= 8 && bytes.slice(0, 8).every((value, index) => value === [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a][index])
-      : part.mimeType === 'image/gif'
-        ? ascii(0, 6) === 'GIF87a' || ascii(0, 6) === 'GIF89a'
-        : part.mimeType === 'image/webp' && ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP';
+      : part.mimeType === 'image/webp' && ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP';
   if (!matches) throw new GmailPermanentAttachmentError('ATTACHMENT_MALFORMED_PAYLOAD', 'Gmail image attachment does not match its declared MIME type');
   return bytes;
 }
@@ -448,7 +446,7 @@ export function createGmailClient(accessToken: string, fetcher: typeof fetch = f
     },
     async attachment(messageId: string, part: GmailAttachmentPart) {
       if (!part.filename || Buffer.byteLength(part.filename) > 255 || INVALID_ATTACHMENT_FILENAME.test(part.filename)) throw new GmailPermanentAttachmentError('ATTACHMENT_MALFORMED_PAYLOAD', 'Gmail attachment filename is invalid');
-      if (part.type === 'image' && part.size > 20 * 1024 * 1024) throw new GmailPermanentAttachmentError('ATTACHMENT_INVALID_SIZE', 'Gmail image attachment exceeds the canonical size limit');
+      if (part.size > MAX_GMAIL_ATTACHMENT_BYTES) throw new GmailPermanentAttachmentError('ATTACHMENT_INVALID_SIZE', 'Gmail attachment exceeds the canonical size limit');
       if (part.data !== undefined) return validateGmailAttachmentPayload(part, decodeGmailAttachmentData(part.data, part.size));
       if (!part.attachmentId) throw new GmailPermanentAttachmentError('ATTACHMENT_INVALID_IDENTIFIER', 'Gmail attachment identifier is missing');
       const attachment = await request<{ data?: unknown; size?: unknown }>(`/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(part.attachmentId)}`);

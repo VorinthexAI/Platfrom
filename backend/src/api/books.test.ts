@@ -30,7 +30,7 @@ describe('book HTTP handlers', () => {
 
   test('registers all mobile book routes', async () => {
     const app = new Hono(); registerRoutes(app); const book = newId(); const chapter = newId();
-    for (const [method, path] of [['POST', '/assistant/respond'], ['POST', '/books/overview'], ['POST', '/books/topic-suggestions'], ['POST', '/books/goal-suggestions'], ['POST', '/books'], ['POST', `/books/${book}/detail`], ['POST', `/books/${book}/extension/preview`], ['POST', `/books/${book}/extension`], ['POST', `/books/${book}/retry`], ['POST', `/books/${book}/cancel`], ['POST', `/books/${book}/favorite`], ['DELETE', `/books/${book}`], ['PATCH', `/books/${book}/chapters/${chapter}/progress`]]) {
+    for (const [method, path] of [['POST', '/assistant/respond'], ['POST', '/books/overview'], ['POST', '/books/topic-suggestions'], ['POST', '/books/goal-suggestions'], ['POST', '/books/preview'], ['POST', '/books'], ['POST', `/books/${book}/detail`], ['POST', `/books/${book}/extension/preview`], ['POST', `/books/${book}/extension`], ['POST', `/books/${book}/retry`], ['POST', `/books/${book}/cancel`], ['POST', `/books/${book}/favorite`], ['DELETE', `/books/${book}`], ['PATCH', `/books/${book}/chapters/${chapter}/progress`]]) {
       expect((await app.request(path, { method, headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(401);
     }
   });
@@ -58,7 +58,7 @@ describe('book HTTP handlers', () => {
     const app = new Hono().post('/books', createBookHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }), authorize: async () => ({ context }), recordEvent: async () => {}, appScopeKey: 'cmrnlzf640001qc7kazsr96k5', billing }).create);
     expect((await app.request('/books', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(202);
     expect(charges).toHaveLength(2);
-    expect(charges.every((charge) => charge.toolSlug === 'book.create' && charge.microSparks === 100_000_000)).toBe(true);
+    expect(charges.every((charge) => charge.toolSlug === 'book.create' && charge.microSparks === 70_000_000)).toBe(true);
     expect(charges.every((charge) => (charge.metadata as { paidOutcome?: string }).paidOutcome === 'queue-accepted')).toBe(true);
 
     const insufficientBilling = { charge: async () => { throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'private'); } };
@@ -91,6 +91,20 @@ describe('book HTTP handlers', () => {
     const domain = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const capability = defaultAssistantCapabilityRegistry.resolve('book-workspace').find(({ definition }) => definition.name === 'book.goal.suggest')!;
     await capability.execute({ topic: 'Decision making', excludeGoals: ['Old goal'] }, { domain, books: service } as any);
+    expect(calls[0]).toEqual([body, userKey, { signal: expect.any(AbortSignal), timeoutMs: 45_000 }]);
+    expect(calls[1]).toEqual([body, userKey, { signal: undefined, timeoutMs: undefined }]);
+  });
+
+  test('keeps create preview HTTP and Core callers on the same canonical service method', async () => {
+    const teamKey = newId(); const scopeKey = newId(); const userKey = newId(); const calls: unknown[][] = [];
+    const service = { preview: async (...args: unknown[]) => { calls.push(args); return { title: 'Clear Decisions', description: 'Learn to decide well under pressure.' }; } } as never;
+    const handlers = createBookHandlers({ ...billingFixture, service, getIdentity: async () => ({ key: userKey, identityType: 'user' }), authorize: async () => ({ context: toolDomain(teamKey, scopeKey, userKey) }) });
+    const app = new Hono(); app.post('/books/preview', handlers.preview);
+    const body = { teamKey, scopeKey, topic: 'Decision making', goal: 'Decide well' };
+    expect((await app.request('/books/preview', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(200);
+    const domain = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const capability = defaultAssistantCapabilityRegistry.resolve('book-workspace').find(({ definition }) => definition.name === 'book.preview')!;
+    await capability.execute({ topic: 'Decision making', goal: 'Decide well' }, { domain, books: service } as any);
     expect(calls[0]).toEqual([body, userKey, { signal: expect.any(AbortSignal), timeoutMs: 45_000 }]);
     expect(calls[1]).toEqual([body, userKey, { signal: undefined, timeoutMs: undefined }]);
   });

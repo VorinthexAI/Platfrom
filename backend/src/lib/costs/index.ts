@@ -53,26 +53,26 @@ export function resolvePurchaseGrantMicroSparks(productId: string): number {
 }
 
 export const TOOL_COST_RULES: Readonly<Record<string, PublicFixedCostRule>> = Object.freeze({
-  'book.create': sparks(100, 'Create an audio book', 'Generate and save a complete audio book.'),
+  'book.create': sparks(70, 'Create an audio book', 'Generate and save a complete audio book.'),
   'book.extend': sparks(30, 'Extend an audio book', 'Generate and save an additional audio book chapter.'),
   'highlight.create': sparks(20, 'Create a highlight', 'Create a generated highlight from an image collection.'),
   'image.create-memory': sparks(10, 'Create a memory', 'Create a generated memory for an image.'),
   'visual-identity.create': sparks(15, 'Create a visual identity', 'Create a visual identity from selected images.'),
   'email.tone.create': sparks(25, 'Create a Signal writing tone', 'Build a reusable writing tone from connected email examples.'),
   'trip.create': sparks(15, 'Create a trip', 'Create and save a generated trip plan.'),
-  'place.guide.find': sparks(5, 'View country', 'Generate a country travel guide when it has not already been prepared.'),
-  'place.find-city': sparks(5, 'View city', 'Generate a city travel guide when it has not already been prepared.'),
+  'place.guide.find': sparks(5, 'View place', 'Generate a place guide when it has not already been prepared.'),
+  'place.find-city': sparks(5, 'View city', 'Generate a city travel guide when it has not already been prepared.', undefined, false),
   'profile.badge.generate': sparks(10, 'Generate a profile badge', 'Generate a custom profile badge for the authenticated user.', undefined, false),
 });
 export const ACTION_COST_RULES: Readonly<Record<string, FixedCostRule>> = Object.freeze({});
 
 export const ACTION_PRICED_OPERATION_TOOL_SLUGS = Object.freeze([
   'agents.core', 'app.enhance', 'app.search', 'app.speech', 'app.translate',
-  'book.goal.suggest', 'book.topic.suggest',
+  'book.goal.suggest', 'book.preview', 'book.topic.suggest',
   'app.generate-image', 'conversation.message.send',
   'document.parse', 'document.rewrite', 'document.summarize', 'document.topics',
   'email.draft.compose', 'email.draft.create', 'email.message.summarize',
-  'feedback.create',
+
   'image.caption', 'image.create-visual-identity', 'image.ideas.create',
   'inbox.sort',
   'place.find', 'place.reference.generate',
@@ -86,7 +86,7 @@ export const OUTCOME_PRICED_OPERATION_TOOL_SLUGS = Object.freeze([
 // This list is intentionally exhaustive rather than a fallback. Adding a public
 // tool without choosing fixed, action, or free billing must fail registry tests.
 export const FREE_TOOL_SLUGS = Object.freeze([
-  'agent.guide', 'app.history', 'app.notify', 'billing.summary.read', 'catalog.list', 'communication.message.send', 'communication.thread.mark-read', 'communication.thread.read', 'payment.checkout.create', 'pricing.read', 'referral.redeem', 'referral.summary.read', 'subscription.current.cancel', 'subscription.current.read', 'subscription.current.restore',
+  'agent.guide', 'app.notify', 'billing.summary.read', 'catalog.list', 'notification.list', 'notification.mark-read', 'payment.checkout.create', 'pricing.read', 'referral.redeem', 'referral.summary.read', 'subscription.current.cancel', 'subscription.current.read', 'subscription.current.restore',
   'book.chapter.progress', 'book.delete', 'book.detail', 'book.favorite', 'book.generation.cancel', 'book.generation.retry', 'book.list',
   'collection.create', 'collection.delete', 'collection.duplicates.delete', 'collection.hide', 'collection.image.transfer', 'collection.list', 'collection.reveal', 'collection.update',
   'content.hidden.list', 'content.neighbors', 'content.search', 'content.search-history.delete', 'content.search-history.list',
@@ -101,7 +101,7 @@ export const FREE_TOOL_SLUGS = Object.freeze([
   'place.create', 'place.delete', 'place.find-children', 'place.list', 'place.open', 'place.reference.list', 'place.search', 'place.update',
   'profile.badge.claim', 'profile.update', 'subject.delete', 'subject.image.list', 'subject.list',
   'scope.create', 'scope.delete', 'scope.list', 'scope.prioritize', 'scope.select', 'scope.update',
-  'tag.assignment.set', 'tag.create', 'tag.delete', 'tag.list', 'tag.update', 'ticket.create',
+  'tag.assignment.set', 'tag.create', 'tag.delete', 'tag.list', 'tag.update', 'ticket.create', 'ticket.list',
   'trip.attachment.set', 'trip.delete', 'trip.guide.list', 'trip.list', 'trip.search', 'trip.update',
 ] as const);
 
@@ -114,6 +114,7 @@ export const TOOL_COST_POLICIES: Readonly<Record<string, ToolCostPolicy>> = Obje
 
 export function lookupToolCostPolicy(toolSlug: string, input?: unknown): ToolCostPolicy | null {
   const slug = assertDottedSlug(toolSlug);
+  if (slug === 'ticket.create' && typeof input === 'object' && input !== null && (input as Record<string, unknown>).kind === 'feedback') return { mode: 'action' };
   if (slug === 'agent.guide' && typeof input === 'object' && input !== null && (input as Record<string, unknown>).mode === 'topics') return { mode: 'action' };
   if (slug === 'book.extend' && typeof input === 'object' && input !== null && (input as Record<string, unknown>).mode === 'preview') return { mode: 'action' };
   return TOOL_COST_POLICIES[slug] ?? null;

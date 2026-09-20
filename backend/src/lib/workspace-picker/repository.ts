@@ -2,13 +2,14 @@ import { db, withTransaction } from '@/lib/db/client';
 import { toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { newId } from '@/lib/ids';
 import { USER_WORKSPACE_APPS_COLLECTION, userWorkspaceAppSchema, type UserWorkspaceApp } from '@/lib/db/user-workspace-apps.node';
+import { scopeVisibilitySchema, type ScopeVisibility } from '@/lib/ai/scopes/schema';
 import { WORKSPACE_PICKER_SLUGS } from './slugs';
 
 export type WorkspacePickerScope = {
   key: string;
   slug: (typeof WORKSPACE_PICKER_SLUGS)[number];
   name: string;
-  visibility: 'public' | 'private';
+  visibility: ScopeVisibility;
 };
 
 export interface WorkspacePickerRepository {
@@ -44,8 +45,9 @@ export function createWorkspacePickerRepository(
       const bySlug = new Map(rows.map((row) => [row.slug, row]));
       return WORKSPACE_PICKER_SLUGS.flatMap((slug) => {
         const row = bySlug.get(slug);
-        if (!row || (row.visibility !== 'public' && row.visibility !== 'private')) return [];
-        return [{ key: row.key, slug, name: row.name, visibility: row.visibility }];
+        const visibility = scopeVisibilitySchema.safeParse(row?.visibility);
+        if (!row || !visibility.success) return [];
+        return [{ key: row.key, slug, name: row.name, visibility: visibility.data }];
       });
     },
     async listUserScopeKeys(userKey) {

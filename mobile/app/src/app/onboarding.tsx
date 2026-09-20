@@ -6,6 +6,7 @@ import { OnboardingCoreConversation } from "@/components/onboarding/OnboardingCo
 import { OnboardingReward } from "@/components/onboarding/OnboardingReward";
 import { OnboardingProfileBadge } from "@/components/onboarding/OnboardingProfileBadge";
 import { PaywallSheet } from "@/components/PaywallSheet";
+import { fetchBillingSummary, hasNewcomerAccountGrant } from "@/lib/billing-client";
 import { getLocalOnboardingState, markOnboardingPreviewComplete } from "@/lib/onboarding-state";
 import { useAppsStore } from "@/state/apps";
 import { useAuthStore } from "@/state/auth";
@@ -40,7 +41,14 @@ export default function OnboardingRoute() {
       : phase === "reward"
       ? <OnboardingReward onFinished={() => setPhase("profile-badge")} />
       : phase === "paywall"
-        ? <PaywallSheet initialPage={initialPage} mode="onboarding" onComplete={() => setPhase(postDeletion ? "profile-badge" : "reward")} />
+        ? <PaywallSheet initialPage={initialPage} mode="onboarding" onComplete={async () => {
+          if (postDeletion) {
+            setPhase("profile-badge");
+            return;
+          }
+          const granted = await fetchBillingSummary().then(hasNewcomerAccountGrant).catch(() => false);
+          setPhase(granted ? "reward" : "profile-badge");
+        }} />
         : <OnboardingCoreConversation apps={apps} onFinished={() => void startAuth()} />}
   </View>;
 }

@@ -15,6 +15,7 @@ import {
   emailToneRecordSchema,
 } from '@/lib/db/email-records.node';
 import { EMAIL_ATTACHMENTS_COLLECTION, emailAttachmentSchema } from '@/lib/db/email-attachments.node';
+import { EMAIL_INBOXES_COLLECTION } from '@/lib/db/email-inboxes.node';
 import { newId } from '@/lib/ids';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { compareEmailMessages } from './message-order';
@@ -35,6 +36,7 @@ type Database = Pick<typeof db, 'query'> & Partial<Pick<typeof db, 'beginTransac
 type RepositoryError = (reason: 'not_found' | 'forbidden' | 'conflict', message?: string) => Error;
 type StableKey = (kind: string, ...values: string[]) => string;
 const raw = (value: unknown) => withArangoKey(value as Record<string, unknown>);
+const signalSentMessageId = (value?: string) => { const match = /^<vorinthex-([a-z0-9]+)@vorinthex\.com>$/.exec(value ?? ''); return Boolean(match && z.string().cuid().safeParse(match[1]).success); };
 const cosineSimilarity = (left: readonly number[], right: readonly number[]) => {
   if (left.length !== right.length || left.length === 0) return -1;
   let dot = 0, leftMagnitude = 0, rightMagnitude = 0;
@@ -172,7 +174,7 @@ export function createCanonicalEmailRepository(database: Database, error: Reposi
     },
     async thread(scopeKey: string, threadKey: string) {
       const thread = await get(EMAIL_THREADS_COLLECTION, parseThread, scopeKey, threadKey);
-      if (!thread || thread.inInbox === false) throw error('not_found');
+      if (!thread) throw error('not_found');
       const cursor = await database.query('FOR message IN emailMessages FILTER message.scopeKey == @scopeKey && message.threadKey == @threadKey RETURN message', { scopeKey, threadKey });
       return { thread, messages: (await cursor.all()).map(parseMessage).sort(compareEmailMessages) };
     },
@@ -188,32 +190,37 @@ export function createCanonicalEmailRepository(database: Database, error: Reposi
       return { threads: selected, messages: messages.filter((message) => message.accountKey === accountKey && keys.has(message.threadKey)) };
     },
     async overview(scopeKey: string, connectorKey: string, query: EmailOverviewRepositoryQuery) {
-      const threads = (await list(EMAIL_THREADS_COLLECTION, parseThread, scopeKey)).filter((thread) => thread.accountKey === connectorKey && thread.inInbox !== false && (!query.createdFrom || thread.createdAt >= query.createdFrom) && (!query.createdTo || thread.createdAt <= query.createdTo));
+      const mailbox = 'mailbox' in query ? query.mailbox : undefined;
+      const allThreads = (await list(EMAIL_THREADS_COLLECTION, parseThread, scopeKey)).filter((thread) => thread.accountKey === connectorKey && (!query.createdFrom || thread.createdAt >= query.createdFrom) && (!query.createdTo || thread.createdAt <= query.createdTo));
       const messages = (await list(EMAIL_MESSAGES_COLLECTION, parseMessage, scopeKey)).filter((message) => message.accountKey === connectorKey);
+      const sentThreadKeys = new Set(messages.filter((message) => signalSentMessageId(message.messageIdHeader)).map((message) => message.threadKey));
+      const threads = mailbox === 'sent' ? allThreads.filter((thread) => sentThreadKeys.has(thread.key)) : allThreads.filter((thread) => thread.inInbox !== false);
       const search = query.search?.trim().toLowerCase() ?? '';
       const matchesSearch = (thread: typeof threads[number]) => !search || messages.some((message) => message.threadKey === thread.key && `${message.from} ${message.subject} ${message.body}`.toLowerCase().includes(search));
-      const active = threads.filter((thread) => !thread.labels?.includes('TRASH'));
+      const inboxThreads = allThreads.filter((thread) => thread.inInbox !== false);
+      const active = inboxThreads.filter((thread) => !thread.labels?.includes('TRASH'));
       const legacyFilter = 'filter' in query ? query.filter : undefined;
       const queryFacets = 'facets' in query ? query.facets : [];
       const readState = 'readState' in query ? query.readState : undefined;
       const filtered = threads.filter((thread) => {
         const trash = thread.labels?.includes('TRASH') ?? false;
+        if (mailbox === 'sent') return !trash;
         if (legacyFilter) return legacyFilter === 'trash' ? trash : !trash && (legacyFilter === 'all' || legacyFilter === 'important' && thread.inboxCategory === 'Important' || legacyFilter === 'urgent' && thread.inboxCategory === 'Urgent' || legacyFilter === 'purchases' && thread.inboxCategory === 'Purchases' || legacyFilter === 'needs_action' && thread.state === 'needs_action' || legacyFilter === 'filtered' && thread.inboxCategory === 'Filtered' || legacyFilter === 'unread' && thread.unread || legacyFilter === 'favorite' && thread.isFavorite);
         const facets: string[] = queryFacets;
         return !trash && (readState == null || thread.unread === (readState === 'unread')) && (!facets.includes('favorite') || thread.isFavorite) && (!facets.some((value) => ['urgent', 'important', 'purchases', 'filtered'].includes(value)) || facets.includes((thread.inboxCategory ?? 'Important').toLowerCase()));
       }).filter(matchesSearch).sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt) || a.key.localeCompare(b.key));
       const limit = query.limit ?? 50;
-      const fingerprint = stableKey('mail-overview-cursor', scopeKey, connectorKey, JSON.stringify({ filter: 'filter' in query ? query.filter : null, readState: 'readState' in query ? query.readState : null, facets: [...('facets' in query ? query.facets : [])].sort(), search, createdFrom: query.createdFrom ?? null, createdTo: query.createdTo ?? null }));
+      const fingerprint = stableKey('mail-overview-cursor', scopeKey, connectorKey, JSON.stringify({ mailbox: mailbox ?? null, filter: 'filter' in query ? query.filter : null, readState: 'readState' in query ? query.readState : null, facets: [...('facets' in query ? query.facets : [])].sort(), search, createdFrom: query.createdFrom ?? null, createdTo: query.createdTo ?? null }));
       const after = query.cursor ? z.object({ v: z.literal(1), fingerprint: z.string().cuid(), lastMessageAt: z.string().datetime(), key: z.string().cuid() }).strict().parse(JSON.parse(Buffer.from(query.cursor, 'base64url').toString('utf8'))) : null;
       if (after && after.fingerprint !== fingerprint) throw error('conflict', 'Email cursor belongs to another connector, scope, or query');
       const page = after ? filtered.filter((thread) => thread.lastMessageAt < after.lastMessageAt || thread.lastMessageAt === after.lastMessageAt && thread.key > after.key) : filtered;
       const selected = page.slice(0, limit), last = selected.at(-1);
       const nextCursor = page.length > limit && last ? Buffer.from(JSON.stringify({ v: 1, fingerprint, lastMessageAt: last.lastMessageAt, key: last.key })).toString('base64url') : null;
-      return { threads: selected, nextCursor, counts: { all: active.length, important: active.filter((value) => value.inboxCategory === 'Important').length, urgent: active.filter((value) => value.inboxCategory === 'Urgent').length, purchases: active.filter((value) => value.inboxCategory === 'Purchases').length, needsAction: active.filter((value) => value.state === 'needs_action').length, filtered: active.filter((value) => value.inboxCategory === 'Filtered').length, unread: active.filter((value) => value.unread).length, favorite: active.filter((value) => value.isFavorite).length, trash: threads.length - active.length } };
+          return { threads: selected, nextCursor, counts: { all: active.length, important: active.filter((value) => value.inboxCategory === 'Important').length, urgent: active.filter((value) => value.inboxCategory === 'Urgent').length, purchases: active.filter((value) => value.inboxCategory === 'Purchases').length, needsAction: active.filter((value) => value.state === 'needs_action').length, filtered: active.filter((value) => value.inboxCategory === 'Filtered').length, unread: active.filter((value) => value.unread).length, favorite: active.filter((value) => value.isFavorite).length, trash: inboxThreads.length - active.length } };
     },
-    async searchThreads(scopeKey: string, connectorKey: string, embedding: number[], query: string, minimumScore: number, limit: number, filters?: { readState?: 'read' | 'unread'; facets?: Array<'urgent' | 'important' | 'purchases' | 'filtered' | 'favorite'> } & EmailCreatedAtRange) {
+    async searchThreads(scopeKey: string, connectorKey: string, embedding: number[], query: string, minimumScore: number, limit: number, filters?: { mailbox?: 'sent'; readState?: 'read' | 'unread'; facets?: Array<'urgent' | 'important' | 'purchases' | 'filtered' | 'favorite'> } & EmailCreatedAtRange) {
       const facets = [...new Set(filters?.facets ?? [])];
-      const cursor = await database.query(`FOR message IN emailMessages FILTER message.scopeKey == @scopeKey && message.accountKey == @connectorKey && message.embeddingContentVersion == 4 LET thread = DOCUMENT(emailThreads, message.threadKey) FILTER thread != null && thread.inInbox != false && "TRASH" NOT IN (thread.labels || []) FILTER @createdFrom == null || thread.createdAt >= @createdFrom FILTER @createdTo == null || thread.createdAt <= @createdTo FILTER @readState == null || thread.unread == (@readState == "unread") FILTER LENGTH(@facets) == 0 || (("favorite" NOT IN @facets || thread.isFavorite == true) && (!LENGTH(INTERSECTION(@facets, ["urgent", "important", "purchases", "filtered"])) || LOWER(thread.inboxCategory) IN @facets)) LET direct = CONTAINS(LOWER(CONCAT_SEPARATOR(" ", message.from, message.subject, message.body)), @query) LET similarity = COSINE_SIMILARITY(message.embedding, @embedding) LET score = direct ? 1 : similarity FILTER direct || IS_NUMBER(similarity) && similarity >= @minimumScore COLLECT threadKey = thread._key INTO rows = { thread, score } LET selected = FIRST(FOR row IN rows SORT row.score DESC LIMIT 1 RETURN row) SORT selected.score DESC, selected.thread.lastMessageAt DESC LIMIT @limit RETURN selected`, { scopeKey, connectorKey, embedding, query: query.trim().toLowerCase(), minimumScore, limit, readState: filters?.readState ?? null, facets, createdFrom: filters?.createdFrom ?? null, createdTo: filters?.createdTo ?? null });
+      const cursor = await database.query(`FOR message IN emailMessages FILTER message.scopeKey == @scopeKey && message.accountKey == @connectorKey && message.embeddingContentVersion == 4 FILTER @mailbox != "sent" || REGEX_TEST(message.messageIdHeader || "", "^<vorinthex-[a-z0-9]+@vorinthex\\.com>$") LET thread = DOCUMENT(emailThreads, message.threadKey) FILTER thread != null && "TRASH" NOT IN (thread.labels || []) FILTER @mailbox == "sent" || thread.inInbox != false FILTER @createdFrom == null || thread.createdAt >= @createdFrom FILTER @createdTo == null || thread.createdAt <= @createdTo FILTER @mailbox == "sent" || @readState == null || thread.unread == (@readState == "unread") FILTER @mailbox == "sent" || LENGTH(@facets) == 0 || (("favorite" NOT IN @facets || thread.isFavorite == true) && (!LENGTH(INTERSECTION(@facets, ["urgent", "important", "purchases", "filtered"])) || LOWER(thread.inboxCategory) IN @facets)) LET direct = CONTAINS(LOWER(CONCAT_SEPARATOR(" ", message.from, message.subject, message.body)), @query) LET similarity = COSINE_SIMILARITY(message.embedding, @embedding) LET score = direct ? 1 : similarity FILTER direct || IS_NUMBER(similarity) && similarity >= @minimumScore COLLECT threadKey = thread._key INTO rows = { thread, score } LET selected = FIRST(FOR row IN rows SORT row.score DESC LIMIT 1 RETURN row) SORT selected.score DESC, selected.thread.lastMessageAt DESC LIMIT @limit RETURN selected`, { scopeKey, connectorKey, embedding, query: query.trim().toLowerCase(), minimumScore, limit, mailbox: filters?.mailbox ?? null, readState: filters?.readState ?? null, facets, createdFrom: filters?.createdFrom ?? null, createdTo: filters?.createdTo ?? null });
       return (await cursor.all() as any[]).map((row) => ({ thread: parseThread(row.thread), score: row.score }));
     },
     async similarMessages(scopeKey: string, messageKey: string, embedding: number[], limit = 10) { const source = await this.message(scopeKey, messageKey); const cursor = await database.query('FOR message IN emailMessages FILTER message.scopeKey == @scopeKey && message.accountKey == @accountKey && message._key != @messageKey && message.threadKey != @threadKey && message.embeddingContentVersion == 4 LET similarity = COSINE_SIMILARITY(message.embedding, @embedding) FILTER IS_NUMBER(similarity) SORT similarity DESC LIMIT @limit RETURN { message, similarity }', { scopeKey, accountKey: source.accountKey, messageKey, threadKey: source.threadKey, embedding, limit: Math.min(limit, 10) }); return (await cursor.all() as any[]).map((row) => ({ message: parseMessage(row.message), similarity: row.similarity })); },
@@ -226,6 +233,46 @@ export function createCanonicalEmailRepository(database: Database, error: Reposi
       const result = await cursor.next() as { threadsDeleted: number; documentsDeleted: number } | undefined;
       if (!result) throw error('conflict', 'Email connector lease was lost before clearing Trash');
       return { ...result, attachmentMutation: { documentKeys: [], imageKeys: [], collectionKeys: [] } };
+    },
+    async purgeConnectorMailbox(scopeKey: string, userKey: string, connectorKey: string) {
+      const now = new Date().toISOString();
+      const cursor = await transaction([
+        TEAM_CONNECTORS_COLLECTION, EMAIL_INBOXES_COLLECTION, EMAIL_THREADS_COLLECTION, EMAIL_MESSAGES_COLLECTION, EMAIL_DRAFTS_COLLECTION, EMAIL_ATTACHMENTS_COLLECTION,
+        'tagAssignments', 'documentVersions', 'documentSummaries', 'documentSummaryAudio', 'storageDeletionJobs',
+      ], async (trx) => trx.query(`
+        LET connector = DOCUMENT(@@connectors, @connectorKey)
+        FILTER connector != null && connector.userKey == @userKey && connector.status == "error" && connector.syncEnabled == false
+        FILTER connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now
+        FILTER connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now
+        LET threadRows = (FOR thread IN emailThreads FILTER thread.scopeKey == @scopeKey && thread.accountKey == @connectorKey RETURN thread)
+        LET threadKeys = threadRows[*]._key
+        LET messageRows = (FOR message IN emailMessages FILTER message.scopeKey == @scopeKey && message.accountKey == @connectorKey RETURN message)
+        LET messageKeys = messageRows[*]._key
+        LET draftRows = (FOR draft IN emailDrafts FILTER draft.scopeKey == @scopeKey && (draft.accountKey == @connectorKey || draft.threadKey IN threadKeys) RETURN draft)
+        LET draftKeys = draftRows[*]._key
+        LET inboxRows = (FOR inbox IN @@inboxes FILTER inbox.connectorKey == @connectorKey && inbox.userKey == @userKey RETURN inbox)
+        LET inboxKeys = inboxRows[*]._key
+        LET attachmentRows = (FOR attachment IN emailAttachments FILTER attachment.connectorKey == @connectorKey && attachment.userKey == @userKey RETURN attachment)
+        LET summaryRows = (FOR summary IN documentSummaries FILTER summary.scopeKey == @scopeKey && summary.documentKey IN messageKeys RETURN summary)
+        LET summaryKeys = summaryRows[*]._key
+        LET audioRows = (FOR audio IN documentSummaryAudio FILTER audio.scopeKey == @scopeKey && audio.summaryKey IN summaryKeys RETURN audio)
+        LET storageKeys = UNIQUE(APPEND(attachmentRows[* FILTER IS_STRING(CURRENT.storageKey)].storageKey, audioRows[* FILTER IS_STRING(CURRENT.storageKey)].storageKey))
+        LET jobs = (FOR storageKey IN storageKeys UPSERT { storageKey } INSERT { storageKey, createdAt: @now } UPDATE {} IN storageDeletionJobs RETURN 1)
+        LET cleanupTags = (FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && ((assignment.sourceType == "email-thread" && assignment.sourceKey IN threadKeys) || (assignment.sourceType == "email-message" && assignment.sourceKey IN messageKeys) || (assignment.sourceType == "email-draft" && assignment.sourceKey IN draftKeys) || (assignment.sourceType == "email-inbox" && assignment.sourceKey IN inboxKeys)) REMOVE assignment IN tagAssignments RETURN 1)
+        LET removedVersions = (FOR value IN documentVersions FILTER value.scopeKey == @scopeKey && value.documentKey IN messageKeys REMOVE value IN documentVersions RETURN 1)
+        LET removedAudio = (FOR audio IN audioRows REMOVE audio IN documentSummaryAudio RETURN 1)
+        LET removedSummaries = (FOR summary IN summaryRows REMOVE summary IN documentSummaries RETURN 1)
+        LET removedAttachments = (FOR attachment IN attachmentRows REMOVE attachment IN emailAttachments RETURN 1)
+        LET removedDrafts = (FOR draft IN draftRows REMOVE draft IN emailDrafts RETURN 1)
+        LET removedMessages = (FOR message IN messageRows REMOVE message IN emailMessages RETURN 1)
+        LET removedThreads = (FOR thread IN threadRows REMOVE thread IN emailThreads RETURN 1)
+        LET removedInboxes = (FOR inbox IN inboxRows REMOVE inbox IN @@inboxes RETURN 1)
+        REMOVE connector IN @@connectors
+        RETURN { storageKeys }
+      `, { '@connectors': TEAM_CONNECTORS_COLLECTION, '@inboxes': EMAIL_INBOXES_COLLECTION, scopeKey, userKey, connectorKey, now }));
+      const result = await cursor.next() as { storageKeys: string[] } | undefined;
+      if (!result) throw error('conflict', 'Email connector changed while deleting the inbox');
+      return { storageKeys: result.storageKeys.filter((value) => typeof value === 'string') };
     },
     async createMessageTranslation(input: Omit<DocumentVersion, 'key' | 'version' | 'createdAt'>) {
       const snapshot = documentVersionSchema.omit({ key: true, version: true, createdAt: true }).parse(input);

@@ -9,7 +9,7 @@ export const SCOPE_MEMBER_ROLES = ['owner', 'admin', 'moderator', 'viewer'] as c
 export const scopeMemberRoleSchema = z.enum(SCOPE_MEMBER_ROLES);
 export type ScopeMemberRole = z.infer<typeof scopeMemberRoleSchema>;
 
-export const SCOPE_VISIBILITIES = ['public', 'private'] as const;
+export const SCOPE_VISIBILITIES = ['public', 'private', 'hidden'] as const;
 export const scopeVisibilitySchema = z.enum(SCOPE_VISIBILITIES);
 export type ScopeVisibility = z.infer<typeof scopeVisibilitySchema>;
 

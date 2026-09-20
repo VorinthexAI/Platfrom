@@ -27,6 +27,6 @@ Draft attachment selectors accept private email attachment keys owned by the use
 
 Automatic drafts resolve tones, reply context, sender identity, and persistence ownership from the connector owner, never the system execution principal. Sent-only and archived threads skip the inbox-only automatic draft precheck. Inbox visibility and categories use inbox labels, while the conversation preview and action state include newer sent/archived replies (excluding spam, trash, and provider drafts).
 
-Disconnect blocks new local work and destroys that connector's encrypted credentials. It intentionally does not stop the account-wide Gmail watch or revoke the account-wide Google OAuth grant because another authorized Vorinthex connector may share them; notifications for the disconnected connector are ignored and its watch expires naturally.
+Disconnect hard-deletes that inbox's local mailbox rows (threads, messages, drafts, email attachments, inbox metadata, and the connector document) and destroys its encrypted credentials. Archive and Gallery export copies stay. If no other active Vorinthex connector shares that Gmail address, disconnect also stops the Gmail watch and revokes the Google OAuth grant.
 
 Migration backfills reuse the storage key already referenced by an Archive or Gallery export; they do not copy physical objects. Legacy Compass hero rows therefore derive a deterministic migration hash from that storage key when the historical Gallery row has no byte hash. A later rewrite creates independently owned canonical objects during normal regeneration.

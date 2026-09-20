@@ -79,7 +79,7 @@ describe('action registry', () => {
     visit(sourceRoot);
     // The seed migration is the sole historical-data exception; all runtime
     // paths must stay free of the retired action ID.
-    const historicalMigration = join(sourceRoot, 'db', 'seed.ts');
+    const historicalMigration = join(sourceRoot, 'db', 'migrations', '0018-canonical-seed.ts');
     expect(files.filter((path) => path !== historicalMigration && readFileSync(path, 'utf8').includes('core.ask'))).toEqual([]);
   });
 

@@ -41,12 +41,13 @@ const checkoutHandoffExpired = (expiresAt: string) => Date.parse(expiresAt) <= D
 function PlanCard({ current, onSelect, product, selected }: { current: boolean; onSelect: () => void; product: MobileProduct; selected: boolean }) {
   const period = product.billingPeriod === "month" ? "month" : product.billingPeriod === "week" ? "week" : null;
   const sparkAmount = productSparkAmount(product);
+  const bestValue = product.billingPeriod === "month";
   return <View style={styles.planWrap}>
     <Button accessibilityLabel={`${formatProductPrice(effectivePriceCents(product), product.currency)}${period ? ` per ${period}` : " one time"}, ${sparkAmount} Sparks`} accessibilityState={{ selected }} contentMode="raw" onPress={onSelect} shape="rounded" size="md" style={[styles.plan, selected && styles.planSelected]} variant="outline">
       <View style={styles.planValue}><Text style={styles.planGrant}>{sparkAmount.toLocaleString("en-US")} Sparks</Text><Text style={styles.planName}>{product.billingPeriod === "month" ? "Monthly plan" : product.billingPeriod === "week" ? "Weekly plan" : "One-time top-up"}</Text></View>
       <View style={styles.priceRow}>{product.discountedPriceCents !== null ? <Text accessibilityLabel={`Reference price ${formatProductPrice(product.priceCents, product.currency)}`} style={styles.referencePrice}>{formatProductPrice(product.priceCents, product.currency)}</Text> : null}<Text style={styles.price}>{formatProductPrice(effectivePriceCents(product), product.currency)}</Text>{period ? <Text style={styles.period}>/{period}</Text> : null}</View>
     </Button>
-    {current ? <Badge accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.currentPlanBadge}><Text style={styles.currentPlanBadgeText}>Current plan</Text></Badge> : null}
+    {current ? <Badge accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.currentPlanBadge}><Text style={styles.currentPlanBadgeText}>Current subscription</Text></Badge> : bestValue ? <Badge accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.bestValueBadge}><Text style={styles.bestValueBadgeText}>Best value</Text></Badge> : null}
   </View>;
 }
 
@@ -286,6 +287,8 @@ const styles = StyleSheet.create({
   planSelected: { borderColor: palette.silver50 },
   currentPlanBadge: { backgroundColor: palette.page, borderColor: palette.silver50, borderRadius: 999, borderWidth: 1, paddingHorizontal: spacing.sm, paddingVertical: 3, position: "absolute", right: spacing.md, top: 0 },
   currentPlanBadgeText: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 11 },
+  bestValueBadge: { backgroundColor: "#030507", borderRadius: 999, paddingHorizontal: spacing.sm, paddingVertical: 3, position: "absolute", right: spacing.md, top: 0 },
+  bestValueBadgeText: { color: palette.chromeWhite, fontFamily: fonts.medium, fontSize: 11 },
   planValue: { flex: 1, gap: 2, minWidth: 0 },
   planName: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 11 },
   planGrant: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 17 },

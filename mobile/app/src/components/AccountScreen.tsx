@@ -9,7 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Avatar } from "@vorinthex/shared/ui/avatar";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
-import { BellIcon, CheckIcon, DeleteAccountIcon, FaqIcon, FeedbackIcon, FolderIcon, HelpIcon, IssueIcon, PlusIcon, PrivacyIcon, ReferralIcon, SettingsIcon, SignOutIcon, SparksIcon, TermsIcon, WarningIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { BellIcon, CheckIcon, DeleteAccountIcon, FaqIcon, FeedbackIcon, FolderIcon, HelpIcon, IssueIcon, PlusIcon, PrivacyIcon, ReferralIcon, SettingsIcon, SignOutIcon, SparksIcon, TermsIcon, WalletIcon, WarningIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
@@ -24,15 +24,16 @@ import { useAppsStore } from "@/state/apps";
 import { extractDomainErrorMessage, isSparkFundingError } from "@/lib/domain-error-observer";
 import { fonts, palette, radii, spacing } from "@/theme/tokens";
 import { AccountScreenShell } from "@/components/AccountScreenShell";
+import { WalletSheet, type WalletHelp } from "@/components/WalletSheet";
 import { normalizeCapturedPng } from "@/lib/captured-image";
 import { deleteGalleryImages, fetchGalleryUploadStatus, uploadGalleryImages, type GalleryContext } from "@/lib/gallery-client";
-import { billingSummaryQueryKey, currentSubscriptionQueryKey, formatStorageSummary, setDevSparkBalance, setSubscriptionCancellation, wholeSparks } from "@/lib/billing-client";
+import { billingSummaryQueryKey, currentSubscriptionQueryKey, setDevSparkBalance, setSubscriptionCancellation, wholeSparks } from "@/lib/billing-client";
 import { useBillingSummary, useCurrentSubscription } from "@/hooks/use-billing-summary";
 import { fetchReferralSummary, normalizeReferralCode, redeemReferralCode, referralCodeSchema, referralRedemptionErrorMessage, referralSummaryQueryKey, type ReferralRedeemResult } from "@/lib/referral-client";
 import { subscriptionPresentation } from "@/lib/subscription-presentation";
 import { useUiStore } from "@/state/ui";
 
-type ProfileSheet = "avatar-actions" | "badge-generate" | "name" | "faq" | "privacy" | "terms" | "cancel-subscription" | "delete-account" | "referral" | "storage-help" | "scope-help" | "scope-create" | "scope-actions" | "scope-delete";
+type ProfileSheet = "avatar-actions" | "badge-generate" | "name" | "faq" | "privacy" | "terms" | "cancel-subscription" | "delete-account" | "referral" | "wallet" | "scope-help" | "scope-create" | "scope-actions" | "scope-delete";
 type ReferralMode = "share" | "redeem";
 export type AccountScreenInitialState = { sheet: "referral"; referralMode: ReferralMode };
 
@@ -111,11 +112,12 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const signOut = useAuthStore((state) => state.signOut);
   const deleteAccount = useAuthStore((state) => state.deleteAccount);
   const openCostDetails = useUiStore((state) => state.openCostDetails);
+  const openPaywall = useUiStore((state) => state.openPaywall);
   const products = useAppsStore((state) => state.products);
   const badgeCost = useAppsStore((state) => state.capabilityCosts["profile.badge.generate"]);
   const refreshProducts = useAppsStore((state) => state.refreshProducts);
-  const storageSparkCost = useAppsStore((state) => state.sparkCosts.find((charge) => charge.kind === "storage")?.sparkCost);
   const [sheet, setSheet] = useState<ProfileSheet | undefined>(initialState?.sheet);
+  const [walletHelp, setWalletHelp] = useState<WalletHelp>();
   const [nameDraft, setNameDraft] = useState("");
   const [scopeName, setScopeName] = useState("");
   const [scopeDescription, setScopeDescription] = useState("");
@@ -506,7 +508,7 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   };
 
   const headerActions = page === "profile" ? <>
-    <Button accessibilityLabel="Open notifications in Signal" contentMode="raw" iconOnly onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "inbox", inbox: "internal" } })} size="xs" variant="icon"><BellIcon size="sm" /></Button>
+    <Button accessibilityLabel="Open notifications in Signal" contentMode="raw" iconOnly onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "unread", inbox: "internal" } })} size="xs" variant="icon"><BellIcon size="sm" /></Button>
     <Button accessibilityLabel="Open settings" contentMode="raw" iconOnly onPress={() => router.push("/settings")} size="xs" variant="icon"><SettingsIcon size="sm" /></Button>
   </> : undefined;
 
@@ -554,10 +556,6 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
           {user?.email ? <Text style={styles.email}>{user.email}</Text> : null}
         </View>
         {__DEV__ ? <View style={styles.sparkTest}><Text style={styles.inputLabel}>Sparks (test)</Text><TextInput accessibilityLabel="Spark balance" keyboardType="number-pad" onChangeText={setSparkBalanceDraft} onSubmitEditing={saveSparkBalance} placeholder="0" returnKeyType="done" value={sparkBalanceDraft} /><Button disabled={savingSparkBalance} loading={savingSparkBalance} onPress={saveSparkBalance} size="md" variant="secondary">Set balance</Button></View> : null}
-        <View style={styles.storageSection}>
-          <View style={styles.scopeTitleRow}><Text style={styles.scopeTitle}>{storageSparkCost ? `Storage (${storageSparkCost} Sparks / GB / Month)` : "Storage"}</Text><Button accessibilityLabel="How is storage charged?" contentMode="raw" iconOnly onPress={() => setSheet("storage-help")} size="xs" variant="icon"><HelpIcon size="sm" /></Button></View>
-          {billingSummaryQuery.isPending ? <Skeleton style={styles.storageSkeleton} /> : billingSummaryQuery.isError ? <Text accessibilityRole="alert" style={styles.storageSummary}>Storage usage is unavailable.</Text> : <Text style={styles.storageSummary}>{formatStorageSummary(billingSummaryQuery.data.storage.bytes, billingSummaryQuery.data.storage.estimatedMonthlyMicroSparks)}</Text>}
-        </View>
         <View style={styles.scopeSection}>
           <View style={styles.scopeTitleRow}><Text style={styles.scopeTitle}>Scopes</Text><Button accessibilityLabel="What are scopes?" contentMode="raw" iconOnly onPress={() => setSheet("scope-help")} size="xs" variant="icon"><HelpIcon size="sm" /></Button></View>
           <View style={styles.scopeGrid}>
@@ -567,13 +565,14 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
         </View>
       </View> : <View style={styles.settingsContent}>
         <View style={styles.settingsGrid}>
-          <SettingsActionCard icon={<IssueIcon size="lg" />} label="Report issue" onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "inbox", inbox: "internal", compose: "issue" } })} size={settingsCardSize} />
-          <SettingsActionCard icon={<FeedbackIcon size="lg" />} label="Feedback" onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "inbox", inbox: "internal", compose: "feedback" } })} size={settingsCardSize} />
+          <SettingsActionCard icon={<IssueIcon size="lg" />} label="Report issue" onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "unread", inbox: "internal", compose: "issue" } })} size={settingsCardSize} />
+          <SettingsActionCard icon={<FeedbackIcon size="lg" />} label="Feedback" onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "unread", inbox: "internal", compose: "feedback" } })} size={settingsCardSize} />
           <SettingsActionCard icon={<FaqIcon size="lg" />} label="FAQ" onPress={() => { setFaqQuestionIndex(undefined); setSheet("faq"); }} size={settingsCardSize} />
           <SettingsActionCard icon={<TermsIcon size="lg" />} label="Terms" onPress={() => setSheet("terms")} size={settingsCardSize} />
           <SettingsActionCard icon={<PrivacyIcon size="lg" />} label="Privacy" onPress={() => setSheet("privacy")} size={settingsCardSize} />
           <SettingsActionCard icon={<ReferralIcon size="lg" />} label="Referral" onPress={() => { setReferralMode("share"); setSheet("referral"); }} size={settingsCardSize} />
-          <SettingsActionCard icon={<SparksIcon size="lg" />} label="Sparks" onPress={openCostDetails} size={settingsCardSize} />
+          <SettingsActionCard icon={<WalletIcon size="lg" />} label="Wallet" onPress={() => setSheet("wallet")} size={settingsCardSize} />
+          <SettingsActionCard icon={<SparksIcon size="lg" />} label="Spark costs" onPress={openCostDetails} size={settingsCardSize} />
           {subscriptionView?.action === "cancel" ? <SettingsActionCard danger icon={<WarningIcon size="lg" variant="danger" />} label="Cancel subscription" onPress={() => setSheet("cancel-subscription")} size={settingsCardSize} /> : null}
           <SettingsActionCard danger icon={<DeleteAccountIcon size="lg" variant="danger" />} label="Delete account" onPress={() => setSheet("delete-account")} size={settingsCardSize} />
           <SettingsActionCard danger icon={<SignOutIcon size="lg" variant="danger" />} label="Log out" onPress={() => void logOut()} size={settingsCardSize} />
@@ -599,8 +598,12 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
       <Text style={styles.scopeHelp}>Scopes are separate workspaces for different parts of your life. For example, you can create one for work and another for personal use, keeping their content, conversations, and tools organized independently.</Text>
     </BottomSheet>
 
-    <BottomSheet footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "storage-help"} title="Storage">
-      <Text style={styles.scopeHelp}>Storage reflects tracked files and media across your apps. Usage is measured continuously and charged in Sparks each hour. The monthly amount shown is an estimate at your current usage. If storage remains unfunded for 90 days, your tracked stored data becomes eligible for deletion.</Text>
+    <BottomSheet footer={<><Button onPress={() => { setWalletHelp(undefined); setSheet(undefined); openPaywall(); }} size="md" variant="primary">Buy more</Button><Button onPress={() => { setWalletHelp(undefined); setSheet(undefined); }} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) { setWalletHelp(undefined); setSheet(undefined); } }} open={sheet === "wallet"} title="Wallet">
+      <WalletSheet onOpenHelp={setWalletHelp} userKey={user?.key} />
+    </BottomSheet>
+
+    <BottomSheet footer={<Button onPress={() => setWalletHelp(undefined)} size="md" variant="secondary">Close</Button>} onOpenChange={(open) => { if (!open) setWalletHelp(undefined); }} open={sheet === "wallet" && Boolean(walletHelp)} title={walletHelp === "ai" ? "AI usage" : walletHelp === "charges" ? "Charges" : "Storage"}>
+      <Text style={styles.scopeHelp}>{walletHelp === "ai" ? "This is Sparks spent on AI that does not have a listed static Spark charge, such as chatting in Core. Actions with a set price appear under Charges." : walletHelp === "charges" ? "Charges are each time Sparks were spent on an action with a set price, such as creating an audio book or connecting email. Other AI spend is shown above as AI usage." : "Storage reflects tracked files and media across your apps. Usage is measured continuously and charged in Sparks each hour. The monthly amount shown is an estimate at your current usage. If storage remains unfunded for 90 days, your tracked stored data becomes eligible for deletion."}</Text>
     </BottomSheet>
 
     <BottomSheet description={TERMS_COPY.eyebrow} footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "terms"} title="Terms of service">
@@ -724,9 +727,6 @@ const styles = StyleSheet.create({
   referralSuccess: { borderColor: palette.hairline, borderRadius: radii.md, borderWidth: 1, gap: spacing.md, marginTop: spacing.sm, padding: spacing.md },
   referralSuccessTitle: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 16, textAlign: "center" },
   deleteError: { color: palette.danger, fontFamily: fonts.regular, fontSize: 13, lineHeight: 19 },
-  storageSection: { alignSelf: "stretch", gap: spacing.xs, marginTop: spacing.xl, width: "100%" },
-  storageSummary: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 14, lineHeight: 20 },
-  storageSkeleton: { height: 20, width: "72%" },
   scopeSection: { alignSelf: "stretch", gap: spacing.sm, marginTop: spacing.xl, width: "100%" },
   scopeActionItem: { justifyContent: "center" },
   scopeTitleRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", minHeight: 32 },

@@ -13,6 +13,8 @@ The AI runtime routes generic actions through models and providers. Product beha
 3. Start local dev with `bun start` from `backend/`. This brings up the Docker Compose infra (ArangoDB, Redis, LocalStack, Mailpit), applies dev migrations, and starts the API natively with hot reload.
 4. Reset local dev data with `bun reset`. This runs `docker compose down -v`.
 
+**Never edit existing graph migration files.** Schema and seed changes need a new numbered file under `src/db/migrations/` that backfills existing data and stays backwards compatible with already-applied databases. Platform seed (Founders team, live scopes, commerce products) lives in `src/db/migrations/0018-canonical-seed.ts` and runs once via the migration ledger. See `src/db/migrations/README.md`. Do not wipe the local DB to pick up schema or seed edits.
+
 You can still run pieces manually with `bun run dev:infra`, `bun run db:migrate:dev`, and `bun run dev`.
 
 Docker Desktop or another ArangoDB/Redis environment must be running for migrations and DB-backed tests.

@@ -26,7 +26,7 @@ const GENERIC_CONTAINER_FIELDS = new Set(['items', 'results']);
 const LABEL_FIELDS = ['name', 'title', 'subject', 'filename', 'caption', 'label'] as const;
 const FALLBACK_LABELS: Record<AppSearchCollectionSlug, string> = {
   folders: 'Folder', documents: 'Document', files: 'File', collections: 'Collection', images: 'Image', inboxes: 'Inbox',
-  'email-tones': 'Email tone', 'email-messages': 'Email message', 'email-drafts': 'Email draft', places: 'Place', trips: 'Trip', countries: 'Country', books: 'Audio book', tags: 'Tag', 'tag-assignments': 'Tagged resource',
+  'email-tones': 'Email tone', 'email-messages': 'Email message', 'email-drafts': 'Email draft', places: 'Place', trips: 'Trip', countries: 'Country', books: 'Audio book', tags: 'Tag', 'tag-assignments': 'Tagged resource', tickets: 'Ticket', notifications: 'Notification',
 };
 const MAX_RESULTS_PER_GROUP = 50;
 

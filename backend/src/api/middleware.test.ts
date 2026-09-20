@@ -277,7 +277,7 @@ describe('validateQueryParams', () => {
   test('allows only billing summary pagination query params', async () => {
     let nextCalls = 0;
     const before = encodeURIComponent('2026-09-11T12:00:00.000Z');
-    await validateQueryParams(middlewareContext('/api/v1/billing/summary', {}, `?limit=50&beforeCreatedAt=${before}&beforeKey=transaction-1`), async () => { nextCalls += 1; });
+    await validateQueryParams(middlewareContext('/api/v1/billing/summary', {}, `?limit=50&beforeCreatedAt=${before}&beforeKey=transaction-1&kind=tool`), async () => { nextCalls += 1; });
     expect(nextCalls).toBe(1);
     await expect(validateQueryParams(middlewareContext('/api/v1/billing/summary', {}, '?limit=50&userKey=forged'), async () => {})).rejects.toThrow();
   });

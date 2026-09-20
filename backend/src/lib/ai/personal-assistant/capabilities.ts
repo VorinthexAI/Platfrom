@@ -22,7 +22,7 @@ import type { CommerceService } from '@/lib/commerce/service';
 import type { ScopeService } from '@/lib/ai/scopes';
 import type { AppNotificationService } from '@/lib/app-notifications/service';
 import type { CostService } from '@/lib/costs/service';
-import type { UserInboxService } from '@/lib/user-inbox/service';
+import type { UserNotificationService } from '@/lib/user-notifications/service';
 import { APP_SEARCH_OVERLAPPING_TOOL_NAME_SET } from '@/lib/ai/tools/search-routing-policy';
 import { appSpeechCapability, appEnhanceCapability, appSearchCapability, appTranslateCapability, archiveCapabilities, ascendCapabilities, compassCapabilities, hiddenListCapability, platformCapabilities, signalCapabilities } from './service-capabilities';
 import { galleryAssistantCapabilities } from './gallery-capabilities';
@@ -71,7 +71,7 @@ export interface AssistantCapabilityContext {
   costs?: CostService;
   scopes?: ScopeService;
   appNotifications?: AppNotificationService;
-  userInbox?: UserInboxService;
+  userNotifications?: UserNotificationService;
 }
 
 export type MutationWorkspace = 'archive' | 'gallery' | 'signal' | 'compass' | 'ascend';
@@ -139,8 +139,8 @@ for (const item of [appSearchCapability, appEnhanceCapability, appTranslateCapab
 
 defaultAssistantCapabilityRegistry
   .register(writeNoteCapability)
-  .registerSurface('knowledge-workspace', ['app.search', 'app.enhance', 'app.translate', 'app.speech', 'content.hidden.list', ...platformCapabilities.map(({ definition }) => definition.name), ...appSearchOnly(archiveCapabilities).map(({ definition }) => definition.name), 'note.write'])
-  .registerSurface('media-workspace', ['app.search', 'content.hidden.list', ...platformCapabilities.map(({ definition }) => definition.name), ...appSearchOnly(galleryAssistantCapabilities).map(({ definition }) => definition.name)])
-  .registerSurface('book-workspace', ['app.search', ...platformCapabilities.map(({ definition }) => definition.name), ...appSearchOnly(ascendCapabilities).map(({ definition }) => definition.name)])
-  .registerSurface('travel-workspace', ['app.search', ...platformCapabilities.map(({ definition }) => definition.name), ...appSearchOnly(compassCapabilities).map(({ definition }) => definition.name)])
-  .registerSurface('signal-workspace', ['app.search', 'app.enhance', 'app.translate', ...platformCapabilities.map(({ definition }) => definition.name), ...appSearchOnly(signalCapabilities).map(({ definition }) => definition.name)]);
+  .registerSurface('knowledge-workspace', ['app.search', 'app.enhance', 'app.translate', 'app.speech', 'content.hidden.list', ...appSearchOnly(platformCapabilities).map(({ definition }) => definition.name), ...appSearchOnly(archiveCapabilities).map(({ definition }) => definition.name), 'note.write'])
+  .registerSurface('media-workspace', ['app.search', 'content.hidden.list', ...appSearchOnly(platformCapabilities).map(({ definition }) => definition.name), ...appSearchOnly(galleryAssistantCapabilities).map(({ definition }) => definition.name)])
+  .registerSurface('book-workspace', ['app.search', ...appSearchOnly(platformCapabilities).map(({ definition }) => definition.name), ...appSearchOnly(ascendCapabilities).map(({ definition }) => definition.name)])
+  .registerSurface('travel-workspace', ['app.search', ...appSearchOnly(platformCapabilities).map(({ definition }) => definition.name), ...appSearchOnly(compassCapabilities).map(({ definition }) => definition.name)])
+  .registerSurface('signal-workspace', ['app.search', 'app.enhance', 'app.translate', ...appSearchOnly(platformCapabilities).map(({ definition }) => definition.name), ...appSearchOnly(signalCapabilities).map(({ definition }) => definition.name)]);

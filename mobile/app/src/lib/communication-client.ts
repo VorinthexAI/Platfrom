@@ -1,79 +1,48 @@
 import { z } from "zod";
 
 import { apiClient } from "./api-client";
+import { appSearchResults, searchApp } from "./app-search-client";
 
+export const MANAGED_INBOX_PAGE_SIZE = 10;
 const keySchema = z.string().trim().min(1).max(200);
 const dateSchema = z.iso.datetime();
 
-export const communicationTabSchema = z.enum(["inbox", "sent"]);
+export const communicationTabSchema = z.enum(["unread", "read", "sent"]);
 export type CommunicationTab = z.infer<typeof communicationTabSchema>;
-export const communicationReadStateSchema = z.enum(["all", "read", "unread"]);
+export const communicationReadStateSchema = z.enum(["read", "unread"]);
 export type CommunicationReadState = z.infer<typeof communicationReadStateSchema>;
-
-export const communicationListInputSchema = z.strictObject({
-  tab: communicationTabSchema,
-  cursor: keySchema.optional(),
-  limit: z.number().int().min(1).max(50).optional(),
-  query: z.string().trim().max(500).optional(),
-  readState: communicationReadStateSchema.optional(),
-});
-
-export const communicationSourceSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("internal"), label: z.string().trim().min(1).max(100) }),
-  z.strictObject({ kind: z.literal("external"), connectorKey: keySchema, label: z.string().trim().min(1).max(320) }),
-]);
 
 export const communicationThreadSchema = z.strictObject({
   key: keySchema,
-  kind: z.enum(["notification", "issue", "feedback", "email"]),
-  source: communicationSourceSchema,
-  subject: z.string().trim().min(1).max(998),
-  preview: z.string().trim().max(2_000),
+  kind: z.enum(["notification", "issue", "feedback"]),
+  subject: z.string().trim().min(1).max(8_000),
+  preview: z.string().trim().min(1).max(8_000),
   isRead: z.boolean(),
-  canReply: z.boolean(),
   updatedAt: dateSchema,
 });
 
-export const communicationMessageSchema = z.strictObject({
+const notificationSchema = z.strictObject({
   key: keySchema,
-  author: z.enum(["user", "vorinthex", "external"]),
-  authorName: z.string().trim().min(1).max(320),
-  body: z.string().min(1).max(50_000),
+  title: z.string().trim().min(1).max(100),
+  message: z.string().trim().min(1).max(1_000),
+  isRead: z.boolean(),
   createdAt: dateSchema,
 });
-
-const communicationListResponseSchema = z.strictObject({
+const ticketSchema = z.strictObject({
+  key: keySchema,
+  message: z.string().trim().min(1).max(8_000),
+  kind: z.enum(["issue", "feedback"]),
+  createdAt: dateSchema,
+});
+const listResponseSchema = z.strictObject({
   success: z.literal(true),
   data: z.strictObject({
-    items: z.array(communicationThreadSchema),
-    unreadCount: z.number().int().nonnegative(),
+    items: z.array(z.unknown()),
     nextCursor: keySchema.nullable(),
   }),
 });
 
-const communicationThreadResponseSchema = z.strictObject({
-  success: z.literal(true),
-  data: z.strictObject({
-    thread: communicationThreadSchema,
-    messages: z.array(communicationMessageSchema),
-  }),
-});
-
-const storedThreadSchema = z.object({
-  key: keySchema,
-  kind: z.enum(["notification", "issue", "feedback"]),
-  subject: z.string().trim().min(1).max(200),
-  createdBy: z.enum(["user", "system", "staff"]),
-  readAt: dateSchema.nullable(),
-  lastMessageAt: dateSchema,
-  preview: z.string().max(8_000).optional(),
-}).passthrough();
-const storedMessageSchema = z.object({ key: keySchema, sender: z.enum(["user", "system", "staff"]), body: z.string().min(1).max(8_000), createdAt: dateSchema }).passthrough();
-const storedListResponseSchema = z.object({ success: z.literal(true), data: z.object({ items: z.array(storedThreadSchema), unreadCount: z.number().int().nonnegative(), nextCursor: keySchema.nullable() }).passthrough() }).passthrough();
-const storedDetailResponseSchema = z.object({ success: z.literal(true), data: z.object({ thread: storedThreadSchema, messages: z.array(storedMessageSchema) }).passthrough() }).passthrough();
-
 export type CommunicationThread = z.infer<typeof communicationThreadSchema>;
-export type CommunicationThreadDetail = z.infer<typeof communicationThreadResponseSchema>["data"];
 export type CommunicationContext = Readonly<{ userKey: string; teamKey: string; scopeKey: string }>;
 
 const contextKey = (context: CommunicationContext) => [context.userKey, context.teamKey, context.scopeKey] as const;
@@ -82,57 +51,49 @@ function requestContext(context: CommunicationContext) {
   return { teamKey: keySchema.parse(context.teamKey), scopeKey: keySchema.parse(context.scopeKey) };
 }
 
-function projectThread(thread: z.infer<typeof storedThreadSchema>): CommunicationThread {
-  return communicationThreadSchema.parse({
-    key: thread.key,
-    kind: thread.kind,
-    source: { kind: "internal", label: "Vorinthex" },
-    subject: thread.subject,
-    preview: thread.preview ?? thread.subject,
-    isRead: thread.readAt !== null,
-    canReply: thread.kind === "issue" || thread.kind === "feedback",
-    updatedAt: thread.lastMessageAt,
-  });
+function fromNotification(item: z.infer<typeof notificationSchema>): CommunicationThread {
+  return communicationThreadSchema.parse({ key: item.key, kind: "notification", subject: item.title, preview: item.message, isRead: item.isRead, updatedAt: item.createdAt });
 }
 
-function projectDetail(data: z.infer<typeof storedDetailResponseSchema>["data"]): CommunicationThreadDetail {
-  return communicationThreadResponseSchema.shape.data.parse({
-    thread: projectThread(data.thread),
-    messages: data.messages.map((message) => ({ key: message.key, author: message.sender === "user" ? "user" : "vorinthex", authorName: message.sender === "user" ? "You" : "Vorinthex", body: message.body, createdAt: message.createdAt })),
-  });
+function fromTicket(item: z.infer<typeof ticketSchema>): CommunicationThread {
+  return communicationThreadSchema.parse({ key: item.key, kind: item.kind, subject: item.kind === "feedback" ? "Product feedback" : "Support issue", preview: item.message, isRead: true, updatedAt: item.createdAt });
 }
 
 export const communicationQueryKeys = {
   all: (context: CommunicationContext) => ["communication", ...contextKey(context)] as const,
   lists: (context: CommunicationContext) => [...communicationQueryKeys.all(context), "lists"] as const,
-  list: (context: CommunicationContext, tab: CommunicationTab, query = "", readState: CommunicationReadState = "all") => [...communicationQueryKeys.lists(context), tab, query, readState] as const,
-  details: (context: CommunicationContext) => [...communicationQueryKeys.all(context), "details"] as const,
-  detail: (context: CommunicationContext, threadKey: string) => [...communicationQueryKeys.details(context), threadKey] as const,
+  list: (context: CommunicationContext, tab: CommunicationTab, query = "") => [...communicationQueryKeys.lists(context), tab, query] as const,
 };
 
-export async function listCommunicationThreads(rawInput: z.input<typeof communicationListInputSchema>, context: CommunicationContext) {
-  const input = communicationListInputSchema.parse(rawInput);
-  const response = await apiClient.post("/auth/me/communications/list", { ...requestContext(context), mailbox: input.tab, ...(input.cursor ? { cursor: input.cursor } : {}), ...(input.limit ? { limit: input.limit } : {}), ...(input.query ? { query: input.query } : {}), ...(input.readState && input.readState !== "all" ? { readState: input.readState } : {}) });
-  const data = storedListResponseSchema.parse(response.data).data;
-  return communicationListResponseSchema.shape.data.parse({ items: data.items.map(projectThread), unreadCount: data.unreadCount, nextCursor: data.nextCursor });
-}
-
-export async function readCommunicationThread(threadKey: string, context: CommunicationContext) {
-  const key = keySchema.parse(threadKey);
-  const response = await apiClient.post(`/auth/me/communications/${encodeURIComponent(key)}/read`, requestContext(context));
-  return projectDetail(storedDetailResponseSchema.parse(response.data).data);
+export async function listCommunicationThreads(rawInput: { tab: CommunicationTab; cursor?: string; limit?: number; query?: string }, context: CommunicationContext) {
+  const tab = communicationTabSchema.parse(rawInput.tab);
+  const query = rawInput.query?.trim() ?? "";
+  if (query) {
+    const collectionSlug = tab === "sent" ? "tickets" : "notifications";
+    const output = await searchApp({
+      query,
+      collectionSlugs: [collectionSlug],
+      limit: rawInput.limit ?? MANAGED_INBOX_PAGE_SIZE,
+      recordHistory: true,
+      ...(tab === "sent" ? {} : { filters: { readState: tab } }),
+    });
+    const items = tab === "sent"
+      ? appSearchResults(output, "tickets", ticketSchema.extend({ score: z.number().optional() }).strip()).map(({ score: _score, ...item }) => fromTicket(item))
+      : appSearchResults(output, "notifications", notificationSchema.extend({ score: z.number().optional() }).strip()).map(({ score: _score, ...item }) => fromNotification(item));
+    return { items, nextCursor: null as string | null };
+  }
+  if (tab === "sent") {
+    const response = await apiClient.post("/tickets/list", { ...requestContext(context), limit: rawInput.limit ?? MANAGED_INBOX_PAGE_SIZE, ...(rawInput.cursor ? { cursor: rawInput.cursor } : {}) });
+    const data = listResponseSchema.parse(response.data).data;
+    return { items: z.array(ticketSchema).parse(data.items).map(fromTicket), nextCursor: data.nextCursor };
+  }
+  const response = await apiClient.post("/auth/me/notifications", { ...requestContext(context), readState: tab, limit: rawInput.limit ?? MANAGED_INBOX_PAGE_SIZE, ...(rawInput.cursor ? { cursor: rawInput.cursor } : {}) });
+  const data = listResponseSchema.parse(response.data).data;
+  return { items: z.array(notificationSchema).parse(data.items).map(fromNotification), nextCursor: data.nextCursor };
 }
 
 export async function markCommunicationThreadRead(threadKey: string, context: CommunicationContext, read = true) {
   const key = keySchema.parse(threadKey);
-  await apiClient.put(`/auth/me/communications/${encodeURIComponent(key)}/read-state`, { ...requestContext(context), read });
-  return readCommunicationThread(key, context);
-}
-
-export async function replyToCommunicationThread(threadKey: string, rawMessage: string, idempotencyKey: string, context: CommunicationContext) {
-  const key = keySchema.parse(threadKey);
-  const message = z.string().trim().min(1).max(8_000).parse(rawMessage);
-  const requestKey = keySchema.parse(idempotencyKey);
-  await apiClient.post(`/auth/me/communications/${encodeURIComponent(key)}/messages`, { ...requestContext(context), message }, { headers: { "Idempotency-Key": requestKey } });
-  return readCommunicationThread(key, context);
+  const response = await apiClient.put(`/auth/me/notifications/${encodeURIComponent(key)}/read-state`, { ...requestContext(context), read });
+  return fromNotification(z.strictObject({ success: z.literal(true), data: notificationSchema }).parse(response.data).data);
 }

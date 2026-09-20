@@ -32,7 +32,7 @@ const BASE_ACCOUNT_DELETE_WRITE_COLLECTIONS = [
   'users', 'teams', 'userTeams', 'scopes', 'scopeMembers', 'authSessions', 'authChallenges', 'userSessions', 'userConnectors',
   'visitors', 'visitorSessions',
   'userMentions', 'userReactions', 'userHiddens', 'userWorkspaceApps', 'userGenerations', 'userSearches', 'contentSearchQueries', 'contentIdempotency',
-  'conversations', 'conversationMessages', 'conversationAttachmentArtifacts', 'tickets', 'userInboxThreads', 'userInboxMessages', 'events', 'tags', 'tagAssignments',
+  'conversations', 'conversationMessages', 'conversationAttachmentArtifacts', 'tickets', 'userInboxThreads', 'userInboxMessages', 'userNotifications', 'events', 'tags', 'tagAssignments',
   'pushSubscriptions', 'appNotifications', 'appNotificationRecipients', 'pushDeliveries',
   'sparkTransactions', 'billingExecutions', 'referralCodes', 'referralAttributions', 'referralRewards',
   'checkoutHandoffs', 'paymentCheckouts', 'paymentOrders', 'subscriptions', 'bookRefundIntents',
@@ -153,6 +153,7 @@ export function createAccountDeletionRepository(
             LET notificationThreadKeys = (FOR item IN userInboxThreads FILTER item.notificationKey IN notificationKeys RETURN item._key)
             LET cleanupInboxMessages = (FOR item IN userInboxMessages FILTER item.userKey == @userKey || item.threadKey IN notificationThreadKeys REMOVE item IN userInboxMessages RETURN 1)
             LET cleanupInboxThreads = (FOR item IN userInboxThreads FILTER item.userKey == @userKey || item._key IN notificationThreadKeys REMOVE item IN userInboxThreads RETURN 1)
+            LET cleanupUserNotifications = (FOR item IN userNotifications FILTER item.userKey == @userKey || item.sourceKey IN notificationKeys REMOVE item IN userNotifications RETURN 1)
             LET cleanupEvents = (FOR item IN events FILTER item.userId == @userKey REMOVE item IN events RETURN 1)
             LET cleanupPushDeliveries = (FOR item IN pushDeliveries FILTER item.userKey == @userKey || item.notificationKey IN notificationKeys REMOVE item IN pushDeliveries RETURN 1)
            LET cleanupNotificationRecipients = (FOR item IN appNotificationRecipients FILTER item.userKey == @userKey || item.notificationKey IN notificationKeys REMOVE item IN appNotificationRecipients RETURN 1)

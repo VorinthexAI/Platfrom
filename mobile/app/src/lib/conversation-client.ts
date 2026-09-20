@@ -47,7 +47,7 @@ export const conversationSchema = z.strictObject({
 }).transform(({ teamKey: _teamKey, scopeKey: _scopeKey, userKey: _userKey, ...conversation }) => conversation);
 export type Conversation = z.infer<typeof conversationSchema>;
 
-export const conversationRetrievalCollectionSlugSchema = z.enum(["folders", "documents", "files", "collections", "images", "inboxes", "email-tones", "email-messages", "email-drafts", "places", "trips", "countries", "books", "tags", "tag-assignments"]);
+export const conversationRetrievalCollectionSlugSchema = z.enum(["folders", "documents", "files", "collections", "images", "inboxes", "email-tones", "email-messages", "email-drafts", "places", "trips", "countries", "books", "tags", "tag-assignments", "tickets", "notifications"]);
 export const conversationRetrievalFiltersSchema = z.strictObject({
   folderKey: z.string().cuid().optional(),
   includeDescendants: z.boolean().optional(),
