@@ -275,6 +275,7 @@ const scenarios: Scenario[] = [
 
   // Noisy language, scoped filters, boundaries, inventories, and mixed-resource intent.
   searchScenario({ id: 'edge-misspelled-document', prompts: prompts('Find the documnt called Research Note.', 'Hitta dokumntet Research Note.', 'Busca el documnto Research Note.', 'Research Noteというドキュメン卜を探して。'), query: 'Research Note', collectionSlug: 'documents', limit: 1, keys: [documents[0].key], facts: ['Research Note'] }),
+  searchScenario({ id: 'edge-typoed-plural-single-target', prompts: prompts('Find this documents about Research Note.', 'Hitta det här dokumenten om Research Note.', 'Busca estos documentos sobre Research Note.', 'Research Noteについてのこの文書を探して。'), query: 'Research Note', collectionSlug: 'documents', limit: 1, keys: [documents[0].key], facts: ['Research Note'] }),
   searchScenario({ id: 'edge-misspelled-file', prompts: prompts('Wheres the Q4 budegt pee dee eff?', 'Var är Q4-budegt-pdf:en?', '¿Dónde está el pee dee eff del presupesto Q4?', 'Q4の予算ピー・ディー・エフはどこ？'), query: 'Q4 Budget', collectionSlug: 'files', limit: 1, keys: [documents[2].key], facts: ['Q4 Budget.pdf'] }),
   searchScenario({ id: 'edge-photo-synonym', prompts: prompts('Locate the sunset lighthouse snapshot.', 'Leta upp ögonblicksbilden av fyren i solnedgången.', 'Localiza la instantánea del faro al atardecer.', '夕暮れの灯台のスナップ写真を探して。'), query: 'lighthouse', collectionSlug: 'images', limit: 1, keys: [images[0].key], facts: ['Orange lighthouse'] }),
   searchScenario({ id: 'edge-album-synonym', prompts: prompts('Find the Family photo album.', 'Hitta fotoalbumet Family.', 'Busca el álbum de fotos Family.', 'Familyの写真アルバムを探して。'), query: 'Family', collectionSlug: 'collections', limit: 1, keys: [galleryCollections[1].key], facts: ['Family'] }),
@@ -388,7 +389,7 @@ function createRepositoryCapture() {
 
 describe('Core App Search deterministic evaluation', () => {
   test('defines more than 100 isolated multilingual questions with full operation and collection coverage', () => {
-    expect(evaluationCases.length).toBe(404);
+    expect(evaluationCases.length).toBe(408);
     expect(evaluationCases.length - 256).toBeGreaterThanOrEqual(100);
     expect(new Set(evaluationCases.map(({ prompt }) => prompt)).size).toBe(evaluationCases.length);
     expect(evaluationCases.filter(({ input }) => input).every(({ input }) => Number.isInteger(input!.limit) && input!.limit >= 1 && input!.limit <= 50)).toBe(true);

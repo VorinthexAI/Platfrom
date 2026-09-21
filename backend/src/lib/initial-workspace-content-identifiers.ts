@@ -17,6 +17,10 @@ export const initialWorkspaceFolderKey = (scopeKey: string, id: string) => stabl
 export const initialWorkspaceDocumentKey = (scopeKey: string, id: string) => stableKey('initial-document', scopeKey, id);
 export const initialWorkspaceBookKey = (scopeKey: string) => stableKey('initial-book', scopeKey, 'vorinthex-ai');
 export const initialWorkspaceBookChapterKey = (scopeKey: string, guideId: string) => stableKey('initial-book-chapter', scopeKey, guideId);
+export const initialWorkspaceGalleryCollectionKey = (scopeKey: string) => stableKey('initial-gallery-collection', scopeKey, 'vorinthex-ai');
+export const initialWorkspaceGalleryImageKey = (scopeKey: string, assetId: string) => stableKey('initial-gallery-image', scopeKey, assetId);
+export const initialWorkspaceGalleryRelationKey = (scopeKey: string, assetId: string) => stableKey('initial-gallery-relation', scopeKey, assetId);
+export const initialWorkspaceGalleryStorageKey = (scopeKey: string, assetId: string) => `media/${scopeKey}/initial-gallery/${assetId}.png`;
 
 export function isInitialWorkspaceFolderKey(scopeKey: string, key: string): boolean {
   return INITIAL_WORKSPACE_FOLDER_IDS.some((id) => initialWorkspaceFolderKey(scopeKey, id) === key);

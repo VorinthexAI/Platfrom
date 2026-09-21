@@ -16,13 +16,13 @@ set -euo pipefail
 
 TAG="${1:-latest}"
 API_TAG="${2:-$TAG}"
-REGION="eu-north-1"
+REGION="us-east-1"
 ACCOUNT="938565868704"
 ECR="${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com"
 ROOT="/opt/vorinthex"
 NET="vorinthex"
 STATE="${ROOT}/active-color"
-SSM_PREFIX="/vorinthex/prod"
+SSM_PREFIX="/vorinthex/us-prod"
 
 log() { echo "[deploy $(date -u +%H:%M:%S)] $*"; }
 
@@ -161,16 +161,16 @@ sed "s/__ACTIVE__/${NEW}/" -i "$WEB_ENV"
 docker rm -f "api-${NEW}" "web-${NEW}" >/dev/null 2>&1 || true
 cleanup_docker_disk
 
-docker pull "${ECR}/vorinthex-backend:${API_TAG}"
-docker pull "${ECR}/vorinthex-web:${TAG}"
+docker pull "${ECR}/vorinthex-us-prod-backend:${API_TAG}"
+docker pull "${ECR}/vorinthex-us-prod-web:${TAG}"
 
 # --- start the new color ----------------------------------------------------
 log "starting api-${NEW}"
 docker run -d --name "api-${NEW}" --network "$NET" --restart unless-stopped \
-	--env-file "$API_ENV" "${ECR}/vorinthex-backend:${API_TAG}"
+  --env-file "$API_ENV" "${ECR}/vorinthex-us-prod-backend:${API_TAG}"
 log "starting web-${NEW}"
 docker run -d --name "web-${NEW}" --network "$NET" --restart unless-stopped \
-	--env-file "$WEB_ENV" "${ECR}/vorinthex-web:${TAG}"
+  --env-file "$WEB_ENV" "${ECR}/vorinthex-us-prod-web:${TAG}"
 
 # --- health check the new color --------------------------------------------
 ok=0

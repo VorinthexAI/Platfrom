@@ -2,7 +2,7 @@ import type { Context } from 'hono';
 import { completeProfileAvatarUpload, normalizeProfileAvatarUploadError, profileAvatarCompleteInputSchema, profileAvatarReserveInputSchema, reserveProfileAvatarUpload } from '@/lib/account-profile/avatar-upload';
 import { signProfileAvatarUrl, trySignProfileAvatarUrl } from '@/lib/account-profile/avatar-url';
 import { accountProfileService, normalizeAccountProfileError, profileNameUpdateInputSchema, type AccountProfileService } from '@/lib/account-profile/service';
-import { profileBadgeClaimInputSchema, profileBadgeGenerateInputSchema, profileBadgeService, type ProfileBadgeService } from '@/lib/account-profile/badge';
+import { ProfileBadgeGenerationError, profileBadgeClaimInputSchema, profileBadgeGenerateInputSchema, profileBadgeService, type ProfileBadgeService } from '@/lib/account-profile/badge';
 import { authorizeContentExecution, type ToolContext } from '@/lib/ai/tools';
 import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
 import { toolEventService, type ToolEventRecorder } from '@/lib/ai/events/service';
@@ -89,6 +89,7 @@ export function createProfileBadgeHandlers(dependencies: {
   };
   const fail = (c: Context, error: unknown) => {
     const billing = sparkErrorResponse(c, error); if (billing) return billing;
+    if (error instanceof ProfileBadgeGenerationError) return c.json({ success: false, error: { code: 'PROFILE_BADGE_UNAVAILABLE', message: error.message } }, 503);
     return failure(c, error, true);
   };
   return {

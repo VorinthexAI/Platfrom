@@ -133,6 +133,36 @@ variable "ecr_repository_name" {
   default     = "vorinthex-backend"
 }
 
+variable "ecr_web_repository_name" {
+  type        = string
+  description = "ECR repository name for the web image."
+  default     = "vorinthex-web"
+}
+
+variable "early_app_subnet_id" {
+  type        = string
+  description = "Existing subnet for the imported early app host. Empty selects the first managed public subnet."
+  default     = "subnet-016963e4f49edd3a0"
+}
+
+variable "early_app_ami_id" {
+  type        = string
+  description = "AMI for the early app host. Empty selects the current AL2023 ARM64 AMI in the active region."
+  default     = "ami-0d08de17b554b801f"
+}
+
+variable "backend_deploy_system_assets_policy_name" {
+  type        = string
+  description = "Inline policy name attached to the shared deployment role."
+  default     = "vorinthex-backend-deploy-system-assets"
+}
+
+variable "early_app_archive_processing_policy_name" {
+  type        = string
+  description = "Inline policy name granting the early app host access to runtime storage and processing services."
+  default     = "vorinthex-early-app-archive-processing"
+}
+
 variable "ssm_parameter_prefix" {
   type        = string
   description = "SSM parameter prefix without a leading slash."

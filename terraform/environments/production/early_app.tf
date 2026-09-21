@@ -5,6 +5,15 @@
 # a plan never proposes replacing the running box (its bootstrap ran once).
 # ---------------------------------------------------------------------------
 
+data "aws_ssm_parameter" "early_app_al2023_arm64" {
+  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
+}
+
+locals {
+  early_app_subnet_id = var.early_app_subnet_id != "" ? var.early_app_subnet_id : module.network.public_subnet_ids[0]
+  early_app_ami_id    = var.early_app_ami_id != "" ? var.early_app_ami_id : data.aws_ssm_parameter.early_app_al2023_arm64.value
+}
+
 resource "aws_security_group" "early_app" {
   name        = "vorinthex-early-app-sg"
   description = "early-infra app box"
@@ -95,9 +104,9 @@ resource "aws_vpc_security_group_ingress_rule" "job_redis_from_document_worker" 
 }
 
 resource "aws_instance" "early_app" {
-  ami                         = "ami-0d08de17b554b801f"
+  ami                         = local.early_app_ami_id
   instance_type               = "t4g.medium"
-  subnet_id                   = "subnet-016963e4f49edd3a0"
+  subnet_id                   = local.early_app_subnet_id
   vpc_security_group_ids      = [aws_security_group.early_app.id]
   iam_instance_profile        = "vorinthex-early-app-profile"
   associate_public_ip_address = true
@@ -121,7 +130,7 @@ data "aws_iam_instance_profile" "early_app" {
 }
 
 resource "aws_iam_role_policy" "early_app_archive_processing" {
-  name = "vorinthex-early-app-archive-processing"
+  name = var.early_app_archive_processing_policy_name
   role = data.aws_iam_instance_profile.early_app.role_name
 
   policy = jsonencode({

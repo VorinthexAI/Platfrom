@@ -54,6 +54,16 @@ describe('canonical scope service', () => {
     await expect(denied.create({ name: 'No' }, context, 'request-2')).rejects.toBeInstanceOf(ScopeServiceError);
   });
 
+  test('returns a created scope when its nonessential starter content cannot be provisioned', async () => {
+    const created = scope();
+    const service = createScopeService({
+      authorizeTeam: async () => teamDecision('owner'),
+      createInTransaction: async () => ({ scope: created, role: 'owner', currentScopeKey }),
+      ensureInitialWorkspaceContent: async () => { throw new Error('embedding unavailable'); },
+    });
+    await expect(service.create({ name: 'Plans' }, context, 'request-1')).resolves.toMatchObject({ key: created.key });
+  });
+
   test('authorizes selection and transactionally targets only the authenticated user', async () => {
     const target = scope();
     const calls: unknown[] = [];

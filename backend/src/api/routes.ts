@@ -59,7 +59,7 @@ import { feedbackHandlers, ticketHandler, ticketHandlers } from './tickets';
 import { listApps } from './apps';
 import { tagHandlers } from './tags';
 import { recordAnalyticsEvent } from './event-ingestion';
-import { getBillingSummary, setDevSparkBalance } from './billing';
+import { getBillingSummary } from './billing';
 import { getReferralSummary, redeemReferral } from './referrals';
 import { referralCodeTransportSchema } from './auth-referral-code';
 import { commerceHandlers } from './commerce';
@@ -102,7 +102,6 @@ export function registerRoutes(app: Hono) {
   app.post('/subscriptions/current/cancel', commerceHandlers.cancelSubscription);
   app.post('/subscriptions/current/restore', commerceHandlers.restoreSubscription);
   app.get('/billing/summary', getBillingSummary);
-  app.post('/billing/dev-balance', setDevSparkBalance);
   app.get('/referrals/summary', getReferralSummary);
   app.post('/referrals/redeem', redeemReferral);
   app.post('/auth/signup', async (c) => {

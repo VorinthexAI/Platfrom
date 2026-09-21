@@ -138,7 +138,7 @@ const styles = StyleSheet.create({
   countTabs: { width: "100%", flexDirection: "row", padding: 3, borderWidth: 1, borderColor: palette.hairline },
   countTab: { flex: 1 },
   contextActions: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing.xs },
-  contextChip: { alignSelf: "flex-start", minHeight: 34, maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: "rgba(221, 226, 229, 0.18)", borderRadius: 999, backgroundColor: "rgba(255, 255, 255, 0.03)" },
+  contextChip: { alignSelf: "flex-start", minHeight: 34, maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: "rgba(221, 226, 229, 0.18)", borderRadius: 999, backgroundColor: palette.page },
   contextChipMain: { minWidth: 0, flexShrink: 1, justifyContent: "center", paddingLeft: 7, paddingRight: 0 },
   contextChipAction: { width: 24, minWidth: 24, maxWidth: 24, height: 24, minHeight: 24, maxHeight: 24, marginRight: 3, borderRadius: 12 },
   contextChipText: { minWidth: 0, flexShrink: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "center" },

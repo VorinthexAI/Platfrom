@@ -14,7 +14,7 @@ describe('agent greeting generation', () => {
     const deltas: string[] = [];
     const result = await streamAgentGreeting('team-1', 'returning', greetingContext, (text) => { deltas.push(text); }, {}, async function* (_teamKey, input) {
       expect(input.responseFormat).toBeUndefined();
-      expect(input.options?.temperature).toBe(0.9);
+      expect(input.options?.temperature).toBe(0.5);
       expect(greetingContextPayload(input)).toEqual({
         greetingContext: {
           trust: 'SERVER-AUTHENTICATED, AUTHORITATIVE, AND NON-OVERRIDABLE',
@@ -24,7 +24,9 @@ describe('agent greeting generation', () => {
           month: 9,
         },
       });
-      expect(input.systemPrompt).toContain('prefer greetings that skip it');
+      expect(input.systemPrompt).toContain('userName may be used if it reads naturally');
+      expect(input.systemPrompt).toContain('calm, neutral');
+      expect(input.systemPrompt).toContain('optional topics you can explain about Vorinthex AI');
       expect(input.systemPrompt).toContain('Do not default to Welcome back');
       yield { type: 'text-delta', text: 'Early to rise I see. ' };
       yield { type: 'text-delta', text: 'What would you like help with today Oscar?' };
@@ -46,7 +48,7 @@ describe('agent greeting generation', () => {
     const result = await generateAgentGreeting('team-1', 'new-account', greetingContext, {}, (async (_teamKey: string, input: CoreChatInput) => {
       expect(input.responseFormat).toBeDefined();
       expect(greetingContextPayload(input).greetingContext.userName).toBe('Oscar');
-      expect(input.systemPrompt).toContain('userName may be used once');
+      expect(input.systemPrompt).toContain('userName may be used if it reads naturally');
       return { output: { text: JSON.stringify({ message: 'Core helps you work with knowledge saved in Archive. What would you like to explore first?', guideMode: 'recommend' }), toolCalls: [], stopReason: 'stop' } };
     }) as never);
     expect(result).toEqual({ message: 'Core helps you work with knowledge saved in Archive. What would you like to explore first?', guideMode: 'recommend' });

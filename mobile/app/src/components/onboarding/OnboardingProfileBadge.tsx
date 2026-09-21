@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
 import { firstNameFor } from "@/lib/auth-helpers";
+import { extractDomainErrorMessage } from "@/lib/domain-error-observer";
 import { claimProfileBadge, generateProfileBadge, type ProfileBadgeCandidate } from "@/lib/profile-client";
 import { recordOnboardingEvent } from "@/lib/onboarding-events";
 import { useAppsStore } from "@/state/apps";
@@ -40,7 +41,7 @@ export function OnboardingProfileBadge({ onFinished }: { onFinished: () => void 
     setError("");
     setGenerating(true);
     try { setCandidate(await generateProfileBadge(teamKey, scopeKey, Crypto.randomUUID())); }
-    catch { setError("Your profile badge could not be generated. Please try again."); }
+    catch (error) { setError(extractDomainErrorMessage(error) ?? "Your profile badge could not be generated. Please try again."); }
     finally { setGenerating(false); }
   };
   const claim = () => {

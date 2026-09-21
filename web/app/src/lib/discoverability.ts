@@ -1,5 +1,5 @@
 export const CANONICAL_ORIGIN = "https://vorinthex.com" as const;
-export const CONTENT_LAST_REVIEWED = "2026-09-12" as const;
+export const CONTENT_LAST_REVIEWED = "2026-09-20" as const;
 export const CONTACT_EMAIL = "contact@vorinthex.com" as const;
 export const PRICING_HERO_HEADING = "One balance for everything you create and use" as const;
 export const PRICING_HERO_BODY =
@@ -193,9 +193,9 @@ export const PUBLIC_DISCOVERABILITY_REGISTRY = {
     path: "/privacy",
     title: "Privacy Policy | Vorinthex AI",
     description:
-      "Read how Vorinthex AI handles personal data, privacy requests, retention, unfunded stored data, security safeguards, and deletion.",
+      "Read how Vorinthex AI handles personal data, including United States hosting, international transfers, privacy requests, retention, safeguards, and deletion.",
     summary:
-      "Vorinthex AI's privacy policy describes data handling, safeguards, rights, retention, and deletion, including the 90-day unfunded-storage policy.",
+      "Vorinthex AI's privacy policy describes United States hosting, international data transfers, safeguards, rights, retention, and deletion.",
     schemaPageType: "WebPage",
     status: "current",
     lastModified: CONTENT_LAST_REVIEWED,

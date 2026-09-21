@@ -56,10 +56,14 @@ export async function redeemReferralCode(value: string) {
 
 export function referralRedemptionErrorMessage(error: unknown) {
   switch (extractDomainErrorCode(error)) {
-    case "INVALID_CODE": return "That referral code was not found.";
-    case "SELF_REFERRAL": return "You cannot use your own referral code.";
-    case "ALREADY_ATTRIBUTED": return "A different referral code is already applied to this account.";
-    case "USER_NOT_VERIFIED": return "Verify your account before using a referral code.";
+    case "INVALID_CODE":
+    case "REFERRAL_INVALID_CODE": return "We couldn't find that referral code. Check it and try again.";
+    case "SELF_REFERRAL":
+    case "REFERRAL_SELF_REFERRAL": return "You can't use your own referral code.";
+    case "ALREADY_ATTRIBUTED":
+    case "REFERRAL_ALREADY_ATTRIBUTED": return "A referral code is already connected to this account.";
+    case "USER_NOT_VERIFIED":
+    case "REFERRAL_USER_NOT_VERIFIED": return "Verify your account before using a referral code.";
     default: return "The referral code could not be applied. Please try again.";
   }
 }

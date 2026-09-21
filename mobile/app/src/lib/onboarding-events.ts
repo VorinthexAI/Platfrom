@@ -16,9 +16,6 @@ export type OnboardingEventSlug =
   | "onboarding.profile-badge.claimed"
   | "onboarding.profile-badge.skipped"
   | "onboarding.notifications"
-  | "onboarding.camera"
-  | "onboarding.camera.allowed"
-  | "onboarding.camera.skipped"
   | "onboarding.notifications.allowed"
   | "onboarding.notifications.skipped"
   | "onboarding.sign-in";

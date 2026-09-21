@@ -229,6 +229,7 @@ export default function AuthRoute() {
           <View style={styles.disclosure}>
             <Text style={styles.disclosureTitle}>AI-powered features</Text>
             <Text style={styles.disclosureCopy}>Vorinthex AI uses artificial intelligence to generate and process text, images, audio and video.</Text>
+            <Text style={styles.disclosureCopy}>Your information is hosted and processed in the United States. See our Privacy Policy for international-transfer details.</Text>
           </View>
         </View>
       </ScrollView>

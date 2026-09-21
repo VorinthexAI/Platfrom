@@ -8,6 +8,7 @@ import { StatusBar } from "expo-status-bar";
 import { BottomSheetScene } from "@vorinthex/shared/ui/bottom-sheet";
 import { ToastProvider } from "@vorinthex/shared/ui/toast";
 import { useEffect, useState } from "react";
+import { Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -43,7 +44,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     const unsubscribe = subscribeLocalOnboardingState(setLocalOnboarding);
-    void readLocalOnboardingState().catch(() => setLocalOnboarding({ complete: false, introSeen: false, postDeletion: false, previewComplete: false }));
+    void readLocalOnboardingState().catch(() => setLocalOnboarding({ complete: false, postDeletion: false, previewComplete: false }));
     return unsubscribe;
   }, []);
 
@@ -73,7 +74,7 @@ export default function RootLayout() {
     const isPublic = root === "auth" || root === "public" || root === "referral" || root === "checkout" || root === undefined;
     const isOnboarded = useAuthStore.getState().user?.isOnboarded === true;
     if (status === "unauthenticated") {
-      if (!localOnboarding.introSeen && !localOnboarding.previewComplete) {
+      if (!localOnboarding.previewComplete) {
         if (root === "auth" || root === undefined || (!isPublic && root !== "onboarding")) router.replace("/onboarding");
       } else if (root === undefined || (!isPublic && root !== "auth")) router.replace("/auth" as Href);
       return;
@@ -96,7 +97,7 @@ export default function RootLayout() {
           <ToastProvider>
             <BottomSheetScene>
               <BookPlaybackProvider>
-                <StatusBar style="light" />
+                <StatusBar hidden={Platform.OS === "android"} style="light" />
                 <Stack
                   screenOptions={{
                     headerShown: false,

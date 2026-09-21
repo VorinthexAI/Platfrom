@@ -218,7 +218,7 @@ async function renderCard(input: {
       const screen = document.querySelector<HTMLImageElement>(".screen")!;
       const frame = document.querySelector<HTMLImageElement>(".device-frame")!;
       const background = document.querySelector<HTMLImageElement>(".background")!;
-      const title = document.querySelector<HTMLElement>(".title")!;
+      const title = document.querySelector<HTMLElement>(".title");
       const description = document.querySelector<HTMLElement>(".description")!;
 
       document.documentElement.style.setProperty("--canvas-width", `${renderInput.width}px`);
@@ -230,7 +230,7 @@ async function renderCard(input: {
       document.documentElement.style.setProperty("--screen-left", `${renderInput.insets.left}%`);
 
       canvas.setAttribute("aria-label", `${renderInput.title}. ${renderInput.description}`);
-      title.textContent = renderInput.title;
+      if (title) title.textContent = renderInput.title;
       description.textContent = renderInput.description;
       logo.src = renderInput.logo;
       logo.alt = `${renderInput.title} logo`;

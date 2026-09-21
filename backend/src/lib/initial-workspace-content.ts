@@ -5,13 +5,18 @@ import { embedTexts } from '@/lib/embeddings';
 import { sanitizeDocumentContent } from '@/lib/ai/document-processing/actions';
 import { chunkDocumentContent, documentEmbeddingTexts, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import { initialWorkspaceContentRepository, type InitialWorkspaceContentRepository } from '@/lib/initial-workspace-content-repository';
-import { initialWorkspaceBookChapterKey, initialWorkspaceBookKey, initialWorkspaceDocumentKey, initialWorkspaceFolderKey } from '@/lib/initial-workspace-content-identifiers';
+import { initialWorkspaceBookChapterKey, initialWorkspaceBookKey, initialWorkspaceDocumentKey, initialWorkspaceFolderKey, initialWorkspaceGalleryCollectionKey, initialWorkspaceGalleryImageKey, initialWorkspaceGalleryRelationKey, initialWorkspaceGalleryStorageKey } from '@/lib/initial-workspace-content-identifiers';
 import { bookSchema } from '@/lib/db/books.node';
 import { BOOK_CHAPTER_WORD_MAX, BOOK_CHAPTER_WORD_MIN, bookChapterSchema } from '@/lib/db/book-chapters.node';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { INITIAL_AUDIOBOOK_ASSET_MANIFEST, INITIAL_AUDIOBOOK_CHAPTER_GUIDE_IDS } from '@/lib/initial-audiobook-assets';
+import { INITIAL_GALLERY_ASSET_MANIFEST, type InitialGalleryAsset } from '@/lib/initial-gallery-assets';
+import { collectionSchema } from '@/lib/db/collections.node';
+import { collectionImageSchema } from '@/lib/db/collection-images.node';
+import { imageSchema } from '@/lib/db/images.node';
+import { documentStorage, type DocumentObjectStorage } from '@/lib/ai/document-processing/storage';
 
-export const INITIAL_WORKSPACE_CONTENT_VERSION = 8;
+export const INITIAL_WORKSPACE_CONTENT_VERSION = 9;
 
 type GuideDocument = { id: string; folderId: string; name: string; content: string; introducedInVersion: number };
 type GuideFolder = { id: string; parentId?: string; name: string; description: string; presentation: NonNullable<Folder['presentation']>; introducedInVersion: number };
@@ -274,6 +279,7 @@ type InitialWorkspaceContentDependencies = {
   repository?: InitialWorkspaceContentRepository;
   embed?: (input: { texts: string[] }) => Promise<number[][]>;
   now?: () => Date;
+  galleryStorage?: Pick<DocumentObjectStorage, 'copy'>;
 };
 
 export function createInitialWorkspaceContentService(dependencies: InitialWorkspaceContentDependencies = {}) {
@@ -288,7 +294,12 @@ export function createInitialWorkspaceContentService(dependencies: InitialWorksp
       const existing = repository.existingKeys ? await repository.existingKeys(parsedScopeKey) : undefined;
       const missingFolderIds = new Set(existing ? INITIAL_WORKSPACE_FOLDERS.filter((item) => !existing.folderKeys.includes(initialWorkspaceFolderKey(parsedScopeKey, item.id))).map((item) => item.id) : []);
       const missingDocumentIds = new Set(existing ? INITIAL_WORKSPACE_DOCUMENTS.filter((item) => !existing.documentKeys.includes(initialWorkspaceDocumentKey(parsedScopeKey, item.id))).map((item) => item.id) : []);
-      if (previousVersion >= version && missingFolderIds.size === 0 && missingDocumentIds.size === 0) return false;
+      const galleryEnabled = Boolean(repository.galleryOwner);
+      const galleryCollectionKey = initialWorkspaceGalleryCollectionKey(parsedScopeKey);
+      const missingGalleryCollection = galleryEnabled && Boolean(existing && !(existing.galleryCollectionKeys ?? []).includes(galleryCollectionKey));
+      const missingGalleryImageIds = galleryEnabled && existing ? INITIAL_GALLERY_ASSET_MANIFEST.filter((asset) => !(existing.galleryImageKeys ?? []).includes(initialWorkspaceGalleryImageKey(parsedScopeKey, asset.id))).map((asset) => asset.id) : [];
+      const missingGalleryAssetIds = galleryEnabled && existing ? INITIAL_GALLERY_ASSET_MANIFEST.filter((asset) => !(existing.galleryRelationKeys ?? []).includes(initialWorkspaceGalleryRelationKey(parsedScopeKey, asset.id))).map((asset) => asset.id) : [];
+      if (previousVersion >= version && missingFolderIds.size === 0 && missingDocumentIds.size === 0 && !missingGalleryCollection && missingGalleryImageIds.length === 0 && missingGalleryAssetIds.length === 0) return false;
       const timestamp = now().toISOString();
       const folderDefinitions = INITIAL_WORKSPACE_FOLDERS.filter((item) => item.introducedInVersion > previousVersion || missingFolderIds.has(item.id));
       const documentDefinitions = INITIAL_WORKSPACE_DOCUMENTS.filter((item) => item.introducedInVersion > previousVersion || missingDocumentIds.has(item.id));
@@ -319,6 +330,26 @@ export function createInitialWorkspaceContentService(dependencies: InitialWorksp
        const initialBook = initialWorkspaceBookRecords(parsedScopeKey, timestamp);
        const books = previousVersion < 6 ? [{ introducedInVersion: 6, value: initialBook.book }] : [];
        const bookChapters = previousVersion < 4 ? initialBook.bookChapters.map((value) => ({ introducedInVersion: 4, value })) : [];
+       const galleryOwner = galleryEnabled ? await repository.galleryOwner!(parsedScopeKey) : null;
+       if (galleryEnabled && !galleryOwner) throw new Error('Initial Gallery content requires an active scope owner.');
+       const galleryCollection = galleryOwner ? collectionSchema.parse({
+         key: galleryCollectionKey, scopeKey: parsedScopeKey, ownerKey: galleryOwner.membershipKey, name: 'Vorinthex AI',
+         description: 'Starter images for your Vorinthex AI workspace.', embedding: Array(EMBEDDING_DIMENSIONS).fill(0),
+         mutationPolicy: 'user', purpose: null, isFavorite: false, createdAt: timestamp, updatedAt: timestamp,
+       }) : null;
+        const galleryAssets = INITIAL_GALLERY_ASSET_MANIFEST.filter((asset) => previousVersion < 9 || missingGalleryImageIds.includes(asset.id) || missingGalleryAssetIds.includes(asset.id));
+        const galleryImages = galleryOwner ? await Promise.all(galleryAssets.map(async (asset) => {
+          const storageKey = initialWorkspaceGalleryStorageKey(parsedScopeKey, asset.id);
+          const stored = await (dependencies.galleryStorage ?? documentStorage).copy({ sourceKey: asset.storageKey, destinationKey: storageKey, mimeType: 'image/png', billingUserKey: galleryOwner.userKey });
+          if (stored.storageKey !== storageKey) throw new Error(`Initial Gallery asset ${asset.filename} was stored at an unexpected key.`);
+          return { introducedInVersion: 9, value: imageSchema.parse({
+            key: initialWorkspaceGalleryImageKey(parsedScopeKey, asset.id), scopeKey: parsedScopeKey, filename: asset.filename, caption: asset.description,
+            storageKey, mimeType: 'image/png', sizeBytes: stored.sizeBytes ?? 1, width: asset.width, height: asset.height,
+           embedding: Array(EMBEDDING_DIMENSIONS).fill(0), createdByKey: galleryOwner.membershipKey, origin: 'uploaded', mutationPolicy: 'user', isFavorite: false, createdAt: timestamp, updatedAt: timestamp,
+         }) };
+       })) : [];
+       const galleryCollections = galleryCollection ? [{ introducedInVersion: 9, value: galleryCollection }] : [];
+       const galleryRelations = galleryOwner ? galleryAssets.map((asset) => ({ introducedInVersion: 9, value: collectionImageSchema.parse({ key: initialWorkspaceGalleryRelationKey(parsedScopeKey, asset.id), scopeKey: parsedScopeKey, collectionKey: galleryCollectionKey, imageKey: initialWorkspaceGalleryImageKey(parsedScopeKey, asset.id), addedByKey: galleryOwner.membershipKey, createdAt: timestamp }) })) : [];
        let changed = false;
        if (previousVersion < version) {
          changed = await repository.publish({
@@ -326,15 +357,21 @@ export function createInitialWorkspaceContentService(dependencies: InitialWorksp
            version,
            folders: folders.filter((item) => item.introducedInVersion > previousVersion).map(({ introducedInVersion, value }) => ({ introducedInVersion, value })),
            documents: documents.filter((item) => item.introducedInVersion > previousVersion).map(({ introducedInVersion, value }) => ({ introducedInVersion, value })),
-           books,
-           bookChapters,
+            books,
+             bookChapters,
+             galleryCollections,
+             galleryImages,
+             galleryRelations,
          });
        }
-       if (repository.insertMissing && (missingFolderIds.size || missingDocumentIds.size)) {
-         const inserted = await repository.insertMissing({
-           folders: folders.filter((item) => missingFolderIds.has(item.id)).map((item) => item.value),
-           documents: documents.filter((item) => missingDocumentIds.has(item.id)).map((item) => item.value),
-         });
+         if (repository.insertMissing && (missingFolderIds.size || missingDocumentIds.size || missingGalleryCollection || missingGalleryImageIds.length || missingGalleryAssetIds.length)) {
+          const inserted = await repository.insertMissing({
+            folders: folders.filter((item) => missingFolderIds.has(item.id)).map((item) => item.value),
+            documents: documents.filter((item) => missingDocumentIds.has(item.id)).map((item) => item.value),
+             galleryCollections: missingGalleryCollection && galleryCollection ? [galleryCollection] : [],
+             galleryImages: galleryImages.filter(({ value }) => missingGalleryImageIds.includes(INITIAL_GALLERY_ASSET_MANIFEST.find((asset) => initialWorkspaceGalleryImageKey(parsedScopeKey, asset.id) === value.key)?.id ?? '')).map(({ value }) => value),
+             galleryRelations: galleryRelations.filter(({ value }) => missingGalleryAssetIds.includes(INITIAL_GALLERY_ASSET_MANIFEST.find((asset) => initialWorkspaceGalleryRelationKey(parsedScopeKey, asset.id) === value.key)?.id ?? '')).map(({ value }) => value),
+          });
          changed = changed || inserted > 0;
        }
        return changed;

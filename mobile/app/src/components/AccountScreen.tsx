@@ -27,7 +27,7 @@ import { AccountScreenShell } from "@/components/AccountScreenShell";
 import { WalletSheet, type WalletHelp } from "@/components/WalletSheet";
 import { normalizeCapturedPng } from "@/lib/captured-image";
 import { deleteGalleryImages, fetchGalleryUploadStatus, uploadGalleryImages, type GalleryContext } from "@/lib/gallery-client";
-import { billingSummaryQueryKey, currentSubscriptionQueryKey, setDevSparkBalance, setSubscriptionCancellation, wholeSparks } from "@/lib/billing-client";
+import { currentSubscriptionQueryKey, setSubscriptionCancellation, wholeSparks } from "@/lib/billing-client";
 import { useBillingSummary, useCurrentSubscription } from "@/hooks/use-billing-summary";
 import { fetchReferralSummary, normalizeReferralCode, redeemReferralCode, referralCodeSchema, referralRedemptionErrorMessage, referralSummaryQueryKey, type ReferralRedeemResult } from "@/lib/referral-client";
 import { subscriptionPresentation } from "@/lib/subscription-presentation";
@@ -131,8 +131,6 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const [referralRedemption, setReferralRedemption] = useState<ReferralRedeemResult>();
   const [referralRedemptionError, setReferralRedemptionError] = useState("");
   const [redeemingReferral, setRedeemingReferral] = useState(false);
-  const [sparkBalanceDraft, setSparkBalanceDraft] = useState("");
-  const [savingSparkBalance, setSavingSparkBalance] = useState(false);
   const referralCodeInputRef = useRef<ComponentRef<typeof TextInput>>(null);
   const longPressedScopeKey = useRef<string | undefined>(undefined);
   const scopeListMutation = useRef(0);
@@ -142,7 +140,6 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const scopeCardSize = Math.floor((width - spacing.md * 2 - 20) / 3);
   const settingsCardSize = scopeCardSize;
   const billingSummaryQuery = useBillingSummary(user?.key);
-  const sparkBalance = billingSummaryQuery.data ? wholeSparks(billingSummaryQuery.data.microSparkBalance) : undefined;
   const subscriptionQuery = useCurrentSubscription(page === "settings" ? user?.key : undefined);
   const referralQuery = useQuery({ queryKey: referralSummaryQueryKey(String(user?.key ?? "")), queryFn: fetchReferralSummary, enabled: Boolean(user?.key && sheet === "referral"), initialData: authReferralSummary?.code.ownerUserKey === user?.key ? authReferralSummary : undefined });
   const scopesQuery = useQuery({ queryKey: scopeQueryKey, queryFn: ({ signal }) => listScopes(teamKey, signal), enabled: Boolean(user?.key && teamKey), refetchOnMount: "always" });
@@ -226,7 +223,7 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
         throw error;
       }
     } catch (error) {
-      if (!isSparkFundingError(error)) showToast({ title: "Your profile badge could not be generated. Please try again.", duration: 2_500 });
+      if (!isSparkFundingError(error)) showToast({ title: extractDomainErrorMessage(error) ?? "Your profile badge could not be generated. Please try again.", duration: 2_500 });
     } finally {
       setGeneratingBadge(false);
     }
@@ -246,29 +243,6 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
       update.rollback();
       showToast({ title: "Name could not be updated.", duration: 2_500 });
     });
-  };
-
-  useEffect(() => {
-    if (sparkBalance === undefined) return;
-    setSparkBalanceDraft((current) => current.trim() ? current : String(sparkBalance));
-  }, [sparkBalance]);
-
-  const saveSparkBalance = () => {
-    const userKey = user?.key;
-    if (!userKey || savingSparkBalance) return;
-    const sparks = Number.parseInt(sparkBalanceDraft.trim(), 10);
-    if (!Number.isInteger(sparks) || sparks < 0 || sparks > 1_000_000) {
-      showToast({ title: "Enter a whole Spark amount from 0 to 1000000.", duration: 2_500 });
-      return;
-    }
-    setSavingSparkBalance(true);
-    void setDevSparkBalance(sparks).then((summary) => {
-      queryClient.setQueryData(billingSummaryQueryKey(userKey), summary);
-      setSparkBalanceDraft(String(wholeSparks(summary.microSparkBalance)));
-      showToast({ title: "Spark balance updated.", duration: 2_000 });
-    }).catch(() => {
-      showToast({ title: "Spark balance could not be updated.", duration: 2_500 });
-    }).finally(() => setSavingSparkBalance(false));
   };
 
   const permanentlyDeleteAccount = () => {
@@ -555,7 +529,6 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
           <Button accessibilityLabel="Edit name" contentMode="raw" onPress={openName} size="xl" style={styles.nameButton} variant="ghost"><Text numberOfLines={2} style={styles.name}>{name}</Text></Button>
           {user?.email ? <Text style={styles.email}>{user.email}</Text> : null}
         </View>
-        {__DEV__ ? <View style={styles.sparkTest}><Text style={styles.inputLabel}>Sparks (test)</Text><TextInput accessibilityLabel="Spark balance" keyboardType="number-pad" onChangeText={setSparkBalanceDraft} onSubmitEditing={saveSparkBalance} placeholder="0" returnKeyType="done" value={sparkBalanceDraft} /><Button disabled={savingSparkBalance} loading={savingSparkBalance} onPress={saveSparkBalance} size="md" variant="secondary">Set balance</Button></View> : null}
         <View style={styles.scopeSection}>
           <View style={styles.scopeTitleRow}><Text style={styles.scopeTitle}>Scopes</Text><Button accessibilityLabel="What are scopes?" contentMode="raw" iconOnly onPress={() => setSheet("scope-help")} size="xs" variant="icon"><HelpIcon size="sm" /></Button></View>
           <View style={styles.scopeGrid}>
@@ -688,7 +661,6 @@ const styles = StyleSheet.create({
   badgeAvatar: { backgroundColor: palette.voidBlack },
   badgeContent: { alignItems: "center", flex: 1, gap: spacing.md, justifyContent: "center" },
   badgePreview: { alignSelf: "center", borderColor: palette.hairlineBright, borderRadius: 999, borderWidth: 1, overflow: "hidden" },
-  sparkTest: { alignSelf: "stretch", gap: spacing.sm, marginTop: spacing.xl, width: "100%" },
   identity: { alignItems: "center", gap: spacing.xs, marginTop: spacing.md },
   nameButton: { maxWidth: "100%", paddingHorizontal: spacing.sm },
   name: { color: palette.silver50, flexShrink: 1, fontFamily: fonts.medium, fontSize: 28, lineHeight: 34, textAlign: "center" },

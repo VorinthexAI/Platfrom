@@ -43,10 +43,11 @@ module "network" {
 module "storage" {
   source = "../../modules/storage"
 
-  name_prefix         = var.name_prefix
-  ecr_repository_name = var.ecr_repository_name
-  s3_bucket_name      = var.s3_bucket_name
-  tags                = local.tags
+  name_prefix             = var.name_prefix
+  ecr_repository_name     = var.ecr_repository_name
+  ecr_web_repository_name = var.ecr_web_repository_name
+  s3_bucket_name          = var.s3_bucket_name
+  tags                    = local.tags
 }
 
 resource "tls_private_key" "deploy" {
@@ -133,7 +134,9 @@ locals {
     "ACCESS_TOKEN_SECRET",
     "TOTP_SECRET_ENCRYPTION_KEY"
   ]
-  ssm_values = merge(local.generated_env_values, local.prod_env_values)
+  # Infrastructure-derived connection and regional values must always describe
+  # this stack, rather than stale values from a generated application env file.
+  ssm_values = merge(local.prod_env_values, local.generated_env_values)
   ssm_keys   = toset(distinct(concat(local.generated_env_keys, keys(local.prod_env_values))))
   ssm_arns = [
     for key in local.ssm_keys :

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Vorinthex Screenshot Layout Preview</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Geist:wght@300;400&display=swap");
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { min-height: 100%; margin: 0; }
+      body { min-width: 320px; overflow: auto; background: #11161a; font-family: "Geist", system-ui, sans-serif; }
+      .stage { width: 1080px; height: 1920px; margin: 16px auto 0; transform: scale(var(--preview-scale, 0.4)); transform-origin: top center; }
+      .canvas { position: relative; width: 1080px; height: 1920px; overflow: hidden; color: #f5f7f8; background: radial-gradient(circle at 50% 36%, rgba(118,132,143,.15), transparent 34%), linear-gradient(180deg, #080b0f 0%, #030507 50%, #010203 100%); }
+      .canvas::before, .canvas::after { position: absolute; content: ""; pointer-events: none; }
+      .canvas::before { inset: 0; background: linear-gradient(120deg, transparent 25%, rgba(223,232,235,.06) 44%, transparent 58%), radial-gradient(circle at 50% 4%, rgba(236,243,246,.12), transparent 25%); }
+      .canvas::after { width: 980px; height: 980px; top: 670px; left: 50px; border: 1px solid rgba(221,226,229,.12); border-radius: 50%; box-shadow: 0 0 140px rgba(210,221,227,.08), inset 0 0 90px rgba(210,221,227,.05); }
+      .brand { position: absolute; z-index: 2; top: 74px; left: 50%; display: grid; justify-items: center; gap: 18px; transform: translateX(-50%); }
+      .brand-logo { width: 88px; height: 88px; filter: drop-shadow(0 0 24px rgba(221,226,229,.2)); object-fit: contain; }
+      .brand-title { margin: 0; color: #F5F7F8; font-family: "Geist", system-ui, sans-serif; font-size: 34px; font-weight: 300; letter-spacing: .02em; white-space: nowrap; }
+      .device { position: absolute; z-index: 1; top: 292px; left: 50%; width: 620px; height: 1328px; transform: translateX(-50%); filter: drop-shadow(0 45px 72px rgba(0,0,0,.75)) drop-shadow(0 0 32px rgba(190,202,210,.14)); }
+      .phone { position: absolute; inset: 0; border: 11px solid transparent; border-radius: 88px; background: linear-gradient(#050607, #050607) padding-box, linear-gradient(105deg, #252c30 0%, #e0e5e7 18%, #788287 31%, #f3f6f7 50%, #6a7378 69%, #dce2e4 84%, #343b3f 100%) border-box; box-shadow: 0 0 0 2px #15191b, inset 3px 0 2px rgba(255,255,255,.24), inset -3px 0 3px rgba(0,0,0,.8), inset 0 2px 2px rgba(255,255,255,.18), inset 0 -2px 2px rgba(0,0,0,.72); }
+      .phone::before, .phone::after { position: absolute; z-index: 3; content: ""; border-radius: 5px; background: linear-gradient(180deg, #d9dfe1, #4b5458 35%, #9fa8ac 70%, #30373a); box-shadow: inset 1px 0 rgba(255,255,255,.32), 0 1px 2px rgba(0,0,0,.6); }
+      .phone::before { top: 248px; left: -16px; width: 7px; height: 114px; }
+      .phone::after { top: 398px; right: -16px; width: 7px; height: 184px; }
+      .screen { position: absolute; z-index: 1; top: 26px; right: 26px; bottom: 26px; left: 26px; width: calc(100% - 52px); height: calc(100% - 52px); overflow: hidden; border-radius: 64px; background: linear-gradient(135deg, #050708, #000 52%, #040607); box-shadow: inset 0 0 0 1px rgba(255,255,255,.09), inset 0 2px 10px rgba(255,255,255,.04); object-fit: cover; object-position: center top; }
+      .speaker { position: absolute; z-index: 2; top: 37px; left: 50%; width: 176px; height: 39px; transform: translateX(-50%); border: 1px solid rgba(255,255,255,.06); border-radius: 999px; background: linear-gradient(180deg, #000, #080a0b); box-shadow: inset 0 1px rgba(255,255,255,.03), 0 2px 5px rgba(0,0,0,.8); }
+      .placeholder-copy { position: absolute; z-index: 2; right: 100px; bottom: 80px; left: 100px; margin: 0; color: #AEB6BC; font-size: 29px; font-weight: 300; letter-spacing: .012em; line-height: 1.36; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <div class="stage" aria-label="Product screenshot layout preview">
+      <main class="canvas">
+        <header class="brand">
+          <img class="brand-logo" src="../../../web/app/public/logos/vorinthex-mark.png" alt="Vorinthex AI">
+          <h1 class="brand-title">Vorinthex AI</h1>
+        </header>
+        <section class="device" aria-label="Example app screenshot inside an iPhone frame">
+          <div class="phone"></div>
+          <div class="screen" aria-label="Empty screenshot area"></div>
+          <div class="speaker" aria-hidden="true"></div>
+        </section>
+        <p class="placeholder-copy">We're building connected AI apps that share context, learn together, and make every part of your digital life more intelligent.</p>
+      </main>
+    </div>
+    <script>
+      function resizePreview() {
+        const scale = Math.min((window.innerWidth - 32) / 1080, (window.innerHeight - 48) / 1920, 1);
+        document.documentElement.style.setProperty('--preview-scale', String(scale));
+      }
+      addEventListener('resize', resizePreview);
+      resizePreview();
+    </script>
+  </body>
+</html>

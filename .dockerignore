@@ -1,0 +1,12 @@
+# Docker builds use the monorepo root as context. Exclude workstation-only
+# dependencies and outputs so Linux builders never read Windows link metadata.
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+.git
+**/.env
+**/.env.*
+!**/.env.example
+**/coverage
+**/*.log
