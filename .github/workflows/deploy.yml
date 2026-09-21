@@ -178,7 +178,7 @@ jobs:
       - name: Web test
         run: bun run web:test
       - name: Web build
-        run: bun run web:build
+        run: rm -rf web/app/.next && bun run web:build
       - name: Backend check
         run: bun run backend:check
       - name: Backend test

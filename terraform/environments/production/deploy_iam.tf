@@ -27,6 +27,7 @@ resource "aws_iam_role_policy" "backend_deploy_system_assets" {
         Effect = "Allow"
         Action = [
           "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
           "ecr:CompleteLayerUpload",
           "ecr:CreateRepository",
           "ecr:DescribeRepositories",
@@ -35,6 +36,11 @@ resource "aws_iam_role_policy" "backend_deploy_system_assets" {
           "ecr:PutImage",
           "ecr:UploadLayerPart"
         ]
+        Resource = ["*"]
+      },
+      {
+        Effect = "Allow"
+        Action = ["ec2:AuthorizeSecurityGroupIngress", "ec2:RevokeSecurityGroupIngress"]
         Resource = ["*"]
       },
       {
