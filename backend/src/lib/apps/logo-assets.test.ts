@@ -3,7 +3,8 @@ import { resolve } from 'node:path';
 import { HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { APP_LOGO_MANIFEST } from './logo-manifest';
 import { INITIAL_AUDIOBOOK_ASSET_MANIFEST } from '@/lib/initial-audiobook-assets';
-import { APP_LOGO_CACHE_CONTROL, seedAppLogoAssets, seedInitialAudiobookAssets } from './logo-assets';
+import { INITIAL_GALLERY_ASSET_MANIFEST } from '@/lib/initial-gallery-assets';
+import { APP_LOGO_CACHE_CONTROL, seedAppLogoAssets, seedInitialAudiobookAssets, seedInitialGalleryAssets } from './logo-assets';
 
 describe('app logo system asset seeder', () => {
   test('uploads checksummed PNGs once and skips unchanged objects via HeadObject', async () => {
@@ -55,4 +56,17 @@ test('uploads six normalized MP3 chapters', async () => {
   expect(results).toHaveLength(6);
   expect(uploads).toHaveLength(6);
   expect(uploads.every(({ input }) => input.ContentType === 'audio/mpeg' && Number(input.ContentLength ?? (input.Body as Uint8Array).byteLength) > 0)).toBe(true);
+});
+
+test('uploads the Gallery starter images to the system asset prefix', async () => {
+  const uploads: PutObjectCommand[] = [];
+  const client = { send: async (command: HeadObjectCommand | PutObjectCommand) => {
+    if (command instanceof HeadObjectCommand) throw Object.assign(new Error('missing'), { name: 'NotFound' });
+    uploads.push(command);
+    return {};
+  } };
+  const results = await seedInitialGalleryAssets({ client: client as never, bucket: 'assets', repositoryRoot: resolve(import.meta.dir, '../../../../') });
+  expect(results).toHaveLength(INITIAL_GALLERY_ASSET_MANIFEST.length);
+  expect(uploads.map(({ input }) => input.Key)).toEqual(INITIAL_GALLERY_ASSET_MANIFEST.map(({ storageKey }) => storageKey));
+  expect(uploads.every(({ input }) => input.ContentType === 'image/png' && (input.Body as Uint8Array).byteLength > 0)).toBe(true);
 });

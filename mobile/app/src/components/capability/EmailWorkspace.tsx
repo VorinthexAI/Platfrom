@@ -3174,7 +3174,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const inboxActionItems = <>
     {connected && permissions.canMutate ? <BottomSheetItem onPress={openInboxEdit} style={styles.sheetAction} variant="secondary">Edit</BottomSheetItem> : null}
     {connected && permissions.canMutate ? <BottomSheetItem onPress={() => void openTrashRoot()} style={styles.sheetAction} variant="secondary">Trash</BottomSheetItem> : null}
-    {permissions.canManageConnector ? <BottomSheetItem disabled={Boolean(busy)} onPress={openConnectForm} style={styles.sheetAction} variant="secondary">Connect email</BottomSheetItem> : null}
+    {!initialConnectorKey && permissions.canManageConnector ? <BottomSheetItem disabled={Boolean(busy)} onPress={openConnectForm} style={styles.sheetAction} variant="secondary">Connect email</BottomSheetItem> : null}
     {connected && permissions.canManageConnector ? <BottomSheetItem onPress={() => { if (newEmailOpen) resetNewEmail(); setSheet("disconnect"); }} style={styles.sheetAction} variant="secondary">Delete</BottomSheetItem> : null}
   </>;
   const formFooter = formSheet ? <>
@@ -3215,6 +3215,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   </>;
   const draftEmpty = Boolean(inboxTab === "drafts" && !draftsQuery.isPending && !draftSearching && !draftsQuery.error && !draftSearchError && !visibleInboxDrafts.length);
   const messageEmpty = Boolean(inboxTab !== "drafts" && !loading && !inboxQueryPending && !initialSyncPending && !loadError && !overview?.threads.length);
+  const inboxInitialLoading = !overview && (loading || inboxQueryPending || initialSyncPending);
   return (
     <View style={styles.root}>
       <View accessibilityElementsHidden={readerSheetOpen} importantForAccessibility={readerSheetOpen ? "no-hide-descendants" : "auto"} pointerEvents={readerSheetOpen ? "none" : "auto"} style={styles.workspaceSurface}>
@@ -3247,7 +3248,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         >
           {selected ? selectedMessage?.subject ?? selected.thread.subject : initialConnectorKey ? selectedAccount?.name ?? "" : "Signal"}
         </Text>
-        {!selected && !sentView ? <View style={styles.localActions}>
+        {!selected ? <View style={styles.localActions}>
           <>
             <Button accessibilityLabel="More inbox actions" contentMode="raw" hitSlop={6} onPress={() => { setSheet("account"); setSheetOpen(true); }} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
             <Button
@@ -3264,7 +3265,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
               <PlusIcon size="sm" />
             </Button>
           </>
-        </View> : selected && !sentView ? <Button accessibilityLabel="More email actions" contentMode="raw" hitSlop={6} onPress={() => { setSheet("account"); setSheetOpen(true); }} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : null}
+        </View> : selected ? <Button accessibilityLabel="More email actions" contentMode="raw" hitSlop={6} onPress={() => { setSheet("account"); setSheetOpen(true); }} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : null}
       </View> : null}
       {!initialConnectorKey ? (
         <View style={styles.signalRoot}>
@@ -3431,7 +3432,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
             scrollEventThrottle={120}
             showsVerticalScrollIndicator={false}
           >
-            {inboxTab === "drafts" ? draftsQuery.isPending || draftSearching || Boolean((normalizedInboxSearch || selectedTagKeys.length) && !activeDraftSearchResults) ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading drafts" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : visibleInboxDrafts.map((saved) => <Button accessibilityLabel={`${saved.variant === "new" ? saved.subject : "Reply"}, to ${saved.to.join(", ")}`} contentMode="raw" key={saved.key} onPress={() => openInboxDraft(saved)} shape="pill" size="sm" style={styles.threadCard} variant="secondary"><MailIcon size="sm" /><View style={styles.threadBody}><Text numberOfLines={1} style={styles.subject}>{saved.variant === "new" ? saved.subject : "Reply"}</Text><Text numberOfLines={1} style={styles.rowSubtitle}>To: {saved.to.join(", ")}</Text></View></Button>) : loading || inboxQueryPending || initialSyncPending ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading inbox messages" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : overview?.threads.map((thread) => (
+            {inboxTab === "drafts" ? draftsQuery.isPending || draftSearching || Boolean((normalizedInboxSearch || selectedTagKeys.length) && !activeDraftSearchResults) ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading drafts" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : visibleInboxDrafts.map((saved) => <Button accessibilityLabel={`${saved.variant === "new" ? saved.subject : "Reply"}, to ${saved.to.join(", ")}`} contentMode="raw" key={saved.key} onPress={() => openInboxDraft(saved)} shape="pill" size="sm" style={styles.threadCard} variant="secondary"><MailIcon size="sm" /><View style={styles.threadBody}><Text numberOfLines={1} style={styles.subject}>{saved.variant === "new" ? saved.subject : "Reply"}</Text><Text numberOfLines={1} style={styles.rowSubtitle}>To: {saved.to.join(", ")}</Text></View></Button>) : inboxInitialLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading inbox messages" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : overview?.threads.map((thread) => (
               <Button
                 accessibilityActions={sentView ? undefined : [{ name: "longpress", label: selectedThreads.some(({ key }) => key === thread.key) ? `Deselect ${thread.subject}` : `Select ${thread.subject}` }]}
                 accessibilityLabel={`${!thread.isRead ? "Unread, " : ""}${shortAddress(thread.latestFrom)}, ${thread.subject}`}
@@ -3620,7 +3621,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
           <BottomSheetMenu>
             <BottomSheetItem disabled={!permissions.canMutate} onPress={openToneCreate} style={styles.sheetAction} variant="secondary">Create email tone</BottomSheetItem>
             <BottomSheetItem onPress={openReplyContexts} style={styles.sheetAction} variant="secondary">Reply context</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(busy) || !permissions.canManageConnector} onPress={openConnectForm} style={styles.sheetAction} variant="secondary">Connect email</BottomSheetItem>
+            {!initialConnectorKey ? <BottomSheetItem disabled={Boolean(busy) || !permissions.canManageConnector} onPress={openConnectForm} style={styles.sheetAction} variant="secondary">Connect email</BottomSheetItem> : null}
           </BottomSheetMenu>
         ) : sheet === "trashRoot" ? (
           <ScrollView contentContainerStyle={styles.trashRootContent} showsVerticalScrollIndicator={false}>
@@ -3703,7 +3704,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
             ) : null}
             <BottomSheetItem disabled={!permissions.canMutate} onPress={openToneCreate} style={styles.sheetAction} variant="secondary">Create email tone</BottomSheetItem>
             <BottomSheetItem onPress={openReplyContexts} style={styles.sheetAction} variant="secondary">Reply context</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(busy) || !permissions.canManageConnector} onPress={openConnectForm} style={styles.sheetAction} variant="secondary">Connect email</BottomSheetItem>
+            {!initialConnectorKey ? <BottomSheetItem disabled={Boolean(busy) || !permissions.canManageConnector} onPress={openConnectForm} style={styles.sheetAction} variant="secondary">Connect email</BottomSheetItem> : null}
           </BottomSheetMenu>
         ) : sheet === "bulkActions" ? (
           <BottomSheetMenu>
@@ -4382,7 +4383,7 @@ const styles = StyleSheet.create({
   inlineError: { paddingHorizontal: 2 },
   inlineErrorText: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   recipientChips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
-  recipientChip: { alignSelf: "flex-start", minHeight: 42, maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: "rgba(221, 226, 229, 0.18)", borderRadius: 999, backgroundColor: "rgba(255, 255, 255, 0.03)" },
+  recipientChip: { alignSelf: "flex-start", minHeight: 42, maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: "rgba(221, 226, 229, 0.18)", borderRadius: 999, backgroundColor: palette.page },
   recipientChipCompact: { minHeight: 34 },
   recipientChipMain: { minWidth: 0, flexShrink: 1, justifyContent: "flex-start", paddingLeft: spacing.sm, paddingRight: 0 },
   recipientChipRemove: { width: 42, height: 42, paddingHorizontal: 0, paddingVertical: 0 },

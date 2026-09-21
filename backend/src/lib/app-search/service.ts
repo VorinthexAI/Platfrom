@@ -157,7 +157,7 @@ export const appSearchInputSchema = z.object(appSearchInputShape).strict().super
 export const appSearchModelInputSchema = z.object({
   ...appSearchInputShape,
   filters: appSearchFiltersSchema.optional(),
-  limit: appSearchLimitSchema.describe('Required user-visible result count. Use 1 for a singular answer target even when plural evidence identifies it, such as which collection contains these images; use an explicit requested quantity up to 50; use 10 for an unspecified plural; use 50 only for exhaustive inventories.'),
+  limit: appSearchLimitSchema.describe('Required user-visible result count. Use 1 for one intended answer target despite incidental plural grammar or typos; use an explicit requested quantity up to 50; use 10 only for an unspecified request for multiple results; use 50 only for exhaustive inventories.'),
 }).strict().superRefine(validateAppSearchInput);
 export type AppSearchInput = z.infer<typeof appSearchInputSchema>;
 

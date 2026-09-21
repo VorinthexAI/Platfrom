@@ -17,6 +17,13 @@ export const profileBadgeGenerateInputSchema = z.object({}).strict();
 export const profileBadgeClaimInputSchema = z.object({ candidateKey: z.string().cuid() }).strict();
 export const profileBadgeCandidateSchema = z.object({ candidateKey: z.string().cuid(), avatarUrl: z.string().url(), expiresAt: z.string().datetime() }).strict();
 
+export class ProfileBadgeGenerationError extends Error {
+  constructor() {
+    super('Profile badge generation is temporarily unavailable. Please try again later.');
+    this.name = 'ProfileBadgeGenerationError';
+  }
+}
+
 const centralMarks = ['faceted nexus', 'interlocking arcs', 'split chevron', 'radial aperture', 'shielded diamond', 'orbital triad'] as const;
 const ringForms = ['segmented circular frame', 'precision-broken orbital ring', 'concentric chrome enclosure'] as const;
 const supports = ['three balanced radial supports', 'two mirrored structural blades', 'four restrained cardinal notches'] as const;
@@ -69,11 +76,16 @@ export function createProfileBadgeService(dependencies: ProfileBadgeServiceDepen
         if (!record || record.userKey !== principal.user.key || record.status !== 'reserved' || Date.parse(record.expiresAt) <= (dependencies.now?.() ?? new Date()).getTime()) throw new Error('Profile badge candidate is no longer available.');
         return profileBadgeCandidateSchema.parse({ candidateKey: record.key, avatarUrl: await (dependencies.sign ?? signProfileAvatarUrl)(record.storageKey), expiresAt: record.expiresAt });
       }
-      const response = await (dependencies.execute ?? executeAction)<{ operation: 'generate'; prompt: string; count: 1; aspectRatio: '1:1'; outputFormat: 'png' }, ImageOutput>(
-        { mode: 'auto', teamKey: context.teamKey, actionSlug: 'image' },
-        { operation: 'generate', prompt: profileBadgePrompt(principal.user.key, principal.user.name), count: 1, aspectRatio: '1:1', outputFormat: 'png' },
-        { providers: ['image.primary'], signal: dependencies.signal, timeoutMs: dependencies.timeoutMs },
-      );
+      let response;
+      try {
+        response = await (dependencies.execute ?? executeAction)<{ operation: 'generate'; prompt: string; count: 1; aspectRatio: '1:1'; outputFormat: 'png' }, ImageOutput>(
+          { mode: 'auto', teamKey: context.teamKey, actionSlug: 'image' },
+          { operation: 'generate', prompt: profileBadgePrompt(principal.user.key, principal.user.name), count: 1, aspectRatio: '1:1', outputFormat: 'png' },
+          { providers: ['image.primary'], signal: dependencies.signal, timeoutMs: dependencies.timeoutMs },
+        );
+      } catch {
+        throw new ProfileBadgeGenerationError();
+      }
       const generated = imageOutputSchema.parse(response.output).images[0];
       if (!generated) throw new Error('Image provider returned no profile badge.');
       const source = Uint8Array.from(Buffer.from(generated.base64, 'base64'));

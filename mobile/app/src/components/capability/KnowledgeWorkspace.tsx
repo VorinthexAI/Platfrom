@@ -2133,7 +2133,19 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
       toggleFolderSelection(folder);
       if (selecting && selectedCount < MAX_SELECTED_CONTENT_RESOURCES) hydrateSelectedFolder(folder);
     }
-    else void (hasContentContext ? openFolder(folder) : selectFolder(folder));
+    else if (hasContentContext) router.push({
+      pathname: "/capability/[slug]",
+      params: {
+        slug: "archive",
+        assetKey: folder.key,
+        ...(returnSignalConnectorKey ? { returnSignalConnectorKey } : {}),
+        ...(returnSignalMessageKey ? { returnSignalMessageKey } : {}),
+        ...(returnSignalThreadKey ? { returnSignalThreadKey } : {}),
+        ...(returnTripKey ? { returnTripKey } : {}),
+        ...(returnTripName ? { returnTripName } : {}),
+      },
+    });
+    else void selectFolder(folder);
   };
 
   const handleDocumentLongPress = (document: ContentDocument, suppressPress = true) => {
@@ -4461,7 +4473,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
               {!similarLoading && similarContentTab === "folders" ? <View style={similarResults?.folders.length ? styles.rootFolderGrid : styles.similarEmpty}>
                 {similarFolders.map((folder) => <View key={folder.key} style={[styles.rootFolderCard, { width: destinationCardSize, height: destinationCardSize }]}>
                   <FolderCover folder={folder} />
-                  <Button contentMode="raw" onPress={() => { closeSheet(); requestAnimationFrame(() => { void openFolder(folder); }); }} shape="rounded" size="md" style={[styles.rootFolderMain, folderHasCover(folder) && styles.coveredFolderMain]} variant="ghost">{folderHasCover(folder) ? null : <FolderIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.archiveCardLabel, folderHasCover(folder) && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
+                  <Button contentMode="raw" onPress={() => { closeSheet(); requestAnimationFrame(() => handleFolderPress(folder)); }} shape="rounded" size="md" style={[styles.rootFolderMain, folderHasCover(folder) && styles.coveredFolderMain]} variant="ghost">{folderHasCover(folder) ? null : <FolderIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.archiveCardLabel, folderHasCover(folder) && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
                 </View>)}
                 {similarFolders.length === 0 ? <Text style={styles.empty}>No matching folders found.</Text> : null}
               </View> : null}

@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { createInitialWorkspaceContentService, initialWorkspaceBookRecords, INITIAL_WORKSPACE_CONTENT_VERSION, INITIAL_WORKSPACE_DOCUMENTS, INITIAL_WORKSPACE_FOLDERS } from './initial-workspace-content';
-import { INITIAL_WORKSPACE_DOCUMENT_IDS, INITIAL_WORKSPACE_FOLDER_IDS, initialWorkspaceBookKey, initialWorkspaceDocumentKey, initialWorkspaceFolderKey, isInitialWorkspaceDocumentKey, isInitialWorkspaceFolderKey } from './initial-workspace-content-identifiers';
+import { INITIAL_WORKSPACE_DOCUMENT_IDS, INITIAL_WORKSPACE_FOLDER_IDS, initialWorkspaceBookKey, initialWorkspaceDocumentKey, initialWorkspaceFolderKey, initialWorkspaceGalleryCollectionKey, initialWorkspaceGalleryImageKey, initialWorkspaceGalleryStorageKey, isInitialWorkspaceDocumentKey, isInitialWorkspaceFolderKey } from './initial-workspace-content-identifiers';
+import { INITIAL_GALLERY_ASSET_MANIFEST } from './initial-gallery-assets';
 import { INITIAL_AUDIOBOOK_CHAPTER_GUIDE_IDS } from './initial-audiobook-assets';
 
 const scopeKey = 'cmrnlzf640001qc7kazsr96k5';
@@ -31,7 +32,7 @@ describe('initial workspace content', () => {
     expect(INITIAL_WORKSPACE_DOCUMENTS.find(({ id }) => id === 'learning-start')?.content).toContain('using the documents in this guide tree as sources');
     const signalFolder = INITIAL_WORKSPACE_FOLDERS.find(({ id }) => id === 'communication');
     const signalDocuments = INITIAL_WORKSPACE_DOCUMENTS.filter(({ folderId }) => folderId === 'communication');
-    expect(INITIAL_WORKSPACE_CONTENT_VERSION).toBe(8);
+    expect(INITIAL_WORKSPACE_CONTENT_VERSION).toBe(9);
     expect(signalFolder?.introducedInVersion).toBe(7);
     expect(signalFolder?.description).toContain('private inbox');
     expect(signalDocuments).toHaveLength(3);
@@ -54,7 +55,7 @@ describe('initial workspace content', () => {
     let persisted: { folders: Array<{ value: { key: string; name: string; presentation?: string } & Record<string, unknown> }>; documents: Array<{ value: { key: string } & Record<string, unknown> }>; books: Array<{ introducedInVersion: number; value: { key: string; chapterCount: number } }>; bookChapters: Array<{ value: { title: string; content?: string; audioStorageKey?: string } }> } | undefined;
     const service = createInitialWorkspaceContentService({
       repository: {
-        currentVersion: async () => initialized ? 8 : 0,
+        currentVersion: async () => initialized ? 9 : 0,
         publish: async (input) => { persisted = input; initialized = true; return true; },
       },
       embed: async ({ texts }) => { embeddingCalls += 1; return texts.map(() => Array(EMBEDDING_DIMENSIONS).fill(0)); },
@@ -90,7 +91,7 @@ describe('initial workspace content', () => {
     });
 
     expect(await service.ensure(scopeKey)).toBe(true);
-    expect(persisted?.version).toBe(8);
+    expect(persisted?.version).toBe(9);
     expect(persisted?.folders).toEqual([]);
     expect(persisted?.documents).toHaveLength(1);
     expect(persisted?.documents[0]).toMatchObject({
@@ -160,7 +161,7 @@ describe('initial workspace content', () => {
   test('does not publish when the current guide version is present', async () => {
     let embedded = false;
     const service = createInitialWorkspaceContentService({
-      repository: { currentVersion: async () => 8, publish: async () => { throw new Error('current content must not publish'); } },
+      repository: { currentVersion: async () => 9, publish: async () => { throw new Error('current content must not publish'); } },
       embed: async () => { embedded = true; return []; },
     });
     await expect(service.ensure(scopeKey)).resolves.toBe(false);
@@ -171,7 +172,7 @@ describe('initial workspace content', () => {
     const inserted: { folders: Array<{ name: string }>; documents: Array<{ name: string }> } = { folders: [], documents: [] };
     const service = createInitialWorkspaceContentService({
       repository: {
-        currentVersion: async () => 8,
+        currentVersion: async () => 9,
         existingKeys: async () => ({
           folderKeys: INITIAL_WORKSPACE_FOLDER_IDS.filter((id) => id !== 'assistant').map((id) => initialWorkspaceFolderKey(scopeKey, id)),
           documentKeys: INITIAL_WORKSPACE_DOCUMENT_IDS.filter((id) => id !== 'assistant-overview').map((id) => initialWorkspaceDocumentKey(scopeKey, id)),
@@ -188,5 +189,55 @@ describe('initial workspace content', () => {
     expect(await service.ensure(scopeKey)).toBe(true);
     expect(inserted.folders).toEqual([{ name: 'Core' }]);
     expect(inserted.documents).toEqual([{ name: 'What Core Is' }]);
+  });
+
+  test('provisions a user-owned Gallery collection with deterministic records', async () => {
+    let published: { galleryCollections: Array<{ introducedInVersion: number; value: { key: string; ownerKey?: string; name: string; mutationPolicy: string } }>; galleryImages: Array<{ value: { key: string; storageKey: string; caption: string; embedding: number[]; mutationPolicy: string } }>; galleryRelations: unknown[] } | undefined;
+    const copied: Array<{ sourceKey: string; destinationKey: string }> = [];
+    const owner = { membershipKey: 'cmrnlzf650002qc7k4p5zem5w', userKey: 'cmrnlzf650003qc7k4p5zem5w' };
+    const service = createInitialWorkspaceContentService({
+      repository: {
+        currentVersion: async () => 0,
+        galleryOwner: async () => owner,
+        publish: async (input) => { published = input; return true; },
+      },
+      embed: async ({ texts }) => texts.map(() => Array(EMBEDDING_DIMENSIONS).fill(0)),
+      galleryStorage: { copy: async (input) => { copied.push(input); return { storageKey: input.destinationKey, sizeBytes: 1 }; } },
+    });
+
+    await expect(service.ensure(scopeKey)).resolves.toBe(true);
+    expect(published?.galleryCollections).toEqual([{
+      introducedInVersion: 9,
+      value: expect.objectContaining({ key: initialWorkspaceGalleryCollectionKey(scopeKey), ownerKey: owner.membershipKey, name: 'Vorinthex AI', mutationPolicy: 'user' }),
+    }]);
+    expect(published?.galleryImages).toHaveLength(INITIAL_GALLERY_ASSET_MANIFEST.length);
+    expect(published?.galleryImages.every(({ value }) => value.mutationPolicy === 'user' && value.embedding.every((item) => item === 0))).toBe(true);
+    expect(published?.galleryImages.map(({ value }) => value.key)).toEqual(INITIAL_GALLERY_ASSET_MANIFEST.map((asset) => initialWorkspaceGalleryImageKey(scopeKey, asset.id)));
+    expect(copied).toEqual(INITIAL_GALLERY_ASSET_MANIFEST.map((asset) => expect.objectContaining({ sourceKey: asset.storageKey, destinationKey: initialWorkspaceGalleryStorageKey(scopeKey, asset.id) })));
+    expect(published?.galleryRelations).toHaveLength(INITIAL_GALLERY_ASSET_MANIFEST.length);
+  });
+
+  test('restores a missing Gallery collection after the content version is current', async () => {
+    let restored: Array<{ key: string; ownerKey?: string; mutationPolicy: string }> = [];
+    const owner = { membershipKey: 'cmrnlzf650002qc7k4p5zem5w', userKey: 'cmrnlzf650003qc7k4p5zem5w' };
+    const service = createInitialWorkspaceContentService({
+      repository: {
+        currentVersion: async () => 9,
+        galleryOwner: async () => owner,
+        existingKeys: async () => ({
+          folderKeys: INITIAL_WORKSPACE_FOLDER_IDS.map((id) => initialWorkspaceFolderKey(scopeKey, id)),
+          documentKeys: INITIAL_WORKSPACE_DOCUMENT_IDS.map((id) => initialWorkspaceDocumentKey(scopeKey, id)),
+          galleryCollectionKeys: [],
+          galleryRelationKeys: [],
+        }),
+        insertMissing: async (input) => { restored = input.galleryCollections; return input.galleryCollections.length; },
+        publish: async () => { throw new Error('current Gallery content must not republish'); },
+      },
+      embed: async ({ texts }) => texts.map(() => Array(EMBEDDING_DIMENSIONS).fill(0)),
+      galleryStorage: { copy: async ({ destinationKey }) => ({ storageKey: destinationKey, sizeBytes: 1 }) },
+    });
+
+    await expect(service.ensure(scopeKey)).resolves.toBe(true);
+    expect(restored).toEqual([expect.objectContaining({ key: initialWorkspaceGalleryCollectionKey(scopeKey), ownerKey: owner.membershipKey, mutationPolicy: 'user' })]);
   });
 });

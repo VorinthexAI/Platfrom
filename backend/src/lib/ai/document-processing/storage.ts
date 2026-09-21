@@ -10,7 +10,7 @@ export interface DocumentStorage {
 
 export interface DocumentObjectStorage extends DocumentStorage {
   download(storageKey: string): Promise<{ bytes: Uint8Array; mimeType?: string; sizeBytes?: number; etag?: string }>;
-  copy(input: { sourceKey: string; destinationKey: string; mimeType?: string; billingUserKey?: string }): Promise<{ storageKey: string; bucket?: string; etag?: string }>;
+  copy(input: { sourceKey: string; destinationKey: string; mimeType?: string; billingUserKey?: string }): Promise<{ storageKey: string; sizeBytes?: number; bucket?: string; etag?: string }>;
 }
 
 export const documentStorage: DocumentObjectStorage = {
@@ -52,12 +52,12 @@ export const documentStorage: DocumentObjectStorage = {
       CopySource: copySource,
       ...(input.mimeType ? { ContentType: input.mimeType, MetadataDirective: 'REPLACE' } : {}),
     }));
+    const stored = await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: input.destinationKey }));
+    if (stored.ContentLength === undefined) throw new Error(`Copied storage object ${input.destinationKey} returned no size.`);
     if (billingUserKey) {
-      const stored = await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: input.destinationKey }));
-      if (stored.ContentLength === undefined) throw new Error(`Copied storage object ${input.destinationKey} returned no size.`);
       try { await recordStoredObject({ storageKey: input.destinationKey, userKey: billingUserKey, sizeBytes: stored.ContentLength }); }
       catch (error) { await s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: input.destinationKey })).catch(() => undefined); throw error; }
     }
-    return { storageKey: input.destinationKey, bucket: S3_BUCKET, etag: result.CopyObjectResult?.ETag };
+    return { storageKey: input.destinationKey, sizeBytes: stored.ContentLength, bucket: S3_BUCKET, etag: result.CopyObjectResult?.ETag };
   },
 };

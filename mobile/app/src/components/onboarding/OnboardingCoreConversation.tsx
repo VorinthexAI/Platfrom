@@ -2,7 +2,6 @@ import { Button } from "@vorinthex/shared/ui/button";
 import { ChromeIcon } from "@vorinthex/shared/ui/chrome-icon";
 import { LoadingText } from "@vorinthex/shared/ui/loading-text";
 import { RichText } from "@vorinthex/shared/ui/rich-text";
-import * as ImagePicker from "expo-image-picker";
 import * as Notifications from "expo-notifications";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -17,7 +16,7 @@ import { fonts, palette, spacing } from "@/theme/tokens";
 import { OnboardingAppPreview } from "./OnboardingIntroSequence";
 import { selectOnboardingAppStages, type OnboardingAppSlug, type OnboardingAppStage } from "./onboarding-stages";
 
-type PermissionStep = "camera" | "notifications";
+type PermissionStep = "notifications";
 type ConversationStep =
   | { kind: "welcome" }
   | { kind: "app"; app: OnboardingAppStage }
@@ -36,7 +35,6 @@ const APP_COPY: Record<OnboardingAppSlug, string> = {
 };
 
 const PERMISSION_COPY: Record<PermissionStep, string> = {
-  camera: "Allow camera access to scan documents and capture photos directly into Vorinthex AI.",
   notifications: "Allow notifications so you never miss anything. Signal can let you know when important connected email, Vorinthex app communication, or support replies arrive.",
 };
 
@@ -68,7 +66,6 @@ export function OnboardingCoreConversation({ apps, onFinished }: { apps: readonl
   const steps = useMemo<ConversationStep[]>(() => [
     { kind: "welcome" },
     ...selectOnboardingAppStages(apps).map((app) => ({ kind: "app" as const, app })),
-    { kind: "permission", permission: "camera" },
     { kind: "permission", permission: "notifications" },
     { kind: "finish" },
   ], [apps]);
@@ -135,9 +132,7 @@ export function OnboardingCoreConversation({ apps, onFinished }: { apps: readonl
     setBusy(true);
     let allowed = false;
     try {
-      if (permission === "camera" && allow) {
-        allowed = (await ImagePicker.requestCameraPermissionsAsync()).granted;
-      } else if (permission === "notifications" && allow) {
+      if (permission === "notifications" && allow) {
         if (Platform.OS === "android") await Notifications.setNotificationChannelAsync("default", { importance: Notifications.AndroidImportance.DEFAULT, name: "Notifications" });
         const result = await Notifications.requestPermissionsAsync({ ios: { allowAlert: true, allowBadge: true, allowSound: true } });
         allowed = result.granted;

@@ -45,11 +45,9 @@ const fallbackGreetings = {
   referralOnboarding: 'Your account is ready. If anyone invited you with a referral code, you can enter it now.',
   newAccount: 'Your account is ready. Core can help you work with what you keep in Archive. What would you like to explore first?',
   returning: [
-    'The day is open. What would you like to do?',
-    'Good to see you. How can I help today?',
-    'Ready when you are. What should we work on?',
-    'Whenever you are ready. What comes first?',
-    'Quiet moment. What should we take on?',
+    'Good to see you. The topics below are things I can explain if you want to learn more about Vorinthex AI, or you can ask me anything.',
+    'Ready when you are. Pick a topic below to learn more about Vorinthex AI, or ask me anything.',
+    'The day is open. I can walk you through a topic below, or you can ask me anything.',
   ],
 };
 
@@ -75,8 +73,8 @@ function greetingMessages(context: AgentGreetingContext, instruction: string) {
 function prompt(state: AgentGreetingState, structured = true) {
   const format = structured ? ` Set guideMode to ${state === 'returning' ? 'explain' : 'recommend'}. Return only strict JSON matching the requested schema.` : ' Return only the greeting message as plain text, without JSON, quotes, or commentary.';
   if (state === 'referral-onboarding') return `${GREETING_CONTEXT_POLICY} Write Core's opening message immediately after account onboarding. In a neutral, concise tone, say the account is ready. Ask whether anyone invited the user with a referral code, and that they can enter it if they have one. Do not explain Spark rewards, friend payouts, or subscription bonuses. Ignore timeOfDay, hour, and month. userName may be used once if it reads naturally, and must be omitted when null. Use at most two sentences and 35 words. Do not mention any company or product name.${format} ${USER_VISIBLE_AI_PROSE_POLICY}`;
-  if (state === 'new-account') return `${GREETING_CONTEXT_POLICY} Write Core's brief opening message for a new account. Naturally introduce Core as the assistant and Archive as the place for the user's saved knowledge, including how Core can help them work with Archive. Ignore timeOfDay, hour, and month. userName may be used once if it reads naturally, and must be omitted when null. Do not mention referrals, invitations, codes, or any other product. End with a question about what to explore first. Use at most three concise sentences and 35 words.${format} ${USER_VISIBLE_AI_PROSE_POLICY}`;
-  return `${GREETING_CONTEXT_POLICY} Write a natural opening greeting from Core when the user opens the app. timeOfDay is the user's local time of day and hour is the local hour from 0 to 23. Use those values directly. Do not infer time from anything else, and never say good morning in the afternoon or evening. month may inform a light seasonal tone only when it clearly helps. Never announce the clock, timezone, weekday, country, or that context was used. userName may appear at most occasionally; prefer greetings that skip it, never use it when it is null, and do not default to leading with it. Vary the opening. Do not default to Welcome back. Be lightly creative and conversational while staying natural, like noticing an early hour without becoming cute or theatrical. Do not call the return wonderful, claim knowledge of recent activity, or mention any company or product name, including Vorinthex, Vorinthex AI, and Core. Ask what they would like to do. Use one or two concise sentences under 40 words.${format} ${USER_VISIBLE_AI_PROSE_POLICY}`;
+  if (state === 'new-account') return `${GREETING_CONTEXT_POLICY} Write Core's brief opening message for a new account. Naturally introduce Core as the assistant and Archive as the place for the user's saved knowledge, including how Core can help them work with Archive. Ignore timeOfDay, hour, and month. userName may be used if it reads naturally, and must be omitted when null. Do not mention referrals, invitations, or codes. Keep the tone calm and neutral. Make clear that the short suggestions below are optional topics you can explain about Vorinthex AI, and that they can also just ask you anything. Do not ask how you can help today. Use at most three sentences and 50 words.${format} ${USER_VISIBLE_AI_PROSE_POLICY}`;
+  return `${GREETING_CONTEXT_POLICY} Write a calm, neutral opening greeting from Core when the user opens the app. timeOfDay is the user's local time of day and hour is the local hour from 0 to 23. Use those values directly only if a light time of day mention feels natural. Do not infer time from anything else, and never say good morning in the afternoon or evening. Never announce the clock, timezone, weekday, country, or that context was used. userName may be used if it reads naturally; omit it when null, and do not always lead with it. Do not default to Welcome back or How can I help today. Stay plain and conversational. Do not be cute, theatrical, or overly creative. Do not call the return wonderful or claim knowledge of recent activity. Make clear that the short suggestions below are optional topics you can explain about Vorinthex AI, and that they can also just ask you anything. Use two sentences under 50 words.${format} ${USER_VISIBLE_AI_PROSE_POLICY}`;
 }
 
 export type AgentGreetingExecutor = typeof executeAsk;
@@ -96,7 +94,7 @@ function fallbackGreeting(state: AgentGreetingState) {
 
 function greetingTemperature(state: AgentGreetingState, attempt = 0) {
   if (attempt > 0) return 0.2;
-  return state === 'returning' ? 0.9 : 0.6;
+  return state === 'returning' ? 0.5 : 0.4;
 }
 
 export async function streamAgentGreeting(teamKey: string, state: AgentGreetingState, context: AgentGreetingContext, onDelta: (text: string) => void | Promise<void>, options: ExecuteActionOptions = {}, stream: AgentGreetingStreamExecutor = streamAsk) {

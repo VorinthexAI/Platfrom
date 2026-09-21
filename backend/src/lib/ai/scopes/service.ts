@@ -332,7 +332,10 @@ export function createScopeService(dependencies: ScopeServiceDependencies = {}) 
         description: input.description ?? null,
         idempotencyKey: requestKey,
       });
-      await (dependencies.ensureInitialWorkspaceContent ?? initialWorkspaceContentService.ensure)(created.scope.key);
+      // Guide provisioning can depend on embeddings; it must not invalidate an already-created scope.
+      await (dependencies.ensureInitialWorkspaceContent ?? initialWorkspaceContentService.ensure)(created.scope.key).catch((error) => {
+        console.error('initial workspace content provisioning failed', { scopeKey: created.scope.key, error });
+      });
       return publicScope(created.scope, created.role, created.currentScopeKey);
     },
 

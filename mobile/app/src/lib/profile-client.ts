@@ -82,7 +82,7 @@ export function uploadProfileAvatar(rawFile: z.input<typeof avatarUploadSchema>)
 }
 
 export async function generateProfileBadge(teamKey: string, scopeKey: string, idempotencyKey: string) {
-  const response = await apiClient.post("/auth/me/profile/badge-candidates", { teamKey: z.string().min(1).parse(teamKey), scopeKey: z.string().min(1).parse(scopeKey) }, { headers: { "Idempotency-Key": z.string().min(1).max(200).parse(idempotencyKey) } });
+  const response = await apiClient.post("/auth/me/profile/badge-candidates", { teamKey: z.string().min(1).parse(teamKey), scopeKey: z.string().min(1).parse(scopeKey) }, { headers: { "Idempotency-Key": z.string().min(1).max(200).parse(idempotencyKey) }, timeout: 4 * 60_000 });
   return profileBadgeCandidateSchema.parse(responseData(response.data));
 }
 

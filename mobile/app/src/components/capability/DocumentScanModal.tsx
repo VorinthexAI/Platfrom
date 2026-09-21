@@ -30,25 +30,32 @@ function deleteCapturedFile(uri: string) {
 
 export function DocumentScanModal({ busy, error, onClose, onSubmit }: Props) {
   const [pages, setPages] = useState<DocumentScanPage[]>([]);
-  const [capturing, setCapturing] = useState(false);
+  const [pending, setPending] = useState(0);
   const [captureError, setCaptureError] = useState<string>();
   const pagesRef = useRef<DocumentScanPage[]>([]);
 
   const capture = async (picture: CameraCapturedPicture) => {
-    if (capturing || busy || pages.length >= MAX_DOCUMENT_SCAN_PAGES) return;
-    setCapturing(true);
+    if (busy || pagesRef.current.length >= MAX_DOCUMENT_SCAN_PAGES) return;
     setCaptureError(undefined);
+    const id = `${Date.now()}-${Math.random()}`;
+    setPending((count) => count + 1);
+    setPages((current) => {
+      const next = appendScanPage(current, { id, uri: picture.uri, sizeBytes: Math.max(1, new File(picture.uri).size) });
+      pagesRef.current = next;
+      return next;
+    });
     try {
       const normalized = await normalizeCapturedPng(picture, { maxSide: 1800, compress: 0.76 });
       setPages((current) => {
-        const next = appendScanPage(current, { id: `${Date.now()}-${Math.random()}`, uri: normalized.uri, sizeBytes: normalized.sizeBytes });
+        const next = current.map((page) => page.id === id ? { ...page, uri: normalized.uri, sizeBytes: normalized.sizeBytes } : page);
         pagesRef.current = next;
         return next;
       });
+      if (picture.uri !== normalized.uri) deleteCapturedFile(picture.uri);
     } catch (cause) {
       setCaptureError(cause instanceof Error ? cause.message : "The page could not be captured.");
     } finally {
-      setCapturing(false);
+      setPending((count) => Math.max(0, count - 1));
     }
   };
 
@@ -77,12 +84,12 @@ export function DocumentScanModal({ busy, error, onClose, onSubmit }: Props) {
       {pages.map((page, index) => <View key={page.id} style={styles.page}>
         <Image contentFit="cover" source={page.uri} style={styles.preview} />
         <Text style={styles.pageLabel}>{index + 1}</Text>
-        <Button accessibilityLabel={`Remove page ${index + 1}`} contentMode="raw" disabled={busy || capturing} onPress={() => remove(page.id)} size="xs" style={styles.remove} variant="icon"><CloseIcon size="sm" /></Button>
+        <Button accessibilityLabel={`Remove page ${index + 1}`} contentMode="raw" disabled={busy} onPress={() => remove(page.id)} size="xs" style={styles.remove} variant="icon"><CloseIcon size="sm" /></Button>
       </View>)}
     </ScrollView>
   </View>;
 
-  return <BrandedCameraModal bottomContent={drawer} count={pages.length} countUnit="pages" disabled={busy || capturing} doneLoading={busy} externalError={error ?? captureError} hint="" maximum={MAX_DOCUMENT_SCAN_PAGES} onCapture={capture} onClose={onClose} onDone={() => onSubmit(pages)} title="Scan documents" />;
+  return <BrandedCameraModal bottomContent={drawer} count={pages.length} countUnit="pages" disabled={busy} doneLoading={busy || pending > 0} externalError={error ?? captureError} hint="" maximum={MAX_DOCUMENT_SCAN_PAGES} onCapture={capture} onClose={onClose} onDone={() => onSubmit(pages)} title="Scan documents" />;
 }
 
 const styles = StyleSheet.create({

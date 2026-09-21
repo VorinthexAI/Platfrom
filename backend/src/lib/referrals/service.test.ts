@@ -69,6 +69,24 @@ describe('referral service', () => {
     expect(published).toBe(false);
   });
 
+  test('publishes the referrer SSE invalidation after the first subscription reward', async () => {
+    const events: string[] = [];
+    const attribution = referralAttributionSchema.parse({ key: 'attribution', referralCodeKey: 'code', referrerUserKey: 'referrer', referredUserKey: 'referred', programVersion: 'v1', createdAt: at });
+    const reward = referralRewardSchema.parse({ key: 'paid-reward', attributionKey: attribution.key, referrerUserKey: attribution.referrerUserKey, referredUserKey: attribution.referredUserKey, milestone: 'first-paid', programVersion: attribution.programVersion, microSparks: 100_000_000, sparkTransactionKey: 'paid-transaction', qualifyingPaymentKey: 'payment-1', createdAt: at });
+    const repository = {
+      ensureCode: async () => { throw new Error('unused'); },
+      readSummary: async () => { throw new Error('unused'); },
+      readRedemptionStatus: async () => ({ attributed: false, referrerName: null, signupRewardIssued: false, firstPaidRewardStatus: null }),
+      completeVerifiedReferral: async () => { throw new Error('unused'); },
+      applyFirstPaidReward: async () => ({ status: 'applied' as const, attribution, reward }),
+      reverseFirstPaidReward: async () => ({ status: 'not-found' as const }),
+    } satisfies ReferralRepository;
+    const service = createReferralService({ repository, publishReward: async (userKey, event) => { events.push(`${userKey}:${event}`); } });
+
+    await expect(service.applyFirstPaidReward('referred', 'payment-1')).resolves.toMatchObject({ status: 'applied' });
+    expect(events).toEqual(['referrer:referral.reward.created']);
+  });
+
   test('redeems a normalized code and returns safe dynamic reward status', async () => {
     const attribution = referralAttributionSchema.parse({ key: 'attribution', referralCodeKey: 'code', referrerUserKey: 'referrer', referredUserKey: 'referred', programVersion: 'v1', createdAt: at });
     const reward = referralRewardSchema.parse({ key: 'reward', attributionKey: attribution.key, referrerUserKey: 'referrer', referredUserKey: 'referred', milestone: 'signup', programVersion: 'v1', microSparks: 50_000_000, sparkTransactionKey: 'transaction', createdAt: at });

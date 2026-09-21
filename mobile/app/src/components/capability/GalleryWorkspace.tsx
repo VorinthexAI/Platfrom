@@ -634,6 +634,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
 
   const handleGalleryEvent = useEffectEvent((event: Parameters<Parameters<typeof subscribeAppEvent>[0]>[0]) => {
     if (event.type === "inbox.changed" || event.type === "communication.changed" || event.type === "conversation.changed" || event.type === "content.changed") return;
+    if (event.type === "gallery.changed" && event.slug === "upload.changed" && unresolvedUploadJobs.current.size > 0) return;
     const plan = galleryRefreshPlan(event.type === "event-stream.connected" ? "reconnect" : event.slug);
     if (!busyRef.current && plan.has("cleanup") && (activeSheetRef.current === "cleanup" || activeSheetRef.current === "confirmCleanupDelete")) invalidateCleanupLoad();
     scheduleGalleryRefresh(plan);
@@ -1024,11 +1025,25 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
     settleUploadJobs(result.jobs, generation);
   }
 
+  async function mergeCompletedUploadImages(collectionKey: string, imageKeys: readonly string[]) {
+    const loaded = await Promise.all(imageKeys.map(async (imageKey) => {
+      const result = await queryClient.fetchQuery({
+        queryKey: galleryQueryKeys.image(galleryContext, collectionKey, imageKey),
+        queryFn: () => searchGalleryImages({ imageKey, collectionKey }),
+        staleTime: 0,
+      });
+      return result.images.find((image) => image.key === imageKey);
+    }));
+    const images: GalleryImage[] = loaded.flatMap((image) => image ? [image as GalleryImage] : []);
+    if (!images.length) return images;
+    const merge = (overview: GalleryOverview | undefined) => overview ? { ...overview, images: [...images, ...overview.images.filter((image) => !images.some(({ key }) => key === image.key))] } : overview;
+    queryClient.setQueryData<GalleryOverview>(galleryQueryKeys.overview(galleryContext, collectionKey), merge);
+    if (activeCollectionKey.current === collectionKey) setImages((current) => [...images, ...current.filter((image) => !images.some(({ key }) => key === image.key))]);
+    return images;
+  }
+
   async function completeUpload(files: PreparedGalleryUpload[], collectionKey: string, optimisticBatchKey?: string, generation = refreshContextGeneration.current) {
     const isCurrent = () => isCurrentContextGeneration(generation, refreshContextGeneration.current);
-    const uploadLocation = activeCollection?.key;
-    const uploadCollection = activeCollection?.key === collectionKey ? activeCollection : undefined;
-    const uploadView = uploadCollection ? "collection" : "root";
     const result = await uploadGalleryImages(files, collectionKey);
     if (!isCurrent()) {
       deletePreparedFiles(files);
@@ -1054,31 +1069,10 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
         setSelectedImage((current) => (current?.key === selected.clientKey && updated.imageKey ? { ...current, key: updated.imageKey } : current));
       }
     }
-    await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => {
-      if (isCurrent()) setStatus(errorMessage(error));
-    });
-    if (!isCurrent()) {
-      deletePreparedFiles(files);
-      return;
-    }
     void (async () => {
       const settledKeys = new Set<string>();
       const failedKeys = new Set<string>();
       let allSettled = false;
-      const refreshVisibleOverview = async () => {
-        if (!isCurrent()) return { attempted: false, overview: undefined };
-        if ((activeCollectionKey.current === uploadLocation && visibleGalleryView.current === uploadView) || (!activeCollectionKey.current && visibleGalleryView.current === "root")) {
-          const targetCount = uploadCollection ? images.length : images.length;
-          const overview = await replayOverviewWindow(uploadCollection?.key, targetCount, generation);
-          if (!overview || !isCurrent()) return { attempted: false, overview: undefined };
-          applyCollectionSingleton(overview.collections);
-          setCanCreateCollections(overview.canCreateCollections);
-          setImages(overview.images);
-          setNextCursor(overview.nextCursor);
-          return { attempted: true, overview };
-        }
-        return { attempted: false, overview: undefined };
-      };
       for (let attempt = 0; attempt < 40; attempt += 1) {
         await wait(3_000);
         if (!isCurrent()) {
@@ -1095,20 +1089,13 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
           const terminalJobs = current.jobs.filter(({ key, status: jobStatus }) => !settledKeys.has(key) && (jobStatus === "completed" || jobStatus === "failed"));
           if (terminalJobs.length > 0) {
             for (const job of terminalJobs) if (job.status === "failed") failedKeys.add(job.key);
-            await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+            const persistedImages = await mergeCompletedUploadImages(collectionKey, terminalJobs.filter(({ status }) => status === "completed").map(({ imageKey }) => imageKey));
             if (!isCurrent()) {
               deletePreparedFiles(files);
               return;
             }
-            const refresh = await refreshVisibleOverview();
             if (optimisticBatchKey) {
-              const visibleOverview: GalleryOverview | undefined = refresh.overview && typeof refresh.overview !== "boolean" ? refresh.overview : undefined;
-              const targetOverview: GalleryOverview | undefined = uploadCollection && visibleOverview ? visibleOverview : await replayOverviewWindow(collectionKey, queryClient.getQueryData<GalleryOverview>(galleryQueryKeys.overview(galleryContext, collectionKey))?.images.length ?? files.length, generation).catch(() => undefined);
-              if (!isCurrent()) {
-                deletePreparedFiles(files);
-                return;
-              }
-              const persistedByKey = new Map(targetOverview?.images.map((image) => [image.key, image]));
+              const persistedByKey = new Map(persistedImages.map((image) => [image.key, image]));
               const persistedJobs = terminalJobs.filter(({ imageKey, status: jobStatus }) => jobStatus === "failed" || (jobStatus === "completed" && persistedByKey.has(imageKey)));
               const prefetchResults = await Promise.allSettled(
                 persistedJobs.map(({ imageKey, status: jobStatus }) => {
@@ -1139,14 +1126,10 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
           if (allSettled) break;
         } catch {}
       }
-      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) }).catch((error: unknown) => {
-        if (isCurrent()) setStatus(errorMessage(error));
-      });
       if (!isCurrent()) {
         deletePreparedFiles(files);
         return;
       }
-      await refreshVisibleOverview();
       if (isCurrent()) await loadSubjects(true);
       if (failedKeys.size > 0) notify(failedKeys.size === uploadKeys.length ? "Upload failed" : "Some uploads failed");
     })().catch(() => undefined);
@@ -1356,14 +1339,14 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
       const collection = await createGalleryCollection(name, false);
       if (!isCurrent()) return;
       updateCollectionSingleton((current) => current.map((item) => (item.key === optimisticKey ? collection : item)));
-      setActiveCollection((current) => (current?.key === optimisticKey ? collection : current));
+      showCollection(collection);
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext), refetchType: "none" });
       if (hasUpload) {
         const uploadStarted = await uploadTo(collection.key, false, collection);
         notify(uploadStarted ? "Collection created" : "Upload failed; collection created");
       } else {
         notify("Collection created");
-        void load(undefined, true);
+        void load(collection, true);
       }
     } catch (error) {
       if (isCurrent()) {
@@ -3465,11 +3448,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
       <ResourceTagsSheet context={contentContext} onApply={() => { setSelectedImageKeys([]); setSelectedCollectionKeys([]); }} onClose={() => setResourceTagsOpen(false)} open={resourceTagsOpen} targets={resourceTagTargets} />
 
       <BottomSheet
-        footer={
-          <Button onPress={similarBehindImage ? goBackSheet : closeSheet} size="md" variant="secondary">
-            Close
-          </Button>
-        }
+        footer={<Button onPress={similarBehindImage ? goBackSheet : closeSheet} size="md" variant="secondary">Close</Button>}
         height="full"
         onOpenChange={(open) => {
           if (!open && (activeSheetRef.current === "image" || activeSheetRef.current === "imageActions" || activeSheetRef.current === "imageAdvanced")) {
@@ -3479,7 +3458,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
         }}
         onSwipeLeft={collectionViewerImages.length > 1 ? () => focusCollectionImage(1) : undefined}
         onSwipeRight={collectionViewerImages.length > 1 ? () => focusCollectionImage(-1) : undefined}
-        open={sheetOpen && (activeSheet === "image" || activeSheet === "imageActions" || activeSheet === "imageAdvanced") && Boolean(selectedImage || selectedOptimisticItem)}
+        open={sheetOpen && (activeSheet === "image" || activeSheet === "imageActions" || activeSheet === "imageAdvanced" || activeSheet === "confirmDeleteImage") && Boolean(selectedImage || selectedOptimisticItem)}
         pageKey={imageSheetPageKey ?? selectedOptimisticItem?.clientKey ?? selectedImage?.key}
         title={selectedImage?.filename ?? selectedOptimisticItem?.filename ?? "Image"}
       >

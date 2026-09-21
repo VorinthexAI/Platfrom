@@ -3,7 +3,7 @@ data "aws_iam_role" "backend_deploy" {
 }
 
 resource "aws_iam_role_policy" "backend_deploy_system_assets" {
-  name = "vorinthex-backend-deploy-system-assets"
+  name = var.backend_deploy_system_assets_policy_name
   role = data.aws_iam_role.backend_deploy.id
 
   policy = jsonencode({

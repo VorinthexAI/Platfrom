@@ -146,7 +146,7 @@ export const appSearchCapability: AssistantCapability<typeof appSearchModelInput
 
 appSearchCapability.definition.description = appSearchCapability.definition.description.replace(
   'Set limit to the requested quantity: grammatical singular or one/single in the user\'s language means 1, an explicit number means that number up to 50, and an unspecified plural uses the default.',
-  'Always set limit to the requested quantity: grammatical singular or one/single in the user\'s language means 1, an explicit number means that number up to 50, and an unspecified plural requires a reasonable bounded limit, usually 10.',
+  'Always set limit to the requested quantity: use 1 when the intended answer target is one resource, even if incidental plural grammar or a typo names the resource; use an explicit number up to 50; use a reasonable bounded limit, usually 10, only when the user intends multiple results.',
 );
 appSearchCapability.definition.description += ` For an account-wide total, omit collectionSlugs and use operation sum with scope account; this is distinct from current-scope resource sums. Account-wide summable fields: ${describeAppSearchAccountAggregates()}.`;
 

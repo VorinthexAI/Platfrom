@@ -1,6 +1,5 @@
 import { Button } from "@vorinthex/shared/ui/button";
-import { BellIcon, CameraIcon } from "@vorinthex/shared/ui/icons-mobile";
-import * as ImagePicker from "expo-image-picker";
+import { BellIcon } from "@vorinthex/shared/ui/icons-mobile";
 import * as Notifications from "expo-notifications";
 import { useEffect, useEffectEvent, useState } from "react";
 import { AppState, Linking, Platform, StyleSheet, Text } from "react-native";
@@ -10,27 +9,22 @@ import { recordOnboardingEvent } from "@/lib/onboarding-events";
 import { fonts, palette } from "@/theme/tokens";
 import { syncPushSubscription } from "@/lib/push-notifications";
 
-type PermissionStep = "notifications" | "camera";
+type PermissionStep = "notifications";
 type Recovery = "request" | "settings";
 
-const STEPS: readonly PermissionStep[] = ["camera", "notifications"];
+const STEPS: readonly PermissionStep[] = ["notifications"];
 const PRESENTATION = {
   notifications: { title: "Allow notifications", description: "Stay up to date with updates and never miss anything.", Icon: BellIcon },
-  camera: { title: "Allow camera", description: "Use your camera to scan documents and capture images directly in Vorinthex.", Icon: CameraIcon },
 } as const;
 
-function settingsInstructions(step: PermissionStep) {
-  if (step === "notifications") return Platform.OS === "ios"
+function settingsInstructions() {
+  return Platform.OS === "ios"
     ? "Open Settings, choose Notifications, then turn on Allow Notifications. Return here when finished."
     : "Open App settings, choose Notifications, then turn on Allow notifications. Return here when finished.";
-  return Platform.OS === "ios"
-    ? "Open Settings, choose Camera, then turn on camera access. Return here when finished."
-    : "Open App settings, choose Permissions, then allow Camera access. Return here when finished.";
 }
 
-async function accessIsEnabled(step: PermissionStep) {
-  if (step === "notifications") return (await Notifications.getPermissionsAsync()).granted;
-  return (await ImagePicker.getCameraPermissionsAsync()).granted;
+async function accessIsEnabled() {
+  return (await Notifications.getPermissionsAsync()).granted;
 }
 
 export function OnboardingPermissions({ onFinished }: { onFinished: () => void }) {
@@ -38,7 +32,7 @@ export function OnboardingPermissions({ onFinished }: { onFinished: () => void }
   const [recovery, setRecovery] = useState<Recovery>("request");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const step = STEPS[index] ?? "camera";
+  const step = STEPS[index] ?? "notifications";
   const presentation = PRESENTATION[step];
   const StepIcon = presentation.Icon;
   const advanceAfterSettings = useEffectEvent(() => next());
@@ -49,7 +43,7 @@ export function OnboardingPermissions({ onFinished }: { onFinished: () => void }
     if (recovery !== "settings") return;
     const subscription = AppState.addEventListener("change", (state) => {
       if (state !== "active") return;
-      void accessIsEnabled(step).then((enabled) => { if (enabled) advanceAfterSettings(); }).catch(() => undefined);
+      void accessIsEnabled().then((enabled) => { if (enabled) advanceAfterSettings(); }).catch(() => undefined);
     });
     return () => subscription.remove();
   }, [recovery, step]);
@@ -81,18 +75,12 @@ export function OnboardingPermissions({ onFinished }: { onFinished: () => void }
           next();
         } else {
           setRecovery(permission.canAskAgain ? "request" : "settings");
-          setError(permission.canAskAgain ? "Notifications were not enabled. Tap Allow to try again, or use the close button to continue without them." : settingsInstructions("notifications"));
+          setError(permission.canAskAgain ? "Notifications were not enabled. Tap Allow to try again, or use the close button to continue without them." : settingsInstructions());
         }
         return;
       }
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
-      if (permission.granted) next();
-      else {
-        setRecovery(permission.canAskAgain ? "request" : "settings");
-        setError(permission.canAskAgain ? "Camera access was not enabled. Tap Allow to try again, or use the close button to continue." : settingsInstructions("camera"));
-      }
     } catch {
-      setError(settingsInstructions(step));
+      setError(settingsInstructions());
       setRecovery("settings");
     } finally {
       setBusy(false);

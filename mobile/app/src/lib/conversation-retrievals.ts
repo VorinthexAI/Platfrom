@@ -1,4 +1,3 @@
-import type { AppSearchOutput } from "./app-search-client";
 import type { ConversationRetrieval, ConversationRetrievalCollectionSlug } from "./conversation-client";
 
 export type ConversationRetrievalResult = {
@@ -53,30 +52,4 @@ export function formatConversationRetrievalSummary(results: readonly Conversatio
   if (!parts.length) return "";
   if (parts.length === 1) return `Found ${parts[0]}`;
   return `Found ${parts.slice(0, -1).join(", ")} & ${parts.at(-1)}`;
-}
-
-export function appSearchResultIdentity(collectionSlug: ConversationRetrievalCollectionSlug, result: unknown) {
-  if (!result || typeof result !== "object") return undefined;
-  const field = collectionSlug === "countries" ? "countryCode" : "key";
-  const identity = (result as Record<string, unknown>)[field];
-  return typeof identity === "string" && identity ? identity : undefined;
-}
-
-export function validConversationRetrievalIdentities(retrieval: ConversationRetrieval, output: AppSearchOutput) {
-  if (output.retrieval) {
-    const current = new Set(mergeConversationRetrievalResults([output.retrieval]).map((result) => `${result.collectionSlug}:${result.key}`));
-    return new Set(mergeConversationRetrievalResults([retrieval]).filter((result) => current.has(`${result.collectionSlug}:${result.key}`)).map((result) => `${result.collectionSlug}:${result.key}`));
-  }
-  const valid = new Set<string>();
-  for (const group of output.groups) {
-    for (const result of group.results) {
-      const identity = appSearchResultIdentity(group.collectionSlug, result);
-      if (identity) valid.add(`${group.collectionSlug}:${identity}`);
-    }
-  }
-  return new Set(mergeConversationRetrievalResults([retrieval]).filter((result) => valid.has(`${result.collectionSlug}:${result.key}`)).map((result) => `${result.collectionSlug}:${result.key}`));
-}
-
-export function filterConversationRetrievalResults(results: readonly ConversationRetrievalResult[], validations: ReadonlyMap<ConversationRetrieval, ReadonlySet<string>>) {
-  return results.filter((result) => validations.get(result.retrieval)?.has(`${result.collectionSlug}:${result.key}`) ?? true);
 }

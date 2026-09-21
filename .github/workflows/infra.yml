@@ -69,9 +69,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AWS_REGION: eu-north-1
-  TF_WORKING_DIR: terraform/environments/production
-  TF_VAR_aws_region: eu-north-1
+  AWS_REGION: us-east-1
+  TF_WORKING_DIR: terraform/environments/us-east-1
+  TF_VAR_aws_region: us-east-1
 
 jobs:
   terraform:
@@ -151,7 +151,7 @@ jobs:
         run: |
           terraform init \
             -backend-config="bucket=${{ env.TF_STATE_BUCKET }}" \
-            -backend-config="key=vorinthex/production/terraform.tfstate" \
+            -backend-config="key=vorinthex/us-east-1/terraform.tfstate" \
             -backend-config="region=${{ env.TF_STATE_REGION }}" \
             -backend-config="use_lockfile=true"
 
@@ -222,6 +222,7 @@ jobs:
             echo "CLOUDFLARE_SSL_MODE=$(v CLOUDFLARE_SSL_MODE)"
             echo "CLOUDFLARE_DNS_TARGET=$(v CLOUDFLARE_DNS_TARGET)"
             echo "DNS_APEX=$(v DNS_APEX)"
+            echo "CLOUDFLARE_API_TOKEN=$(jq -r '.secrets.prod.cloudflare.CLOUDFLARE_API_TOKEN // empty' .github/environments.json)"
           } >> "$GITHUB_ENV"
 
       - name: Check Cloudflare credentials
@@ -229,7 +230,7 @@ jobs:
         # secrets are not available in job-level `if`, so gate here and skip
         # gracefully (without failing the workflow) when unset.
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ env.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ZONE_ID: ${{ env.CLOUDFLARE_ZONE_ID }}
         run: |
           if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ZONE_ID" ]; then
@@ -252,7 +253,7 @@ jobs:
         # (HTTP-to-origin) zone would redirect-loop. Override with the CLOUDFLARE_SSL_MODE var in .github/environments.json.
         if: ${{ steps.check.outputs.skip != 'true' && !inputs.dns_dry_run }}
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ env.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ZONE_ID: ${{ env.CLOUDFLARE_ZONE_ID }}
           SSL_MODE: ${{ env.CLOUDFLARE_SSL_MODE }}
         run: |
@@ -263,7 +264,7 @@ jobs:
       - name: Sync Cloudflare DNS
         if: steps.check.outputs.skip != 'true'
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ env.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ZONE_ID: ${{ env.CLOUDFLARE_ZONE_ID }}
           CLOUDFLARE_DNS_TARGET: ${{ env.CLOUDFLARE_DNS_TARGET }}
           DNS_APEX: ${{ env.DNS_APEX }}

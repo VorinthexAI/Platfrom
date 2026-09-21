@@ -69,6 +69,11 @@ describe('profile badge service', () => {
     expect(redisDeletes).toHaveLength(2);
   });
 
+  test('returns a safe unavailable error when the image provider fails', async () => {
+    const service = createProfileBadgeService({ execute: async () => { throw new Error('provider credits exhausted'); } });
+    await expect(service.generate({}, context, 'request-1')).rejects.toThrow('Profile badge generation is temporarily unavailable. Please try again later.');
+  });
+
   test('returns the reserved candidate without another provider call when a paid request replays', async () => {
     const png = await sharp({ create: { width: 8, height: 8, channels: 4, background: '#030507' } }).png().toBuffer();
     const values = new Map<string, string>();

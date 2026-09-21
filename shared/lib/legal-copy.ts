@@ -10,7 +10,7 @@ export interface VaultCopy {
   email?: string;
 }
 
-export const LEGAL_EFFECTIVE_DATE = "Effective 16 Sept 2026";
+export const LEGAL_EFFECTIVE_DATE = "Effective 20 Sept 2026";
 
 export const PRIVACY_COPY: VaultCopy = {
   title: "Privacy Policy",
@@ -68,7 +68,8 @@ export const PRIVACY_COPY: VaultCopy = {
     {
       title: "Security and international processing",
       paragraphs: [
-        "We use administrative, technical, and organizational safeguards designed to protect personal data. No system is completely secure, so we cannot guarantee absolute security. Vorinthex AI and its service providers may process data in countries other than your own, with safeguards used where required by applicable law.",
+        "Vorinthex AI hosts and processes personal data in the United States. If you access the services from outside the United States, your personal data may be transferred to, stored in, and processed in the United States and other countries where Vorinthex AI or its service providers operate. Those countries may have data-protection laws different from those in your country.",
+        "We use administrative, technical, and organizational safeguards designed to protect personal data, including safeguards for international transfers where required by applicable law. No system is completely secure, so we cannot guarantee absolute security.",
       ],
     },
     {
@@ -93,6 +94,7 @@ export const TERMS_COPY: VaultCopy = {
   eyebrow: LEGAL_EFFECTIVE_DATE,
   paragraphs: [
     "These terms govern your use of the Vorinthex AI website, apps, and services.",
+    "Our Privacy Policy explains that Vorinthex AI hosts and processes personal data in the United States and describes international transfers that may occur when you use the services.",
     "Additional or updated terms may apply to specific Vorinthex apps, services, or AI-assisted features. When using an AI-assisted feature, you remain responsible for reviewing outputs before relying on them for important decisions.",
     "The Vorinthex AI name, marks, visual identity, software, and original content are the property of Vorinthex AI or its licensors.",
   ],

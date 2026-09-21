@@ -29,36 +29,37 @@ function deleteCapturedFile(uri: string) {
 
 export function GalleryCaptureModal({ onClose, onSubmit }: Props) {
   const [files, setFiles] = useState<PreparedGalleryUpload[]>([]);
-  const [capturing, setCapturing] = useState(false);
+  const [pending, setPending] = useState(0);
   const [error, setError] = useState<string>();
   const filesRef = useRef<PreparedGalleryUpload[]>([]);
   const submitted = useRef(false);
   const active = useRef(true);
 
   const capture = async (picture: CameraCapturedPicture) => {
-    if (capturing || files.length >= MAX_GALLERY_CAPTURES) return;
-    setCapturing(true);
+    if (filesRef.current.length >= MAX_GALLERY_CAPTURES) return;
     setError(undefined);
+    const timestamp = Date.now();
+    const clientKey = `${timestamp}-${Math.random().toString(36).slice(2)}`;
+    const preview: PreparedGalleryUpload = { clientKey, filename: `gallery-${timestamp}.png`, uri: picture.uri, sizeBytes: Math.max(1, new File(picture.uri).size) };
+    setPending((count) => count + 1);
+    setFiles((current) => {
+      const next = [...current, preview].slice(0, MAX_GALLERY_CAPTURES);
+      filesRef.current = next;
+      return next;
+    });
     try {
       const normalized = await normalizeCapturedPng(picture, { maxSide: 2400, compress: 0.88 });
       if (!active.current) { deleteCapturedFile(normalized.uri); return; }
-      const timestamp = Date.now();
-      const file: PreparedGalleryUpload = {
-        clientKey: `${timestamp}-${Math.random().toString(36).slice(2)}`,
-        filename: `gallery-${timestamp}.png`,
-        uri: normalized.uri,
-        sizeBytes: normalized.sizeBytes,
-        ...(normalized.latitude !== undefined && normalized.longitude !== undefined ? { latitude: normalized.latitude, longitude: normalized.longitude } : {}),
-      };
       setFiles((current) => {
-        const next = [...current, file].slice(0, MAX_GALLERY_CAPTURES);
+        const next = current.map((file) => file.clientKey === clientKey ? { ...file, uri: normalized.uri, sizeBytes: normalized.sizeBytes, ...(normalized.latitude !== undefined && normalized.longitude !== undefined ? { latitude: normalized.latitude, longitude: normalized.longitude } : {}) } : file);
         filesRef.current = next;
         return next;
       });
+      if (preview.uri !== normalized.uri) deleteCapturedFile(preview.uri);
     } catch (cause) {
       if (active.current) setError(cause instanceof Error ? cause.message : "The image could not be captured.");
     } finally {
-      if (active.current) setCapturing(false);
+      if (active.current) setPending((count) => Math.max(0, count - 1));
     }
   };
 
@@ -92,12 +93,12 @@ export function GalleryCaptureModal({ onClose, onSubmit }: Props) {
       {files.map((file, index) => <View key={file.clientKey} style={styles.item}>
         <Image contentFit="cover" source={file.uri} style={styles.preview} />
         <Text style={styles.itemLabel}>{index + 1}</Text>
-        <Button accessibilityLabel={`Remove image ${index + 1}`} contentMode="raw" disabled={capturing} onPress={() => remove(file.clientKey)} size="xs" style={styles.remove} variant="icon"><CloseIcon size="sm" /></Button>
+        <Button accessibilityLabel={`Remove image ${index + 1}`} contentMode="raw" onPress={() => remove(file.clientKey)} size="xs" style={styles.remove} variant="icon"><CloseIcon size="sm" /></Button>
       </View>)}
     </ScrollView>
   </View>;
 
-  return <BrandedCameraModal bottomContent={drawer} count={files.length} countUnit="images" disabled={capturing} externalError={error} hint="" maximum={MAX_GALLERY_CAPTURES} onCapture={capture} onClose={onClose} onDone={submit} title="Capture for Gallery" />;
+  return <BrandedCameraModal bottomContent={drawer} count={files.length} countUnit="images" doneLoading={pending > 0} externalError={error} hint="" maximum={MAX_GALLERY_CAPTURES} onCapture={capture} onClose={onClose} onDone={submit} title="Capture for Gallery" />;
 }
 
 const styles = StyleSheet.create({
