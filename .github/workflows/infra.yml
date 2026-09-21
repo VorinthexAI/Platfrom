@@ -112,7 +112,7 @@ jobs:
           {
             echo "AWS_INFRA_ROLE_ARN=$(v AWS_INFRA_ROLE_ARN)"
             echo "TF_STATE_BUCKET=$(v TF_STATE_BUCKET)"
-            echo "TF_STATE_REGION=$(pick '' TF_STATE_REGION "$AWS_REGION")"
+            echo "TF_STATE_REGION=$(pick '' TF_STATE_REGION eu-north-1)"
             echo "TF_VAR_instance_type=$(pick "$IN_INSTANCE_TYPE" PROD_INSTANCE_TYPE t3.small)"
             echo "TF_VAR_graph_db_instance_type=$(pick "$IN_GRAPH_DB_INSTANCE_TYPE" PROD_GRAPH_DB_INSTANCE_TYPE t3.small)"
             echo "TF_VAR_graph_db_volume_size=$(pick "$IN_GRAPH_DB_VOLUME_SIZE" PROD_GRAPH_DB_VOLUME_SIZE 30)"
