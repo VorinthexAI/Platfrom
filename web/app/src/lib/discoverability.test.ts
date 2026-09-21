@@ -4,6 +4,7 @@ import manifest from "@/app/manifest";
 import sitemap from "@/app/sitemap";
 import {
   CANONICAL_ORIGIN,
+  CONTENT_LAST_REVIEWED,
   PRICING_HERO_BODY,
   PRICING_HERO_HEADING,
   PRODUCT_FACTS,
@@ -11,7 +12,7 @@ import {
   canonicalUrl,
 } from "@/lib/discoverability";
 import { buildLlmsFullText, buildLlmsText } from "@/lib/llms";
-import { PRIVACY_COPY, TERMS_COPY } from "@/lib/legal-copy";
+import { LEGAL_EFFECTIVE_DATE, PRIVACY_COPY, TERMS_COPY } from "@/lib/legal-copy";
 import { buildRobotsMetadata, buildRouteMetadata } from "@/lib/metadata";
 import {
   NEWCOMER_FREE_SPARKS,
@@ -59,7 +60,7 @@ describe("public discoverability registry", () => {
     expect(sitemap().map(({ url }) => url).sort()).toEqual(
       PUBLIC_ROUTES.map(({ path }) => canonicalUrl(path)).sort(),
     );
-    expect(sitemap().every(({ lastModified }) => lastModified === "2026-09-12")).toBe(
+    expect(sitemap().every(({ lastModified }) => lastModified === CONTENT_LAST_REVIEWED)).toBe(
       true,
     );
   });
@@ -150,7 +151,7 @@ describe("generated answer-engine content", () => {
     for (const output of outputs) {
       expect(output).toContain("# Vorinthex AI");
       expect(output).toContain("> ");
-      expect(output).toContain("Last reviewed: 2026-09-12");
+      expect(output).toContain(`Last reviewed: ${CONTENT_LAST_REVIEWED}`);
       expect(output).toContain("personal AI");
       expect(output).toContain(PRICING_HERO_HEADING);
       expect(output).toContain(PRICING_HERO_BODY);
@@ -200,7 +201,7 @@ describe("legal policy copy", () => {
 
     for (const copy of [terms, privacy]) {
       expect(copy).not.toMatch(/Effective September 4/i);
-      expect(copy).toContain("Effective 16 Sept 2026");
+      expect(copy).toContain(LEGAL_EFFECTIVE_DATE);
       expect(copy).toContain("prepaid Sparks");
       expect(copy).toContain("no debt or grace-period backcharges accrue");
       expect(copy).toContain("uploads can continue");
