@@ -1,6 +1,5 @@
 import type { Context, MiddlewareHandler } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
-import { rateLimiter } from 'hono-rate-limiter';
 import { z } from 'zod';
 import { referralCodeTransportSchema } from './auth-referral-code';
 import { timingSafeEqual } from '@/lib/crypto';
@@ -77,11 +76,6 @@ export const bindEventApp = createBindEventApp();
 export function isPublicFounderAuthPath(path: string) {
   return PUBLIC_AUTH_PATHS.has(path.replace(/\/$/, ''))
     || /^\/api\/v1\/auth\/mobile\/oauth\/(google|apple)(?:\/callback)?$/.test(path.replace(/\/$/, ''));
-}
-
-function getClientIp(c: Parameters<MiddlewareHandler>[0]) {
-  const forwarded = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
-  return forwarded || c.req.header('cf-connecting-ip') || c.req.header('x-real-ip') || 'unknown';
 }
 
 function getRequestApiKey(c: Parameters<MiddlewareHandler>[0]) {
@@ -224,8 +218,7 @@ export const requireEnvApiKey: MiddlewareHandler = async (c, next) => {
   if (isPublicProductPath(c.req.path, c.req.method)) return next();
   // Health checks are hit by Docker/Caddy probes that can't carry the API key.
   if (c.req.path === '/api/v1/health') return next();
-  // Guest bootstrap creates a revocable per-install session and is protected by
-  // the global IP rate limit rather than an extractable mobile secret.
+  // Guest bootstrap creates a revocable per-install session without an embedded API key.
   if (c.req.path.replace(/\/$/, '') === '/api/v1/auth/guest') return next();
   // OAuth providers redirect here directly and cannot attach application headers.
   if (/^\/api\/v1\/auth\/mobile\/oauth\/(google|apple)\/callback\/?$/.test(c.req.path)) return next();
@@ -334,28 +327,3 @@ export function createAutoRefreshAuthTokens(dependencies: AutoRefreshDependencie
 }
 
 export const autoRefreshAuthTokens = createAutoRefreshAuthTokens();
-
-function positiveInteger(value: string | undefined, fallback: number, name: string) {
-  const normalized = value?.trim();
-  if (!normalized) return fallback;
-  const parsed = Number(normalized);
-  if (!Number.isInteger(parsed) || parsed < 1) throw new Error(`${name} must be a positive integer`);
-  return parsed;
-}
-
-const rateLimitResponse = { error: 'rate limit exceeded' };
-
-export function createIpRateLimit(options: { enabled?: boolean; limit?: number; windowMs?: number } = {}): MiddlewareHandler {
-  const enabled = options.enabled ?? process.env.RATE_LIMIT_ENABLED === 'true';
-  const limit = options.limit ?? positiveInteger(process.env.RATE_LIMIT_REQ_PER_MIN, 200, 'RATE_LIMIT_REQ_PER_MIN');
-  const windowMs = options.windowMs ?? 60_000;
-  return rateLimiter({
-    windowMs,
-    limit,
-    keyGenerator: getClientIp,
-    skip: () => !enabled,
-    message: rateLimitResponse,
-  });
-}
-
-export const ipRateLimit = createIpRateLimit();

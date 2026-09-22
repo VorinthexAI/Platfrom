@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { websocket } from 'hono/bun';
 import { errorHandler } from './errors';
-import { autoRefreshAuthTokens, bindDevice, bindEventApp, bindEventIdentifier, ipRateLimit, requestLogger, requireEnvApiKey, validateQueryParams } from './middleware';
+import { autoRefreshAuthTokens, bindDevice, bindEventApp, bindEventIdentifier, requestLogger, requireEnvApiKey, validateQueryParams } from './middleware';
 import { EVENT_IDENTIFIER_HEADER } from '@/lib/ai/events/event-identifier';
 import { DEVICE_IDENTIFIER_HEADER } from '@/lib/ai/events/device';
 import { handleResendWebhook, RESEND_WEBHOOK_V1_PATH } from './resend';
@@ -58,12 +58,11 @@ app.use('*', cors({
     'webhook-timestamp',
     'webhook-signature',
   ],
-  exposeHeaders: ['WWW-Authenticate', 'X-Access-Token', 'X-Refresh-Token', 'X-Access-Token-Max-Age', 'X-Refresh-Token-Max-Age', 'RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset', 'RateLimit-Policy', 'Retry-After'],
+  exposeHeaders: ['WWW-Authenticate', 'X-Access-Token', 'X-Refresh-Token', 'X-Access-Token-Max-Age', 'X-Refresh-Token-Max-Age'],
 }));
 app.use('*', bindEventIdentifier);
 app.use('*', bindDevice);
 app.use('*', requestLogger);
-app.use('*', ipRateLimit);
 app.use('*', requireEnvApiKey);
 app.use('*', bindEventApp);
 app.use('*', autoRefreshAuthTokens);
