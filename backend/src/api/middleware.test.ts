@@ -4,7 +4,7 @@ import { FOUNDER_ACCESS_MAX_AGE_SECONDS, FOUNDER_REFRESH_MAX_AGE_SECONDS } from 
 import { isResendWebhookPath } from './resend';
 import { isGmailWebhookPath } from './email-webhook';
 import { isPolarWebhookPath } from './polar-webhook';
-import { bindDevice, bindEventIdentifier, createAutoRefreshAuthTokens, createBindEventApp, isOnboardingSandboxPath, isPublicFounderAuthPath, isPublicProductPath, rateLimitByIp, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
+import { bindDevice, bindEventIdentifier, createAutoRefreshAuthTokens, createBindEventApp, isOnboardingSandboxPath, isPublicFounderAuthPath, isPublicProductPath, priorityRateLimitPolicy, rateLimitByIp, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
 import { currentEventAppKey, currentEventAppScopeKey } from '@/lib/ai/events/runtime';
 import { APP_KEYS } from '@/lib/apps/registry';
 import { currentEventIdentifier } from '@/lib/ai/events/event-identifier';
@@ -168,6 +168,16 @@ describe('api middleware webhook exemptions', () => {
       if (previousRateLimitEnabled === undefined) delete process.env.RATE_LIMIT_ENABLED;
       else process.env.RATE_LIMIT_ENABLED = previousRateLimitEnabled;
     }
+  });
+});
+
+describe('priority API rate limits', () => {
+  test('isolates profile badge generation and Core greetings from the global bucket', () => {
+    expect(priorityRateLimitPolicy('/api/v1/auth/me/profile/badge-candidates', 'POST')).toEqual({ bucket: 'profile-badge', limit: 10, windowSeconds: 60 });
+    expect(priorityRateLimitPolicy('/api/v1/agent/greeting', 'POST')).toEqual({ bucket: 'agent-greeting', limit: 30, windowSeconds: 60 });
+    expect(priorityRateLimitPolicy('/api/v1/agent/greeting/topics/', 'POST')).toEqual({ bucket: 'agent-greeting', limit: 30, windowSeconds: 60 });
+    expect(priorityRateLimitPolicy('/api/v1/auth/me/profile/badge-candidates', 'GET')).toBeNull();
+    expect(priorityRateLimitPolicy('/api/v1/billing/summary', 'GET')).toBeNull();
   });
 });
 

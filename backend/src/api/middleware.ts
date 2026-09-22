@@ -335,6 +335,16 @@ export function createAutoRefreshAuthTokens(dependencies: AutoRefreshDependencie
 
 export const autoRefreshAuthTokens = createAutoRefreshAuthTokens();
 
+export function priorityRateLimitPolicy(path: string, method: string) {
+  if (method === 'POST' && /^\/api\/v1\/auth\/me\/profile\/badge-candidates\/?$/.test(path)) {
+    return { bucket: 'profile-badge', limit: 10, windowSeconds: 60 } as const;
+  }
+  if (method === 'POST' && /^\/api\/v1\/agent\/greeting(?:\/topics)?\/?$/.test(path)) {
+    return { bucket: 'agent-greeting', limit: 30, windowSeconds: 60 } as const;
+  }
+  return null;
+}
+
 export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
   // Provider webhook retries burst from a small IP pool; rate-limiting them
   // would drop or delay deliveries. The endpoint is protected by signatures.
@@ -344,17 +354,18 @@ export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
   const onboardingSandbox = isOnboardingSandboxPath(c.req.path, c.req.method);
   if (!authPath && !onboardingSandbox && process.env.RATE_LIMIT_ENABLED !== 'true') return next();
   const handoffRead = /^\/api\/v1\/auth\/handoff\/(stream|status)\/?$/.test(c.req.path);
+  const priority = priorityRateLimitPolicy(c.req.path, c.req.method);
 
-  const limit = onboardingSandbox
+  const limit = priority?.limit ?? (onboardingSandbox
     ? 15
     : handoffRead
     ? 120
     : authPath
       ? 20
-    : Number(process.env.RATE_LIMIT_MAX_REQUESTS ?? process.env.RATE_LIMIT_REQ_PER_MIN ?? 60);
-  const windowSeconds = authPath || onboardingSandbox
+    : Number(process.env.RATE_LIMIT_MAX_REQUESTS ?? process.env.RATE_LIMIT_REQ_PER_MIN ?? 60));
+  const windowSeconds = priority?.windowSeconds ?? (authPath || onboardingSandbox
     ? 5 * 60
-    : Number(process.env.RATE_LIMIT_WINDOW_SECONDS ?? 60);
+    : Number(process.env.RATE_LIMIT_WINDOW_SECONDS ?? 60));
   if (!Number.isInteger(limit) || limit < 1) {
     return c.json({ error: 'RATE_LIMIT_MAX_REQUESTS must be a positive integer' }, 500);
   }
@@ -363,7 +374,7 @@ export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
   }
 
   const ip = getClientIp(c);
-  const bucket = onboardingSandbox ? 'onboarding-sandbox' : handoffRead ? 'auth-handoff-read' : authPath ? 'auth' : 'global';
+  const bucket = priority?.bucket ?? (onboardingSandbox ? 'onboarding-sandbox' : handoffRead ? 'auth-handoff-read' : authPath ? 'auth' : 'global');
   const key = `rate-limit:${bucket}:${ip}:${Math.floor(Date.now() / (windowSeconds * 1000))}`;
 
   try {

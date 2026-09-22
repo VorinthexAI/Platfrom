@@ -45,7 +45,7 @@ export function welcomeEmailInput(to: string): BrandedEmailInput {
     to,
     subject: 'Welcome to Vorinthex AI',
     preheader: 'Access your personal AI agent now.',
-    label: 'Vorinthex AI',
+    label: '',
     eyebrow: 'Welcome',
     headline: 'Welcome to Vorinthex AI.',
     bodyHtml: 'Access your personal AI agent now.',

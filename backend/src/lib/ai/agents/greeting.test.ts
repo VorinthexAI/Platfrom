@@ -36,6 +36,18 @@ describe('agent greeting generation', () => {
     expect(result).toEqual({ message: deltas.join(''), guideMode: 'explain' });
   });
 
+  test('streams the canonical new-account greeting without waiting for a provider', async () => {
+    const deltas: string[] = [];
+    const result = await streamAgentGreeting('team-1', 'new-account', greetingContext, (text) => { deltas.push(text); }, {}, async function* () {
+      throw new Error('provider must not be called');
+    });
+    expect(deltas).toEqual([result.message]);
+    expect(result).toEqual({
+      message: 'Your account is ready. Core can help you work with what you keep in Archive. What would you like to explore first?',
+      guideMode: 'recommend',
+    });
+  });
+
   test('asks new accounts whether anyone invited them with a referral code', async () => {
     await expect(generateAgentGreeting('team-1', 'referral-onboarding', greetingContext, {}, (async (_teamKey: string, input: CoreChatInput) => {
       expect(input.systemPrompt).toContain('anyone invited the user with a referral code');
