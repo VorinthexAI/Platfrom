@@ -4,7 +4,7 @@ import { FOUNDER_ACCESS_MAX_AGE_SECONDS, FOUNDER_REFRESH_MAX_AGE_SECONDS } from 
 import { isResendWebhookPath } from './resend';
 import { isGmailWebhookPath } from './email-webhook';
 import { isPolarWebhookPath } from './polar-webhook';
-import { bindDevice, bindEventIdentifier, createAuthenticatedRateLimit, createAutoRefreshAuthTokens, createBindEventApp, createPublicRateLimit, isOnboardingSandboxPath, isPublicFounderAuthPath, isPublicProductPath, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
+import { bindDevice, bindEventIdentifier, createIpRateLimit, createAutoRefreshAuthTokens, createBindEventApp, isPublicFounderAuthPath, isPublicProductPath, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
 import { currentEventAppKey, currentEventAppScopeKey } from '@/lib/ai/events/runtime';
 import { APP_KEYS } from '@/lib/apps/registry';
 import { currentEventIdentifier } from '@/lib/ai/events/event-identifier';
@@ -154,63 +154,42 @@ describe('api middleware webhook exemptions', () => {
     }
   });
 
-  test('does not rate limit provider webhooks', async () => {
-    const limiter = createAuthenticatedRateLimit({ enabled: true, limit: 1 });
-    let nextCalls = 0;
-    for (const path of ['/api/v1/webhooks/resend', '/api/v1/webhooks/gmail/pubsub']) await limiter(middlewareContext(path), async () => { nextCalls += 1; });
-    expect(nextCalls).toBe(2);
-  });
 });
 
 describe('rate limit middleware', () => {
-  test('applies public limits after the API key and authenticated limits after session resolution', async () => {
-    const source = await Bun.file(new URL('./index.ts', import.meta.url)).text();
-    expect(source.indexOf("app.use('*', requireEnvApiKey)")).toBeLessThan(source.indexOf("app.use('*', publicRateLimit)"));
-    expect(source.indexOf("app.use('*', autoRefreshAuthTokens)")).toBeLessThan(source.indexOf("app.use('*', authenticatedRateLimit)"));
-  });
-
-  test('keeps authenticated users in separate in-memory buckets', async () => {
+  test('uses one counter per IP regardless of user or route', async () => {
     const app = new Hono<{ Variables: { userId: string | undefined } }>();
     app.use('*', async (c, next) => { c.set('userId', c.req.header('x-test-user')); await next(); });
-    app.use('*', createAuthenticatedRateLimit({ enabled: true, limit: 1, windowMs: 60_000 }));
-    app.get('/api/v1/private', (c) => c.json({ ok: true }));
+    app.use('*', createIpRateLimit({ enabled: true, limit: 2, windowMs: 60_000 }));
+    app.all('*', (c) => c.json({ ok: true }));
 
     expect((await app.request('/api/v1/private', { headers: { 'x-test-user': 'user-1', 'x-forwarded-for': '203.0.113.1' } })).status).toBe(200);
-    expect((await app.request('/api/v1/private', { headers: { 'x-test-user': 'user-2', 'x-forwarded-for': '203.0.113.1' } })).status).toBe(200);
-    const limited = await app.request('/api/v1/private', { headers: { 'x-test-user': 'user-1', 'x-forwarded-for': '203.0.113.1' } });
+    expect((await app.request('/api/v1/auth/login', { method: 'POST', headers: { 'x-test-user': 'user-2', 'x-forwarded-for': '203.0.113.1' } })).status).toBe(200);
+    const limited = await app.request('/api/v1/onboarding/sandbox/sessions', { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.1' } });
     expect(limited.status).toBe(429);
     expect(await limited.json()).toEqual({ error: 'rate limit exceeded' });
-    expect(limited.headers.get('ratelimit-limit')).toBe('1');
+    expect(limited.headers.get('ratelimit-limit')).toBe('2');
     expect(Number(limited.headers.get('retry-after'))).toBeGreaterThan(0);
+    expect((await app.request('/api/v1/private', { headers: { 'x-test-user': 'user-1', 'x-forwarded-for': '203.0.113.2' } })).status).toBe(200);
+    expect((await app.request('/api/v1/webhooks/polar', { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.1' } })).status).toBe(429);
   });
 
   test('bypasses normal requests when disabled', async () => {
     const app = new Hono();
-    app.use('*', createAuthenticatedRateLimit({ enabled: false, limit: 1 }));
+    app.use('*', createIpRateLimit({ enabled: false, limit: 1 }));
     app.get('/api/v1/private', (c) => c.json({ ok: true }));
     expect((await app.request('/api/v1/private')).status).toBe(200);
     expect((await app.request('/api/v1/private')).status).toBe(200);
   });
 
-  test('limits public auth by IP without consuming the authenticated bucket', async () => {
+  test('resets an exhausted IP counter after its window', async () => {
     const app = new Hono();
-    app.use('*', createPublicRateLimit({ windowMs: 60_000 }));
-    app.use('*', createAuthenticatedRateLimit({ enabled: true, limit: 1, windowMs: 60_000 }));
-    app.post('/api/v1/auth/login', (c) => c.json({ ok: true }));
+    app.use('*', createIpRateLimit({ enabled: true, limit: 1, windowMs: 100 }));
     app.get('/api/v1/private', (c) => c.json({ ok: true }));
-
-    for (let request = 0; request < 20; request += 1) expect((await app.request('/api/v1/auth/login', { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.2' } })).status).toBe(200);
-    expect((await app.request('/api/v1/auth/login', { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.2' } })).status).toBe(429);
-    expect((await app.request('/api/v1/private', { headers: { 'x-forwarded-for': '203.0.113.2' } })).status).toBe(200);
-  });
-});
-
-describe('onboarding sandbox middleware', () => {
-  test('recognizes only the two exact POST endpoints', () => {
-    expect(isOnboardingSandboxPath('/api/v1/onboarding/sandbox/sessions', 'POST')).toBe(true);
-    expect(isOnboardingSandboxPath('/api/v1/onboarding/sandbox/answers/', 'POST')).toBe(true);
-    expect(isOnboardingSandboxPath('/api/v1/onboarding/sandbox/sessions', 'GET')).toBe(false);
-    expect(isOnboardingSandboxPath('/api/v1/onboarding/sandbox/other', 'POST')).toBe(false);
+    expect((await app.request('/api/v1/private')).status).toBe(200);
+    expect((await app.request('/api/v1/private')).status).toBe(429);
+    await Bun.sleep(150);
+    expect((await app.request('/api/v1/private')).status).toBe(200);
   });
 });
 
