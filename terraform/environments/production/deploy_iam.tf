@@ -39,8 +39,8 @@ resource "aws_iam_role_policy" "backend_deploy_system_assets" {
         Resource = ["*"]
       },
       {
-        Effect = "Allow"
-        Action = ["ec2:AuthorizeSecurityGroupIngress", "ec2:RevokeSecurityGroupIngress"]
+        Effect   = "Allow"
+        Action   = ["ec2:AuthorizeSecurityGroupIngress", "ec2:RevokeSecurityGroupIngress"]
         Resource = ["*"]
       },
       {
