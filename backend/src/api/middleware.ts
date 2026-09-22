@@ -56,7 +56,6 @@ const PUBLIC_AUTH_PATHS = new Set([
 ]);
 const isProviderWebhookPath = (path: string) => isResendWebhookPath(path) || isGmailWebhookPath(path) || isPolarWebhookPath(path);
 export const isPublicProductPath = (path: string, method = 'GET') => method === 'GET' && ['/api/v1/products', '/api/v1/costs'].includes(path.replace(/\/+$/, ''));
-export const isOnboardingSandboxPath = (path: string, method = 'GET') => method === 'POST' && /^\/api\/v1\/onboarding\/sandbox\/(sessions|answers)\/?$/.test(path);
 
 export function createBindEventApp(resolveApp: (appKey: string) => Promise<{ aliasKey: string; scopeKey: string }> = (appKey) => appsService.resolveAlias(appKey)): MiddlewareHandler {
   return async (c, next) => {
@@ -226,7 +225,7 @@ export const requireEnvApiKey: MiddlewareHandler = async (c, next) => {
   // Health checks are hit by Docker/Caddy probes that can't carry the API key.
   if (c.req.path === '/api/v1/health') return next();
   // Guest bootstrap creates a revocable per-install session and is protected by
-  // the public-auth Redis rate limit rather than an extractable mobile secret.
+  // the global IP rate limit rather than an extractable mobile secret.
   if (c.req.path.replace(/\/$/, '') === '/api/v1/auth/guest') return next();
   // OAuth providers redirect here directly and cannot attach application headers.
   if (/^\/api\/v1\/auth\/mobile\/oauth\/(google|apple)\/callback\/?$/.test(c.req.path)) return next();
@@ -346,45 +345,17 @@ function positiveInteger(value: string | undefined, fallback: number, name: stri
 
 const rateLimitResponse = { error: 'rate limit exceeded' };
 
-export function createPublicRateLimit(options: { windowMs?: number } = {}): MiddlewareHandler {
-  return rateLimiter({
-    windowMs: options.windowMs ?? 5 * 60 * 1000,
-    limit: (c) => isOnboardingSandboxPath(c.req.path, c.req.method)
-      ? 15
-      : /^\/api\/v1\/auth\/handoff\/(stream|status)\/?$/.test(c.req.path)
-        ? 120
-        : 20,
-    keyGenerator: (c) => {
-      const bucket = isOnboardingSandboxPath(c.req.path, c.req.method)
-        ? 'onboarding-sandbox'
-        : /^\/api\/v1\/auth\/handoff\/(stream|status)\/?$/.test(c.req.path)
-          ? 'auth-handoff-read'
-          : 'auth';
-      return `${bucket}:${getClientIp(c)}`;
-    },
-    skip: (c) => !isPublicFounderAuthPath(c.req.path) && !isOnboardingSandboxPath(c.req.path, c.req.method),
-    message: rateLimitResponse,
-  });
-}
-
-export function createAuthenticatedRateLimit(options: { enabled?: boolean; limit?: number; windowMs?: number } = {}): MiddlewareHandler {
+export function createIpRateLimit(options: { enabled?: boolean; limit?: number; windowMs?: number } = {}): MiddlewareHandler {
   const enabled = options.enabled ?? process.env.RATE_LIMIT_ENABLED === 'true';
-  const limit = options.limit ?? positiveInteger(process.env.RATE_LIMIT_MAX_REQUESTS ?? process.env.RATE_LIMIT_REQ_PER_MIN, 60, 'RATE_LIMIT_MAX_REQUESTS');
-  const windowMs = options.windowMs ?? positiveInteger(process.env.RATE_LIMIT_WINDOW_SECONDS, 60, 'RATE_LIMIT_WINDOW_SECONDS') * 1000;
+  const limit = options.limit ?? positiveInteger(process.env.RATE_LIMIT_REQ_PER_MIN, 200, 'RATE_LIMIT_REQ_PER_MIN');
+  const windowMs = options.windowMs ?? 60_000;
   return rateLimiter({
     windowMs,
     limit,
-    keyGenerator: (c) => {
-      const userId = c.get('userId');
-      return typeof userId === 'string' && userId ? `user:${userId}` : `ip:${getClientIp(c)}`;
-    },
-    skip: (c) => !enabled
-      || isProviderWebhookPath(c.req.path)
-      || isPublicFounderAuthPath(c.req.path)
-      || isOnboardingSandboxPath(c.req.path, c.req.method),
+    keyGenerator: getClientIp,
+    skip: () => !enabled,
     message: rateLimitResponse,
   });
 }
 
-export const publicRateLimit = createPublicRateLimit();
-export const authenticatedRateLimit = createAuthenticatedRateLimit();
+export const ipRateLimit = createIpRateLimit();
