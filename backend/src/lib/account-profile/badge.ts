@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import sharp from 'sharp';
 import { z } from 'zod';
-import { executeAction, type ExecuteActionOptions } from '@/lib/ai/router';
+import { executeAction, ProviderExecutionError, type ExecuteActionOptions } from '@/lib/ai/router';
 import { currentFixedChargeReceipt } from '@/lib/ai/events/runtime';
 import { imageOutputSchema, type ImageOutput } from '@/lib/ai/providers';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
@@ -81,9 +81,16 @@ export function createProfileBadgeService(dependencies: ProfileBadgeServiceDepen
         response = await (dependencies.execute ?? executeAction)<{ operation: 'generate'; prompt: string; count: 1; aspectRatio: '1:1'; outputFormat: 'png' }, ImageOutput>(
           { mode: 'auto', teamKey: context.teamKey, actionSlug: 'image' },
           { operation: 'generate', prompt: profileBadgePrompt(principal.user.key, principal.user.name), count: 1, aspectRatio: '1:1', outputFormat: 'png' },
-          { providers: ['image.primary'], signal: dependencies.signal, timeoutMs: dependencies.timeoutMs },
+          { providers: ['image.primary'], retry: { attempts: 2 }, signal: dependencies.signal, timeoutMs: dependencies.timeoutMs },
         );
-      } catch {
+      } catch (error) {
+        console.error('profile badge provider generation failed', {
+          teamKey: context.teamKey,
+          userKeyHash: createHash('sha256').update(principal.user.key).digest('hex').slice(0, 16),
+          attempts: error instanceof ProviderExecutionError
+            ? error.attempts.map(({ providerId, modelId, externalModelId, code }) => ({ providerId, modelId, externalModelId, code }))
+            : [],
+        });
         throw new ProfileBadgeGenerationError();
       }
       const generated = imageOutputSchema.parse(response.output).images[0];

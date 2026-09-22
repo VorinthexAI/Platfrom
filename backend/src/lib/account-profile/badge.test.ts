@@ -48,7 +48,7 @@ describe('profile badge service', () => {
       avatarUrl: 'https://example.com/badge.png',
       expiresAt: '2026-09-09T10:10:00.000Z',
     });
-    expect(calls[0]).toMatchObject(['execute', { mode: 'auto', teamKey: 'team-1', actionSlug: 'image' }, { operation: 'generate', count: 1, aspectRatio: '1:1', outputFormat: 'png' }, { providers: ['image.primary'] }]);
+    expect(calls[0]).toMatchObject(['execute', { mode: 'auto', teamKey: 'team-1', actionSlug: 'image' }, { operation: 'generate', count: 1, aspectRatio: '1:1', outputFormat: 'png' }, { providers: ['image.primary'], retry: { attempts: 2 } }]);
     expect(calls).toContainEqual(['upload', expect.objectContaining({ key: `pending/profile-avatars/${userKey}/${candidateKey}/original.png`, mimeType: 'image/png' })]);
     expect(calls).toContainEqual(['sign', `pending/profile-avatars/${userKey}/${candidateKey}/original.png`]);
     await expect(service.generate({ unexpected: true }, context, 'request-2')).rejects.toThrow('Unrecognized key');

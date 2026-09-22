@@ -4,7 +4,7 @@ import { FOUNDER_ACCESS_MAX_AGE_SECONDS, FOUNDER_REFRESH_MAX_AGE_SECONDS } from 
 import { isResendWebhookPath } from './resend';
 import { isGmailWebhookPath } from './email-webhook';
 import { isPolarWebhookPath } from './polar-webhook';
-import { bindDevice, bindEventIdentifier, createAutoRefreshAuthTokens, createBindEventApp, isOnboardingSandboxPath, isPublicFounderAuthPath, isPublicProductPath, priorityRateLimitPolicy, rateLimitByIp, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
+import { bindDevice, bindEventIdentifier, createAuthenticatedRateLimit, createAutoRefreshAuthTokens, createBindEventApp, createPublicRateLimit, isOnboardingSandboxPath, isPublicFounderAuthPath, isPublicProductPath, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
 import { currentEventAppKey, currentEventAppScopeKey } from '@/lib/ai/events/runtime';
 import { APP_KEYS } from '@/lib/apps/registry';
 import { currentEventIdentifier } from '@/lib/ai/events/event-identifier';
@@ -155,29 +155,53 @@ describe('api middleware webhook exemptions', () => {
   });
 
   test('does not rate limit provider webhooks', async () => {
-    const previousRateLimitEnabled = process.env.RATE_LIMIT_ENABLED;
-    process.env.RATE_LIMIT_ENABLED = 'true';
-
+    const limiter = createAuthenticatedRateLimit({ enabled: true, limit: 1 });
     let nextCalls = 0;
-
-    try {
-      for (const path of ['/api/v1/webhooks/resend', '/api/v1/webhooks/gmail/pubsub']) await rateLimitByIp(middlewareContext(path), async () => { nextCalls += 1; });
-
-      expect(nextCalls).toBe(2);
-    } finally {
-      if (previousRateLimitEnabled === undefined) delete process.env.RATE_LIMIT_ENABLED;
-      else process.env.RATE_LIMIT_ENABLED = previousRateLimitEnabled;
-    }
+    for (const path of ['/api/v1/webhooks/resend', '/api/v1/webhooks/gmail/pubsub']) await limiter(middlewareContext(path), async () => { nextCalls += 1; });
+    expect(nextCalls).toBe(2);
   });
 });
 
-describe('priority API rate limits', () => {
-  test('isolates profile badge generation and Core greetings from the global bucket', () => {
-    expect(priorityRateLimitPolicy('/api/v1/auth/me/profile/badge-candidates', 'POST')).toEqual({ bucket: 'profile-badge', limit: 10, windowSeconds: 60 });
-    expect(priorityRateLimitPolicy('/api/v1/agent/greeting', 'POST')).toEqual({ bucket: 'agent-greeting', limit: 30, windowSeconds: 60 });
-    expect(priorityRateLimitPolicy('/api/v1/agent/greeting/topics/', 'POST')).toEqual({ bucket: 'agent-greeting', limit: 30, windowSeconds: 60 });
-    expect(priorityRateLimitPolicy('/api/v1/auth/me/profile/badge-candidates', 'GET')).toBeNull();
-    expect(priorityRateLimitPolicy('/api/v1/billing/summary', 'GET')).toBeNull();
+describe('rate limit middleware', () => {
+  test('applies public limits after the API key and authenticated limits after session resolution', async () => {
+    const source = await Bun.file(new URL('./index.ts', import.meta.url)).text();
+    expect(source.indexOf("app.use('*', requireEnvApiKey)")).toBeLessThan(source.indexOf("app.use('*', publicRateLimit)"));
+    expect(source.indexOf("app.use('*', autoRefreshAuthTokens)")).toBeLessThan(source.indexOf("app.use('*', authenticatedRateLimit)"));
+  });
+
+  test('keeps authenticated users in separate in-memory buckets', async () => {
+    const app = new Hono<{ Variables: { userId: string | undefined } }>();
+    app.use('*', async (c, next) => { c.set('userId', c.req.header('x-test-user')); await next(); });
+    app.use('*', createAuthenticatedRateLimit({ enabled: true, limit: 1, windowMs: 60_000 }));
+    app.get('/api/v1/private', (c) => c.json({ ok: true }));
+
+    expect((await app.request('/api/v1/private', { headers: { 'x-test-user': 'user-1', 'x-forwarded-for': '203.0.113.1' } })).status).toBe(200);
+    expect((await app.request('/api/v1/private', { headers: { 'x-test-user': 'user-2', 'x-forwarded-for': '203.0.113.1' } })).status).toBe(200);
+    const limited = await app.request('/api/v1/private', { headers: { 'x-test-user': 'user-1', 'x-forwarded-for': '203.0.113.1' } });
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ error: 'rate limit exceeded' });
+    expect(limited.headers.get('ratelimit-limit')).toBe('1');
+    expect(Number(limited.headers.get('retry-after'))).toBeGreaterThan(0);
+  });
+
+  test('bypasses normal requests when disabled', async () => {
+    const app = new Hono();
+    app.use('*', createAuthenticatedRateLimit({ enabled: false, limit: 1 }));
+    app.get('/api/v1/private', (c) => c.json({ ok: true }));
+    expect((await app.request('/api/v1/private')).status).toBe(200);
+    expect((await app.request('/api/v1/private')).status).toBe(200);
+  });
+
+  test('limits public auth by IP without consuming the authenticated bucket', async () => {
+    const app = new Hono();
+    app.use('*', createPublicRateLimit({ windowMs: 60_000 }));
+    app.use('*', createAuthenticatedRateLimit({ enabled: true, limit: 1, windowMs: 60_000 }));
+    app.post('/api/v1/auth/login', (c) => c.json({ ok: true }));
+    app.get('/api/v1/private', (c) => c.json({ ok: true }));
+
+    for (let request = 0; request < 20; request += 1) expect((await app.request('/api/v1/auth/login', { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.2' } })).status).toBe(200);
+    expect((await app.request('/api/v1/auth/login', { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.2' } })).status).toBe(429);
+    expect((await app.request('/api/v1/private', { headers: { 'x-forwarded-for': '203.0.113.2' } })).status).toBe(200);
   });
 });
 
