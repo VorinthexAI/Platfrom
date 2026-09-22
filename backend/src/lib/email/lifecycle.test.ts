@@ -6,11 +6,12 @@ describe('account lifecycle emails', () => {
   test('renders a thin welcome email with the universal app link', () => {
     const input = welcomeEmailInput('person@example.com');
     const html = renderBrandedEmail(input);
-    expect(input).toMatchObject({ to: 'person@example.com', actionLabel: 'Open app', actionUrl: OPEN_APP_URL });
+    expect(input).toMatchObject({ to: 'person@example.com', label: '', actionLabel: 'Open app', actionUrl: OPEN_APP_URL });
     expect(html).toContain('Welcome to Vorinthex AI.');
     expect(html).toContain('Access your personal AI agent now.');
     expect(html).toContain('https://vorinthex.com/open');
     expect(html).toContain('vtx-button');
+    expect(html).toContain('background-color:#000000');
     expect(html).not.toContain('Core is available from the bottom');
     expect(html).not.toContain('supporting:start');
   });

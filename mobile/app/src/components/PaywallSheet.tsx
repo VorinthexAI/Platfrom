@@ -21,7 +21,7 @@ import { useCurrentSubscription, useWholeSparkBalance } from "@/hooks/use-billin
 import { useDelayedAction } from "@/hooks/use-delayed-action";
 import { currentSubscriptionQueryKey, formatWholeSparks, setSubscriptionCancellation } from "@/lib/billing-client";
 import { refreshAuthoritativeBilling } from "@/lib/billing-refresh";
-import { CHECKOUT_SUCCESS_URL, checkoutCallbackFromUrl, createCheckoutHandoff } from "@/lib/checkout-client";
+import { CHECKOUT_SUCCESS_URL, checkoutCallbackFromUrl, createCheckout } from "@/lib/checkout-client";
 import { activeSubscriptionOffers, activeTopup, effectivePriceCents, formatProductPrice, productSparkAmount, type MobileProduct } from "@/lib/product-client";
 import { fetchReferralSummary, referralSummaryQueryKey } from "@/lib/referral-client";
 import { recordOnboardingEvent } from "@/lib/onboarding-events";
@@ -35,8 +35,6 @@ type PaywallMode = "onboarding" | "standard";
 type Page = "plans" | "referral";
 type OfferTab = "plans" | "topup";
 type CheckoutState = "checkout-error" | "confirming" | "idle" | "opening" | "refresh-error";
-
-const checkoutHandoffExpired = (expiresAt: string) => Date.parse(expiresAt) <= Date.now();
 
 function PlanCard({ current, onSelect, product, selected }: { current: boolean; onSelect: () => void; product: MobileProduct; selected: boolean }) {
   const period = product.billingPeriod === "month" ? "month" : product.billingPeriod === "week" ? "week" : null;
@@ -151,9 +149,8 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
     setCheckoutState("opening");
     setMessage(undefined);
     try {
-      const handoff = await createCheckoutHandoff(selected.productId, Crypto.randomUUID());
-      if (checkoutHandoffExpired(handoff.expiresAt)) throw new Error("The checkout link expired before it could open.");
-      const result = await WebBrowser.openAuthSessionAsync(handoff.url, CHECKOUT_SUCCESS_URL);
+      const checkoutSession = await createCheckout(selected.productId, Crypto.randomUUID());
+      const result = await WebBrowser.openAuthSessionAsync(checkoutSession.url, CHECKOUT_SUCCESS_URL);
       if (result.type === "cancel" || result.type === "dismiss") {
         setCheckoutState("idle");
         return;
@@ -207,7 +204,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
     }
   }
 
-  const footer = page === "plans" ? <><Button disabled={!selected} loading={checkoutState === "opening" || checkoutState === "confirming"} onPress={() => void (checkoutState === "refresh-error" ? refreshReturnedCheckout() : checkout())} size="md" variant="primary">{checkoutState === "confirming" ? "Refreshing billing" : checkoutState === "refresh-error" ? "Refresh billing status" : checkoutState === "checkout-error" ? "Try checkout again" : "Continue to checkout"}</Button>{mode === "standard" ? <Button onPress={closeStandard} size="md" variant="secondary">Close</Button> : null}</> : <Button disabled={!referral.data || sharing} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button>;
+  const footer = page === "plans" ? <><Button disabled={!selected} onPress={() => void (checkoutState === "refresh-error" ? refreshReturnedCheckout() : checkout())} size="md" variant="primary">{checkoutState === "confirming" ? "Refreshing billing" : checkoutState === "refresh-error" ? "Refresh billing status" : checkoutState === "checkout-error" ? "Try checkout again" : "Continue to checkout"}</Button>{mode === "standard" ? <Button onPress={closeStandard} size="md" variant="secondary">Close</Button> : null}</> : <Button disabled={!referral.data || sharing} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button>;
 
   if (mode === "onboarding" && page === "referral") return <OnboardingStepLayout
     action={<><Button disabled={!referral.data || sharing || completing} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button><Button disabled={completing} onPress={() => void finish()} size="md" variant="secondary">Skip</Button>{completionError ? <Button loading={completing} onPress={() => void finish()} size="md" variant="secondary">Retry</Button> : null}</>}
