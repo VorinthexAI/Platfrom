@@ -144,14 +144,22 @@ resource "aws_iam_role_policy" "early_app_archive_processing" {
           "${module.storage.s3_bucket_arn}/books/*",
           "${module.storage.s3_bucket_arn}/content/*",
           "${module.storage.s3_bucket_arn}/document-audio/*",
+          "${module.storage.s3_bucket_arn}/media/*",
+          "${module.storage.s3_bucket_arn}/profiles/*",
+          "${module.storage.s3_bucket_arn}/pending/gallery/*",
+          "${module.storage.s3_bucket_arn}/pending/profile-avatars/*",
           "${module.storage.s3_bucket_arn}/pending/image-hashing/*",
           "${aws_s3_bucket.textract_staging.arn}/textract/*"
         ]
       },
       {
-        Effect   = "Allow"
-        Action   = ["s3:GetObject"]
-        Resource = ["${module.storage.s3_bucket_arn}/apps/logos/v1/*"]
+        Effect = "Allow"
+        Action = ["s3:GetObject"]
+        Resource = [
+          "${module.storage.s3_bucket_arn}/apps/logos/v1/*",
+          "${module.storage.s3_bucket_arn}/system/initial-gallery/v1/*",
+          "${module.storage.s3_bucket_arn}/system/initial-audiobook/v1/*"
+        ]
       },
       {
         Effect   = "Allow"
