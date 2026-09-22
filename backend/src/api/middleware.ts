@@ -1,5 +1,6 @@
 import type { Context, MiddlewareHandler } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
+import { rateLimiter } from 'hono-rate-limiter';
 import { z } from 'zod';
 import { referralCodeTransportSchema } from './auth-referral-code';
 import { timingSafeEqual } from '@/lib/crypto';
@@ -335,53 +336,55 @@ export function createAutoRefreshAuthTokens(dependencies: AutoRefreshDependencie
 
 export const autoRefreshAuthTokens = createAutoRefreshAuthTokens();
 
-export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
-  // Provider webhook retries burst from a small IP pool; rate-limiting them
-  // would drop or delay deliveries. The endpoint is protected by signatures.
-  if (isProviderWebhookPath(c.req.path)) return next();
+function positiveInteger(value: string | undefined, fallback: number, name: string) {
+  const normalized = value?.trim();
+  if (!normalized) return fallback;
+  const parsed = Number(normalized);
+  if (!Number.isInteger(parsed) || parsed < 1) throw new Error(`${name} must be a positive integer`);
+  return parsed;
+}
 
-  const authPath = isPublicFounderAuthPath(c.req.path);
-  const onboardingSandbox = isOnboardingSandboxPath(c.req.path, c.req.method);
-  if (!authPath && !onboardingSandbox && process.env.RATE_LIMIT_ENABLED !== 'true') return next();
-  const handoffRead = /^\/api\/v1\/auth\/handoff\/(stream|status)\/?$/.test(c.req.path);
+const rateLimitResponse = { error: 'rate limit exceeded' };
 
-  const limit = onboardingSandbox
-    ? 15
-    : handoffRead
-    ? 120
-    : authPath
-      ? 20
-    : Number(process.env.RATE_LIMIT_MAX_REQUESTS ?? process.env.RATE_LIMIT_REQ_PER_MIN ?? 60);
-  const windowSeconds = authPath || onboardingSandbox
-    ? 5 * 60
-    : Number(process.env.RATE_LIMIT_WINDOW_SECONDS ?? 60);
-  if (!Number.isInteger(limit) || limit < 1) {
-    return c.json({ error: 'RATE_LIMIT_MAX_REQUESTS must be a positive integer' }, 500);
-  }
-  if (!Number.isInteger(windowSeconds) || windowSeconds < 1) {
-    return c.json({ error: 'RATE_LIMIT_WINDOW_SECONDS must be a positive integer' }, 500);
-  }
+export function createPublicRateLimit(options: { windowMs?: number } = {}): MiddlewareHandler {
+  return rateLimiter({
+    windowMs: options.windowMs ?? 5 * 60 * 1000,
+    limit: (c) => isOnboardingSandboxPath(c.req.path, c.req.method)
+      ? 15
+      : /^\/api\/v1\/auth\/handoff\/(stream|status)\/?$/.test(c.req.path)
+        ? 120
+        : 20,
+    keyGenerator: (c) => {
+      const bucket = isOnboardingSandboxPath(c.req.path, c.req.method)
+        ? 'onboarding-sandbox'
+        : /^\/api\/v1\/auth\/handoff\/(stream|status)\/?$/.test(c.req.path)
+          ? 'auth-handoff-read'
+          : 'auth';
+      return `${bucket}:${getClientIp(c)}`;
+    },
+    skip: (c) => !isPublicFounderAuthPath(c.req.path) && !isOnboardingSandboxPath(c.req.path, c.req.method),
+    message: rateLimitResponse,
+  });
+}
 
-  const ip = getClientIp(c);
-  const bucket = onboardingSandbox ? 'onboarding-sandbox' : handoffRead ? 'auth-handoff-read' : authPath ? 'auth' : 'global';
-  const key = `rate-limit:${bucket}:${ip}:${Math.floor(Date.now() / (windowSeconds * 1000))}`;
+export function createAuthenticatedRateLimit(options: { enabled?: boolean; limit?: number; windowMs?: number } = {}): MiddlewareHandler {
+  const enabled = options.enabled ?? process.env.RATE_LIMIT_ENABLED === 'true';
+  const limit = options.limit ?? positiveInteger(process.env.RATE_LIMIT_MAX_REQUESTS ?? process.env.RATE_LIMIT_REQ_PER_MIN, 60, 'RATE_LIMIT_MAX_REQUESTS');
+  const windowMs = options.windowMs ?? positiveInteger(process.env.RATE_LIMIT_WINDOW_SECONDS, 60, 'RATE_LIMIT_WINDOW_SECONDS') * 1000;
+  return rateLimiter({
+    windowMs,
+    limit,
+    keyGenerator: (c) => {
+      const userId = c.get('userId');
+      return typeof userId === 'string' && userId ? `user:${userId}` : `ip:${getClientIp(c)}`;
+    },
+    skip: (c) => !enabled
+      || isProviderWebhookPath(c.req.path)
+      || isPublicFounderAuthPath(c.req.path)
+      || isOnboardingSandboxPath(c.req.path, c.req.method),
+    message: rateLimitResponse,
+  });
+}
 
-  try {
-    const { redisConnection } = await import('@/lib/redis');
-    const count = await redisConnection.incr(key);
-    if (count === 1) await redisConnection.expire(key, windowSeconds + 10);
-
-    c.header('X-RateLimit-Limit', String(limit));
-    c.header('X-RateLimit-Remaining', String(Math.max(limit - count, 0)));
-
-    if (count > limit) {
-      c.header('Retry-After', String(windowSeconds));
-      return c.json({ error: 'rate limit exceeded' }, 429);
-    }
-  } catch (error) {
-    console.warn('rate limit check failed', error);
-    if (authPath || onboardingSandbox) return c.json({ error: 'service temporarily unavailable' }, 503);
-  }
-
-  return next();
-};
+export const publicRateLimit = createPublicRateLimit();
+export const authenticatedRateLimit = createAuthenticatedRateLimit();
