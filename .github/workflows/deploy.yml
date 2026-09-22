@@ -578,7 +578,9 @@ jobs:
           scp /tmp/graph-db.env graphdbbox:~/vorinthex-db/.env
           rm -f /tmp/graph-db.env
       - name: Start ArangoDB
-        run: ssh graphdbbox "cd ~/vorinthex-db && docker compose up -d --remove-orphans"
+        # The existing database host was bootstrapped with a standalone
+        # `arangodb` container on the same persistent EBS mount.
+        run: ssh graphdbbox "docker rm -f arangodb >/dev/null 2>&1 || true; cd ~/vorinthex-db && docker compose up -d --remove-orphans"
       - name: Open SSH tunnel to ArangoDB
         run: ssh -f -N -L 8529:127.0.0.1:8529 graphdbbox
       - name: Wait for ArangoDB
