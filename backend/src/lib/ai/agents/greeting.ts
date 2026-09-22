@@ -100,11 +100,6 @@ function greetingTemperature(state: AgentGreetingState, attempt = 0) {
 export async function streamAgentGreeting(teamKey: string, state: AgentGreetingState, context: AgentGreetingContext, onDelta: (text: string) => void | Promise<void>, options: ExecuteActionOptions = {}, stream: AgentGreetingStreamExecutor = streamAsk) {
   const parsedState = agentGreetingStateSchema.parse(state);
   const parsedContext = agentGreetingContextSchema.parse(context);
-  if (parsedState !== 'returning') {
-    const greeting = fallbackGreeting(parsedState);
-    await onDelta(greeting.message);
-    return greeting;
-  }
   let message = '';
   let done = false;
   for await (const chunk of stream(teamKey, {
