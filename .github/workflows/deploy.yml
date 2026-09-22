@@ -457,7 +457,7 @@ jobs:
   # is not baked into any image. Data seeding therefore keeps running from a
   # full checkout over the tunnel after the active API has been swapped.
   backend-db:
-    name: Deploy graph database
+    name: Synchronize graph database data
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [changes, backend-secrets, backend-migrate]
@@ -560,41 +560,8 @@ jobs:
           ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null || { echo "::error::EC2 SSH key is not a valid private key. Re-save the GitHub secret with the full PEM/OpenSSH private key or set the *_SSH_KEY_B64 secret."; exit 1; }
           ssh-keyscan -T 10 -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null || echo "::warning::ssh-keyscan failed for graph database host; SSH will use accept-new."
           printf 'Host graphdbbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
-      - name: Copy graph-db compose file
-        run: |
-          ssh graphdbbox "mkdir -p ~/vorinthex-db"
-          scp backend/deploy/docker-compose.db.yml graphdbbox:~/vorinthex-db/docker-compose.yml
-      - name: Render .env from SSM
-        run: |
-          # @json double-quotes and escapes each value (embedded newlines become
-          # literal "\n") so a multi-line SSM value stays on one physical line —
-          # Docker Compose's env-file parser un-escapes \n back on load. Without
-          # this, a value containing a raw newline splits across two lines and
-          # the second half gets parsed as a bogus new KEY, e.g. "unexpected
-          # character '+' in variable name".
-          aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json \
-          | jq -r '.[] | (.n | sub("^.*/";"")) + "=" + (.v | @json)' > /tmp/graph-db.env
-          test -s /tmp/graph-db.env || { echo "::error::No parameters found under $SSM_PATH"; exit 1; }
-          scp /tmp/graph-db.env graphdbbox:~/vorinthex-db/.env
-          rm -f /tmp/graph-db.env
-      - name: Start ArangoDB
-        # The existing database host was bootstrapped with a standalone
-        # `arangodb` container on the same persistent EBS mount.
-        run: ssh graphdbbox "docker rm -f arangodb >/dev/null 2>&1 || true; cd ~/vorinthex-db && docker compose up -d --remove-orphans"
       - name: Open SSH tunnel to ArangoDB
         run: ssh -f -N -L 8529:127.0.0.1:8529 graphdbbox
-      - name: Wait for ArangoDB
-        run: |
-          for i in $(seq 1 60); do
-            status=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8529/_api/version || true)
-            if [ "$status" != "000" ]; then
-              echo "ArangoDB is reachable through the retained SSH tunnel (HTTP $status)."
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "::error::ArangoDB did not become reachable through the SSH tunnel within 120 seconds."
-          exit 1
       - name: Fetch ArangoDB and embedding credentials from SSM
         run: |
           creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
