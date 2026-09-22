@@ -457,16 +457,11 @@ jobs:
   # is not baked into any image. Data seeding therefore keeps running from a
   # full checkout over the tunnel after the active API has been swapped.
   backend-db:
-    name: Synchronize graph database data
+    name: LATER / retired graph database data sync
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [changes, backend-secrets, backend-migrate]
-    if: >-
-      always()
-      && needs.changes.outputs.backend == 'true'
-      && (github.event.pull_request.merged == true || inputs.deploy)
-      && needs.backend-secrets.result == 'success'
-      && needs.backend-migrate.result == 'success'
+    if: false # Catalog sync and embedding backfills are not deployment work.
     environment: production
     env:
       EC2_HOST: ${{ secrets.GRAPH_DB_EC2_HOST }}
@@ -755,7 +750,7 @@ jobs:
   seed-db-secrets:
     name: Upsert db.seeds.secrets.json to production
     runs-on: ubuntu-latest
-    needs: [changes, backend-db]
+    needs: [changes, backend-migrate]
     if: needs.changes.outputs.backend == 'true' && (github.event.pull_request.merged == true || inputs.deploy)
     environment: production
     env:
@@ -891,7 +886,7 @@ jobs:
     # LATER ECS deploy. Disabled while the single early-infra box serves production.
     name: LATER / roll api ECS service
     runs-on: ubuntu-latest
-    needs: [changes, backend-image, backend-db]
+    needs: [changes, backend-image]
     if: false # LATER: enable when ECS becomes the production runtime.
     environment: production
     steps:
@@ -1022,7 +1017,7 @@ jobs:
   early-deploy:
     name: Blue-green deploy to early-infra box
     runs-on: ubuntu-latest
-    needs: [changes, deploy-web, backend-image, backend-secrets, backend-migrate, backend-db]
+    needs: [changes, deploy-web, backend-image, backend-secrets, backend-migrate]
     if: >-
       always()
       && (needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true')
@@ -1030,7 +1025,6 @@ jobs:
       && (needs.changes.outputs.web != 'true' || needs.deploy-web.result == 'success')
       && (needs.changes.outputs.backend != 'true' || (needs.backend-image.result == 'success' && needs.backend-secrets.result == 'success'))
       && (needs.changes.outputs.backend != 'true' || needs.backend-migrate.result == 'success')
-      && (needs.changes.outputs.backend != 'true' || needs.backend-db.result == 'success')
     environment: production
     env:
       APP_INSTANCE_TAG: vorinthex-early-app
@@ -1178,9 +1172,7 @@ jobs:
 
   early-infra-standalone-deploy:
     name: LATER / early-infra duplicate deploy
-    # backend-db is an explicit dependency so this retained path cannot activate
-    # backend code before migrations, data setup, and catalog sync complete.
-    needs: [early-infra-standalone-build, backend-db]
+    needs: [early-infra-standalone-build]
     if: false # LATER: do not run a second blue-green swap.
     runs-on: ubuntu-latest
     environment: production
