@@ -41,12 +41,13 @@ export default function SplashRoute() {
       withTiming(LOGO_SIZE + 110, { duration: 1200, easing: easings.inOut }),
     );
 
+    let active = true;
     const timer = setTimeout(() => {
-      void readLocalOnboardingState().then((onboarding) => router.replace((status === "authenticated"
+      void readLocalOnboardingState().then((onboarding) => { if (!active) return; router.replace((useAuthStore.getState().status === "authenticated"
         ? !useAuthStore.getState().user?.isOnboarded ? "/onboarding" : "/capability/archive"
-        : onboarding.previewComplete ? "/auth" : "/onboarding") as Href));
+        : onboarding.previewComplete ? "/auth" : "/onboarding") as Href); });
     }, durations.splashHold + 300);
-    return () => clearTimeout(timer);
+    return () => { active = false; clearTimeout(timer); };
   }, [logoOpacity, logoScale, router, status, sweepX, taglineOpacity, wordmarkOpacity]);
 
   const logoStyle = useAnimatedStyle(() => ({

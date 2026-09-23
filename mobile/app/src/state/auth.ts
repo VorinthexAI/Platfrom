@@ -7,11 +7,14 @@ import { hasCompleteAuthContext, normalizeAuthContext, type AuthUser } from "@/l
 import { emptyWorkspacePicker, type WorkspacePickerState } from "@/data/registry";
 import { clearPendingReferralCode } from "@/lib/pending-referral-vault";
 import { tokenVault } from "@/lib/token-vault";
-import { markOnboardingComplete, markPostDeletionOnboarding, resetOnboardingSession } from "@/lib/onboarding-state";
+import { markOnboardingComplete, markOnboardingPreviewComplete, markPostDeletionOnboarding, resetOnboardingSession } from "@/lib/onboarding-state";
+import { endSessionRequests, resumeSessionRequests, sessionEpoch, sessionIsEnding } from "@/lib/session-lifecycle";
 import type { ReferralSummary } from "@/lib/referral-client";
 import type { ScopeSummary } from "@/lib/scope-client";
 
 let authOperation = 0;
+let deletion: Promise<void> | undefined;
+let hydration: { epoch: number; promise: Promise<void> } | undefined;
 let scopeMutation = 0;
 let confirmedScope: Record<string, unknown> | null = null;
 
@@ -27,7 +30,7 @@ type AuthState = {
   workspacePicker: WorkspacePickerState;
   referralSummary: ReferralSummary | null;
   bootstrap: () => Promise<void>;
-  hydrate: () => Promise<void>;
+  hydrate: (options?: { newSession?: boolean }) => Promise<void>;
   reconnectContentContext: () => Promise<void>;
   completeOnboarding: () => Promise<void>;
   optimisticScope: (scope: ScopeSummary) => OptimisticScopeUpdate;
@@ -102,6 +105,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   workspacePicker: emptyWorkspacePicker,
   referralSummary: null,
   bootstrap: async () => {
+    if (sessionIsEnding()) return;
     const operation = ++authOperation;
     const { session, generation } = await tokenVault.snapshot();
     if (!session) {
@@ -122,6 +126,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (operation === authOperation) {
         confirmedScope = context.scope;
         set({ status: "authenticated", ...context, referralSummary });
+        void markOnboardingPreviewComplete().catch(() => undefined);
         if (context.user?.isOnboarded) void markOnboardingComplete().catch(() => undefined);
         await writeAuthContext(context);
       }
@@ -146,18 +151,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     }
   },
-  hydrate: async () => {
+  hydrate: (options) => {
+    if (hydration?.epoch === sessionEpoch() && !sessionIsEnding()) return hydration.promise;
+    if (options?.newSession) resumeSessionRequests();
+    else if (get().status !== "authenticated" || sessionIsEnding()) return Promise.resolve();
     const operation = ++authOperation;
-    const context = await loadContext();
-    const referralSummary = await loadReferralSummary(context.user, get().referralSummary);
-    if (operation === authOperation) {
-      confirmedScope = context.scope;
-      set({ status: "authenticated", ...context, referralSummary });
-      if (context.user?.isOnboarded) void markOnboardingComplete().catch(() => undefined);
-      await writeAuthContext(context);
-    }
+    const promise = (async () => {
+      const context = await loadContext();
+      const referralSummary = await loadReferralSummary(context.user, get().referralSummary);
+      if (operation === authOperation) {
+        confirmedScope = context.scope;
+        set({ status: "authenticated", ...context, referralSummary });
+        void markOnboardingPreviewComplete().catch(() => undefined);
+        if (context.user?.isOnboarded) void markOnboardingComplete().catch(() => undefined);
+        await writeAuthContext(context);
+      }
+    })().finally(() => { if (hydration?.promise === promise) hydration = undefined; });
+    hydration = { epoch: sessionEpoch(), promise };
+    return promise;
   },
   reconnectContentContext: async () => {
+    if (get().status !== "authenticated" || sessionIsEnding()) return;
     const operation = ++authOperation;
     const context = await loadContext();
     if (!hasCompleteAuthContext(context)) throw new Error("Archive execution context is unavailable.");
@@ -253,32 +267,46 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       rollback: () => settle("failed", {}),
     };
   },
-  deleteAccount: async () => {
-    const sessionSnapshot = tokenVault.snapshot();
-    const localCleanup = Promise.allSettled([clearAuthContext(), clearPendingReferralCode(), markPostDeletionOnboarding()]);
-    authOperation += 1;
-    confirmedScope = null;
-    set(signedOutState);
-    const { session } = await sessionSnapshot;
-    const deletion = session ? deleteRemoteAccount(session) : Promise.reject(new Error("Account deletion requires an authenticated session."));
-    await Promise.allSettled([tokenVault.clear(), localCleanup]);
-    await deletion;
+  deleteAccount: () => {
+    if (deletion) return deletion;
+    deletion = (async () => {
+      const { session } = await tokenVault.snapshot();
+      if (!session || get().status !== "authenticated") throw new Error("Please sign in again before deleting your account.");
+      const operation = ++authOperation;
+      endSessionRequests();
+      try {
+        await deleteRemoteAccount(session);
+        if (operation !== authOperation) return;
+        confirmedScope = null;
+        await Promise.allSettled([tokenVault.clear(), clearAuthContext(), clearPendingReferralCode(), markPostDeletionOnboarding()]);
+        set(signedOutState);
+      } catch {
+        if (operation === authOperation && get().status === "authenticated") resumeSessionRequests();
+        throw new Error("Your account could not be deleted. Please try again.");
+      }
+    })().finally(() => { deletion = undefined; });
+    return deletion;
   },
   signOut: async () => {
+    const snapshot = tokenVault.read().catch(() => null);
+    endSessionRequests();
+    const localCleanup = Promise.allSettled([tokenVault.clear(), clearAuthContext()]);
     authOperation += 1;
     confirmedScope = null;
     resetOnboardingSession();
+    void markOnboardingPreviewComplete().catch(() => undefined);
     set(signedOutState);
-    const session = await tokenVault.read().catch(() => null);
+    const session = await snapshot;
     await Promise.allSettled([
-      tokenVault.clear(),
-      clearAuthContext(),
+      localCleanup,
       ...(session ? [cleanupRemoteSession(session)] : []),
     ]);
   },
 }));
 
 onUnauthorized(() => {
+  if (sessionIsEnding()) return;
+  endSessionRequests();
   authOperation += 1;
   confirmedScope = null;
   resetOnboardingSession();

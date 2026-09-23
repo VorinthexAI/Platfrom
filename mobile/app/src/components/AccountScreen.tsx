@@ -9,11 +9,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Avatar } from "@vorinthex/shared/ui/avatar";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
-import { BellIcon, CheckIcon, DeleteAccountIcon, FaqIcon, FeedbackIcon, FolderIcon, HelpIcon, IssueIcon, PlusIcon, PrivacyIcon, ReferralIcon, SettingsIcon, SignOutIcon, SparksIcon, TermsIcon, WalletIcon, WarningIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { BellIcon, CheckIcon, DeleteAccountIcon, FaqIcon, FeedbackIcon, FolderIcon, HelpIcon, IssueIcon, PlusIcon, PrivacyIcon, ReferralIcon, SettingsIcon, SignOutIcon, SparksIcon, SubscriptionCancelIcon, TermsIcon, WalletIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
-import { useToast } from "@vorinthex/shared/ui/toast";
+import { useToast as useRawToast } from "@vorinthex/shared/ui/toast";
+import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 import { PRIVACY_COPY, TERMS_COPY, type VaultCopy } from "@vorinthex/shared/lib/legal-copy";
 
 import { claimProfileBadge, generateProfileBadge, updateProfileName, uploadProfileAvatar } from "@/lib/profile-client";
@@ -102,6 +103,9 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const { width } = useWindowDimensions();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const { showToast: showAccountResultToast } = useRawToast();
+  const deletingAccount = useRef(false);
+  const [accountDeletionPending, setAccountDeletionPending] = useState(false);
   const user = useAuthStore((state) => state.user);
   const teamKey = useAuthStore((state) => String(state.team?.key ?? ""));
   const scopeKey = useAuthStore((state) => String(state.scope?.key ?? ""));
@@ -246,15 +250,21 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   };
 
   const permanentlyDeleteAccount = () => {
-    setSheet(undefined);
-    const deletion = deleteAccount();
-    queryClient.clear();
-    router.replace("/auth");
-    void deletion.then(() => {
-      showToast({ title: "Your account has been deleted.", duration: 3_000 });
-    }).catch((error) => {
-      showToast({ title: extractDomainErrorMessage(error) ?? "Your account could not be deleted. Please try again.", duration: 3_000 });
-    });
+    if (deletingAccount.current) return;
+    const owner = useAuthStore.getState().user?.key;
+    deletingAccount.current = true;
+    setAccountDeletionPending(true);
+    void deleteAccount().then(() => {
+      if (useAuthStore.getState().status !== "unauthenticated") return;
+      setSheet(undefined);
+      queryClient.clear();
+      router.replace("/auth");
+      showAccountResultToast({ title: "Your account has been deleted.", duration: 3_000 });
+    }).catch(() => {
+      if (useAuthStore.getState().user?.key !== owner) return;
+      showAccountResultToast({ title: "Your account could not be deleted. Please try again.", duration: 3_000 });
+      void queryClient.invalidateQueries();
+    }).finally(() => { deletingAccount.current = false; setAccountDeletionPending(false); });
   };
 
   const logOut = () => {
@@ -546,7 +556,7 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
           <SettingsActionCard icon={<ReferralIcon size="lg" />} label="Referral" onPress={() => { setReferralMode("share"); setSheet("referral"); }} size={settingsCardSize} />
           <SettingsActionCard icon={<WalletIcon size="lg" />} label="Wallet" onPress={() => setSheet("wallet")} size={settingsCardSize} />
           <SettingsActionCard icon={<SparksIcon size="lg" />} label="Spark costs" onPress={openCostDetails} size={settingsCardSize} />
-          {subscriptionView?.action === "cancel" ? <SettingsActionCard danger icon={<WarningIcon size="lg" variant="danger" />} label="Cancel subscription" onPress={() => setSheet("cancel-subscription")} size={settingsCardSize} /> : null}
+          {subscriptionView?.action === "cancel" ? <SettingsActionCard danger icon={<SubscriptionCancelIcon size="lg" variant="danger" />} label="Cancel subscription" onPress={() => setSheet("cancel-subscription")} size={settingsCardSize} /> : null}
           <SettingsActionCard danger icon={<DeleteAccountIcon size="lg" variant="danger" />} label="Delete account" onPress={() => setSheet("delete-account")} size={settingsCardSize} />
           <SettingsActionCard danger icon={<SignOutIcon size="lg" variant="danger" />} label="Log out" onPress={() => void logOut()} size={settingsCardSize} />
         </View>
@@ -612,7 +622,7 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
       <Text style={styles.scopeHelp}>{cancellationPeriodEnd ? `Your subscription remains active until ${cancellationPeriodEnd}, then it will not renew.` : "Your subscription remains active through the current billing period, then it will not renew."}</Text>
     </BottomSheet>
 
-    <BottomSheet focusKey="profile-delete-account" footer={<><Button onPress={permanentlyDeleteAccount} size="md" variant="primary">Delete</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "delete-account"} title="Delete account?" />
+    <BottomSheet dismissible={!accountDeletionPending} focusKey="profile-delete-account" footer={<><Button disabled={accountDeletionPending} onPress={permanentlyDeleteAccount} size="md" variant="primary">Delete</Button><Button disabled={accountDeletionPending} onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open && !accountDeletionPending) setSheet(undefined); }} open={sheet === "delete-account"} title="Delete account?" />
 
     <BottomSheet description={referralMode === "share" ? "Invite a friend with your code and earn Sparks as they get started." : "Apply the referral code from the person who invited you."} dismissible={!redeemingReferral} focusKey="profile-referral" footer={<>{referralMode === "share" ? referralUnused ? <Button disabled={sharingReferral} loading={sharingReferral} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button> : null : <Button disabled={!referralCodeValid || redeemingReferral || Boolean(referralRedemption)} loading={redeemingReferral} onPress={() => void submitReferralCode()} size="md" variant="primary">{referralRedemption ? "Code applied" : "Use code"}</Button>}<Button disabled={redeemingReferral} onPress={closeReferralSheet} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open && !redeemingReferral) closeReferralSheet(); }} open={sheet === "referral"} title="Referral">
       <ScrollView contentContainerStyle={styles.referralContent} showsVerticalScrollIndicator={false}>

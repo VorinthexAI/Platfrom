@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import { useToast } from "@vorinthex/shared/ui/toast";
+import { useSessionToast } from "./use-session-toast";
+import { sessionIsEnding } from "@/lib/session-lifecycle";
 import { extractDomainErrorMessage, isRequestCancellation, isSparkFundingError } from "@/lib/domain-error-observer";
 
 const recentlyPresented = new Map<string, number>();
@@ -7,8 +8,9 @@ const recentlyPresented = new Map<string, number>();
 /** Present new failures once, without persistent inline panels or render-time toasts. */
 export function useErrorFeedback(errors: readonly unknown[]) {
   const previous = useRef(new Set<string>());
-  const { notices, showToast } = useToast();
+  const { notices, showToast } = useSessionToast();
   useEffect(() => {
+    if (sessionIsEnding()) { previous.current.clear(); return; }
     const messages = new Set(errors.flatMap((error) => {
       if (!error || isRequestCancellation(error) || isSparkFundingError(typeof error === "string" ? { message: error } : error)) return [];
       const message = typeof error === "string" ? error : extractDomainErrorMessage(error);

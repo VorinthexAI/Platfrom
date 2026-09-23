@@ -78,7 +78,7 @@ export default function TeamMfaRoute() {
         : await postJson<{ challenge_token_hash: string; codes: [string, string] }, { teamKey: string; scopeKey?: string }>("/auth/totp/setup/complete", { challenge_token_hash: state.setup.challenge, codes: [state.firstCode!, code] });
       const selected = await selectTeam(result.teamKey, result.scopeKey);
       if (selected.status !== "selected") throw new Error("Team assurance did not complete.");
-      await hydrate();
+      await hydrate({ newSession: true });
       await queryClient.cancelQueries({ predicate: ({ queryKey }) => queryBelongsToTeamScope(queryKey, previousTeamKey, previousScopeKey) });
       queryClient.removeQueries({ predicate: ({ queryKey }) => queryBelongsToTeamScope(queryKey, previousTeamKey, previousScopeKey) });
       router.replace("/profile");

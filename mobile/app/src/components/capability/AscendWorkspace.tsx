@@ -32,7 +32,7 @@ import { Slider } from "@vorinthex/shared/ui/slider";
 import { Switch } from "@vorinthex/shared/ui/switch";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
-import { useToast } from "@vorinthex/shared/ui/toast";
+import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 import {
   CheckIcon,
   ChevronLeftIcon,

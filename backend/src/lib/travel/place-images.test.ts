@@ -11,7 +11,7 @@ const issuedAt = Date.now();
 const hero = { title: 'Japan travel interpretation', prompt: 'Authoritative destination: Japan. Create an original landscape editorial interpretation of a volcanic island country with cedar forests, dense cities, timber architecture, and soft morning light. No text or identifiable people.' };
 const tokenPayload = { version: 5, issuedAt, nonce: 'A'.repeat(43), teamKey, scopeKey, country: { name: 'Japan', countryCode: 'JP', continent: 'Asia', latitude: 36.2, longitude: 138.2 }, place: { kind: 'country', name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2 }, hero } as const;
 const staged = new Map<string, Uint8Array>();
-const storage = { upload: async ({ key, bytes }: { key: string; bytes: Uint8Array }) => { staged.set(key, bytes); return { storageKey: key }; }, download: async (key: string) => { const bytes = staged.get(key); if (!bytes) throw new Error('missing'); return { bytes }; }, delete: async (key: string) => { staged.delete(key); } } as any;
+const storage = { exists: async (key: string) => staged.has(key), upload: async ({ key, bytes }: { key: string; bytes: Uint8Array }) => { staged.set(key, bytes); return { storageKey: key }; }, download: async (key: string) => { const bytes = staged.get(key); if (!bytes) throw Object.assign(new Error('missing'), { name: 'NoSuchKey' }); return { bytes }; }, delete: async (key: string) => { staged.delete(key); } } as any;
 const token = { storage, decryptImageRequest: (value: string) => { if (!value.startsWith(input.imageRequestToken)) throw new Error('tampered token'); return tokenPayload; }, signUrl: async (key: string) => `https://signed.test/${key}` };
 const repository = { authorizeRead: async () => {} };
 function png(width = 1536, height = 1024) {
@@ -94,5 +94,29 @@ describe('transient place hero generation', () => {
     await expect(generateFor(current - PLACE_IMAGE_TOKEN_VALIDITY_MS)(input, userKey)).rejects.toThrow('expired');
     await expect(generateFor(current + 1)({ ...input, imageRequestToken: `${input.imageRequestToken}-future` }, userKey)).rejects.toThrow('future');
     expect(calls).toBe(0);
+  });
+
+  test('does not turn storage authorization, corruption, or signing failures into paid regeneration', async () => {
+    let calls = 0;
+    const execute = (async () => { calls++; return generated(); }) as any;
+    for (const failure of [Object.assign(new Error('denied'), { name: 'AccessDenied', $metadata: { httpStatusCode: 403 } }), new Error('network unavailable')]) {
+      const generate = createPlaceImageGenerator({ repository, ...token, storage: { ...storage, exists: async () => { throw failure; } }, execute });
+      await expect(generate(input, userKey)).rejects.toThrow(failure.message);
+    }
+    const corrupt = createPlaceImageGenerator({ repository, ...token, storage: { ...storage, exists: async () => true, download: async () => ({ bytes: new Uint8Array() }) }, execute });
+    await expect(corrupt(input, userKey)).rejects.toThrow('empty');
+    const signing = createPlaceImageGenerator({ repository, ...token, storage: { ...storage, exists: async () => true, download: async () => ({ bytes: png() }) }, signUrl: async () => { throw new Error('signing failed'); }, execute });
+    await expect(signing(input, userKey)).rejects.toThrow('signing failed');
+    expect(calls).toBe(0);
+  });
+
+  test('refreshes the signed URL of an existing preview without invoking the provider', async () => {
+    let calls = 0, signs = 0;
+    const generate = createPlaceImageGenerator({ repository, ...token, execute: (async () => { calls++; return generated(); }) as any, signUrl: async () => `https://signed.test/preview?revision=${++signs}`, log: () => {} });
+    const first = await generate(input, userKey);
+    const refreshed = await generate(input, userKey);
+    expect(first.image.url).not.toBe(refreshed.image.url);
+    expect(calls).toBe(1);
+    expect(refreshed.costUsd).toBeNull();
   });
 });

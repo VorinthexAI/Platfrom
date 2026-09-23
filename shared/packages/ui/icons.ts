@@ -81,3 +81,4 @@ export * from './icons/privacy';
 export * from './icons/delete-account';
 export * from './icons/sign-out';
 export * from './icons/wallet';
+export * from './icons/subscription-cancel';

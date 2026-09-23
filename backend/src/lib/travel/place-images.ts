@@ -26,6 +26,15 @@ export const placeImageTokenSchema = z.object({
 }).strict();
 export type PlaceImageToken = z.infer<typeof placeImageTokenSchema>;
 export function stagedPlaceImageKey(nonce: string) { return `pending/compass/place-hero/${nonce}/preview.png`; }
+export async function downloadStagedPlaceImage(storage: DocumentObjectStorage, key: string) {
+  if (storage.exists && !await storage.exists(key)) return undefined;
+  try { return await storage.download(key); }
+  catch (error) {
+    const failure = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+    if (failure?.name === 'NoSuchKey' || failure?.name === 'NotFound' || failure?.$metadata?.httpStatusCode === 404) return undefined;
+    throw error;
+  }
+}
 export const travelPlaceImageResponseSchema = z.object({
   status: z.literal('ready'),
   image: z.object({ status: z.literal('ready'), title: z.string().trim().min(1).max(160), url: z.string().url(), width: z.number().int().positive(), height: z.number().int().positive(), mimeType: generatedImageMimeTypeSchema }).strict(),
@@ -80,15 +89,14 @@ export function createPlaceImageGenerator(dependencies: PlaceImageDependencies) 
     if (currentTime >= expiresAt) throw new Error('Place image request token has expired.');
     pruneReplayState(currentTime);
     const stagedKey = stagedPlaceImageKey(token.nonce);
-    try {
-      const staged = await storage.download(stagedKey);
+    const staged = await downloadStagedPlaceImage(storage, stagedKey);
+    if (staged) {
       if (staged.bytes.byteLength > 0 && staged.bytes.byteLength <= PLACE_IMAGE_PNG_MAX_BYTES) {
         const dimensions = staged.bytes[0] === 137 ? readPlacePngDimensions(staged.bytes) : { width: 1024, height: 682 };
         consumedPlaceImageTokens.set(tokenHash(input.imageRequestToken), expiresAt);
-        return travelPlaceImageResponseSchema.parse({ status: 'ready', image: { status: 'ready', title: token.hero.title, url: await signUrl(stagedKey), width: dimensions.width, height: dimensions.height, mimeType: 'image/png' }, durationMs: 0, costUsd: null });
+        return travelPlaceImageResponseSchema.parse({ status: 'ready', image: { status: 'ready', title: token.hero.title, url: await signUrl(stagedKey), width: dimensions.width, height: dimensions.height, mimeType: staged.mimeType ?? 'image/png' }, durationMs: 0, costUsd: null });
       }
-    } catch {
-      // A missing staged object is the only state that permits provider work.
+      throw new Error('Stored place image is empty or exceeds the maximum allowed size.');
     }
     const hash = tokenHash(input.imageRequestToken);
     const inFlightKey = `${token.teamKey}\0${token.scopeKey}\0${token.nonce}`;

@@ -16,7 +16,7 @@ import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Switch } from "@vorinthex/shared/ui/switch";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
-import { useToast } from "@vorinthex/shared/ui/toast";
+import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 import { BrainIcon, CheckIcon, ChevronLeftIcon, ChevronRightIcon, CloseIcon, FilterIcon, FolderIcon, MoreHorizontalIcon, PlusIcon, SearchIcon, SendIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { appendCursorItems, isNearScrollEnd } from "@vorinthex/shared/lib/pagination";
 

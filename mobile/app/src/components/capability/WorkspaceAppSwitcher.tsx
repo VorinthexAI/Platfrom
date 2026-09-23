@@ -4,7 +4,7 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CheckIcon, ChevronLeftIcon, ChevronRightIcon } from "@vorinthex/shared/ui/icons-mobile";
-import { useToast } from "@vorinthex/shared/ui/toast";
+import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { assistantIconSource, capabilityIconSource } from "@/data/capability-icons";

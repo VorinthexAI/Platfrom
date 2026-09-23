@@ -7,7 +7,7 @@ import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button, ButtonSizeProvider } from "@vorinthex/shared/ui/button";
 import { CloseIcon, PlusIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
-import { useToast } from "@vorinthex/shared/ui/toast";
+import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 
 import { EmailAttachmentPicker, type EmailAttachmentImageUrls, type EmailAttachmentLabels } from "@/components/capability/EmailAttachmentPicker";
 import { GalleryGenerationHistory } from "@/components/capability/GalleryGenerationHistory";

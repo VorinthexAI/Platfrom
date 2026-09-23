@@ -6,7 +6,7 @@ import { OnboardingCoreConversation } from "@/components/onboarding/OnboardingCo
 import { OnboardingReward } from "@/components/onboarding/OnboardingReward";
 import { OnboardingProfileBadge } from "@/components/onboarding/OnboardingProfileBadge";
 import { PaywallSheet } from "@/components/PaywallSheet";
-import { getLocalOnboardingState, markOnboardingPreviewComplete } from "@/lib/onboarding-state";
+import { getLocalOnboardingState, markOnboardingIntroShown, markOnboardingPreviewComplete } from "@/lib/onboarding-state";
 import { useAppsStore } from "@/state/apps";
 import { useAuthStore } from "@/state/auth";
 import { useUiStore } from "@/state/ui";
@@ -22,13 +22,16 @@ export default function OnboardingRoute() {
   const apps = useAppsStore((state) => state.apps);
   const alreadyOnboarded = useRef(useAuthStore.getState().user?.isOnboarded === true);
   useEffect(() => {
+    if (phase === "conversation" && authStatus === "unauthenticated") void markOnboardingIntroShown().catch(() => undefined);
+  }, [authStatus, phase]);
+  useEffect(() => {
     if (alreadyOnboarded.current) router.replace("/capability/archive");
   }, [router]);
   const handleComplete = useCallback(() => {
     const completion = completeOnboarding();
     useUiStore.getState().requestAgentGreeting("onboarding");
     router.replace("/capability/archive");
-    void completion.catch(() => router.replace("/onboarding"));
+    void completion.catch(() => { if (useAuthStore.getState().status === "authenticated") router.replace("/onboarding"); });
   }, [completeOnboarding, router]);
   const startAuth = useCallback(async () => {
     await markOnboardingPreviewComplete();

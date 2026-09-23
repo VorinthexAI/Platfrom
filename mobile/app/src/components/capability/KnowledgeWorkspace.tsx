@@ -20,7 +20,7 @@ import { PullToRefresh } from "@vorinthex/shared/ui/pull-to-refresh";
 import { highlightedSegments, searchDocumentPassagesLiteral, type DocumentPassage, type HighlightRange } from "@vorinthex/shared/ui/document-search";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
-import { useToast } from "@vorinthex/shared/ui/toast";
+import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 import { Spinner } from "@vorinthex/shared/ui/spinner";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Slider } from "@vorinthex/shared/ui/slider";
@@ -831,7 +831,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
   }, [narrationAudio.didJustFinish]);
 
   useEffect(() => {
-    if (hasContentContext) return;
+    if (hasContentContext || useAuthStore.getState().status !== "authenticated") return;
     void reconnectContentContext().catch((cause: unknown) => {
       setError(cause instanceof Error ? cause.message : "Archive AI could not connect.");
       setLocationLoading(false);

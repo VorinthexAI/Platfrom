@@ -1,10 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
 import { Badge } from "@vorinthex/shared/ui/badge";
 import { Button, ButtonSizeProvider } from "@vorinthex/shared/ui/button";
 import { CloseIcon, HelpIcon, ReferralIcon, SparksIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Tabs, TabsTrigger } from "@vorinthex/shared/ui/tabs";
-import { useToast } from "@vorinthex/shared/ui/toast";
+import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 import * as Crypto from "expo-crypto";
 import { LinearGradient } from "expo-linear-gradient";
 import * as WebBrowser from "expo-web-browser";
@@ -19,14 +19,13 @@ import { SparkCostsSheet } from "@/components/SparkCostsSheet";
 import { vorinthexMarkSource } from "@/data/capability-icons";
 import { useCurrentSubscription, useWholeSparkBalance } from "@/hooks/use-billing-summary";
 import { useDelayedAction } from "@/hooks/use-delayed-action";
-import { currentSubscriptionQueryKey, formatWholeSparks, setSubscriptionCancellation } from "@/lib/billing-client";
+import { formatWholeSparks } from "@/lib/billing-client";
 import { completeCheckoutReturn } from "@/lib/checkout-return";
 import { useErrorFeedback } from "@/hooks/use-error-feedback";
-import { CHECKOUT_SUCCESS_URL, checkoutCallbackFromUrl, createCheckout } from "@/lib/checkout-client";
+import { CHECKOUT_SUCCESS_URL, checkoutCallbackFromUrl, checkoutErrorMessage, createCheckout } from "@/lib/checkout-client";
 import { activeSubscriptionOffers, activeTopup, effectivePriceCents, formatProductPrice, productSparkAmount, type MobileProduct } from "@/lib/product-client";
 import { fetchReferralSummary, referralSummaryQueryKey } from "@/lib/referral-client";
 import { recordOnboardingEvent } from "@/lib/onboarding-events";
-import { subscriptionPresentation } from "@/lib/subscription-presentation";
 import { useAppsStore } from "@/state/apps";
 import { useAuthStore } from "@/state/auth";
 import { useUiStore } from "@/state/ui";
@@ -88,17 +87,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
   const effectiveSelectedKey = offers.some(({ key }) => key === selectedKey) ? selectedKey : preferred?.key;
   const selected = offers.find(({ key }) => key === effectiveSelectedKey);
   const subscription = subscriptionQuery.data;
-  const subscriptionProduct = subscription ? products.find(({ key }) => key === subscription.productKey) : undefined;
   const currentSubscriptionProductKey = subscription && ["active", "trialing", "past_due"].includes(subscription.status) ? subscription.productKey : undefined;
-  const subscriptionView = subscription ? subscriptionPresentation(subscription, subscriptionProduct) : undefined;
-  const updateSubscription = useMutation({
-    mutationFn: setSubscriptionCancellation,
-    onSuccess: (updated) => {
-      if (userKey) void queryClient.invalidateQueries({ queryKey: currentSubscriptionQueryKey(userKey), exact: true, refetchType: "active" });
-      showToast({ title: updated.cancelAtPeriodEnd ? "Cancellation scheduled." : "Subscription renewed.", duration: 2_500 });
-    },
-    onError: () => showToast({ title: "Subscription could not be updated.", duration: 2_500 }),
-  });
   const referral = useQuery({ queryKey: referralSummaryQueryKey(userKey ?? "unauthenticated"), queryFn: fetchReferralSummary, enabled: Boolean(userKey && open && (mode === "onboarding" || page === "referral")), initialData: authReferralSummary?.code.ownerUserKey === userKey ? authReferralSummary : undefined });
   useErrorFeedback(open ? [message, completionError, page === "referral" ? referral.error : undefined] : []);
 
@@ -138,6 +127,10 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
 
   async function checkout() {
     if (!selected || !userKey || checkoutInFlight.current || checkoutState === "opening") return;
+    if (selected.key === currentSubscriptionProductKey) {
+      showToast({ title: "You’re already on this plan.", duration: 2_500 });
+      return;
+    }
     checkoutInFlight.current = true;
     setCheckoutState("opening");
     setMessage(undefined);
@@ -165,7 +158,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
       setCheckoutState("idle");
     } catch (error) {
       setCheckoutState("idle");
-      setMessage(error instanceof Error ? error.message : "Checkout could not be opened. Please try again.");
+      setMessage(checkoutErrorMessage(error));
     } finally {
       checkoutInFlight.current = false;
     }
@@ -224,7 +217,6 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
 
   const content = page === "plans" ? <ScrollView contentContainerStyle={[styles.content, mode === "onboarding" && styles.onboardingContent]} showsVerticalScrollIndicator={false}>
     {mode === "onboarding" ? <View style={styles.hero}><View style={styles.heroTitleRow}><Text style={styles.heroTitle}>One balance for everything you create and use</Text><ButtonSizeProvider overrideParent size="sm"><Button accessibilityLabel="How Sparks are billed" contentMode="raw" iconOnly onPress={() => setSparkCostsOpen(true)} size="sm" variant="icon"><HelpIcon size="sm" /></Button></ButtonSizeProvider></View><Text style={styles.heroCopy}>Sparks give you a simple way to use AI capabilities, store your work, and keep services connected across Vorinthex.</Text></View> : <View style={styles.balanceHero}><View style={styles.balanceHeading}><SparksIcon size="lg" /><Text accessibilityLabel={balance === undefined ? "Sparks balance unavailable. Showing 0 Sparks" : `${balance} Sparks`} style={styles.balance}>{formatWholeSparks(balance ?? 0)} <Text style={styles.balanceUnit}>Sparks</Text></Text></View><ButtonSizeProvider overrideParent size="sm"><Button accessibilityLabel="How Sparks are billed" contentMode="raw" iconOnly onPress={() => setSparkCostsOpen(true)} size="sm" variant="icon"><HelpIcon size="sm" /></Button></ButtonSizeProvider></View>}
-    {mode === "standard" && subscription ? <View style={styles.subscriptionCard}><View style={styles.subscriptionHeading}><Text style={styles.sectionLabel}>YOUR SUBSCRIPTION</Text><Badge><Text style={styles.subscriptionBadge}>{subscription.status.replace("_", " ").toUpperCase()}</Text></Badge></View><Text style={styles.subscriptionTitle}>{subscriptionView?.title}</Text><Text style={styles.subscriptionCopy}>{subscriptionView?.copy}</Text>{subscriptionView?.action ? <Button loading={updateSubscription.isPending} onPress={() => updateSubscription.mutate(subscriptionView.action === "cancel")} size="md" variant="secondary">{subscriptionView.action === "restore" ? "Restore renewal" : "Cancel renewal"}</Button> : null}</View> : null}
     {mode === "standard" ? <><Tabs accessibilityLabel="Spark offers" accessibilityRole="tablist" onValueChange={(value) => setOfferTab(value as OfferTab)} style={styles.offerTabs} value={offerTab}><TabsTrigger style={styles.offerTab} value="plans">Plans</TabsTrigger><TabsTrigger style={styles.offerTab} value="topup">Top-up</TabsTrigger></Tabs><View style={styles.plans}>{offers.map((product) => <PlanCard current={currentSubscriptionProductKey === product.key} key={product.key} onSelect={() => setSelectedKey(product.key)} product={product} selected={effectiveSelectedKey === product.key} />)}</View></> : <View style={styles.plans}>{subscriptions.map((product) => <PlanCard current={currentSubscriptionProductKey === product.key} key={product.key} onSelect={() => setSelectedKey(product.key)} product={product} selected={effectiveSelectedKey === product.key} />)}</View>}
     {!offers.length ? <View style={styles.state}><Text style={styles.heroCopy}>{productsStatus === "loading" ? "Loading offers..." : "Offers are temporarily unavailable."}</Text>{productsStatus !== "loading" ? <Button onPress={() => void refreshProducts()} size="md" variant="secondary">Retry</Button> : null}</View> : null}
   </ScrollView> : <ScrollView contentContainerStyle={styles.referralContent} showsVerticalScrollIndicator={false}>
@@ -271,15 +263,10 @@ const styles = StyleSheet.create({
   offerTabs: { alignSelf: "stretch" },
   offerTab: { flex: 1 },
   plans: { gap: spacing.sm },
-  subscriptionCard: { borderColor: palette.hairline, borderRadius: 16, borderWidth: 1, gap: spacing.sm, padding: spacing.md },
-  subscriptionHeading: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
-  subscriptionBadge: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 9, letterSpacing: 1 },
-  subscriptionTitle: { color: palette.text, fontFamily: fonts.medium, fontSize: 16 },
-  subscriptionCopy: { color: palette.muted, fontFamily: fonts.regular, fontSize: 13, lineHeight: 19 },
   planWrap: { alignSelf: "stretch", maxWidth: "100%", paddingTop: spacing.xs, position: "relative", width: "100%" },
   plan: { alignItems: "center", alignSelf: "stretch", backgroundColor: "transparent", borderColor: palette.hairline, flexDirection: "row", height: "auto", justifyContent: "space-between", maxWidth: "100%", minHeight: 78, overflow: "hidden", paddingHorizontal: spacing.md, paddingVertical: spacing.sm, width: "100%" },
   planSelected: { borderColor: palette.silver50 },
-  currentPlanBadge: { backgroundColor: palette.page, borderColor: palette.silver50, borderRadius: 999, borderWidth: 1, paddingHorizontal: spacing.sm, paddingVertical: 3, position: "absolute", right: spacing.md, top: 0 },
+  currentPlanBadge: { backgroundColor: palette.page, borderRadius: 999, borderWidth: 0, paddingHorizontal: spacing.sm, paddingVertical: 3, position: "absolute", right: spacing.md, top: 0 },
   currentPlanBadgeText: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 11 },
   bestValueBadge: { backgroundColor: "#030507", borderRadius: 999, paddingHorizontal: spacing.sm, paddingVertical: 3, position: "absolute", right: spacing.md, top: 0 },
   bestValueBadgeText: { color: palette.chromeWhite, fontFamily: fonts.medium, fontSize: 11 },

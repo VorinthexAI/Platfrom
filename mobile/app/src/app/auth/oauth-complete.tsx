@@ -18,7 +18,7 @@ export default function OAuthCompleteRoute() {
     if (error || !code) return;
     void exchangeOAuthCode(code)
       .then(async () => {
-        await hydrate();
+        await hydrate({ newSession: true });
       })
       .catch(() => setMessage("This sign-in response is invalid or expired."));
   }, [code, error, hydrate]);

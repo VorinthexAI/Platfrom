@@ -33,6 +33,7 @@ export default function RootLayout() {
     Geist_600SemiBold: Geist_300Light,
   });
   const status = useAuthStore((state) => state.status);
+  const isOnboarded = useAuthStore((state) => state.user?.isOnboarded === true);
   const bootstrap = useAuthStore((state) => state.bootstrap);
   const [localOnboarding, setLocalOnboarding] = useState<LocalOnboardingState>();
   const appsStatus = useAppsStore((state) => state.bootstrapStatus);
@@ -71,8 +72,8 @@ export default function RootLayout() {
     if (status === "bootstrapping" || appsStatus !== "ready" || !localOnboarding) return;
     const root = segments[0] as string | undefined;
     const isPublic = root === "auth" || root === "public" || root === "referral" || root === "checkout" || root === undefined;
-    const isOnboarded = useAuthStore.getState().user?.isOnboarded === true;
     if (status === "unauthenticated") {
+      if (root === "onboarding" && localOnboarding.introActive) return;
       if (!localOnboarding.previewComplete) {
         if (root === "auth" || root === undefined || (!isPublic && root !== "onboarding")) router.replace("/onboarding");
       } else if (root === undefined || (!isPublic && root !== "auth")) router.replace("/auth" as Href);
@@ -83,7 +84,7 @@ export default function RootLayout() {
       else router.replace("/capability/archive");
     }
     if (status === "authenticated" && !isOnboarded && !isPublic && root !== "onboarding") router.replace("/onboarding");
-  }, [appsStatus, localOnboarding, router, segments, status]);
+  }, [appsStatus, isOnboarded, localOnboarding, router, segments, status]);
 
   if ((!fontsLoaded && !fontError) || !connectionResolved || !localOnboarding || (!isOffline && (status === "bootstrapping" || appsStatus !== "ready"))) {
     return null;

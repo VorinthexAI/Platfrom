@@ -334,7 +334,7 @@ describe('travel contracts and service', () => {
   test('creates canonical hero storage and an independent best-effort Gallery copy from staged bytes', async () => {
     const bytesByKey = new Map<string, Uint8Array>();
     const deleted: string[] = [], processed: Uint8Array[] = [];
-    const storage = { upload: async ({ key, bytes }: any) => { bytesByKey.set(key, bytes); return { storageKey: key }; }, download: async (key: string) => { const bytes = bytesByKey.get(key); if (!bytes) throw new Error('missing'); return { bytes }; }, delete: async (key: string) => { deleted.push(key); bytesByKey.delete(key); }, copy: async () => ({ storageKey: '' }) };
+    const storage = { upload: async ({ key, bytes }: any) => { bytesByKey.set(key, bytes); return { storageKey: key }; }, download: async (key: string) => { const bytes = bytesByKey.get(key); if (!bytes) throw Object.assign(new Error('missing'), { name: 'NoSuchKey' }); return { bytes }; }, delete: async (key: string) => { deleted.push(key); bytesByKey.delete(key); }, copy: async () => ({ storageKey: '' }) };
     const token = { version: 5, issuedAt: Date.parse(timestamp), nonce: 'A'.repeat(43), teamKey: 'team', scopeKey, country: { name: 'Japan', countryCode: 'JP', continent: 'Asia', latitude: 36.2, longitude: 138.2 }, place: { kind: 'country', name: 'Japan', summary: 'Island country.', countryCode: 'JP', latitude: 36.2, longitude: 138.2 }, hero: { title: 'Japan travel interpretation', prompt: 'Japan landscape' } } as const;
     let providerCalls = 0, converges = 0;
     const exportOrder: string[] = [];
@@ -669,7 +669,7 @@ describe('travel contracts and service', () => {
     const staged = new Map<string, Uint8Array>();
     const storage = {
       upload: async ({ key: storageKey, bytes }: any) => { staged.set(storageKey, bytes); return { storageKey }; },
-      download: async (storageKey: string) => { const bytes = staged.get(storageKey); if (!bytes) throw new Error('missing'); return { bytes }; },
+      download: async (storageKey: string) => { const bytes = staged.get(storageKey); if (!bytes) throw Object.assign(new Error('missing'), { name: 'NoSuchKey' }); return { bytes }; },
       delete: async (storageKey: string) => { staged.delete(storageKey); }, copy: async () => ({ storageKey: '' }),
     };
     const repository = { ...generatedPersistence, authorizeRead: async () => {}, authorizeWrite: async () => { decryptedAfterAuthorization = true; return key; } } as unknown as TravelRepository;
@@ -738,7 +738,7 @@ describe('travel contracts and service', () => {
     const guideGate = new Promise<void>((resolve) => { releaseGuide = resolve; });
     const briefGate = new Promise<void>((resolve) => { releaseBrief = resolve; });
     const tokens = new Map<string, unknown>(), staged = new Map<string, Uint8Array>();
-    const storage = { upload: async ({ key: storageKey, bytes }: any) => { staged.set(storageKey, bytes); return { storageKey }; }, download: async (storageKey: string) => { const bytes = staged.get(storageKey); if (!bytes) throw new Error('missing'); return { bytes }; }, delete: async () => {}, copy: async () => ({ storageKey: '' }) };
+    const storage = { upload: async ({ key: storageKey, bytes }: any) => { staged.set(storageKey, bytes); return { storageKey }; }, download: async (storageKey: string) => { const bytes = staged.get(storageKey); if (!bytes) throw Object.assign(new Error('missing'), { name: 'NoSuchKey' }); return { bytes }; }, delete: async () => {}, copy: async () => ({ storageKey: '' }) };
     const service = createTravelService({
       repository: { ...generatedPersistence, authorizeRead: async () => {}, authorizeWrite: async () => key } as unknown as TravelRepository, storage, embed: async () => embedding, now: () => timestamp,
       issueImageNonce: () => 'N'.repeat(43), encryptChildrenRequest: () => 'children-token',

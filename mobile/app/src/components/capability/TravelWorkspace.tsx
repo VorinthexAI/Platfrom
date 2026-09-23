@@ -18,7 +18,7 @@ import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { Switch } from "@vorinthex/shared/ui/switch";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
-import { useToast } from "@vorinthex/shared/ui/toast";
+import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { ResourceTagsSheet } from "@/components/ResourceTagsSheet";
@@ -74,7 +74,8 @@ import {
   type TripGuide,
 } from "@/lib/travel-client";
 import { formatGuideBody, formatGuideContent, type GuideTextRun } from "@/lib/travel-guide-format";
-import { hydratePlaceChildren, PLACE_GUIDE_CACHE_MS } from "@/lib/travel-prefetch";
+import { hydratePlaceChildren, PLACE_GUIDE_CACHE_MS, PLACE_IMAGE_CACHE_MS } from "@/lib/travel-prefetch";
+import { useErrorFeedback } from "@/hooks/use-error-feedback";
 import { tagFilterContextKey, type ResourceTagTarget } from "@/lib/tag-client";
 import {
   addOptimisticCompassPlace,
@@ -323,10 +324,10 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   }, [savedTableSearchActive, tripCompletedOnly, tripFavoritesOnly, tripSearchQuery.data, trips]);
   const selectedTrip = selectedTripKey ? trips.find(({ key }) => key === selectedTripKey) : undefined;
   const selectedPlace = selectedPlaceKey
-    ? (selectedPlaceSnapshot?.key === selectedPlaceKey ? selectedPlaceSnapshot : undefined)
+    ? places.find(({ key }) => key === selectedPlaceKey)
       ?? selectedTrip?.places.find(({ key }) => key === selectedPlaceKey)
-      ?? places.find(({ key }) => key === selectedPlaceKey)
       ?? trips.flatMap(({ places: tripPlaces }) => tripPlaces).find(({ key }) => key === selectedPlaceKey)
+      ?? (selectedPlaceSnapshot?.key === selectedPlaceKey ? selectedPlaceSnapshot : undefined)
     : undefined;
   const placeReferencesQuery = useQuery({
     queryKey: compassQueryKeys.placeReferences(travelContext, selectedPlace?.key ?? "", placeReferenceKind),
@@ -403,7 +404,7 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
       return generatePlaceHeroUntilReady(countryDetailQuery.data.imageRequestToken, signal);
     },
     enabled: countryDetailEnabled && !savedCountryImage && !countryDetailQuery.isFetching && !countryDetailQuery.isError && Boolean(countryDetailQuery.data?.imageRequestToken),
-    staleTime: COUNTRY_SHEET_CACHE_MS,
+    staleTime: PLACE_IMAGE_CACHE_MS,
     gcTime: COUNTRY_SHEET_CACHE_MS,
     retry: false,
   });
@@ -445,7 +446,7 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
       return generatePlaceHeroUntilReady(cityDetailQuery.data.imageRequestToken, signal);
     },
     enabled: cityDetailEnabled && !savedCityImage && !cityDetailQuery.isFetching && !cityDetailQuery.isError && Boolean(cityDetailQuery.data?.imageRequestToken),
-    staleTime: COUNTRY_SHEET_CACHE_MS,
+    staleTime: PLACE_IMAGE_CACHE_MS,
     gcTime: COUNTRY_SHEET_CACHE_MS,
     retry: false,
   });
@@ -453,6 +454,17 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   const cityDetailLoading = cityDetailEnabled && !cityDetail && (cityDetailQuery.isPending || cityDetailQuery.isFetching);
   const cityDetailError = cityDetailQuery.error ? errorMessage(cityDetailQuery.error) : undefined;
   const cityImage = cityDetail ? savedCityImage ?? cityImageQuery.data : undefined;
+
+  async function retryCountryHero() {
+    if (savedCountryImage) { await Promise.all([overviewQuery.refetch(), tripsQuery.refetch()]); return; }
+    if (countryDetailQuery.isError || Date.now() - countryDetailQuery.dataUpdatedAt >= PLACE_GUIDE_CACHE_MS) { await countryDetailQuery.refetch(); return; }
+    await countryImageQuery.refetch();
+  }
+  async function retryCityHero() {
+    if (savedCityImage) { await Promise.all([overviewQuery.refetch(), tripsQuery.refetch()]); return; }
+    if (cityDetailQuery.isError || Date.now() - cityDetailQuery.dataUpdatedAt >= PLACE_GUIDE_CACHE_MS) { await cityDetailQuery.refetch(); return; }
+    await cityImageQuery.refetch();
+  }
 
   useEffect(() => {
     setCountryGuideDraft(undefined);
@@ -589,6 +601,8 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   }
 
   function openSavedPlace(place: Place) {
+    void overviewQuery.refetch();
+    void tripsQuery.refetch();
     const country = countryByCode.get(place.countryCode) ?? { countryCode: place.countryCode, name: place.kind === "country" ? place.name : place.countryCode, continent: "Unknown", latitude: place.latitude, longitude: place.longitude };
     setDetailSource("table");
     setSelectedCountry(country);
@@ -1523,7 +1537,7 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     <View style={[styles.workspaceViewport, { paddingLeft: Math.max(insets.left, spacing.md), paddingRight: Math.max(insets.right, spacing.md) }]}>
       {selectedPlace ? <>
         <View style={styles.rootTitleRow}><Button accessibilityLabel={selectedTrip ? `Back to ${selectedTrip.name}` : "Back to Places"} contentMode="raw" onPress={() => { setSelectedPlaceKey(undefined); setSelectedPlaceSnapshot(undefined); }} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button><Text numberOfLines={1} style={styles.rootTitle}>{selectedPlace.name}</Text><Button accessibilityLabel="Place menu" contentMode="raw" onPress={() => setPlaceMenuOpen(true)} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button><Button accessibilityLabel="AI place actions" contentMode="raw" onPress={() => setPlaceAiMenuOpen(true)} size="xs" variant="icon"><BrainIcon size="sm" /></Button></View>
-        <ScrollView accessibilityLabel={`${selectedPlace.name} place details`} alwaysBounceVertical contentContainerStyle={styles.savedPlaceDetail} refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />} showsVerticalScrollIndicator={false}>{selectedPlace.kind === "country" ? countryDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{countryDetailError}</Text></View> : visibleCountryGuide || savedCountryImage ? <GuideHero cacheKey={`compass-place-cover:${selectedPlace.key}`} detail={visibleCountryGuide ?? { summary: selectedPlace.summary, culture: "", food: "", whyVisit: "" }} image={(countryImage ?? savedCountryImage)?.image} onImageError={() => void overviewQuery.refetch()} /> : countryDetailLoading ? <GuideLoading label={`Loading information about ${selectedPlace.name}`} /> : null : cityDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{cityDetailError}</Text></View> : cityDetail || savedCityImage ? <GuideHero cacheKey={`compass-place-cover:${selectedPlace.key}`} detail={cityDetail ?? { summary: selectedPlace.summary, culture: "", food: "", whyVisit: "" }} image={(cityImage ?? savedCityImage)?.image} onImageError={() => void overviewQuery.refetch()} /> : cityDetailLoading ? <GuideLoading label={`Loading information about ${selectedPlace.name}`} /> : null}</ScrollView>
+        <ScrollView accessibilityLabel={`${selectedPlace.name} place details`} alwaysBounceVertical contentContainerStyle={styles.savedPlaceDetail} refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />} showsVerticalScrollIndicator={false}>{selectedPlace.kind === "country" ? countryDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{countryDetailError}</Text></View> : visibleCountryGuide || savedCountryImage ? <GuideHero cacheKey={`compass-place-cover:${selectedPlace.key}`} detail={visibleCountryGuide ?? { summary: selectedPlace.summary, culture: "", food: "", whyVisit: "" }} image={(countryImage ?? savedCountryImage)?.image} error={savedCountryImage ? undefined : countryImageQuery.error} pending={countryImageQuery.isFetching} onImageError={retryCountryHero} /> : countryDetailLoading ? <GuideLoading label={`Loading information about ${selectedPlace.name}`} /> : null : cityDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{cityDetailError}</Text></View> : cityDetail || savedCityImage ? <GuideHero cacheKey={`compass-place-cover:${selectedPlace.key}`} detail={cityDetail ?? { summary: selectedPlace.summary, culture: "", food: "", whyVisit: "" }} image={(cityImage ?? savedCityImage)?.image} error={savedCityImage ? undefined : cityImageQuery.error} pending={cityImageQuery.isFetching} onImageError={retryCityHero} /> : cityDetailLoading ? <GuideLoading label={`Loading information about ${selectedPlace.name}`} /> : null}</ScrollView>
       </> : selectedTrip ? <>
         <View style={styles.rootTitleRow}><Button accessibilityLabel="Back to trips" contentMode="raw" onPress={() => { setSelectedTripKey(undefined); setSelectedTripPlaceKeys([]); }} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button><Text numberOfLines={1} style={styles.rootTitle}>{selectedTrip.name}</Text><Button accessibilityLabel="Trip menu" contentMode="raw" onPress={() => setTripMenuOpen(true)} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button><Button accessibilityLabel="Add to trip" contentMode="raw" onPress={() => setTripAddMenuOpen(true)} size="xs" variant="icon"><PlusIcon size="sm" /></Button></View>
         <View style={styles.detailHeaderActions}><Button accessibilityLabel="AI trip actions" contentMode="raw" onPress={() => setTripAiMenuOpen(true)} size="xs" variant="icon"><BrainIcon size="sm" /></Button>{tripDetailTab === "places" ? <Button accessibilityLabel={tripView === "globe" ? "Show trip table" : "Show trip globe"} contentMode="raw" onPress={() => setTripView((current) => current === "globe" ? "table" : "globe")} size="xs" variant="icon">{tripView === "globe" ? <TableViewIcon size="sm" /> : <GlobeViewIcon size="sm" />}</Button> : null}</View>
@@ -1549,10 +1563,10 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     <CoreComposer accessory={rootView === "globe" && !selectedPlace && !selectedTrip && selectedCountry && !countryDetailOpen && !cityDetailOpen ? <Button accessibilityLabel={`Reopen ${selectedCountry.name}`} contentMode="raw" onPress={() => openCountryDetail(selectedCountry, "globe", true)} size="sm" style={styles.placeIsland} variant="secondary"><LocationPinIcon size="sm" /><Text numberOfLines={1} style={styles.placeIslandText}>{selectedCountry.name}</Text><ChevronRightIcon size="sm" /></Button> : undefined} accessibilityLabel="Ask Core about saved cities" disabled={assistantBusy} editable={!assistantBusy} leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />} loading={assistantBusy} message={assistantMessage ? <View style={assistantFailed ? styles.inlineError : styles.inlineNotice}><Text style={styles.messageText}>{assistantMessage}</Text></View> : null} onChangeText={(value) => { setAssistantInput(value); assistantRequestKey.current = undefined; }} onFocusChange={handleCoreFocusChange} onSubmit={() => void askAssistant()} pageIdentity={(closeCore) => <WorkspaceAppSwitcher active="compass" identity="core" onSelectActive={closeCore} />} prompts={CORE_PROMPTS} sendIcon={<SendIcon size="sm" />} value={assistantInput} />
 
     <BottomSheet footer={<View style={styles.sheetFooter}>{!countryAlreadySaved && countryDetail ? <Button disabled={countryImage?.status !== "ready"} onPress={saveCountry} size="md" variant="primary">Save</Button> : null}<Button onPress={() => setCountryDetailOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} height="full" onOpenChange={setCountryDetailOpen} open={countryDetailOpen} title={selectedCountry?.name ?? "Country"}>
-      <ScrollView contentContainerStyle={[styles.sheetContent, countryDetailError && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" onScroll={({ nativeEvent }) => { countryScrollOffset.current = nativeEvent.contentOffset.y; }} ref={countryScrollRef} scrollEventThrottle={16} showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}><View style={[styles.countryDetail, countryDetailError && styles.sheetEmptyContent]}>{countryDetailLoading ? <GuideLoading label={`Loading information about ${selectedCountry?.name ?? "country"}`} /> : countryDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{countryDetailError}</Text></View> : visibleCountryGuide ? <><GuideHero cacheKey={savedCountryDetail ? `compass-place-cover:${savedCountryDetail.key}` : `compass-country-hero:${selectedCountry?.countryCode ?? ""}`} detail={visibleCountryGuide} image={countryImage?.image} onImageError={() => { if (savedCountryImage) void overviewQuery.refetch(); }} />{detailSource === "globe" && countryDetail ? <><Text style={styles.popularCitiesTitle}>Popular cities</Text><View style={[styles.cityList, styles.countryCityList]}>{countryDetail.popularCities.map((city) => <Button accessibilityLabel={`Open ${city.name}, ${selectedCountry?.name ?? "country"}`} contentMode="raw" key={city.name} onPress={() => { if (selectedCountry) openCityDetail(city, selectedCountry, detailSource); }} size="md" style={[styles.cityPill, styles.sheetSecondary]} variant="secondary"><Text style={styles.cityName}>{city.name}</Text><ChevronRightIcon size="sm" /></Button>)}</View></> : null}</> : null}</View></ScrollView>
+      <ScrollView contentContainerStyle={[styles.sheetContent, countryDetailError && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" onScroll={({ nativeEvent }) => { countryScrollOffset.current = nativeEvent.contentOffset.y; }} ref={countryScrollRef} scrollEventThrottle={16} showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}><View style={[styles.countryDetail, countryDetailError && styles.sheetEmptyContent]}>{countryDetailLoading ? <GuideLoading label={`Loading information about ${selectedCountry?.name ?? "country"}`} /> : countryDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{countryDetailError}</Text></View> : visibleCountryGuide ? <><GuideHero cacheKey={savedCountryDetail ? `compass-place-cover:${savedCountryDetail.key}` : `compass-country-hero:${selectedCountry?.countryCode ?? ""}`} detail={visibleCountryGuide} image={countryImage?.image} error={savedCountryImage ? undefined : countryImageQuery.error} pending={countryDetailQuery.isFetching || countryImageQuery.isFetching} onImageError={retryCountryHero} />{detailSource === "globe" && countryDetail ? <><Text style={styles.popularCitiesTitle}>Popular cities</Text><View style={[styles.cityList, styles.countryCityList]}>{countryDetail.popularCities.map((city) => <Button accessibilityLabel={`Open ${city.name}, ${selectedCountry?.name ?? "country"}`} contentMode="raw" key={city.name} onPress={() => { if (selectedCountry) openCityDetail(city, selectedCountry, detailSource); }} size="md" style={[styles.cityPill, styles.sheetSecondary]} variant="secondary"><Text style={styles.cityName}>{city.name}</Text><ChevronRightIcon size="sm" /></Button>)}</View></> : null}</> : null}</View></ScrollView>
     </BottomSheet>
     <BottomSheet footer={<View style={styles.sheetFooter}>{!cityAlreadySaved && cityDetail ? <Button disabled={cityImage?.status !== "ready"} onPress={saveCity} size="md" variant="primary">Save</Button> : null}<Button onPress={() => setCityDetailOpen(false)} size="md" style={styles.sheetSecondary} variant="secondary">Close</Button></View>} height="full" onOpenChange={setCityDetailOpen} open={cityDetailOpen} title={selectedCity?.name ?? "City"}>
-      <ScrollView contentContainerStyle={[styles.sheetContent, cityDetailError && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}><View style={[styles.countryDetail, cityDetailError && styles.sheetEmptyContent]}>{cityDetailLoading ? <GuideLoading label={`Loading information about ${selectedCity?.name ?? "city"}`} /> : cityDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{cityDetailError}</Text></View> : cityDetail ? <GuideHero cacheKey={savedCityDetail ? `compass-place-cover:${savedCityDetail.key}` : `compass-city-hero:${selectedCountry?.countryCode ?? ""}:${selectedCity?.name ?? ""}`} detail={cityDetail} image={cityImage?.image} onImageError={() => { if (savedCityImage) void overviewQuery.refetch(); }} /> : null}</View></ScrollView>
+      <ScrollView contentContainerStyle={[styles.sheetContent, cityDetailError && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.fullSheetScroll}><View style={[styles.countryDetail, cityDetailError && styles.sheetEmptyContent]}>{cityDetailLoading ? <GuideLoading label={`Loading information about ${selectedCity?.name ?? "city"}`} /> : cityDetailError ? <View style={styles.countryDetailFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{cityDetailError}</Text></View> : cityDetail ? <GuideHero cacheKey={savedCityDetail ? `compass-place-cover:${savedCityDetail.key}` : `compass-city-hero:${selectedCountry?.countryCode ?? ""}:${selectedCity?.name ?? ""}`} detail={cityDetail} image={cityImage?.image} error={savedCityImage ? undefined : cityImageQuery.error} pending={cityDetailQuery.isFetching || cityImageQuery.isFetching} onImageError={retryCityHero} /> : null}</View></ScrollView>
     </BottomSheet>
     <BottomSheet hideHeading onOpenChange={setActionsOpen} open={actionsOpen} title=""><BottomSheetMenu><BottomSheetItem onPress={() => { setActionsOpen(false); updatePlaceSearch(""); delaySheetTransition(() => setCreatePlaceOpen(true)); }} style={styles.sheetAction} variant="secondary">Find place</BottomSheetItem><BottomSheetItem onPress={() => { setActionsOpen(false); setSelectedPlaceKeys([]); setTripName(""); setTripDescription(""); delaySheetTransition(() => setTripSelectionOpen(true)); }} style={styles.sheetAction} variant="secondary">Create trip</BottomSheetItem></BottomSheetMenu></BottomSheet>
     <BottomSheet hideHeading onOpenChange={setPlaceBulkMenuOpen} open={placeBulkMenuOpen} title=""><BottomSheetMenu><BottomSheetItem onPress={() => updateSelectedPlaces({ isFavorite: !allSelectedPlacesFavorite })} style={styles.sheetAction} variant="secondary">{allSelectedPlacesFavorite ? "Unfavorite" : "Favorite"}</BottomSheetItem><BottomSheetItem onPress={() => openPlaceTags(selectedTablePlaceKeys, () => setPlaceBulkMenuOpen(false))} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem><BottomSheetItem onPress={() => updateSelectedPlaces({ status: allSelectedPlacesVisited ? "wishlist" : "visited" })} style={styles.sheetAction} variant="secondary">{allSelectedPlacesVisited ? "Mark as want to go" : "Mark as visited"}</BottomSheetItem><BottomSheetItem onPress={openBulkPlaceDelete} style={styles.sheetAction} variant="secondary">Delete</BottomSheetItem></BottomSheetMenu></BottomSheet>
@@ -1743,15 +1757,34 @@ function GuideLoading({ label }: { label: string }) {
   return <View accessibilityLabel={label} accessibilityRole="progressbar" style={styles.countryDetailSkeleton}><Skeleton style={[styles.skeletonBlock, styles.skeletonHero]} /><Skeleton style={[styles.skeletonBlock, styles.skeletonText]} /></View>;
 }
 
-function GuideHero({ cacheKey, detail, image, onImageError }: { cacheKey?: string; detail: Pick<CityDetail, "summary" | "culture" | "food" | "whyVisit">; image?: PlaceImageResponse["image"]; onImageError: () => void }) {
+function GuideHero({ cacheKey, detail, image, error, pending, onImageError }: { cacheKey?: string; detail: Pick<CityDetail, "summary" | "culture" | "food" | "whyVisit">; image?: PlaceImageResponse["image"]; error?: unknown; pending?: boolean; onImageError: () => void | Promise<unknown> }) {
   const sections = [["summary", detail.summary], ["culture", detail.culture], ["food", detail.food], ["whyVisit", detail.whyVisit]] as const;
-  return <View accessibilityLabel={image ? "Destination hero" : "Generating destination hero"} accessibilityRole={!image ? "progressbar" : undefined} style={styles.guideHero}><PlaceImageFrame cacheKey={cacheKey} image={image} onError={onImageError} /><View style={styles.guideSections}>{sections.map(([key, section]) => section ? <Text key={key} style={styles.guideText}>{section}</Text> : <Skeleton key={key} style={[styles.skeletonBlock, styles.skeletonText]} />)}</View></View>;
+  return <View accessibilityLabel="Destination hero" style={styles.guideHero}><PlaceImageFrame key={cacheKey} cacheKey={cacheKey} image={image} failed={Boolean(error)} pending={pending} onRetry={onImageError} /><View style={styles.guideSections}>{sections.map(([key, section]) => section ? <Text key={key} style={styles.guideText}>{section}</Text> : <Skeleton key={key} style={[styles.skeletonBlock, styles.skeletonText]} />)}</View></View>;
 }
 
-function PlaceImageFrame({ cacheKey, image, onError }: { cacheKey?: string; image?: PlaceImageResponse["image"]; onError: () => void }) {
+function PlaceImageFrame({ cacheKey, image, failed: requestFailed, pending, onRetry }: { cacheKey?: string; image?: PlaceImageResponse["image"]; failed?: boolean; pending?: boolean; onRetry: () => void | Promise<unknown> }) {
   const url = image?.url;
-  const [loaded, setLoaded] = useState(Boolean(url));
-  return <View style={styles.imageFrame}>{url ? <Image accessibilityLabel={image.title} cachePolicy="memory-disk" contentFit="cover" onError={() => { setLoaded(false); onError(); }} onLoad={() => setLoaded(true)} source={{ uri: url, ...(cacheKey ? { cacheKey } : {}) }} style={styles.placeImage} transition={0} /> : null}{!url || !loaded ? <Skeleton style={styles.imageSkeleton} /> : null}</View>;
+  const [loadedUrl, setLoadedUrl] = useState<string>();
+  const [failedUrl, setFailedUrl] = useState<string>();
+  const [retrying, setRetrying] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const recovered = useRef(false);
+  const failed = !pending && !retrying && (requestFailed || Boolean(url && failedUrl === url));
+  useErrorFeedback([failed ? "The destination image could not be loaded. Try again." : undefined]);
+  useEffect(() => {
+    if (!url || loadedUrl === url) return;
+    const timer = setTimeout(() => setFailedUrl(url), 30_000);
+    return () => clearTimeout(timer);
+  }, [attempt, loadedUrl, url]);
+  const retry = async () => {
+    if (retrying || pending) return;
+    setRetrying(true);
+    setFailedUrl(undefined);
+    setLoadedUrl(undefined);
+    setAttempt((value) => value + 1);
+    try { await onRetry(); } catch { setFailedUrl(url); } finally { setRetrying(false); }
+  };
+  return <View style={styles.imageFrame}>{url ? <Image key={`${url}:${attempt}`} accessibilityLabel={image.title} cachePolicy="memory-disk" contentFit="cover" onError={() => { setFailedUrl(url); if (!recovered.current) { recovered.current = true; void retry(); } }} onLoad={() => { setLoadedUrl(url); setFailedUrl(undefined); }} source={{ uri: url, ...(cacheKey ? { cacheKey: `${cacheKey}:${url.split("?")[0]}:${attempt}` } : {}) }} style={styles.placeImage} transition={0} /> : null}{failed ? <View style={[StyleSheet.absoluteFill, { alignItems: "center", justifyContent: "center" }]}><Button accessibilityLabel="Retry destination image" onPress={() => void retry()} size="md" variant="secondary">Retry image</Button></View> : !url || loadedUrl !== url ? <Skeleton accessibilityLabel="Loading destination image" accessibilityRole="progressbar" style={styles.imageSkeleton} /> : null}</View>;
 }
 
 const styles = StyleSheet.create({
