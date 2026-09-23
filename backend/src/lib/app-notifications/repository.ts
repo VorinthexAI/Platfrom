@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
-import { db } from '@/lib/db/client';
+import { db, withDatabaseTransaction } from '@/lib/db/client';
 import { currentEmbeddingSchema, embeddingMetadata } from '@/lib/embeddings';
 import { newId } from '@/lib/ids';
 import type { AppNotifyInput, PushRegistrationInput } from './contracts';
 import { encryptPushToken, pushTokenHash } from './token-crypto';
 
 type QueryDatabase = Pick<typeof db, 'query'>;
+type RegistrationTransaction = <T>(operation: (transaction: QueryDatabase) => Promise<T>) => Promise<T>;
 export interface PendingPushDelivery { key: string; userKey: string; tokenCiphertext: string; projectId: string; title: string; message: string; notificationKey: string }
 export interface PendingReceipt { key: string; receiptId: string }
 export interface StorageRetentionWarningPersistenceInput {
@@ -19,22 +20,33 @@ export interface StorageRetentionWarningPersistenceInput {
   warningDayStart: string;
 }
 
-export function createAppNotificationRepository(database: QueryDatabase = db) {
+export function createAppNotificationRepository(
+  database: QueryDatabase = db,
+  registrationTransaction: RegistrationTransaction = (operation) => withDatabaseTransaction(database as typeof db, { write: ['pushSubscriptions'], exclusive: ['pushSubscriptions'] }, operation),
+) {
   return {
     async register(userKey: string, installationKey: string, input: PushRegistrationInput) {
       const now = new Date().toISOString();
       const tokenHash = pushTokenHash(input.token);
-      const cursor = await database.query<{ key: string }>(`
-        LET reused = FIRST(FOR item IN pushSubscriptions FILTER item.tokenHash == @tokenHash LIMIT 1 RETURN item)
-        LET existing = FIRST(FOR item IN pushSubscriptions FILTER item.userKey == @userKey && item.installationKey == @installationKey LIMIT 1 RETURN item)
-        LET removeReused = reused != null && (existing == null || reused._key != existing._key) ? (REMOVE reused IN pushSubscriptions RETURN 1) : []
-        LET key = existing == null ? @key : existing._key
-        UPSERT { _key: key }
-          INSERT { _key: key, userKey: @userKey, installationKey: @installationKey, tokenHash: @tokenHash, tokenCiphertext: @tokenCiphertext, projectId: @projectId, platform: @platform, createdAt: @now, updatedAt: @now }
-          UPDATE { userKey: @userKey, tokenHash: @tokenHash, tokenCiphertext: @tokenCiphertext, projectId: @projectId, platform: @platform, updatedAt: @now } IN pushSubscriptions
-        RETURN { key: NEW._key }
-      `, { key: newId(), userKey, installationKey, tokenHash, tokenCiphertext: encryptPushToken(input.token), projectId: input.projectId, platform: input.platform, now });
-      return (await cursor.next())!;
+      const tokenCiphertext = encryptPushToken(input.token);
+      // ArangoDB cannot REMOVE and then UPSERT the same collection in one AQL
+      // statement. Keep reassignment atomic across two statements, including
+      // competing registrations of the same installation or provider token.
+      return registrationTransaction(async (transaction) => {
+        await transaction.query(`
+          FOR item IN pushSubscriptions
+            FILTER item.tokenHash == @tokenHash
+            FILTER item.userKey != @userKey || item.installationKey != @installationKey
+            REMOVE item IN pushSubscriptions
+        `, { tokenHash, userKey, installationKey });
+        const cursor = await transaction.query<{ key: string }>(`
+          UPSERT { userKey: @userKey, installationKey: @installationKey }
+            INSERT { _key: @key, userKey: @userKey, installationKey: @installationKey, tokenHash: @tokenHash, tokenCiphertext: @tokenCiphertext, projectId: @projectId, platform: @platform, createdAt: @now, updatedAt: @now }
+            UPDATE { tokenHash: @tokenHash, tokenCiphertext: @tokenCiphertext, projectId: @projectId, platform: @platform, updatedAt: @now } IN pushSubscriptions
+          RETURN { key: NEW._key }
+        `, { key: newId(), userKey, installationKey, tokenHash, tokenCiphertext, projectId: input.projectId, platform: input.platform, now });
+        return (await cursor.next())!;
+      });
     },
 
     async unregister(userKey: string, installationKey: string) {
