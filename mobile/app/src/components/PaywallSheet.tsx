@@ -20,7 +20,8 @@ import { vorinthexMarkSource } from "@/data/capability-icons";
 import { useCurrentSubscription, useWholeSparkBalance } from "@/hooks/use-billing-summary";
 import { useDelayedAction } from "@/hooks/use-delayed-action";
 import { currentSubscriptionQueryKey, formatWholeSparks, setSubscriptionCancellation } from "@/lib/billing-client";
-import { refreshAuthoritativeBilling } from "@/lib/billing-refresh";
+import { completeCheckoutReturn } from "@/lib/checkout-return";
+import { useErrorFeedback } from "@/hooks/use-error-feedback";
 import { CHECKOUT_SUCCESS_URL, checkoutCallbackFromUrl, createCheckout } from "@/lib/checkout-client";
 import { activeSubscriptionOffers, activeTopup, effectivePriceCents, formatProductPrice, productSparkAmount, type MobileProduct } from "@/lib/product-client";
 import { fetchReferralSummary, referralSummaryQueryKey } from "@/lib/referral-client";
@@ -34,7 +35,7 @@ import { fonts, palette, spacing } from "@/theme/tokens";
 type PaywallMode = "onboarding" | "standard";
 type Page = "plans" | "referral";
 type OfferTab = "plans" | "topup";
-type CheckoutState = "checkout-error" | "confirming" | "idle" | "opening" | "refresh-error";
+type CheckoutState = "idle" | "opening";
 
 function PlanCard({ current, onSelect, product, selected }: { current: boolean; onSelect: () => void; product: MobileProduct; selected: boolean }) {
   const period = product.billingPeriod === "month" ? "month" : product.billingPeriod === "week" ? "week" : null;
@@ -45,7 +46,7 @@ function PlanCard({ current, onSelect, product, selected }: { current: boolean; 
       <View style={styles.planValue}><Text style={styles.planGrant}>{sparkAmount.toLocaleString("en-US")} Sparks</Text><Text style={styles.planName}>{product.billingPeriod === "month" ? "Monthly plan" : product.billingPeriod === "week" ? "Weekly plan" : "One-time top-up"}</Text></View>
       <View style={styles.priceRow}>{product.discountedPriceCents !== null ? <Text accessibilityLabel={`Reference price ${formatProductPrice(product.priceCents, product.currency)}`} style={styles.referencePrice}>{formatProductPrice(product.priceCents, product.currency)}</Text> : null}<Text style={styles.price}>{formatProductPrice(effectivePriceCents(product), product.currency)}</Text>{period ? <Text style={styles.period}>/{period}</Text> : null}</View>
     </Button>
-    {current ? <Badge accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.currentPlanBadge}><Text style={styles.currentPlanBadgeText}>Current subscription</Text></Badge> : bestValue ? <Badge accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.bestValueBadge}><Text style={styles.bestValueBadgeText}>Best value</Text></Badge> : null}
+    {current ? <Badge accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.currentPlanBadge}><Text style={styles.currentPlanBadgeText}>Current plan</Text></Badge> : bestValue ? <Badge accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.bestValueBadge}><Text style={styles.bestValueBadgeText}>Best value</Text></Badge> : null}
   </View>;
 }
 
@@ -55,6 +56,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
   const onboardingHeroHeight = Math.max(280, height * 0.4);
   const standardOpen = useUiStore((state) => state.paywallOpen);
   const standardEntry = useUiStore((state) => state.paywallEntry);
+  const onboardingReferralEntry = useUiStore((state) => state.onboardingReferralEntry);
   const closeStandard = useUiStore((state) => state.closePaywall);
   const open = mode === "onboarding" || standardOpen;
   const products = useAppsStore((state) => state.products);
@@ -98,9 +100,13 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
     onError: () => showToast({ title: "Subscription could not be updated.", duration: 2_500 }),
   });
   const referral = useQuery({ queryKey: referralSummaryQueryKey(userKey ?? "unauthenticated"), queryFn: fetchReferralSummary, enabled: Boolean(userKey && open && (mode === "onboarding" || page === "referral")), initialData: authReferralSummary?.code.ownerUserKey === userKey ? authReferralSummary : undefined });
+  useErrorFeedback(open ? [message, completionError, page === "referral" ? referral.error : undefined] : []);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      const reset = setTimeout(() => setSparkCostsOpen(false), 0);
+      return () => clearTimeout(reset);
+    }
     const reset = setTimeout(() => {
       setPage(initialPage);
       setOfferTab("plans");
@@ -118,35 +124,20 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
   };
 
   useEffect(() => {
+    if (mode !== "onboarding" || !open || !onboardingReferralEntry) return;
+    useUiStore.getState().consumeOnboardingReferralEntry();
+    setPage("referral");
+  }, [mode, onboardingReferralEntry, open]);
+
+  useEffect(() => {
     if (mode !== "onboarding" || !open) return;
     if (recordedOnboardingPages.current.has(page)) return;
     recordedOnboardingPages.current.add(page);
     void recordOnboardingEvent(page === "plans" ? "onboarding.paywall" : "onboarding.referral").catch(() => undefined);
   }, [mode, open, page]);
 
-  async function refreshBilling() {
-    if (!userKey) throw new Error("Your authenticated billing context is unavailable.");
-    await refreshAuthoritativeBilling(queryClient, userKey);
-  }
-
-  async function refreshReturnedCheckout() {
-    setCheckoutState("confirming");
-    setMessage("Checkout returned. Billing updates are confirmed by webhook and may take a moment.");
-    try {
-      await refreshBilling();
-      if (mode === "onboarding") {
-        setPage("referral");
-        setCheckoutState("idle");
-      } else closeStandard();
-    } catch {
-      setCheckoutState("refresh-error");
-      setMessage("Checkout returned, but billing status could not be refreshed. Webhook confirmation may still be processing.");
-      if (mode === "onboarding") setPage("referral");
-    }
-  }
-
   async function checkout() {
-    if (!selected || checkoutInFlight.current || checkoutState === "opening" || checkoutState === "confirming") return;
+    if (!selected || !userKey || checkoutInFlight.current || checkoutState === "opening") return;
     checkoutInFlight.current = true;
     setCheckoutState("opening");
     setMessage(undefined);
@@ -159,13 +150,21 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
       }
       const callback = result.type === "success" ? checkoutCallbackFromUrl(result.url) : undefined;
       if (callback !== "success") {
-        setCheckoutState("checkout-error");
+        setCheckoutState("idle");
         setMessage("Checkout was not completed. You can safely try again.");
         return;
       }
-      await refreshReturnedCheckout();
+      if (completeCheckoutReturn(queryClient, userKey)) {
+        setMessage(undefined);
+        setSparkCostsOpen(false);
+        if (mode === "onboarding") {
+          useUiStore.getState().consumeOnboardingReferralEntry();
+          setPage("referral");
+        }
+      }
+      setCheckoutState("idle");
     } catch (error) {
-      setCheckoutState("checkout-error");
+      setCheckoutState("idle");
       setMessage(error instanceof Error ? error.message : "Checkout could not be opened. Please try again.");
     } finally {
       checkoutInFlight.current = false;
@@ -208,7 +207,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
     }
   }
 
-  const footer = page === "plans" ? <><Button disabled={!selected} onPress={() => void (checkoutState === "refresh-error" ? refreshReturnedCheckout() : checkout())} size="md" variant="primary">{checkoutState === "confirming" ? "Refreshing billing" : checkoutState === "refresh-error" ? "Refresh billing status" : checkoutState === "checkout-error" ? "Try checkout again" : "Continue to checkout"}</Button>{mode === "standard" ? <Button onPress={closeStandard} size="md" variant="secondary">Close</Button> : null}</> : <Button disabled={!referral.data || sharing} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button>;
+  const footer = page === "plans" ? <><Button disabled={!selected} onPress={() => void checkout()} size="md" variant="primary">Continue to checkout</Button>{mode === "standard" ? <Button onPress={closeStandard} size="md" variant="secondary">Close</Button> : null}</> : <Button disabled={!referral.data || sharing} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button>;
 
   if (mode === "onboarding" && page === "referral") return <OnboardingStepLayout
     action={<><Button disabled={!referral.data || sharing || completing} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button><Button disabled={completing} onPress={() => void finish()} size="md" variant="secondary">Skip</Button>{completionError ? <Button loading={completing} onPress={() => void finish()} size="md" variant="secondary">Retry</Button> : null}</>}
@@ -220,24 +219,18 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
     title="Invite a friend"
   >
     <View style={styles.rewardSteps}><Text style={styles.rewardStep}>50 Sparks when your friend signs up, plus 100 more when they start their first subscription.</Text></View>
-    {referral.isLoading ? <Text style={styles.heroCopy}>Loading your referral code...</Text> : referral.isError ? <View style={styles.state}><Text accessibilityRole="alert" style={styles.error}>Your referral code could not be loaded.</Text><Button onPress={() => void referral.refetch()} size="md" variant="secondary">Retry</Button></View> : referral.data ? <View style={styles.codeBlock}><Text style={styles.sectionLabel}>YOUR CODE</Text><Text selectable style={styles.code}>{referral.data.code.code}</Text></View> : null}
-    {message ? <Text accessibilityLiveRegion="polite" style={styles.error}>{message}</Text> : null}
-    {completionError ? <Text accessibilityRole="alert" style={styles.error}>{completionError}</Text> : null}
+    {referral.isLoading ? <Text style={styles.heroCopy}>Loading your referral code...</Text> : referral.isError ? <Button onPress={() => void referral.refetch()} size="md" variant="secondary">Retry</Button> : referral.data ? <View style={styles.codeBlock}><Text style={styles.sectionLabel}>YOUR CODE</Text><Text selectable style={styles.code}>{referral.data.code.code}</Text></View> : null}
   </OnboardingStepLayout>;
 
   const content = page === "plans" ? <ScrollView contentContainerStyle={[styles.content, mode === "onboarding" && styles.onboardingContent]} showsVerticalScrollIndicator={false}>
     {mode === "onboarding" ? <View style={styles.hero}><View style={styles.heroTitleRow}><Text style={styles.heroTitle}>One balance for everything you create and use</Text><ButtonSizeProvider overrideParent size="sm"><Button accessibilityLabel="How Sparks are billed" contentMode="raw" iconOnly onPress={() => setSparkCostsOpen(true)} size="sm" variant="icon"><HelpIcon size="sm" /></Button></ButtonSizeProvider></View><Text style={styles.heroCopy}>Sparks give you a simple way to use AI capabilities, store your work, and keep services connected across Vorinthex.</Text></View> : <View style={styles.balanceHero}><View style={styles.balanceHeading}><SparksIcon size="lg" /><Text accessibilityLabel={balance === undefined ? "Sparks balance unavailable. Showing 0 Sparks" : `${balance} Sparks`} style={styles.balance}>{formatWholeSparks(balance ?? 0)} <Text style={styles.balanceUnit}>Sparks</Text></Text></View><ButtonSizeProvider overrideParent size="sm"><Button accessibilityLabel="How Sparks are billed" contentMode="raw" iconOnly onPress={() => setSparkCostsOpen(true)} size="sm" variant="icon"><HelpIcon size="sm" /></Button></ButtonSizeProvider></View>}
-    {mode === "standard" && subscription ? <View style={styles.subscriptionCard}><View style={styles.subscriptionHeading}><Text style={styles.sectionLabel}>YOUR SUBSCRIPTION</Text><Badge><Text style={styles.subscriptionBadge}>{subscription.status.replace("_", " ").toUpperCase()}</Text></Badge></View><Text style={styles.subscriptionTitle}>{subscriptionView?.title}</Text><Text style={styles.subscriptionCopy}>{subscriptionView?.copy}</Text>{subscriptionView?.action ? <Button loading={updateSubscription.isPending} onPress={() => updateSubscription.mutate(subscriptionView.action === "cancel")} size="md" variant="secondary">{subscriptionView.action === "restore" ? "Restore renewal" : "Cancel renewal"}</Button> : null}</View> : mode === "standard" && subscriptionQuery.isError ? <View style={styles.state}><Text accessibilityRole="alert" style={styles.error}>Subscription status could not be loaded.</Text><Button onPress={() => void subscriptionQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : null}
+    {mode === "standard" && subscription ? <View style={styles.subscriptionCard}><View style={styles.subscriptionHeading}><Text style={styles.sectionLabel}>YOUR SUBSCRIPTION</Text><Badge><Text style={styles.subscriptionBadge}>{subscription.status.replace("_", " ").toUpperCase()}</Text></Badge></View><Text style={styles.subscriptionTitle}>{subscriptionView?.title}</Text><Text style={styles.subscriptionCopy}>{subscriptionView?.copy}</Text>{subscriptionView?.action ? <Button loading={updateSubscription.isPending} onPress={() => updateSubscription.mutate(subscriptionView.action === "cancel")} size="md" variant="secondary">{subscriptionView.action === "restore" ? "Restore renewal" : "Cancel renewal"}</Button> : null}</View> : null}
     {mode === "standard" ? <><Tabs accessibilityLabel="Spark offers" accessibilityRole="tablist" onValueChange={(value) => setOfferTab(value as OfferTab)} style={styles.offerTabs} value={offerTab}><TabsTrigger style={styles.offerTab} value="plans">Plans</TabsTrigger><TabsTrigger style={styles.offerTab} value="topup">Top-up</TabsTrigger></Tabs><View style={styles.plans}>{offers.map((product) => <PlanCard current={currentSubscriptionProductKey === product.key} key={product.key} onSelect={() => setSelectedKey(product.key)} product={product} selected={effectiveSelectedKey === product.key} />)}</View></> : <View style={styles.plans}>{subscriptions.map((product) => <PlanCard current={currentSubscriptionProductKey === product.key} key={product.key} onSelect={() => setSelectedKey(product.key)} product={product} selected={effectiveSelectedKey === product.key} />)}</View>}
-    {!offers.length ? <View style={styles.state}><Text style={styles.error}>{productsStatus === "loading" ? "Loading offers..." : "Offers are temporarily unavailable."}</Text>{productsStatus !== "loading" ? <Button onPress={() => void refreshProducts()} size="md" variant="secondary">Retry</Button> : null}</View> : null}
-    {message ? <Text accessibilityLiveRegion="polite" style={styles.error}>{message}</Text> : null}
-    {completionError ? <Text accessibilityRole="alert" style={styles.error}>{completionError}</Text> : null}
+    {!offers.length ? <View style={styles.state}><Text style={styles.heroCopy}>{productsStatus === "loading" ? "Loading offers..." : "Offers are temporarily unavailable."}</Text>{productsStatus !== "loading" ? <Button onPress={() => void refreshProducts()} size="md" variant="secondary">Retry</Button> : null}</View> : null}
   </ScrollView> : <ScrollView contentContainerStyle={styles.referralContent} showsVerticalScrollIndicator={false}>
     <View style={styles.referralHero}><Text style={styles.heroTitle}>Invite a friend</Text><Text style={styles.heroCopy}>Invite a friend with your code and earn Sparks as they get started.</Text></View>
     <View style={styles.rewardSteps}><Text style={styles.sectionLabel}>HOW IT WORKS</Text><Text style={styles.rewardStep}>Earn 50 Sparks when your friend signs up.</Text><Text style={styles.rewardStep}>Earn 100 more when they start their first subscription.</Text></View>
-    {referral.isLoading ? <Text style={styles.heroCopy}>Loading your referral code...</Text> : referral.isError ? <View style={styles.state}><Text accessibilityRole="alert" style={styles.error}>Your referral code could not be loaded.</Text><Button onPress={() => void referral.refetch()} size="md" variant="secondary">Retry</Button></View> : referral.data ? <View style={styles.codeBlock}><Text style={styles.sectionLabel}>YOUR CODE</Text><Text selectable style={styles.code}>{referral.data.code.code}</Text></View> : null}
-    {message ? <Text accessibilityLiveRegion="polite" style={styles.error}>{message}</Text> : null}
-    {completionError ? <Text accessibilityRole="alert" style={styles.error}>{completionError}</Text> : null}
+    {referral.isLoading ? <Text style={styles.heroCopy}>Loading your referral code...</Text> : referral.isError ? <Button onPress={() => void referral.refetch()} size="md" variant="secondary">Retry</Button> : referral.data ? <View style={styles.codeBlock}><Text style={styles.sectionLabel}>YOUR CODE</Text><Text selectable style={styles.code}>{referral.data.code.code}</Text></View> : null}
   </ScrollView>;
 
   if (mode === "onboarding") return <><View style={[styles.onboardingRoot, { paddingBottom: Math.max(insets.bottom, spacing.md), paddingTop: Math.max(insets.top, spacing.md) }]}>
@@ -297,7 +290,6 @@ const styles = StyleSheet.create({
   referencePrice: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 15, marginRight: spacing.xs, textDecorationLine: "line-through" },
   price: { color: palette.chromeWhite, fontFamily: fonts.medium, fontSize: 25 },
   period: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 12 },
-  error: { color: palette.danger, fontFamily: fonts.regular, fontSize: 13, lineHeight: 19, textAlign: "center" },
   sectionLabel: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 10, letterSpacing: 2 },
   taxNote: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 11, lineHeight: 17, textAlign: "center" },
   referralContent: { gap: spacing.lg, paddingBottom: spacing.lg },

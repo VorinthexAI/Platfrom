@@ -146,8 +146,8 @@ export function createPolarProvider(configuration = polarConfiguration(), fetche
       }
       return subscriptions;
     },
-    async createCheckout(input: { providerProductId: string; userKey: string; productId: string; idempotencyKey: string; successUrl: string; returnUrl: string; customerIpAddress?: string }) {
-      return checkoutResponseSchema.parse(await request('/checkouts/', { method: 'POST', headers: { 'Idempotency-Key': input.idempotencyKey }, body: JSON.stringify({ products: [input.providerProductId], external_customer_id: input.userKey, success_url: input.successUrl, return_url: input.returnUrl, allow_discount_codes: false, ...(input.customerIpAddress ? { customer_ip_address: input.customerIpAddress } : {}), metadata: { userKey: input.userKey, productId: input.productId } }) }, checkoutResponseSchema));
+    async createCheckout(input: { providerProductId: string; userKey: string; productId: string; idempotencyKey: string; successUrl: string; returnUrl: string; customerIpAddress?: string; customerEmail?: string; customerName?: string }) {
+      return checkoutResponseSchema.parse(await request('/checkouts/', { method: 'POST', headers: { 'Idempotency-Key': input.idempotencyKey }, body: JSON.stringify({ products: [input.providerProductId], external_customer_id: input.userKey, success_url: input.successUrl, return_url: input.returnUrl, allow_discount_codes: false, ...(input.customerIpAddress ? { customer_ip_address: input.customerIpAddress } : {}), ...(input.customerEmail ? { customer_email: input.customerEmail } : {}), ...(input.customerName ? { customer_name: input.customerName } : {}), metadata: { userKey: input.userKey, productId: input.productId } }) }, checkoutResponseSchema));
     },
     async updateSubscription(providerSubscriptionId: string, cancelAtPeriodEnd: boolean) {
       return subscriptionResponseSchema.parse(await request(`/subscriptions/${encodeURIComponent(providerSubscriptionId)}`, { method: 'PATCH', body: JSON.stringify({ cancel_at_period_end: cancelAtPeriodEnd }) }, subscriptionResponseSchema));
