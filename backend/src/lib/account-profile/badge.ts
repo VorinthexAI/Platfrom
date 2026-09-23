@@ -11,6 +11,7 @@ import { newId } from '@/lib/ids';
 import { redisConnection } from '@/lib/redis';
 import { s3, S3_BUCKET } from '@/lib/s3';
 import { signProfileAvatarUrl } from './avatar-url';
+import { invalidateMediaDownload } from '@/lib/media-delivery';
 import { completeProfileAvatarUpload, PROFILE_AVATAR_MAX_BYTES, PROFILE_AVATAR_MAX_EDGE, PROFILE_AVATAR_URL_TTL_SECONDS, profileAvatarReservationRedisKey, profileAvatarReservationSchema, type ProfileAvatarUploadDependencies } from './avatar-upload';
 
 export const profileBadgeGenerateInputSchema = z.object({}).strict();
@@ -59,7 +60,7 @@ export interface ProfileBadgeService {
 export function createProfileBadgeService(dependencies: ProfileBadgeServiceDependencies = {}): ProfileBadgeService {
   const storage = dependencies.storage ?? {
     async upload(input) { await s3.send(new PutObjectCommand({ Bucket: S3_BUCKET, Key: input.key, Body: input.bytes, ContentType: input.mimeType, ContentLength: input.bytes.byteLength })); },
-    async delete(key) { await s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: key })); },
+    async delete(key) { await s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: key })); await invalidateMediaDownload(key); },
   };
   return {
     async generate(rawInput, context, requestKey) {

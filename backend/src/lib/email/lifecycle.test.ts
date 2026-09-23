@@ -33,6 +33,8 @@ describe('account lifecycle emails', () => {
     const html = renderBrandedEmail(input);
     expect(input.actionUrl).toBeUndefined();
     expect(input.actionLabel).toBeUndefined();
+    expect(html).toMatch(/<td align="left"[^>]*>\s*Vorinthex AI\s*<\/td>/);
+    expect(html).not.toMatch(/<td align="right"[^>]*>\s*Vorinthex AI\s*<\/td>/);
     expect(html).toContain('Your account has been deleted.');
     expect(html).not.toContain('vtx-button-wrap');
     expect(html).not.toContain('If the button does not work');
@@ -54,6 +56,8 @@ describe('commerce lifecycle emails', () => {
     for (const input of inputs) {
       const html = renderBrandedEmail(input);
       expect(input).toMatchObject({ to: 'person@example.com', actionLabel: 'Open app', actionUrl: OPEN_APP_URL });
+      expect(html).toMatch(/<td align="left"[^>]*>\s*Vorinthex AI\s*<\/td>/);
+      expect(html).not.toMatch(/<td align="right"[^>]*>\s*Vorinthex AI\s*<\/td>/);
       expect(html).toContain('Hi Ada,');
       expect(html).toContain('https://vorinthex.com/open');
       expect(html).toContain('vtx-button');

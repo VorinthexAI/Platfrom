@@ -28,6 +28,10 @@ Direct HTTPS (api.vorinthex.com) ──▶ same Caddy (public ACME cert)
 - No ALB / NAT / ElastiCache / (our) CloudFront. Cloudflare is the CDN/edge.
 - Image hashing remains transient Fargate compute launched per queued image-hash
   job; document parsing and scanning run directly in the API container.
+- Client-facing stored images, audio, and original files use a separate private
+  CloudFront distribution with short-lived signed download URLs. Uploads and
+  backend processing still use S3 directly. The CDN is separate from the
+  website's Cloudflare proxy and the direct API hostname.
 
 ## DNS
 

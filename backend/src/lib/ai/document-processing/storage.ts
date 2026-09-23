@@ -2,6 +2,7 @@ import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCom
 import { currentBillingUserKey } from '@/lib/ai/events/runtime';
 import { markStoredObjectDeleted, recordStoredObject } from '@/lib/automations/storage-charger-repository';
 import { s3, S3_BUCKET } from '@/lib/s3';
+import { invalidateMediaDownload } from '@/lib/media-delivery';
 
 export interface DocumentStorage {
   upload(input: { key: string; bytes: Uint8Array; mimeType: string; billingUserKey?: string }): Promise<{ storageKey: string; bucket?: string; etag?: string }>;
@@ -38,6 +39,7 @@ export const documentStorage: DocumentObjectStorage = {
   },
   async delete(storageKey) {
     await s3.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: storageKey }));
+    await invalidateMediaDownload(storageKey);
     await markStoredObjectDeleted(storageKey);
   },
   async download(storageKey) {

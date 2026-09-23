@@ -74,6 +74,7 @@ describe('Content input contracts', () => {
     expect(contentToolInputSchemas['document.read'].parse({ documentKeys: [key] })).toEqual({ documentKeys: [key] });
     expect(contentToolInputSchemas['document.download'].parse({ documentKeys: [key] }).format).toBe('original');
     expect(contentToolInputSchemas['document.download'].parse({ documentKeys: [key], format: 'html' }).format).toBe('html');
+    expect(contentToolInputSchemas['document.download'].parse({ documentKeys: [key], format: 'original-url' }).format).toBe('original-url');
     expect(contentToolInputSchemas['document.translate'].parse({ documentKeys: [key], targetLanguage: 'French' })).toMatchObject({ mode: 'preview', atomic: false });
     expect(contentToolInputSchemas['document.enhance'].parse({ documentKeys: [key] })).toMatchObject({ mode: 'preview', atomic: false });
     expect(contentToolInputSchemas['document.rewrite'].parse({ rewrites: [{ documentKey: key, instruction: 'Clarify' }] })).toMatchObject({ atomic: false, rewrites: [{ mode: 'preview' }] });

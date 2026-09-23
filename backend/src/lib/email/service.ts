@@ -84,7 +84,7 @@ export function renderBrandedEmail(input: BrandedEmailInput) {
   return replaceAll(template, {
     subject: input.subject,
     preheader: input.preheader,
-    label: input.label,
+    label: input.label === 'Vorinthex AI' ? '' : input.label,
     eyebrow: input.eyebrow,
     headline: input.headline,
     body_html: input.bodyHtml,
@@ -99,7 +99,7 @@ export function renderMarketingEmail(input: MarketingEmailInput) {
   return replaceAll(getMarketingTemplate(), {
     subject: input.subject,
     preheader: input.preheader,
-    label: input.label,
+    label: input.label === 'Vorinthex AI' ? '' : input.label,
     eyebrow: input.eyebrow,
     headline: input.headline,
     body_html: input.bodyHtml,

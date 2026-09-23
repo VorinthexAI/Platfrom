@@ -113,6 +113,10 @@ locals {
     ARANGO_ROOT_PASSWORD       = random_password.graph_db_password.result
     REDIS_URL                  = "redis://localhost:6379"
     S3_BUCKET                  = module.storage.s3_bucket_name
+    MEDIA_CDN_DOMAIN           = aws_cloudfront_distribution.media_delivery.domain_name
+    MEDIA_CDN_DISTRIBUTION_ID  = aws_cloudfront_distribution.media_delivery.id
+    MEDIA_CDN_KEY_PAIR_ID      = aws_cloudfront_public_key.media_delivery.id
+    MEDIA_CDN_PRIVATE_KEY      = replace(tls_private_key.media_delivery.private_key_pem, "\n", "\\n")
     CONTENT_TEXTRACT_BUCKET    = aws_s3_bucket.textract_staging.bucket
     CONTENT_TEXTRACT_REGION    = "eu-west-1"
     API_KEY                    = random_password.api_key.result
@@ -128,6 +132,10 @@ locals {
     "ARANGO_ROOT_PASSWORD",
     "REDIS_URL",
     "S3_BUCKET",
+    "MEDIA_CDN_DOMAIN",
+    "MEDIA_CDN_DISTRIBUTION_ID",
+    "MEDIA_CDN_KEY_PAIR_ID",
+    "MEDIA_CDN_PRIVATE_KEY",
     "CONTENT_TEXTRACT_BUCKET",
     "CONTENT_TEXTRACT_REGION",
     "API_KEY",

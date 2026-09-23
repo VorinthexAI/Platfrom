@@ -166,11 +166,15 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
         queryClient.setQueryData(queryKey, updated);
         void queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "active" });
       }
-      setSheet(undefined);
-      showToast({ title: "Cancellation scheduled.", duration: 2_500 });
     },
     onError: () => showToast({ title: "Subscription could not be canceled. Please try again.", duration: 2_500 }),
   });
+  const confirmSubscriptionCancellation = () => {
+    if (cancelSubscription.isPending) return;
+    setSheet(undefined);
+    showToast({ title: "Subscription cancelled", duration: 2_500 });
+    cancelSubscription.mutate();
+  };
   useEffect(() => {
     if (sheet === "scope-create" && !scopeOperationIsPending()) void queryClient.invalidateQueries({ queryKey: scopeListQueryKey(String(user?.key ?? ""), teamKey) });
   }, [teamKey, queryClient, sheet, user?.key]);
@@ -556,7 +560,7 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
           <SettingsActionCard icon={<ReferralIcon size="lg" />} label="Referral" onPress={() => { setReferralMode("share"); setSheet("referral"); }} size={settingsCardSize} />
           <SettingsActionCard icon={<WalletIcon size="lg" />} label="Wallet" onPress={() => setSheet("wallet")} size={settingsCardSize} />
           <SettingsActionCard icon={<SparksIcon size="lg" />} label="Spark costs" onPress={openCostDetails} size={settingsCardSize} />
-          {subscriptionView?.action === "cancel" ? <SettingsActionCard danger icon={<SubscriptionCancelIcon size="lg" variant="danger" />} label="Cancel subscription" onPress={() => setSheet("cancel-subscription")} size={settingsCardSize} /> : null}
+          {subscriptionView?.action === "cancel" ? <SettingsActionCard danger icon={<SubscriptionCancelIcon size="lg" variant="danger" />} label="Cancel subscription" onPress={() => { if (!cancelSubscription.isPending) setSheet("cancel-subscription"); }} size={settingsCardSize} /> : null}
           <SettingsActionCard danger icon={<DeleteAccountIcon size="lg" variant="danger" />} label="Delete account" onPress={() => setSheet("delete-account")} size={settingsCardSize} />
           <SettingsActionCard danger icon={<SignOutIcon size="lg" variant="danger" />} label="Log out" onPress={() => void logOut()} size={settingsCardSize} />
         </View>
@@ -618,7 +622,7 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
       </View>
     </BottomSheet>
 
-    <BottomSheet dismissible={!cancelSubscription.isPending} focusKey="profile-cancel-subscription" footer={<><Button disabled={cancelSubscription.isPending} loading={cancelSubscription.isPending} onPress={() => cancelSubscription.mutate()} size="md" variant="primary">Cancel subscription</Button><Button disabled={cancelSubscription.isPending} onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open && !cancelSubscription.isPending) setSheet(undefined); }} open={sheet === "cancel-subscription"} title="Cancel subscription?">
+    <BottomSheet focusKey="profile-cancel-subscription" footer={<><Button onPress={confirmSubscriptionCancellation} size="md" variant="primary">Cancel subscription</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "cancel-subscription"} title="Cancel subscription?">
       <Text style={styles.scopeHelp}>{cancellationPeriodEnd ? `Your subscription remains active until ${cancellationPeriodEnd}, then it will not renew.` : "Your subscription remains active through the current billing period, then it will not renew."}</Text>
     </BottomSheet>
 

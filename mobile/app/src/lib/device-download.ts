@@ -75,6 +75,17 @@ export async function saveTemporaryBase64File(fileName: string, content: string)
   return file;
 }
 
+export async function saveTemporaryUrlFile(fileName: string, url: string) {
+  const file = new File(Paths.cache, `${Date.now()}-${safeFileName(fileName)}`);
+  try {
+    await File.downloadFileAsync(url, file, { idempotent: true });
+    return file;
+  } catch (error) {
+    if (file.exists) file.delete();
+    throw error;
+  }
+}
+
 export async function openTemporaryBase64File(fileName: string, mimeType: string, content: string) {
   const file = await saveTemporaryBase64File(fileName, content);
   const path = file.uri.replace(/^file:\/\//, "");

@@ -4423,5 +4423,5 @@ const styles = StyleSheet.create({
 });
 
 function GalleryViewerImage({ image, viewport }: { image: GalleryImage; viewport: { width: number; height: number } }) {
-  return <Image contentFit="contain" source={image.url} style={[styles.detailImage, fitContainedMediaSize(image, viewport)]} />;
+  return <Image cachePolicy="memory-disk" contentFit="contain" source={{ uri: image.url, cacheKey: `gallery-image:${image.key}` }} style={[styles.detailImage, fitContainedMediaSize(image, viewport)]} />;
 }

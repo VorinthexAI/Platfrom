@@ -1247,6 +1247,25 @@ describe('Content runtime', () => {
     expect(found.results[0]?.data?.document.originalAvailable).toBe(true);
   });
 
+  test('issues original file links only after the existing document authorization', async () => {
+    const f = fixture('viewer');
+    const documentKey = f.addDocument('Download body');
+    let signed = 0;
+    const signer = async (key: string) => { signed += 1; return `https://d123.cloudfront.net/${key}`; };
+    const storage = {
+      async download(): Promise<never> { throw new Error('Link downloads must not fetch bytes'); },
+      async copy(input: { destinationKey: string }) { return { storageKey: input.destinationKey }; },
+      async upload(input: { key: string }) { return { storageKey: input.key }; },
+      async delete() {},
+    };
+    const linked = await runContentTool('document.download', { documentKeys: [documentKey], format: 'original-url' }, f.context, { repository: f.repository, storage, signOriginalDocumentUrl: signer });
+    expect(linked.results[0]?.data).toMatchObject({ encoding: 'url', format: 'original-url', url: `https://d123.cloudfront.net/${f.documents.get(documentKey).storageKey}` });
+    expect(signed).toBe(1);
+    const missing = await runContentTool('document.download', { documentKeys: [newId()], format: 'original-url' }, f.context, { repository: f.repository, storage, signOriginalDocumentUrl: signer });
+    expect(missing.results[0]?.success).toBe(false);
+    expect(signed).toBe(1);
+  });
+
   test('generates an HTML preview from authorized original bytes', async () => {
     const f = fixture('viewer');
     const documentKey = f.addDocument('Preview body');
@@ -1261,7 +1280,9 @@ describe('Content runtime', () => {
       generatePreview: async () => ({ bytes: new TextEncoder().encode('<html>Original body</html>'), mimeType: 'text/html; charset=utf-8', extension: 'html' }),
     });
     expect(output.results[0]?.data).toMatchObject({ format: 'html', fileName: 'Notes.html', mimeType: 'text/html; charset=utf-8' });
-    expect(Buffer.from(output.results[0]?.data?.content ?? '', 'base64').toString()).toBe('<html>Original body</html>');
+    const file = output.results[0]?.data;
+    expect(file?.encoding).toBe('base64');
+    expect(Buffer.from(file?.encoding === 'base64' ? file.content : '', 'base64').toString()).toBe('<html>Original body</html>');
   });
 
   test('sanitizes plain-text updates', async () => {

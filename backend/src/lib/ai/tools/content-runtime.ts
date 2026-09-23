@@ -338,6 +338,7 @@ export interface ContentToolDependencies extends RouterDependencies {
   ) => Promise<{ storageKey: string } | null>;
   signFolderCoverUrl?: (storageKey: string) => Promise<string>;
   signDocumentSourceUrl?: (storageKey: string) => Promise<string>;
+  signOriginalDocumentUrl?: (storageKey: string) => Promise<string>;
   signAudioUrl?: (storageKey: string) => Promise<string>;
   publishTripChange?: (scopeKey: string) => Promise<void>;
   publishPlaceReferenceChange?: (scopeKey: string) => Promise<void>;
@@ -957,6 +958,7 @@ interface RuntimeDefaults {
   signDocumentSourceUrl: NonNullable<
     ContentToolDependencies["signDocumentSourceUrl"]
   >;
+  signOriginalDocumentUrl: NonNullable<ContentToolDependencies["signOriginalDocumentUrl"]>;
   signAudioUrl: NonNullable<ContentToolDependencies["signAudioUrl"]>;
 }
 
@@ -1090,6 +1092,7 @@ async function defaults(
     signFolderCoverUrl: deps.signFolderCoverUrl ?? imageUrl.signedImageUrl,
     signDocumentSourceUrl:
       deps.signDocumentSourceUrl ?? imageUrl.signedImageUrl,
+    signOriginalDocumentUrl: deps.signOriginalDocumentUrl ?? imageUrl.signedImageUrl,
     signAudioUrl: deps.signAudioUrl ?? audioUrl.signedAudioUrl,
   };
 }
@@ -4306,7 +4309,7 @@ export async function runContentTool<Name extends ContentToolName>(
         key: item.documentKey,
         run: async () => {
           const current = await document(item.documentKey, "viewer", false);
-          if (item.format === "original") {
+          if (item.format === "original" || item.format === "original-url") {
             if (!current.storageKey || !current.extension || !current.mimeType)
               fail(
                 "CONTENT_NOT_FOUND",
@@ -4315,6 +4318,14 @@ export async function runContentTool<Name extends ContentToolName>(
                 "storage",
                 current.key,
               );
+            if (item.format === "original-url") return {
+              documentKey: current.key,
+              format: "original-url" as const,
+              fileName: downloadFileName(current.name, current.extension!),
+              mimeType: current.mimeType!,
+              encoding: "url" as const,
+              url: await d.signOriginalDocumentUrl(current.storageKey),
+            };
             const object = await storageOperation(
               "download",
               current.key,

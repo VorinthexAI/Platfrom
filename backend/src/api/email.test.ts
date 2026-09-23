@@ -50,6 +50,8 @@ describe('email rendering', () => {
     });
 
     expect(html).toContain('<title>Update</title>');
+    expect(html).toMatch(/<td align="left"[^>]*>\s*Vorinthex AI\s*<\/td>/);
+    expect(html).toMatch(/<td align="right"[^>]*>\s*Update\s*<\/td>/);
     expect(html).toContain('A quiet signal');
     expect(html).toContain('Unsubscribe here');
     expect(html).toContain('https://app.example.com/public/updates/unsubscribe?token_hash=abc');
@@ -60,6 +62,9 @@ describe('email rendering', () => {
     expect(html).not.toContain('vtx-button');
     expect(html).not.toContain('#faf7f2');
     expect(html).not.toContain('#6b6358');
+    expect(renderMarketingEmail({
+      to: 'person@example.com', subject: 'Update', preheader: 'Preview text', label: 'Vorinthex AI', eyebrow: 'News', headline: 'News', bodyHtml: 'Body', footerHtml: 'Footer', unsubscribeUrl: 'https://app.example.com/unsubscribe',
+    })).not.toMatch(/<td align="right"[^>]*>\s*Vorinthex AI\s*<\/td>/);
   });
 
   test('removes transactional action blocks when no CTA is supplied', () => {

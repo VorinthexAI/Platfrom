@@ -68,6 +68,7 @@ import {
   deleteContentSearchHistory,
   copyContentSelection,
   downloadContentDocument,
+  getOriginalDocumentDownload,
   enhanceContentDocument,
   findContentNeighbors,
   findContentDocumentSummary,
@@ -152,7 +153,7 @@ import {
 } from "@/lib/content-query-cache";
 import { getUserSearchHistory, promoteCachedUserSearchHistory, removeCachedUserSearchHistory, userSearchHistoryQueryKey } from "@/lib/user-search-history-cache";
 import { compassQueryKeys, invalidateAssistantChanges } from "@/lib/workspace-query-cache";
-import { saveBase64Download, saveTemporaryBase64File } from "@/lib/device-download";
+import { saveBase64Download, saveTemporaryBase64File, saveTemporaryUrlFile, saveUrlDownload } from "@/lib/device-download";
 import { fetchGalleryUploadStatus, uploadGalleryImages } from "@/lib/gallery-client";
 import { BOOK_AUDIO_MODE } from "@/lib/book-audio";
 import { audioTimelineDuration, audioTimelinePosition, formatAudioTime, resolveAudioTimelinePosition } from "@/lib/audio-playback-timeline";
@@ -3883,8 +3884,13 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     notify(document.extension ? "File download started" : "Document download started");
     void (async () => {
       try {
-        const download = await downloadContentDocument(document.key, document.originalAvailable ? "original" : "txt");
-        await saveBase64Download(download.fileName, download.mimeType, download.content);
+        if (document.originalAvailable) {
+          const download = await getOriginalDocumentDownload(document.key);
+          await saveUrlDownload(download.url, download.fileName, download.mimeType);
+        } else {
+          const download = await downloadContentDocument(document.key, "txt");
+          await saveBase64Download(download.fileName, download.mimeType, download.content);
+        }
       } catch {
         notify("Download failed");
       }
@@ -3904,9 +3910,17 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     setWorkspaceMode("viewer");
     const generation = ++documentActionGeneration.current;
     try {
-      const download = await downloadContentDocument(document.key, document.extension === "pdf" ? "original" : "html");
-      if (generation !== documentActionGeneration.current) return;
-      const file = await saveTemporaryBase64File(download.fileName, download.content);
+      const pdf = document.extension === "pdf";
+      let file: File;
+      if (pdf) {
+        const download = await getOriginalDocumentDownload(document.key);
+        if (generation !== documentActionGeneration.current) return;
+        file = await saveTemporaryUrlFile(download.fileName, download.url);
+      } else {
+        const download = await downloadContentDocument(document.key, "html");
+        if (generation !== documentActionGeneration.current) return;
+        file = await saveTemporaryBase64File(download.fileName, download.content);
+      }
       if (generation !== documentActionGeneration.current || workspaceModeRef.current !== "viewer") {
         file.delete();
         return;

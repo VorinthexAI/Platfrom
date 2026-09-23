@@ -603,6 +603,15 @@ export async function downloadContentDocument(documentKey: string, format: "orig
   return result.data;
 }
 
+export async function getOriginalDocumentDownload(documentKey: string) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { documentKey: string; format: "original-url"; fileName: string; mimeType: string; encoding: "url"; url: string }; error?: { message: string } }[];
+  }>("document.download", { documentKeys: [documentKey], format: "original-url" });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The original file could not be downloaded.");
+  return result.data;
+}
+
 export async function createContentFolder(name: string, parentFolderKey?: string, description?: string, folderKey = createContentRecordKey(), mutationKey = `folder-create:${folderKey}`) {
   const contentContext = getContentContext();
   const data = await callContentTool<{

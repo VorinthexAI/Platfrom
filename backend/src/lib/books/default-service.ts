@@ -1,13 +1,9 @@
-import { GetObjectCommand, type S3Client } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { createPublicS3Client, S3_BUCKET } from '@/lib/s3';
+import { AUDIO_URL_TTL_SECONDS, signedMediaDownloadUrl } from '@/lib/media-delivery';
 import { createBookRepository } from './repository';
 import { createBookRuntime } from './runtime';
 import { createBookService } from './service';
 
 const repository = createBookRepository();
-const publicS3 = createPublicS3Client();
-const signObject = getSignedUrl as unknown as (client: S3Client, command: GetObjectCommand, options: { expiresIn: number }) => Promise<string>;
 
 export function createCachedUrlSigner(sign: (key: string) => Promise<string>, options: { cacheMs?: number; maxEntries?: number; now?: () => number } = {}) {
   const cacheMs = options.cacheMs ?? 12 * 60_000;
@@ -26,7 +22,7 @@ export function createCachedUrlSigner(sign: (key: string) => Promise<string>, op
   };
 }
 
-const signBookUrl = createCachedUrlSigner((key) => signObject(publicS3, new GetObjectCommand({ Bucket: S3_BUCKET, Key: key }), { expiresIn: 15 * 60 }));
+const signBookUrl = createCachedUrlSigner((key) => signedMediaDownloadUrl(key, AUDIO_URL_TTL_SECONDS));
 export const defaultBookService = createBookService({
   repository,
   generator: createBookRuntime({ repository }),
