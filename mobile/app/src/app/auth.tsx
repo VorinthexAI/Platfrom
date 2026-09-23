@@ -75,7 +75,7 @@ export default function AuthRoute() {
         );
         if (!active) return;
         if (claim.status === "authenticated") {
-          await hydrate();
+          await hydrate({ newSession: true });
           if (!active) return;
           claiming = false;
           setClaimingHandoff(false);
@@ -112,7 +112,7 @@ export default function AuthRoute() {
     setLoading(provider);
     try {
       if (await launchOAuthProvider(provider)) {
-        await hydrate();
+        await hydrate({ newSession: true });
       }
     } catch (oauthError) {
       setError(messageFor(oauthError));

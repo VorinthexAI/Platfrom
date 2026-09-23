@@ -10,7 +10,7 @@ import type { CoreChatInput } from '@/lib/ai/actions';
 import { decryptAuthenticatedJson, encryptAuthenticatedJson } from '@/lib/authenticated-encryption';
 import { createTravelRepository, type TravelAccessContext, type TravelRepository } from './repository';
 import { createPlaceImageGenerator, PLACE_IMAGE_TOKEN_MAX_LENGTH, readPlacePngDimensions, type PlaceImageDependencies } from './place-images';
-import { placeImageTokenSchema, stagedPlaceImageKey } from './place-images';
+import { downloadStagedPlaceImage, placeImageTokenSchema, stagedPlaceImageKey } from './place-images';
 import { buildPlaceEmbeddingText, buildTripEmbeddingText, TRIP_EMBEDDING_CONTENT_VERSION } from './semantic-text';
 import { documentStorage, type DocumentObjectStorage } from '@/lib/ai/document-processing/storage';
 import { ingestGalleryLibraryUpload } from '@/lib/gallery/upload-processing';
@@ -712,9 +712,8 @@ export function createTravelService(options: { repository?: TravelRepository; ex
       if (token.issuedAt > at || at >= token.issuedAt + 60 * 60_000) throw new Error('Place image request token has expired.');
       const stableKey = (kind: string, value: string) => `c${createHash('sha256').update(`${kind}\0${value}`).digest('hex').slice(0, 24)}`;
       const storage = options.storage ?? documentStorage;
-      let staged;
-      try { staged = await storage.download(stagedPlaceImageKey(token.nonce)); }
-      catch {
+      let staged = await downloadStagedPlaceImage(storage, stagedPlaceImageKey(token.nonce));
+      if (!staged) {
         await generatePlaceHeroImage({ teamKey: input.teamKey, scopeKey: input.scopeKey, imageRequestToken: input.imageRequestToken }, userKey, execution);
         staged = await storage.download(stagedPlaceImageKey(token.nonce));
       }

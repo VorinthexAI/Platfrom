@@ -1,4 +1,4 @@
-import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand } from '@aws-sdk/client-s3';
 import { currentBillingUserKey } from '@/lib/ai/events/runtime';
 import { markStoredObjectDeleted, recordStoredObject } from '@/lib/automations/storage-charger-repository';
 import { s3, S3_BUCKET } from '@/lib/s3';
@@ -9,11 +9,18 @@ export interface DocumentStorage {
 }
 
 export interface DocumentObjectStorage extends DocumentStorage {
+  exists?(storageKey: string): Promise<boolean>;
   download(storageKey: string): Promise<{ bytes: Uint8Array; mimeType?: string; sizeBytes?: number; etag?: string }>;
   copy(input: { sourceKey: string; destinationKey: string; mimeType?: string; billingUserKey?: string }): Promise<{ storageKey: string; sizeBytes?: number; bucket?: string; etag?: string }>;
 }
 
 export const documentStorage: DocumentObjectStorage = {
+  async exists(storageKey) {
+    // Explicit listing distinguishes a missing preview from AccessDenied. A
+    // missing GET/HEAD otherwise returns 403 when ListBucket is not permitted.
+    const result = await s3.send(new ListObjectsV2Command({ Bucket: S3_BUCKET, Prefix: storageKey, MaxKeys: 1 }));
+    return result.Contents?.some(({ Key }) => Key === storageKey) ?? false;
+  },
   async upload(input) {
     const billingUserKey = input.billingUserKey ?? currentBillingUserKey();
     const result = await s3.send(new PutObjectCommand({

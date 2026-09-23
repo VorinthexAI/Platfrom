@@ -2,6 +2,18 @@ import { z } from "zod";
 
 import { apiClient } from "./api-client";
 import { productIdSchema } from "./product-client";
+import { extractDomainErrorCode } from "./domain-error-observer";
+
+export function checkoutErrorMessage(error: unknown) {
+  switch (extractDomainErrorCode(error)) {
+    case "SUBSCRIPTION_EXISTS": return "You already have an active plan or a checkout in progress. You can manage your plan in Settings.";
+    case "CHECKOUT_PENDING": return "Your checkout is already opening. Please wait a moment.";
+    case "PRODUCT_INACTIVE":
+    case "PRODUCT_NOT_FOUND":
+    case "PRODUCT_NOT_SYNCED": return "This offer isn’t available right now. Please try again later.";
+    default: return "Checkout could not be opened. Please try again.";
+  }
+}
 
 const polarCheckoutUrlSchema = z.url().refine((value) => {
   const url = new URL(value);

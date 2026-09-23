@@ -9,7 +9,7 @@ import { Button } from "@vorinthex/shared/ui/button";
 import { CheckIcon, CloseIcon, MoreHorizontalIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
-import { useToast } from "@vorinthex/shared/ui/toast";
+import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 
 import { createGalleryCollectionMemory, deleteGalleryCollectionMemory, fetchGalleryCollectionMemory, getGalleryContext, isGalleryClientErrorCode, isGalleryMemoryExhaustion, listGalleryCollectionMemories, type GalleryCollection, type GalleryMemory } from "@/lib/gallery-client";
 import { galleryMemoryTypedText, galleryMemoryTypingDuration, splitGalleryMemoryText } from "@/lib/gallery-memory-typing";

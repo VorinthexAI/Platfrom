@@ -11,7 +11,7 @@ import { PullToRefresh } from "@vorinthex/shared/ui/pull-to-refresh";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
-import { useToast } from "@vorinthex/shared/ui/toast";
+import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 import { useErrorFeedback } from "@/hooks/use-error-feedback";
 import { isNearScrollEnd } from "@vorinthex/shared/lib/pagination";
 

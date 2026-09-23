@@ -37,7 +37,7 @@ export default function MagicTokenRoute() {
         if (result.status !== "authenticated") throw new Error("Additional verification is required.");
         setState("success");
         setMessage("Sign in complete. Opening your workspace...");
-        await hydrate();
+        await hydrate({ newSession: true });
       })
       .catch(() => {
         setState("expired");

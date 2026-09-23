@@ -43,7 +43,7 @@ import { PullToRefresh } from "@vorinthex/shared/ui/pull-to-refresh";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput as SharedTextInput } from "@vorinthex/shared/ui/text-input";
 import { Switch } from "@vorinthex/shared/ui/switch";
-import { useToast } from "@vorinthex/shared/ui/toast";
+import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 import { useErrorFeedback } from "@/hooks/use-error-feedback";
 
 import { ChromeIcon } from "@/components/ChromeIcon";

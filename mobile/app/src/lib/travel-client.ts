@@ -467,8 +467,15 @@ export function extractGuideSections(text: string) {
 }
 
 export async function streamFindPlace(query: string, country: AuthoritativeCountry, onDelta: (text: string) => void, signal?: AbortSignal) {
-  const body = { ...getTravelContext(), ...z.strictObject({ query: z.string().trim().min(2).max(200), country: authoritativeCountrySchema }).parse({ query, country }) };
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) controller.abort();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 120_000);
   let place: PlaceDetail | undefined;
+  try {
+  const body = { ...getTravelContext(), ...z.strictObject({ query: z.string().trim().min(2).max(200), country: authoritativeCountrySchema }).parse({ query, country }) };
   let failed: Error | undefined;
   await postEventStream("/travel/places/guide/stream", body, (frame) => {
     if (frame.event === "start") return;
@@ -479,6 +486,7 @@ export async function streamFindPlace(query: string, country: AuthoritativeCount
     }
     if (frame.event === "done") {
       place = z.object({ place: placeDetailSchema }).parse(data).place;
+      controller.abort();
       return;
     }
     if (frame.event === "error") {
@@ -487,10 +495,15 @@ export async function streamFindPlace(query: string, country: AuthoritativeCount
       return;
     }
     throw new Error(`Unknown country guide stream event: ${frame.event}.`);
-  }, signal);
+  }, controller.signal);
   if (failed) throw failed;
   if (!place) throw new Error("Country guide stream ended before completion.");
   return place;
+  } catch (error) {
+    if (place && !signal?.aborted) return place;
+    if (timedOut) throw new Error("The destination guide took too long. Please try again.");
+    throw error;
+  } finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
 }
 
 export function findCity(city: string, country: AuthoritativeCountry, signal?: AbortSignal) {
@@ -498,7 +511,7 @@ export function findCity(city: string, country: AuthoritativeCountry, signal?: A
     "/travel/cities/find",
     z.strictObject({ city: z.string().trim().min(1).max(160), country: authoritativeCountrySchema }).parse({ city, country }),
     z.strictObject({ city: cityDetailSchema }),
-    { timeout: 30_000, signal },
+    { timeout: 120_000, signal },
   ).then(({ city: detail }) => detail);
 }
 
@@ -507,7 +520,7 @@ export function findPlaceChildren(childrenRequestToken: string, signal?: AbortSi
     "/travel/places/children/find",
     z.strictObject({ childrenRequestToken: z.string().min(1).max(64 * 1024) }).parse({ childrenRequestToken }),
     z.strictObject({ cities: z.array(cityDetailSchema).length(10) }),
-    { timeout: 30_000, signal },
+    { timeout: 120_000, signal },
   ).then(({ cities }) => cities);
 }
 

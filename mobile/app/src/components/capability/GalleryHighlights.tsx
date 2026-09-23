@@ -9,7 +9,7 @@ import { Button } from "@vorinthex/shared/ui/button";
 import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, CloseIcon, MoreHorizontalIcon, PauseIcon, PlayIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
-import { useToast } from "@vorinthex/shared/ui/toast";
+import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 
 import { createGalleryCollectionHighlight, deleteGalleryCollectionHighlight, fetchGalleryCollectionHighlight, getGalleryContext, isGalleryClientErrorCode, listGalleryCollectionHighlights, resolveGalleryHighlightSlides, type GalleryCollection, type GalleryHighlight, type GalleryHighlightDetail } from "@/lib/gallery-client";
 import { HIGHLIGHT_SLIDE_DURATION_MS, initialHighlightPlaybackState, reduceHighlightPlayback } from "@/lib/gallery-highlight-playback";

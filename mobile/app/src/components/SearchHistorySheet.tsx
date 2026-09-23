@@ -3,7 +3,7 @@ import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
 import { SearchHistoryPill } from "@vorinthex/shared/ui/search-history-pill";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
-import { useToast } from "@vorinthex/shared/ui/toast";
+import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 import { useErrorFeedback } from "@/hooks/use-error-feedback";
 
 import type { ContentSearchHistoryItem } from "@/lib/content-client";

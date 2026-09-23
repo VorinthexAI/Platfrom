@@ -16,7 +16,9 @@ export default function OpenAppRoute() {
       router.replace(useAuthStore.getState().user?.isOnboarded ? "/capability/archive" : "/onboarding");
       return;
     }
-    void readLocalOnboardingState().then((onboarding) => router.replace(onboarding.previewComplete ? "/auth" : "/onboarding"));
+    let active = true;
+    void readLocalOnboardingState().then((onboarding) => { if (active && useAuthStore.getState().status === "unauthenticated") router.replace(onboarding.previewComplete ? "/auth" : "/onboarding"); });
+    return () => { active = false; };
   }, [router, status]);
 
   return <View style={styles.root} />;

@@ -6,7 +6,7 @@ import { Button } from "@vorinthex/shared/ui/button";
 import { FilterPill } from "@vorinthex/shared/ui/filter-pill";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
-import { useToast } from "@vorinthex/shared/ui/toast";
+import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 
 import { TagCreateSheet, TagSheetEmptyState } from "@/components/TagSheetShared";
 import type { ContentContext } from "@/lib/content-client";

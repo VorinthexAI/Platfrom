@@ -1,4 +1,5 @@
-import { AxiosHeaders, create, isAxiosError, type AxiosInstance } from "axios";
+import { AxiosHeaders, CanceledError, create, isAxiosError, type AxiosInstance } from "axios";
+import { captureSessionRequest, sessionEpoch, sessionIsEnding } from "./session-lifecycle";
 
 import { extractSessionTokens, normalizeApiPath } from "./auth-helpers";
 import { tokenVault } from "./token-vault";
@@ -12,7 +13,7 @@ import { ensureAppsReady } from "@/state/apps";
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://vorinthex.com";
 const BACKEND_API_KEY = process.env.EXPO_PUBLIC_BACKEND_API_KEY ?? "";
 let unauthorizedListener: (() => void) | undefined;
-const requestSessions = new WeakMap<object, { generation: number; authenticated: boolean }>();
+const requestSessions = new WeakMap<object, { generation: number; authenticated: boolean; lifecycle: ReturnType<typeof captureSessionRequest> }>();
 
 export const apiClient: AxiosInstance = create({
   baseURL: `${API_BASE_URL.replace(/\/$/, "")}/api/v1`,
@@ -25,34 +26,48 @@ export const apiClient: AxiosInstance = create({
 });
 
 apiClient.interceptors.request.use(async (config) => {
-  await ensureAppsReady();
-  const selectedAppHeaders = selectedAppKeyHeaders();
-  const [eventIdentifier, device] = await Promise.all([getInstallationEventIdentifier(), getDeviceIdentifier()]);
-  config.url = normalizeApiPath(config.url ?? "/");
-  const { session, generation, invalidated } = await tokenVault.snapshot();
-  if (invalidated) unauthorizedListener?.();
-  requestSessions.set(config, { generation, authenticated: Boolean(session) });
-  const headers = AxiosHeaders.from(config.headers);
-  headers.set(INSTALLATION_EVENT_IDENTIFIER_HEADER, eventIdentifier);
-  if (device) headers.set(DEVICE_IDENTIFIER_HEADER, device);
-  if (!headers.has(VORINTHEX_APP_KEY_HEADER)) {
-    for (const [name, value] of Object.entries(selectedAppHeaders)) headers.set(name, value);
-  }
-  if (BACKEND_API_KEY) headers.set("X-Vorinthex-API-Key", BACKEND_API_KEY);
-  if (session) {
-    if (session.accessExpiresAt > Date.now()) headers.set("Authorization", `Bearer ${session.accessToken}`);
-    headers.set("X-Refresh-Token", session.refreshToken);
-  }
-  config.headers = headers;
-  return config;
+  const lifecycle = captureSessionRequest(config.signal as AbortSignal | undefined);
+  try {
+    const path = normalizeApiPath(config.url ?? "/");
+    const publicRequest = /^\/auth\/(?!me(?:\/|$)|logout(?:\/|$))/.test(path) || /^\/(apps|products|costs|health)$/.test(path);
+    if (sessionIsEnding() && !publicRequest) throw new CanceledError("canceled");
+    await ensureAppsReady();
+    const selectedAppHeaders = selectedAppKeyHeaders();
+    const [eventIdentifier, device] = await Promise.all([getInstallationEventIdentifier(), getDeviceIdentifier()]);
+    config.url = path;
+    const { session, generation, invalidated } = await tokenVault.snapshot();
+    if (invalidated) unauthorizedListener?.();
+    lifecycle.assertCurrent();
+    config.signal = lifecycle.signal;
+    requestSessions.set(config, { generation, authenticated: Boolean(session), lifecycle });
+    const headers = AxiosHeaders.from(config.headers);
+    headers.set(INSTALLATION_EVENT_IDENTIFIER_HEADER, eventIdentifier);
+    if (device) headers.set(DEVICE_IDENTIFIER_HEADER, device);
+    if (!headers.has(VORINTHEX_APP_KEY_HEADER)) {
+      for (const [name, value] of Object.entries(selectedAppHeaders)) headers.set(name, value);
+    }
+    if (BACKEND_API_KEY) headers.set("X-Vorinthex-API-Key", BACKEND_API_KEY);
+    if (session) {
+      if (session.accessExpiresAt > Date.now()) headers.set("Authorization", `Bearer ${session.accessToken}`);
+      headers.set("X-Refresh-Token", session.refreshToken);
+    }
+    config.headers = headers;
+    return config;
+  } catch (error) { lifecycle.cleanup(); throw error; }
 });
 
 apiClient.interceptors.response.use(async (response) => {
   const tokens = extractSessionTokens(response.data, (name) => response.headers[name]);
   const requestSession = requestSessions.get(response.config);
+  requestSession?.lifecycle.cleanup();
+  requestSession?.lifecycle.assertCurrent();
   if (tokens && requestSession) await tokenVault.writeIfCurrent(tokens, requestSession.generation);
+  requestSession?.lifecycle.assertCurrent();
   return response;
 }, async (error: unknown) => {
+  const owner = isAxiosError(error) && error.config ? requestSessions.get(error.config) : undefined;
+  owner?.lifecycle.cleanup();
+  if (owner && owner.lifecycle.owner !== sessionEpoch()) throw new CanceledError("canceled");
   if (isAxiosError(error) && error.response) {
     const requestSession = error.config ? requestSessions.get(error.config) : undefined;
     const tokens = extractSessionTokens(error.response.data, (name) => error.response?.headers[name]);
@@ -64,6 +79,7 @@ apiClient.interceptors.response.use(async (response) => {
       if (cleared) unauthorizedListener?.();
     }
   }
+  if (owner && owner.lifecycle.owner !== sessionEpoch()) throw new CanceledError("canceled");
   return rejectObservedDomainError(error);
 });
 
@@ -83,10 +99,21 @@ export async function postJson<TBody, TResponse>(path: string, body: TBody, opti
 }
 
 export async function deleteRemoteAccount(session: { accessToken: string; refreshToken: string }) {
-  await apiClient.post("/auth/me/delete", { confirmation: "DELETE MY ACCOUNT" }, { headers: {
-    Authorization: `Bearer ${session.accessToken}`,
-    "X-Refresh-Token": session.refreshToken,
-  } });
+  const [eventIdentifier, device] = await Promise.all([getInstallationEventIdentifier(), getDeviceIdentifier()]);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60_000);
+  try {
+    const response = await fetch(`${API_BASE_URL.replace(/\/$/, "")}/api/v1/auth/me/delete`, {
+      method: "POST", signal: controller.signal, headers: {
+        "Content-Type": "application/json", "X-Vorinthex-Session-Transport": "header",
+        ...selectedAppKeyHeaders(), [INSTALLATION_EVENT_IDENTIFIER_HEADER]: eventIdentifier,
+        ...(device ? { [DEVICE_IDENTIFIER_HEADER]: device } : {}),
+        ...(BACKEND_API_KEY ? { "X-Vorinthex-API-Key": BACKEND_API_KEY } : {}),
+        Authorization: `Bearer ${session.accessToken}`, "X-Refresh-Token": session.refreshToken,
+      }, body: JSON.stringify({ confirmation: "DELETE MY ACCOUNT" }),
+    });
+    if (!response.ok) throw new Error("Account deletion could not be confirmed. Please try again.");
+  } finally { clearTimeout(timeout); }
 }
 
 export async function patchJson<TBody, TResponse>(path: string, body: TBody): Promise<TResponse> {
@@ -101,11 +128,16 @@ async function authenticatedEventStream(
   signal?: AbortSignal,
   onOpen?: () => void,
 ) {
+  const lifecycle = captureSessionRequest(signal);
+  signal = lifecycle.signal;
+  try {
+  if (sessionIsEnding()) throw new CanceledError("canceled");
   await ensureAppsReady();
   const selectedAppHeaders = selectedAppKeyHeaders();
   const [eventIdentifier, device] = await Promise.all([getInstallationEventIdentifier(), getDeviceIdentifier()]);
   const { session, generation, invalidated } = await tokenVault.snapshot();
   if (invalidated) unauthorizedListener?.();
+  lifecycle.assertCurrent();
   const headers: Record<string, string> = {
     "Accept": "text/event-stream",
     "Cache-Control": "no-cache",
@@ -127,6 +159,7 @@ async function authenticatedEventStream(
     let headersHandled = false;
     const abort = () => request.abort();
     const processAvailable = () => {
+      if (lifecycle.owner !== sessionEpoch()) return;
       if (processingError) return;
       if (request.readyState >= 2 && (request.status < 200 || request.status >= 300)) return;
       try {
@@ -140,6 +173,7 @@ async function authenticatedEventStream(
     };
     const cleanup = () => signal?.removeEventListener("abort", abort);
     const processHeaders = () => {
+      if (lifecycle.owner !== sessionEpoch()) return;
       if (headersHandled || request.readyState < 2) return;
       headersHandled = true;
       const tokens = extractSessionTokens(undefined, (name) => request.getResponseHeader(name));
@@ -154,6 +188,7 @@ async function authenticatedEventStream(
     request.onerror = () => { cleanup(); reject(processingError ?? new Error("Streaming request failed.")); };
     request.onabort = () => { cleanup(); reject(processingError ?? new DOMException("Aborted", "AbortError")); };
     request.onload = () => { void (async () => {
+      lifecycle.assertCurrent();
       if (request.status >= 200 && request.status < 300) processAvailable();
       if (processingError) throw processingError;
       const event = parseServerSentEvent(buffer);
@@ -171,6 +206,7 @@ async function authenticatedEventStream(
     signal?.addEventListener("abort", abort, { once: true });
     request.send(method === "POST" ? JSON.stringify(body) : null);
   });
+  } finally { lifecycle.cleanup(); }
 }
 
 export function getEventStream(path: string, onEvent: (event: ServerSentEvent) => void, signal?: AbortSignal, onOpen?: () => void) {

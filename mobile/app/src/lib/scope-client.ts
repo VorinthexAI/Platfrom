@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import { apiClient } from "./api-client";
+import { CanceledError } from "axios";
+import { sessionEpoch, sessionIsCurrent } from "./session-lifecycle";
 
 const richScopeProjection = { "X-Vorinthex-Scope-Projection": "2" };
 
@@ -30,11 +32,15 @@ let scopeOperationQueue = Promise.resolve();
 let pendingScopeOperations = 0;
 
 export function scheduleScopeOperation<T>(run: () => Promise<T>) {
+  const owner = sessionEpoch();
   const sequence = ++scopeOperationSequence;
   pendingScopeOperations += 1;
-  const promise = scopeOperationQueue.catch(() => undefined).then(run);
+  const promise = scopeOperationQueue.catch(() => undefined).then(() => {
+    if (!sessionIsCurrent(owner)) throw new CanceledError("canceled");
+    return run();
+  });
   scopeOperationQueue = promise.then(() => undefined, () => undefined).finally(() => { pendingScopeOperations -= 1; });
-  return { isCurrent: () => sequence === scopeOperationSequence, promise };
+  return { isCurrent: () => sequence === scopeOperationSequence && sessionIsCurrent(owner), promise };
 }
 
 export function scopeOperationIsPending() {

@@ -146,11 +146,28 @@ resource "aws_iam_role_policy" "early_app_archive_processing" {
           "${module.storage.s3_bucket_arn}/document-audio/*",
           "${module.storage.s3_bucket_arn}/media/*",
           "${module.storage.s3_bucket_arn}/profiles/*",
+          "${module.storage.s3_bucket_arn}/compass/*",
+          "${module.storage.s3_bucket_arn}/email/*",
+          "${module.storage.s3_bucket_arn}/pending/compass/*",
+          "${module.storage.s3_bucket_arn}/pending/conversation-attachments/*",
           "${module.storage.s3_bucket_arn}/pending/gallery/*",
           "${module.storage.s3_bucket_arn}/pending/profile-avatars/*",
           "${module.storage.s3_bucket_arn}/pending/image-hashing/*",
           "${aws_s3_bucket.textract_staging.arn}/textract/*"
         ]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:DeleteObject"]
+        Resource = ["${module.storage.s3_bucket_arn}/managed/scope-directory/v1/*"]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = [module.storage.s3_bucket_arn]
+        Condition = {
+          StringLike = { "s3:prefix" = ["pending/compass/place-hero/*"] }
+        }
       },
       {
         Effect = "Allow"
