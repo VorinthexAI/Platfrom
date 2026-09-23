@@ -4,7 +4,7 @@ import { FOUNDER_ACCESS_MAX_AGE_SECONDS, FOUNDER_REFRESH_MAX_AGE_SECONDS } from 
 import { isResendWebhookPath } from './resend';
 import { isGmailWebhookPath } from './email-webhook';
 import { isPolarWebhookPath } from './polar-webhook';
-import { bindDevice, bindEventIdentifier, createAutoRefreshAuthTokens, createBindEventApp, isPublicFounderAuthPath, isPublicProductPath, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
+import { bindDevice, bindEventIdentifier, createIpRateLimit, createAutoRefreshAuthTokens, createBindEventApp, isPublicFounderAuthPath, isPublicProductPath, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
 import { currentEventAppKey, currentEventAppScopeKey } from '@/lib/ai/events/runtime';
 import { APP_KEYS } from '@/lib/apps/registry';
 import { currentEventIdentifier } from '@/lib/ai/events/event-identifier';
@@ -154,6 +154,42 @@ describe('api middleware webhook exemptions', () => {
     }
   });
 
+});
+
+describe('rate limit middleware', () => {
+  test('uses one counter per verified IP regardless of user or route', async () => {
+    const app = new Hono();
+    app.use('*', createIpRateLimit({ enabled: true, limit: 2, windowMs: 60_000 }));
+    app.all('*', (c) => c.json({ ok: true }));
+
+    expect((await app.request('/api/v1/private', { headers: { 'x-test-user': 'user-1', 'x-forwarded-for': '203.0.113.1' } })).status).toBe(200);
+    expect((await app.request('/api/v1/auth/me/push-subscription', { method: 'PUT', headers: { 'x-test-user': 'user-2', 'x-forwarded-for': '203.0.113.1' } })).status).toBe(200);
+    const limited = await app.request('/api/v1/private', { headers: { 'x-forwarded-for': '203.0.113.1', 'cf-connecting-ip': '203.0.113.99' } });
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ error: 'rate limit exceeded' });
+    expect(limited.headers.get('ratelimit-limit')).toBe('2');
+    expect(Number(limited.headers.get('retry-after'))).toBeGreaterThan(0);
+    expect((await app.request('/api/v1/private', { headers: { 'x-forwarded-for': '203.0.113.2' } })).status).toBe(200);
+    expect((await app.request('/api/v1/webhooks/polar', { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.1' } })).status).toBe(429);
+  });
+
+  test('bypasses normal requests when disabled', async () => {
+    const app = new Hono();
+    app.use('*', createIpRateLimit({ enabled: false, limit: 1 }));
+    app.get('/api/v1/private', (c) => c.json({ ok: true }));
+    expect((await app.request('/api/v1/private')).status).toBe(200);
+    expect((await app.request('/api/v1/private')).status).toBe(200);
+  });
+
+  test('resets an exhausted IP counter after its window', async () => {
+    const app = new Hono();
+    app.use('*', createIpRateLimit({ enabled: true, limit: 1, windowMs: 100 }));
+    app.get('/api/v1/private', (c) => c.json({ ok: true }));
+    expect((await app.request('/api/v1/private')).status).toBe(200);
+    expect((await app.request('/api/v1/private')).status).toBe(429);
+    await Bun.sleep(150);
+    expect((await app.request('/api/v1/private')).status).toBe(200);
+  });
 });
 
 describe('mobile auth API-key protection', () => {
