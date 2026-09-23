@@ -7,7 +7,8 @@ ECS + ElastiCache + NAT + CloudFront stack (all destroyed).
 ## Topology
 
 ```
-Cloudflare (SSL = Full) ──▶ app box :443 (Caddy, self-signed internal cert)
+Cloudflare (website, SSL = Full) ──▶ app box :443 (Caddy, internal cert)
+Direct HTTPS (api.vorinthex.com) ──▶ same Caddy (public ACME cert)
                               ├─ web    container (Next.js, :3000)
                               ├─ api    container (Bun backend, :3001)
                               └─ redis  container (:6379, local)
@@ -16,10 +17,12 @@ Cloudflare (SSL = Full) ──▶ app box :443 (Caddy, self-signed internal cert
                             graph-db box ── ArangoDB 3.12 (:8529) + EBS data volume
 ```
 
-- **app box** — `vorinthex-early-app`, t4g.medium (ARM), **public** subnet, EIP
-  `13.49.39.46`. Caddy serves only `vorinthex.com`, path-routing `/api/v1/*`
-  (including the Resend webhook) to api and all other paths to web. Security group only
-  admits Cloudflare's IP ranges (managed prefix list) on :80/:443.
+- **app box** — `vorinthex-early-app`, t4g.medium (ARM), Virginia **public** subnet,
+  EIP `52.5.125.6`. Caddy serves the proxied apex and the DNS-only API hostname.
+  `/api/v1/*` routes to Bun on either hostname; the apex keeps this route for
+  existing clients and web integrations. All other apex paths route to Next.js.
+  Direct HTTPS is admitted on :443, with Caddy restricting the website hosts to
+  Cloudflare peers; :80 is restricted to Cloudflare.
 - **graph-db box** — `vorinthex-prod-graph-db-host`, t3.small, ArangoDB in Docker
   on the `/data/arangodb` EBS volume. Unchanged from before; holds all data.
 - No ALB / NAT / ElastiCache / (our) CloudFront. Cloudflare is the CDN/edge.
@@ -28,11 +31,12 @@ Cloudflare (SSL = Full) ──▶ app box :443 (Caddy, self-signed internal cert
 
 ## DNS
 
-The Cloudflare proxied apex CNAME in `.github/scripts/domains.json` points at
-the app box's public DNS, set via the `CLOUDFLARE_DNS_TARGET` repo
-variable (`ec2-13-49-39-46.eu-north-1.compute.amazonaws.com`). The zone SSL mode
-is **Full** (Caddy serves a self-signed certificate for `vorinthex.com`).
-Run the sync from `infra.yml` (`run_dns_sync=true`).
+The Cloudflare-proxied apex and www CNAMEs point at the app box's public DNS,
+set via `CLOUDFLARE_DNS_TARGET` (`ec2-52-5-125-6.compute-1.amazonaws.com`).
+The DNS-only `api.vorinthex.com` A record points at the same box's EIP.
+Cloudflare's zone SSL mode is **Full** for the website's internal origin cert;
+direct API traffic uses Caddy's public ACME cert. Sync via `infra.yml`
+(`run_dns_sync=true`).
 
 ## Deploy
 
@@ -57,12 +61,9 @@ ignored so a plan never replaces the running box — verified 0-destroy, clean p
 
 ## Known gaps / follow-ups
 
-- **Origin is open on 0.0.0.0/0.** The Cloudflare-only prefix-list rules do not (on
-  their own) admit Cloudflare to the origin, so :80/:443 are also open to the world
-  (`early_app_http_open`/`early_app_https_open`). Mitigated by the API key + an
-  unpublished origin IP. TODO: figure out why the prefix-list rules don't work and
-  lock down to Cloudflare-only.
-- Cloudflare→origin is Full with a self-signed origin cert. Optional hardening: a
+- Port 443 is public for the DNS-only API hostname. Because the website shares
+  that port, Caddy enforces the Cloudflare source-IP restriction on apex/www.
+- Cloudflare→origin is Full with an internal origin cert. Optional hardening: a
   real origin cert (Cloudflare Origin CA) for Full (strict).
 - DB stays on t3.small (a t4g.small downsize was skipped — ~$5/mo, not worth the
   cross-instance data move).

@@ -6,8 +6,9 @@
 //
 //   { "vorinthex.com": [] }
 //
-// The apex becomes a proxied CNAME to the configured origin target. Cloudflare
-// CNAME flattening makes an apex CNAME legal.
+// The apex and www are proxied CNAMEs to the configured origin target; the
+// mobile API hostname is a DNS-only A record for that origin's public IPv4.
+// Cloudflare CNAME flattening makes an apex CNAME legal.
 //
 // The sync is idempotent: existing records are matched by name+type, updated
 // only when content/proxied/type differ, created when missing, and never
@@ -30,7 +31,9 @@
 //   DRY_RUN=1              log planned actions without mutating Cloudflare
 
 import { readFileSync } from "node:fs";
+import { lookup } from "node:dns/promises";
 import { resolve } from "node:path";
+import { desiredDnsRecords, type DesiredRecord } from "./cloudflare-dns-records";
 
 const API_BASE = "https://api.cloudflare.com/client/v4";
 // Early-infra origin: the single app box (public DNS of its EIP). Override with
@@ -97,14 +100,6 @@ type DnsRecord = {
   id: string;
   type: string;
   name: string;
-  content: string;
-  proxied: boolean;
-  ttl: number;
-};
-
-type DesiredRecord = {
-  name: string;
-  type: "CNAME";
   content: string;
   proxied: boolean;
   ttl: number;
@@ -287,13 +282,8 @@ async function main() {
   );
 
   const hostnames = loadDesiredHostnames();
-  const desired: DesiredRecord[] = hostnames.map((name) => ({
-    name,
-    type: "CNAME",
-    content: target,
-    proxied: true,
-    ttl: 1, // "automatic"; required to be 1 for proxied records
-  }));
+  const apiAddress = (await lookup(target, { family: 4 })).address;
+  const desired: DesiredRecord[] = desiredDnsRecords(hostnames, target, apex, apiAddress);
 
   console.log(
     `[cloudflare-dns-sync] desired records: ${desired.length} (${hostnames.join(", ")})`,
@@ -316,10 +306,9 @@ async function main() {
   let failures = 0;
 
   for (const want of desired) {
-    // A proxied hostname may already exist as a CNAME (our own record) or as
-    // an A/AAAA record from earlier infra. We only manage CNAMEs; match by
-    // name+type=CNAME to stay idempotent and never duplicate.
-    const key = `${want.name.toLowerCase()}|CNAME`;
+    // The apex/www use CNAMEs; the direct API uses an A record. Replace only
+    // incompatible address records for the exact hostname being managed.
+    const key = `${want.name.toLowerCase()}|${want.type}`;
     const matches = byKey.get(key) ?? [];
 
     if (matches.length === 0) {
@@ -331,7 +320,7 @@ async function main() {
       const addressShadow = existing.filter(
         (r) =>
           r.name.toLowerCase() === want.name.toLowerCase() &&
-          (r.type.toUpperCase() === "A" || r.type.toUpperCase() === "AAAA"),
+          (want.type === "CNAME" ? ["A", "AAAA"] : ["CNAME", "AAAA"]).includes(r.type.toUpperCase()),
       );
       const otherShadow = existing.filter(
         (r) =>
@@ -348,9 +337,9 @@ async function main() {
 
       if (dryRun) {
         for (const s of addressShadow) {
-          console.log(`[plan] DELETE ${s.type} ${s.name} -> ${s.content} (replaced by CNAME)`);
+          console.log(`[plan] DELETE ${s.type} ${s.name} -> ${s.content} (replaced by ${want.type})`);
         }
-        console.log(`[plan] CREATE CNAME ${want.name} -> ${want.content} (proxied)`);
+        console.log(`[plan] CREATE ${want.type} ${want.name} -> ${want.content} (${want.proxied ? "proxied" : "DNS only"})`);
         created += 1;
         continue;
       }
@@ -359,13 +348,13 @@ async function main() {
           await cfFetch<unknown>(`/zones/${zoneId}/dns_records/${s.id}`, {
             method: "DELETE",
           });
-          console.log(`[delete] ${s.type} ${s.name} -> ${s.content} (replaced by CNAME)`);
+          console.log(`[delete] ${s.type} ${s.name} -> ${s.content} (replaced by ${want.type})`);
         }
         await cfFetch<DnsRecord>(`/zones/${zoneId}/dns_records`, {
           method: "POST",
           body: JSON.stringify(want),
         });
-        console.log(`[create] CNAME ${want.name} -> ${want.content} (proxied)`);
+        console.log(`[create] ${want.type} ${want.name} -> ${want.content} (${want.proxied ? "proxied" : "DNS only"})`);
         created += 1;
       } catch (err) {
         console.error(`[cloudflare-dns-sync] failed to create ${want.name}: ${String(err)}`);
@@ -379,19 +368,19 @@ async function main() {
     const [canonical, ...extras] = matches;
     if (extras.length > 0) {
       console.warn(
-        `[cloudflare-dns-sync] WARN: ${want.name} has ${matches.length} CNAME records; managing ${canonical.id}, leaving ${extras.length} extra untouched`,
+        `[cloudflare-dns-sync] WARN: ${want.name} has ${matches.length} ${want.type} records; managing ${canonical.id}, leaving ${extras.length} extra untouched`,
       );
     }
 
     if (!needsUpdate(canonical, want)) {
-      console.log(`[unchanged] CNAME ${want.name} -> ${want.content}`);
+      console.log(`[unchanged] ${want.type} ${want.name} -> ${want.content} (${want.proxied ? "proxied" : "DNS only"})`);
       unchanged += 1;
       continue;
     }
 
     if (dryRun) {
       console.log(
-        `[plan] UPDATE CNAME ${want.name}: ${canonical.content}${canonical.proxied ? " (proxied)" : ""} -> ${want.content} (proxied)`,
+        `[plan] UPDATE ${want.type} ${want.name}: ${canonical.content} (${canonical.proxied ? "proxied" : "DNS only"}) -> ${want.content} (${want.proxied ? "proxied" : "DNS only"})`,
       );
       updated += 1;
       continue;
@@ -401,7 +390,7 @@ async function main() {
         method: "PUT",
         body: JSON.stringify(want),
       });
-      console.log(`[update] CNAME ${want.name} -> ${want.content} (proxied)`);
+      console.log(`[update] ${want.type} ${want.name} -> ${want.content} (${want.proxied ? "proxied" : "DNS only"})`);
       updated += 1;
     } catch (err) {
       console.error(`[cloudflare-dns-sync] failed to update ${want.name}: ${String(err)}`);

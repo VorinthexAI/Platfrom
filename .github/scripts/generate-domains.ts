@@ -8,11 +8,11 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const domains = {
-  "vorinthex.com": ["www"],
+  "vorinthex.com": ["www", "api"],
 };
 
 const outPath = resolve(dirname(fileURLToPath(import.meta.url)), "domains.json");
 writeFileSync(outPath, `${JSON.stringify(domains, null, 2)}\n`, "utf8");
 
 console.log(`Wrote ${outPath}`);
-console.log("Domains: 1, subdomain slugs: 1");
+console.log("Domains: 1, subdomain slugs: 2");

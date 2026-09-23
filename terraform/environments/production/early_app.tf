@@ -23,8 +23,8 @@ resource "aws_security_group" "early_app" {
 }
 
 # Cloudflare origin-facing IPv4 ranges (https://www.cloudflare.com/ips-v4).
-# The app box only accepts :80/:443 from these, so the origin is not open to the
-# public internet — Cloudflare is the only ingress path.
+# HTTP and the proxied site are only served to these peers by Caddy; direct
+# HTTPS connections for the API also reach the instance on the shared port.
 resource "aws_ec2_managed_prefix_list" "cloudflare" {
   name           = "cloudflare-origins"
   address_family = "IPv4"
@@ -61,11 +61,15 @@ resource "aws_vpc_security_group_ingress_rule" "early_app_https" {
   prefix_list_id    = aws_ec2_managed_prefix_list.cloudflare.id
 }
 
-# Origin is locked to Cloudflare only: :80/:443 accept solely the Cloudflare
-# prefix list above. Verified from Caddy logs that every Cloudflare origin-pull IP
-# (104.16.0.0/13, 172.64.0.0/13, 141.101.64.0/18, ...) is covered by the list, so
-# no 0.0.0.0/0 rule is needed. The box has no IPv6 and the public route table has
-# no overlapping internal route, so there is no IPv6 / route-hijack bypass path.
+# The mobile API hostname connects directly over HTTPS. Caddy limits the
+# apex/www virtual hosts to Cloudflare source addresses on this shared port.
+resource "aws_vpc_security_group_ingress_rule" "early_app_direct_api_https" {
+  security_group_id = aws_security_group.early_app.id
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+  cidr_ipv4         = "0.0.0.0/0"
+}
 
 resource "aws_vpc_security_group_egress_rule" "early_app_all" {
   security_group_id = aws_security_group.early_app.id

@@ -1,12 +1,12 @@
 # Caddy reverse proxy for the single-box early-infra app host.
 # Rendered by deploy.sh with __COLOR__ replaced by the active color (blue|green).
 #
-# Cloudflare is the client (proxied). The apex serves the app and www redirects
-# to it. Backend v1 API paths go to Bun (:3001), and all other paths go to Next.js.
+# The apex and www stay behind Cloudflare; api.vorinthex.com is DNS-only and
+# connects directly to Bun through Caddy. Existing /api/v1 paths on the apex
+# remain available to already-installed apps and web callers.
 #
-# Serves the apex on :80 AND :443 with a self-signed internal certificate
-# (Cloudflare "Full", non-strict). local_certs
-# forces Caddy's internal CA so it never reaches out to Let's Encrypt.
+# The proxied site uses an internal certificate (Cloudflare "Full"). The direct
+# API site explicitly uses ACME for a certificate trusted by phones.
 
 {
 	admin off
@@ -19,7 +19,14 @@
 	}
 }
 
-(routes) {
+(cloudflare_only) {
+	# The security group admits direct API traffic on the shared HTTPS port.
+	# Check the actual TCP peer, never a caller-controlled forwarding header.
+	@untrusted_origin not remote_ip 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+	respond @untrusted_origin 403
+}
+
+(api_route) {
 	@api path /api/v1 /api/v1/*
 	handle @api {
 		reverse_proxy api-__COLOR__:3001 {
@@ -28,6 +35,10 @@
 			flush_interval -1
 		}
 	}
+}
+
+(routes) {
+	import api_route
 	handle {
 		reverse_proxy web-__COLOR__:3000 {
 			header_up X-Forwarded-For {client_ip}
@@ -46,7 +57,10 @@ http://www.vorinthex.com {
 
 https://www.vorinthex.com {
 	tls internal
-	redir https://vorinthex.com{uri} permanent
+	route {
+		import cloudflare_only
+		redir https://vorinthex.com{uri} permanent
+	}
 }
 
 https://vorinthex.com {
@@ -58,5 +72,21 @@ https://vorinthex.com {
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 		-Server
 	}
-	import routes
+	route {
+		import cloudflare_only
+		import routes
+	}
+}
+
+https://api.vorinthex.com {
+	tls {
+		issuer acme {
+			# Port 80 remains Cloudflare-only. ACME validates via TLS on :443.
+			disable_http_challenge
+		}
+	}
+	import api_route
+	handle {
+		respond 404
+	}
 }
