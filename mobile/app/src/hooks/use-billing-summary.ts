@@ -7,7 +7,7 @@ export const BILLING_BALANCE_POLL_INTERVAL_MS = 60_000;
 export function useWholeSparkBalance(userKey: string | undefined) {
   return useQuery({
     queryKey: billingSummaryQueryKey(userKey ?? "unauthenticated"),
-    queryFn: () => fetchBillingSummary(),
+    queryFn: ({ signal }) => fetchBillingSummary({}, signal),
     enabled: Boolean(userKey),
     refetchInterval: BILLING_BALANCE_POLL_INTERVAL_MS,
     refetchIntervalInBackground: false,
@@ -20,7 +20,7 @@ export function useWholeSparkBalance(userKey: string | undefined) {
 export function useBillingSummary(userKey: string | undefined) {
   return useQuery({
     queryKey: billingSummaryQueryKey(userKey ?? "unauthenticated"),
-    queryFn: () => fetchBillingSummary(),
+    queryFn: ({ signal }) => fetchBillingSummary({}, signal),
     enabled: Boolean(userKey),
     refetchInterval: BILLING_BALANCE_POLL_INTERVAL_MS,
     refetchIntervalInBackground: false,
@@ -32,7 +32,7 @@ export function useBillingSummary(userKey: string | undefined) {
 export function useCurrentSubscription(userKey: string | undefined) {
   return useQuery({
     queryKey: currentSubscriptionQueryKey(userKey ?? "unauthenticated"),
-    queryFn: fetchCurrentSubscription,
+    queryFn: ({ signal }) => fetchCurrentSubscription(signal),
     enabled: Boolean(userKey),
     refetchOnMount: "always",
     refetchOnReconnect: "always",

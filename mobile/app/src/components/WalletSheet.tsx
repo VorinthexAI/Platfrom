@@ -41,7 +41,7 @@ export function WalletSheet({ onOpenHelp, userKey }: { onOpenHelp: (help: Wallet
   const subscriptionView = subscription ? subscriptionPresentation(subscription, products.find(({ key }) => key === subscription.productKey)) : undefined;
   const historyQuery = useInfiniteQuery({
     queryKey: walletHistoryQueryKey(userKey ?? "unauthenticated"),
-    queryFn: ({ pageParam }) => fetchBillingSummary({ limit: WALLET_HISTORY_PAGE_SIZE, kind: "tool", ...(pageParam ?? {}) }),
+    queryFn: ({ pageParam, signal }) => fetchBillingSummary({ limit: WALLET_HISTORY_PAGE_SIZE, kind: "tool", ...(pageParam ?? {}) }, signal),
     initialPageParam: undefined as { beforeCreatedAt: string; beforeKey: string } | undefined,
     getNextPageParam: (lastPage) => {
       const last = lastPage.transactions.at(-1);
@@ -59,8 +59,8 @@ export function WalletSheet({ onOpenHelp, userKey }: { onOpenHelp: (help: Wallet
       contentContainerStyle={styles.content}
       data={spends}
       keyExtractor={(item) => item.key}
-      ListEmptyComponent={historyQuery.isPending ? <Skeleton style={styles.listSkeleton} /> : historyQuery.isError ? <View style={styles.state}><Text accessibilityRole="alert" style={styles.error}>Spark charges could not be loaded.</Text><Button onPress={() => void historyQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : <Text style={styles.empty}>No static Spark charges yet.</Text>}
-      ListFooterComponent={historyQuery.isFetchNextPageError ? <Button onPress={() => void historyQuery.fetchNextPage()} size="md" variant="secondary">Retry more charges</Button> : historyQuery.isFetchingNextPage ? <Skeleton style={styles.listSkeleton} /> : null}
+      ListEmptyComponent={historyQuery.isPending ? <View accessibilityLabel="Loading Spark charges" accessibilityRole="progressbar" style={styles.state}>{[0, 1, 2].map((key) => <Skeleton key={key} style={styles.listSkeleton} />)}</View> : historyQuery.isError ? <View style={styles.state}><Text accessibilityRole="alert" style={styles.error}>Spark charges could not be loaded.</Text><Button onPress={() => void historyQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : <Text style={styles.empty}>No static Spark charges yet.</Text>}
+      ListFooterComponent={historyQuery.isFetchNextPageError ? <Button onPress={() => void historyQuery.fetchNextPage()} size="md" variant="secondary">Retry more charges</Button> : historyQuery.isFetchingNextPage ? <Skeleton accessibilityLabel="Loading more Spark charges" accessibilityRole="progressbar" style={styles.listSkeleton} /> : null}
       ListHeaderComponent={<View style={styles.header}>
         <View style={styles.section}>
           <Text style={styles.title}>Spark balance</Text>
@@ -97,12 +97,12 @@ const styles = StyleSheet.create({
   title: { color: palette.silver50, flex: 1, fontFamily: fonts.medium, fontSize: 16 },
   summary: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 14, lineHeight: 20 },
   balance: { color: palette.chromeWhite, fontFamily: fonts.medium, fontSize: 20, lineHeight: 26 },
-  summarySkeleton: { height: 20, width: "72%" },
-  listSkeleton: { height: 48, width: "100%" },
+  summarySkeleton: { height: 20, width: "72%", backgroundColor: palette.hairlineBright, opacity: 0.72 },
+  listSkeleton: { height: 48, width: "100%", backgroundColor: palette.hairlineBright, opacity: 0.72 },
   empty: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 14, lineHeight: 20 },
   state: { alignItems: "center", gap: spacing.md },
   error: { color: palette.danger, fontFamily: fonts.regular, fontSize: 13, lineHeight: 19, textAlign: "center" },
-  row: { alignItems: "center", flexDirection: "row", gap: spacing.md, justifyContent: "space-between" },
+  row: { alignItems: "flex-start", flexDirection: "row", gap: spacing.md, justifyContent: "space-between" },
   rowCopy: { flex: 1, gap: 3 },
   rowName: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 14 },
   rowDate: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 12, lineHeight: 17 },

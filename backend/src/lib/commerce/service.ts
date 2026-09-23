@@ -209,7 +209,10 @@ export function createCommerceService({ repository, provider, createProvider = c
       if (claimed.status === 'replayed') return checkoutCreateResultSchema.parse({ key: claimed.checkout.key, status: claimed.checkout.status, url: claimed.checkout.checkoutUrl });
       try {
         const providerIdempotencyKey = `checkout:${createHash('sha256').update(`${trustedUserKey}\u0000${idempotencyKey}`).digest('hex')}`;
-        const checkout = await polar().createCheckout({ providerProductId: product.providerProductId, userKey: trustedUserKey, productId: product.productId, idempotencyKey: providerIdempotencyKey, successUrl: CHECKOUT_SUCCESS_URL, returnUrl: CHECKOUT_RETURN_URL, customerIpAddress });
+        const customer = await emailRecipient(trustedUserKey);
+        const checkout = await polar().createCheckout({ providerProductId: product.providerProductId, userKey: trustedUserKey, productId: product.productId, idempotencyKey: providerIdempotencyKey, successUrl: CHECKOUT_SUCCESS_URL, returnUrl: CHECKOUT_RETURN_URL, customerIpAddress,
+          ...(customer ? { customerEmail: customer.email, ...(customer.name?.trim() ? { customerName: customer.name.trim().slice(0, 256) } : {}) } : {}),
+        });
         const saved = await repository.completeCheckout(claimed.checkout.key, checkout.id, checkout.url, now().toISOString());
         return checkoutCreateResultSchema.parse({ key: saved.key, status: saved.status, url: saved.checkoutUrl });
       } catch (error) {
@@ -220,14 +223,14 @@ export function createCommerceService({ repository, provider, createProvider = c
     async getCurrentSubscription(trustedUserKey: string) {
       const subscription = await repository.getCurrentSubscription(trustedUserKey);
       if (!subscription) return null;
-      const { providerSubscriptionId: _providerSubscriptionId, ...safe } = subscription;
+      const { providerSubscriptionId: _providerSubscriptionId, providerModifiedAt: _providerModifiedAt, ...safe } = subscription;
       return currentSubscriptionResultSchema.parse(safe);
     },
     async setCancellation(trustedUserKey: string, cancelAtPeriodEnd: boolean) {
       const current = await repository.getCurrentSubscription(trustedUserKey);
       if (!current) throw new CommerceError('SUBSCRIPTION_NOT_FOUND', 'Current subscription was not found.');
       if (current.cancelAtPeriodEnd === cancelAtPeriodEnd) {
-        const { providerSubscriptionId: _providerSubscriptionId, ...safe } = current;
+        const { providerSubscriptionId: _providerSubscriptionId, providerModifiedAt: _providerModifiedAt, ...safe } = current;
         return currentSubscriptionResultSchema.parse(safe);
       }
       const response = await polar().updateSubscription(current.providerSubscriptionId, cancelAtPeriodEnd);
@@ -240,7 +243,7 @@ export function createCommerceService({ repository, provider, createProvider = c
           if (recipient) await sendSubscriptionCancellation({ ...recipient, currentPeriodEnd: saved.currentPeriodEnd });
         })().catch((error) => console.error('subscription cancellation email delivery failed', { userKey: trustedUserKey, error }));
       }
-      const { providerSubscriptionId: _providerSubscriptionId, ...safe } = saved;
+      const { providerSubscriptionId: _providerSubscriptionId, providerModifiedAt: _providerModifiedAt, ...safe } = saved;
       return currentSubscriptionResultSchema.parse(safe);
     },
     async revokeUserSubscriptions(trustedUserKey: string) {

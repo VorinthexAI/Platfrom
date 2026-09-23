@@ -12,6 +12,39 @@
 
 Signal email connectors support Gmail only. End users authorize Gmail through Google OAuth and never configure cloud resources or workers.
 
+### OAuth scope verification and callback compatibility
+
+The current authorization request uses `openid`, `email` (the Google
+`https://www.googleapis.com/auth/userinfo.email` alias), and
+`https://mail.google.com/`. Declare these on **Google Auth Platform → Data Access**
+in the project that owns the configured OAuth client. **In production** is a
+publishing setting, not approval of the restricted Gmail scope. Complete Branding
+and submit the Gmail data-access verification with a working end-to-end demo.
+Server-side storage/processing of restricted Gmail data is subject to Google's
+applicable security-assessment requirements. Project submission, domain ownership,
+and the reviewer demo must be completed by the project owner; deployment alone
+cannot mark the Google application verified.
+
+The full Gmail scope remains intentional: **Clear Trash** uses
+`messages.batchDelete` for permanent deletion. Both Trash features and the scope
+remain enabled. A demo should show consent in English, inbox import/read/search,
+read/star changes, a user-approved send, Trash/Clear Trash on test mail, and
+disconnect. See https://developers.google.com/workspace/gmail/api/auth/scopes.
+
+Google may include `iss=https://accounts.google.com` in the authorization response.
+The shared strict transport schemas in `src/api/oauth-callback-schemas.ts` validate
+it on both the dedicated Gmail callback and the shared Google sign-in callback.
+Unknown fields and other issuers remain rejected. Existing one-time state, PKCE,
+nonce, and token identity checks still apply.
+
+Connection failures log a fixed stage (`token-exchange`, `gmail-profile`,
+`connector-persistence`, `inbox-initialization`, `sync-initialization`,
+`gmail-watch`, `initial-sync-enqueue`, or `connection-grant`) and numeric
+provider/database codes when available. These diagnostics deliberately exclude
+authorization codes, state tokens, credentials, email addresses, and provider
+response bodies. Retry connection with a fresh OAuth flow after a deployment;
+authorization state and grants are one-time and short-lived.
+
 Manual synchronization and Gmail subscription notifications are independent ingestion entry points. Both converge on the same provider-thread parser, pass every message through the canonical inbox sorter, and persist private `emailInboxes`, `emailThreads`, `emailMessages`, `emailDrafts`, `emailTones`, `emailReplyContext`, `emailWritingProfiles`, and `emailAttachments` rows. Archive and Gallery receive ordinary user-owned exports only; they are not Signal's lifecycle source. Subscription workers must call the system-only `ingestSubscriptionNotification`, never `sync`; that canonical operation owns exact-connector authorization and durable pending-history marking/clearing.
 
 After a subscription-origin `messagesAdded` thread has been sorted and committed, the system-only `email.draft.create-if-needed` capability makes one best-effort structured decision: it either skips the message or persists an idempotent reply draft keyed to that source message. Draft-generation failures are reported but do not roll back committed ingestion or prevent cursor advancement. Added-message provenance is persisted across subscription continuations. Initial/manual sync, label-only changes, deletions, and `inbox.sort` never create automatic drafts. Draft provenance is server-controlled; Drafts listing and search expose subscription-created drafts while manual reply/new-message drafts remain addressable through their direct lifecycle operations.

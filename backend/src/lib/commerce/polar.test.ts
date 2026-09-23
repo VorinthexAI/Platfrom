@@ -16,9 +16,10 @@ describe('Polar provider adapter', () => {
       request = { url: String(url), init: init! };
       return new Response(JSON.stringify({ id: 'checkout-1', url: 'https://sandbox.polar.sh/checkout/1', status: 'open', ignored: true }), { status: 200 });
     });
-    await expect(provider.createCheckout({ providerProductId: 'remote-1', userKey: 'user-1', productId: 'topup.small', idempotencyKey: 'request-1', successUrl: 'https://vorinthex.com/checkout/success', returnUrl: 'https://vorinthex.com/checkout/error', customerIpAddress: '203.0.113.7' })).resolves.toMatchObject({ id: 'checkout-1' });
+    await expect(provider.createCheckout({ providerProductId: 'remote-1', userKey: 'user-1', productId: 'topup.small', idempotencyKey: 'request-1', successUrl: 'https://vorinthex.com/checkout/success', returnUrl: 'https://vorinthex.com/checkout/error', customerIpAddress: '203.0.113.7', customerEmail: 'signed-in@example.com', customerName: 'Signed In' })).resolves.toMatchObject({ id: 'checkout-1' });
     expect(request?.url).toBe('https://sandbox-api.polar.sh/v1/checkouts/');
     expect((request?.init.headers as Record<string, string>)['Idempotency-Key']).toBe('request-1');
+    expect(JSON.parse(String(request?.init.body))).toMatchObject({ customer_email: 'signed-in@example.com', customer_name: 'Signed In' });
     expect(JSON.parse(String(request?.init.body))).toMatchObject({ products: ['remote-1'], external_customer_id: 'user-1', success_url: 'https://vorinthex.com/checkout/success', return_url: 'https://vorinthex.com/checkout/error', allow_discount_codes: false, customer_ip_address: '203.0.113.7', metadata: { userKey: 'user-1', productId: 'topup.small' } });
   });
 

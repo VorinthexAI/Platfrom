@@ -74,19 +74,19 @@ export const billingSummaryQueryKey = (userKey: string) => ["billing-summary", u
 export const walletHistoryQueryKey = (userKey: string) => ["billing-wallet-history", userKey] as const;
 export const currentSubscriptionQueryKey = (userKey: string) => ["billing-subscription", userKey] as const;
 
-export async function fetchBillingSummary(query: BillingSummaryQuery = {}): Promise<BillingSummary> {
+export async function fetchBillingSummary(query: BillingSummaryQuery = {}, signal?: AbortSignal): Promise<BillingSummary> {
   const params = Object.fromEntries(Object.entries({
     limit: query.limit,
     beforeCreatedAt: query.beforeCreatedAt,
     beforeKey: query.beforeKey,
     kind: query.kind,
   }).filter(([, value]) => value !== undefined));
-  const response = await apiClient.get("/billing/summary", { params });
+  const response = await apiClient.get("/billing/summary", { params, signal });
   return billingSummaryEnvelopeSchema.parse(response.data).data;
 }
 
-export async function fetchCurrentSubscription(): Promise<CurrentSubscription | null> {
-  const response = await apiClient.get("/subscriptions/current");
+export async function fetchCurrentSubscription(signal?: AbortSignal): Promise<CurrentSubscription | null> {
+  const response = await apiClient.get("/subscriptions/current", { signal });
   return subscriptionEnvelopeSchema.parse(response.data).data;
 }
 

@@ -26,6 +26,21 @@ afterEach(() => {
 });
 
 describe('email OAuth state', () => {
+  test('reports only the failing stage and numeric provider status without credentials', async () => {
+    const diagnostics: unknown[] = [];
+    const oauth = createEmailOAuthService({
+      store, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey }),
+      exchange: async () => { throw Object.assign(new Error('private-code access-token person@example.com'), { status: 403, response: { body: 'private-provider-body' } }); },
+      reportFailure: (diagnostic) => { diagnostics.push(diagnostic); },
+    });
+    const state = new URL((await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
+    const redirect = new URL(await oauth.callback({ state, code: 'private-code' }));
+    expect(redirect.searchParams.get('email_connection_error')).toBe('connection_failed');
+    expect(diagnostics).toEqual([{ stage: 'token-exchange', providerStatus: 403 }]);
+    expect(JSON.stringify(diagnostics)).not.toMatch(/private-code|access-token|person@example|private-provider/);
+    await expect(oauth.callback({ state, code: 'private-code' })).rejects.toThrow('invalid or expired');
+  });
+
   test('binds state to access context and consumes denial callbacks once', async () => {
     const oauth = createEmailOAuthService({ store, authorize: async () => ({ teamMembershipKey: scopeKey }), connectors: {} as never });
     const started = await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' });

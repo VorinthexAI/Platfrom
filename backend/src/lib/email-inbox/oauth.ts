@@ -9,6 +9,13 @@ import { EmailWatchRepairPendingError } from './service';
 
 const STATE_PREFIX = 'email:oauth:state:';
 const GRANT_PREFIX = 'email:oauth:grant:';
+
+export interface EmailOAuthFailureDiagnostic { stage: string; databaseCode?: number; providerStatus?: number }
+
+function failureDiagnostic(stage: string, error: unknown): EmailOAuthFailureDiagnostic {
+  const details = typeof error === 'object' && error !== null ? error as Record<string, unknown> : {};
+  return { stage, ...(typeof details.errorNum === 'number' ? { databaseCode: details.errorNum } : {}), ...(typeof details.status === 'number' ? { providerStatus: details.status } : {}) };
+}
 const stateSchema = z.object({
   userKey: z.string().cuid(), teamKey: z.string().min(1), scopeKey: z.string().cuid(),
   provider: z.literal('gmail').default('gmail'),
@@ -51,6 +58,7 @@ export function createEmailOAuthService(options: {
   enqueueInitialSync?: (input: { teamKey: string; scopeKey: string; connectorKey: string; operationKey: string }) => Promise<unknown>;
   ensureInbox?: (actor: { userKey: string; teamKey: string; scopeKey: string }, connector: NonNullable<Awaited<ReturnType<ConnectorRepository['getByKey']>>>, metadata: { name: string; description?: string }, overwrite: boolean, expectedRevision: string | null) => Promise<unknown>;
   inboxView?: (actor: { userKey: string; teamKey: string; scopeKey: string }, connectorKey: string) => Promise<unknown>;
+  reportFailure?: (diagnostic: EmailOAuthFailureDiagnostic) => void;
 } = {}) {
   const store = options.store ?? redisStore;
   const connectors = options.connectors ?? createConnectorRepository();
@@ -86,10 +94,14 @@ export function createEmailOAuthService(options: {
         return redirect.toString();
       }
       let reconnect: { connectorKey: string; connectorRevision: string; inboxKey?: string; inboxRevision?: string; previous: Awaited<ReturnType<ConnectorRepository['findExact']>>; previousInbox: Awaited<ReturnType<InboxRepository['getByConnector']>> } | undefined;
+      let stage = 'authorize';
       try {
         await authorize(state.userKey, state.teamKey, state.scopeKey);
+        stage = 'token-exchange';
         const result = await exchange(input.code, state.verifier, state.nonce);
+        stage = 'gmail-profile';
         const providerProfile = await profile(result.credentials.accessToken);
+        stage = 'connector-persistence';
         const previous = await connectors.findExact(state.userKey, result.identity.providerAccountId, state.provider);
         const previousInbox = previous ? await inboxes.getByConnector(state.userKey, previous.key) : null;
         if (!result.credentials.refreshToken && previous && previous.status !== 'revoked' && previous.encryptedCredentials !== 'revoked') {
@@ -104,8 +116,10 @@ export function createEmailOAuthService(options: {
           expectedRevision: previous?.revision ?? null,
         });
         reconnect = { connectorKey: connector.key, connectorRevision: connector.revision, previous, previousInbox };
+        stage = 'inbox-initialization';
         const initializedInbox = await ensureInbox({ userKey: state.userKey, teamKey: state.teamKey, scopeKey: state.scopeKey }, connector, { name: state.name, ...(state.description ? { description: state.description } : {}) }, previous !== null, previousInbox?.revision ?? null) as { key?: string; revision?: string } | undefined;
         if (initializedInbox?.revision) { reconnect.inboxKey = initializedInbox.key; reconnect.inboxRevision = initializedInbox.revision; }
+        stage = 'sync-initialization';
         const syncRevision = await connectors.setSyncState(connector.key, 'idle', { historyId: providerProfile.historyId, pendingHistoryId: null, pendingThreadIds: null, pendingSubscriptionMessages: null, resetLastSynced: true, markSynced: false, expectedRevision: reconnect.connectorRevision });
         if (!syncRevision) throw new Error('Could not initialize email synchronization state');
         reconnect.connectorRevision = syncRevision;
@@ -115,17 +129,22 @@ export function createEmailOAuthService(options: {
           connector = activated;
           reconnect.connectorRevision = activated.revision;
         }
+        stage = 'gmail-watch';
         try {
           const watch = await registerWatch({ userKey: state.userKey, teamKey: state.teamKey, scopeKey: state.scopeKey }, connector.key, reconnect.connectorRevision) as { connectorRevision?: string } | undefined;
           if (watch?.connectorRevision) reconnect.connectorRevision = watch.connectorRevision;
         }
         catch (error) { if (!(error instanceof EmailWatchRepairPendingError)) throw error; }
+        stage = 'initial-sync-enqueue';
         await enqueueInitialSync({ teamKey: state.teamKey, scopeKey: state.scopeKey, connectorKey: connector.key, operationKey: randomUUID() });
+        stage = 'connection-grant';
         const grant = token('vrtx_email_grant_');
         const payload = grantSchema.parse({ userKey: state.userKey, teamKey: state.teamKey, scopeKey: state.scopeKey, connectorKey: connector.key });
         if (!(await store.put(`${GRANT_PREFIX}${grant}`, JSON.stringify(payload), 300))) throw new Error('Could not create email connection grant');
         redirect.searchParams.set('email_connection_code', grant);
-      } catch {
+      } catch (error) {
+        // Never log callback URLs, authorization codes, tokens, or provider bodies.
+        try { (options.reportFailure ?? ((diagnostic) => console.warn('email oauth connection failed', diagnostic)))(failureDiagnostic(stage, error)); } catch { /* Diagnostics cannot prevent the app return. */ }
         if (reconnect) await connectors.rollbackReconnect({ connectorKey: reconnect.connectorKey, connectorRevision: reconnect.connectorRevision, previousConnector: reconnect.previous, inboxKey: reconnect.inboxKey, inboxRevision: reconnect.inboxRevision, previousInbox: reconnect.previousInbox }).catch(() => false);
         redirect.searchParams.set('email_connection_error', 'connection_failed');
       }

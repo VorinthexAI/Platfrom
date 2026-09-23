@@ -103,7 +103,7 @@ export const subscriptionSchema = z.object({
 export const checkoutCreateInputSchema = z.object({ productId: productIdSchema }).strict();
 export const checkoutCreateResultSchema = z.object({ key: cuid, status: z.enum(['open', 'completed']), url: polarCheckoutUrlSchema }).strict();
 export const subscriptionMutationInputSchema = z.object({}).strict();
-export const currentSubscriptionResultSchema = subscriptionSchema.omit({ providerSubscriptionId: true }).nullable();
+export const currentSubscriptionResultSchema = subscriptionSchema.omit({ providerSubscriptionId: true, providerModifiedAt: true }).nullable();
 
 export type Product = z.infer<typeof productSchema>;
 export type PublicProduct = z.infer<typeof publicProductSchema>;

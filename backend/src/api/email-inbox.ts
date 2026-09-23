@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import { z, ZodError } from 'zod';
 import { FoundersAccessError } from '@/lib/founders/access';
 import { createEmailOAuthService, type EmailOAuthService } from '@/lib/email-inbox/oauth';
+import { emailOAuthCallbackSchema } from './oauth-callback-schemas';
 import { createEmailService, EmailIdempotencyError, EmailRepositoryError, emailDraftComposeInputSchema, emailDraftComposeInputShape, emailDraftCreateInputSchema, emailDraftDeleteInputSchema, emailDraftUpdateInputSchema, emailMessageGeneratedListInputSchema, emailMessageSummarizeInputSchema, emailMessageSummaryDeleteInputSchema, emailMessageTranslationDeleteInputSchema, emailOverviewInputSchema, emailOverviewInputShape, emailReplyContextCreateInputSchema, emailReplyContextDeleteInputSchema, emailReplyContextUpdateInputSchema, emailSemanticSearchInputSchema, emailSimilarFindInputSchema, emailThreadFavoriteInputSchema, emailThreadReadStateInputSchema, emailThreadTrashInputSchema, emailToneCreateInputSchema, emailToneDeleteInputSchema, emailToneUpdateInputSchema, emailTrashClearInputSchema, inboxUpdateInputSchema, publicEmailDraftSchema, publicEmailGeneratedDeleteResultSchema, publicEmailInboxSchema, publicEmailOverviewSchema, publicEmailSummaryListResultSchema, publicEmailSummaryResultSchema, publicEmailTranslationListResultSchema, type EmailService } from '@/lib/email-inbox/service';
 import { getAuthIdentity } from './security';
 import { authenticatedTeamContext } from './auth';
@@ -108,11 +109,7 @@ export function createEmailHandlers(options: { service?: EmailService; oauth?: E
     }),
     callback: async (c: Context) => {
       try {
-        const input = strictObject({
-          state: z.string().startsWith('vrtx_email_state_').max(256), code: z.string().min(1).max(4096).optional(), error: z.string().max(200).optional(),
-          scope: z.string().max(2000).optional(), authuser: z.string().max(20).optional(), prompt: z.string().max(200).optional(), hd: z.string().max(320).optional(),
-          error_description: z.string().max(1000).optional(), error_subtype: z.string().max(200).optional(), session_state: z.string().max(500).optional(),
-        }).parse(Object.fromEntries(new URL(c.req.url).searchParams));
+        const input = emailOAuthCallbackSchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
         return c.redirect(await oauth.callback(input), 302);
       } catch { return c.json({ success: false, error: { code: 'EMAIL_OAUTH_FAILED', message: 'Email authorization failed.' } }, 400); }
     },

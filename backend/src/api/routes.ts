@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
+import { googleSignInCallbackSchema } from './oauth-callback-schemas';
 import { countryCodeSchema } from '@/lib/db/users.node';
 import {
   completeTotpSetup,
@@ -224,7 +225,7 @@ export function registerRoutes(app: Hono) {
     const provider = oauthProviderSchema.parse(c.req.param('provider'));
     const rawState = new URL(c.req.url).searchParams.get('state');
     if (provider === 'google' && rawState?.startsWith('vrtx_email_state_')) return emailHandlers.callback(c);
-    const callbackSchema = strictObject({
+    const callbackSchema = provider === 'google' ? googleSignInCallbackSchema : strictObject({
       code: z.string().min(1),
       state: z.string().min(1),
       user: z.string().max(16_384).optional(),

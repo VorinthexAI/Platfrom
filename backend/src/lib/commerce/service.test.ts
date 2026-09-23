@@ -49,6 +49,7 @@ describe('canonical commerce service', () => {
       repository: repository({ listProducts: async () => COMMERCE_CATALOG.filter((product) => product.active), getProductByProductId: async () => ({ ...COMMERCE_CATALOG[3], providerProductId: 'remote-topup' }), claimCheckout: async (input) => { claimed = input; return { status: 'claimed', checkout: input }; } }),
       provider: { listProducts: async () => [], createCheckout: async (input: Parameters<NonNullable<Parameters<typeof createCommerceService>[0]['provider']>['createCheckout']>[0]) => { providerInput = input; return { id: 'checkout-1', url: 'https://polar.sh/checkout/1', status: 'open' }; }, updateSubscription: async () => { throw new Error('unused'); }, createProduct: async () => { throw new Error('unused'); }, updateProduct: async () => { throw new Error('unused'); } } as never,
       now: () => new Date(at), createKey: newId,
+      getEmailRecipient: async (key) => { expect(key).toBe(userKey); return { email: 'signed-in@example.com', name: ' Signed In ' }; },
     });
     const products = await service.listProducts();
     expect(products).toHaveLength(3);
@@ -57,6 +58,16 @@ describe('canonical commerce service', () => {
     expect(claimed).toMatchObject({ userKey, idempotencyKey: 'request-1', status: 'pending' });
     expect(providerInput).toMatchObject({ userKey, productId: 'topup.small', providerProductId: 'remote-topup', idempotencyKey: `checkout:${createHash('sha256').update(`${userKey}\u0000request-1`).digest('hex')}` });
     expect(providerInput).toMatchObject({ successUrl: 'https://vorinthex.com/checkout/success', returnUrl: 'https://vorinthex.com/checkout/error', customerIpAddress: '203.0.113.7' });
+    expect(providerInput).toMatchObject({ customerEmail: 'signed-in@example.com', customerName: 'Signed In' });
+  });
+
+  test('does not send placeholder guest identity or accept model-supplied customer details', async () => {
+    let captured: unknown;
+    const service = createCommerceService({ repository: repository(), getEmailRecipient: async () => ({ email: 'install@guest.vorinthex.com', name: 'Guest' }), provider: { createCheckout: async (input: unknown) => { captured = input; return { id: 'checkout-guest', url: 'https://polar.sh/checkout/guest', status: 'open' }; } } as never });
+    await service.createCheckout({ productId: 'topup.small' }, newId(), 'guest-checkout');
+    expect(captured).not.toHaveProperty('customerEmail');
+    expect(captured).not.toHaveProperty('customerName');
+    await expect(service.createCheckout({ productId: 'topup.small', customerEmail: 'forged@example.com' }, newId(), 'forged')).rejects.toThrow();
   });
 
   test('replays completed checkout, rejects inactive products, and leaves uncertain provider failures recoverable', async () => {
@@ -292,6 +303,11 @@ describe('canonical commerce service', () => {
     expect(providerCalls).toBe(2);
     expect(cancellationEmails).toHaveLength(1);
     expect(await service.getCurrentSubscription(userKey)).not.toHaveProperty('providerSubscriptionId');
+    for (const result of [await service.getCurrentSubscription(userKey), await service.setCancellation(userKey, true), await service.setCancellation(userKey, true), await service.setCancellation(userKey, false)]) {
+      expect(result).not.toHaveProperty('providerModifiedAt');
+      expect(result).not.toHaveProperty('providerSubscriptionId');
+      expect(Object.keys(result!).sort()).toEqual(['key', 'userKey', 'productKey', 'status', 'cancelAtPeriodEnd', 'currentPeriodStart', 'currentPeriodEnd', 'createdAt', 'updatedAt'].sort());
+    }
     await expect(service.processWebhook({ type: 'subscription.canceled', timestamp: at, data: { id: 'subscription-1', status: 'active', product_id: 'remote-weekly', customer: { external_id: userKey }, cancel_at_period_end: true } })).resolves.toMatchObject({ subscription: 'active' });
     expect(current).toMatchObject({ status: 'active', cancelAtPeriodEnd: true });
     await expect(service.processWebhook({ type: 'subscription.revoked', timestamp: at, data: { id: 'subscription-1', status: 'unpaid', product_id: 'remote-weekly', customer: { external_id: userKey } } })).resolves.toMatchObject({ subscription: 'unpaid' });

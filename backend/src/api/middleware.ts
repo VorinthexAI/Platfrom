@@ -2,6 +2,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { rateLimiter } from 'hono-rate-limiter';
 import { z } from 'zod';
+import { emailOAuthCallbackSchema, googleOAuthCallbackSchema } from './oauth-callback-schemas';
 import { referralCodeTransportSchema } from './auth-referral-code';
 import { timingSafeEqual } from '@/lib/crypto';
 import { isResendWebhookPath } from './resend';
@@ -191,12 +192,13 @@ function querySchemaForPath(path: string, method: string) {
     return strictObject({ redirect_uri: z.string().url(), referral_code: referralCodeTransportSchema.optional() });
   }
   if (/^\/auth\/mobile\/oauth\/(google|apple)\/callback$/.test(apiPath)) {
+    if (apiPath.includes('/google/')) return googleOAuthCallbackSchema;
     return strictObject({
       code: z.string().min(1).optional(), state: z.string().min(1).optional(), error: z.string().optional(), scope: z.string().optional(), authuser: z.string().optional(), prompt: z.string().optional(), hd: z.string().optional(), error_description: z.string().optional(), error_subtype: z.string().optional(),
     });
   }
   if (apiPath === '/email/connectors/gmail/callback') {
-    return strictObject({ code: z.string().min(1).optional(), state: z.string().min(1), error: z.string().optional(), scope: z.string().optional(), authuser: z.string().optional(), prompt: z.string().optional(), hd: z.string().optional(), error_description: z.string().optional(), error_subtype: z.string().optional(), session_state: z.string().optional() });
+    return emailOAuthCallbackSchema;
   }
   if (/^\/founders\/teams\/[^/]+\/communication\/channels\/[^/]+\/messages$/.test(apiPath)) {
     return strictObject({ limit: z.string().regex(/^\d+$/).optional() });

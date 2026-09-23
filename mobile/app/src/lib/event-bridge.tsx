@@ -7,7 +7,7 @@ import { publishAppEvent } from "./app-events";
 import { appSearchQueryRoot } from "./app-search-client";
 import { publishBookChanged } from "./book-events";
 import { createCoalescedRefresh } from "./async-refresh";
-import { billingSummaryQueryKey, walletHistoryQueryKey } from "./billing-client";
+import { billingSummaryQueryKey, currentSubscriptionQueryKey, walletHistoryQueryKey } from "./billing-client";
 import { compassQueryKeys } from "./compass-query-keys";
 import { conversationQueryKeys } from "./conversation-cache";
 import { communicationQueryKeys } from "./communication-client";
@@ -65,6 +65,7 @@ export function AuthenticatedEventBridge() {
     const conversationContext = { userKey, teamKey, scopeKey };
     const communicationContext = { userKey, teamKey, scopeKey };
     const invalidateBilling = () => {
+      void queryClient.invalidateQueries({ queryKey: currentSubscriptionQueryKey(userKey), exact: true, refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: billingSummaryQueryKey(userKey), exact: true, refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: walletHistoryQueryKey(userKey), exact: true, refetchType: "active" });
     };
