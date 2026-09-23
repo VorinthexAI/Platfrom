@@ -73,7 +73,7 @@ export function createArangoCommerceRepository(database: CommerceDatabase = db a
       return transact({ read: ['products', 'subscriptions', 'users'], write: ['paymentCheckouts'] }, async (transaction) => {
         const userCursor = await transaction.query('LET user = DOCUMENT(users, @userKey) RETURN user != null && user.deletionRequestedAt == null', { userKey: valid.userKey });
         if (await userCursor.next() !== true) return { status: 'account_missing' as const, checkout: valid };
-        const cursor = await transaction.query('FOR checkout IN paymentCheckouts FILTER checkout.userKey == @userKey && checkout.idempotencyKey == @idempotencyKey LIMIT 1 RETURN checkout', valid);
+        const cursor = await transaction.query('FOR checkout IN paymentCheckouts FILTER checkout.userKey == @userKey && checkout.idempotencyKey == @idempotencyKey LIMIT 1 RETURN checkout', { userKey: valid.userKey, idempotencyKey: valid.idempotencyKey });
         const existingValue = await cursor.next();
         if (existingValue) {
           const existing = parse(paymentCheckoutSchema, existingValue);

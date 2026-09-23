@@ -25,6 +25,6 @@ describe('book billing receipt persistence', () => {
     const service = createBookService({ repository, generator: { create: async () => bookKey, write: async () => {} }, detach: () => {}, signUrl: async () => 'signed', publishChanged: async () => {} });
     const context = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey: teamKey, userId: userKey, status: 'active' } } } as never;
     await observeToolExecution('book.extend', context, () => service.extend(bookKey, { teamKey, scopeKey, mode: 'generate', chapterCount: 1, titles: ['Next'], requestKey: 'extend-1' }, userKey), { input: { mode: 'generate' }, idempotencyKey: 'extend-1', recorder: async () => {}, appScopeKey: newId(), hash: async () => 'c'.repeat(64), charge: async (_key, input) => ({ status: 'applied', transaction: { key: extensionTransactionKey, eventKey: input.eventKey } }) as never });
-    expect(accepted.fixedChargeReceipt).toEqual({ userKey, toolSlug: 'book.extend', transactionKey: extensionTransactionKey, executionIdentity: 'c'.repeat(64), microSparks: 30_000_000, replayed: false });
+    expect(accepted.fixedChargeReceipt).toEqual({ userKey, toolSlug: 'book.extend', transactionKey: extensionTransactionKey, executionIdentity: 'c'.repeat(64), microSparks: 25_000_000, replayed: false });
   });
 });

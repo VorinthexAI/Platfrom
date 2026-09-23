@@ -408,6 +408,7 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
       requestKey: string;
     }) => createBook(input, requestKey),
     onMutate: ({ input, requestKey }) => {
+      showToast({ title: "Audio book creation started", duration: 2_500 });
       const timestamp = new Date().toISOString();
       const book: Book = {
         key: `pending-${requestKey}`,
@@ -488,6 +489,7 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
   });
   const lifecycleMutation = useMutation({
     onMutate: ({ book }: { action: "delete"; book: Book }) => {
+      showToast({ title: "Audio book deleted", duration: 2_500 });
       setLifecycleError(undefined);
       removeCachedBook(queryClient, context, book.key);
       if (playback.playbackBookKey === book.key) playback.clear(false);
@@ -573,6 +575,7 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
       return extendBook(bookKey, 3, titles, requestKey);
     },
     onMutate: ({ bookKey }) => {
+      showToast({ title: "Audio book extension started", duration: 2_500 });
       setSheetOpen(false);
       setSheet(undefined);
       const overviewKey = ascendQueryKeys.overview(context);
@@ -705,6 +708,7 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
     setBriefActionTarget(undefined);
     setBriefTranslateTarget(undefined);
     setBriefTransformation({ target, action });
+    showToast({ title: action === "enhance" ? "Enhancement started" : "Translation started", duration: 2_000 });
     try {
       const result = action === "enhance" ? await enhanceAppTextForContext(capturedContext, text) : await translateAppTextForContext(capturedContext, text, language);
       const currentContext = getBooksContext();

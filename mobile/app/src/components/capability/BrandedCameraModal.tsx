@@ -3,6 +3,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Modal, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "@vorinthex/shared/ui/button";
+import { ToastViewport } from "@vorinthex/shared/ui/toast";
+import { useErrorFeedback } from "@/hooks/use-error-feedback";
 import { CameraIcon, CameraRotateIcon, CloseIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { fonts, palette, radii, spacing } from "@/theme/tokens";
 
@@ -30,6 +32,7 @@ export function BrandedCameraModal({ title, hint = "Keep the page flat and fill 
   const [facing, setFacing] = useState<CameraType>("back");
   const [torch, setTorch] = useState(false);
   const [error, setError] = useState<string>();
+  useErrorFeedback([externalError ?? error]);
 
   useEffect(() => { if (permission === null) void requestPermission(); }, [permission, requestPermission]);
 
@@ -60,7 +63,6 @@ export function BrandedCameraModal({ title, hint = "Keep the page flat and fill 
           <View style={styles.guide}><View style={styles.guideCornerTopLeft} /><View style={styles.guideCornerTopRight} /><View style={styles.guideCornerBottomLeft} /><View style={styles.guideCornerBottomRight} /></View>
           <View style={styles.bottomBar}>
             {bottomContent}
-            {externalError || error ? <Text accessibilityRole="alert" style={styles.error}>{externalError ?? error}</Text> : null}
             {count >= maximum || hint ? <Text style={styles.hint}>{count >= maximum ? "Capture limit reached" : hint}</Text> : null}
             <View style={styles.controls}>
               <View style={styles.controlSide}><Button accessibilityLabel={`${torch ? "Turn off" : "Turn on"} camera light`} disabled={capturing || disabled} onPress={() => setTorch((value) => !value)} size="sm" variant={torch ? "primary" : "secondary"}>{torch ? "Light off" : "Light on"}</Button></View>
@@ -76,6 +78,7 @@ export function BrandedCameraModal({ title, hint = "Keep the page flat and fill 
         <Button onPress={() => void requestPermission()} size="lg" variant="primary">Allow camera</Button>
         <Button onPress={onClose} size="md" variant="ghost">Not now</Button>
       </View>}
+      <ToastViewport />
     </View>
   </Modal>;
 }
@@ -98,7 +101,6 @@ const styles = StyleSheet.create({
   controls: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   controlSide: { alignItems: "center", minWidth: 82 },
   shutter: { height: 74, overflow: "hidden", paddingHorizontal: 0, paddingVertical: 0, width: 74 },
-  error: { color: palette.danger, fontFamily: fonts.regular, fontSize: 12, textAlign: "center" },
   permission: { alignItems: "center", flex: 1, gap: spacing.md, justifyContent: "center", paddingHorizontal: spacing.xl },
   permissionTitle: { color: palette.text, fontFamily: fonts.semibold, fontSize: 22 },
   permissionText: { color: palette.muted, fontFamily: fonts.regular, fontSize: 14, lineHeight: 21, textAlign: "center" },

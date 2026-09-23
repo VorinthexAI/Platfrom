@@ -5,7 +5,7 @@ export const REFERRAL_PROGRAM_VERSION = 'v1' as const;
 export const REFERRAL_SIGNUP_REWARD_MICRO_SPARKS = 50_000_000;
 export const REFERRAL_PAID_REWARD_MICRO_SPARKS = 100_000_000;
 export const STORAGE_SPARKS_PER_GB_MONTH = 30;
-export const INBOX_INITIAL_SYNC_SPARKS = 100;
+export const INBOX_INITIAL_SYNC_SPARKS = 75;
 export const INBOX_NEW_EMAIL_SPARKS = 1;
 export const BYTES_PER_GB = 1_000_000_000;
 export const HOURS_PER_BILLING_MONTH = 730;
@@ -53,8 +53,8 @@ export function resolvePurchaseGrantMicroSparks(productId: string): number {
 }
 
 export const TOOL_COST_RULES: Readonly<Record<string, PublicFixedCostRule>> = Object.freeze({
-  'book.create': sparks(70, 'Create an audio book', 'Generate and save a complete audio book.'),
-  'book.extend': sparks(30, 'Extend an audio book', 'Generate and save an additional audio book chapter.'),
+  'book.create': sparks(75, 'Create an audio book', 'Generate and save a complete audio book.'),
+  'book.extend': sparks(25, 'Extend an audio book', 'Generate and save an additional audio book chapter.'),
   'highlight.create': sparks(20, 'Create a highlight', 'Create a generated highlight from an image collection.'),
   'image.create-memory': sparks(10, 'Create a memory', 'Create a generated memory for an image.'),
   'visual-identity.create': sparks(15, 'Create a visual identity', 'Create a visual identity from selected images.'),

@@ -109,15 +109,15 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   }
 
   async function createHighlight(imageKeys?: string[]) {
-    if (!owner) return;
+    if (!owner || creating) return;
     const generation = ++createRequest.current;
     setCreating(true);
+    notify("Highlight creation started");
     try {
       const { highlight } = await createGalleryCollectionHighlight(collection.key, imageKeys);
       if (generation !== createRequest.current) return;
       queryClient.setQueryData(galleryQueryKeys.highlight(galleryContext, collection.key, highlight.key), { highlight });
       setHighlights((current) => [...current.filter(({ key }) => key !== highlight.key), highlight]);
-      notify("Highlight created");
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" }).catch(() => undefined);
       if (listSheetOpen.current) void openHighlight(highlight);
     } catch (failure) {
@@ -153,14 +153,20 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   function deleteSelectedHighlights() {
     if (!owner || selectedHighlightKeys.length === 0) return;
     const highlightKeys = [...selectedHighlightKeys];
+    const previous = highlights.filter(({ key }) => highlightKeys.includes(key));
     highlightKeys.forEach((key) => pendingHighlightDeletes.current.add(key));
     setHighlights((current) => current.filter(({ key }) => !highlightKeys.includes(key)));
     highlightKeys.forEach((highlightKey) => queryClient.removeQueries({ queryKey: galleryQueryKeys.highlight(galleryContext, collection.key, highlightKey), exact: true }));
     setSelectedHighlightKeys([]);
     setActiveSheet("player");
     notify(`Deleted ${highlightKeys.length} ${highlightKeys.length === 1 ? "highlight" : "highlights"}`);
-    void Promise.allSettled(highlightKeys.map((highlightKey) => deleteGalleryCollectionHighlight(highlightKey))).then(() => {
+    void Promise.allSettled(highlightKeys.map((highlightKey) => deleteGalleryCollectionHighlight(highlightKey))).then((outcomes) => {
       highlightKeys.forEach((key) => pendingHighlightDeletes.current.delete(key));
+      const failed = new Set(highlightKeys.filter((_, index) => outcomes[index]?.status === "rejected"));
+      if (failed.size) {
+        setHighlights((current) => [...current.filter(({ key }) => !failed.has(key)), ...previous.filter(({ key }) => failed.has(key))]);
+        notify(`${highlightKeys.length - failed.size} deleted, ${failed.size} failed`);
+      }
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" });
     });
   }

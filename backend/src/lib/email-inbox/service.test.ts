@@ -523,7 +523,7 @@ describe('email synchronization', () => {
     expect(states.at(-1)).toMatchObject({ state: 'idle', input: { pendingHistoryId: null, pendingThreadIds: null, completeInitialSync: true } });
     expect(events.at(-1)).toBe('inbox.changed');
     expect(charges).toHaveLength(1);
-    expect(charges[0]).toMatchObject([userKey, { toolSlug: 'inbox.sync', microSparks: 100_000_000, metadata: { category: 'inbox-initial-sync', connectorKey: connector.key } }]);
+    expect(charges[0]).toMatchObject([userKey, { toolSlug: 'inbox.sync', microSparks: 75_000_000, metadata: { category: 'inbox-initial-sync', connectorKey: connector.key } }]);
     expect(charges[0]).toMatchObject([userKey, { executionIdentity: createHash('sha256').update(`inbox.sync\0${connector.key}\0${connector.initialSyncChargeKey}`).digest('hex') }]);
     expect(completions).toBe(1);
     const stateCount = states.length;

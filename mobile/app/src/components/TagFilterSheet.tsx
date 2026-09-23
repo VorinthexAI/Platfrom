@@ -75,6 +75,7 @@ export function TagFilterSheet({ context, onClose, open }: TagFilterSheetProps) 
     const name = tagName.trim();
     if (!name || creating) return;
     setCreating(true);
+    showToast({ title: "Tag created", duration: 2_000 });
     try {
       const created = await createScopeTag(context, { key: createResourceTagKey(), name });
       setTags((current) => [...current.filter((tag) => tag.key !== created.key), created]);

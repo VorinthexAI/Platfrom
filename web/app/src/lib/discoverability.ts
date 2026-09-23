@@ -1,5 +1,5 @@
 export const CANONICAL_ORIGIN = "https://vorinthex.com" as const;
-export const CONTENT_LAST_REVIEWED = "2026-09-20" as const;
+export const CONTENT_LAST_REVIEWED = "2026-09-23" as const;
 export const CONTACT_EMAIL = "contact@vorinthex.com" as const;
 export const PRICING_HERO_HEADING = "One balance for everything you create and use" as const;
 export const PRICING_HERO_BODY =
@@ -138,6 +138,7 @@ export const PRODUCT_FACTS = {
     topUp: SPARK_TOP_UP,
     referrals: REFERRAL_REWARDS,
     webPurchasesAvailable: false,
+    capabilityCosts: { initialEmailSync: 75, createAudioBook: 75, extendAudioBook: 25 },
   },
   capabilities: CORE_CAPABILITIES,
 } as const;
@@ -161,7 +162,7 @@ export const PUBLIC_DISCOVERABILITY_REGISTRY = {
     path: "/pricing",
     title: "Sparks Pricing | Vorinthex AI",
     description: PRICING_HERO_BODY,
-    summary: `${PRICING_HERO_HEADING}. ${PRICING_HERO_BODY}`,
+    summary: `${PRICING_HERO_HEADING}. ${PRICING_HERO_BODY} Initial email sync costs 75 Sparks, audio book creation costs 75 Sparks, and an additional audio book chapter costs 25 Sparks.`,
     schemaPageType: "WebPage",
     status: "current",
     lastModified: CONTENT_LAST_REVIEWED,

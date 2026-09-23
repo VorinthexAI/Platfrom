@@ -74,6 +74,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
   const [sparkCostsOpen, setSparkCostsOpen] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string>();
   const [checkoutState, setCheckoutState] = useState<CheckoutState>("idle");
+  const checkoutInFlight = useRef(false);
   const [message, setMessage] = useState<string>();
   const [completionError, setCompletionError] = useState<string>();
   const [sharing, setSharing] = useState(false);
@@ -145,7 +146,8 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
   }
 
   async function checkout() {
-    if (!selected || checkoutState === "opening" || checkoutState === "confirming") return;
+    if (!selected || checkoutInFlight.current || checkoutState === "opening" || checkoutState === "confirming") return;
+    checkoutInFlight.current = true;
     setCheckoutState("opening");
     setMessage(undefined);
     try {
@@ -165,6 +167,8 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
     } catch (error) {
       setCheckoutState("checkout-error");
       setMessage(error instanceof Error ? error.message : "Checkout could not be opened. Please try again.");
+    } finally {
+      checkoutInFlight.current = false;
     }
   }
 

@@ -1002,11 +1002,11 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     const tripKey = selectedTrip.key;
     tripGuideGeneratingRef.current = true;
     setTripGuideGenerating(true);
+    showToast({ title: "Travel guide generation started", duration: 2_000 });
     try {
       const guide = await generateTripGuide(tripKey, randomUUID());
       queryClient.setQueryData<TripGuide[]>(compassQueryKeys.tripGuides(travelContext, tripKey), (current) => [guide, ...(current ?? []).filter(({ key }) => key !== guide.key)]);
       setSelectedTripGuide(guide);
-      showToast({ title: "Travel guide request complete", duration: 2_000 });
     } catch (error) {
       setSelectedTripGuide(undefined);
       showToast({ title: errorMessage(error), duration: 2_000 });
@@ -1038,11 +1038,11 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     const generation = ++placeReferenceGeneration.current;
     placeReferenceGeneratingRef.current = true;
     setPlaceReferenceGenerating(true);
+    showToast({ title: `${PLACE_REFERENCE_OPTIONS.find((option) => option.kind === kind)?.singular ?? "Reference"} generation started`, duration: 2_000 });
     try {
       const reference = await generatePlaceReference(placeKey, kind, randomUUID());
       queryClient.setQueryData<PlaceReference[]>(compassQueryKeys.placeReferences(travelContext, placeKey, kind), (current) => [reference, ...(current ?? []).filter(({ key }) => key !== reference.key)]);
       if (generation === placeReferenceGeneration.current && selectedPlaceKey === placeKey) setSelectedPlaceReference(reference);
-      showToast({ title: `${PLACE_REFERENCE_OPTIONS.find((option) => option.kind === kind)?.singular ?? "Reference"} request complete`, duration: 2_000 });
     } catch (error) {
       setSelectedPlaceReference(undefined);
       showToast({ title: errorMessage(error), duration: 2_000 });
@@ -1068,6 +1068,7 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
       if (tripMutationQueue.current.get(tripKey) === queued) tripMutationQueue.current.delete(tripKey);
     });
     tripMutationQueue.current.set(tripKey, queued);
+    return queued;
   }
 
   async function convergeTripsAfterAmbiguousFailure(tripKey: string, failedVersion: number) {
@@ -1095,10 +1096,10 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     }
   }
 
-  function optimisticTripUpdate(tripKey: string, update: (current: Trip) => Trip, request: (optimistic: Trip, version: number) => Promise<Trip>, failureTitle: string, successTitle: string) {
+  function optimisticTripUpdate(tripKey: string, update: (current: Trip) => Trip, request: (optimistic: Trip, version: number) => Promise<Trip>, failureTitle: string, successTitle: string, reportFailure = true) {
     const cached = queryClient.getQueryData<Trip[]>(compassQueryKeys.trips(travelContext))?.find(({ key }) => key === tripKey);
     const previous = optimisticTripRef.current.get(tripKey) ?? cached;
-    if (!previous) return;
+    if (!previous) return Promise.resolve(false);
     const version = nextTripMutationVersion(tripKey);
     optimisticTripDeleteVersion.current.delete(tripKey);
     const optimistic = update(previous);
@@ -1106,7 +1107,8 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     upsertCachedCompassTrip(queryClient, travelContext, optimistic);
     showToast({ title: successTitle, duration: 2_000 });
     const optimisticReady = queryClient.cancelQueries({ queryKey: compassQueryKeys.trips(travelContext), exact: true }).catch(() => undefined);
-    enqueueTripMutation(tripKey, async () => {
+    let succeeded = true;
+    return enqueueTripMutation(tripKey, async () => {
       await optimisticReady;
       return request(optimistic, version);
     }, async (result) => {
@@ -1121,7 +1123,11 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
         return;
       }
       await convergeTripsAfterAmbiguousFailure(tripKey, version);
-      showToast({ title: result.error instanceof Error && result.error.message ? result.error.message : failureTitle, duration: 2_000 });
+      succeeded = false;
+      if (reportFailure) showToast({ title: errorMessage(result.error) || (isSparkFundingError(result.error) ? "" : failureTitle), duration: 2_000 });
+    }).then(() => succeeded, () => {
+      if (reportFailure) showToast({ title: failureTitle, duration: 2_000 });
+      return false;
     });
   }
 
@@ -1446,15 +1452,19 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     setSelectedTableTripKeys([]);
     setTripTableBulkMenuOpen(false);
     showToast({ title: selectionComplete ? successTitle : one ? "Trip could not be updated" : "Some trips could not be updated", duration: 2_000 });
-    for (const trip of selected) {
+    const updates = selected.map((trip) => {
       const status = patch.status;
-      optimisticTripUpdate(trip.key, (current) => ({
+      return optimisticTripUpdate(trip.key, (current) => ({
         ...current,
         ...patch,
         ...(status === "completed" ? { places: current.places.map((place) => ({ ...place, status: "visited" as const })) } : {}),
         updatedAt: new Date().toISOString(),
-      }), () => updateTrip({ tripKey: trip.key, ...patch }), "Some trips could not be updated", "");
-    }
+      }), () => updateTrip({ tripKey: trip.key, ...patch }), "Some trips could not be updated", "", false);
+    });
+    void Promise.all(updates).then((results) => {
+      const failed = results.filter((succeeded) => !succeeded).length;
+      if (failed) showToast({ title: `${results.length - failed} updated, ${failed} failed`, duration: 2_500 });
+    });
   }
 
   function openBulkTripDelete() {

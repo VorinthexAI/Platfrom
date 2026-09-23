@@ -160,7 +160,8 @@ import { appendCursorItems, isNearScrollEnd } from "@vorinthex/shared/lib/pagina
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { useAuthStore } from "@/state/auth";
 import { languageForCountryCode } from "@/lib/auth-helpers";
-import { isSparkFundingError } from "@/lib/domain-error-observer";
+import { isRequestCancellation, isSparkFundingError } from "@/lib/domain-error-observer";
+import { useErrorFeedback } from "@/hooks/use-error-feedback";
 import { pauseOwnedPlayer } from "@/lib/audio-player-lifecycle";
 import { tagFilterContextKey } from "@/lib/tag-client";
 import { filterByHiddenView, hideUserSource, isUserHidden, listUserHiddens, revealUserSource, type HiddenViewFilters, type UserHiddenRecord, type UserHiddenSource } from "@/lib/user-hidden-client";
@@ -264,9 +265,7 @@ function plainSummaryText(value: string) {
 }
 
 function isQueryCancellation(error: unknown) {
-  if (!(error instanceof Error)) return false;
-  const code = "code" in error ? error.code : undefined;
-  return error.name === "AbortError" || error.name === "CanceledError" || error.name === "CancelledError" || code === "ERR_CANCELED";
+  return isRequestCancellation(error);
 }
 
 function SummaryText({ value }: { value: string }) {
@@ -479,6 +478,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
   const [generatingSummary, setGeneratingSummary] = useState(false);
   const [summaryReaderTopic, setSummaryReaderTopic] = useState<string>();
   const [error, setError] = useState<string>();
+  useErrorFeedback([error, sheetError, sheetLoadError, aiInstructionError, scanError, filePreviewError, narrationError, librarySearchError, rootSearchError, folderSearchError]);
   const editorSession = useRef(0);
   const revision = useRef(0);
   const dirty = useRef(false);
@@ -1497,6 +1497,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     setSummaryReaderTopic(topic);
     setSelectedSummary(undefined);
     setGeneratingSummary(true);
+    notify("Summary generation started");
     setSheetError(undefined);
     setSheetLoadError(undefined);
     if (sheetBackStack.current.at(-1) === "summaryVersions") goBackSheet();
@@ -1598,6 +1599,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     const pendingLabel = action === "enhance" ? "Enhancing version..." : "Translating version...";
     setDocumentActionLoading(action);
     setPendingDocumentVersionLabel(pendingLabel);
+    notify(action === "enhance" ? "Enhancement started" : "Translation started");
     setSheetError(undefined);
     setSheetLoadError(undefined);
     if (activeSheetRef.current === "transform") goBackSheet();
@@ -1611,7 +1613,6 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
       setPendingDocumentVersionLabel(undefined);
       setVersions((history) => [...history.filter(({ key }) => key !== version.key), version]);
       await openDocumentVersion(version, generated.text, true);
-      notify(action === "enhance" ? "Enhanced version ready" : "Translated version ready");
     } catch (cause) {
       if (!isSparkFundingError(cause)) {
         const message = cause instanceof Error ? cause.message : action === "enhance" ? "The document could not be enhanced." : "The document could not be translated.";
@@ -1838,6 +1839,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
 
   const openDocumentVersion = async (version: ContentDocumentVersion, generatedContent?: string, propagateError = false) => {
     if (dirty.current || saveInFlight.current || saveState !== "saved") return false;
+    if (!propagateError) notify("Document version restored");
     setOpeningDocumentKey(version.documentKey);
     setError(undefined);
     closeSheet();
@@ -2033,6 +2035,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     const document = selectedDocument;
     if (!document || document.managed || generatingDocumentAudio) return;
     setGeneratingDocumentAudio(true);
+    notify("Audio generation started");
     setSheetLoadError(undefined);
     try {
       const version = addCachedContentDocumentAudioVersion(queryClient, contentContext, await generateContentDocumentAudio(document.key));
@@ -2330,6 +2333,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     const coverRequest = coverChange !== undefined ? (folderCoverRequests.current.get(previous.key) ?? 0) + 1 : undefined;
     if (coverRequest !== undefined) folderCoverRequests.current.set(previous.key, coverRequest);
     replaceFolder(optimistic);
+    notify("Folder updated");
     void invalidateContentLocations(queryClient, contentContext, [previous.parentFolderKey]);
     closeSheet();
     if (coverChange !== undefined && currentFolder?.key === previous.key) void goBackFolder();
@@ -2746,6 +2750,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
       return createContentFolder(name, parentFolderKey, optimistic.description, folderKey, mutationKey);
     })();
     pendingFolderCreates.current.set(folderKey, creation);
+    notify("Folder created");
     try {
       const created = await creation;
       if (created.key !== folderKey) throw new Error("The created folder identity did not match the optimistic folder.");
@@ -3020,6 +3025,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
       uploadBatchRef.current = batch;
       setUploadBatch(batch);
       setUploading(true);
+      if (batch.length) notify("Upload started");
       setFolderContentTab("files");
       closeSheet();
       const pendingFolder = folderKey ? pendingFolderCreates.current.get(folderKey) : undefined;
@@ -3063,7 +3069,6 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
       const completed = uploadBatchRef.current;
       const successCount = completed.filter(({ status }) => status === "success").length;
       const failureCount = completed.filter(({ status }) => status === "error").length;
-      if (failureCount) setError(completed.find(({ status }) => status === "error")?.error ?? "Files could not be uploaded.");
       if (currentFolderKeyRef.current === folderKey) {
         setFolders(location.folders);
         setDocuments(location.documents);
@@ -3072,9 +3077,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
           setRootDocuments(location.documents);
         }
       }
-      notify(failureCount > 0
-        ? successCount > 0 ? `${successCount} uploaded, ${failureCount} failed` : "Files could not be uploaded"
-        : `Uploaded ${successCount} ${successCount === 1 ? "file" : "files"}`);
+      if (failureCount > 0) notify(successCount > 0 ? `${successCount} uploaded, ${failureCount} failed` : "Files could not be uploaded");
       uploadBatchRef.current = [];
       setUploadBatch([]);
       setUploadFolderKey(undefined);
@@ -3127,6 +3130,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     setScanError(undefined);
     try {
       if (scanSessionSize(pages) > MAX_DOCUMENT_SCAN_BYTES) throw new Error("Scanned pages must be 16 MB or smaller in total.");
+      notify("Document scan started");
       const prepared = await Promise.all(pages.map(async (page, index) => ({ name: `scan-page-${index + 1}.png`, size: page.sizeBytes, base64: await new File(page.uri).base64() })));
       if (generation !== scanGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
       processingStarted = true;
@@ -3144,12 +3148,11 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         if (!folderKey) setRootDocuments(addDocument);
       }
       await invalidateContentLocations(queryClient, requestContext, [folderKey]);
-      notify("Document scanned");
       await openNote(document);
     } catch (cause) {
       if (generation !== scanGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
       const message = cause instanceof Error ? cause.message : "The document could not be scanned.";
-      if (processingStarted) { setError(message); notify("Document could not be scanned"); }
+      if (processingStarted) setError(message);
       else setScanError(message);
     } finally {
       if (generation === scanGeneration.current) {
@@ -3227,6 +3230,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         && navigationRequest === navigationGeneration.current
         && requestContextKey === contentContextKeyRef.current;
       let committed = false;
+      notify(`${directDocument.extension ? "File" : "Document"} ${action === "move" ? "moved" : "copied"}`);
       void (action === "move"
         ? moveContentSelection({ folderKeys: [], documentKeys: [directDocument.key] }, targetKey)
         : copyContentSelection({ folderKeys: [], documentKeys: [directDocument.key] }, [targetKey])).then(async (outcome) => {
@@ -3242,10 +3246,8 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
           } else if (isCurrent()) replaceDocument(updated, false);
         }
         await invalidateContentLocations(queryClient, contentContext, [sourceKey, targetKey]);
-        if (isCurrent()) notify(`${directDocument.extension ? "File" : "Document"} ${action === "move" ? "moved" : "copied"}`);
       }).catch(() => {
         if (committed) {
-          if (isCurrent()) notify(`${directDocument.extension ? "File" : "Document"} ${action === "move" ? "moved" : "copied"}`);
           return;
         }
         if (sourceLocation) queryClient.setQueryData(contentQueryKeys.location(contentContext, sourceKey), sourceLocation);
@@ -3321,6 +3323,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         && navigationRequest === navigationGeneration.current
         && requestContextKey === contentContextKeyRef.current;
       let committed = false;
+      notify(`Folder ${action === "move" ? "moved" : "copied"}`);
       void (async () => {
         const outcome = action === "move"
           ? await moveContentSelection({ folderKeys: [directFolder.key], documentKeys: [] }, destinationKeys[0])
@@ -3342,12 +3345,9 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
           });
         }
         await invalidateContentLocations(queryClient, contentContext, [sourceKey, ...destinationKeys]);
-        if (isCurrent()) notify(outcome.failed
-          ? `${outcome.succeeded} ${action === "move" ? "moved" : "copied"}, ${outcome.failed} failed`
-          : `${outcome.succeeded} ${outcome.succeeded === 1 ? "folder" : "folders"} ${action === "move" ? "moved" : "copied"}`);
+        if (isCurrent() && outcome.failed) notify(`${outcome.succeeded} ${action === "move" ? "moved" : "copied"}, ${outcome.failed} failed`);
       })().catch(() => {
         if (committed) {
-          if (isCurrent()) notify(`Folder ${action === "move" ? "moved" : "copied"}`);
           return;
         }
         if (sourceLocation) queryClient.setQueryData(contentQueryKeys.location(contentContext, sourceKey), sourceLocation);
@@ -3377,6 +3377,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     bulkMutationLocked.current = true;
     setSheetError(undefined);
     // Capture ancestry before optimistic cache changes; preparation runs after dismissal.
+    notify(`${selectedFoldersSnapshot.length + selectedDocumentsSnapshot.length} items ${action === "move" ? "moved" : "copied"}`);
     const resources = resolveStructuralResources(selectedFoldersSnapshot, selectedDocumentsSnapshot);
     let operationFolders = selectedFoldersSnapshot;
     let operationDocuments = selectedDocumentsSnapshot;
@@ -3532,12 +3533,9 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         setResults(undefined);
         setFolderSearchResults(undefined);
       }
-      if (transferIsCurrent()) notify(outcome.failed
-        ? `${outcome.succeeded} ${action === "move" ? "moved" : "copied"}, ${outcome.failed} failed`
-        : `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} ${action === "move" ? "moved" : "copied"}`);
+      if (transferIsCurrent() && outcome.failed) notify(`${outcome.succeeded} ${action === "move" ? "moved" : "copied"}, ${outcome.failed} failed`);
     } catch (cause) {
       if (transferCommitted) {
-        if (transferIsCurrent()) notify(`${action === "move" ? "Move" : "Copy"} completed`);
         return;
       }
       locationSnapshots.forEach((location, key) => {
@@ -3573,6 +3571,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     const folderSnapshot = [...selectedFolders];
     const documentSnapshot = [...selectedDocuments];
     const selection: ContentSelection = { folderKeys: folderSnapshot.map(({ key }) => key), documentKeys: documentSnapshot.map(({ key }) => key) };
+    if (folderSnapshot.length + documentSnapshot.length) notify(nextFavorite ? "Added to favorites" : "Removed from favorites");
     const updatedAt = new Date().toISOString();
     folderSnapshot.forEach((folder) => replaceFolder({ ...folder, isFavorite: nextFavorite }, false));
     documentSnapshot.forEach((document) => replaceDocument({ ...document, isFavorite: nextFavorite, updatedAt }, false));
@@ -3665,16 +3664,15 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         }).catch(() => undefined);
       }
       let committed = false;
+      notify("Folder deleted");
       void hardDeleteContentSelection({ folderKeys: [directFolder.key], documentKeys: [] }).then((outcome) => {
         if (outcome.succeeded === 0) throw outcome.failures[0] ?? new Error("The folder could not be deleted.");
         committed = true;
         removeCachedContentFoldersEverywhere(queryClient, contentContext, [directFolder.key]);
         void queryClient.invalidateQueries({ queryKey: compassQueryKeys.trips(contentContext), exact: true });
         void invalidateContentLocations(queryClient, contentContext, [parentKey]).catch(() => undefined);
-        notify("1 item deleted");
       }).catch((cause: unknown) => {
         if (committed) {
-          if (isCurrent()) notify("1 item deleted");
           return;
         }
         if (!isCurrent()) return;
@@ -3741,6 +3739,8 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
       && navigationRequest === navigationGeneration.current
       && requestContextKey === contentContextKeyRef.current;
     const resources = resolveStructuralResources(eligibleFolders, eligibleDocuments);
+    const deletingCount = eligibleFolders.length + eligibleDocuments.length;
+    if (deletingCount) notify(`${deletingCount} item${deletingCount === 1 ? "" : "s"} deleted`);
     let committed = false;
     void (async () => {
       try {
@@ -3770,14 +3770,11 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
           setSelectedDocuments([...favoriteDocuments, ...operationDocuments.filter(({ key }) => failedDocuments.has(key))]);
         }
         void queryClient.invalidateQueries({ queryKey: contentQueryKeys.locations(contentContext), refetchType: "none" }).catch(() => undefined);
-        notify(favoriteCount > 0
+        if (favoriteCount > 0 || outcome.failed) notify(favoriteCount > 0
           ? `Can't delete ${favoriteCount} favorite item${favoriteCount === 1 ? "" : "s"}`
-          : outcome.failed
-            ? outcome.succeeded ? `${outcome.succeeded} deleted, ${outcome.failed} failed` : "Items could not be deleted"
-            : `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} deleted`);
+          : outcome.succeeded ? `${outcome.succeeded} deleted, ${outcome.failed} failed` : "Items could not be deleted");
       } catch (cause) {
         if (committed) {
-          if (isCurrent()) notify("Items deleted");
           return;
         }
         if (!isCurrent()) return;
@@ -3823,6 +3820,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     if (!selectedDocument || !name) return;
     const previous = selectedDocument;
     const optimistic = { ...previous, name, isFavorite: documentDetailsFavorite };
+    if (name !== previous.name || documentDetailsFavorite !== Boolean(previous.isFavorite)) notify(previous.extension ? "File updated" : "Document updated");
     const editorTitleAtStart = titleRef.current;
     replaceDocument(optimistic);
     if (previous.key === documentKeyRef.current && titleRef.current === editorTitleAtStart) {
@@ -3882,12 +3880,11 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     const document = selectedDocument;
     if (!document) return;
     closeSheet();
+    notify(document.extension ? "File download started" : "Document download started");
     void (async () => {
       try {
         const download = await downloadContentDocument(document.key, document.originalAvailable ? "original" : "txt");
         await saveBase64Download(download.fileName, download.mimeType, download.content);
-        await new Promise((resolve) => setTimeout(resolve, 1_000));
-        notify(document.extension ? "File downloaded" : "Document downloaded");
       } catch {
         notify("Download failed");
       }
@@ -3985,14 +3982,13 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
       && navigationRequest === navigationGeneration.current
       && requestContextKey === contentContextKeyRef.current;
     let committed = false;
+    notify(target.extension ? "File deleted" : "Document deleted");
     void hardDeleteContentSelection({ folderKeys: [], documentKeys: [target.key] }).then((outcome) => {
       if (outcome.succeeded === 0) throw outcome.failures[0] ?? new Error("The item could not be deleted.");
       committed = true;
       removeCachedContentDocumentEverywhere(queryClient, contentContext, target.key);
-      notify("1 item deleted");
     }).catch((cause: unknown) => {
       if (committed) {
-        if (isCurrent()) notify("1 item deleted");
         return;
       }
       if (!isCurrent()) return;
@@ -4099,7 +4095,6 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         <Slider accessibilityLabel="Summary audio progress" disabled={narrationDuration <= 0} max={Math.max(1, narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(value); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={Math.min(narrationElapsed, narrationDuration)} />
         <Text style={styles.narrationTime}>{formatAudioTime(narrationDuration)}</Text>
       </View>
-      {narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
     </View>
   ) : null;
 
@@ -4117,7 +4112,6 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         <Slider accessibilityLabel="Audio progress" disabled={narrationDuration <= 0} max={Math.max(1, narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(value); scrubSelectedAudioVersion(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={Math.min(narrationElapsed, narrationDuration)} />
         <Text style={styles.narrationTime}>{formatAudioTime(narrationDuration)}</Text>
       </View>
-      {narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
     </View>
   ) : null;
   if (activeSheet === "summaryReader") mutationFooter = <>{summaryNarrationIsland}{mutationFooter}</>;
@@ -4148,14 +4142,13 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}><WorkspaceAppSwitcher active="archive" /><ProfileHeaderRight /></View>
       {workspaceMode === "viewer" ? <FileViewer
-        error={filePreviewError}
         loading={!filePreviewError && !filePreviewUri}
         onBack={leaveFileViewer}
         onMenu={() => { if (selectedDocument) showDocumentActions(selectedDocument); }}
         onTitlePress={selectedDocument && !selectedDocument.managed ? () => showDocumentDetails(selectedDocument) : undefined}
         onRenderError={setFilePreviewError}
-        htmlUri={selectedDocument?.extension !== "pdf" ? filePreviewUri : undefined}
-        pdfUri={selectedDocument?.extension === "pdf" ? filePreviewUri : undefined}
+        htmlUri={!filePreviewError && selectedDocument?.extension !== "pdf" ? filePreviewUri : undefined}
+        pdfUri={!filePreviewError && selectedDocument?.extension === "pdf" ? filePreviewUri : undefined}
         title={selectedDocument ? documentDisplayName(selectedDocument) : "File"}
       /> : <View style={styles.workspaceViewport}><ArchiveContentViewport editor={workspaceMode === "editor"} onLoadMore={loadMoreArchive} onRefresh={refreshArchive} refreshEnabled={hasContentContext && workspaceMode !== "editor"} refreshing={userRefreshing}>
         {workspaceMode === "auto" || workspaceMode === "folders" ? (
@@ -4165,7 +4158,6 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
               <Text numberOfLines={1} style={styles.folderTitle}>Archive</Text>
               <Button accessibilityLabel="Create in Archive" contentMode="raw" disabled={locationLoading} onPress={() => openSheet("create")} size="xs" variant="icon"><PlusIcon size="sm" /></Button>
             </View>
-            {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
             <View style={styles.rootActions}>
               <View style={styles.rootSearch}>
                 <SearchIcon size="sm" variant="muted" />
@@ -4182,7 +4174,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
                 <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "documents" }} onPress={() => selectFolderContentTab("documents")} size="xs" style={styles.folderTab} variant={folderContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
                 <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "files" }} onPress={() => selectFolderContentTab("files")} size="xs" style={styles.folderTab} variant={folderContentTab === "files" ? "secondary" : "ghost"}>Files</Button>
               </Tabs>
-              {rootSearchActive ? rootSearchError ? <View style={styles.sheetEmptyContent}><Text accessibilityRole="alert" style={styles.notice}>{rootSearchError}</Text><Button onPress={() => setRootSearchRevision((value) => value + 1)} size="md" variant="secondary">Retry search</Button></View> : rootSearching || !rootSearchResults ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folder search results" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.loadingGrid]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel="Loading search results" accessibilityRole="progressbar" style={styles.rootDocuments}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? <View accessibilityLiveRegion="polite" style={[styles.rootFolderGrid, rootSearchFolders.length === 0 && styles.searchEmptyContent]}>
+              {rootSearchActive ? rootSearchError ? <View style={styles.sheetEmptyContent}><Button onPress={() => setRootSearchRevision((value) => value + 1)} size="md" variant="secondary">Retry search</Button></View> : rootSearching || !rootSearchResults ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folder search results" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.loadingGrid]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel="Loading search results" accessibilityRole="progressbar" style={styles.rootDocuments}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? <View accessibilityLiveRegion="polite" style={[styles.rootFolderGrid, rootSearchFolders.length === 0 && styles.searchEmptyContent]}>
                 {rootSearchFolders.map((folder) => { const selected = selectedFolders.some(({ key }) => key === folder.key); return <View key={folder.key} style={[styles.rootFolderCard, selected && styles.selectedItem, { width: archiveCardSize, height: archiveCardSize }]}><FolderCover folder={folder} /><Button accessibilityState={{ selected }} contentMode="raw" onLongPress={() => handleFolderLongPress(folder)} onPress={() => handleFolderPress(folder)} shape="rounded" size="xl" style={[styles.rootFolderMain, folderHasCover(folder) && styles.coveredFolderMain]} variant="ghost">{folderHasCover(folder) ? null : <FolderIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.archiveCardLabel, folderHasCover(folder) && styles.coveredFolderLabel]}>{folder.name}</Text></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>; })}
                 {rootSearchFolders.length === 0 ? <Text style={styles.empty}>No folders matching these filters.</Text> : null}
               </View> : <View accessibilityLiveRegion="polite" style={[styles.rootDocuments, rootSearchDocuments.length === 0 && styles.searchEmptyContent]}>
@@ -4223,7 +4215,6 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
                 <Button accessibilityLabel={`Create in ${currentFolder?.name ?? "Archive"}`} contentMode="raw" onPress={() => openSheet("create")} size="xs" variant="icon"><PlusIcon size="sm" /></Button>
               </View>
             </View>
-            {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
             <View style={styles.rootActions}>
               <View style={[styles.rootSearch, styles.folderScopedSearch]}>
                 <SearchIcon size="sm" variant="muted" />
@@ -4239,7 +4230,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
               <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "documents" }} onPress={() => selectFolderContentTab("documents")} size="xs" style={styles.folderTab} variant={folderContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
               <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "files" }} onPress={() => selectFolderContentTab("files")} size="xs" style={styles.folderTab} variant={folderContentTab === "files" ? "secondary" : "ghost"}>Files</Button>
             </Tabs>
-            {folderSearchActive ? folderSearchError ? <View style={styles.sheetEmptyContent}><Text accessibilityRole="alert" style={styles.notice}>{folderSearchError}</Text><Button onPress={() => setFolderSearchRevision((value) => value + 1)} size="md" variant="secondary">Retry search</Button></View> : folderSearching || !folderSearchResults ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folder search results" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.folderTabContent, styles.loadingGrid]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel="Loading search results" accessibilityRole="progressbar" style={[styles.folderDocuments, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
+            {folderSearchActive ? folderSearchError ? <View style={styles.sheetEmptyContent}><Button onPress={() => setFolderSearchRevision((value) => value + 1)} size="md" variant="secondary">Retry search</Button></View> : folderSearching || !folderSearchResults ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folder search results" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.folderTabContent, styles.loadingGrid]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel="Loading search results" accessibilityRole="progressbar" style={[styles.folderDocuments, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
               <View accessibilityLiveRegion="polite" style={[styles.rootFolderGrid, styles.folderTabContent, folderSearchFolders.length === 0 && styles.searchEmptyContent]}>
                 {folderSearchFolders.map((folder) => { const selected = selectedFolders.some(({ key }) => key === folder.key); return <View key={folder.key} style={[styles.rootFolderCard, selected && styles.selectedItem, { width: archiveCardSize, height: archiveCardSize }]}>
                   <FolderCover folder={folder} />
@@ -4295,17 +4286,12 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
             <TextInput accessibilityLabel="Search in document" editable={!documentEditable} maxLength={200} onChangeText={setDocumentSearchQuery} onSubmitEditing={() => setDocumentSearchRevision((current) => current + 1)} placeholder="Search in document..." returnKeyType="search" style={styles.rootSearchInput} value={documentSearchQuery} />
             {documentSearchQuery.trim() ? <Button accessibilityLabel="Clear document search" contentMode="raw" iconOnly onPress={() => setDocumentSearchQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}
           </View>
-          {narrationError ? <Text accessibilityRole="alert" style={styles.documentSearchStatus}>{narrationError}</Text> : null}
           <View style={[styles.noteSheet, (editorFocused || aiInputFocused) && styles.noteSheetFocused]}>
           {openingDocumentKey ? <View accessibilityLabel={`Loading ${title}`} accessibilityRole="progressbar" style={styles.editorSkeleton}>
             <Skeleton style={styles.editorBodySkeleton} />
           </View> : <>
-          {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
           {saveState === "error" ? (
-            <View style={styles.saveErrorRow}>
-              <Text style={styles.saveErrorText}>This document has not synced.</Text>
-              <Button onPress={() => setSaveRetry((current) => current + 1)} size="xs" variant="secondary">Retry save</Button>
-            </View>
+            <Button accessibilityLabel="Document has not synced. Retry save" onPress={() => setSaveRetry((current) => current + 1)} size="xs" variant="secondary">Retry save</Button>
           ) : null}
 
           <ScrollView alwaysBounceVertical={!documentEditable} contentContainerStyle={styles.editorReadDocument} keyboardShouldPersistTaps="handled" nestedScrollEnabled onLayout={(event) => { editorDocumentViewportHeight.current = event.nativeEvent.layout.height; }} ref={editorDocumentScroll} refreshControl={<PullToRefresh enabled={Boolean(editorDocumentKey) && !documentEditable && saveState === "saved"} onRefresh={refreshArchive} refreshing={userRefreshing} />} showsVerticalScrollIndicator={false} style={styles.editorReadScroll}>
@@ -4378,7 +4364,6 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         loading={instructing}
         maxLength={8_000}
         message={<>
-          {aiInstructionError ? <Text accessibilityRole="alert" style={styles.aiComposerError}>{aiInstructionError}</Text> : null}
           {aiResponse ? (
             <View style={styles.aiResponse}>
               <Text numberOfLines={4} style={styles.aiResponseText}>{aiResponse.message}</Text>
@@ -4419,8 +4404,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         open={sheetOpen && activeSheet !== "searchHistory"}
         title={activeSheet === "documentAdvanced" ? "Advanced" : compactDelete ? deleteConfirmationTitle : activeSheet === "enhance" ? "AI actions" : activeSheet === "transform" ? documentTransformation === "enhance" ? "Enhance document" : "Translate document" : activeSheet === "summarize" ? "Summarize document" : activeSheet === "summaryVersions" ? "Summary versions" : activeSheet === "summaryReader" ? capitalizeLabel(selectedSummary?.topic ?? summaryReaderTopic ?? `Summary ${selectedSummary?.version ?? ""}`) : activeSheet === "historyChooser" ? "Document history" : activeSheet === "searchHistory" ? "Search history" : activeSheet === "similar" ? "Archive" : activeSheet === "documentVersions" ? "Document versions" : activeSheet === "versions" ? documentTransformation === "enhance" ? "Enhancements" : "Translations" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folder" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "documentDetails" ? `Edit ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Edit folder" : "New in Archive"}
       >
-        {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
-        {sheetLoadError ? <View style={styles.sheetEmptyContent}><Text accessibilityRole="alert" style={styles.notice}>{sheetLoadError}</Text></View> : <>
+        {sheetLoadError ? <View style={styles.sheetEmptyContent}><Button onPress={() => { setSheetLoadError(undefined); goBackSheet(); }} size="md" variant="secondary">Back</Button></View> : <>
         {compactDelete ? <View style={styles.compactSheetActions}>
           <Button onPress={() => void (activeSheet === "deleteDocument" ? deleteSelectedDocument() : deleteContentSelection())} size="md" variant="primary">Delete</Button>
           <Button onPress={() => closeSheet()} size="md" variant="secondary">Close</Button>
@@ -4668,7 +4652,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
             {filterBadges}
             <ScrollView contentContainerStyle={[styles.folderGrid, !showArchiveRoot && visibleFolders.length === 0 && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" style={styles.folderList}>
               {showArchiveRoot ? <Button icon={<ArchiveIcon size="md" />} onPress={() => void selectRootFolder()} size="md" style={styles.folderTile} variant="secondary">Archive</Button> : null}
-              {libraryQuery.trim() && librarySearchError ? <View style={styles.sheetEmptyContent}><Text accessibilityRole="alert" style={styles.notice}>{librarySearchError}</Text><Button onPress={() => setLibrarySearchRevision((value) => value + 1)} size="md" variant="secondary">Retry search</Button></View> : libraryQuery.trim() && (librarySearching || !librarySearchResults) ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading Archive folder picker search" accessibilityRole="progressbar" key={index} style={styles.folderTileSkeleton} />) : visibleFolders.map((folder) => (
+              {libraryQuery.trim() && librarySearchError ? <View style={styles.sheetEmptyContent}><Button onPress={() => setLibrarySearchRevision((value) => value + 1)} size="md" variant="secondary">Retry search</Button></View> : libraryQuery.trim() && (librarySearching || !librarySearchResults) ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading Archive folder picker search" accessibilityRole="progressbar" key={index} style={styles.folderTileSkeleton} />) : visibleFolders.map((folder) => (
                 <View key={folder.key} style={styles.managedTile}>
                   <Button icon={<FolderIcon size="md" />} onPress={() => void selectFolder(folder)} size="md" style={styles.managedTileMain} variant="secondary">{folder.name}</Button>
                   <Button accessibilityLabel={`Manage ${folder.name}`} contentMode="raw" onPress={() => showFolderActions(folder)} size="md" style={styles.managedTileAction} variant="icon"><MoreHorizontalIcon size="sm" /></Button>
@@ -4690,7 +4674,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
             </View>
             {filterBadges}
             <ScrollView contentContainerStyle={[styles.folderGrid, visibleDocuments.length === 0 && styles.sheetEmptyContent]} keyboardShouldPersistTaps="handled" style={styles.folderList}>
-              {libraryQuery.trim() && librarySearchError ? <View style={styles.sheetEmptyContent}><Text accessibilityRole="alert" style={styles.notice}>{librarySearchError}</Text><Button onPress={() => setLibrarySearchRevision((value) => value + 1)} size="md" variant="secondary">Retry search</Button></View> : libraryQuery.trim() && (librarySearching || !librarySearchResults) ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading Archive document picker search" accessibilityRole="progressbar" key={index} style={styles.folderTileSkeleton} />) : visibleDocuments.map((document) => (
+              {libraryQuery.trim() && librarySearchError ? <View style={styles.sheetEmptyContent}><Button onPress={() => setLibrarySearchRevision((value) => value + 1)} size="md" variant="secondary">Retry search</Button></View> : libraryQuery.trim() && (librarySearching || !librarySearchResults) ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading Archive document picker search" accessibilityRole="progressbar" key={index} style={styles.folderTileSkeleton} />) : visibleDocuments.map((document) => (
                 <Button contentMode="raw" key={"documentKey" in document ? document.documentKey : document.key} onPress={() => void ("documentKey" in document ? openLibrarySearchDocument(document) : openArchiveDocument(document, true))} size="md" style={styles.folderTile} variant="secondary">
                   <FileIcon size="md" /><Text numberOfLines={1} style={styles.folderTileLabel}>{documentPillName(document)}</Text>{"documentKey" in document ? null : <ScannedBadge document={document} />}
                 </Button>
@@ -4724,7 +4708,6 @@ const styles = StyleSheet.create({
   bulkSelectionText: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12 },
   rootSearch: { minHeight: 44, flex: 1, paddingLeft: 12, paddingRight: 8, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.page },
   documentSearch: { flex: 0, width: "100%" },
-  documentSearchStatus: { minHeight: 16, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16, textAlign: "right" },
   documentSearchHighlight: { color: palette.silver50, backgroundColor: "rgba(206, 170, 92, 0.36)" },
   folderScopedSearch: { flex: 1 },
   folderSearchRow: { minHeight: 44, marginTop: spacing.xxs, flexDirection: "row", alignItems: "center", gap: spacing.xs },
@@ -4782,9 +4765,6 @@ const styles = StyleSheet.create({
   noteActions: { flexDirection: "row", gap: 8 },
   folderContext: { flexDirection: "row", alignItems: "center", gap: 6 },
   folderContextBack: { flex: 1, justifyContent: "flex-start" },
-  notice: { marginBottom: 12, padding: 10, borderRadius: radii.sm, color: palette.silver300, backgroundColor: "rgba(120, 76, 40, 0.24)", fontFamily: fonts.regular, fontSize: 12 },
-  saveErrorRow: { marginBottom: 10, padding: 10, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: radii.sm, borderColor: palette.hairline, borderWidth: 1 },
-  saveErrorText: { flex: 1, color: palette.silver300, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
   editorFrame: { minHeight: 280, width: "100%", position: "relative" },
   editorFrameFocused: { minHeight: 280 },
   editor: { minHeight: 280, width: "100%", paddingHorizontal: 0, paddingVertical: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26, textAlign: "left", writingDirection: "ltr" },
@@ -4792,7 +4772,6 @@ const styles = StyleSheet.create({
   editorReadDocument: { flexGrow: 1, width: "100%", gap: spacing.md, paddingBottom: spacing.xl },
   editorReadText: { width: "100%", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26, textAlign: "left", writingDirection: "ltr" },
   editorFocused: { minHeight: 280 },
-  aiComposerError: { paddingHorizontal: 8, color: "#D98B8B", fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
   aiResponse: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, gap: 3, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   aiResponseText: { color: palette.text, fontFamily: fonts.regular, fontSize: 14, lineHeight: 20 },
   aiResponseSources: { color: palette.muted, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
@@ -4806,7 +4785,6 @@ const styles = StyleSheet.create({
   narrationControls: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   narrationSlider: { flex: 1 },
   narrationTime: { minWidth: 32, color: palette.silver300, fontFamily: fonts.regular, fontSize: 10, textAlign: "center" },
-  narrationError: { color: "#D98B8B", fontFamily: fonts.regular, fontSize: 10, lineHeight: 14 },
   summaryNarrationSpinner: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   enhancePanel: { gap: 6 },
   transformationForm: { flex: 1, gap: spacing.sm },
