@@ -6,7 +6,8 @@ import { resolvePurchaseGrantMicroSparks } from '@/lib/costs';
 import { referralService } from '@/lib/referrals/service';
 import { getUserById } from '@/lib/db/users.node';
 import { sendSubscriptionCancellationEmail, sendSubscriptionPurchaseEmail, sendSubscriptionRenewalEmail, sendTopUpPurchaseEmail } from '@/lib/email/lifecycle';
-import { checkoutCreateInputSchema, checkoutCreateResultSchema, currentSubscriptionResultSchema, productIdSchema, publicProductSchema, subscriptionSchema, subscriptionStatusSchema } from './contracts';
+import { checkoutCreateInputSchema, checkoutCreateResultSchema, productIdSchema, publicProductSchema, subscriptionSchema, subscriptionStatusSchema } from './contracts';
+import { currentSubscriptionResponseSchema } from './public-subscription';
 import { createArangoCommerceRepository, type CommerceRepository } from './repository';
 import { createPolarProvider, PolarProviderError, type PolarProvider } from './polar';
 
@@ -224,14 +225,14 @@ export function createCommerceService({ repository, provider, createProvider = c
       const subscription = await repository.getCurrentSubscription(trustedUserKey);
       if (!subscription) return null;
       const { providerSubscriptionId: _providerSubscriptionId, providerModifiedAt: _providerModifiedAt, ...safe } = subscription;
-      return currentSubscriptionResultSchema.parse(safe);
+      return currentSubscriptionResponseSchema.parse(safe);
     },
     async setCancellation(trustedUserKey: string, cancelAtPeriodEnd: boolean) {
       const current = await repository.getCurrentSubscription(trustedUserKey);
       if (!current) throw new CommerceError('SUBSCRIPTION_NOT_FOUND', 'Current subscription was not found.');
       if (current.cancelAtPeriodEnd === cancelAtPeriodEnd) {
         const { providerSubscriptionId: _providerSubscriptionId, providerModifiedAt: _providerModifiedAt, ...safe } = current;
-        return currentSubscriptionResultSchema.parse(safe);
+        return currentSubscriptionResponseSchema.parse(safe);
       }
       const response = await polar().updateSubscription(current.providerSubscriptionId, cancelAtPeriodEnd);
       const projectedAt = now().toISOString();
@@ -244,7 +245,7 @@ export function createCommerceService({ repository, provider, createProvider = c
         })().catch((error) => console.error('subscription cancellation email delivery failed', { userKey: trustedUserKey, error }));
       }
       const { providerSubscriptionId: _providerSubscriptionId, providerModifiedAt: _providerModifiedAt, ...safe } = saved;
-      return currentSubscriptionResultSchema.parse(safe);
+      return currentSubscriptionResponseSchema.parse(safe);
     },
     async revokeUserSubscriptions(trustedUserKey: string) {
       const subscriptions = await repository.listSubscriptionsByUser(trustedUserKey);
