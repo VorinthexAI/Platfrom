@@ -11,6 +11,7 @@ import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { isNearScrollEnd } from "@vorinthex/shared/lib/pagination";
 
 import { SearchHistorySheet } from "@/components/SearchHistorySheet";
+import { useErrorFeedback } from "@/hooks/use-error-feedback";
 import { deleteContentSearchHistory, getContentContext, type ContentSearchHistoryItem } from "@/lib/content-client";
 import { fetchGalleryOverview, searchGalleryImages, type GalleryCollection, type GalleryImage } from "@/lib/gallery-client";
 import { appendGalleryCollectionPickerPage, GALLERY_COLLECTION_PICKER_COLUMNS, GALLERY_COLLECTION_PICKER_HISTORY_DEBOUNCE_MS, GALLERY_COLLECTION_PICKER_MAX_SELECTION, GALLERY_COLLECTION_PICKER_RESULT_DEBOUNCE_MS, GALLERY_COLLECTION_PICKER_SKELETON_COUNT, toggleGalleryCollectionImageSelection } from "@/lib/gallery-collection-image-picker";
@@ -48,6 +49,7 @@ export function GalleryCollectionImagePicker({ actionLabel = "Create", collectio
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [error, setError] = useState<string>();
+  useErrorFeedback([open ? error : undefined]);
   const [gridWidth, setGridWidth] = useState(0);
   const [filters, setFilters] = useState<HiddenViewFilters>({ favoritesOnly: false, showHidden: false });
   const [filterOpen, setFilterOpen] = useState(false);
@@ -216,7 +218,7 @@ export function GalleryCollectionImagePicker({ actionLabel = "Create", collectio
   return <>
     <BottomSheet description={description} footer={footer} height="full" onOpenChange={(next) => { if (!next && !filterOpen && !historyOpen) onClose(); }} open={open} title={title}>
       <View style={styles.actions}><View style={styles.search}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search collection images" onChangeText={changeQuery} placeholder="Search..." returnKeyType="search" style={styles.searchInput} value={query} />{query.trim() ? <ButtonSizeProvider overrideParent size="xs"><Button accessibilityLabel="Clear image search" contentMode="raw" iconOnly onPress={() => changeQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button></ButtonSizeProvider> : null}</View><Button accessibilityLabel="Filter collection images" contentMode="raw" onPress={() => setFilterOpen(true)} size="md" style={styles.filterButton} variant="icon"><FilterIcon size="sm" variant={filters.favoritesOnly || filters.showHidden ? "accent" : "default"} /></Button></View>
-      {error ? <View accessibilityRole="alert" style={styles.error}><Text style={styles.errorText}>{error}</Text><Button onPress={() => void load(query.trim())} size="md" variant="secondary">Retry</Button></View> : null}
+      {error ? <Button onPress={() => void load(query.trim())} size="md" variant="secondary">Retry</Button> : null}
       <ScrollView accessibilityLabel="Collection image results" accessibilityState={{ busy: loading || loadingMore }} contentContainerStyle={[styles.results, !loading && !error && visibleImages.length === 0 && styles.emptyResults]} keyboardShouldPersistTaps="handled" onScroll={({ nativeEvent }) => { if (isNearScrollEnd({ offset: nativeEvent.contentOffset.y, viewport: nativeEvent.layoutMeasurement.height, content: nativeEvent.contentSize.height })) void loadMore(); }} scrollEventThrottle={120} showsVerticalScrollIndicator={false}>
         <View onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} style={styles.grid}>{loading ? Array.from({ length: GALLERY_COLLECTION_PICKER_SKELETON_COUNT }, (_, index) => <Skeleton key={index} style={[styles.skeleton, { width: imageSize, height: imageSize }]} />) : visibleImages.map((image) => { const selected = selectedKeys.includes(image.key); return <Button accessibilityLabel={`${selected ? "Deselect" : "Select"} ${image.caption || image.filename}`} accessibilityState={{ selected }} contentMode="raw" key={image.key} onPress={() => choose(image.key)} shape="rounded" size="md" style={[styles.imageButton, { width: imageSize, height: imageSize }]} variant="ghost"><View style={[styles.imageFrame, selected && styles.imageFrameSelected]}><Image contentFit="cover" source={image.url} style={styles.image} transition={150} />{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View></Button>; })}{loadingMore ? Array.from({ length: GALLERY_COLLECTION_PICKER_SKELETON_COUNT }, (_, index) => <Skeleton key={`more-${index}`} style={[styles.skeleton, { width: imageSize, height: imageSize }]} />) : null}</View>
         {!loading && !error && visibleImages.length === 0 ? <Text style={styles.empty}>No images found.</Text> : null}
@@ -242,8 +244,6 @@ const styles = StyleSheet.create({
   image: { width: "100%", height: "100%" },
   skeleton: { borderRadius: radii.md, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   empty: { width: "100%", color: palette.silver500, fontFamily: fonts.regular, fontSize: 13, textAlign: "center" },
-  error: { marginTop: spacing.sm, padding: spacing.sm, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderRadius: radii.md, backgroundColor: "rgba(64,20,20,0.9)" },
-  errorText: { minWidth: 0, flex: 1, color: palette.silver100, fontFamily: fonts.regular, fontSize: 12 },
   filterPanel: { gap: 12 },
   filterRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs },
   filterLabel: { color: palette.muted, fontFamily: fonts.regular, fontSize: 12 },

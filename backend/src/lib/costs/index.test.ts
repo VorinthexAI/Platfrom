@@ -82,12 +82,13 @@ describe('Spark costs', () => {
   test('keeps frozen canonical rule maps and validates all requested slugs', () => {
     expect(Object.isFrozen(TOOL_COST_RULES)).toBe(true);
     expect(Object.isFrozen(ACTION_COST_RULES)).toBe(true);
-    expect(TOOL_COST_RULES['book.create']?.microSparks).toBe(70_000_000);
+    expect(TOOL_COST_RULES['book.create']?.microSparks).toBe(75_000_000);
+    expect(TOOL_COST_RULES['book.extend']?.microSparks).toBe(25_000_000);
     expect(TOOL_COST_RULES['document.parse']).toBeUndefined();
     expect(TOOL_COST_RULES['document.scan']).toBeUndefined();
     expect(lookupToolCostPolicy('document.parse')).toEqual({ mode: 'action' });
     expect(lookupToolCostPolicy('document.scan')).toBeNull();
-    expect({ initialSync: INBOX_INITIAL_SYNC_SPARKS, newEmail: INBOX_NEW_EMAIL_SPARKS }).toEqual({ initialSync: 100, newEmail: 1 });
+    expect({ initialSync: INBOX_INITIAL_SYNC_SPARKS, newEmail: INBOX_NEW_EMAIL_SPARKS }).toEqual({ initialSync: 75, newEmail: 1 });
     expect(Object.keys(ACTION_COST_RULES)).toEqual([]);
     expect(COST_RULE_PRECEDENCE).toEqual(['tool', 'action']);
     expect(lookupCostRule({ toolSlug: 'document.create', actionSlug: 'text' })).toBeNull();

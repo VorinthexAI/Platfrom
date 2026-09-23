@@ -44,6 +44,7 @@ import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput as SharedTextInput } from "@vorinthex/shared/ui/text-input";
 import { Switch } from "@vorinthex/shared/ui/switch";
 import { useToast } from "@vorinthex/shared/ui/toast";
+import { useErrorFeedback } from "@/hooks/use-error-feedback";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { EmailAttachmentPicker, type EmailAttachmentImageUrls, type EmailAttachmentLabels } from "@/components/capability/EmailAttachmentPicker";
@@ -547,6 +548,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   }, [initialDraftKey, selectedInboxDraft]);
   const newEmailOpen = newEmailRecipientsOpen || newEmailContentOpen || newEmailAlternativesOpen || newEmailReviewOpen || newEmailAttachmentsOpen;
   const newEmailAlternativeError = newEmailError ?? newEmailAlternatives.find(({ status }) => status === "failed")?.error;
+  useErrorFeedback([rootSearchError, searchHistoryError, assistantError, receivedAttachmentsError, trashRootError, readerError, loadError, sheetError, newEmailRecipientError, newEmailAlternativeError, draftSearchError, toneError, draftDetailQuery.error]);
   const newEmailPendingAlternativeCount = newEmailAlternatives.filter(({ status }) => status === "pending").length;
   const newEmailAlternativeSkeletonCount = newEmailAlternatives.length > 0 && newEmailPendingAlternativeCount === newEmailAlternatives.length ? 3 : Math.min(3, newEmailPendingAlternativeCount);
   const availableNewEmailTones = [...BUILT_IN_EMAIL_TONES.map((value) => ({ label: `${value[0]?.toUpperCase()}${value.slice(1)}`, value })), ...toneRecords.map((record) => ({ label: record.name, value: record.slug ?? record.key }))]
@@ -1072,6 +1074,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     if (!code || processedConnectionCode.current === code) return;
     processedConnectionCode.current = code;
     setBusy("connect");
+    notify("Email connection started");
     void exchangeEmailConnection(code)
       .then(
         (connector) => completeConnectionFromEffect(connector),
@@ -1500,6 +1503,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     if (!saved || !connectorKey || draftSending || !finalContent) return;
     const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     setDraftSending(true);
+    notify("Email sent");
     try {
       if (finalContent !== (saved.finalContent ?? saved.generatedContent).trim()) {
         const updated = await updateEmailDraftForContext(context, saved.key, finalContent, randomUUID());
@@ -1526,7 +1530,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       setDraftSearchResults((current) => current ? { ...current, drafts: current.drafts.filter(({ key }) => key !== saved.key) } : current);
       setSelectedInboxDraftKey(undefined);
       setDraftBody("");
-      notify("Email sent");
     } catch (failure) {
       notify(messageFor(failure));
     } finally {
@@ -2100,7 +2103,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       applyAuthoritativeThreads(context, connectorKey, succeeded);
       applyDeletedThreadKeys(context, connectorKey, deletedKeys, snapshot);
       applyOptimisticThreads(context, connectorKey, snapshot.filter(({ key }) => failedKeys.includes(key)));
-      if (report.repairPending) notify("Email update is pending repair.");
+      if (failedKeys.length || repairPendingKeys.length) notify(`${succeededKeys.size + deletedKeys.length} updated, ${failedKeys.length} failed${repairPendingKeys.length ? `, ${repairPendingKeys.length} pending repair` : ""}`);
     } catch (failure) {
       if (generation === bulkGeneration.current && contextIsCurrent(context) && initialConnectorKey === connectorKey) {
         clearPendingThreadFields(threadKeys, [action]);
@@ -2249,6 +2252,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     setEditorActionTarget(undefined);
     setEditorTranslateTarget(undefined);
     setEditorTransformation({ target, action });
+    notify(action === "enhance" ? "Enhancement started" : "Translation started");
     try {
       const result = action === "enhance"
         ? await enhanceAppTextForContext(context, text)
@@ -2271,6 +2275,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const targets = options;
     setNewEmailError(undefined);
     setNewEmailAlternatives(options.map((option) => ({ option, status: "pending" })));
+    if (options.length) notify("Draft generation started");
     const operations = targets.map(async (option) => {
       const previous = newEmailToneRequests.current.get(option.value);
       const fingerprint = JSON.stringify([initialConnectorKey, newEmailRecipients, newEmailSubject, newEmailBody, option.value]);
@@ -2308,6 +2313,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const generation = newEmailGeneration.current;
     const owner = newEmailGenerationOwner.current;
     if (!owner || newEmailToneRequests.current.has(option.value)) return;
+    notify("Draft generation restarted");
     const controller = new AbortController();
     const fingerprint = JSON.stringify([initialConnectorKey, newEmailRecipients, newEmailSubject, newEmailBody, option.value]);
     const retained = newEmailToneRequestKeys.current.get(option.value);
@@ -2460,6 +2466,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     sendGeneration.current = generation;
     newEmailSendInFlight.current = true;
     setNewEmailSending(true);
+    notify("Email sent");
     setNewEmailError(undefined);
     try {
       let prepared: NewEmailDraft;
@@ -2499,7 +2506,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       await sendEmailDraftForContext(context, prepared.key, newEmailFinalSend.current.requestKey);
       newEmailFinalSend.current = undefined;
       if (generation !== newEmailGeneration.current || !contextIsCurrent(context)) return;
-      notify("Email sent");
       newEmailSendInFlight.current = false;
       sendGeneration.current = undefined;
       resetNewEmail(prepared.key);
@@ -2695,6 +2701,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         const selectors = records.length
           ? records.map((record) => ({ label: record.name, tone: record.slug ?? record.key }))
           : BUILT_IN_EMAIL_TONES.map((tone) => ({ label: tone, tone }));
+        notify("Reply generation started");
         const generated = await Promise.allSettled(selectors.map(async ({ label, tone }) => {
           const created = await createEmailDraftForContext(context, { threadKey, replyMode: "reply", tone }, randomUUID());
           if (created.variant !== "reply") throw new Error(`${label} did not create a reply draft.`);
@@ -2708,6 +2715,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         const firstFailure = generated.find((result): result is PromiseRejectedResult => result.status === "rejected");
         setReplyDrafts(drafts);
         if (!drafts.length) throw firstFailure?.reason ?? new Error("Replies could not be generated.");
+        if (firstFailure) notify(`${drafts.length} replies generated, ${generated.length - drafts.length} failed`);
       } catch (failure) {
         if (readerOperationIsCurrent(generation, context, threadKey, messageKey)) setReaderError(messageFor(failure));
       } finally {
@@ -2803,6 +2811,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const generation = readerGeneration.current;
     setReplyModeOpen(false);
     setReplySending(true);
+    notify("Reply sent");
     setReaderError(undefined);
     try {
       if (!current) {
@@ -2827,7 +2836,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       const sent = await sendEmailDraftForContext(context, prepared.key, replyFinalSend.current.requestKey, mode);
       replyFinalSend.current = undefined;
       if (generation !== readerGeneration.current || !contextIsCurrent(context)) return;
-      notify("Reply sent");
       setReplySending(false);
       closeReaderFlowPreservingDraft(prepared.key);
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.all(context) });
@@ -2858,6 +2866,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const requestKey = randomUUID();
     setReaderSheet("translate");
     setReaderGenerating("translation");
+    notify("Translation started");
     setReaderLoading(true);
     setReaderError(undefined);
     try {
@@ -2881,6 +2890,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const generation = ++readerGeneration.current;
     const requestKey = randomUUID();
     setReaderGenerating("summary");
+    notify("Summary generation started");
     setReaderLoading(true);
     setReaderError(undefined);
     try {
@@ -3018,6 +3028,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     let cleared = 0;
     trashClearInFlight.current = true;
     setTrashClearBusy(true);
+    notify("Trash cleared");
     setSheetError(undefined);
     await Promise.all([
       ...groups.map(({ connector }) => queryClient.cancelQueries({ queryKey: signalQueryKeys.accountOverviews(context, connector.connectorKey) })),
@@ -3064,7 +3075,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       setSheet("trashRoot");
       setSheetError(undefined);
       if (failures.size) notify(`${cleared} trashed thread${cleared === 1 ? "" : "s"} permanently deleted, ${failures.size} inbox${failures.size === 1 ? "" : "es"} failed`);
-      else notify("Trash cleared");
       setTrashClearBusy(false);
     }
     trashClearInFlight.current = false;
@@ -3077,7 +3087,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     setBusy("disconnect");
     setSheetError(undefined);
     setSheetOpen(false);
-    notify("Deleting inbox");
+    notify("Inbox deleted");
     try {
       await disconnectEmailForContext(context, connectorKey);
       if (!operationIsCurrent(generation, context) || initialConnectorKey !== connectorKey) return;
@@ -3157,6 +3167,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const overviewSelectedAccount = overview?.selectedAccount;
   const activeSelectedAccount = overviewSelectedAccount?.connectorKey === initialConnectorKey ? overviewSelectedAccount : selectedAccount;
   const initialSyncPending = Boolean(initialConnectorKey && activeSelectedAccount && !activeSelectedAccount.initialSyncCompleted && activeSelectedAccount.syncStatus !== "error");
+  useErrorFeedback([activeSelectedAccount?.syncStatus === "error" && !activeSelectedAccount.initialSyncCompleted ? activeSelectedAccount.syncError ?? "Initial inbox sync failed and will retry automatically." : undefined]);
   const connected = Boolean(activeSelectedAccount);
   const newEmailBodyTransformation = editorTransformation?.target === "newEmail" ? editorTransformation.action : undefined;
   const newEmailReviewTransformation = editorTransformation?.target === "newEmailReview" ? editorTransformation.action : undefined;
@@ -3322,8 +3333,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
           >
             {rootTab === "inboxes" ? loading || rootFilterActive && (rootSearching || rootSearchResults?.tab !== "inboxes" || rootSearchResults?.filterKey !== rootFilterKey) ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading Signal cards" accessibilityRole="progressbar" key={index} style={[styles.rootCardSkeleton, { width: rootCardSize, height: rootCardSize }]} />) : (
               <>
-                {loadError ? <View accessibilityRole="alert" style={styles.rootInlineNotice}><Text style={styles.inlineNoticeText}>{loadError}</Text><Button onPress={() => void load()} size="md" variant="secondary">Retry</Button></View> : null}
-                {rootSearchError ? <View accessibilityRole="alert" style={styles.rootInlineNotice}><Text style={styles.inlineNoticeText}>{rootSearchError}</Text></View> : null}
+                {loadError ? <Button onPress={() => void load()} size="md" variant="secondary">Retry</Button> : null}
                 {managedInboxVisible ? <View style={[styles.rootCard, { width: rootCardSize, height: rootCardSize }]}>
                   <Button accessibilityLabel="Open Vorinthex AI inbox" contentMode="raw" onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "unread", inbox: "internal" } })} shape="rounded" size="xl" style={styles.rootCardMain} variant="ghost">
                     <Image accessibilityLabel="Vorinthex AI inbox cover" contentFit="contain" source={contentPresentationIconSource.platform} style={styles.managedInboxLogo} />
@@ -3362,12 +3372,11 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
               </>
             ) : tonesLoading || rootFilterActive && (rootSearching || rootSearchResults?.tab !== "tones" || rootSearchResults?.filterKey !== rootFilterKey) ? Array.from({ length: 3 }, (_, index) => (
               <Skeleton accessibilityLabel="Loading Signal tones" accessibilityRole="progressbar" key={index} style={[styles.rootCardSkeleton, { width: rootCardSize, height: rootCardSize }]} />
-            )) : rootSearchError ? <View accessibilityRole="alert" style={styles.rootToneError}><Text style={styles.rootEmpty}>{rootSearchError}</Text></View> : toneError && !toneRecords.length ? (
-              <View accessibilityRole="alert" style={styles.rootToneError}>
-                <Text style={styles.rootEmpty}>{toneError}</Text>
+            )) : rootSearchError ? <Button onPress={() => void load()} size="md" variant="secondary">Retry</Button> : toneError && !toneRecords.length ? (
+              <View style={styles.rootToneError}>
                 <Button onPress={() => void metadataQuery.refetch()} size="md" variant="secondary">Retry tones</Button>
               </View>
-            ) : <>{toneError ? <View accessibilityRole="alert" style={styles.rootToneError}><Text style={styles.rootEmpty}>{toneError}</Text><Button onPress={() => void metadataQuery.refetch()} size="md" variant="secondary">Retry tones</Button></View> : null}{visibleTones.length ? visibleTones.map((record) => (
+            ) : <>{toneError ? <Button onPress={() => void metadataQuery.refetch()} size="md" variant="secondary">Retry tones</Button> : null}{visibleTones.length ? visibleTones.map((record) => (
               <View key={record.key} style={[styles.rootCard, { width: rootCardSize, height: rootCardSize }]}>
               <Button
                 accessibilityLabel={`${permissions.canMutate ? "Edit" : "View"} ${record.name} email tone${record.isFavorite ? ", Favorite" : ""}`}
@@ -3413,7 +3422,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
               <Button accessibilityRole="tab" accessibilityState={{ selected: sentView }} onPress={() => chooseSentMailbox()} size="xs" style={styles.categoryTab} variant={sentView ? "secondary" : "ghost"}>Sent</Button>
             </Tabs>
           </View>
-          {inboxTab !== "drafts" && activeSelectedAccount?.syncStatus === "error" && !activeSelectedAccount.initialSyncCompleted ? <View accessibilityRole="alert" style={styles.inlineNotice}><Text style={styles.inlineNoticeText}>{activeSelectedAccount.syncError ?? "Initial inbox sync failed and will retry automatically."}</Text></View> : null}
           {selectionNotice ? <Text accessibilityLiveRegion="assertive" style={styles.selectionNotice}>{selectionNotice}</Text> : null}
           <ScrollView
             alwaysBounceVertical
@@ -3502,7 +3510,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         loading={assistantBusy}
         maxLength={8_000}
         message={<>
-          {assistantError ? <Text accessibilityRole="alert" style={styles.aiComposerError}>{assistantError}</Text> : null}
           {assistantResponse ? <Text numberOfLines={4} style={styles.aiResponse}>{assistantResponse.message}</Text> : null}
         </>}
         onChangeText={(value) => { setAssistantInput(value); if (assistantError) setAssistantError(undefined); }}
@@ -3532,7 +3539,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
 
       <BottomSheet footer={<Button disabled={receivedAttachmentsLoading} onPress={() => setAttachmentsOpen(false)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => setAttachmentsOpen(open)} open={attachmentsOpen && Boolean(selectedMessage)} title="Received attachments">
         <ScrollView accessibilityLabel="Received email attachments" accessibilityLiveRegion="polite" accessibilityState={{ busy: receivedAttachmentsLoading }} contentContainerStyle={[styles.receivedAttachmentContent, !receivedAttachmentsLoading && !receivedAttachmentsError && !receivedAttachments.length && styles.sheetEmptyContent]} showsVerticalScrollIndicator={false}>
-          {receivedAttachmentsError ? <View accessibilityRole="alert" style={styles.sheetError}><Text style={styles.sheetErrorText}>{receivedAttachmentsError}</Text><Button onPress={() => void openReceivedAttachments()} size="md" variant="secondary">Retry</Button></View> : null}
+          {receivedAttachmentsError ? <Button onPress={() => void openReceivedAttachments()} size="md" variant="secondary">Retry</Button> : null}
           <View onLayout={({ nativeEvent }) => setReceivedAttachmentGridWidth(nativeEvent.layout.width)} style={styles.receivedAttachmentGrid}>
           {receivedAttachmentsLoading ? Array.from({ length: 4 }, (_, index) => <Skeleton accessibilityLabel="Loading received attachments" accessibilityRole="progressbar" key={index} style={[styles.receivedAttachmentCard, { width: receivedAttachmentCardSize, height: receivedAttachmentCardSize, backgroundColor: palette.hairlineBright, opacity: 0.72, borderWidth: 0 }]} />) : receivedAttachments.map((attachment) => { const label = attachment.kind === "document" ? attachment.document.name : attachment.image.filename; return <Button accessibilityLabel={`Open ${attachment.kind === "document" ? "Archive" : "Gallery"} attachment ${label}`} contentMode="raw" key={attachmentIdentity(attachment.ref)} onPress={() => openReceivedAttachment(attachment)} shape="rounded" size="md" style={[styles.receivedAttachmentCard, { width: receivedAttachmentCardSize, height: receivedAttachmentCardSize }]} variant="ghost">{attachment.kind === "image" ? <Image contentFit="cover" source={attachment.image.url} style={styles.receivedAttachmentImage} transition={150} /> : <FileIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.receivedAttachmentLabel, attachment.kind === "image" && styles.receivedAttachmentImageLabel]}>{label}</Text></Button>; })}
           </View>
@@ -3555,7 +3562,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         open={Boolean(selectedInboxDraftKey)}
         title={selectedInboxDraft?.variant === "new" ? selectedInboxDraft.subject : "Reply"}
       >
-        {draftDetailQuery.isPending ? <Skeleton accessibilityLabel="Loading draft" accessibilityRole="progressbar" style={styles.readerBodySkeleton} /> : draftDetailQuery.error ? <View accessibilityRole="alert" style={styles.sheetError}><Text style={styles.sheetErrorText}>{messageFor(draftDetailQuery.error)}</Text></View> : <ScrollView contentContainerStyle={styles.generatedReader} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}><AiTextEditor accessibilityLabel="Draft email text" containerStyle={styles.draftEditor} editable={!draftSending && !draftTransformation} maxLength={50_000} multiline onChangeText={setDraftBody} onOpenActions={() => openEmailEditorActions("draft")} textAlignVertical="top" transformation={draftTransformation} value={draftBody} /></ScrollView>}
+        {draftDetailQuery.isPending ? <Skeleton accessibilityLabel="Loading draft" accessibilityRole="progressbar" style={styles.readerBodySkeleton} /> : draftDetailQuery.error ? <Button onPress={() => void draftDetailQuery.refetch()} size="md" variant="secondary">Retry draft</Button> : <ScrollView contentContainerStyle={styles.generatedReader} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}><AiTextEditor accessibilityLabel="Draft email text" containerStyle={styles.draftEditor} editable={!draftSending && !draftTransformation} maxLength={50_000} multiline onChangeText={setDraftBody} onOpenActions={() => openEmailEditorActions("draft")} textAlignVertical="top" transformation={draftTransformation} value={draftBody} /></ScrollView>}
       </BottomSheet>
       <BottomSheet
         dismissible={!busy && !trashRootLoading && !trashClearBusy}
@@ -3595,11 +3602,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
                                : sheet === "rootCreate" ? "Create" : sheet === "rootFilter" || sheet === "inboxFilter" ? "" : sheet === "account" ? "" : selected ? "Email actions" : "Inbox actions"
         }
       >
-        {sheetError ? (
-          <View accessibilityRole="alert" style={styles.sheetError}>
-            <Text style={styles.sheetErrorText}>{sheetError}</Text>
-          </View>
-        ) : null}
         {sheet === "inboxFilter" ? (
           <View style={styles.rootFilterPanel}>
             {INBOX_FACETS.map(({ facet, label }) => <View key={facet} style={styles.favoriteRow}><Switch accessibilityLabel={`Filter ${label} email`} checked={inboxControlsQuery.facets.includes(facet)} onCheckedChange={() => toggleFacet(facet)} /><Text style={styles.favoriteLabel}>{label}</Text></View>)}
@@ -3625,7 +3627,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
           </BottomSheetMenu>
         ) : sheet === "trashRoot" ? (
           <ScrollView contentContainerStyle={styles.trashRootContent} showsVerticalScrollIndicator={false}>
-            {trashRootError ? <View accessibilityRole="alert" style={styles.sheetError}><Text style={styles.sheetErrorText}>{trashRootError}</Text><Button onPress={() => void openTrashRoot()} size="md" variant="secondary">Retry</Button></View> : null}
+            {trashRootError ? <Button onPress={() => void openTrashRoot()} size="md" variant="secondary">Retry</Button> : null}
             {trashRootLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading Trash" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : null}
             {!trashRootLoading && !trashRootError && !trashGroups.some(({ threads, error }) => threads.length || error) ? <View style={styles.empty}><Text style={styles.centerText}>Trash is empty.</Text></View> : null}
             {trashGroups.flatMap(({ threads }) => threads).map((thread) => <Button accessibilityLabel={`${!thread.isRead ? "Unread, " : ""}${shortAddress(thread.latestFrom)}, ${thread.subject}`} contentMode="raw" key={thread.key} onPress={() => { setSheetOpen(false); void openThread(thread); }} shape="pill" size="sm" style={styles.threadCard} variant="secondary"><MailIcon size="sm" /><View style={styles.threadBody}><Text numberOfLines={1} style={[styles.subject, !thread.isRead && styles.subjectUnread]}>{thread.subject}</Text></View></Button>)}
@@ -3756,7 +3758,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         <ScrollView contentContainerStyle={styles.newEmailForm} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Text style={styles.inputLabel}>Email addresses</Text>
           <TextInput accessibilityLabel="Email recipients" autoCapitalize="none" autoCorrect={false} editable={!newEmailSending} keyboardType="email-address" onBlur={() => { if (newEmailRecipientInput.trim()) commitNewEmailRecipients(); }} onChangeText={changeNewEmailRecipientInput} onSubmitEditing={() => commitNewEmailRecipients()} placeholder="Email address" ref={newEmailRecipientInputRef} value={newEmailRecipientInput} />
-          {newEmailRecipientError ? <View accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.inlineError}><Text style={styles.inlineErrorText}>{newEmailRecipientError}</Text></View> : null}
           <ButtonSizeProvider overrideParent size="xs"><View accessibilityLabel="Committed email recipients" style={styles.recipientChips}>{newEmailRecipients.map((address) => <View key={address.toLocaleLowerCase()} style={[styles.recipientChip, styles.recipientChipCompact]}><Button accessibilityLabel={`Focus recipient input for ${address}`} contentMode="raw" disabled={newEmailSending} onPress={() => newEmailRecipientInputRef.current?.focus()} size="xs" style={styles.recipientChipMain} variant="ghost"><Text style={styles.recipientChipText}>{address}</Text></Button><Button accessibilityLabel={`Remove recipient ${address}`} contentMode="raw" disabled={newEmailSending} hitSlop={10} iconOnly onPress={() => removeNewEmailRecipient(address)} shape="pill" size="xs" style={[styles.recipientChipRemove, styles.recipientChipRemoveCompact]} variant="secondary"><CloseIcon size="xs" /></Button></View>)}</View></ButtonSizeProvider>
         </ScrollView>
       </BottomSheet>
@@ -3784,7 +3785,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         title="Choose a tone"
       >
         <ScrollView contentContainerStyle={styles.alternativeList} showsVerticalScrollIndicator={false}>
-          {newEmailAlternativeError ? <View accessibilityRole="alert" style={styles.sheetError}><Text style={styles.sheetErrorText}>{newEmailAlternativeError}</Text></View> : null}
           {Array.from({ length: newEmailAlternativeSkeletonCount }, (_, index) => <Skeleton accessibilityLabel="Generating email alternatives" accessibilityRole="progressbar" key={index} style={styles.newEmailAlternativeSkeleton} />)}
           {newEmailAlternatives.flatMap((alternative) => alternative.status === "succeeded" && alternative.draft ? [<Button contentMode="raw" key={alternative.option.value} onPress={() => openNewEmailReview(alternative.draft)} shape="pill" size="md" style={styles.newEmailAlternative} variant="secondary"><View style={styles.newEmailAlternativeCopy}><Text numberOfLines={1} style={styles.rowTitle}>{alternative.option.label}</Text><Text numberOfLines={1} style={styles.newEmailAlternativePreview}>{alternative.draft.finalContent ?? alternative.draft.generatedContent}</Text></View></Button>] : alternative.status === "failed" ? [<Button accessibilityLabel={`Retry ${alternative.option.label} email alternative`} key={alternative.option.value} onPress={() => retryNewEmailAlternative(alternative.option)} size="md" style={styles.newEmailAlternative} variant="secondary">Retry {alternative.option.label}</Button>] : [])}
         </ScrollView>
@@ -3798,7 +3798,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         title="Email draft"
       >
         <ScrollView contentContainerStyle={styles.newEmailForm} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          {newEmailError ? <View accessibilityRole="alert" style={styles.sheetError}><Text style={styles.sheetErrorText}>{newEmailError}</Text></View> : null}
           <TextInput accessibilityLabel="Review email subject" editable={!newEmailSending && !newEmailReviewTransformation} maxLength={998} onChangeText={(value) => { setNewEmailReviewSubject(value); if (newEmailSelectedDraft && value !== newEmailSubject) setNewEmailSkipped(true); }} placeholder="Subject" value={newEmailReviewSubject} />
           <AiTextEditor accessibilityLabel="Review email body" editable={!newEmailSending && !newEmailReviewTransformation} maxLength={50_000} multiline onChangeText={setNewEmailReviewBody} onOpenActions={() => openEmailEditorActions("newEmailReview")} placeholder="Message" style={styles.newEmailBodyInput} textAlignVertical="top" transformation={newEmailReviewTransformation} value={newEmailReviewBody} />
           <ButtonSizeProvider overrideParent size="xs"><View style={styles.attachmentActions}><View style={[styles.recipientChip, styles.attachmentChip]}><Button accessibilityLabel="Open attachments" contentMode="raw" disabled={newEmailSending || Boolean(newEmailReviewTransformation)} onPress={openNewEmailAttachments} size="xs" style={[styles.recipientChipMain, styles.attachmentChipMain]} variant="ghost"><Text style={[styles.recipientChipText, styles.attachmentChipText]}>Attachments</Text></Button><Button accessibilityLabel="Add attachments" contentMode="raw" disabled={newEmailSending || Boolean(newEmailReviewTransformation)} hitSlop={10} iconOnly onPress={openNewEmailAttachments} shape="pill" size="xs" style={[styles.recipientChipRemove, styles.attachmentChipRemove]} variant="secondary"><PlusIcon size="xs" /></Button></View>{newEmailAttachments.length ? <View style={[styles.recipientChip, styles.attachmentChip]}><Button contentMode="raw" disabled={newEmailSending || Boolean(newEmailReviewTransformation)} onPress={removeAllNewEmailAttachments} size="xs" style={[styles.recipientChipMain, styles.attachmentChipMain]} variant="ghost"><Text style={[styles.recipientChipText, styles.attachmentChipText]}>Remove all</Text></Button><Button accessibilityLabel="Remove all attachments" contentMode="raw" disabled={newEmailSending || Boolean(newEmailReviewTransformation)} hitSlop={10} iconOnly onPress={removeAllNewEmailAttachments} shape="pill" size="xs" style={[styles.recipientChipRemove, styles.attachmentChipRemove]} variant="secondary"><CloseIcon size="xs" /></Button></View> : null}</View></ButtonSizeProvider>
@@ -3816,7 +3815,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         open={readerSheetOpen && readerSheet !== "delete"}
         title={readerSheet === "translate" || readerSheet === "translationReader" ? "Translations" : readerSheet === "translationForm" ? "Translate email" : readerSheet === "summaryVersions" || readerSheet === "summaryReader" ? "Summaries" : readerSheet === "replies" ? "Replies" : readerSheet === "similar" ? "Similar email" : "Move to Trash?"}
       >
-        {readerError && readerSheet !== "replies" ? <View accessibilityRole="alert" style={styles.sheetError}><Text style={styles.sheetErrorText}>{readerError}</Text></View> : null}
         {readerSheet === "translate" || readerSheet === "translationReader" ? <View style={[styles.versionPanel, !readerLoading && translations.length === 0 && styles.sheetEmptyContent]}>
           {permissions.canMutate && selectedTranslationKeys.length ? <Tabs accessibilityLabel="Selected translations toolbar" style={styles.generatedBulkToolbar}><View style={styles.generatedBulkToolbarSelection}><Button accessibilityLabel="Clear translation selection" contentMode="raw" disabled={generatedDeleteBusy} onPress={() => setSelectedTranslationKeys([])} size="md" style={styles.generatedBulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button><Text accessibilityLiveRegion="polite" style={styles.generatedBulkSelectionText}>{selectedTranslationKeys.length} selected</Text></View><Button disabled={generatedDeleteBusy} onPress={() => openGeneratedDeleteConfirmation("translation")} size="md" style={styles.generatedBulkDeleteAction} textStyle={styles.generatedBulkDeleteText} variant="secondary">Delete</Button></Tabs> : null}
           {readerLoading && readerGenerating !== "translation" ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading translation versions" accessibilityRole="progressbar" key={index} style={styles.versionSkeleton} />) : <>{translations.map((version) => { const selectedVersion = selectedTranslationKeys.includes(version.key); return <View key={version.key} style={styles.versionRow}><Button accessibilityActions={permissions.canMutate ? [{ name: "longpress", label: selectedVersion ? "Deselect translation" : "Select translation" }] : undefined} accessibilityLabel={`Translation ${version.version}`} accessibilityState={{ selected: selectedVersion }} contentMode="raw" disabled={generatedDeleteBusy} onAccessibilityAction={permissions.canMutate ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleGeneratedLongPress("translation", version.key, false); } : undefined} onLongPress={permissions.canMutate ? () => handleGeneratedLongPress("translation", version.key) : undefined} onPress={() => handleGeneratedPress("translation", version.key)} size="md" style={[styles.versionMain, selectedVersion && styles.generatedVersionSelected]} variant="secondary"><Text numberOfLines={1} style={styles.rowTitle}>Translation {version.version}</Text>{selectedVersion ? <View pointerEvents="none" style={styles.generatedSelectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</Button></View>; })}{readerGenerating === "translation" ? <Skeleton accessibilityLabel="Generating translation" accessibilityRole="progressbar" style={styles.versionSkeleton} /> : translations.length === 0 ? <Text style={styles.centerText}>No translations yet.</Text> : null}</>}
@@ -3911,6 +3909,7 @@ function ReplyContextSheets({ canMutate, context, onClose, open }: { canMutate: 
     staleTime: 0,
   });
   const notes = notesQuery.data ?? [];
+  useErrorFeedback(open ? [editorError, notesQuery.error] : []);
   const activeSelectedKeys = selectedKeys.filter((key) => notes.some((note) => note.key === key));
 
   useEffect(() => {
@@ -4075,12 +4074,12 @@ function ReplyContextSheets({ canMutate, context, onClose, open }: { canMutate: 
     <BottomSheet footer={<View style={styles.replyContextFooter}>{canMutate ? <Button disabled={deleting} onPress={() => openEditor()} size="md" variant="primary">Create context note</Button> : null}<Button disabled={deleting} onPress={onClose} size="md" variant="secondary">Close</Button></View>} height="full" onOpenChange={(nextOpen) => { if (!nextOpen && open && !deleting) onClose(); }} open={open} title="Reply context">
       <ScrollView accessibilityLabel="Reply context notes" accessibilityLiveRegion="polite" accessibilityState={{ busy: notesQuery.isPending || deleting }} contentContainerStyle={[styles.replyContextList, !notesQuery.isPending && !notesQuery.error && !notes.length && styles.replyContextEmpty]} showsVerticalScrollIndicator={false}>
         {activeSelectedKeys.length ? <Tabs accessibilityLabel="Context note selection toolbar" style={styles.replyContextSelectionToolbar}><View style={styles.replyContextSelectionCount}><Button accessibilityLabel="Clear context note selection" contentMode="raw" disabled={deleting} onPress={() => setSelectedKeys([])} size="md" style={styles.replyContextSelectionClear} variant="secondary"><CloseIcon size="sm" /></Button><Text style={styles.replyContextSelectionText}>{activeSelectedKeys.length} selected</Text></View><Button disabled={deleting} onPress={() => setDeleteConfirmOpen(true)} size="md" variant="danger">Delete</Button></Tabs> : null}
-        {notesQuery.isPending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.replyContextPillSkeleton} />) : notesQuery.error ? <View style={styles.replyContextEmpty}><Text style={styles.rootEmpty}>{messageFor(notesQuery.error)}</Text><Button onPress={() => void notesQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : notes.map((note) => { const selected = activeSelectedKeys.includes(note.key); return <Button accessibilityActions={canMutate ? [{ name: "longpress", label: selected ? `Deselect ${note.name}` : `Select ${note.name}` }] : undefined} accessibilityLabel={activeSelectedKeys.length ? `${selected ? "Deselect" : "Select"} ${note.name}` : `Open ${note.name}`} accessibilityState={{ selected }} contentMode="raw" disabled={deleting} key={note.key} onAccessibilityAction={canMutate ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleLongPress(note.key, false); } : undefined} onLongPress={canMutate ? () => handleLongPress(note.key) : undefined} onPress={() => handlePress(note)} shape="pill" size="md" style={[styles.replyContextPill, selected && styles.replyContextPillSelected]} variant="secondary"><Text numberOfLines={1} style={styles.replyContextPillText}>{note.name}</Text></Button>; })}
+        {notesQuery.isPending ? Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.replyContextPillSkeleton} />) : notesQuery.error ? <Button onPress={() => void notesQuery.refetch()} size="md" variant="secondary">Retry</Button> : notes.map((note) => { const selected = activeSelectedKeys.includes(note.key); return <Button accessibilityActions={canMutate ? [{ name: "longpress", label: selected ? `Deselect ${note.name}` : `Select ${note.name}` }] : undefined} accessibilityLabel={activeSelectedKeys.length ? `${selected ? "Deselect" : "Select"} ${note.name}` : `Open ${note.name}`} accessibilityState={{ selected }} contentMode="raw" disabled={deleting} key={note.key} onAccessibilityAction={canMutate ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleLongPress(note.key, false); } : undefined} onLongPress={canMutate ? () => handleLongPress(note.key) : undefined} onPress={() => handlePress(note)} shape="pill" size="md" style={[styles.replyContextPill, selected && styles.replyContextPillSelected]} variant="secondary"><Text numberOfLines={1} style={styles.replyContextPillText}>{note.name}</Text></Button>; })}
         {!notesQuery.isPending && !notesQuery.error && !notes.length ? <View style={styles.replyContextEmpty}><Text style={styles.rootEmpty}>No context notes yet.</Text></View> : null}
       </ScrollView>
     </BottomSheet>
     <BottomSheet dismissible={!saving} footer={<View style={styles.replyContextFooter}>{canMutate ? <Button disabled={saving || !name.trim() || !text.trim()} onPress={() => void saveNote()} size="md" variant="primary">{editor?.mode === "create" ? "Create" : "Save"}</Button> : null}<Button disabled={saving} onPress={requestEditorClose} size="md" variant="secondary">Close</Button></View>} height="full" onOpenChange={(nextOpen) => { if (!nextOpen && editor) requestEditorClose(); }} open={open && Boolean(editor)} title={editor?.mode === "create" ? "New context note" : "Edit context note"}>
-      <ScrollView contentContainerStyle={styles.replyContextEditor} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.formScroll}>{editorError ? <View accessibilityRole="alert" style={styles.sheetError}><Text style={styles.sheetErrorText}>{editorError}</Text></View> : null}<Text style={styles.inputLabel}>Name</Text><TextInput accessibilityLabel="Context note name" editable={canMutate && !saving} maxLength={255} onChangeText={setName} placeholder="Context note name" ref={editorInputRef} value={name} /><Text style={styles.inputLabel}>Context</Text><TextInput accessibilityLabel="Context note text" editable={canMutate && !saving} maxLength={4000} multiline onChangeText={setText} placeholder="Add information that should shape email replies" style={styles.replyContextTextInput} textAlignVertical="top" value={text} /></ScrollView>
+      <ScrollView contentContainerStyle={styles.replyContextEditor} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.formScroll}><Text style={styles.inputLabel}>Name</Text><TextInput accessibilityLabel="Context note name" editable={canMutate && !saving} maxLength={255} onChangeText={setName} placeholder="Context note name" ref={editorInputRef} value={name} /><Text style={styles.inputLabel}>Context</Text><TextInput accessibilityLabel="Context note text" editable={canMutate && !saving} maxLength={4000} multiline onChangeText={setText} placeholder="Add information that should shape email replies" style={styles.replyContextTextInput} textAlignVertical="top" value={text} /></ScrollView>
     </BottomSheet>
     <BottomSheet dismissible={!deleting} onOpenChange={(nextOpen) => { if (!nextOpen && !deleting) setDeleteConfirmOpen(false); }} open={open && deleteConfirmOpen && activeSelectedKeys.length > 0} title={`Delete ${activeSelectedKeys.length === 1 ? "context note" : `${activeSelectedKeys.length} context notes`}?`}><View style={styles.replyContextFooter}><Text style={styles.confirmText}>This permanently deletes the selected reply context.</Text><Button disabled={deleting} onPress={() => void deleteSelected()} size="md" variant="danger">Delete</Button><Button disabled={deleting} onPress={() => setDeleteConfirmOpen(false)} size="md" variant="secondary">Close</Button></View></BottomSheet>
   </>;
@@ -4199,7 +4198,6 @@ const styles = StyleSheet.create({
   replyContextEditor: { flexGrow: 1, gap: 12, paddingBottom: spacing.xl },
   replyContextTextInput: { minHeight: 120 },
   rootToneError: { width: "100%", alignItems: "center", paddingHorizontal: spacing.lg },
-  rootInlineNotice: { width: "100%", minHeight: 44, paddingLeft: spacing.sm, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.md, backgroundColor: palette.panel },
   inboxActions: { minHeight: 52, marginHorizontal: spacing.md, flexDirection: "row", alignItems: "center", gap: spacing.sm },
   inboxFilterButton: { width: 44, height: 44, minHeight: 44 },
   categoryTabsFrame: { marginHorizontal: spacing.md },
@@ -4207,9 +4205,6 @@ const styles = StyleSheet.create({
   categoryTab: { minHeight: 28, flex: 1 },
   facetRow: { minHeight: 44, marginHorizontal: spacing.md, marginTop: 8, flexDirection: "row", alignItems: "center", gap: 4 },
   facetButton: { minWidth: 0, minHeight: 44, flex: 1, paddingHorizontal: 4 },
-  inlineNotice: { minHeight: 38, marginHorizontal: spacing.md, marginTop: spacing.sm, paddingLeft: spacing.sm, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.md, backgroundColor: palette.panel },
-  inlineNoticeText: { minWidth: 0, flex: 1, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
-  aiComposerError: { paddingHorizontal: spacing.sm, color: "#D98B8B", fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
   aiResponse: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, color: palette.silver300, fontFamily: fonts.regular, fontSize: 12, lineHeight: 17, borderRadius: radii.md, backgroundColor: palette.panel },
   signalComposer: { backgroundColor: palette.page },
   searchBox: {
@@ -4355,17 +4350,6 @@ const styles = StyleSheet.create({
   receivedAttachmentImage: StyleSheet.absoluteFill,
   receivedAttachmentLabel: { width: "100%", color: palette.silver100, fontFamily: fonts.medium, fontSize: 11, textAlign: "center" },
   receivedAttachmentImageLabel: { position: "absolute", right: 4, bottom: 4, left: 4, width: "auto", paddingHorizontal: 4, paddingVertical: 3, overflow: "hidden", borderRadius: radii.sm, backgroundColor: "rgba(0,0,0,0.68)", color: palette.silver50 },
-  sheetError: {
-    marginBottom: 10,
-    padding: 10,
-    borderRadius: radii.md,
-    backgroundColor: "rgba(64,20,20,0.9)",
-  },
-  sheetErrorText: {
-    color: palette.silver100,
-    fontFamily: fonts.regular,
-    fontSize: 12,
-  },
   sheetItems: { gap: 10 },
   trashRootContent: { gap: spacing.sm, paddingTop: spacing.sm, paddingBottom: spacing.xl },
   metadataForm: { flexGrow: 1, gap: 12, paddingBottom: spacing.xl },
@@ -4380,8 +4364,6 @@ const styles = StyleSheet.create({
   favoriteLabel: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 12 },
   newEmailForm: { flexGrow: 1, gap: spacing.sm, paddingBottom: spacing.xl },
   newEmailBodyInput: { paddingTop: 12, lineHeight: 22 },
-  inlineError: { paddingHorizontal: 2 },
-  inlineErrorText: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   recipientChips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
   recipientChip: { alignSelf: "flex-start", minHeight: 42, maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: "rgba(221, 226, 229, 0.18)", borderRadius: 999, backgroundColor: palette.page },
   recipientChipCompact: { minHeight: 34 },

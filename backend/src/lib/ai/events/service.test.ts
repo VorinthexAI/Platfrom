@@ -285,7 +285,7 @@ describe('tool events', () => {
       refund: async (_userKey, input) => { order.push('refund'); refundInput = input; return { status: 'applied', transaction: { key: 'refund-1' } } as never; },
     })).rejects.toThrow('failed');
     expect(order).toEqual(['debit', 'work', 'refund']);
-    expect(refundInput).toMatchObject({ microSparks: 70_000_000, idempotencyKey: 'refund:charge-1', chargeTransactionKey: 'charge-1' });
+    expect(refundInput).toMatchObject({ microSparks: 75_000_000, idempotencyKey: 'refund:charge-1', chargeTransactionKey: 'charge-1' });
     expect(refundInput).not.toHaveProperty('eventKey');
   });
 
@@ -297,8 +297,8 @@ describe('tool events', () => {
       charge: async (_userKey, input) => ({ status, transaction: { key: 'charge-1', eventKey: input.eventKey } }) as never,
     });
     expect(seen).toEqual([
-      { userKey: 'user-1', toolSlug: 'book.create', microSparks: 70_000_000, transactionKey: 'charge-1', executionIdentity: 'a'.repeat(64), replayed: false },
-      { userKey: 'user-1', toolSlug: 'book.create', microSparks: 70_000_000, transactionKey: 'charge-1', executionIdentity: 'a'.repeat(64), replayed: true },
+      { userKey: 'user-1', toolSlug: 'book.create', microSparks: 75_000_000, transactionKey: 'charge-1', executionIdentity: 'a'.repeat(64), replayed: false },
+      { userKey: 'user-1', toolSlug: 'book.create', microSparks: 75_000_000, transactionKey: 'charge-1', executionIdentity: 'a'.repeat(64), replayed: true },
     ]);
     expect(currentFixedChargeReceipt()).toBeNull();
   });
@@ -332,7 +332,7 @@ describe('tool events', () => {
     expect(charges).toHaveLength(1);
     expect(charges[0]).toMatchObject({ kind: 'action', actionSlug: 'text' });
     expect(charges[0]).toHaveProperty('eventKey');
-    expect(charges[0]).not.toMatchObject({ microSparks: 30_000_000 });
+    expect(charges[0]).not.toMatchObject({ microSparks: 25_000_000 });
   });
 
   test('charges outcome-priced work only after canonical code establishes a cache miss', async () => {

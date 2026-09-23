@@ -129,12 +129,12 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
     if (!owner || creating) return;
     const generation = ++createRequest.current;
     setCreating(true);
+    notify("Memory creation started");
     try {
       const { memory } = await createGalleryCollectionMemory(collection.key, imageKey);
       if (generation !== createRequest.current || !open) return;
       queryClient.setQueryData(galleryQueryKeys.memory(galleryContext, collection.key, memory.key), { memory });
       setMemories((current) => [...current.filter(({ key }) => key !== memory.key), memory]);
-      notify("Memory created");
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.memories(galleryContext, collection.key), exact: true, refetchType: "none" }).catch(() => undefined);
       if (listSheetOpen.current) void openMemory(memory);
     } catch (failure) {
@@ -170,14 +170,20 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   function deleteSelectedMemories() {
     if (!owner || !selectedMemoryKeys.length) return;
     const memoryKeys = [...selectedMemoryKeys];
+    const previous = memories.filter(({ key }) => memoryKeys.includes(key));
     memoryKeys.forEach((key) => pendingMemoryDeletes.current.add(key));
     setMemories((current) => current.filter(({ key }) => !memoryKeys.includes(key)));
     memoryKeys.forEach((memoryKey) => queryClient.removeQueries({ queryKey: galleryQueryKeys.memory(galleryContext, collection.key, memoryKey), exact: true }));
     setSelectedMemoryKeys([]);
     setActiveSheet("list");
     notify(`Deleted ${memoryKeys.length} ${memoryKeys.length === 1 ? "memory" : "memories"}`);
-    void Promise.allSettled(memoryKeys.map((memoryKey) => deleteGalleryCollectionMemory(memoryKey, collection.key))).then(() => {
+    void Promise.allSettled(memoryKeys.map((memoryKey) => deleteGalleryCollectionMemory(memoryKey, collection.key))).then((outcomes) => {
       memoryKeys.forEach((key) => pendingMemoryDeletes.current.delete(key));
+      const failed = new Set(memoryKeys.filter((_, index) => outcomes[index]?.status === "rejected"));
+      if (failed.size) {
+        setMemories((current) => [...current.filter(({ key }) => !failed.has(key)), ...previous.filter(({ key }) => failed.has(key))]);
+        notify(`${memoryKeys.length - failed.size} deleted, ${failed.size} failed`);
+      }
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.memories(galleryContext, collection.key), exact: true, refetchType: "none" });
     });
   }

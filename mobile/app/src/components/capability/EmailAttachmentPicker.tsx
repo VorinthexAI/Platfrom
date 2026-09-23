@@ -11,6 +11,7 @@ import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 
 import { SearchHistorySheet } from "@/components/SearchHistorySheet";
+import { useErrorFeedback } from "@/hooks/use-error-feedback";
 import { deleteContentSearchHistory, listContentDocumentsAtLocation, searchContentMatches, type ContentContext, type ContentDocument, type ContentSearchHistoryItem } from "@/lib/content-client";
 import { attachmentIdentity, createAttachmentSearchOwner, isSelectableEmailDocument, toggleEmailAttachment } from "@/lib/email-attachment-picker";
 import type { EmailAttachmentRef } from "@/lib/email-client";
@@ -58,6 +59,7 @@ export function EmailAttachmentPicker({ archiveOnly = false, galleryOnly = false
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  useErrorFeedback([open ? error : undefined]);
   const [selectionNotice, setSelectionNotice] = useState<string>();
   const [gridWidth, setGridWidth] = useState(0);
   const [filters, setFilters] = useState<HiddenViewFilters>({ favoritesOnly: false, showHidden: false });
@@ -256,7 +258,7 @@ export function EmailAttachmentPicker({ archiveOnly = false, galleryOnly = false
         <Button accessibilityRole="tab" accessibilityState={{ selected: tab === "gallery" }} onPress={() => changeTab("gallery")} style={styles.folderTab} variant={tab === "gallery" ? "secondary" : "ghost"}>Collections</Button>
       </Tabs> : null}
       {selectionNotice ? <Text accessibilityLiveRegion="assertive" style={styles.notice}>{selectionNotice}</Text> : null}
-      {error ? <View accessibilityRole="alert" style={styles.error}><Text style={styles.errorText}>{error}</Text><Button onPress={() => void load(activeTab, query)} size="md" variant="secondary">Retry</Button></View> : null}
+      {error ? <Button onPress={() => void load(activeTab, query)} size="md" variant="secondary">Retry</Button> : null}
       <ScrollView accessibilityLabel={`${activeTab} attachment results`} accessibilityLiveRegion="polite" accessibilityState={{ busy: loading }} contentContainerStyle={[styles.results, Boolean(query.trim()) && !loading && !error && (activeTab === "archive" ? visibleDocuments.length === 0 : visibleImages.length === 0) && styles.searchEmptyResults]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         {loading ? <View accessibilityLabel="Loading attachment results" accessibilityRole="progressbar" style={activeTab === "gallery" ? styles.imageGrid : styles.rootDocuments}>{Array.from({ length: activeTab === "gallery" ? 4 : 3 }, (_, index) => <Skeleton key={index} style={activeTab === "gallery" ? [styles.imageSkeleton, { width: imageSize, height: imageSize }] : styles.documentSkeleton} />)}</View> : activeTab === "archive" ? <View style={styles.rootDocuments}>{renderedDocuments.map((document) => {
           const ref = { type: "document" as const, key: document.key }; const active = isSelected(ref);
@@ -299,8 +301,6 @@ const styles = StyleSheet.create({
   documentSkeleton: { width: "100%", height: 38, borderRadius: 999, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   empty: { paddingVertical: 60, color: palette.silver700, fontFamily: fonts.regular, fontSize: 13, textAlign: "center" },
   searchEmptyText: { paddingVertical: 0 },
-  error: { marginTop: spacing.sm, padding: spacing.sm, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderRadius: radii.md, backgroundColor: "rgba(64,20,20,0.9)" },
-  errorText: { minWidth: 0, flex: 1, color: palette.silver100, fontFamily: fonts.regular, fontSize: 12 },
   footer: { gap: spacing.sm },
   filterPanel: { gap: 12 },
   favoriteSwitchRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs },

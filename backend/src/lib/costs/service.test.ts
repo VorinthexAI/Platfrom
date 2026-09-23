@@ -15,15 +15,15 @@ describe('public Spark costs', () => {
     expect(charges.some(({ key }) => key === 'place.find-city')).toBe(false);
     expect(charges).toContainEqual(expect.objectContaining({ key: 'app.generate-image', kind: 'static', name: 'Generate an image', sparkCost: '10', unit: 'images' }));
     expect(charges.some(({ key }) => key === 'place.create' || key === 'place.find-children')).toBe(false);
-    expect(charges).toContainEqual(expect.objectContaining({ key: 'book.create', name: 'Create an audio book', description: 'Generate and save a complete audio book.' }));
-    expect(charges).toContainEqual(expect.objectContaining({ key: 'book.extend', name: 'Extend an audio book', description: 'Generate and save an additional audio book chapter.' }));
+    expect(charges).toContainEqual(expect.objectContaining({ key: 'book.create', sparkCost: '75', name: 'Create an audio book', description: 'Generate and save a complete audio book.' }));
+    expect(charges).toContainEqual(expect.objectContaining({ key: 'book.extend', sparkCost: '25', name: 'Extend an audio book', description: 'Generate and save an additional audio book chapter.' }));
     expect(charges).toContainEqual(expect.objectContaining({ key: 'highlight.create', description: 'Create a generated highlight from an image collection.' }));
     expect(charges).toContainEqual(expect.objectContaining({ key: 'visual-identity.create', name: 'Create a visual identity', description: 'Create a visual identity from selected images.' }));
     expect(charges.some(({ key }) => key === 'subject.create')).toBe(false);
     expect(JSON.stringify(charges).toLowerCase()).not.toContain('photo');
     expect(charges).toContainEqual(expect.objectContaining({ key: 'storage', kind: 'storage', sparkCost: '30', unit: 'gb-month' }));
     expect(charges).toContainEqual(expect.objectContaining({ key: 'email.tone.create', name: 'Create a Signal writing tone', description: 'Build a reusable writing tone from connected email examples.' }));
-    expect(charges).toContainEqual(expect.objectContaining({ key: 'inbox.sync', kind: 'static', name: 'Connect and initially sync email', description: expect.stringContaining('private Signal inbox'), sparkCost: '100', unit: 'invocation' }));
+    expect(charges).toContainEqual(expect.objectContaining({ key: 'inbox.sync', kind: 'static', name: 'Connect and initially sync email', description: expect.stringContaining('private Signal inbox'), sparkCost: '75', unit: 'invocation' }));
     expect(charges).toContainEqual(expect.objectContaining({ key: 'inbox.subscribe', kind: 'static', name: 'Receive connected email', description: expect.stringContaining('private Signal inbox'), sparkCost: '1', unit: 'new-email' }));
     expect(charges.some(({ key }) => key === 'connected-inbox')).toBe(false);
     expect(charges).toContainEqual(expect.objectContaining({ key: 'ai-usage', kind: 'variable' }));

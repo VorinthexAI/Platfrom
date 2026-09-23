@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState, type ComponentRef } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
@@ -9,12 +9,13 @@ import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
 
 import { TagCreateSheet, TagSheetEmptyState } from "@/components/TagSheetShared";
+import { useErrorFeedback } from "@/hooks/use-error-feedback";
 import { appSearchQueryRoot } from "@/lib/app-search-client";
 import type { ContentContext } from "@/lib/content-client";
 import { appendResourceTag, createResourceTagKey, createScopeTag, groupResourceTagAssignmentRequests, normalizeResourceTagTargets, persistResourceTagAssignments, removeResourceTag, replaceResourceTag, resolvePendingResourceTagDraft, type ResourceTagAssignmentState, type ResourceTagTarget, type ScopeTag } from "@/lib/tag-client";
 import { applyResourceTagDraft, refreshResourceTagAssignments, refreshScopeTags, resourceTagAssignmentsQueryKey, resourceTagState, scopeTagsQueryKey, toggleResourceTagDraft, type ResourceTagDraft } from "@/lib/tag-query-cache";
 import { invalidateAssistantChanges } from "@/lib/workspace-query-cache";
-import { fonts, palette, spacing } from "@/theme/tokens";
+import { palette, spacing } from "@/theme/tokens";
 
 export type ResourceTagsSheetProps = { context: ContentContext; targets: readonly ResourceTagTarget[]; open: boolean; onApply?: () => void; onClose: () => void };
 
@@ -31,6 +32,7 @@ export function ResourceTagsSheet({ context, targets, open, onApply, onClose }: 
   const [draft, setDraft] = useState<ResourceTagDraft>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  useErrorFeedback([open ? error : undefined]);
   const [createOpen, setCreateOpen] = useState(false);
   const [tagName, setTagName] = useState("");
   const requestRef = useRef(0);
@@ -96,6 +98,7 @@ export function ResourceTagsSheet({ context, targets, open, onApply, onClose }: 
     const normalizedTargets = normalizeResourceTagTargets(targets);
     const queryKey = resourceTagAssignmentsQueryKey(context, normalizedTargets);
     closeCreate();
+    showToast({ title: "Tag created", duration: 2_000 });
     setState((current) => current ? appendResourceTag(current, optimisticTag) : current);
     queryClient.setQueryData<ResourceTagAssignmentState>(queryKey, (current) => appendResourceTag(current ?? state, optimisticTag));
     const catalogKey = scopeTagsQueryKey(context);
@@ -132,6 +135,7 @@ export function ResourceTagsSheet({ context, targets, open, onApply, onClose }: 
     queryClient.setQueryData(queryKey, optimistic);
     onClose();
     onApply?.();
+    if (Object.keys(draft).length) showToast({ title: "Tags updated", duration: 2_000 });
     void (async () => {
       const resolved = await resolvePendingResourceTagDraft(draft, new Map(pendingCreationsRef.current));
       let baseline = resolved.failedKeys.reduce(removeResourceTag, previous);
@@ -150,7 +154,6 @@ export function ResourceTagsSheet({ context, targets, open, onApply, onClose }: 
         showToast({ title: caught instanceof Error ? caught.message : "Tags could not be updated.", duration: 3_000 });
         return;
       }
-      showToast({ title: "Tags updated", duration: 2_000 });
       try { await refreshResourceTagAssignments(queryClient, context, normalizedTargets); } catch { /* Preserve the optimistic success when reconciliation is unavailable. */ }
       const changes = [...new Set(normalizedTargets.map(({ type }) => workspaceByTarget[type]))].map((workspace) => ({ workspace }));
       void Promise.all([invalidateAssistantChanges(queryClient, context, changes), queryClient.invalidateQueries({ queryKey: appSearchQueryRoot })]).catch(() => undefined);
@@ -161,7 +164,7 @@ export function ResourceTagsSheet({ context, targets, open, onApply, onClose }: 
 
   return <><BottomSheet description="Choose tags for the selected items. Tags shown with a dashed outline are currently on only some items." footer={<View style={styles.footer}><Button disabled={loading || Boolean(error) || !state} onPress={draftChanged ? apply : openCreate} size="md" variant="primary">{draftChanged ? "Apply" : "Create tag"}</Button><Button onPress={onClose} size="md" variant="secondary">Close</Button></View>} height="full" onOpenChange={(next) => { if (!next) onClose(); }} open={open} title="Tags">
     <ScrollView contentContainerStyle={[styles.list, !loading && state?.tags.length === 0 && styles.emptyContent]} showsVerticalScrollIndicator={false} style={styles.scroll}>
-      {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+      {error ? <Button onPress={() => loadAssignments(++requestRef.current)} size="md" variant="secondary">Retry tags</Button> : null}
       {loading ? <View accessibilityLabel="Loading tags" accessibilityRole="progressbar" style={styles.list}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.skeleton} />)}</View> : null}
       {!loading && !error && state?.tags.length === 0 ? <TagSheetEmptyState onCreate={openCreate} /> : null}
       {!loading && state ? state.tags.map((tag) => { const tagState = resourceTagState(state, targets, tag.key, draft); return <FilterPill fullWidth key={tag.key} label={tag.name} mixed={tagState === "some"} onPress={() => setDraft((current) => toggleResourceTagDraft(current, state, targets, tag.key))} selected={tagState === "all"} />; }) : null}
@@ -171,6 +174,5 @@ export function ResourceTagsSheet({ context, targets, open, onApply, onClose }: 
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 }, list: { flexGrow: 1, gap: spacing.xs, paddingBottom: spacing.xl }, emptyContent: { justifyContent: "center" },
-  error: { color: palette.danger, fontFamily: fonts.medium, fontSize: 13, textAlign: "center" },
   skeleton: { width: "100%", height: 38, borderRadius: 999, backgroundColor: palette.hairlineBright, opacity: 0.72 }, footer: { gap: spacing.sm },
 });

@@ -58,7 +58,7 @@ describe('book HTTP handlers', () => {
     const app = new Hono().post('/books', createBookHandlers({ service, getIdentity: async () => ({ key: userKey, identityType: 'user' }), authorize: async () => ({ context }), recordEvent: async () => {}, appScopeKey: 'cmrnlzf640001qc7kazsr96k5', billing }).create);
     expect((await app.request('/books', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status).toBe(202);
     expect(charges).toHaveLength(2);
-    expect(charges.every((charge) => charge.toolSlug === 'book.create' && charge.microSparks === 70_000_000)).toBe(true);
+    expect(charges.every((charge) => charge.toolSlug === 'book.create' && charge.microSparks === 75_000_000)).toBe(true);
     expect(charges.every((charge) => (charge.metadata as { paidOutcome?: string }).paidOutcome === 'queue-accepted')).toBe(true);
 
     const insufficientBilling = { charge: async () => { throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'private'); } };

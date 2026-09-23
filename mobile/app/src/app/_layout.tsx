@@ -8,7 +8,6 @@ import { StatusBar } from "expo-status-bar";
 import { BottomSheetScene } from "@vorinthex/shared/ui/bottom-sheet";
 import { ToastProvider } from "@vorinthex/shared/ui/toast";
 import { useEffect, useState } from "react";
-import { Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -97,7 +96,7 @@ export default function RootLayout() {
           <ToastProvider>
             <BottomSheetScene>
               <BookPlaybackProvider>
-                <StatusBar hidden={Platform.OS === "android"} style="light" />
+                <StatusBar hidden={false} style="light" />
                 <Stack
                   screenOptions={{
                     headerShown: false,

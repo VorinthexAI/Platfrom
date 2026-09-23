@@ -1,3 +1,12 @@
+import { CancelledError } from "@tanstack/react-query";
+
+export function isRequestCancellation(error: unknown): boolean {
+  if (error instanceof CancelledError) return true;
+  if (!(error instanceof Error)) return false;
+  return ["AbortError", "CanceledError", "CancelledError"].includes(error.name)
+    || ("code" in error && error.code === "ERR_CANCELED");
+}
+
 export const INSUFFICIENT_BALANCE_CODE = "INSUFFICIENT_BALANCE";
 export const OUTSTANDING_DEBT_CODE = "OUTSTANDING_DEBT";
 
