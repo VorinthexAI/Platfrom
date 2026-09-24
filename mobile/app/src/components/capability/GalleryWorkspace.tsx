@@ -2909,8 +2909,8 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
   const visibleOptimisticItems = activeCollection && !collectionSearchActive && !showOnlyFavorites ? optimisticMediaItems.filter(({ collectionKey }) => collectionKey === activeCollection.key) : [];
   const visibleGenerationPlaceholders = generationPlaceholders.filter(({ collectionKey }) => collectionKey === activeCollection?.key);
   const visibleImageGroups = groupGalleryImagesByCreatedDate<GalleryGridItem>([...visibleGenerationPlaceholders.flatMap((placeholder) => Array.from({ length: placeholder.count }, (_, index) => ({ kind: "generation", key: `${placeholder.requestKey}:${index}`, createdAt: placeholder.createdAt, requestKey: placeholder.requestKey }) as const)), ...visibleOptimisticItems.map((item) => ({ kind: "optimistic", key: item.clientKey, createdAt: item.createdAt, item }) as const), ...visibleImages.map((image) => ({ kind: "persisted", key: galleryPersistedGridKey(image.key, persistedGridKeys), createdAt: image.createdAt, image }) as const)]);
-  const imageViewConstrained = Boolean(activeSubject || collectionSearchActive || showingSearchResults || showOnlyFavorites);
-  const emptyGridMessage = activeSubject ? `No images are currently identified as ${activeSubject.name}.` : imageViewConstrained ? "No images matching these filters." : activeCollection ? "No images yet." : "Your visual memory starts with the first image.";
+  const imageViewConstrained = Boolean(activeSubject || collectionSearchActive || showingSearchResults || showOnlyFavorites || showHidden);
+  const emptyGridMessage = imageViewConstrained ? "No matching images." : "No images yet.";
   const contextualView = Boolean(activeCollection || activeSubject || showingSearchResults);
   const normalCollectionView = Boolean(activeCollection && !activeSubject);
   const rootSearchActive = Boolean(rootSearchQuery.trim() || selectedTags.length);
@@ -3187,8 +3187,8 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
                   })}
               {!loading && !rootSearchLoading && visibleCollections.length === 0 ? (
                 <View style={styles.emptyState}>
-                  <Text style={styles.emptyText}>{rootSearchActive || showOnlyFavorites ? "No collections matching these filters." : "No collections here yet."}</Text>
-                  {rootSearchActive || showOnlyFavorites || !canCreateCollections ? null : (
+                  <Text style={styles.emptyText}>{rootSearchActive || showOnlyFavorites || showHidden ? "No matching collections." : "No collections yet."}</Text>
+                  {rootSearchActive || showOnlyFavorites || showHidden || !canCreateCollections ? null : (
                     <Button
                       accessibilityLabel="Create collection"
                       contentMode="raw"
@@ -3541,7 +3541,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
               ) : (
                 <View style={styles.cleanupEmpty}>
                   <Text style={styles.emptyText}>
-                    {cleanupError ? "Try loading these images again." : "No scored images found at this threshold."}
+                    {cleanupError ? "Try loading these images again." : "No matching images."}
                   </Text>
                 </View>
               )
@@ -3614,7 +3614,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
                 </View>
               ) : (
                 <View style={styles.duplicateEmpty}>
-                  <Text style={styles.emptyText}>{similarError ? "Try loading similar images again." : "No similar images found in this collection."}</Text>
+                  <Text style={styles.emptyText}>{similarError ? "Try loading similar images again." : "No matching images."}</Text>
                 </View>
               )
             }
@@ -3706,7 +3706,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
                           </Button>
                         </View>
                       ))}
-                  {!identityPickerLoading && identityPickerVisibleCollections.length === 0 ? <Text style={styles.emptyText}>No collections found.</Text> : null}
+                  {!identityPickerLoading && identityPickerVisibleCollections.length === 0 ? <Text style={styles.emptyText}>{filtersActive ? "No matching collections." : "No collections yet."}</Text> : null}
                 </View>
               ) : null}
               {identityPickerCollection || identityPickerQuery.trim() ? (
@@ -3749,7 +3749,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
                       : null}
                   </View>
                 ) : (
-                  <Text style={styles.emptyText}>No images found.</Text>
+                  <Text style={styles.emptyText}>{identityPickerQuery.trim() || filtersActive ? "No matching images." : "No images yet."}</Text>
                 )
               ) : null}
             </ScrollView>
@@ -4111,7 +4111,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
                     })}
                   </View>
                 ) : (
-                  <Text style={styles.emptyText}>{duplicatesError ? "Try loading duplicates again." : "No duplicate images found in this collection."}</Text>
+                  <Text style={styles.emptyText}>{duplicatesError ? "Try loading duplicates again." : "No duplicate images yet."}</Text>
                 )}
               </View>
             ) : null}
@@ -4265,7 +4265,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
                         </View>
                       );
                     })}
-                  {writableCollections.filter(({ key }) => key !== activeCollection?.key).length === 0 ? <Text style={styles.emptyText}>No writable destination collections are available.</Text> : null}
+                  {writableCollections.filter(({ key }) => key !== activeCollection?.key).length === 0 ? <Text style={styles.emptyText}>No matching collections.</Text> : null}
                 </View>
               </View>
             ) : null}

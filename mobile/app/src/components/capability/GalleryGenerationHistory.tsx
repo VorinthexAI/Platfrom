@@ -23,7 +23,7 @@ export function GalleryGenerationHistory({ error, history, loading, onClose, onR
     <ScrollView contentContainerStyle={[styles.list, !loading && history.length === 0 && styles.emptyContent]} showsVerticalScrollIndicator={false} style={styles.scroll}>
       {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
       {loading ? <View accessibilityLabel="Loading generation history" accessibilityRole="progressbar" style={styles.list}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.skeleton} />)}</View> : null}
-      {!loading && history.length === 0 && !error ? <Text style={styles.empty}>No generations saved yet.</Text> : null}
+      {!loading && history.length === 0 && !error ? <Text style={styles.empty}>No generations yet.</Text> : null}
       {!loading ? history.map((item) => <SearchHistoryPill count={item.usageCount} disabled={removingPrompt === item.normalizedPrompt} key={item.normalizedPrompt} onPress={() => onSelect(item)} onRemove={() => { if (!removingPrompt) onRemove(item); }} query={item.prompt} removing={removingPrompt === item.normalizedPrompt} />) : null}
     </ScrollView>
   </BottomSheet>;

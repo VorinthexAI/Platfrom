@@ -34,7 +34,7 @@ export function SearchHistorySheet({ error, history, loading, onClose, onOpenCha
     >
       <ScrollView contentContainerStyle={[styles.list, !loading && history.length === 0 && styles.emptyContent]} showsVerticalScrollIndicator={false} style={styles.scroll}>
         {loading ? <View accessibilityLabel="Loading search history" accessibilityRole="progressbar" style={styles.skeletons}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.skeleton} />)}</View> : null}
-        {!loading && history.length === 0 && !error ? <Text style={styles.empty}>No searches saved yet.</Text> : null}
+        {!loading && history.length === 0 && !error ? <Text style={styles.empty}>No searches yet.</Text> : null}
         {!loading ? history.map((item) => <SearchHistoryPill count={item.usageCount} disabled={removingQuery === item.normalizedQuery} key={item.normalizedQuery} onPress={() => onSelect(item)} onRemove={() => { if (!removingQuery) { showToast({ title: "Search removed", duration: 2_000 }); onRemove(item); } }} query={item.query} removing={removingQuery === item.normalizedQuery} />) : null}
       </ScrollView>
     </BottomSheet>

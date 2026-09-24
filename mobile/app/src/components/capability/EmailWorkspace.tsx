@@ -3323,7 +3323,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
           <ScrollView
             accessibilityLabel={rootTab === "inboxes" ? "Signal inboxes" : "Signal tones"}
             alwaysBounceVertical
-            contentContainerStyle={[styles.rootGrid, { paddingBottom: insets.bottom + spacing.xl }, rootTab === "inboxes"
+            contentContainerStyle={[styles.rootGrid, { paddingBottom: rootTab === "inboxes" ? !loading && !loadError && !managedInboxVisible && !visibleAccounts.length ? 0 : insets.bottom + spacing.xl : !tonesLoading && !toneError && !visibleTones.length ? 0 : insets.bottom + spacing.xl }, rootTab === "inboxes"
               ? !loading && !loadError && !managedInboxVisible && !visibleAccounts.length && styles.emptyGrid
               : !tonesLoading && !toneError && !visibleTones.length && styles.emptyGrid]}
             onLayout={({ nativeEvent }) => setRootGridWidth(nativeEvent.layout.width)}
@@ -3362,10 +3362,10 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
                   </Button>
                   </View>
                 ); })}
-                {!loadError && !rootSearchError && !managedInboxVisible && !visibleAccounts.length && (rootFilterActive || rootFavoritesOnly) ? <Text style={styles.rootEmpty}>No inboxes matching these filters.</Text> : null}
+                {!loadError && !rootSearchError && !managedInboxVisible && !visibleAccounts.length && (rootFilterActive || rootFavoritesOnly) ? <Text style={styles.rootEmpty}>No matching inboxes.</Text> : null}
                 {!loadError && !managedInboxVisible && !visibleAccounts.length && !rootFilterActive && !rootFavoritesOnly ? (
                   <View style={styles.rootEmptyState}>
-                    <Text style={styles.rootEmpty}>No connected inbox yet.</Text>
+                    <Text style={styles.rootEmpty}>No inboxes yet.</Text>
                     {permissions.canManageConnector ? <Button accessibilityLabel="Connect email" contentMode="raw" onPress={openConnectForm} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : <Text style={styles.rootEmptyHelp}>Connect an inbox to get started.</Text>}
                   </View>
                 ) : null}
@@ -3392,7 +3392,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
                 <Text ellipsizeMode="tail" numberOfLines={1} style={styles.rootCardTitle}>{record.name}</Text>
               </Button>
               </View>
-            )) : rootFilterActive || rootFavoritesOnly ? <Text style={styles.rootEmpty}>No tones matching these filters.</Text> : (
+            )) : rootFilterActive || rootFavoritesOnly ? <Text style={styles.rootEmpty}>No matching tones.</Text> : (
               <View style={styles.rootEmptyState}>
                 <Text style={styles.rootEmpty}>No tones yet.</Text>
                 {permissions.canMutate ? <Button accessibilityLabel="Create email tone" contentMode="raw" onPress={openToneCreate} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : <Text style={styles.rootEmptyHelp}>Ask a scope moderator to create an email tone.</Text>}
@@ -3428,7 +3428,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
             contentContainerStyle={[
               styles.threadList,
               (draftEmpty || messageEmpty) && styles.searchEmptyList,
-              { paddingBottom: insets.bottom + spacing.xl },
+              { paddingBottom: draftEmpty || messageEmpty ? 0 : insets.bottom + spacing.xl },
             ]}
             style={styles.threadListScroll}
             onScroll={({ nativeEvent }) => {
@@ -3467,15 +3467,15 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
                 </View>
               </Button>
             ))}
-            {draftEmpty ? <View style={styles.empty}><Text style={styles.centerText}>{normalizedInboxSearch || selectedTagKeys.length ? "No drafts matching these filters." : "No drafts here yet."}</Text></View> : null}
+            {draftEmpty ? <View style={styles.empty}><Text style={styles.centerText}>{normalizedInboxSearch || selectedTagKeys.length ? "No matching drafts." : "No drafts yet."}</Text></View> : null}
             {messageEmpty ? (
               <View style={styles.empty}>
                 <Text style={styles.centerText}>
                   {sentView
-                    ? inboxQuery.search || selectedTagKeys.length ? "No sent email matching these filters." : "No sent email yet."
+                    ? inboxQuery.search || selectedTagKeys.length ? "No matching sent emails." : "No sent emails yet."
                     : inboxQuery.search || selectedTagKeys.length
-                    ? "No messages matching these filters."
-                    : inboxQuery.facets.length === 0 ? "Choose one or more facets to show messages." : "No messages matching these filters."}
+                    ? "No matching messages."
+                    : inboxQuery.facets.length === 0 ? "Choose one or more facets to show messages." : "No matching messages."}
                 </Text>
               </View>
             ) : null}
@@ -3533,7 +3533,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         <ScrollView accessibilityLabel="Email thread messages" accessibilityLiveRegion="polite" accessibilityState={{ busy: threadPageLoading }} contentContainerStyle={[styles.threadMessageList, !threadPageLoading && !orderedThreadMessages.length && styles.sheetEmptyContent]} onScroll={({ nativeEvent }) => { if (isNearScrollEnd({ offset: nativeEvent.contentOffset.y, viewport: nativeEvent.layoutMeasurement.height, content: nativeEvent.contentSize.height })) void loadMoreThreadMessages(); }} scrollEventThrottle={120} showsVerticalScrollIndicator={false}>
           {orderedThreadMessages.map((message) => { const current = message.key === selectedMessage?.key; return <Button accessibilityLabel={`${current ? "Current message, " : ""}${message.fromName ?? shortAddress(message.from)}, ${message.subject}, ${formatEmailTimestamp(message.sentAt)}`} accessibilityState={{ selected: current }} contentMode="raw" key={message.key} onPress={() => { setSelectedMessageKey(message.key); setThreadSheetOpen(false); }} shape="pill" size="md" style={[styles.threadMessagePill, current && styles.threadMessagePillSelected]} variant={current ? "ghost" : "secondary"}><MailIcon size="sm" /><View style={styles.threadMessageCopy}><View style={styles.threadMessageMeta}><Text numberOfLines={1} style={styles.threadMessageSender}>{message.fromName ?? shortAddress(message.from)}</Text><Text style={styles.threadMessageTime}>{formatEmailTimestamp(message.sentAt)}</Text></View><Text numberOfLines={1} style={styles.threadMessageSubject}>{message.subject}</Text></View></Button>; })}
           {threadPageLoading ? <Skeleton accessibilityLabel="Loading more thread messages" accessibilityRole="progressbar" style={styles.threadMessageSkeleton} /> : null}
-          {!threadPageLoading && !orderedThreadMessages.length ? <Text style={styles.centerText}>No messages in this thread.</Text> : null}
+          {!threadPageLoading && !orderedThreadMessages.length ? <Text style={styles.centerText}>No messages yet.</Text> : null}
         </ScrollView>
       </BottomSheet>
 
@@ -3543,7 +3543,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
           <View onLayout={({ nativeEvent }) => setReceivedAttachmentGridWidth(nativeEvent.layout.width)} style={styles.receivedAttachmentGrid}>
           {receivedAttachmentsLoading ? Array.from({ length: 4 }, (_, index) => <Skeleton accessibilityLabel="Loading received attachments" accessibilityRole="progressbar" key={index} style={[styles.receivedAttachmentCard, { width: receivedAttachmentCardSize, height: receivedAttachmentCardSize, backgroundColor: palette.hairlineBright, opacity: 0.72, borderWidth: 0 }]} />) : receivedAttachments.map((attachment) => { const label = attachment.kind === "document" ? attachment.document.name : attachment.image.filename; return <Button accessibilityLabel={`Open ${attachment.kind === "document" ? "Archive" : "Gallery"} attachment ${label}`} contentMode="raw" key={attachmentIdentity(attachment.ref)} onPress={() => openReceivedAttachment(attachment)} shape="rounded" size="md" style={[styles.receivedAttachmentCard, { width: receivedAttachmentCardSize, height: receivedAttachmentCardSize }]} variant="ghost">{attachment.kind === "image" ? <Image contentFit="cover" source={attachment.image.url} style={styles.receivedAttachmentImage} transition={150} /> : <FileIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.receivedAttachmentLabel, attachment.kind === "image" && styles.receivedAttachmentImageLabel]}>{label}</Text></Button>; })}
           </View>
-          {!receivedAttachmentsLoading && !receivedAttachmentsError && !receivedAttachments.length ? <Text style={styles.centerText}>No received attachments.</Text> : null}
+          {!receivedAttachmentsLoading && !receivedAttachmentsError && !receivedAttachments.length ? <Text style={styles.centerText}>No attachments yet.</Text> : null}
         </ScrollView>
       </BottomSheet>
 
@@ -3629,7 +3629,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
           <ScrollView contentContainerStyle={styles.trashRootContent} showsVerticalScrollIndicator={false}>
             {trashRootError ? <Button onPress={() => void openTrashRoot()} size="md" variant="secondary">Retry</Button> : null}
             {trashRootLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading Trash" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : null}
-            {!trashRootLoading && !trashRootError && !trashGroups.some(({ threads, error }) => threads.length || error) ? <View style={styles.empty}><Text style={styles.centerText}>Trash is empty.</Text></View> : null}
+            {!trashRootLoading && !trashRootError && !trashGroups.some(({ threads, error }) => threads.length || error) ? <View style={styles.empty}><Text style={styles.centerText}>No trashed messages yet.</Text></View> : null}
             {trashGroups.flatMap(({ threads }) => threads).map((thread) => <Button accessibilityLabel={`${!thread.isRead ? "Unread, " : ""}${shortAddress(thread.latestFrom)}, ${thread.subject}`} contentMode="raw" key={thread.key} onPress={() => { setSheetOpen(false); void openThread(thread); }} shape="pill" size="sm" style={styles.threadCard} variant="secondary"><MailIcon size="sm" /><View style={styles.threadBody}><Text numberOfLines={1} style={[styles.subject, !thread.isRead && styles.subjectUnread]}>{thread.subject}</Text></View></Button>)}
           </ScrollView>
         ) : sheet === "clearTrash" ? (
@@ -3828,10 +3828,10 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         </View> : null}
         {readerSheet === "replies" ? <ScrollView contentContainerStyle={[styles.versionList, !readerLoading && !readerError && replyDrafts.length === 0 && styles.sheetEmptyContent]} showsVerticalScrollIndicator={false} style={styles.sheetList}>
           {readerLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Generating reply options" accessibilityRole="progressbar" key={index} style={styles.newEmailAlternativeSkeleton} />) : replyDrafts.map((reply) => <Button contentMode="raw" key={reply.key} onPress={() => openReplyDraft(reply)} shape="pill" size="md" style={styles.newEmailAlternative} variant="secondary"><View style={styles.newEmailAlternativeCopy}><Text numberOfLines={1} style={styles.rowTitle}>{reply.tone ?? "Reply"}</Text><Text numberOfLines={1} style={styles.newEmailAlternativePreview}>{reply.finalContent ?? reply.generatedContent}</Text></View></Button>)}
-          {!readerLoading && !readerError && replyDrafts.length === 0 ? <Text style={styles.centerText}>No replies available.</Text> : null}
+          {!readerLoading && !readerError && replyDrafts.length === 0 ? <Text style={styles.centerText}>No replies yet.</Text> : null}
         </ScrollView> : null}
         {readerSheet === "similar" ? <View style={styles.similarFlow}>
-           <ScrollView contentContainerStyle={[styles.similarResults, !readerLoading && !similarResults.length && styles.sheetEmptyContent]} showsVerticalScrollIndicator={false}>{readerLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Finding similar email" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : !similarResults.length ? <Text style={styles.centerText}>No similar emails found.</Text> : similarResults.map((result) => <Button contentMode="raw" key={result.key} onPress={() => void openSimilarResult(result)} size="md" style={styles.similarResult} variant="secondary"><MailIcon size="sm" /><Text ellipsizeMode="tail" numberOfLines={1} style={styles.similarResultText}>{result.subject}</Text></Button>)}</ScrollView>
+           <ScrollView contentContainerStyle={[styles.similarResults, !readerLoading && !similarResults.length && styles.sheetEmptyContent]} showsVerticalScrollIndicator={false}>{readerLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Finding similar email" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : !similarResults.length ? <Text style={styles.centerText}>No matching emails.</Text> : similarResults.map((result) => <Button contentMode="raw" key={result.key} onPress={() => void openSimilarResult(result)} size="md" style={styles.similarResult} variant="secondary"><MailIcon size="sm" /><Text ellipsizeMode="tail" numberOfLines={1} style={styles.similarResultText}>{result.subject}</Text></Button>)}</ScrollView>
        </View> : null}
        <BottomSheet footer={<Button onPress={() => { setSelectedTranslationKey(undefined); setReaderSheet("translate"); }} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) { setSelectedTranslationKey(undefined); setReaderSheet("translate"); } }} open={readerSheetOpen && readerSheet === "translationReader" && Boolean(selectedTranslation)} title={`Translation ${selectedTranslation?.version ?? ""}`}><ScrollView contentContainerStyle={styles.generatedReader} showsVerticalScrollIndicator={false}><Text selectable style={styles.readerBody}>{selectedTranslation?.content}</Text></ScrollView></BottomSheet>
        <BottomSheet footer={<Button onPress={() => { setSelectedSummaryKey(undefined); setReaderSheet("summaryVersions"); }} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) { setSelectedSummaryKey(undefined); setReaderSheet("summaryVersions"); } }} open={readerSheetOpen && readerSheet === "summaryReader" && Boolean(selectedSummary)} title={`Summary ${selectedSummary?.version ?? ""}`}><ScrollView contentContainerStyle={styles.generatedReader} showsVerticalScrollIndicator={false}><Text selectable style={styles.readerBody}>{selectedSummary?.summary}</Text></ScrollView></BottomSheet>
@@ -4171,7 +4171,7 @@ const styles = StyleSheet.create({
   rootTab: { flex: 1 },
   rootScroll: { flex: 1 },
   rootGrid: { flexGrow: 1, alignContent: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: 10, paddingBottom: spacing.xl },
-  emptyGrid: { minHeight: 360, alignContent: "center", alignItems: "center", justifyContent: "center" },
+  emptyGrid: { alignContent: "center", alignItems: "center", justifyContent: "center" },
   rootCard: { position: "relative", overflow: "hidden", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.md, backgroundColor: palette.panelRaised },
   rootCardSelected: { borderColor: palette.silver50, borderWidth: 1, backgroundColor: "transparent" },
   rootCardSkeleton: { borderRadius: radii.md, backgroundColor: palette.hairlineBright, opacity: 0.72 },
@@ -4180,7 +4180,7 @@ const styles = StyleSheet.create({
   coveredCardMain: { justifyContent: "flex-end", paddingBottom: 10 },
   coveredCardLabel: { width: "auto", maxWidth: "100%", paddingHorizontal: 5, paddingVertical: 4, overflow: "hidden", borderRadius: radii.sm, backgroundColor: "rgba(0,0,0,0.68)", color: palette.silver50 },
   rootCardTitle: { width: "100%", color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, lineHeight: 15, textAlign: "center" },
-  rootEmptyState: { width: "100%", flex: 1, minHeight: 360, alignItems: "center", justifyContent: "center", gap: 14 },
+  rootEmptyState: { width: "100%", flexGrow: 1, alignItems: "center", justifyContent: "center", gap: 14 },
   rootEmpty: { width: "100%", color: palette.silver500, fontFamily: fonts.regular, fontSize: 13, textAlign: "center" },
   rootEmptyHelp: { maxWidth: 300, color: palette.silver700, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18, textAlign: "center" },
   emptyPlusButton: { width: 44, height: 44 },

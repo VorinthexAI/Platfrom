@@ -1173,7 +1173,7 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
               })}
             </View>
           )}
-          {(!overviewQuery.isPending || searchActive) && !searchPending && (!overviewQuery.error || searchActive) && !searchError && filteredBooks.length === 0 ? <View style={styles.state}><Text style={styles.stateTitle}>{searchActive || showOnlyFavorites || books.length ? "No audio books matching these filters." : "No audio books yet."}</Text>{!books.length && !searchActive && !showOnlyFavorites ? <Button accessibilityLabel="Create audio book" contentMode="raw" onPress={beginCreate} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : null}
+          {(!overviewQuery.isPending || searchActive) && !searchPending && (!overviewQuery.error || searchActive) && !searchError && filteredBooks.length === 0 ? <View style={styles.state}><Text style={styles.stateTitle}>{searchActive || showOnlyFavorites || books.length ? "No matching audio books." : "No audio books yet."}</Text>{!books.length && !searchActive && !showOnlyFavorites ? <Button accessibilityLabel="Create audio book" contentMode="raw" onPress={beginCreate} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : null}
         </ScrollView>
       </>}
       <CoreComposer

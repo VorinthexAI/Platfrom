@@ -259,7 +259,7 @@ export function EmailAttachmentPicker({ archiveOnly = false, galleryOnly = false
       </Tabs> : null}
       {selectionNotice ? <Text accessibilityLiveRegion="assertive" style={styles.notice}>{selectionNotice}</Text> : null}
       {error ? <Button onPress={() => void load(activeTab, query)} size="md" variant="secondary">Retry</Button> : null}
-      <ScrollView accessibilityLabel={`${activeTab} attachment results`} accessibilityLiveRegion="polite" accessibilityState={{ busy: loading }} contentContainerStyle={[styles.results, Boolean(query.trim()) && !loading && !error && (activeTab === "archive" ? visibleDocuments.length === 0 : visibleImages.length === 0) && styles.searchEmptyResults]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+       <ScrollView accessibilityLabel={`${activeTab} attachment results`} accessibilityLiveRegion="polite" accessibilityState={{ busy: loading }} contentContainerStyle={[styles.results, !loading && !error && (activeTab === "archive" ? visibleDocuments.length === 0 : visibleImages.length === 0) && styles.searchEmptyResults]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         {loading ? <View accessibilityLabel="Loading attachment results" accessibilityRole="progressbar" style={activeTab === "gallery" ? styles.imageGrid : styles.rootDocuments}>{Array.from({ length: activeTab === "gallery" ? 4 : 3 }, (_, index) => <Skeleton key={index} style={activeTab === "gallery" ? [styles.imageSkeleton, { width: imageSize, height: imageSize }] : styles.documentSkeleton} />)}</View> : activeTab === "archive" ? <View style={styles.rootDocuments}>{renderedDocuments.map((document) => {
           const ref = { type: "document" as const, key: document.key }; const active = isSelected(ref);
           return <Button accessibilityLabel={`${active ? "Deselect" : "Select"} ${document.name}`} accessibilityState={{ selected: active }} contentMode="raw" key={document.key} onPress={() => toggle(ref)} size="md" style={[styles.documentButton, active && styles.selectedDocumentItem]} variant={active ? "ghost" : "secondary"}><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text></Button>;
@@ -267,7 +267,7 @@ export function EmailAttachmentPicker({ archiveOnly = false, galleryOnly = false
           const ref = { type: "image" as const, key: image.key }; const active = isSelected(ref);
           return <Button accessibilityLabel={`${active ? "Deselect" : "Select"} ${image.caption || image.filename}`} accessibilityState={{ selected: active }} contentMode="raw" key={image.key} onPress={() => toggle(ref)} shape="rounded" size="xl" style={[styles.imageButton, { width: imageSize, height: imageSize }]} variant="ghost"><View style={[styles.imageFrame, active && styles.imageFrameSelected]}><Image accessibilityLabel={image.caption || image.filename} contentFit="cover" source={image.url} style={styles.image} transition={150} />{active ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View></Button>;
         })}</View>}
-        {!loading && !error && (activeTab === "archive" ? visibleDocuments.length === 0 : visibleImages.length === 0) ? <Text style={[styles.empty, Boolean(query.trim()) && styles.searchEmptyText]}>No {activeTab === "archive" ? "documents" : "images"} found.</Text> : null}
+        {!loading && !error && (activeTab === "archive" ? visibleDocuments.length === 0 : visibleImages.length === 0) ? <Text style={styles.empty}>{query.trim() || filters.favoritesOnly || filters.showHidden ? "No matching " : "No "}{activeTab === "archive" ? "documents" : "images"}{query.trim() || filters.favoritesOnly || filters.showHidden ? "." : " yet."}</Text> : null}
       </ScrollView>
     </BottomSheet>
     <BottomSheet hideHeading onOpenChange={(next) => { if (!next) setFilterOpen(false); }} open={filterOpen} title="">
@@ -299,8 +299,7 @@ const styles = StyleSheet.create({
   image: { width: "100%", height: "100%" },
   imageSkeleton: { borderRadius: radii.md, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   documentSkeleton: { width: "100%", height: 38, borderRadius: 999, backgroundColor: palette.hairlineBright, opacity: 0.72 },
-  empty: { paddingVertical: 60, color: palette.silver700, fontFamily: fonts.regular, fontSize: 13, textAlign: "center" },
-  searchEmptyText: { paddingVertical: 0 },
+  empty: { color: palette.silver700, fontFamily: fonts.regular, fontSize: 13, textAlign: "center" },
   footer: { gap: spacing.sm },
   filterPanel: { gap: 12 },
   favoriteSwitchRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: spacing.xs },
