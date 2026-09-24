@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { subscriptionSchema } from './contracts';
 
 // contracts.ts is included in the checksum of the applied 0018 seed migration.
@@ -6,3 +7,8 @@ export const currentSubscriptionResponseSchema = subscriptionSchema.omit({
   providerSubscriptionId: true,
   providerModifiedAt: true,
 }).nullable();
+
+export const scheduledSubscriptionResponseSchema = subscriptionSchema.omit({
+  providerSubscriptionId: true,
+  providerModifiedAt: true,
+}).extend({ pendingProductKey: z.string().cuid().nullable() }).nullable();

@@ -28,6 +28,7 @@ export type CoreComposerProps = {
   onExpandedLeadingPress?: () => void;
   onLeadingPress?: () => void;
   onSubmit: () => void;
+  openEnabled?: boolean;
   pageActions?: ReactNode;
   pageBackdrop?: ReactNode;
   prompts: readonly string[];
@@ -52,6 +53,7 @@ export function CoreComposer({
   onFocusChange,
   onLeadingPress,
   onSubmit,
+  openEnabled = true,
   pageActions,
   pageBackdrop,
   prompts,
@@ -71,16 +73,16 @@ export function CoreComposer({
         ) : leading}
         <TextInput
           aria-label={accessibilityLabel}
-          disabled={!editable}
+          disabled={!editable || !openEnabled}
           maxLength={maxLength}
           onBlur={() => onFocusChange?.(false)}
           onChange={(event) => onChangeText(event.target.value)}
           onFocus={() => onFocusChange?.(true)}
-          onKeyDown={(event) => { if (event.key === "Enter" && !disabled && value.trim()) onSubmit(); }}
+          onKeyDown={(event) => { if (event.key === "Enter" && !disabled && openEnabled && value.trim()) onSubmit(); }}
           placeholder={prompts[0] ?? "Ask Core anything..."}
           value={value}
         />
-        <Button aria-label="Send to Core" disabled={disabled || !value.trim()} loading={loading} onClick={onSubmit} size="sm" variant="primary">{sendIcon}</Button>
+        <Button aria-label="Send to Core" disabled={disabled || !openEnabled || !value.trim()} loading={loading} onClick={onSubmit} size="sm" variant="primary">{sendIcon}</Button>
       </div>
       {expandedFooter}
     </div>

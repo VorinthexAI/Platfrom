@@ -53,6 +53,7 @@ export const subscriptionSchema = z.strictObject({
   productKey: z.string().cuid(),
   status: z.enum(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]),
   cancelAtPeriodEnd: z.boolean(),
+  pendingProductKey: z.string().cuid().nullable().optional(),
   currentPeriodStart: z.string().datetime({ offset: true }).nullable(),
   currentPeriodEnd: z.string().datetime({ offset: true }).nullable(),
   createdAt: z.string().datetime({ offset: true }),
@@ -86,7 +87,7 @@ export async function fetchBillingSummary(query: BillingSummaryQuery = {}, signa
 }
 
 export async function fetchCurrentSubscription(signal?: AbortSignal): Promise<CurrentSubscription | null> {
-  const response = await apiClient.get("/subscriptions/current", { signal });
+  const response = await apiClient.get("/subscriptions/current", { params: { includeScheduled: "true" }, signal });
   return subscriptionEnvelopeSchema.parse(response.data).data;
 }
 
@@ -99,7 +100,7 @@ export async function setSubscriptionCancellation(cancelAtPeriodEnd: boolean): P
 }
 
 export async function scheduleSubscriptionProduct(productId: string): Promise<CurrentSubscription> {
-  const response = await apiClient.post('/subscriptions/current/schedule', { productId });
+  const response = await apiClient.post('/subscriptions/current/schedule', { productId }, { params: { includeScheduled: 'true' } });
   const subscription = subscriptionEnvelopeSchema.parse(response.data).data;
   if (!subscription) throw new Error('Subscription update returned no subscription.');
   return subscription;
@@ -118,7 +119,7 @@ export async function ensureSparkCapacity(requiredMicroSparks = 1) {
 }
 
 export function hasNewcomerAccountGrant(summary: BillingSummary) {
-  return summary.transactions.some((transaction) => transaction.idempotencyKey === "account-grant:v2" || transaction.metadata?.category === "newcomer-grant");
+  return summary.transactions.some((transaction) => transaction.kind === "adjustment" && transaction.idempotencyKey === "account-grant:v2" && transaction.deltaMicroSparks === 100_000_000);
 }
 
 export function wholeSparks(microSparkBalance: number) {

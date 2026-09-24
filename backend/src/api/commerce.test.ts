@@ -57,20 +57,38 @@ describe('commerce HTTP transport', () => {
 
   test('HTTP and Core schedule the selected subscription through the same trusted service', async () => {
     const userKey = newId(), teamKey = newId(); const calls: unknown[][] = [];
-    const commerce = service({ scheduleSubscriptionProduct: async (...args) => { calls.push(args); return { status: 'active', cancelAtPeriodEnd: false } as never; } });
+    const commerce = service({ scheduleSubscriptionProduct: async (...args) => { calls.push(args); return { status: 'active', cancelAtPeriodEnd: false, pendingProductKey: COMMERCE_CATALOG[2].key } as never; } });
     const handler = createCommerceHandlers({ service: commerce, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }).scheduleSubscription;
     const app = new Hono(); app.onError(errorHandler); app.post('/subscriptions/current/schedule', handler);
     const request = (body: unknown) => app.request('/subscriptions/current/schedule', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     const anonymous = new Hono(); anonymous.post('/subscriptions/current/schedule', createCommerceHandlers({ service: commerce, getIdentity: async () => null }).scheduleSubscription);
     expect((await anonymous.request('/subscriptions/current/schedule', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ productId: 'nova.monthly.discounted' }) })).status).toBe(401);
     expect((await request({ productId: 'nova.monthly.discounted', userKey })).status).toBe(400);
-    expect((await request({ productId: 'nova.monthly.discounted' })).status).toBe(200);
+    expect((await (await request({ productId: 'nova.monthly.discounted' })).json()).data).not.toHaveProperty('pendingProductKey');
+    const optedIn = await app.request('/subscriptions/current/schedule?includeScheduled=true', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ productId: 'nova.monthly.discounted' }) });
+    expect((await optedIn.json()).data).toHaveProperty('pendingProductKey', COMMERCE_CATALOG[2].key);
+    expect((await app.request('/subscriptions/current/schedule?includeScheduled=false', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ productId: 'nova.monthly.discounted' }) })).status).toBe(400);
     const domain = { teamKey, runtimeScopeKey: newId(), principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
     const capability = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'subscription.current.schedule')!;
     expect(capability.executionEffect).toBe('write');
     expect(() => capability.inputSchema.parse({ productId: 'nova.monthly.discounted', userKey })).toThrow();
     await capability.execute({ productId: 'nova.monthly.discounted' }, { domain, commerce } as never);
-    expect(calls).toEqual([[userKey, { productId: 'nova.monthly.discounted' }], [userKey, { productId: 'nova.monthly.discounted' }]]);
+    expect(calls).toEqual([[userKey, { productId: 'nova.monthly.discounted' }], [userKey, { productId: 'nova.monthly.discounted' }], [userKey, { productId: 'nova.monthly.discounted' }]]);
+  });
+
+  test('an opted-in HTTP read includes pending plan data while legacy HTTP and Core reads retain their contract', async () => {
+    const userKey = newId(), teamKey = newId(), calls: unknown[][] = [];
+    const base = { key: newId(), userKey, productKey: COMMERCE_CATALOG[2].key, status: 'active', cancelAtPeriodEnd: false, currentPeriodStart: '2026-09-05T10:00:00.000Z', currentPeriodEnd: '2026-10-05T10:00:00.000Z', createdAt: '2026-09-05T10:00:00.000Z', updatedAt: '2026-09-05T10:00:00.000Z' } as const;
+    const commerce = service({ getCurrentSubscription: async (...args) => { calls.push(args); return { ...base, ...(args[1]?.includeScheduled ? { pendingProductKey: COMMERCE_CATALOG[0].key } : {}) }; } });
+    const app = new Hono(); app.onError(errorHandler);
+    app.get('/subscriptions/current', createCommerceHandlers({ service: commerce, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }).currentSubscription);
+    expect((await (await app.request('/subscriptions/current')).json()).data).not.toHaveProperty('pendingProductKey');
+    expect((await (await app.request('/subscriptions/current?includeScheduled=true')).json()).data).toHaveProperty('pendingProductKey', COMMERCE_CATALOG[0].key);
+    expect((await app.request('/subscriptions/current?includeScheduled=false')).status).toBe(400);
+    const domain = { teamKey, runtimeScopeKey: newId(), principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const capability = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'subscription.current.read')!;
+    await capability.execute({}, { domain, commerce } as never);
+    expect(calls).toEqual([[userKey], [userKey, { includeScheduled: true }], [userKey]]);
   });
 
   test('issues authenticated handoffs and keeps resolve/continue sessionless with strict token-only bodies', async () => {

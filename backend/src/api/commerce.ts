@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { commerceService, subscriptionScheduleInputSchema, type CommerceService } from '@/lib/commerce/service';
 import { checkoutCreateInputSchema, subscriptionMutationInputSchema } from '@/lib/commerce/contracts';
 import { getAuthIdentity } from './security';
-import { parseJson } from './validation';
+import { parseJson, parseQuery, strictObject } from './validation';
 import { checkoutHandoffInputSchema, checkoutHandoffService, type CheckoutHandoffService, CheckoutHandoffIssueConflictError, CheckoutHandoffUnavailableError } from '@/lib/commerce/checkout-handoffs';
 
 const idempotencyKeySchema = z.string().trim().min(1).max(200);
@@ -69,7 +69,8 @@ export function createCommerceHandlers(dependencies: CommerceHandlerDependencies
     async currentSubscription(c: Context) {
       const userKey = await authenticatedUser(c, identity);
       if (!userKey) return c.json({ success: false, error: 'authenticated user required' }, 401);
-      return c.json({ success: true, data: await service.getCurrentSubscription(userKey) });
+      const query = parseQuery(c, strictObject({ includeScheduled: z.literal('true').optional() }));
+      return c.json({ success: true, data: await (query.includeScheduled === 'true' ? service.getCurrentSubscription(userKey, { includeScheduled: true }) : service.getCurrentSubscription(userKey)) });
     },
     async cancelSubscription(c: Context) {
       const userKey = await authenticatedUser(c, identity);
@@ -86,7 +87,11 @@ export function createCommerceHandlers(dependencies: CommerceHandlerDependencies
     async scheduleSubscription(c: Context) {
       const userKey = await authenticatedUser(c, identity);
       if (!userKey) return c.json({ success: false, error: 'authenticated user required' }, 401);
-      return c.json({ success: true, data: await service.scheduleSubscriptionProduct(userKey, await parseJson(c, subscriptionScheduleInputSchema)) });
+      const query = parseQuery(c, strictObject({ includeScheduled: z.literal('true').optional() }));
+      const subscription = await service.scheduleSubscriptionProduct(userKey, await parseJson(c, subscriptionScheduleInputSchema));
+      if (!subscription) throw new Error('Subscription update returned no subscription.');
+      const { pendingProductKey: _pendingProductKey, ...legacy } = subscription;
+      return c.json({ success: true, data: query.includeScheduled === 'true' ? subscription : legacy });
     },
   });
 }

@@ -325,7 +325,7 @@ describe('canonical commerce service', () => {
     });
     const scheduled = await service.scheduleSubscriptionProduct(userKey, { productId: 'nova.monthly.discounted' });
     expect(calls).toEqual(['cancel:false', 'schedule:remote-monthly']);
-    expect(scheduled).toMatchObject({ productKey: COMMERCE_CATALOG[0].key, cancelAtPeriodEnd: false, currentPeriodEnd: '2026-10-05T10:00:00.000Z' });
+    expect(scheduled).toMatchObject({ productKey: COMMERCE_CATALOG[0].key, pendingProductKey: COMMERCE_CATALOG[2].key, cancelAtPeriodEnd: false, currentPeriodEnd: '2026-10-05T10:00:00.000Z' });
     expect(scheduled).not.toHaveProperty('providerSubscriptionId');
     await expect(service.scheduleSubscriptionProduct(userKey, { productId: 'topup.small' })).rejects.toMatchObject({ code: 'PRODUCT_NOT_FOUND' });
     await expect(service.scheduleSubscriptionProduct(userKey, { productId: 'nova.weekly', userKey })).rejects.toThrow('Unrecognized key');
@@ -353,6 +353,19 @@ describe('canonical commerce service', () => {
     });
     await expect(service.scheduleSubscriptionProduct(userKey, { productId: 'nova.monthly.discounted' })).rejects.toThrow('database unavailable');
     expect(calls).toEqual([false, true]);
+  });
+
+  test('only an opted-in subscription read includes the scheduled product and tolerates provider outages', async () => {
+    const userKey = newId(); let unavailable = false;
+    const current: Subscription = { key: newId(), userKey, productKey: COMMERCE_CATALOG[2].key, providerSubscriptionId: 'sub-1', status: 'active', cancelAtPeriodEnd: false, currentPeriodStart: at, currentPeriodEnd: '2026-10-05T10:00:00.000Z', providerModifiedAt: null, createdAt: at, updatedAt: at };
+    const service = createCommerceService({
+      repository: repository({ getCurrentSubscription: async () => current, getProductByProviderId: async (id) => id === 'remote-weekly' ? { ...COMMERCE_CATALOG[0], providerProductId: id } : null }),
+      provider: { getSubscription: async () => { if (unavailable) throw new Error('provider unavailable'); return { id: 'sub-1', pending_update: { product_id: 'remote-weekly' } }; } } as never,
+    });
+    expect(await service.getCurrentSubscription(userKey)).not.toHaveProperty('pendingProductKey');
+    expect(await service.getCurrentSubscription(userKey, { includeScheduled: true })).toMatchObject({ productKey: COMMERCE_CATALOG[2].key, pendingProductKey: COMMERCE_CATALOG[0].key });
+    unavailable = true;
+    expect(await service.getCurrentSubscription(userKey, { includeScheduled: true })).toMatchObject({ productKey: COMMERCE_CATALOG[2].key, pendingProductKey: null });
   });
 
   test('accepts Polar renewal webhooks carrying the old checkout product after a scheduled plan change', async () => {

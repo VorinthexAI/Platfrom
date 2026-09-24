@@ -1,6 +1,7 @@
 import { AppleIcon, GoogleIcon, LinkOffIcon, MailIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Button } from "@vorinthex/shared/ui/button";
 import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
+import { Spinner } from "@vorinthex/shared/ui/spinner";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { isAxiosError } from "axios";
 import * as Linking from "expo-linking";
@@ -227,8 +228,8 @@ export default function AuthRoute() {
           </View>
 
           <View style={styles.panel}>
-            <Button disabled={busy} icon={<GoogleIcon />} loading={loading === "google"} onPress={() => void oauth("google")} size="lg" variant="secondary">Continue with Google</Button>
-            <Button disabled={busy} icon={<AppleIcon />} loading={loading === "apple"} onPress={() => void oauth("apple")} size="lg" variant="secondary">Continue with Apple</Button>
+            <Button disabled={busy} icon={<GoogleIcon />} onPress={() => void oauth("google")} size="lg" trailingIcon={loading === "google" ? <Spinner size="small" /> : undefined} variant="secondary">Continue with Google</Button>
+            <Button disabled={busy} icon={<AppleIcon />} onPress={() => void oauth("apple")} size="lg" trailingIcon={loading === "apple" ? <Spinner size="small" /> : undefined} variant="secondary">Continue with Apple</Button>
             <Button disabled={busy} icon={<MailIcon />} onPress={selectEmail} size="lg" variant="secondary">Continue with email</Button>
             {!emailVisible && (error || params.oauth_error) ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error ?? "Sign in could not be completed. Please try again."}</Text> : null}
           </View>

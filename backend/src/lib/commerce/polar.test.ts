@@ -34,6 +34,15 @@ describe('Polar provider adapter', () => {
     expect(body).toEqual({ product_id: 'remote-monthly', proration_behavior: 'next_period' });
   });
 
+  test('reads the provider pending update without exposing a second checkout', async () => {
+    const provider = createPolarProvider({ environment: 'sandbox', accessToken: 'token' }, async (url, init) => {
+      expect(String(url)).toBe('https://sandbox-api.polar.sh/v1/subscriptions/sub-1');
+      expect(init?.method).toBe('GET');
+      return Response.json({ id: 'sub-1', status: 'active', cancel_at_period_end: false, current_period_start: timestamp, current_period_end: '2026-10-05T10:00:00.000Z', pending_update: { product_id: 'remote-weekly' } });
+    });
+    expect((await provider.getSubscription('sub-1')).pending_update?.product_id).toBe('remote-weekly');
+  });
+
   test('uses current product collection URLs, paginates, and omits prices from metadata-only updates', async () => {
     const requests: { url: string; init: RequestInit }[] = [];
     const provider = createPolarProvider({ environment: 'production', accessToken: 'token' }, async (url, init) => {

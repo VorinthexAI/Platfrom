@@ -55,6 +55,7 @@ export type CoreComposerProps = {
   onExpandedLeadingPress?: () => void;
   onLeadingPress?: () => void;
   onSubmit: () => void;
+  openEnabled?: boolean;
   openRequest?: number;
   pageActions?: ReactNode;
   pageBackdrop?: ReactNode;
@@ -262,6 +263,7 @@ export function CoreComposer({
   onExpandedLeadingPress,
   onLeadingPress,
   onSubmit,
+  openEnabled = true,
   openRequest = 0,
   pageActions,
   pageBackdrop,
@@ -272,7 +274,7 @@ export function CoreComposer({
   value,
 }: CoreComposerProps) {
   const insets = useSafeAreaInsets();
-  const [pageOpen, setPageOpen] = useState(openRequest > 0);
+  const [pageOpen, setPageOpen] = useState(openEnabled && openRequest > 0);
   const [focusInputOnPageMount, setFocusInputOnPageMount] = useState(openRequest <= 0 || focusOnOpenRequest);
   const [inputHeight, setInputHeight] = useState(COLLAPSED_INPUT_HEIGHT);
   const [inputLineCount, setInputLineCount] = useState(1);
@@ -317,6 +319,10 @@ export function CoreComposer({
     if (!Keyboard.isVisible()) finishClose();
   }, [finishClose]);
 
+  useEffect(() => {
+    if (!openEnabled && pageOpen) closePage();
+  }, [closePage, openEnabled, pageOpen]);
+
   const focusInput = useCallback(() => {
     if (closingRef.current) return undefined;
     inputRef.current?.focus();
@@ -327,12 +333,12 @@ export function CoreComposer({
   }, []);
 
   const openPage = useCallback(() => {
-    if (pageOpen) return;
+    if (pageOpen || !openEnabled) return;
     setInputHeight(COLLAPSED_INPUT_HEIGHT);
     setInputLineCount(1);
     onFocusChangeRef.current?.(true);
     setPageOpen(true);
-  }, [pageOpen]);
+  }, [openEnabled, pageOpen]);
 
   useEffect(() => {
     const pageWasOpen = pageWasOpenRef.current;
@@ -348,6 +354,7 @@ export function CoreComposer({
   useLayoutEffect(() => {
     if (openRequest <= handledOpenRequestRef.current) return;
     handledOpenRequestRef.current = openRequest;
+    if (!openEnabled) return;
     if (!pageOpen) {
       setInputHeight(COLLAPSED_INPUT_HEIGHT);
       setInputLineCount(1);
@@ -360,16 +367,16 @@ export function CoreComposer({
     }
     onFocusChangeRef.current?.(true);
     setPageOpen(true);
-  }, [focusOnOpenRequest, openRequest, pageOpen]);
+  }, [focusOnOpenRequest, openEnabled, openRequest, pageOpen]);
 
   useEffect(() => {
-    if (focusRequest <= handledFocusRequestRef.current || !pageOpen || !editable) return;
+    if (focusRequest <= handledFocusRequestRef.current || !pageOpen || !editable || !openEnabled) return;
     handledFocusRequestRef.current = focusRequest;
     const timeout = setTimeout(() => {
       if (!closingRef.current) inputRef.current?.focus();
     }, CORE_EDIT_FOCUS_DELAY_MS);
     return () => clearTimeout(timeout);
-  }, [editable, focusRequest, pageOpen]);
+  }, [editable, focusRequest, openEnabled, pageOpen]);
 
   useEffect(() => () => {
     closeSubscriptionRef.current?.remove();
@@ -377,10 +384,10 @@ export function CoreComposer({
   }, []);
 
   useEffect(() => {
-    if (editable) return;
+    if (editable && openEnabled) return;
     inputRef.current?.blur();
     Keyboard.dismiss();
-  }, [editable]);
+  }, [editable, openEnabled]);
 
   useEffect(() => {
     if (value.length !== 0) return;
@@ -392,7 +399,7 @@ export function CoreComposer({
   }, [value]);
 
   function submit() {
-    if (disabled || !editable || !value.trim()) return;
+    if (disabled || !editable || !openEnabled || !value.trim()) return;
     inputRef.current?.blur();
     Keyboard.dismiss();
     onSubmit();
@@ -450,7 +457,7 @@ export function CoreComposer({
       <TextInput
         accessibilityHint={accessibilityHint}
         accessibilityLabel={accessibilityLabel}
-        editable={editable}
+        editable={editable && openEnabled}
         maxLength={maxLength}
         multiline={expanded}
         numberOfLines={expanded ? undefined : 1}
@@ -486,7 +493,7 @@ export function CoreComposer({
     <Button
       accessibilityLabel="Send to Core"
       contentMode="raw"
-      disabled={disabled || !value.trim()}
+      disabled={disabled || !openEnabled || !value.trim()}
       loading={loading}
       onPress={submit}
       size="sm"

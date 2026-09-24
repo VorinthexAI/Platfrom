@@ -17,6 +17,7 @@ const subscriptionResponseSchema = z.object({
   current_period_start: z.string().datetime({ offset: true }),
   current_period_end: z.string().datetime({ offset: true }),
   modified_at: polarTimestamp.nullable().optional(),
+  pending_update: z.object({ product_id: polarId.nullable().optional() }).passthrough().nullable().optional(),
 }).passthrough();
 const fixedPriceSchema = z.object({ id: polarId, amount_type: z.literal('fixed'), price_currency: z.string(), price_amount: z.number().int(), tax_behavior: z.enum(['inclusive', 'exclusive']).nullable(), is_archived: z.boolean() }).passthrough();
 const productResponseSchema = z.object({
@@ -152,6 +153,9 @@ export function createPolarProvider(configuration = polarConfiguration(), fetche
     async updateSubscription(providerSubscriptionId: string, cancelAtPeriodEnd: boolean) {
       return subscriptionResponseSchema.parse(await request(`/subscriptions/${encodeURIComponent(providerSubscriptionId)}`, { method: 'PATCH', body: JSON.stringify({ cancel_at_period_end: cancelAtPeriodEnd }) }, subscriptionResponseSchema));
     },
+    async getSubscription(providerSubscriptionId: string) {
+      return subscriptionResponseSchema.parse(await request(`/subscriptions/${encodeURIComponent(providerSubscriptionId)}`, { method: 'GET' }, subscriptionResponseSchema));
+    },
     async scheduleSubscriptionProduct(providerSubscriptionId: string, providerProductId: string) {
       return subscriptionResponseSchema.parse(await request(`/subscriptions/${encodeURIComponent(providerSubscriptionId)}`, { method: 'PATCH', body: JSON.stringify({ product_id: providerProductId, proration_behavior: 'next_period' }) }, subscriptionResponseSchema));
     },
@@ -192,7 +196,7 @@ export function verifyPolarWebhookSignature(input: { rawBody: string; webhookId?
 }
 
 type CompletePolarProvider = ReturnType<typeof createPolarProvider>;
-export type PolarProvider = Pick<CompletePolarProvider, 'listProducts' | 'createCheckout' | 'updateSubscription' | 'scheduleSubscriptionProduct' | 'revokeSubscription' | 'createProduct' | 'updateProduct'> & Partial<Pick<CompletePolarProvider, 'listOrders' | 'listSubscriptions'>>;
+export type PolarProvider = Pick<CompletePolarProvider, 'listProducts' | 'createCheckout' | 'updateSubscription' | 'scheduleSubscriptionProduct' | 'revokeSubscription' | 'createProduct' | 'updateProduct'> & Partial<Pick<CompletePolarProvider, 'getSubscription' | 'listOrders' | 'listSubscriptions'>>;
 export type PolarReconciliationProvider = Required<Pick<CompletePolarProvider, 'listOrders' | 'listSubscriptions'>>;
 export type PolarProduct = Awaited<ReturnType<PolarProvider['listProducts']>>[number];
 export type PolarOrder = z.infer<typeof polarOrderSchema>;

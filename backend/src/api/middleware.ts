@@ -204,6 +204,8 @@ function querySchemaForPath(path: string, method: string) {
     return strictObject({ limit: z.string().regex(/^\d+$/).optional() });
   }
   if (method === 'DELETE' && apiPath === '/auth/me/hiddens') return strictObject({ source: z.enum(['collection', 'document', 'image', 'folder']), sourceKey: z.string().cuid() });
+  if (method === 'GET' && apiPath === '/subscriptions/current') return strictObject({ includeScheduled: z.literal('true').optional() });
+  if (method === 'POST' && apiPath === '/subscriptions/current/schedule') return strictObject({ includeScheduled: z.literal('true').optional() });
   if (method === 'GET' && apiPath === '/gallery/highlights') return strictObject({ teamKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
   if (method === 'GET' && apiPath === '/gallery/memories') return strictObject({ teamKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
   if (method === 'GET' && apiPath === '/billing/summary') return strictObject({ limit: z.string().regex(/^\d+$/).optional(), beforeCreatedAt: z.string().datetime({ offset: true }).optional(), beforeKey: z.string().trim().min(1).max(200).optional(), kind: sparkTransactionKindSchema.optional() });

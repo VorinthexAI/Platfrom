@@ -7,7 +7,7 @@ import { referralService } from '@/lib/referrals/service';
 import { getUserById } from '@/lib/db/users.node';
 import { sendSubscriptionCancellationEmail, sendSubscriptionPurchaseEmail, sendSubscriptionRenewalEmail, sendTopUpPurchaseEmail } from '@/lib/email/lifecycle';
 import { checkoutCreateInputSchema, checkoutCreateResultSchema, productIdSchema, publicProductSchema, subscriptionSchema, subscriptionStatusSchema } from './contracts';
-import { currentSubscriptionResponseSchema } from './public-subscription';
+import { currentSubscriptionResponseSchema, scheduledSubscriptionResponseSchema } from './public-subscription';
 import { createArangoCommerceRepository, type CommerceRepository } from './repository';
 import { createPolarProvider, PolarProviderError, type PolarProvider } from './polar';
 
@@ -234,11 +234,24 @@ export function createCommerceService({ repository, provider, createProvider = c
         throw error;
       }
     },
-    async getCurrentSubscription(trustedUserKey: string) {
+    async getCurrentSubscription(trustedUserKey: string, options?: { includeScheduled?: boolean }) {
       const subscription = await repository.getCurrentSubscription(trustedUserKey);
       if (!subscription) return null;
       const { providerSubscriptionId: _providerSubscriptionId, providerModifiedAt: _providerModifiedAt, ...safe } = subscription;
-      return currentSubscriptionResponseSchema.parse(safe);
+      if (!options?.includeScheduled) return currentSubscriptionResponseSchema.parse(safe);
+      let pendingProductKey: string | null = null;
+      if (subscription.status === 'active' || subscription.status === 'trialing') {
+        try {
+          const remote = await polar().getSubscription?.(subscription.providerSubscriptionId);
+          if (remote?.id === subscription.providerSubscriptionId && remote.pending_update?.product_id) {
+            const product = await repository.getProductByProviderId(remote.pending_update.product_id);
+            if (product?.type === 'subscription' && product.key !== subscription.productKey) pendingProductKey = product.key;
+          }
+        } catch (error) {
+          console.warn('scheduled subscription lookup failed', { userKey: trustedUserKey, error });
+        }
+      }
+      return scheduledSubscriptionResponseSchema.parse({ ...safe, pendingProductKey });
     },
     async setCancellation(trustedUserKey: string, cancelAtPeriodEnd: boolean) {
       const current = await repository.getCurrentSubscription(trustedUserKey);
@@ -293,7 +306,9 @@ export function createCommerceService({ repository, provider, createProvider = c
         if (current.cancelAtPeriodEnd) await restoreCancellation();
         throw error;
       }
-      return project(scheduled);
+      const updated = await project(scheduled);
+      if (!updated) throw new Error('Scheduled plan returned no subscription.');
+      return scheduledSubscriptionResponseSchema.parse({ ...updated, pendingProductKey: product.key });
     },
     async revokeUserSubscriptions(trustedUserKey: string) {
       const subscriptions = await repository.listSubscriptionsByUser(trustedUserKey);

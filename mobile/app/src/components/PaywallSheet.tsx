@@ -36,16 +36,17 @@ type Page = "plans" | "referral";
 type OfferTab = "plans" | "topup";
 type CheckoutState = "idle" | "opening";
 
-function PlanCard({ current, endsAt, onSelect, product, selected }: { current: boolean; endsAt?: string; onSelect: () => void; product: MobileProduct; selected: boolean }) {
+function PlanCard({ current, currentUntil, endsAt, onSelect, product, selected, startsAt }: { current: boolean; currentUntil: boolean; endsAt?: string; onSelect: () => void; product: MobileProduct; selected: boolean; startsAt?: string }) {
   const period = product.billingPeriod === "month" ? "month" : product.billingPeriod === "week" ? "week" : null;
   const sparkAmount = productSparkAmount(product);
   const bestValue = product.billingPeriod === "month";
+  const status = current ? currentUntil && endsAt ? `Current until ${endsAt}` : endsAt ? `Ends ${endsAt}` : "Current plan" : startsAt ? `Starts ${startsAt}` : undefined;
   return <View style={styles.planWrap}>
-    <Button accessibilityLabel={`${formatProductPrice(effectivePriceCents(product), product.currency)}${period ? ` per ${period}` : " one time"}, ${sparkAmount} Sparks`} accessibilityState={{ selected }} contentMode="raw" onPress={onSelect} shape="rounded" size="md" style={[styles.plan, selected && styles.planSelected]} variant="outline">
+    <Button accessibilityLabel={`${formatProductPrice(effectivePriceCents(product), product.currency)}${period ? ` per ${period}` : " one time"}, ${sparkAmount} Sparks${status ? `, ${status}` : ""}`} accessibilityState={{ selected }} contentMode="raw" onPress={onSelect} shape="rounded" size="md" style={[styles.plan, selected && styles.planSelected]} variant="outline">
       <View style={styles.planValue}><Text style={styles.planGrant}>{sparkAmount.toLocaleString("en-US")} Sparks</Text><Text style={styles.planName}>{product.billingPeriod === "month" ? "Monthly plan" : product.billingPeriod === "week" ? "Weekly plan" : "One-time top-up"}</Text></View>
       <View style={styles.priceRow}>{product.discountedPriceCents !== null ? <Text accessibilityLabel={`Reference price ${formatProductPrice(product.priceCents, product.currency)}`} style={styles.referencePrice}>{formatProductPrice(product.priceCents, product.currency)}</Text> : null}<Text style={styles.price}>{formatProductPrice(effectivePriceCents(product), product.currency)}</Text>{period ? <Text style={styles.period}>/{period}</Text> : null}</View>
     </Button>
-    {current ? <Badge accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.currentPlanBadge}><Text style={styles.currentPlanBadgeText}>{endsAt ? `Ends ${endsAt}` : "Current plan"}</Text></Badge> : bestValue ? <Badge accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.bestValueBadge}><Text style={styles.bestValueBadgeText}>Best value</Text></Badge> : null}
+    {status ? <Badge accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.currentPlanBadge}><Text style={styles.currentPlanBadgeText}>{status}</Text></Badge> : bestValue ? <Badge accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.bestValueBadge}><Text style={styles.bestValueBadgeText}>Best value</Text></Badge> : null}
   </View>;
 }
 
@@ -88,9 +89,10 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
   const selected = offers.find(({ key }) => key === effectiveSelectedKey);
   const subscription = subscriptionQuery.data;
   const currentSubscriptionProductKey = subscription && ["active", "trialing", "past_due"].includes(subscription.status) ? subscription.productKey : undefined;
-  const currentPlanEndDate = subscription?.cancelAtPeriodEnd && subscription.currentPeriodEnd ? new Date(subscription.currentPeriodEnd).toLocaleDateString() : undefined;
+  const currentPlanEndDate = (subscription?.cancelAtPeriodEnd || subscription?.pendingProductKey) && subscription?.currentPeriodEnd ? new Date(subscription.currentPeriodEnd).toLocaleDateString() : undefined;
   const activePlan = subscription && ["active", "trialing"].includes(subscription.status);
   const selectedCurrentPlan = Boolean(selected && selected.key === currentSubscriptionProductKey);
+  const selectedScheduledPlan = Boolean(selected && selected.key !== currentSubscriptionProductKey && selected.key === subscription?.pendingProductKey);
   const renewalAction = Boolean(selected?.type === "subscription" && activePlan);
   const referral = useQuery({ queryKey: referralSummaryQueryKey(userKey ?? "unauthenticated"), queryFn: fetchReferralSummary, enabled: Boolean(userKey && open && (mode === "onboarding" || page === "referral")), initialData: authReferralSummary?.code.ownerUserKey === userKey ? authReferralSummary : undefined });
   useErrorFeedback(open ? [message, completionError, page === "referral" ? referral.error : undefined] : []);
@@ -131,7 +133,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
 
   async function checkout() {
     if (!selected || !userKey || checkoutInFlight.current || checkoutState === "opening") return;
-    if (selectedCurrentPlan && (!renewalAction || !subscription?.cancelAtPeriodEnd)) return;
+    if (selectedScheduledPlan || selectedCurrentPlan && (!renewalAction || !subscription?.cancelAtPeriodEnd)) return;
     checkoutInFlight.current = true;
     setCheckoutState("opening");
     setMessage(undefined);
@@ -210,7 +212,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
     }
   }
 
-  const footer = page === "plans" ? <><Button disabled={!selected || checkoutState === "opening" || selectedCurrentPlan && (!renewalAction || !subscription?.cancelAtPeriodEnd)} onPress={() => void checkout()} pressFeedback="none" size="md" variant="primary">{selectedCurrentPlan ? subscription?.cancelAtPeriodEnd && renewalAction ? "Resume renewal" : "Current plan" : renewalAction ? "Switch at renewal" : "Continue to checkout"}</Button>{mode === "standard" ? <Button onPress={closeStandard} size="md" variant="secondary">Close</Button> : null}</> : <Button disabled={!referral.data || sharing} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button>;
+  const footer = page === "plans" ? <><Button disabled={!selected || checkoutState === "opening" || selectedScheduledPlan || selectedCurrentPlan && (!renewalAction || !subscription?.cancelAtPeriodEnd)} onPress={() => void checkout()} pressFeedback="none" size="md" variant="primary">{selectedScheduledPlan ? "Scheduled" : selectedCurrentPlan ? subscription?.cancelAtPeriodEnd && renewalAction ? "Resume renewal" : "Current plan" : renewalAction ? "Switch at renewal" : "Continue to checkout"}</Button>{mode === "standard" ? <Button onPress={closeStandard} size="md" variant="secondary">Close</Button> : null}</> : <Button disabled={!referral.data || sharing} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button>;
 
   if (mode === "onboarding" && page === "referral") return <OnboardingStepLayout
     action={<><Button disabled={!referral.data || sharing || completing} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button><Button disabled={completing} onPress={() => void finish()} size="md" variant="secondary">Skip</Button>{completionError ? <Button loading={completing} onPress={() => void finish()} size="md" variant="secondary">Retry</Button> : null}</>}
@@ -225,9 +227,10 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
     {referral.isLoading ? <Text style={styles.heroCopy}>Loading your referral code...</Text> : referral.isError ? <Button onPress={() => void referral.refetch()} size="md" variant="secondary">Retry</Button> : referral.data ? <View style={styles.codeBlock}><Text style={styles.sectionLabel}>YOUR CODE</Text><Text selectable style={styles.code}>{referral.data.code.code}</Text></View> : null}
   </OnboardingStepLayout>;
 
+  const renderPlanCard = (product: MobileProduct) => <PlanCard current={currentSubscriptionProductKey === product.key} currentUntil={Boolean(subscription?.pendingProductKey)} endsAt={currentPlanEndDate} key={product.key} onSelect={() => setSelectedKey(product.key)} product={product} selected={effectiveSelectedKey === product.key} startsAt={subscription?.pendingProductKey === product.key ? currentPlanEndDate : undefined} />;
   const content = page === "plans" ? <ScrollView contentContainerStyle={[styles.content, mode === "onboarding" && styles.onboardingContent]} showsVerticalScrollIndicator={false}>
     {mode === "onboarding" ? <View style={styles.hero}><View style={styles.heroTitleRow}><Text style={styles.heroTitle}>One balance for everything you create and use</Text><ButtonSizeProvider overrideParent size="sm"><Button accessibilityLabel="How Sparks are billed" contentMode="raw" iconOnly onPress={() => setSparkCostsOpen(true)} size="sm" variant="icon"><HelpIcon size="sm" /></Button></ButtonSizeProvider></View><Text style={styles.heroCopy}>Sparks give you a simple way to use AI capabilities, store your work, and keep services connected across Vorinthex.</Text></View> : <View style={styles.balanceHero}><View style={styles.balanceHeading}><SparksIcon size="lg" /><Text accessibilityLabel={balance === undefined ? "Sparks balance unavailable. Showing 0 Sparks" : `${balance} Sparks`} style={styles.balance}>{formatWholeSparks(balance ?? 0)} <Text style={styles.balanceUnit}>Sparks</Text></Text></View><ButtonSizeProvider overrideParent size="sm"><Button accessibilityLabel="How Sparks are billed" contentMode="raw" iconOnly onPress={() => setSparkCostsOpen(true)} size="sm" variant="icon"><HelpIcon size="sm" /></Button></ButtonSizeProvider></View>}
-    {mode === "standard" ? <><Tabs accessibilityLabel="Spark offers" accessibilityRole="tablist" onValueChange={(value) => setOfferTab(value as OfferTab)} style={styles.offerTabs} value={offerTab}><TabsTrigger style={styles.offerTab} value="plans">Plans</TabsTrigger><TabsTrigger style={styles.offerTab} value="topup">Top-up</TabsTrigger></Tabs><View style={styles.plans}>{offers.map((product) => <PlanCard current={currentSubscriptionProductKey === product.key} endsAt={currentPlanEndDate} key={product.key} onSelect={() => setSelectedKey(product.key)} product={product} selected={effectiveSelectedKey === product.key} />)}</View></> : <View style={styles.plans}>{subscriptions.map((product) => <PlanCard current={currentSubscriptionProductKey === product.key} endsAt={currentPlanEndDate} key={product.key} onSelect={() => setSelectedKey(product.key)} product={product} selected={effectiveSelectedKey === product.key} />)}</View>}
+    {mode === "standard" ? <><Tabs accessibilityLabel="Spark offers" accessibilityRole="tablist" onValueChange={(value) => setOfferTab(value as OfferTab)} style={styles.offerTabs} value={offerTab}><TabsTrigger style={styles.offerTab} value="plans">Plans</TabsTrigger><TabsTrigger style={styles.offerTab} value="topup">Top-up</TabsTrigger></Tabs><View style={styles.plans}>{offers.map(renderPlanCard)}</View></> : <View style={styles.plans}>{subscriptions.map(renderPlanCard)}</View>}
     {!offers.length ? <View style={styles.state}><Text style={styles.heroCopy}>{productsStatus === "loading" ? "Loading offers..." : "Offers are temporarily unavailable."}</Text>{productsStatus !== "loading" ? <Button onPress={() => void refreshProducts()} size="md" variant="secondary">Retry</Button> : null}</View> : null}
   </ScrollView> : <ScrollView contentContainerStyle={styles.referralContent} showsVerticalScrollIndicator={false}>
     <View style={styles.referralHero}><Text style={styles.heroTitle}>Invite a friend</Text><Text style={styles.heroCopy}>Invite a friend with your code and earn Sparks as they get started.</Text></View>
