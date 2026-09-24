@@ -1,15 +1,16 @@
-import { AppleIcon, GoogleIcon, MailIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { AppleIcon, GoogleIcon, LinkOffIcon, MailIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Button } from "@vorinthex/shared/ui/button";
-import { Spinner } from "@vorinthex/shared/ui/spinner";
+import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { isAxiosError } from "axios";
 import * as Linking from "expo-linking";
-import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AccessibilityInfo, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { vorinthexMarkSource } from "@/data/capability-icons";
+import { AuthSplashScreen } from "@/components/AuthSplashScreen";
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { NeuralBackdrop } from "@/components/NeuralBackdrop";
 import { getJson, postJson } from "@/lib/api-client";
@@ -22,7 +23,7 @@ import { setPendingTeamMfaChallenge } from "@/lib/team-client";
 
 type LoginResponse = {
   handoff_token_hash?: string;
-  handoff_expires_at?: string;
+  expires_at: string;
 };
 
 const FRONTEND_URL = (process.env.EXPO_PUBLIC_FRONTEND_URL ?? "https://vorinthex.com").replace(/\/$/, "");
@@ -36,29 +37,44 @@ function messageFor(error: unknown) {
 
 export default function AuthRoute() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ link_error?: string }>();
   const insets = useSafeAreaInsets();
   const { height, width } = useWindowDimensions();
   const hydrate = useAuthStore((state) => state.hydrate);
   const [emailVisible, setEmailVisible] = useState(false);
   const [email, setEmail] = useState("");
+  const [submittedEmail, setSubmittedEmail] = useState("");
   const [checkInbox, setCheckInbox] = useState(false);
   const [handoff, setHandoff] = useState<{ token: string; expiresAt: number } | null>(null);
-  const [claimingHandoff, setClaimingHandoff] = useState(false);
-  const [loading, setLoading] = useState<OAuthProvider | "email" | null>(null);
+  const [completingSignIn, setCompletingSignIn] = useState(false);
+  const requestVersion = useRef(0);
+  const requestPending = useRef(false);
+  const [loading, setLoading] = useState<OAuthProvider | null>(null);
   const [error, setError] = useState<string | null>(null);
   const busy = loading !== null;
   const emailInvalid = error === "Enter a valid email address.";
+  const invalidLinkVisible = params.link_error === "invalid";
+
+  useFocusEffect(useCallback(() => () => {
+    requestVersion.current += 1;
+    requestPending.current = false;
+    setEmailVisible(false);
+    setCheckInbox(false);
+    setHandoff(null);
+    setCompletingSignIn(false);
+  }, []));
 
   useEffect(() => {
     if (!handoff) return;
     let active = true;
     let claiming = false;
+    const version = requestVersion.current;
     const poll = async () => {
-      if (claiming) return;
+      if (claiming || version !== requestVersion.current) return;
+      let claimAttempted = false;
       if (Date.now() >= handoff.expiresAt) {
-        if (active) {
+        if (active && version === requestVersion.current) {
           setCheckInbox(false);
-          setEmailVisible(true);
           setHandoff(null);
           setError("That sign-in link expired. Request a new one.");
         }
@@ -66,32 +82,47 @@ export default function AuthRoute() {
       }
       try {
         const status = await getJson<{ status: string }>(`/auth/handoff/status?handoff=${encodeURIComponent(handoff.token)}`);
-        if (!active || status.status !== "approved" || claiming) return;
+        if (!active || version !== requestVersion.current) return;
+        if (status.status === "gone") {
+          setCheckInbox(false);
+          setHandoff(null);
+          setError("That sign-in link expired or was already used. Request a new one.");
+          return;
+        }
+        if (status.status !== "approved" || claiming) return;
         claiming = true;
-        setClaimingHandoff(true);
+        claimAttempted = true;
+        setCompletingSignIn(true);
         const claim = await postJson<{ handoff_token_hash: string }, { status: string; totp_challenge_token_hash?: string }>(
           "/auth/handoff/claim",
           { handoff_token_hash: handoff.token },
         );
-        if (!active) return;
+        if (!active || version !== requestVersion.current) return;
         if (claim.status === "authenticated") {
           await hydrate({ newSession: true });
-          if (!active) return;
+          if (!active || version !== requestVersion.current) return;
           claiming = false;
-          setClaimingHandoff(false);
         } else {
           claiming = false;
-          setClaimingHandoff(false);
           if ((claim.status === "totp_setup_required" || claim.status === "totp_required") && claim.totp_challenge_token_hash) {
             setPendingTeamMfaChallenge(claim.status === "totp_required" ? "totp_required" : "setup_required", claim.totp_challenge_token_hash);
             router.replace("/auth/mfa");
-          } else setError("This account requires an additional verification step.");
+          } else {
+            setCompletingSignIn(false);
+            setCheckInbox(false);
+            setHandoff(null);
+            setError("This account requires an additional verification step.");
+          }
         }
       } catch (pollError) {
         claiming = false;
-        if (active) setClaimingHandoff(false);
-        if (isAxiosError(pollError) && !pollError.response) return;
-        if (active) setError(messageFor(pollError));
+        if (isAxiosError(pollError) && !pollError.response && !claimAttempted) return;
+        if (active && version === requestVersion.current) {
+          setCompletingSignIn(false);
+          setCheckInbox(false);
+          setHandoff(null);
+          setError(messageFor(pollError));
+        }
       }
     };
     void poll();
@@ -127,30 +158,51 @@ export default function AuthRoute() {
     setEmailVisible(true);
   };
 
+  const closeEmail = () => {
+    requestVersion.current += 1;
+    requestPending.current = false;
+    setEmailVisible(false);
+    setCheckInbox(false);
+    setCompletingSignIn(false);
+    setHandoff(null);
+    setError(null);
+    Keyboard.dismiss();
+  };
+
   const submitEmail = async () => {
+    if (requestPending.current) return;
     const normalized = email.trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(normalized)) {
       setError("Enter a valid email address.");
       return;
     }
+    requestPending.current = true;
+    const version = ++requestVersion.current;
     setError(null);
-    setLoading("email");
+    setSubmittedEmail(normalized);
+    setCheckInbox(true);
+    Keyboard.dismiss();
     try {
       const referralCode = await readPendingReferralCode();
       const response = await postJson<{ email: string; referral_code?: string }, LoginResponse>("/auth/login", { email: normalized, ...(referralCode ? { referral_code: referralCode } : {}) });
       if (referralCode) await clearPendingReferralCode().catch(() => undefined);
-      const parsedExpiry = response.handoff_expires_at ? Date.parse(response.handoff_expires_at) : Number.NaN;
-      setCheckInbox(true);
+      if (version !== requestVersion.current) return;
+      const parsedExpiry = Date.parse(response.expires_at);
       setHandoff(response.handoff_token_hash ? {
         token: response.handoff_token_hash,
         expiresAt: Number.isFinite(parsedExpiry) ? parsedExpiry : Date.now() + 15 * 60_000,
       } : null);
     } catch (emailError) {
-      setError(messageFor(emailError));
+      if (version === requestVersion.current) {
+        setCheckInbox(false);
+        setError(messageFor(emailError));
+      }
     } finally {
-      setLoading(null);
+      if (version === requestVersion.current) requestPending.current = false;
     }
   };
+
+  if (completingSignIn) return <AuthSplashScreen />;
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.root}>
@@ -168,64 +220,22 @@ export default function AuthRoute() {
           <View style={styles.brand}>
             <ChromeIcon glow={0.55} size={86} source={vorinthexMarkSource} />
             <Text style={styles.eyebrow}>VORINTHEX AI</Text>
-            <Text accessibilityRole="header" style={styles.title}>{checkInbox ? "Check your inbox" : "Access your personal AI"}</Text>
-            <Text style={styles.subtitle}>
-              {checkInbox ? `We sent a secure 15-minute sign-in link to ${email.trim()}. ${handoff ? "This screen will continue automatically." : "Open it on this device to continue."}` : "Your intelligence, memory, and tools, all in one place."}
-            </Text>
+            <Text accessibilityRole="header" style={styles.title}>Access your personal AI</Text>
+            <Text style={styles.subtitle}>Your intelligence, memory, and tools, all in one place.</Text>
           </View>
 
           <View style={styles.panel}>
-            {checkInbox ? (
-              <>
-                <View accessibilityLiveRegion="polite" accessibilityState={{ busy: Boolean(handoff) }} style={styles.waiting}>
-                  {handoff ? <Spinner accessibilityLabel="Waiting for sign-in link" size="small" variant="muted" /> : <MailIcon size="lg" variant="accent" />}
-                  <Text style={styles.waitingText}>{handoff ? "Waiting for your link" : "Ready when you are"}</Text>
-                </View>
-                <Button disabled={claimingHandoff} loading={claimingHandoff} onPress={() => { setCheckInbox(false); setHandoff(null); setError(null); }} size="lg" variant="ghost">Use another email</Button>
-              </>
-            ) : (
-              <>
-                {emailVisible ? (
-                  <View style={styles.emailForm}>
-                    <TextInput
-                      accessibilityLabel="Email address"
-                      accessibilityHint={emailInvalid ? error ?? undefined : "Enter the email address for your account"}
-                      aria-invalid={emailInvalid}
-                      autoCapitalize="none"
-                      autoComplete="email"
-                      autoCorrect={false}
-                      editable={!busy}
-                      keyboardType="email-address"
-                      onChangeText={(value) => { setEmail(value); if (error) setError(null); }}
-                      onSubmitEditing={() => { Keyboard.dismiss(); void submitEmail(); }}
-                      placeholder="you@example.com"
-                      returnKeyType="send"
-                      style={[styles.input, emailInvalid && styles.inputError]}
-                      textContentType="emailAddress"
-                      value={email}
-                    />
-                    <Button disabled={busy || !email.trim()} loading={loading === "email"} onPress={() => void submitEmail()} size="lg" variant="primary">Continue</Button>
-                    <Button disabled={busy} onPress={() => { setEmailVisible(false); setError(null); Keyboard.dismiss(); }} size="sm" variant="ghost">Back</Button>
-                  </View>
-                ) : (
-                  <>
-                    <Button disabled={busy} icon={<GoogleIcon />} loading={loading === "google"} onPress={() => void oauth("google")} size="lg" trailingIcon={loading === "google" ? <Spinner size="small" /> : undefined} variant="secondary">Continue with Google</Button>
-                    <Button disabled={busy} icon={<AppleIcon />} loading={loading === "apple"} onPress={() => void oauth("apple")} size="lg" trailingIcon={loading === "apple" ? <Spinner size="small" /> : undefined} variant="secondary">Continue with Apple</Button>
-                    <Button disabled={busy} icon={<MailIcon />} loading={loading === "email"} onPress={selectEmail} size="lg" variant="secondary">Continue with email</Button>
-                  </>
-                )}
-              </>
-            )}
-            {error && <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text>}
+            <Button disabled={busy} icon={<GoogleIcon />} loading={loading === "google"} onPress={() => void oauth("google")} size="lg" variant="secondary">Continue with Google</Button>
+            <Button disabled={busy} icon={<AppleIcon />} loading={loading === "apple"} onPress={() => void oauth("apple")} size="lg" variant="secondary">Continue with Apple</Button>
+            <Button disabled={busy} icon={<MailIcon />} onPress={selectEmail} size="lg" variant="secondary">Continue with email</Button>
+            {error && !emailVisible ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
           </View>
-          {!checkInbox && (
-            <Text style={styles.legalNote}>
+          <Text style={styles.legalNote}>
               By continuing, you agree to our{" "}
               <Text accessibilityRole="link" onPress={() => void Linking.openURL(`${FRONTEND_URL}/terms`)} style={styles.legalLink}>Terms of Service</Text>
               {" "}and{" "}
               <Text accessibilityRole="link" onPress={() => void Linking.openURL(`${FRONTEND_URL}/privacy`)} style={styles.legalLink}>Privacy Policy</Text>.
-            </Text>
-          )}
+          </Text>
           <View style={styles.disclosure}>
             <Text style={styles.disclosureTitle}>AI-powered features</Text>
             <Text style={styles.disclosureCopy}>Vorinthex AI uses artificial intelligence to generate and process text, images, audio and video.</Text>
@@ -233,6 +243,24 @@ export default function AuthRoute() {
           </View>
         </View>
       </ScrollView>
+      <BottomSheet footer={checkInbox ? <Button onPress={closeEmail} size="md" variant="secondary">Close</Button> : <View style={styles.sheetActions}><Button disabled={!email.trim()} onPress={() => void submitEmail()} size="md" variant="primary">Continue</Button><Button onPress={closeEmail} size="md" variant="secondary">Close</Button></View>} height="full" hideCloseButton hideHeading={checkInbox} onOpenChange={(open) => { if (!open) closeEmail(); }} open={emailVisible} pageKey={checkInbox ? "sent" : "email"} title={checkInbox ? "Check your inbox" : "Continue with email"}>
+        {checkInbox ? <View accessibilityLiveRegion="polite" style={styles.sheetMessage}>
+          <MailIcon size="xl" variant="accent" />
+          <Text accessibilityRole="header" style={styles.sheetTitle}>Check your inbox</Text>
+          <Text style={styles.sheetDescription}>A sign-in email has been sent to {submittedEmail}. Check your inbox to sign in.</Text>
+        </View> : <View style={styles.emailForm}>
+          <Text style={styles.inputLabel}>Email address</Text>
+          <TextInput accessibilityLabel="Email address" accessibilityHint={emailInvalid ? error ?? undefined : "Enter the email address for your account"} aria-invalid={emailInvalid} autoCapitalize="none" autoComplete="email" autoCorrect={false} keyboardType="email-address" onChangeText={(value) => { setEmail(value); if (error) setError(null); }} onSubmitEditing={() => void submitEmail()} placeholder="Email address" returnKeyType="send" style={emailInvalid && styles.inputError} textContentType="emailAddress" value={email} />
+          {error ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
+        </View>}
+      </BottomSheet>
+      <BottomSheet footer={<Button onPress={() => router.setParams({ link_error: undefined })} size="md" variant="secondary">Close</Button>} height="full" hideCloseButton hideHeading onOpenChange={(open) => { if (!open) router.setParams({ link_error: undefined }); }} open={invalidLinkVisible} title="Invalid sign-in link">
+        <View style={styles.sheetMessage}>
+          <LinkOffIcon size="xl" />
+          <Text accessibilityRole="header" style={styles.sheetTitle}>Invalid sign-in link</Text>
+          <Text style={styles.sheetDescription}>This link is invalid, expired, or has already been used. Request a new sign-in email to try again.</Text>
+        </View>
+      </BottomSheet>
     </KeyboardAvoidingView>
   );
 }
@@ -248,11 +276,13 @@ const styles = StyleSheet.create({
   title: { marginTop: spacing.sm, color: palette.silver50, fontFamily: fonts.light, fontSize: 34, lineHeight: 40, letterSpacing: -1.2, textAlign: "center" },
   subtitle: { maxWidth: 340, marginTop: spacing.sm, color: palette.silver300, fontFamily: fonts.regular, fontSize: 14, lineHeight: 21, textAlign: "center" },
   panel: { gap: 12 },
-  emailForm: { gap: 12 },
-  input: { minHeight: 50, backgroundColor: palette.obsidian850 },
+  emailForm: { flex: 1, gap: 12 },
+  inputLabel: { marginLeft: 2, color: palette.silver300, fontFamily: fonts.medium, fontSize: 12, letterSpacing: 0.4 },
   inputError: { borderColor: "#D98B8B" },
-  waiting: { minHeight: 76, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, borderRadius: 22, borderWidth: 1, borderColor: palette.hairline },
-  waitingText: { color: palette.silver300, fontFamily: fonts.medium, fontSize: 13, letterSpacing: 0.6 },
+  sheetActions: { gap: spacing.sm },
+  sheetMessage: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.lg, paddingHorizontal: spacing.md },
+  sheetTitle: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 24, textAlign: "center" },
+  sheetDescription: { maxWidth: 350, color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, lineHeight: 23, textAlign: "center" },
   error: { paddingHorizontal: spacing.sm, color: "#D98B8B", fontFamily: fonts.regular, fontSize: 13, lineHeight: 18, textAlign: "center" },
   legalNote: { alignSelf: "center", maxWidth: 330, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16, textAlign: "center" },
   legalLink: { color: palette.silver300, textDecorationLine: "underline" },

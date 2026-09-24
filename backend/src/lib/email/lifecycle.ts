@@ -58,12 +58,12 @@ export function welcomeEmailInput(to: string): BrandedEmailInput {
 export function signInEmailInput(input: { email: string; magicLink: string; expiresAt: Date }): BrandedEmailInput {
   return {
     to: input.email,
-    subject: 'Your Vorinthex sign in link',
-    preheader: 'Sign in to access your galaxy.',
-    label: 'Sign in',
+    subject: 'Sign in to Vorinthex AI',
+    preheader: 'Use your secure link to sign in to Vorinthex AI.',
+    label: '',
     eyebrow: 'Secure access',
-    headline: 'Your galaxy awaits',
-    bodyHtml: 'Sign in to access your galaxy.',
+    headline: 'Sign in to Vorinthex AI',
+    bodyHtml: 'Use your secure link to sign in to Vorinthex AI.',
     actionUrl: input.magicLink,
     actionLabel: 'Sign in',
     supportingHtml: 'If you did not request this, you can ignore this email.',

@@ -51,6 +51,23 @@ is enabled, also register the app-signing SHA-1 shown in Play Console. iOS
 continues to use the browser flow until an iOS OAuth client and callback URL
 scheme are configured.
 
+## Sign in with Apple on Android
+
+Android uses Apple's web sign-in through the backend. In Apple Developer,
+configure **Sign in with Apple** for the Services ID used by
+`APPLE_OAUTH_CLIENT_ID` (`com.vorinthex.auth` in production), with domain
+`vorinthex.com` and this exact Return URL:
+
+```
+https://vorinthex.com/api/v1/auth/mobile/oauth/apple/callback
+```
+
+The production backend's `BACKEND_PUBLIC_URL` must be `https://vorinthex.com`.
+Apple posts its response to that HTTPS endpoint, which sends a one-time grant
+back to the app's `vorinthexcore://auth/oauth-complete` deep link. Apple's
+Return URL is the HTTPS backend endpoint, not the app deep link; a missing
+or different Return URL produces Apple's `Invalid web redirect url` error.
+
 ## Verified Links
 
 Personal and non-MFA member magic links use

@@ -18,7 +18,8 @@ describe('account lifecycle emails', () => {
 
   test('renders magic-link authentication through the same branded template as welcome email', () => {
     const magicLink = 'https://vorinthex.com/public/auth/token?token_hash=abc&flow=user';
-    const signInHtml = renderBrandedEmail(signInEmailInput({ email: 'person@example.com', magicLink, expiresAt: new Date('2026-09-13T12:15:00.000Z') }));
+    const signInInput = signInEmailInput({ email: 'person@example.com', magicLink, expiresAt: new Date('2026-09-13T12:15:00.000Z') });
+    const signInHtml = renderBrandedEmail(signInInput);
     const welcomeHtml = renderBrandedEmail(welcomeEmailInput('person@example.com'));
 
     for (const sharedTemplateElement of ['vtx-shell', 'vtx-button-wrap', 'vtx-button']) {
@@ -26,6 +27,10 @@ describe('account lifecycle emails', () => {
       expect(welcomeHtml).toContain(sharedTemplateElement);
     }
     expect(signInHtml).toContain(magicLink);
+    expect(signInInput.subject).toBe('Sign in to Vorinthex AI');
+    expect(signInHtml).toContain('Use your secure link to sign in to Vorinthex AI.');
+    expect(signInHtml).not.toContain('galaxy');
+    expect(signInHtml).not.toMatch(/<td align="right"[^>]*>\s*Sign in\s*<\/td>/);
   });
 
   test('renders deletion confirmation without any CTA or fallback action link', () => {

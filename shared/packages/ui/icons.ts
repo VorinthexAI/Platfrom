@@ -18,6 +18,7 @@ export * from './icons/download';
 export * from './icons/upload';
 export * from './icons/copy';
 export * from './icons/link';
+export * from './icons/link-off';
 export * from './icons/settings';
 export * from './icons/user';
 export * from './icons/users';

@@ -1,12 +1,12 @@
 ﻿import Svg, { Path } from "react-native-svg";
 export type MailIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
-export type MailIconSize = "sm" | "md" | "lg";
+export type MailIconSize = "sm" | "md" | "lg" | "xl";
 export type MailIconProps = {
   variant?: MailIconVariant;
   size?: MailIconSize;
   strokeWidth?: number;
 };
-const sizes: Record<MailIconSize, number> = { sm: 16, md: 20, lg: 24 };
+const sizes: Record<MailIconSize, number> = { sm: 16, md: 20, lg: 24, xl: 64 };
 const colors: Record<MailIconVariant, string> = {
   default: "#F5F7F8",
   muted: "#7B858C",

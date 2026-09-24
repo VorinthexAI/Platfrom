@@ -1,11 +1,11 @@
 ﻿import type { SVGProps } from "react";
 export type MailIconVariant = "default" | "inherit" | "muted" | "accent" | "danger" | "inverse";
-export type MailIconSize = "sm" | "md" | "lg";
+export type MailIconSize = "sm" | "md" | "lg" | "xl";
 export type MailIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
   variant?: MailIconVariant;
   size?: MailIconSize;
 };
-const sizes: Record<MailIconSize, number> = { sm: 16, md: 20, lg: 24 };
+const sizes: Record<MailIconSize, number> = { sm: 16, md: 20, lg: 24, xl: 64 };
 const colors: Record<MailIconVariant, string> = {
   default: "var(--vui-color-text)",
   inherit: "currentColor",

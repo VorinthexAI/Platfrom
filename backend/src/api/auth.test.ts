@@ -107,6 +107,22 @@ describe('auth helpers', () => {
     await expect(buildMobileOAuthAuthorizationUrl('google', 'https://attacker.example/callback')).rejects.toThrow('not allowed');
   });
 
+  test('uses the public HTTPS return URL for Android Apple sign in', async () => {
+    process.env.ACCESS_TOKEN_SECRET = 'test-access-secret';
+    process.env.APPLE_OAUTH_CLIENT_ID = 'com.vorinthex.auth';
+    const previousPublicUrl = process.env.BACKEND_PUBLIC_URL;
+    try {
+      process.env.BACKEND_PUBLIC_URL = 'https://vorinthex.com';
+      const url = new URL(await buildMobileOAuthAuthorizationUrl('apple', 'vorinthexcore://auth/oauth-complete'));
+      expect(url.searchParams.get('client_id')).toBe('com.vorinthex.auth');
+      expect(url.searchParams.get('redirect_uri')).toBe('https://vorinthex.com/api/v1/auth/mobile/oauth/apple/callback');
+      expect(url.searchParams.get('response_mode')).toBe('form_post');
+    } finally {
+      if (previousPublicUrl === undefined) delete process.env.BACKEND_PUBLIC_URL;
+      else process.env.BACKEND_PUBLIC_URL = previousPublicUrl;
+    }
+  });
+
   test('accepts only cryptographically verified Apple identity tokens', async () => {
     process.env.APPLE_OAUTH_CLIENT_ID = 'com.example.service';
     const keys = await crypto.subtle.generateKey(

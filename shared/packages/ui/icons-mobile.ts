@@ -41,6 +41,7 @@ export * from "./icons/image/image.mobile";
 export * from "./icons/inbox/inbox.mobile";
 export * from "./icons/info/info.mobile";
 export * from "./icons/link/link.mobile";
+export * from "./icons/link-off/link-off.mobile";
 export * from "./icons/location-pin/location-pin.mobile";
 export * from "./icons/lock/lock.mobile";
 export * from "./icons/log-out/log-out.mobile";
