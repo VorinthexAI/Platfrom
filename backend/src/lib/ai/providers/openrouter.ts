@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { speechInputSchema, speechOutputSchema, type SpeechInput, type SpeechOutput } from '@/lib/ai/actions/speech';
+import { decisionInputSchema, decisionOutputSchema } from '@/lib/ai/actions/decide';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { tokenUsage } from '@/lib/ai/shared/usage';
 import { normalizeProviderError, ProviderError, providerErrorCodeForStatus } from './errors';
@@ -398,6 +399,16 @@ export function createOpenRouterProvider(config: OpenRouterProviderConfig, fetch
     name: 'OpenRouter',
     async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) {
       try {
+        if (request.actionId === 'decide') {
+          const parsedInput = input(decisionInputSchema, request.input, 'decision');
+          const url = `${baseUrl(parsed.baseUrl).replace(/\/v1$/, '')}/alpha/decisions`;
+          const result = await fetcher(url, { method: 'POST', headers: headers(parsed), body: JSON.stringify({ model: request.externalModelId, ...parsedInput }), signal: resolveRequestSignal(request) });
+          if (!result.ok) throw await openRouterHttpError(result, 'decision', parsed.apiKey);
+          const raw: unknown = await result.json();
+          const output = response(decisionOutputSchema, raw, 'decision');
+          const details = raw as { usage?: { input_tokens?: number; output_tokens?: number; cost?: number } };
+          return { output: output as TOutput, usage: tokenUsage(details.usage?.input_tokens, details.usage?.output_tokens), ...(details.usage?.cost !== undefined ? { costUsd: details.usage.cost } : {}), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: raw };
+        }
         if (request.actionId === 'text') return await executeChat<TInput, TOutput>(fetcher, parsed, request);
         if (request.actionId === 'image') {
           const imageInput = imageActionInputSchema.parse(request.input);

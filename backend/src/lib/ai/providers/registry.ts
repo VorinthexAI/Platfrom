@@ -20,6 +20,7 @@ export const MODEL_REGISTRY = [
   { id: 'google.gemini-3.1-flash-lite-image', name: 'Nano Banana 2 Lite', description: 'Fast image generation, editing, and multimodal analysis model.' },
   { id: 'xai.grok-voice-tts-1.0', name: 'Grok Voice TTS 1.0', description: 'Speech generation model with native MP3 output.' },
   { id: 'openai.text-embedding-3-small', name: 'OpenAI Text Embedding 3 Small', description: 'Text embedding model.' },
+  { id: 'typesafe.jev-1.13', name: 'TypeSafe Jev 1.13', description: 'Low-latency structured decision model.' },
 ] as const;
 export type ModelId = (typeof MODEL_REGISTRY)[number]['id'];
 export const MODEL_IDS = MODEL_REGISTRY.map(({ id }) => id) as readonly ModelId[];
@@ -30,6 +31,7 @@ const EXTERNAL_MODEL_IDS = {
   'google.gemini-3.1-flash-lite-image:openrouter': 'google/gemini-3.1-flash-lite-image',
   'xai.grok-voice-tts-1.0:openrouter': 'x-ai/grok-voice-tts-1.0',
   'openai.text-embedding-3-small:openrouter': 'openai/text-embedding-3-small',
+  'typesafe.jev-1.13:openrouter': 'typesafe/jev-1.13',
 } as const;
 
 export function getModel(id: string) { return MODEL_REGISTRY.find((model) => model.id === id); }

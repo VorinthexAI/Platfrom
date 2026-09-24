@@ -1,5 +1,5 @@
 export const CANONICAL_ORIGIN = "https://vorinthex.com" as const;
-export const CONTENT_LAST_REVIEWED = "2026-09-23" as const;
+export const CONTENT_LAST_REVIEWED = "2026-09-24" as const;
 export const CONTACT_EMAIL = "contact@vorinthex.com" as const;
 export const PRICING_HERO_HEADING = "One balance for everything you create and use" as const;
 export const PRICING_HERO_BODY =
@@ -129,6 +129,8 @@ export const PRODUCT_FACTS = {
   availability: "Download Core for your platform.",
   privacy:
     "Privacy and user control are central product principles for Core.",
+  workspaceContext:
+    "Core can answer questions using relevant authorized content across saved documents, files, images, communication, trips, and audio books, and can explain the signed-in user's Sparks balance and subscription. Answers distinguish incomplete evidence from confirmed absence.",
   sparks:
     `${PRICING_HERO_HEADING}. ${PRICING_HERO_BODY} The current launch subscriptions are $19.99 monthly for 1,000 Sparks (discounted from the $24.99 regular monthly price) and $7.99 weekly for 200 Sparks. A one-time 200-Spark top-up is $9.99. Purchases are not yet available on the public website. Prepaid Sparks remain available after subscription cancellation, balances never go below zero, and storage is charged hourly from prepaid Sparks. Unfunded storage incurs no debt or backcharges, uploads can continue, and existing data remains available for export, deletion, and recovery. Adding enough Sparks before deletion begins restores prospective charging. Once deletion begins, it cannot be reversed. Stored data is permanently deleted after 90 consecutive unfunded days. Pricing is shown in USD and excludes VAT and other local taxes; Polar calculates and adds applicable tax at checkout.`,
   pricing: {
@@ -150,9 +152,9 @@ export const PUBLIC_DISCOVERABILITY_REGISTRY = {
     path: "/",
     title: "Vorinthex AI | Your Personal AI",
     description:
-      "Meet Vorinthex Core, a personal AI for iOS and Android that connects knowledge, memories, communication, discovery, and goals.",
+      "Meet Vorinthex Core, a personal AI for iOS and Android that answers questions using authorized knowledge, memories, communication, learning, and account context.",
     summary:
-      "Vorinthex Core is a personal AI for iOS and Android that connects the context that matters to you.",
+      "Vorinthex Core is a personal AI for iOS and Android that answers questions using relevant authorized knowledge, communication, learning, and account context.",
     schemaPageType: "WebPage",
     status: "current",
     lastModified: CONTENT_LAST_REVIEWED,

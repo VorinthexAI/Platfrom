@@ -290,6 +290,7 @@ export function createConversationService(dependencies: ConversationServiceDepen
                 emitted = true;
                 await onEvent({ type: 'delta', correlationKey, assistantMessageKey: started.assistant.key, text });
               },
+              onEvidence: (sources) => { retrievals.push(...sources.slice(0, Math.max(0, 4 - retrievals.length))); },
               onToolSucceeded: (slug, arguments_, result) => {
                 if (slug === 'agent.guide') {
                   const parsed = agentGuideOutputSchema.safeParse(result);

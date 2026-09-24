@@ -39,6 +39,7 @@ import {
   updateSystemOrchestrator,
 } from './system';
 import { invokeContentTool } from './content-tools';
+import { documentUploadHandlers } from './document-uploads';
 import { communicationHandlers } from './communication';
 import { bootstrapGuestAuth, deleteAuthAccount, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
 import { completeGalleryUploads, createGalleryCollection, createGalleryHighlight, createGalleryMemory, createGallerySubject, deleteGalleryCollection, deleteGalleryCollectionDuplicates, deleteGalleryHighlight, deleteGalleryImages, deleteGalleryMemory, deleteGallerySubject, findGalleryCollectionDuplicates, galleryOverview, galleryUploadStatus, listGalleryHighlights, listGalleryMemories, listGallerySubjectImages, listGallerySubjects, presignGalleryUploads, readGalleryHighlight, readGalleryMemory, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages, updateGalleryCollection, updateGalleryImage } from './gallery';
@@ -490,6 +491,8 @@ export function registerRoutes(app: Hono) {
   app.get('/nodes', listNodes);
 
   app.post('/content/tools/:tool', invokeContentTool);
+  app.post('/content/uploads/presign', documentUploadHandlers.reserve);
+  app.post('/content/uploads/complete', documentUploadHandlers.complete);
   app.post('/gallery/overview', galleryOverview);
   app.post('/gallery/collections', createGalleryCollection);
   app.post('/gallery/collections/update', updateGalleryCollection);

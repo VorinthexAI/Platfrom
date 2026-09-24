@@ -10,6 +10,17 @@ const chatInput = { messages: [{ role: 'user', content: [{ type: 'text', text: '
 function mp3Frame() { const frame = new Uint8Array(417); frame.set([0xff, 0xfb, 0x90, 0x64]); return frame; }
 
 describe('OpenRouter provider', () => {
+  test('sends decision questions to Jev decisions API, not chat completions', async () => {
+    let url = '', body: any;
+    const provider = createOpenRouterProvider({ apiKey: 'secret' }, (async (target, init) => {
+      url = String(target); body = JSON.parse(String(init?.body));
+      return Response.json({ answers: { folders: { type: 'choice', choice: 'inspect', probabilities: { inspect: 0.9 } } }, usage: { input_tokens: 10, output_tokens: 2, cost: 0.001 } });
+    }) as typeof fetch);
+    const result = await provider.execute(request('decide', { state: 'List my folders', questions: { folders: { type: 'choice', instructions: 'Read folders?', criteria: { inspect: 'yes', skip: 'no' } } } }, 'typesafe/jev-1.13'));
+    expect(url).toBe('https://openrouter.ai/api/alpha/decisions');
+    expect(body).toMatchObject({ model: 'typesafe/jev-1.13', state: 'List my folders', questions: { folders: { type: 'choice' } } });
+    expect(result).toMatchObject({ output: { answers: { folders: { choice: 'inspect' } } }, usage: { totalTokens: 12 }, costUsd: 0.001 });
+  });
   test('validates config and sends attribution, strict JSON schema, tools, and exact model', async () => {
     expect(() => openRouterProviderConfigSchema.parse({})).toThrow();
     let url = ''; let headers: Headers; let body: any;

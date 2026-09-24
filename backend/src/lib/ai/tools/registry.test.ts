@@ -323,7 +323,7 @@ describe('unified tool registry', () => {
     const result = await runTool('agents.core', '', { message: 'hello' }, {
       contentContext, requestKey: 'trusted-agent-request',
       conversationService: {} as any,
-      agentDependencies: { stream: async function* (_team, input) { inputs.push(input); yield { type: 'text-delta', text: 'Hello.' }; yield { type: 'done' }; } },
+       agentDependencies: { workspaceContext: async () => ({ sections: {}, coverage: { requested: [], unavailable: [], truncated: [] } }), stream: async function* (_team, input) { inputs.push(input); yield { type: 'text-delta', text: 'Hello.' }; yield { type: 'done' }; } },
     });
     expect(result).toEqual({ message: 'Hello.', tools: [] });
     expect(inputs).toHaveLength(1);

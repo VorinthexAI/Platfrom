@@ -3045,7 +3045,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
           update(item.id, { status: "uploading" });
           try {
             if (item.file.size > MAX_MOBILE_UPLOAD_BYTES) throw new Error("Mobile uploads must be 8 MB or smaller.");
-            const { document } = await uploadContentDocument({ name: item.name, type: item.mimeType, size: item.file.size, base64: await item.file.base64() }, folderKey, requestContext, item.mutationKey);
+            const { document } = await uploadContentDocument({ name: item.name, type: item.mimeType, size: item.file.size, uri: item.file.uri }, folderKey, requestContext, item.mutationKey);
             if (generation !== uploadGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
             const verified = await refreshContentDocument(queryClient, requestContext, document.key);
             if (!verified.content.trim()) throw new Error("No text could be extracted from the uploaded file.");
@@ -3132,7 +3132,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     try {
       if (scanSessionSize(pages) > MAX_DOCUMENT_SCAN_BYTES) throw new Error("Scanned pages must be 16 MB or smaller in total.");
       notify("Document scan started");
-      const prepared = await Promise.all(pages.map(async (page, index) => ({ name: `scan-page-${index + 1}.png`, size: page.sizeBytes, base64: await new File(page.uri).base64() })));
+      const prepared = pages.map((page, index) => ({ name: `scan-page-${index + 1}.png`, size: page.sizeBytes, type: "image/png", uri: page.uri }));
       if (generation !== scanGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
       processingStarted = true;
       setProcessingScan({ id: `scan-${generation}`, folderKey, name });

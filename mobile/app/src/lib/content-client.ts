@@ -1,5 +1,6 @@
 import { apiClient } from "./api-client";
 import * as Crypto from "expo-crypto";
+import { File } from "expo-file-system";
 import { z } from "zod";
 import { useAuthStore } from "@/state/auth";
 import { appSearchResults, searchApp } from "./app-search-client";
@@ -687,33 +688,43 @@ export async function deleteContentFolder(folderKey: string) {
   assertSingleBatchSuccess(outcome, "The folder could not be deleted.");
 }
 
-export async function uploadContentDocument(file: { name: string; type: string; size: number; base64: string }, folderKey?: string, contentContext = getContentContext(), idempotencyKey = createContentMutationKey()) {
+type DirectDocumentFile = { name: string; type: string; size: number; uri: string };
+
+async function uploadDocumentSources(kind: "file" | "pages", files: DirectDocumentFile[], folderKey: string | undefined, contentContext: ReturnType<typeof getContentContext>, idempotencyKey: string, name?: string) {
   if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
-  const mimeType = documentMimeType(file.name, file.type);
-  const filename = documentFilename(file.name, mimeType);
-  return callContentTool<{ document: ContentDocument }>("document.parse", {
-    scopeKey: contentContext.scopeKey,
-    folderKey,
-    file: {
-      filename,
-      mimeType,
-      sizeBytes: file.size,
-      encoding: "base64",
-      content: file.base64,
-    },
-    idempotencyKey,
-  }, undefined, contentContext);
+  const selectors = { teamKey: contentContext.teamKey, scopeKey: contentContext.scopeKey };
+  const sources = files.map((file) => {
+    const mimeType = kind === "file" ? documentMimeType(file.name, file.type) : "image/png";
+    return { filename: kind === "file" ? documentFilename(file.name, mimeType) : file.name, mimeType, sizeBytes: file.size };
+  });
+  const unwrap = <T>(response: ToolResponse<T>) => {
+    if (!response.success) throw contentToolError(response.error);
+    return response.data;
+  };
+  const reserved = unwrap((await apiClient.post<ToolResponse<{ uploadKey: string; uploads: { url: string; headers: Record<string, string> }[] }>>("/api/v1/content/uploads/presign", { ...selectors, folderKey, name, idempotencyKey, kind, files: sources })).data);
+  if (reserved.uploads.length !== files.length) throw new Error("Document upload reservation did not match the selected files.");
+  for (let index = 0; index < files.length; index++) {
+    const bytes = await new File(files[index]!.uri).arrayBuffer();
+    if (bytes.byteLength !== files[index]!.size) throw new Error("A selected document changed before it could be uploaded.");
+    const upload = reserved.uploads[index]!;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2 * 60_000);
+    try {
+      const response = await fetch(upload.url, { method: "PUT", headers: upload.headers, body: bytes, signal: controller.signal });
+      if (!response.ok) throw new Error(`Document upload failed (${response.status}).`);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  return unwrap((await apiClient.post<ToolResponse<{ document: ContentDocument }>>("/api/v1/content/uploads/complete", { ...selectors, uploadKey: reserved.uploadKey, idempotencyKey }, { timeout: 5 * 60_000 })).data);
 }
 
-export async function scanContentDocument(pages: { name: string; size: number; base64: string }[], folderKey?: string, contentContext = getContentContext(), name = `Scanned document ${new Date().toISOString().slice(0, 10)}`, idempotencyKey = createContentMutationKey()) {
-  if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
-  return callContentTool<{ document: ContentDocument }>("document.parse", {
-    scopeKey: contentContext.scopeKey,
-    folderKey,
-    name,
-    pages: pages.map((page) => ({ filename: page.name, mimeType: "image/png", sizeBytes: page.size, encoding: "base64", content: page.base64 })),
-    idempotencyKey,
-  }, undefined, contentContext);
+export async function uploadContentDocument(file: DirectDocumentFile, folderKey?: string, contentContext = getContentContext(), idempotencyKey = createContentMutationKey()) {
+  return uploadDocumentSources("file", [file], folderKey, contentContext, idempotencyKey);
+}
+
+export async function scanContentDocument(pages: DirectDocumentFile[], folderKey?: string, contentContext = getContentContext(), name = `Scanned document ${new Date().toISOString().slice(0, 10)}`, idempotencyKey = createContentMutationKey()) {
+  return uploadDocumentSources("pages", pages, folderKey, contentContext, idempotencyKey, name);
 }
 
 const appResultTagsSchema = z.array(z.strictObject({ key: z.string().min(1), name: z.string() })).optional();

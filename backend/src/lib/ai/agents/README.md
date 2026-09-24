@@ -15,14 +15,16 @@ agent candidate set to prevent recursive orchestration.
 Model selections and native calls are untrusted and rechecked before each
 dispatch.
 
-Core's first model request receives only its explicit `app.search`,
-`agent.guide`, and `app.generate-image` definitions. Direct text streams on
-that request. Native calls and visible text may coexist; text is streamed once,
-retained in the assistant tool-call transcript, and never retracted. The loop
-accepts at most four emitted calls. It validates a complete batch before any
-dispatch, runs a batch concurrently only when every call is read-only, and
-requires writes to run alone. Once the cap is reached, one tool-free request
-produces the final response.
+Core gathers private workspace evidence before its first answering model turn.
+`workspace-context.ts` sends the question and the authorized collection catalog
+to the provider-neutral `decide` action (TypeSafe Jev via the OpenRouter Decisions
+API). The returned choices select read modes only, not database keys, arbitrary
+queries, or authority. Canonical collection services then perform scoped discovery,
+exact counts, relationship expansion, and detail reads in parallel. The model
+receives bounded, allowlisted JSON without database identifiers. Navigation
+references remain server-side for conversation persistence. Missing or truncated
+sources carry explicit coverage status rather than implying zero results. Core
+streams one answer from that evidence; image creation remains a separate mutation.
 
 Tools execute only through canonical `runTool` adapters with trusted
 `ToolContext` and hashed per-call request keys. Equal call fingerprints share
@@ -31,11 +33,8 @@ become safe failed
 statuses so the model can recover. Arguments, context, results, and errors are
 bounded and treated as untrusted data; oversized successful results are
 reported with an omission marker rather than truncated. Production arguments
-are strict-schema validated before dispatch. An empty `app.search` may be
-reformulated once, and the server requires the retry to change only the query;
-successful or twice-empty searches close that route for the request. More than
-one semantic search in a batch is rejected so this policy remains
-deterministic. Routing and tool telemetry contains only stage, outcome, counts,
+are strict-schema validated before dispatch. Routing and tool telemetry contains
+only stage, outcome, counts,
 confidence class, and duration, never request or result payloads. The public `agents.core` tool has
 one strict model input and lazily imports Core so `agents -> tools -> agents`
 does not create an eager initialization cycle. Its adapter injects the system
@@ -43,20 +42,13 @@ prompt, current ISO date, request key, identity, team, and scope. Conversation
 titles are generated locally from the first current user message, never by the
 model.
 
-## Live E2E
+## Focused evaluation
 
-With the local API and its dependencies running, execute:
-
-```bash
-bun run --cwd backend test:e2e:core-agent-live
-```
-
-The opt-in suite uses the configured live text provider through the public
-conversation HTTP and SSE flow. It checks a direct answer plus folder list,
-create, update, and delete turns, verifies mutations through canonical Content
-endpoints, checks persisted history, and removes its folder and conversation in
-`finally`. It refuses non-local API hosts unless
-`CORE_AGENT_E2E_DANGEROUS_REMOTE=true` is explicitly set.
+`workspace-context.test.ts` covers 20 representative cross-collection and
+account-grounding scenarios, including deep reads, exact counts, redaction,
+ambiguity, and unavailable sources. `core.test.ts` verifies one answering
+stream with trusted JSON context and no model-facing search loop. The OpenRouter
+provider tests cover Jev's Decisions API transport.
 
 The attachment performance evaluation compares direct-provider execution with
 the complete upload, canonicalization, conversation SSE, and asynchronous

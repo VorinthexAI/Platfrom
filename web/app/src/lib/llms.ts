@@ -61,6 +61,8 @@ Last reviewed: ${CONTENT_LAST_REVIEWED}
 
 ${PRODUCT_FACTS.name} is ${PRODUCT_FACTS.status.toLowerCase()}. ${PRODUCT_FACTS.availability} ${PRODUCT_FACTS.privacy}
 
+${PRODUCT_FACTS.workspaceContext}
+
 ## Core apps
 
 ${PRODUCT_FACTS.capabilities.map(({ name, description, details }) => `- ${name}: ${description} ${details.join(" ")}`).join("\n")}

@@ -185,4 +185,21 @@ resource "aws_s3_bucket_lifecycle_configuration" "runtime" {
       noncurrent_days = 1
     }
   }
+
+  rule {
+    id     = "expire-content-upload-staging"
+    status = "Enabled"
+
+    filter {
+      prefix = "pending/content/"
+    }
+
+    expiration {
+      days = 1
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+  }
 }

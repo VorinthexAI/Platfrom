@@ -15,6 +15,10 @@ speech, image analysis, and structured extraction.
   model metadata, and internal-to-external model identifiers. A route is
   operational only when its environment configuration validates.
 
+The provider-neutral `decide` action binds TypeSafe Jev to the OpenRouter
+Decisions API. It returns typed source-selection choices for a server-owned
+read plan; the selected service still performs all authorization and data reads.
+
 ## Tools Versus Actions
 
 Use a tool when the caller requests a domain outcome: create a folder, find a

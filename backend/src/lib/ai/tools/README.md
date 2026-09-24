@@ -47,8 +47,8 @@ canonical thread sorter and persistence path.
 `app.search` is the canonical collection-aware workspace query. Its registered
 collection adapters declare their supported `search`, `list`, `count`, `sum`, `get`,
 and `summarize` operations, accepted filters, public fields, and valid status
-values. Core uses this one capability
-for workspace resource retrieval; HTTP and product-specific adapters converge
+values. Core's server-owned evidence assembler uses this same canonical service
+for workspace retrieval; HTTP and product-specific adapters converge
 on the same domain services. Exact counts and sums must come from canonical totals or
 exhaustive cursor pagination, never from a truncated result page. Selected-inbox
 message and draft queries require an authorized connector selector. Document
@@ -104,6 +104,12 @@ source ownership, rollback, and embedding persistence. PDF/image transcription
 calls the existing `text` AI action with Core's native file/image transport and a
 server-owned faithful-transcription prompt. Ingestion is action-token priced;
 there is no fixed upload or scan charge and no separate public scan tool.
+
+Mobile document and scan uploads reserve short-lived `pending/content/` objects
+through `/content/uploads/presign`, PUT the bytes directly to S3, and submit
+reservation keys through `/content/uploads/complete`. Completion verifies the
+objects and invokes the same `document.parse` Content tool as Core; the signed
+transfer endpoints are protocol boundaries, not additional public tools.
 
 ## Calling Actions
 

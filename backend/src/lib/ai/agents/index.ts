@@ -5,6 +5,8 @@ import { streamAsk, type ExecuteActionOptions } from '@/lib/ai/router';
 import type { ProviderStreamChunk } from '@/lib/ai/providers';
 import { isToolReadOnly, MODEL_TOOL_NAMES, TOOL_DEFINITIONS, runTool, toolInputSchemas, type ToolDependencies } from '@/lib/ai/tools';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
+import type { gatherWorkspaceContext } from './workspace-context';
+import type { AppSearchRetrieval } from '@/lib/app-search/service';
 import { projectAppSearchModelResult } from '@/lib/app-search/service';
 import { SparkRefundError } from '@/lib/ai/events/runtime';
 import { SparkRepositoryError } from '@/lib/sparks/repository';
@@ -18,6 +20,7 @@ const MAX_TOOL_CALLS = 4;
 const publicDefinitions = TOOL_DEFINITIONS.map(({ name, description, inputSchema }) => coreChatToolDefinitionSchema.parse({ name, description, inputSchema }));
 
 export interface AgentRuntimeDependencies {
+  workspaceContext?: typeof gatherWorkspaceContext;
   stream?: typeof streamAsk;
   router?: ExecuteActionOptions;
   initialResponseTimeoutMs?: number;
@@ -50,6 +53,7 @@ export interface AgentExecutionContext {
   currentStagedImageArtifactKeys?: string[];
   onDelta?: (text: string) => void | Promise<void>;
   onToolSucceeded?: (slug: string, arguments_: unknown, result: unknown) => boolean | void;
+  onEvidence?: (retrievals: AppSearchRetrieval[]) => void;
   normalizeToolArguments?: (slug: string, arguments_: unknown) => unknown;
 }
 
@@ -89,7 +93,7 @@ function currentRequestMessage(request: InternalAgentRequest, includeAttachments
 }
 
 function userMessages(request: InternalAgentRequest): CoreChatMessage[] {
-  const background: CoreChatMessage = { role: 'user', content: [{ type: 'text', text: JSON.stringify({ ...(request.currentConversationSummary ? { currentConversationSummary: request.currentConversationSummary } : {}), recalledContext: request.recalledContext ?? [], currentDate: request.currentDate }) }] };
+  const background: CoreChatMessage = { role: 'user', content: [{ type: 'text', text: JSON.stringify({ ...(request.currentConversationSummary ? { currentConversationSummary: request.currentConversationSummary } : {}), recalledContext: request.recalledContext ?? [], currentDate: request.currentDate, ...(request.workspaceContext ? { workspaceContext: request.workspaceContext } : {}) }) }] };
   const recent: CoreChatMessage[] = (request.context ?? []).map(({ role, content }) => ({ role, content: [{ type: 'text', text: content }] }));
   const preloaded = request.preloadedTools.flatMap((tool, index): CoreChatMessage[] => {
     const toolCallId = `preloaded-${index + 1}`;
@@ -150,30 +154,7 @@ function successfulStatus(slug: string, args: unknown, result: unknown) {
   return parsed.success ? parsed.data : agentToolStatusSchema.parse({ ...base, result: { omitted: true, reason: 'The capability result was too large or could not be serialized for model context.' } });
 }
 
-type SearchRetry = { collectionSlugs: unknown; filters: unknown; limit: unknown; operation: unknown; query: string };
-type SearchOutcome = { kind: 'empty'; retry: SearchRetry } | { kind: 'nonempty' };
-type ExecutionOutcome = { status: AgentToolStatus; searchOutcome?: SearchOutcome; finish?: boolean };
-
-function appSearchOutcome(args: unknown, result: unknown): SearchOutcome | undefined {
-  if (!args || typeof args !== 'object' || !result || typeof result !== 'object') return undefined;
-  const input = args as Record<string, unknown>;
-  const output = result as Record<string, unknown>;
-  if ((input.operation ?? 'search') !== 'search' || typeof input.query !== 'string' || !Array.isArray(output.groups)) return undefined;
-  const groups = output.groups as Array<Record<string, unknown>>;
-  if (!groups.length || groups.some((group) => !Array.isArray(group.results))) return undefined;
-  if (groups.some((group) => (group.results as unknown[]).length > 0)) return { kind: 'nonempty' };
-  return { kind: 'empty', retry: { collectionSlugs: input.collectionSlugs, filters: input.filters, limit: input.limit, operation: input.operation ?? 'search', query: input.query } };
-}
-
-function assertSearchReformulation(base: SearchRetry, args: unknown) {
-  if (!args || typeof args !== 'object') throw new Error('The app.search reformulation must preserve the original search constraints.');
-  const input = args as Record<string, unknown>;
-  const unchanged = canonicalJson(input.collectionSlugs) === canonicalJson(base.collectionSlugs)
-    && canonicalJson(input.filters) === canonicalJson(base.filters)
-    && canonicalJson(input.limit) === canonicalJson(base.limit)
-    && (input.operation ?? 'search') === base.operation;
-  if (!unchanged || typeof input.query !== 'string' || input.query.trim() === base.query.trim()) throw new Error('The app.search reformulation must change only the query.');
-}
+type ExecutionOutcome = { status: AgentToolStatus; finish?: boolean };
 
 function assertActiveMember(context: ToolContext) {
   if (context.principal.kind !== 'member' || context.principal.userTeam.status !== 'active') throw new Error('An active user team membership is required to execute an agent.');
@@ -212,8 +193,6 @@ export async function runAgent(
     ? generateConversationName(context.toolContext.teamKey, request.message, stream, dependencies.router).catch(() => undefined)
     : undefined;
   let emittedCalls = 0;
-  let searchRetry: SearchRetry | undefined;
-  let appSearchClosed = false;
   let turn = 0;
 
   while (true) {
@@ -285,12 +264,6 @@ export async function runAgent(
       return { call, invocation, invalidArguments, readOnly: invalidArguments ? false : isToolReadOnly(call.name, invocation.arguments) };
     });
     if (preparedCalls.length > 1 && preparedCalls.some(({ readOnly }) => !readOnly)) throw new Error('The agent returned multiple tool calls when every call must be read-only.');
-    const searchCalls = preparedCalls.filter(({ invocation }) => invocation.slug === 'app.search' && ((invocation.arguments as Record<string, unknown> | null)?.operation ?? 'search') === 'search');
-    if (searchCalls.length > 1) throw new Error('Only one app.search semantic query may be emitted per batch.');
-    if (searchCalls[0]) {
-      if (appSearchClosed) throw new Error('The app.search retry limit has been reached for this request.');
-      if (searchRetry) assertSearchReformulation(searchRetry, searchCalls[0].invocation.arguments);
-    }
     emittedCalls += preparedCalls.length;
     observe({ stage, outcome: 'selected', candidateCount: toolDefinitions?.length ?? 0, selectedToolCount: preparedCalls.length, confidence: 'high', durationMs: performance.now() - startedAt });
 
@@ -327,7 +300,7 @@ export async function runAgent(
           catch (error) { console.error('agent successful-tool observation failed', { slug: invocation.slug, error }); }
           const status = successfulStatus(invocation.slug, invocation.arguments, result);
           observe({ stage: 'tool', outcome: 'succeeded', candidateCount: allowedNames.length, selectedToolCount: 1, durationMs: performance.now() - toolStartedAt });
-          return { status, searchOutcome: invocation.slug === 'app.search' ? appSearchOutcome(invocation.arguments, result) : undefined, finish };
+          return { status, finish };
         } catch (error) {
           if (error instanceof SparkRepositoryError || error instanceof SparkRefundError) throw error;
           console.error('agent tool execution failed', { slug: invocation.slug, error });
@@ -354,12 +327,6 @@ export async function runAgent(
       emittedCalls = MAX_TOOL_CALLS;
       turn += 1;
       continue;
-    }
-    const searchOutcome = searchCalls.length ? outcomes[preparedCalls.indexOf(searchCalls[0]!)]!.searchOutcome : undefined;
-    if (searchCalls.length) {
-      if (searchRetry) { appSearchClosed = true; searchRetry = undefined; }
-      else if (searchOutcome?.kind === 'empty') searchRetry = searchOutcome.retry;
-      else if (searchOutcome?.kind === 'nonempty') appSearchClosed = true;
     }
     turn += 1;
   }
