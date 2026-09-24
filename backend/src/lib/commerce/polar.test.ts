@@ -23,6 +23,17 @@ describe('Polar provider adapter', () => {
     expect(JSON.parse(String(request?.init.body))).toMatchObject({ products: ['remote-1'], external_customer_id: 'user-1', success_url: 'https://vorinthex.com/checkout/success', return_url: 'https://vorinthex.com/checkout/error', allow_discount_codes: false, customer_ip_address: '203.0.113.7', metadata: { userKey: 'user-1', productId: 'topup.small' } });
   });
 
+  test('schedules a plan change at the next billing period without an immediate charge', async () => {
+    let body: unknown;
+    const provider = createPolarProvider({ environment: 'sandbox', accessToken: 'token' }, async (url, init) => {
+      expect(String(url)).toBe('https://sandbox-api.polar.sh/v1/subscriptions/sub-1');
+      body = JSON.parse(String(init?.body));
+      return Response.json({ id: 'sub-1', status: 'active', cancel_at_period_end: false, current_period_start: timestamp, current_period_end: '2026-10-05T10:00:00.000Z' });
+    });
+    await provider.scheduleSubscriptionProduct('sub-1', 'remote-monthly');
+    expect(body).toEqual({ product_id: 'remote-monthly', proration_behavior: 'next_period' });
+  });
+
   test('uses current product collection URLs, paginates, and omits prices from metadata-only updates', async () => {
     const requests: { url: string; init: RequestInit }[] = [];
     const provider = createPolarProvider({ environment: 'production', accessToken: 'token' }, async (url, init) => {

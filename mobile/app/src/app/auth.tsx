@@ -37,7 +37,7 @@ function messageFor(error: unknown) {
 
 export default function AuthRoute() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ link_error?: string }>();
+  const params = useLocalSearchParams<{ link_error?: string; oauth_error?: string }>();
   const insets = useSafeAreaInsets();
   const { height, width } = useWindowDimensions();
   const hydrate = useAuthStore((state) => state.hydrate);
@@ -139,6 +139,7 @@ export default function AuthRoute() {
 
   const oauth = async (provider: OAuthProvider) => {
     void recordAnalyticsEvent(`auth.option.selected.${provider}`).catch(() => undefined);
+    if (params.oauth_error) router.setParams({ oauth_error: undefined });
     setError(null);
     setLoading(provider);
     try {
@@ -154,6 +155,7 @@ export default function AuthRoute() {
 
   const selectEmail = () => {
     void recordAnalyticsEvent("auth.option.selected.email").catch(() => undefined);
+    if (params.oauth_error) router.setParams({ oauth_error: undefined });
     setError(null);
     setEmailVisible(true);
   };
@@ -228,7 +230,7 @@ export default function AuthRoute() {
             <Button disabled={busy} icon={<GoogleIcon />} loading={loading === "google"} onPress={() => void oauth("google")} size="lg" variant="secondary">Continue with Google</Button>
             <Button disabled={busy} icon={<AppleIcon />} loading={loading === "apple"} onPress={() => void oauth("apple")} size="lg" variant="secondary">Continue with Apple</Button>
             <Button disabled={busy} icon={<MailIcon />} onPress={selectEmail} size="lg" variant="secondary">Continue with email</Button>
-            {error && !emailVisible ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
+            {!emailVisible && (error || params.oauth_error) ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error ?? "Sign in could not be completed. Please try again."}</Text> : null}
           </View>
           <Text style={styles.legalNote}>
               By continuing, you agree to our{" "}
@@ -243,7 +245,7 @@ export default function AuthRoute() {
           </View>
         </View>
       </ScrollView>
-      <BottomSheet footer={checkInbox ? <Button onPress={closeEmail} size="md" variant="secondary">Close</Button> : <View style={styles.sheetActions}><Button disabled={!email.trim()} onPress={() => void submitEmail()} size="md" variant="primary">Continue</Button><Button onPress={closeEmail} size="md" variant="secondary">Close</Button></View>} height="full" hideCloseButton hideHeading={checkInbox} onOpenChange={(open) => { if (!open) closeEmail(); }} open={emailVisible} pageKey={checkInbox ? "sent" : "email"} title={checkInbox ? "Check your inbox" : "Continue with email"}>
+      <BottomSheet footer={checkInbox ? <Button onPress={closeEmail} size="md" variant="secondary">Close</Button> : <View style={styles.sheetActions}><Button disabled={!email.trim()} onPress={() => void submitEmail()} size="md" variant="primary">Continue</Button><Button onPress={closeEmail} size="md" variant="secondary">Close</Button></View>} height="full" hideCloseButton hideHeading={checkInbox} onOpenChange={(open) => { if (!open) closeEmail(); }} open={emailVisible} pageKey={checkInbox ? "sent" : "email"} pageTransitionOrigin="bottom" title={checkInbox ? "Check your inbox" : "Continue with email"}>
         {checkInbox ? <View accessibilityLiveRegion="polite" style={styles.sheetMessage}>
           <MailIcon size="xl" variant="accent" />
           <Text accessibilityRole="header" style={styles.sheetTitle}>Check your inbox</Text>

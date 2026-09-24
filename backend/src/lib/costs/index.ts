@@ -86,7 +86,7 @@ export const OUTCOME_PRICED_OPERATION_TOOL_SLUGS = Object.freeze([
 // This list is intentionally exhaustive rather than a fallback. Adding a public
 // tool without choosing fixed, action, or free billing must fail registry tests.
 export const FREE_TOOL_SLUGS = Object.freeze([
-  'agent.guide', 'app.notify', 'billing.summary.read', 'catalog.list', 'notification.list', 'notification.mark-read', 'payment.checkout.create', 'pricing.read', 'referral.redeem', 'referral.summary.read', 'subscription.current.cancel', 'subscription.current.read', 'subscription.current.restore',
+  'agent.guide', 'app.notify', 'billing.summary.read', 'catalog.list', 'notification.list', 'notification.mark-read', 'payment.checkout.create', 'pricing.read', 'referral.redeem', 'referral.summary.read', 'subscription.current.cancel', 'subscription.current.read', 'subscription.current.restore', 'subscription.current.schedule',
   'book.chapter.progress', 'book.delete', 'book.detail', 'book.favorite', 'book.generation.cancel', 'book.generation.retry', 'book.list',
   'collection.create', 'collection.delete', 'collection.duplicates.delete', 'collection.hide', 'collection.image.transfer', 'collection.list', 'collection.reveal', 'collection.update',
   'content.hidden.list', 'content.neighbors', 'content.search', 'content.search-history.delete', 'content.search-history.list',

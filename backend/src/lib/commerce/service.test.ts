@@ -314,6 +314,65 @@ describe('canonical commerce service', () => {
     expect(current.status).toBe('unpaid');
   });
 
+  test('uncancels before scheduling a different plan for the next period, without a second checkout', async () => {
+    const userKey = newId(); const calls: string[] = [];
+    let current: Subscription = { key: newId(), userKey, productKey: COMMERCE_CATALOG[0].key, providerSubscriptionId: 'sub-1', status: 'active', cancelAtPeriodEnd: true, currentPeriodStart: at, currentPeriodEnd: '2026-10-05T10:00:00.000Z', providerModifiedAt: null, createdAt: at, updatedAt: at };
+    const response = (cancel: boolean, modifiedAt: string) => ({ id: 'sub-1', status: 'active' as const, cancel_at_period_end: cancel, current_period_start: at, current_period_end: current.currentPeriodEnd!, modified_at: modifiedAt });
+    const service = createCommerceService({
+      repository: repository({ getCurrentSubscription: async () => current, getProductByProductId: async (id) => id === 'nova.monthly.discounted' ? { ...COMMERCE_CATALOG[2], providerProductId: 'remote-monthly' } : null, upsertSubscription: async (input) => ({ status: 'applied', subscription: current = input }) }),
+      provider: { updateSubscription: async (_id: string, cancel: boolean) => { calls.push(`cancel:${cancel}`); return response(cancel, '2026-09-05T10:00:01.000Z'); }, scheduleSubscriptionProduct: async (_id: string, productId: string) => { calls.push(`schedule:${productId}`); return response(false, '2026-09-05T10:00:02.000Z'); } } as never,
+      now: () => new Date(at),
+    });
+    const scheduled = await service.scheduleSubscriptionProduct(userKey, { productId: 'nova.monthly.discounted' });
+    expect(calls).toEqual(['cancel:false', 'schedule:remote-monthly']);
+    expect(scheduled).toMatchObject({ productKey: COMMERCE_CATALOG[0].key, cancelAtPeriodEnd: false, currentPeriodEnd: '2026-10-05T10:00:00.000Z' });
+    expect(scheduled).not.toHaveProperty('providerSubscriptionId');
+    await expect(service.scheduleSubscriptionProduct(userKey, { productId: 'topup.small' })).rejects.toMatchObject({ code: 'PRODUCT_NOT_FOUND' });
+    await expect(service.scheduleSubscriptionProduct(userKey, { productId: 'nova.weekly', userKey })).rejects.toThrow('Unrecognized key');
+  });
+
+  test('restores the cancellation if scheduling a new plan fails', async () => {
+    const userKey = newId(); const calls: boolean[] = [];
+    let current: Subscription = { key: newId(), userKey, productKey: COMMERCE_CATALOG[0].key, providerSubscriptionId: 'sub-1', status: 'active', cancelAtPeriodEnd: true, currentPeriodStart: at, currentPeriodEnd: '2026-10-05T10:00:00.000Z', providerModifiedAt: null, createdAt: at, updatedAt: at };
+    const service = createCommerceService({
+      repository: repository({ getCurrentSubscription: async () => current, getProductByProductId: async () => ({ ...COMMERCE_CATALOG[2], providerProductId: 'remote-monthly' }), upsertSubscription: async (input) => ({ status: 'applied', subscription: current = input }) }),
+      provider: { updateSubscription: async (_id: string, cancel: boolean) => { calls.push(cancel); return { id: 'sub-1', status: 'active', cancel_at_period_end: cancel, current_period_start: at, current_period_end: current.currentPeriodEnd!, modified_at: `2026-09-05T10:00:0${calls.length}.000Z` }; }, scheduleSubscriptionProduct: async () => { throw new Error('provider rejected plan'); } } as never,
+      now: () => new Date(at),
+    });
+    await expect(service.scheduleSubscriptionProduct(userKey, { productId: 'nova.monthly.discounted' })).rejects.toThrow('provider rejected plan');
+    expect(calls).toEqual([false, true]);
+    expect(current.cancelAtPeriodEnd).toBe(true);
+  });
+
+  test('recancels when storing the uncanceled state fails before scheduling', async () => {
+    const userKey = newId(); const calls: boolean[] = []; let writes = 0;
+    const current: Subscription = { key: newId(), userKey, productKey: COMMERCE_CATALOG[0].key, providerSubscriptionId: 'sub-1', status: 'active', cancelAtPeriodEnd: true, currentPeriodStart: at, currentPeriodEnd: '2026-10-05T10:00:00.000Z', providerModifiedAt: null, createdAt: at, updatedAt: at };
+    const service = createCommerceService({
+      repository: repository({ getCurrentSubscription: async () => current, getProductByProductId: async () => ({ ...COMMERCE_CATALOG[2], providerProductId: 'remote-monthly' }), upsertSubscription: async (input) => { if (++writes === 1) throw new Error('database unavailable'); return { status: 'applied', subscription: input }; } }),
+      provider: { updateSubscription: async (_id: string, cancel: boolean) => { calls.push(cancel); return { id: 'sub-1', status: 'active', cancel_at_period_end: cancel, current_period_start: at, current_period_end: current.currentPeriodEnd!, modified_at: `2026-09-05T10:00:0${calls.length}.000Z` }; }, scheduleSubscriptionProduct: async () => { throw new Error('must not schedule'); } } as never,
+    });
+    await expect(service.scheduleSubscriptionProduct(userKey, { productId: 'nova.monthly.discounted' })).rejects.toThrow('database unavailable');
+    expect(calls).toEqual([false, true]);
+  });
+
+  test('accepts Polar renewal webhooks carrying the old checkout product after a scheduled plan change', async () => {
+    const userKey = newId();
+    let current: Subscription = { key: newId(), userKey, productKey: COMMERCE_CATALOG[0].key, providerSubscriptionId: 'sub-1', status: 'active', cancelAtPeriodEnd: false, currentPeriodStart: at, currentPeriodEnd: '2026-10-05T10:00:00.000Z', providerModifiedAt: null, createdAt: at, updatedAt: at };
+    const monthly = { ...COMMERCE_CATALOG[2], providerProductId: 'remote-monthly' };
+    const service = createCommerceService({ repository: repository({
+      getCurrentSubscription: async () => current,
+      getProductByProviderId: async (id) => id === 'remote-monthly' ? monthly : null,
+      getProductByProductId: async (id) => id === 'nova.weekly' ? { ...COMMERCE_CATALOG[0], providerProductId: 'remote-weekly' } : id === monthly.productId ? monthly : null,
+      upsertSubscription: async (input) => ({ status: 'applied', subscription: current = input }),
+    }), applyFirstPaidReward: async () => ({ status: 'not-attributed' }) });
+    const renewal = (id: string) => ({ type: 'order.paid', timestamp: '2026-10-05T10:00:00.000Z', data: { id, status: 'paid', product_id: 'remote-monthly', subscription_id: 'sub-1', billing_reason: 'subscription_cycle', subtotal_amount: 1999, discount_amount: 0, net_amount: 1999, total_amount: 1999, currency: 'usd', customer: { external_id: userKey }, metadata: { userKey, productId: 'nova.weekly' }, product: { id: 'remote-monthly', metadata: { productId: monthly.productId } } } });
+    await expect(service.processWebhook(renewal('order-before-cycle'))).resolves.toMatchObject({ fulfillment: 'applied' });
+    await expect(service.processWebhook({ type: 'subscription.cycled', timestamp: '2026-10-05T10:00:00.000Z', data: { id: 'sub-1', status: 'active', product_id: 'remote-monthly', customer: { external_id: userKey }, metadata: { userKey, productId: 'nova.weekly' }, product: { id: 'remote-monthly', metadata: { productId: monthly.productId } }, current_period_start: '2026-10-05T10:00:00.000Z', current_period_end: '2026-11-05T10:00:00.000Z' } })).resolves.toMatchObject({ subscription: 'active' });
+    expect(current.productKey).toBe(monthly.key);
+    await expect(service.processWebhook(renewal('order-after-cycle'))).resolves.toMatchObject({ fulfillment: 'applied' });
+    await expect(service.processWebhook({ ...renewal('forged'), data: { ...renewal('forged').data, subscription_id: 'other-subscription' } })).rejects.toMatchObject({ code: 'INVALID_REFERENCE' });
+  });
+
   test('revokes every locally billable subscription before account deletion', async () => {
     const userKey = newId(); const revoked: string[] = [];
     const base: Subscription = { key: newId(), userKey, productKey: COMMERCE_CATALOG[0].key, providerSubscriptionId: 'active-subscription', status: 'active', cancelAtPeriodEnd: false, currentPeriodStart: at, currentPeriodEnd: at, providerModifiedAt: at, createdAt: at, updatedAt: at };

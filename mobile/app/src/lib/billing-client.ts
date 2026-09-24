@@ -98,6 +98,13 @@ export async function setSubscriptionCancellation(cancelAtPeriodEnd: boolean): P
   return subscription;
 }
 
+export async function scheduleSubscriptionProduct(productId: string): Promise<CurrentSubscription> {
+  const response = await apiClient.post('/subscriptions/current/schedule', { productId });
+  const subscription = subscriptionEnvelopeSchema.parse(response.data).data;
+  if (!subscription) throw new Error('Subscription update returned no subscription.');
+  return subscription;
+}
+
 export const IMAGE_GENERATE_MICRO_SPARKS = 10_000_000;
 
 export async function ensureSparkCapacity(requiredMicroSparks = 1) {

@@ -16,6 +16,7 @@ import {
   requestSignInEmail,
   exchangeMobileOAuthGrant,
   mobileOAuthCallbackUri,
+  mobileOAuthErrorRedirectUri,
   startTotpSetup,
   validateMagicLink,
   verifyTotpAndIssueSession,
@@ -102,6 +103,7 @@ export function registerRoutes(app: Hono) {
   app.get('/subscriptions/current', commerceHandlers.currentSubscription);
   app.post('/subscriptions/current/cancel', commerceHandlers.cancelSubscription);
   app.post('/subscriptions/current/restore', commerceHandlers.restoreSubscription);
+  app.post('/subscriptions/current/schedule', commerceHandlers.scheduleSubscription);
   app.get('/billing/summary', getBillingSummary);
   app.get('/referrals/summary', getReferralSummary);
   app.post('/referrals/redeem', redeemReferral);
@@ -233,27 +235,37 @@ export function registerRoutes(app: Hono) {
     const callback = c.req.method === 'POST'
       ? callbackSchema.parse(await c.req.parseBody())
       : parseQuery(c, callbackSchema);
-    const result = await completeOAuthSignIn({
-      provider,
-      code: callback.code,
-      state: callback.state,
-      redirectUri: mobileOAuthCallbackUri(provider),
-    });
-    if (!result) return c.json({ error: 'oauth sign in failed' }, 401);
-    if (!result.mobileRedirectUri) return c.json({ error: 'invalid mobile oauth state' }, 401);
-    const redirect = new URL(result.mobileRedirectUri);
-    const code = await createMobileOAuthGrant({
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
-      accessTokenMaxAgeSeconds: result.accessTokenMaxAgeSeconds,
-      refreshTokenMaxAgeSeconds: result.refreshTokenMaxAgeSeconds,
-      sessionExpiresAt: result.sessionExpiresAt,
-      alias: result.alias,
-      aliasSlug: result.aliasSlug,
-      welcomeLine: result.welcomeLine,
-    });
-    redirect.searchParams.set('code', code);
-    return c.redirect(redirect.toString(), 302);
+    try {
+      const result = await completeOAuthSignIn({
+        provider,
+        code: callback.code,
+        state: callback.state,
+        redirectUri: mobileOAuthCallbackUri(provider),
+      });
+      if (!result) {
+        const failure = await mobileOAuthErrorRedirectUri(provider, callback.state);
+        return failure ? c.redirect(failure, 302) : c.json({ error: 'oauth sign in failed' }, 401);
+      }
+      if (!result.mobileRedirectUri) return c.json({ error: 'invalid mobile oauth state' }, 401);
+      const redirect = new URL(result.mobileRedirectUri);
+      const code = await createMobileOAuthGrant({
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+        accessTokenMaxAgeSeconds: result.accessTokenMaxAgeSeconds,
+        refreshTokenMaxAgeSeconds: result.refreshTokenMaxAgeSeconds,
+        sessionExpiresAt: result.sessionExpiresAt,
+        alias: result.alias,
+        aliasSlug: result.aliasSlug,
+        welcomeLine: result.welcomeLine,
+      });
+      redirect.searchParams.set('code', code);
+      return c.redirect(redirect.toString(), 302);
+    } catch (error) {
+      console.error('mobile oauth callback failed', { provider, error });
+      const failure = await mobileOAuthErrorRedirectUri(provider, callback.state);
+      if (failure) return c.redirect(failure, 302);
+      throw error;
+    }
   };
   app.get('/auth/mobile/oauth/:provider/callback', mobileOAuthCallback);
   app.post('/auth/mobile/oauth/:provider/callback', mobileOAuthCallback);

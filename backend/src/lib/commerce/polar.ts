@@ -152,6 +152,9 @@ export function createPolarProvider(configuration = polarConfiguration(), fetche
     async updateSubscription(providerSubscriptionId: string, cancelAtPeriodEnd: boolean) {
       return subscriptionResponseSchema.parse(await request(`/subscriptions/${encodeURIComponent(providerSubscriptionId)}`, { method: 'PATCH', body: JSON.stringify({ cancel_at_period_end: cancelAtPeriodEnd }) }, subscriptionResponseSchema));
     },
+    async scheduleSubscriptionProduct(providerSubscriptionId: string, providerProductId: string) {
+      return subscriptionResponseSchema.parse(await request(`/subscriptions/${encodeURIComponent(providerSubscriptionId)}`, { method: 'PATCH', body: JSON.stringify({ product_id: providerProductId, proration_behavior: 'next_period' }) }, subscriptionResponseSchema));
+    },
     async revokeSubscription(providerSubscriptionId: string) {
       try {
         return subscriptionResponseSchema.parse(await request(`/subscriptions/${encodeURIComponent(providerSubscriptionId)}`, { method: 'DELETE' }, subscriptionResponseSchema));
@@ -189,7 +192,7 @@ export function verifyPolarWebhookSignature(input: { rawBody: string; webhookId?
 }
 
 type CompletePolarProvider = ReturnType<typeof createPolarProvider>;
-export type PolarProvider = Pick<CompletePolarProvider, 'listProducts' | 'createCheckout' | 'updateSubscription' | 'revokeSubscription' | 'createProduct' | 'updateProduct'> & Partial<Pick<CompletePolarProvider, 'listOrders' | 'listSubscriptions'>>;
+export type PolarProvider = Pick<CompletePolarProvider, 'listProducts' | 'createCheckout' | 'updateSubscription' | 'scheduleSubscriptionProduct' | 'revokeSubscription' | 'createProduct' | 'updateProduct'> & Partial<Pick<CompletePolarProvider, 'listOrders' | 'listSubscriptions'>>;
 export type PolarReconciliationProvider = Required<Pick<CompletePolarProvider, 'listOrders' | 'listSubscriptions'>>;
 export type PolarProduct = Awaited<ReturnType<PolarProvider['listProducts']>>[number];
 export type PolarOrder = z.infer<typeof polarOrderSchema>;

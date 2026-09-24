@@ -24,7 +24,7 @@ import { scopeTagCreateInputSchema, scopeTagDeleteInputSchema, scopeTagListInput
 import { referralRedeemInputSchema, referralRedeemResultSchema, referralSummaryReadInputSchema, referralSummarySchema } from '@/lib/referrals/contracts';
 import { referralService } from '@/lib/referrals/service';
 import { checkoutCreateInputSchema, subscriptionMutationInputSchema } from '@/lib/commerce/contracts';
-import { commerceService } from '@/lib/commerce/service';
+import { commerceService, subscriptionScheduleInputSchema } from '@/lib/commerce/service';
 import { scopeCreateInputSchema, scopeDeleteInputSchema, scopeListInputSchema, scopePrioritizeInputSchema, scopeSelectInputSchema, scopeUpdateInputSchema, scopeService } from '@/lib/ai/scopes';
 import { appNotifyInputSchema } from '@/lib/app-notifications/contracts';
 import { userNotificationListInputSchema, userNotificationMarkReadInputSchema } from '@/lib/user-notifications/schemas';
@@ -209,6 +209,10 @@ export const platformCapabilities = [
   capability('subscription.current.restore', 'Restore a subscription that is scheduled to cancel at period end.', subscriptionMutationInputSchema, async (_input, context) => {
     const { userKey } = identity(context);
     return (context.commerce ?? commerceService).setCancellation(userKey, false);
+  }, undefined, 'write'),
+  capability('subscription.current.schedule', 'Schedule a different active subscription plan for the next renewal without billing twice in the current period. Restore a pending cancellation first.', subscriptionScheduleInputSchema, async (input, context) => {
+    const { userKey } = identity(context);
+    return (context.commerce ?? commerceService).scheduleSubscriptionProduct(userKey, input);
   }, undefined, 'write'),
   capability('referral.summary.read', 'Read the authenticated user\'s referral code and current referral reward summary.', referralSummaryReadInputSchema, async (_input, context) => {
     const { userKey } = identity(context);

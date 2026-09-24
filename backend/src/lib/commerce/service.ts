@@ -12,8 +12,10 @@ import { createArangoCommerceRepository, type CommerceRepository } from './repos
 import { createPolarProvider, PolarProviderError, type PolarProvider } from './polar';
 
 export class CommerceError extends Error {
-  constructor(public readonly code: 'PRODUCT_NOT_FOUND' | 'PRODUCT_INACTIVE' | 'PRODUCT_NOT_SYNCED' | 'CHECKOUT_CONFLICT' | 'CHECKOUT_PENDING' | 'SUBSCRIPTION_EXISTS' | 'SUBSCRIPTION_NOT_FOUND' | 'ACCOUNT_NOT_FOUND' | 'INVALID_REFERENCE', message: string) { super(message); this.name = 'CommerceError'; }
+  constructor(public readonly code: 'PRODUCT_NOT_FOUND' | 'PRODUCT_INACTIVE' | 'PRODUCT_NOT_SYNCED' | 'CHECKOUT_CONFLICT' | 'CHECKOUT_PENDING' | 'SUBSCRIPTION_EXISTS' | 'SUBSCRIPTION_NOT_FOUND' | 'SUBSCRIPTION_NOT_SWITCHABLE' | 'ACCOUNT_NOT_FOUND' | 'INVALID_REFERENCE', message: string) { super(message); this.name = 'CommerceError'; }
 }
+
+export const subscriptionScheduleInputSchema = z.object({ productId: productIdSchema }).strict();
 
 const timestamp = z.string().datetime({ offset: true });
 const webhookDataSchema = z.object({
@@ -99,17 +101,28 @@ export function createCommerceService({ repository, provider, createProvider = c
     const recipient = await getEmailRecipient(userKey);
     return recipient && !recipient.email.endsWith('@guest.vorinthex.com') ? { email: recipient.email, name: recipient.name } : null;
   }
-  async function productReference(data: z.infer<typeof webhookDataSchema>) {
+  async function productReference(data: z.infer<typeof webhookDataSchema>, userKey?: string, subscriptionId?: string) {
     const providerIds = [data.product_id, data.product?.id].filter((value): value is string => Boolean(value));
     const metadataIds = [data.metadata?.productId, data.product?.metadata?.productId].filter((value): value is string => typeof value === 'string');
-    if (new Set(providerIds).size > 1 || new Set(metadataIds).size > 1) throw new CommerceError('INVALID_REFERENCE', 'Webhook contains conflicting product references.');
+    if (new Set(providerIds).size > 1) throw new CommerceError('INVALID_REFERENCE', 'Webhook contains conflicting product references.');
     const byProvider = providerIds[0] ? await repository.getProductByProviderId(providerIds[0]) : null;
     const metadataId = productIdSchema.safeParse(metadataIds[0]);
     const byMetadata = metadataId.success ? await repository.getProductByProductId(metadataId.data) : null;
     if (providerIds[0] && !byProvider) throw new CommerceError('INVALID_REFERENCE', 'Webhook references an unknown provider product.');
     if (metadataIds[0] && (!metadataId.success || !byMetadata)) throw new CommerceError('INVALID_REFERENCE', 'Webhook references invalid product metadata.');
     if (!byProvider && !byMetadata) throw new CommerceError('INVALID_REFERENCE', 'Webhook references an unknown product.');
-    if (byProvider && byMetadata && byProvider.key !== byMetadata.key) throw new CommerceError('INVALID_REFERENCE', 'Webhook contains conflicting product references.');
+    const metadataMismatch = new Set(metadataIds).size > 1 || Boolean(byProvider && byMetadata && byProvider.key !== byMetadata.key);
+    if (metadataMismatch) {
+      // Polar retains checkout metadata after a scheduled plan change. The
+      // signed provider product and its own metadata identify the new plan;
+      // the subscription may still carry the old productId for later webhooks.
+      const current = userKey && subscriptionId ? await repository.getCurrentSubscription(userKey) : null;
+      const scheduledTransition = byProvider?.type === 'subscription' && byMetadata?.type === 'subscription' && current !== null && subscriptionId !== undefined
+        && current.providerSubscriptionId === subscriptionId
+        && (current.productKey === byProvider.key || current.productKey === byMetadata.key)
+        && (!data.product?.metadata?.productId || data.product.metadata.productId === byProvider.productId);
+      if (!scheduledTransition) throw new CommerceError('INVALID_REFERENCE', 'Webhook contains conflicting product references.');
+    }
     return byProvider ?? byMetadata!;
   }
   function userReference(data: z.infer<typeof webhookDataSchema>) {
@@ -247,6 +260,41 @@ export function createCommerceService({ repository, provider, createProvider = c
       const { providerSubscriptionId: _providerSubscriptionId, providerModifiedAt: _providerModifiedAt, ...safe } = saved;
       return currentSubscriptionResponseSchema.parse(safe);
     },
+    async scheduleSubscriptionProduct(trustedUserKey: string, rawInput: unknown) {
+      const { productId } = subscriptionScheduleInputSchema.parse(rawInput);
+      const current = await repository.getCurrentSubscription(trustedUserKey);
+      if (!current) throw new CommerceError('SUBSCRIPTION_NOT_FOUND', 'Current subscription was not found.');
+      if (current.status !== 'active' && current.status !== 'trialing') throw new CommerceError('SUBSCRIPTION_NOT_SWITCHABLE', 'Only an active subscription can change plans.');
+      const product = await repository.getProductByProductId(productId);
+      if (!product || product.type !== 'subscription') throw new CommerceError('PRODUCT_NOT_FOUND', 'The selected plan was not found.');
+      if (!product.active) throw new CommerceError('PRODUCT_INACTIVE', 'The selected plan is unavailable.');
+      if (!product.providerProductId) throw new CommerceError('PRODUCT_NOT_SYNCED', 'The selected plan is unavailable at checkout.');
+      if (product.key === current.productKey) throw new CommerceError('SUBSCRIPTION_EXISTS', 'This is already the current plan. Restore its renewal instead.');
+
+      const provider = polar();
+      const project = async (response: Awaited<ReturnType<PolarProvider['updateSubscription']>>) => {
+        const saved = await repository.upsertSubscription({ ...current, status: response.status, cancelAtPeriodEnd: response.cancel_at_period_end, currentPeriodStart: response.current_period_start ?? current.currentPeriodStart, currentPeriodEnd: response.current_period_end ?? current.currentPeriodEnd, providerModifiedAt: response.modified_at ?? current.providerModifiedAt, updatedAt: now().toISOString() });
+        const { providerSubscriptionId: _providerSubscriptionId, providerModifiedAt: _providerModifiedAt, ...safe } = saved.subscription;
+        return currentSubscriptionResponseSchema.parse(safe);
+      };
+      const restoreCancellation = async () => {
+        try { await project(await provider.updateSubscription(current.providerSubscriptionId, true)); }
+        catch (recoveryError) { console.error('subscription plan-change cancellation recovery failed', { userKey: trustedUserKey, recoveryError }); }
+      };
+      if (current.cancelAtPeriodEnd) {
+        const restored = await provider.updateSubscription(current.providerSubscriptionId, false);
+        try { await project(restored); }
+        catch (error) { await restoreCancellation(); throw error; }
+      }
+      let scheduled: Awaited<ReturnType<PolarProvider['scheduleSubscriptionProduct']>>;
+      try {
+        scheduled = await provider.scheduleSubscriptionProduct(current.providerSubscriptionId, product.providerProductId);
+      } catch (error) {
+        if (current.cancelAtPeriodEnd) await restoreCancellation();
+        throw error;
+      }
+      return project(scheduled);
+    },
     async revokeUserSubscriptions(trustedUserKey: string) {
       const subscriptions = await repository.listSubscriptionsByUser(trustedUserKey);
       const revocable = subscriptions.filter((subscription) => !['canceled', 'unpaid', 'incomplete_expired'].includes(subscription.status));
@@ -289,8 +337,8 @@ export function createCommerceService({ repository, provider, createProvider = c
         return { processed: true, checkout: 'failed' };
       }
       if (['order.created', 'order.paid', 'order.updated'].includes(event.type) && (event.type === 'order.paid' || event.data.status === 'paid')) {
-        const product = await productReference(event.data);
         const userKey = userReference(event.data);
+        const product = await productReference(event.data, userKey, event.data.subscription_id ?? undefined);
         const result = await applyPaidOrderFacts({ providerOrderId: event.data.id, userKey, productId: product.productId, providerProductId: event.data.product_id ?? event.data.product?.id, providerSubscriptionId: event.data.subscription_id ?? null, billingReason: event.data.billing_reason, amountCents: event.data.total_amount, baseAmountCents: event.data.subtotal_amount, netAmountCents: event.data.net_amount, discountAmountCents: event.data.discount_amount, currency: event.data.currency, paidAt: occurredAt });
         return { processed: true, fulfillment: result.status };
       }
@@ -300,8 +348,8 @@ export function createCommerceService({ repository, provider, createProvider = c
         return { processed: true, refund: result.status, status: result.order.status };
       }
       if (event.type.startsWith('subscription.')) {
-        const product = await productReference(event.data);
         const userKey = userReference(event.data);
+        const product = await productReference(event.data, userKey, event.data.id);
         const status = subscriptionStatusSchema.safeParse(event.data.status);
         if (!status.success) return { ignored: true };
         const providerModifiedAt = event.data.modified_at ?? occurredAt;

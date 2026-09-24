@@ -55,6 +55,24 @@ describe('commerce HTTP transport', () => {
     ]);
   });
 
+  test('HTTP and Core schedule the selected subscription through the same trusted service', async () => {
+    const userKey = newId(), teamKey = newId(); const calls: unknown[][] = [];
+    const commerce = service({ scheduleSubscriptionProduct: async (...args) => { calls.push(args); return { status: 'active', cancelAtPeriodEnd: false } as never; } });
+    const handler = createCommerceHandlers({ service: commerce, getIdentity: async () => ({ key: userKey, identityType: 'user' }) }).scheduleSubscription;
+    const app = new Hono(); app.onError(errorHandler); app.post('/subscriptions/current/schedule', handler);
+    const request = (body: unknown) => app.request('/subscriptions/current/schedule', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const anonymous = new Hono(); anonymous.post('/subscriptions/current/schedule', createCommerceHandlers({ service: commerce, getIdentity: async () => null }).scheduleSubscription);
+    expect((await anonymous.request('/subscriptions/current/schedule', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ productId: 'nova.monthly.discounted' }) })).status).toBe(401);
+    expect((await request({ productId: 'nova.monthly.discounted', userKey })).status).toBe(400);
+    expect((await request({ productId: 'nova.monthly.discounted' })).status).toBe(200);
+    const domain = { teamKey, runtimeScopeKey: newId(), principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey, userId: userKey, status: 'active' } } } as unknown as ToolContext;
+    const capability = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'subscription.current.schedule')!;
+    expect(capability.executionEffect).toBe('write');
+    expect(() => capability.inputSchema.parse({ productId: 'nova.monthly.discounted', userKey })).toThrow();
+    await capability.execute({ productId: 'nova.monthly.discounted' }, { domain, commerce } as never);
+    expect(calls).toEqual([[userKey, { productId: 'nova.monthly.discounted' }], [userKey, { productId: 'nova.monthly.discounted' }]]);
+  });
+
   test('issues authenticated handoffs and keeps resolve/continue sessionless with strict token-only bodies', async () => {
     const userKey = newId(); const token = `vch_${'A'.repeat(43)}`; const calls: unknown[][] = [];
     const handoffs = {

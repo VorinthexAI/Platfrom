@@ -18,11 +18,11 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(188);
-    expect(MODEL_TOOL_NAMES).toHaveLength(183);
-    expect(TOOL_DEFINITIONS).toHaveLength(183);
+    expect(TOOL_NAMES).toHaveLength(189);
+    expect(MODEL_TOOL_NAMES).toHaveLength(184);
+    expect(TOOL_DEFINITIONS).toHaveLength(184);
     expect(TOOL_NAMES).not.toContain('document.scan');
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 142);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 143);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...MODEL_TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -40,9 +40,11 @@ describe('unified tool registry', () => {
     for (const name of ['tag.list', 'tag.create', 'tag.update', 'tag.delete', 'tag.assignment.set']) expect(() => toolInputSchemas[name].parse({ teamKey: 'forged' })).toThrow('Unrecognized key');
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(['billing.summary.read', 'referral.summary.read', 'profile.update', 'ticket.create', 'ticket.list', 'app.notify', 'notification.list', 'notification.mark-read']));
     expect(TOOL_NAMES).not.toEqual(expect.arrayContaining(['feedback.create', 'app.history', 'communication.thread.read', 'communication.thread.mark-read', 'communication.message.send', 'communication.staff.reply']));
-    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['pricing.read', 'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore']));
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['pricing.read', 'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore', 'subscription.current.schedule']));
     expect(toolInputSchemas['payment.checkout.create'].parse({ productId: 'topup.small' })).toEqual({ productId: 'topup.small' });
     expect(() => toolInputSchemas['payment.checkout.create'].parse({ productId: 'topup.small', providerProductId: 'forged' })).toThrow('Unrecognized key');
+    expect(toolInputSchemas['subscription.current.schedule'].parse({ productId: 'nova.monthly.discounted' })).toEqual({ productId: 'nova.monthly.discounted' });
+    expect(() => toolInputSchemas['subscription.current.schedule'].parse({ productId: 'nova.monthly.discounted', userKey: newId() })).toThrow('Unrecognized key');
     expect(toolInputSchemas['referral.summary.read'].parse({})).toEqual({});
     expect(() => toolInputSchemas['referral.summary.read'].parse({ userKey: newId() })).toThrow('Unrecognized key');
     expect(toolInputSchemas['ticket.create'].parse({ message: 'Add dark mode', kind: 'feedback' })).toEqual({ message: 'Add dark mode', kind: 'feedback' });

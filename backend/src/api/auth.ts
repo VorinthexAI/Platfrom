@@ -864,14 +864,14 @@ function pemBodyToArrayBuffer(pem: string) {
   return Buffer.from(body, 'base64');
 }
 
-async function buildAppleClientSecret() {
+export async function buildAppleClientSecret() {
   const now = Math.floor(Date.now() / 1000);
   const header = {
     alg: 'ES256',
     kid: requiredEnv('APPLE_OAUTH_KEY_ID'),
   };
   const payload = {
-    iss: requiredEnv('APPLE_OAUTH_TEAM_KEY'),
+    iss: requiredEnv('APPLE_OAUTH_TEAM_ID'),
     iat: now,
     exp: now + 60 * 60 * 24 * 30,
     aud: 'https://appleid.apple.com',
@@ -927,8 +927,11 @@ async function exchangeAppleCode(code: string, redirectUri: string) {
       grant_type: 'authorization_code',
     }),
   });
-  const tokenData = await tokenResponse.json().catch(() => null) as { id_token?: string } | null;
-  if (!tokenResponse.ok || !tokenData?.id_token) return null;
+  const tokenData = await tokenResponse.json().catch(() => null) as { id_token?: string; error?: string } | null;
+  if (!tokenResponse.ok || !tokenData?.id_token) {
+    console.warn('apple oauth token exchange rejected', { status: tokenResponse.status, error: tokenData?.error ?? 'missing_id_token' });
+    return null;
+  }
   return verifyAppleIdentityToken(tokenData.id_token);
 }
 
@@ -1016,6 +1019,14 @@ export async function buildMobileOAuthAuthorizationUrl(provider: OAuthProvider, 
   if (!allowedMobileOAuthRedirect(mobileRedirectUri)) throw new Error('mobile OAuth redirect is not allowed');
   const callbackUri = mobileOAuthCallbackUri(provider);
   return buildOAuthAuthorizationUrl(provider, callbackUri, mobileRedirectUri, referralCode);
+}
+
+export async function mobileOAuthErrorRedirectUri(provider: OAuthProvider, state: string) {
+  const verified = await verifySignedOAuthState(provider, state, mobileOAuthCallbackUri(provider));
+  if (!verified || !verified.mobileRedirectUri || !allowedMobileOAuthRedirect(verified.mobileRedirectUri)) return null;
+  const redirect = new URL(verified.mobileRedirectUri);
+  redirect.searchParams.set('error', 'oauth_failed');
+  return redirect.toString();
 }
 
 const mobileGrantSchema = z.object({

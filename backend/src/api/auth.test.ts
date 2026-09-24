@@ -5,6 +5,7 @@ import {
   buildMagicLink,
   buildMfaLink,
   buildMobileOAuthAuthorizationUrl,
+  buildAppleClientSecret,
   buildOAuthAuthorizationUrl,
   FOUNDER_ACCESS_MAX_AGE_SECONDS,
   FOUNDER_REFRESH_MAX_AGE_SECONDS,
@@ -21,6 +22,7 @@ import {
   teamAssurance,
   verifyAccessToken,
   verifyAppleIdentityToken,
+  mobileOAuthErrorRedirectUri,
   verifyGoogleIdentityToken,
   verifySuccessiveTotpCodes,
 } from './auth';
@@ -117,6 +119,43 @@ describe('auth helpers', () => {
       expect(url.searchParams.get('client_id')).toBe('com.vorinthex.auth');
       expect(url.searchParams.get('redirect_uri')).toBe('https://vorinthex.com/api/v1/auth/mobile/oauth/apple/callback');
       expect(url.searchParams.get('response_mode')).toBe('form_post');
+    } finally {
+      if (previousPublicUrl === undefined) delete process.env.BACKEND_PUBLIC_URL;
+      else process.env.BACKEND_PUBLIC_URL = previousPublicUrl;
+    }
+  });
+
+  test('signs the Apple client secret with the configured Team ID and PKCS8 key', async () => {
+    const keys = ['APPLE_OAUTH_TEAM_ID', 'APPLE_OAUTH_KEY_ID', 'APPLE_OAUTH_CLIENT_ID', 'APPLE_OAUTH_PRIVATE_KEY'] as const;
+    const previous = keys.map((key) => process.env[key]);
+    try {
+      const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+      const privateKey = await crypto.subtle.exportKey('pkcs8', pair.privateKey);
+      process.env.APPLE_OAUTH_TEAM_ID = 'TESTTEAM12';
+      process.env.APPLE_OAUTH_KEY_ID = 'TESTKEY123';
+      process.env.APPLE_OAUTH_CLIENT_ID = 'com.example.service';
+      process.env.APPLE_OAUTH_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----\n${Buffer.from(privateKey).toString('base64')}\n-----END PRIVATE KEY-----`;
+
+      const [header, payload, signature] = (await buildAppleClientSecret()).split('.');
+      expect(JSON.parse(Buffer.from(header!, 'base64url').toString('utf8'))).toMatchObject({ alg: 'ES256', kid: 'TESTKEY123' });
+      expect(JSON.parse(Buffer.from(payload!, 'base64url').toString('utf8'))).toMatchObject({ iss: 'TESTTEAM12', sub: 'com.example.service', aud: 'https://appleid.apple.com' });
+      expect(await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, pair.publicKey, Buffer.from(signature!, 'base64url'), new TextEncoder().encode(`${header}.${payload}`))).toBe(true);
+    } finally {
+      keys.forEach((key, index) => { if (previous[index] === undefined) delete process.env[key]; else process.env[key] = previous[index]; });
+    }
+  });
+
+  test('sends failed mobile Apple sign in only to the signed app redirect', async () => {
+    const previousPublicUrl = process.env.BACKEND_PUBLIC_URL;
+    process.env.ACCESS_TOKEN_SECRET = 'test-access-secret';
+    process.env.APPLE_OAUTH_CLIENT_ID = 'com.example.service';
+    process.env.BACKEND_PUBLIC_URL = 'https://vorinthex.com';
+    try {
+      const authorization = new URL(await buildMobileOAuthAuthorizationUrl('apple', 'vorinthexcore://auth/oauth-complete'));
+      const state = authorization.searchParams.get('state')!;
+      expect(await mobileOAuthErrorRedirectUri('apple', state)).toBe('vorinthexcore://auth/oauth-complete?error=oauth_failed');
+      expect(await mobileOAuthErrorRedirectUri('google', state)).toBeNull();
+      expect(await mobileOAuthErrorRedirectUri('apple', `${state}invalid`)).toBeNull();
     } finally {
       if (previousPublicUrl === undefined) delete process.env.BACKEND_PUBLIC_URL;
       else process.env.BACKEND_PUBLIC_URL = previousPublicUrl;

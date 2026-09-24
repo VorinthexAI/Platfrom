@@ -1,6 +1,6 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { commerceService, type CommerceService } from '@/lib/commerce/service';
+import { commerceService, subscriptionScheduleInputSchema, type CommerceService } from '@/lib/commerce/service';
 import { checkoutCreateInputSchema, subscriptionMutationInputSchema } from '@/lib/commerce/contracts';
 import { getAuthIdentity } from './security';
 import { parseJson } from './validation';
@@ -82,6 +82,11 @@ export function createCommerceHandlers(dependencies: CommerceHandlerDependencies
       if (!userKey) return c.json({ success: false, error: 'authenticated user required' }, 401);
       await parseJson(c, subscriptionMutationInputSchema);
       return c.json({ success: true, data: await service.setCancellation(userKey, false) });
+    },
+    async scheduleSubscription(c: Context) {
+      const userKey = await authenticatedUser(c, identity);
+      if (!userKey) return c.json({ success: false, error: 'authenticated user required' }, 401);
+      return c.json({ success: true, data: await service.scheduleSubscriptionProduct(userKey, await parseJson(c, subscriptionScheduleInputSchema)) });
     },
   });
 }

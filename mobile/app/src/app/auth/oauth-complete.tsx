@@ -1,32 +1,24 @@
-import { useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
-import { Spinner } from "@vorinthex/shared/ui/spinner";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useEffect } from "react";
 
+import { AuthSplashScreen } from "@/components/AuthSplashScreen";
 import { exchangeOAuthCode } from "@/lib/oauth";
 import { useAuthStore } from "@/state/auth";
-import { fonts, palette, spacing } from "@/theme/tokens";
 
 export default function OAuthCompleteRoute() {
   const { code, error } = useLocalSearchParams<{ code?: string; error?: string }>();
+  const router = useRouter();
   const hydrate = useAuthStore((state) => state.hydrate);
-  const [message, setMessage] = useState(() => error
-    ? "Additional verification is required before this account can sign in."
-    : code ? "Completing secure sign in..." : "The identity provider returned an incomplete sign-in response.");
 
   useEffect(() => {
-    if (error || !code) return;
+    if (error || !code) {
+      router.replace({ pathname: "/auth", params: { oauth_error: "1" } });
+      return;
+    }
     void exchangeOAuthCode(code)
-      .then(async () => {
-        await hydrate({ newSession: true });
-      })
-      .catch(() => setMessage("This sign-in response is invalid or expired."));
-  }, [code, error, hydrate]);
+      .then(() => hydrate({ newSession: true }))
+      .catch(() => router.replace({ pathname: "/auth", params: { oauth_error: "1" } }));
+  }, [code, error, hydrate, router]);
 
-  return <View style={styles.root}><Spinner size="small" /><Text style={styles.message}>{message}</Text></View>;
+  return <AuthSplashScreen />;
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.lg, backgroundColor: palette.page, padding: spacing.xl },
-  message: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, textAlign: "center" },
-});

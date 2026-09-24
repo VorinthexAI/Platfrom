@@ -46,7 +46,7 @@ describe('personal assistant runtime', () => {
       'app.enhance', 'app.translate', 'app.speech',
       'content.hidden.list',
       'app.notify', 'notification.mark-read', 'scope.list', 'pricing.read',
-      'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore',
+      'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore', 'subscription.current.schedule',
       'referral.summary.read', 'referral.redeem', 'profile.update', 'ticket.create',
       'folder.hide', 'folder.reveal', 'document.hide', 'document.reveal',
       'folder.create', 'folder.update', 'folder.move', 'folder.copy',
@@ -92,7 +92,7 @@ describe('personal assistant runtime', () => {
       'app.search',
       'content.hidden.list',
       'app.notify', 'notification.mark-read', 'scope.list', 'pricing.read',
-      'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore',
+      'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore', 'subscription.current.schedule',
       'referral.summary.read', 'referral.redeem', 'profile.update', 'ticket.create',
       'collection.create', 'collection.update', 'collection.delete',
       'image.search', 'image.favorite', 'image.update', 'image.delete',
@@ -138,7 +138,7 @@ describe('personal assistant runtime', () => {
       },
     });
 
-    expect(chatInput.tools.filter(({ name }: { name: string }) => !name.startsWith('profile.badge.')).map(({ name }: { name: string }) => name)).toEqual(['app.search', 'app.notify', 'notification.mark-read', 'scope.list', 'pricing.read', 'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore', 'referral.summary.read', 'referral.redeem', 'profile.update', 'ticket.create', 'place.reference.generate', 'place.reference.list', 'trip.guide.generate', 'trip.guide.list', 'trip.create', 'trip.update', 'trip.delete', 'trip.attachment.set', 'place.guide.find', 'place.find-city', 'place.find-children', 'place.create', 'place.update', 'place.delete', 'place.open', 'assistant.unsupported']);
+    expect(chatInput.tools.filter(({ name }: { name: string }) => !name.startsWith('profile.badge.')).map(({ name }: { name: string }) => name)).toEqual(['app.search', 'app.notify', 'notification.mark-read', 'scope.list', 'pricing.read', 'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore', 'subscription.current.schedule', 'referral.summary.read', 'referral.redeem', 'profile.update', 'ticket.create', 'place.reference.generate', 'place.reference.list', 'trip.guide.generate', 'trip.guide.list', 'trip.create', 'trip.update', 'trip.delete', 'trip.attachment.set', 'place.guide.find', 'place.find-city', 'place.find-children', 'place.create', 'place.update', 'place.delete', 'place.open', 'assistant.unsupported']);
     expect(chatInput.systemPrompt).toContain('operating inside Compass');
     expect(chatInput.messages[0].content[0].text).toContain('"workspace":"Compass"');
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Compass. Core can search your saved knowledge for travel context.', sources: [] });
@@ -300,7 +300,7 @@ describe('personal assistant runtime', () => {
       execute: async (_request, nextInput) => {
         modelCalls += 1;
         if (modelCalls === 1) {
-          expect(nextInput.tools?.filter(({ name }) => !name.startsWith('profile.badge.')).map(({ name }) => name)).toEqual(['app.search', 'app.notify', 'notification.mark-read', 'scope.list', 'pricing.read', 'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore', 'referral.summary.read', 'referral.redeem', 'profile.update', 'ticket.create', 'book.topic.suggest', 'book.goal.suggest', 'book.preview', 'book.extend', 'book.chapter.progress', 'book.create', 'book.generation.retry', 'book.generation.cancel', 'book.favorite', 'book.delete', 'assistant.unsupported']);
+          expect(nextInput.tools?.filter(({ name }) => !name.startsWith('profile.badge.')).map(({ name }) => name)).toEqual(['app.search', 'app.notify', 'notification.mark-read', 'scope.list', 'pricing.read', 'catalog.list', 'payment.checkout.create', 'subscription.current.read', 'subscription.current.cancel', 'subscription.current.restore', 'subscription.current.schedule', 'referral.summary.read', 'referral.redeem', 'profile.update', 'ticket.create', 'book.topic.suggest', 'book.goal.suggest', 'book.preview', 'book.extend', 'book.chapter.progress', 'book.create', 'book.generation.retry', 'book.generation.cancel', 'book.favorite', 'book.delete', 'assistant.unsupported']);
           expect(nextInput.systemPrompt).toContain('Call book.create exactly once');
           return response({ text: '', toolCalls: [{ id: 'book-create-1', name: 'book.create', arguments: brief }], stopReason: 'tool_use' });
         }

@@ -45,7 +45,7 @@ async function launchBrowserOAuth(provider: OAuthProvider) {
   const callback = Linking.parse(result.url).queryParams ?? {};
   const code = typeof callback.code === "string" ? callback.code : null;
   const providerError = typeof callback.error === "string" ? callback.error : null;
-  if (providerError) throw new Error("Additional verification is required before this account can sign in.");
+  if (providerError) throw new Error(providerError === "oauth_failed" ? `${provider === "apple" ? "Apple" : "Google"} sign in could not be completed. Please try again.` : "Additional verification is required before this account can sign in.");
   if (!code) throw new Error("The identity provider returned an incomplete sign-in response.");
   await exchangeOAuthCode(code);
   return true;

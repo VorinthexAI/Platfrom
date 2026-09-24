@@ -33,7 +33,7 @@ export async function errorHandler(error: Error, c: Context) {
   }
   if (error instanceof CommerceError) {
     const status = error.code === 'PRODUCT_NOT_FOUND' || error.code === 'SUBSCRIPTION_NOT_FOUND' || error.code === 'ACCOUNT_NOT_FOUND' ? 404
-      : error.code === 'PRODUCT_INACTIVE' || error.code === 'CHECKOUT_CONFLICT' || error.code === 'CHECKOUT_PENDING' || error.code === 'SUBSCRIPTION_EXISTS' ? 409
+      : error.code === 'PRODUCT_INACTIVE' || error.code === 'CHECKOUT_CONFLICT' || error.code === 'CHECKOUT_PENDING' || error.code === 'SUBSCRIPTION_EXISTS' || error.code === 'SUBSCRIPTION_NOT_SWITCHABLE' ? 409
       : error.code === 'PRODUCT_NOT_SYNCED' ? 503 : 422;
     return c.json(errorResponse(error.code, error.message), status);
   }
