@@ -75,7 +75,7 @@ import {
 import { fetchGalleryOverview, searchGalleryImages, type GalleryImage } from "@/lib/gallery-client";
 import { galleryQueryKeys } from "@/lib/workspace-query-cache";
 import { normalizeCapturedJpeg } from "@/lib/captured-image";
-import { formatConversationRetrievalSummary, mergeConversationRetrievalResults, type ConversationRetrievalResult } from "@/lib/conversation-retrievals";
+import { conversationRetrievalDestination, formatConversationRetrievalSummary, mergeConversationRetrievalResults, type ConversationRetrievalResult } from "@/lib/conversation-retrievals";
 import { deleteContentSearchHistory, type ContentSearchHistoryItem } from "@/lib/content-client";
 import { readConversationSelection, writeConversationSelection } from "@/lib/conversation-selection-vault";
 import { getUserSearchHistory, promoteCachedUserSearchHistory, removeCachedUserSearchHistory, userSearchHistoryQueryKey } from "@/lib/user-search-history-cache";
@@ -325,24 +325,10 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
     setSelectedMessage(undefined);
   }, [selectedMessage, showToast]);
   const navigateRetrievalResult = useCallback((result: ConversationRetrievalResult) => {
-    const { collectionSlug, destinationCollectionSlug, destinationKey, key, retrieval } = result;
-    const searchParams = retrieval.query ? { initialQuery: retrieval.query } : {};
+    const destination = conversationRetrievalDestination(result);
+    if (!destination) return;
     closeRetrievals();
-    if (collectionSlug === "folders") router.push({ pathname: "/capability/[slug]", params: { slug: "archive", assetKey: key, ...(destinationCollectionSlug === "documents" || destinationCollectionSlug === "files" ? { collectionKind: destinationCollectionSlug } : {}), ...searchParams } });
-    else if (collectionSlug === "documents" || collectionSlug === "files") router.push({ pathname: "/capability/[slug]", params: { slug: "archive", documentKey: key, documentTitle: result.label, ...searchParams } });
-    else if (collectionSlug === "collections") router.push({ pathname: "/capability/[slug]", params: { slug: "gallery", assetKey: key, ...searchParams } });
-    else if (collectionSlug === "images") router.push({ pathname: "/capability/[slug]", params: { slug: "gallery", ...(retrieval.filters?.collectionKey ? { assetKey: retrieval.filters.collectionKey } : {}), imageKey: key, ...searchParams } });
-    else if (collectionSlug === "email-messages" && (destinationKey || retrieval.filters?.connectorKey)) router.push({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: destinationKey ?? retrieval.filters!.connectorKey!, signalThreadKey: key, collectionKind: "email-messages", ...searchParams } });
-    else if (collectionSlug === "trips") router.push({ pathname: "/capability/[slug]", params: { slug: "compass", tripKey: key, collectionKind: "trips", ...searchParams } });
-    else if (collectionSlug === "inboxes" && destinationKey) router.push({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: destinationKey, signalReturn: "root", ...(destinationCollectionSlug === "email-messages" || destinationCollectionSlug === "email-drafts" ? { collectionKind: destinationCollectionSlug, ...searchParams } : {}) } });
-    else if (collectionSlug === "email-tones") router.push({ pathname: "/capability/[slug]", params: { slug: "signal", toneKey: key, collectionKind: "email-tones", ...searchParams } });
-    else if (collectionSlug === "email-drafts" && (destinationKey || retrieval.filters?.connectorKey)) router.push({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: destinationKey ?? retrieval.filters!.connectorKey!, draftKey: key, collectionKind: "email-drafts", ...searchParams } });
-    else if (collectionSlug === "places") router.push({ pathname: "/capability/[slug]", params: { slug: "compass", placeKey: key, collectionKind: "places", ...searchParams } });
-    else if (collectionSlug === "countries") router.push({ pathname: "/capability/[slug]", params: { slug: "compass", countryCode: key, collectionKind: "countries", ...searchParams } });
-    else if (collectionSlug === "books") router.push({ pathname: "/capability/[slug]", params: { slug: "ascend", bookKey: key, ...searchParams } });
-    else if (collectionSlug === "tickets") router.push({ pathname: "/capability/[slug]", params: { slug: "signal", inbox: "internal", tab: "sent", ...searchParams } });
-    else if (collectionSlug === "notifications") router.push({ pathname: "/capability/[slug]", params: { slug: "signal", inbox: "internal", tab: "unread", ...searchParams } });
-    else router.push({ pathname: "/capability/[slug]", params: { slug: "signal" } });
+    router.push(destination);
   }, [closeRetrievals, router]);
 
   const listFilter = useMemo(() => ({ query: committedQuery, favoriteOnly: false }), [committedQuery]);

@@ -22,12 +22,12 @@ import { GalleryCollectionImagePicker } from "@/components/capability/GalleryCol
 import { ResourceTagsSheet } from "@/components/ResourceTagsSheet";
 import { useAuthStore } from "@/state/auth";
 
-type GalleryMemoriesProps = { collection: GalleryCollection; onClose: () => void; open: boolean };
+type GalleryMemoriesProps = { collection: GalleryCollection; initialMemoryKey?: string; onClose: () => void; open: boolean };
 type MemorySheet = "list" | "actions" | "confirmDelete";
 const COLUMNS = 4;
 const GAP = 5;
 
-export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesProps) {
+export function GalleryMemories({ collection, initialMemoryKey, onClose, open }: GalleryMemoriesProps) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const galleryContext = getGalleryContext();
@@ -58,6 +58,7 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   const detailRequest = useRef(0);
   const createRequest = useRef(0);
   const listLoaded = useRef(false);
+  const initialOpened = useRef<string | undefined>(undefined);
   const listSheetOpen = useRef(open && !detail && !opening && activeSheet === "list");
   const pendingMemoryDeletes = useRef(new Set<string>());
   const longPressedMemory = useRef<string | undefined>(undefined);
@@ -189,6 +190,13 @@ export function GalleryMemories({ collection, onClose, open }: GalleryMemoriesPr
   }
 
   const loadListOnOpen = useEffectEvent(() => void loadList(true));
+  const openInitialMemory = useEffectEvent((key: string) => void openMemory({ key }));
+  useEffect(() => {
+    if (!open || !initialMemoryKey || initialOpened.current === initialMemoryKey) return;
+    initialOpened.current = initialMemoryKey;
+    const timer = setTimeout(() => openInitialMemory(initialMemoryKey), 0);
+    return () => clearTimeout(timer);
+  }, [collection.key, initialMemoryKey, open]);
   const refreshFromEvent = useEffectEvent(() => {
     if (!open || creating || opening) return;
     if (detail) void refreshDetail(detail.key);

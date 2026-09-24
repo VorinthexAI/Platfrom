@@ -16,6 +16,7 @@ export interface AgentToolDependencies {
   agentDependencies?: AgentRuntimeDependencies;
   currentUserMessageContent?: string;
   recentConversationContext?: string[];
+  currentConversationKey?: string;
   onEvidence?: (retrievals: AppSearchRetrieval[]) => void;
   signal?: AbortSignal;
 }
@@ -35,7 +36,7 @@ export function createAgentContextTool(gather?: typeof gatherWorkspaceContext) {
       if (!dependencies.requestKey) throw new Error('agent.context requires a trusted request key.');
       if (!dependencies.currentUserMessageContent) throw new Error('agent.context requires the trusted current user request.');
       const run = gather ?? dependencies.agentDependencies?.workspaceContext ?? (await import('@/lib/ai/agents/workspace-context')).gatherWorkspaceContext;
-      const gathered = await run(dependencies.currentUserMessageContent, dependencies.context, { signal: dependencies.signal }, dependencies.recentConversationContext ?? []);
+      const gathered = await run(dependencies.currentUserMessageContent, dependencies.context, { signal: dependencies.signal, conversations: dependencies.conversations, currentConversationKey: dependencies.currentConversationKey }, dependencies.recentConversationContext ?? []);
       const { navigation, ...modelEvidence } = gathered;
       if (navigation?.length) dependencies.onEvidence?.(navigation);
       return modelEvidence;

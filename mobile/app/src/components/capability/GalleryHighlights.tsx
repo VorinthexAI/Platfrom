@@ -23,6 +23,7 @@ import { fonts, palette, radii, spacing } from "@/theme/tokens";
 
 type GalleryHighlightsProps = {
   collection: GalleryCollection;
+  initialHighlightKey?: string;
   onClose: () => void;
   open: boolean;
 };
@@ -31,7 +32,7 @@ const COLUMNS = 3;
 const GAP = 8;
 type HighlightSheet = "player" | "actions" | "confirmDelete";
 
-export function GalleryHighlights({ collection, onClose, open }: GalleryHighlightsProps) {
+export function GalleryHighlights({ collection, initialHighlightKey, onClose, open }: GalleryHighlightsProps) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const notify = (title: string) => showToast({ title, duration: 2_000 });
@@ -56,6 +57,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   const detailRequest = useRef(0);
   const createRequest = useRef(0);
   const listLoaded = useRef(false);
+  const initialOpened = useRef<string | undefined>(undefined);
   const pendingHighlightDeletes = useRef(new Set<string>());
   const longPressedHighlight = useRef<string | undefined>(undefined);
   const listSheetOpen = useRef(open && !detail && !opening && activeSheet === "player");
@@ -86,7 +88,7 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
     }
   }
 
-  async function openHighlight(highlight: GalleryHighlight) {
+  async function openHighlight(highlight: Pick<GalleryHighlight, "key">) {
     listSheetOpen.current = false;
     const generation = ++detailRequest.current;
     setOpening(true);
@@ -172,6 +174,13 @@ export function GalleryHighlights({ collection, onClose, open }: GalleryHighligh
   }
 
   const loadListOnOpen = useEffectEvent(() => void loadList(true));
+  const openInitialHighlight = useEffectEvent((key: string) => void openHighlight({ key }));
+  useEffect(() => {
+    if (!open || !initialHighlightKey || initialOpened.current === initialHighlightKey) return;
+    initialOpened.current = initialHighlightKey;
+    const timer = setTimeout(() => openInitialHighlight(initialHighlightKey), 0);
+    return () => clearTimeout(timer);
+  }, [collection.key, initialHighlightKey, open]);
   const refreshFromEvent = useEffectEvent(() => {
     if (!open || creating || opening) return;
     if (detail) void openHighlight(detail);

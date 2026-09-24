@@ -23,6 +23,9 @@ export const appSearchCollectionSlugSchema = z.enum([
   'folders', 'documents', 'files', 'collections', 'images', 'inboxes', 'email-tones', 'email-messages', 'email-drafts', 'places', 'trips', 'countries', 'books', 'tags', 'tag-assignments', 'tickets', 'notifications',
 ]);
 export type AppSearchCollectionSlug = z.infer<typeof appSearchCollectionSlugSchema>;
+/** Additional authorized resource references assembled by Core's one read tool. */
+export const appSearchRetrievalCollectionSlugSchema = z.enum([...appSearchCollectionSlugSchema.options, 'highlights', 'memories', 'subjects']);
+export type AppSearchRetrievalCollectionSlug = z.infer<typeof appSearchRetrievalCollectionSlugSchema>;
 
 export const appSearchOperationSchema = z.enum(['search', 'list', 'count', 'sum', 'get', 'summarize']);
 type AppSearchOperation = z.infer<typeof appSearchOperationSchema>;
@@ -348,10 +351,10 @@ export const appSearchRetrievalResultSchema = z.object({
   key: z.string().trim().min(1).max(255),
   label: z.string().trim().min(1).max(200),
   destinationKey: z.string().trim().min(1).max(255).optional(),
-  destinationCollectionSlug: appSearchCollectionSlugSchema.optional(),
+  destinationCollectionSlug: appSearchRetrievalCollectionSlugSchema.optional(),
 }).strict();
 export const appSearchRetrievalGroupSchema = z.object({
-  collectionSlug: appSearchCollectionSlugSchema,
+  collectionSlug: appSearchRetrievalCollectionSlugSchema,
   results: z.array(appSearchRetrievalResultSchema).min(1).max(50),
 }).strict();
 export const appSearchRetrievalSchema = z.object({
@@ -360,7 +363,7 @@ export const appSearchRetrievalSchema = z.object({
   minimumScore: z.number().min(-1).max(1).optional(),
   filters: appSearchFiltersSchema.optional(),
   searchCollectionSlugs: z.array(appSearchCollectionSlugSchema).min(1).max(10).optional(),
-  groups: z.array(appSearchRetrievalGroupSchema).min(1).max(appSearchCollectionSlugSchema.options.length),
+  groups: z.array(appSearchRetrievalGroupSchema).min(1).max(appSearchRetrievalCollectionSlugSchema.options.length),
   source: z.enum(['search', 'results']).optional(),
 }).strict().superRefine(({ query, source, groups }, context) => {
   if (source !== 'results' && (!query || query.length < 1)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['query'], message: 'Search retrievals require a query.' });
@@ -453,7 +456,10 @@ export function projectAppSearchRetrieval(rawInput: unknown, rawOutput: unknown)
       case 'email-drafts':
         for (const result of group.results) {
           if (result.inbox && (inboxCounts.get(`email-drafts:${result.inbox.key}`) ?? 0) > 1) add('inboxes', { key: result.inbox.key, destinationKey: result.inbox.connectorKey, destinationCollectionSlug: 'email-drafts', label: retrievalLabel(result.inbox.name, 'Inbox') });
-          else add('email-drafts', { key: result.key, ...(result.inbox?.connectorKey || result.variant === 'new' || input.filters?.connectorKey ? { destinationKey: result.inbox?.connectorKey ?? (result.variant === 'new' ? result.connectorKey : input.filters!.connectorKey) } : {}), label: result.variant === 'new' ? retrievalLabel(result.subject, 'Email draft') : 'Reply draft' });
+           else {
+             const connectorKey = result.inbox?.connectorKey ?? (result.variant === 'new' ? result.connectorKey : undefined) ?? input.filters?.connectorKey;
+             add('email-drafts', { key: result.key, ...(connectorKey ? { destinationKey: connectorKey } : {}), label: result.variant === 'new' ? retrievalLabel(result.subject, 'Email draft') : 'Reply draft' });
+           }
         }
         continue;
       case 'books': results = group.results.map((result) => ({ key: result.key, label: retrievalLabel(result.title, 'Audio book') })); break;

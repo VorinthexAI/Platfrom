@@ -537,6 +537,12 @@ describe('app search service', () => {
     expect(appSearchRetrievalSchema.safeParse({ query: 'roadmap', limit: 5, minimumScore: 0.55, groups: [{ collectionSlug: 'collections', results: [{ key: firstKey, label: 'X' }] }] }).success).toBe(true);
   });
 
+  test('preserves a reply draft inbox destination so its pill opens the correct connector', () => {
+    const connectorKey = newId(), draftKey = newId(), date = '2026-09-24T00:00:00.000Z';
+    const retrieval = projectAppSearchRetrieval({ query: 'reply', collectionSlugs: ['email-drafts'] }, { query: 'reply', groups: [{ collectionSlug: 'email-drafts', results: [{ key: draftKey, variant: 'reply', threadKey: newId(), messageKey: newId(), replyMode: 'reply', to: ['person@example.com'], cc: [], generatedContent: 'Reply', status: 'generated', createdAt: date, updatedAt: date, inbox: { key: newId(), connectorKey, name: 'Work' } }] }] });
+    expect(retrieval?.groups[0]?.results[0]).toMatchObject({ key: draftKey, destinationKey: connectorKey, label: 'Reply draft' });
+  });
+
   test('passes dynamic date intervals but no score cutoff to ranked image search', async () => {
     const inputs: any[] = [];
     const collectionKey = newId();

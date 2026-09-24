@@ -129,7 +129,7 @@ function errorMessage(error: unknown) {
   return extractDomainErrorMessage(error) ?? (error instanceof Error ? error.message : "Gallery could not complete that request.");
 }
 
-export function GalleryWorkspace({ initialAction, initialCollectionKey, initialImageKey, initialSearchQuery, returnSignalConnectorKey, returnSignalMessageKey, returnSignalThreadKey, returnTripKey, returnTripName }: { initialAction?: "create" | "create-collection"; initialCollectionKey?: string; initialImageKey?: string; initialSearchQuery?: string; returnSignalConnectorKey?: string; returnSignalMessageKey?: string; returnSignalThreadKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
+export function GalleryWorkspace({ initialAction, initialCollectionKey, initialHighlightKey, initialMemoryKey, initialSubjectKey, initialImageKey, initialSearchQuery, returnSignalConnectorKey, returnSignalMessageKey, returnSignalThreadKey, returnTripKey, returnTripName }: { initialAction?: "create" | "create-collection"; initialCollectionKey?: string; initialHighlightKey?: string; initialMemoryKey?: string; initialSubjectKey?: string; initialImageKey?: string; initialSearchQuery?: string; returnSignalConnectorKey?: string; returnSignalMessageKey?: string; returnSignalThreadKey?: string; returnTripKey?: string; returnTripName?: string } = {}) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -163,6 +163,8 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
   const [activeCollection, setActiveCollection] = useState<GalleryCollection | undefined>(cachedInitialCollection);
   const initialCollectionOpened = useRef<string | undefined>(undefined);
   const initialImageOpened = useRef<string | undefined>(undefined);
+  const initialArtifactOpened = useRef<string | undefined>(undefined);
+  const initialSubjectOpened = useRef<string | undefined>(undefined);
   const initialImageRequest = useRef(0);
   const initialImageLoading = useRef<string | undefined>(undefined);
   const [showingCollectionOverview, setShowingCollectionOverview] = useState(!initialCollectionKey);
@@ -460,6 +462,29 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
     const timer = setTimeout(() => showCollection(collection), 0);
     return () => clearTimeout(timer);
   }, [collections, initialCollectionKey]);
+
+  useEffect(() => {
+    if (!activeCollection || activeCollection.key !== initialCollectionKey) return;
+    const target = initialHighlightKey ? `highlight:${initialHighlightKey}` : initialMemoryKey ? `memory:${initialMemoryKey}` : undefined;
+    if (!target || initialArtifactOpened.current === target) return;
+    initialArtifactOpened.current = target;
+    const timer = setTimeout(() => {
+      if (initialHighlightKey) setHighlightsOpen(true);
+      else if (initialMemoryKey) setMemoriesOpen(true);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [activeCollection, initialCollectionKey, initialHighlightKey, initialMemoryKey]);
+
+  useEffect(() => {
+    if (!initialSubjectKey || initialSubjectOpened.current === initialSubjectKey || identitiesLoading) return;
+    const subject = subjects.find(({ key }) => key === initialSubjectKey);
+    initialSubjectOpened.current = initialSubjectKey;
+    const timer = setTimeout(() => {
+      if (subject) void filterByVisualIdentity(subject);
+      else setStatus("That visual identity is no longer available.");
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [identitiesLoading, initialSubjectKey, subjects]);
 
   useEffect(() => {
     if (!initialImageKey || initialImageOpened.current === initialImageKey || activeCollection?.key !== initialCollectionKey) return;
@@ -3427,8 +3452,8 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialI
         value={aiInput}
       />
 
-      {activeCollection?.access.canContribute ? <GalleryHighlights collection={activeCollection} key={`highlights:${activeCollection.key}`} onClose={() => setHighlightsOpen(false)} open={highlightsOpen} /> : null}
-      {activeCollection?.access.canContribute ? <GalleryMemories collection={activeCollection} key={`memories:${activeCollection.key}`} onClose={() => setMemoriesOpen(false)} open={memoriesOpen} /> : null}
+      {activeCollection ? <GalleryHighlights collection={activeCollection} initialHighlightKey={initialHighlightKey} key={`highlights:${activeCollection.key}`} onClose={() => setHighlightsOpen(false)} open={highlightsOpen} /> : null}
+      {activeCollection ? <GalleryMemories collection={activeCollection} initialMemoryKey={initialMemoryKey} key={`memories:${activeCollection.key}`} onClose={() => setMemoriesOpen(false)} open={memoriesOpen} /> : null}
       {activeCollection?.access.canContribute ? <GalleryImageGeneration collection={activeCollection} key={`generation:${activeCollection.key}`} onClose={() => setGenerationOpen(false)} onGenerate={(input, requestKey) => void generateImages(input, requestKey)} open={generationOpen} /> : null}
 
       <SearchHistorySheet error={status} history={history} loading={historyLoading} onClose={() => { if (identityHistoryOpen) setIdentityHistoryOpen(false); else closeSheet(); }} onRemove={(item) => void removeHistoryQuery(item)} onSelect={applyHistoryQuery} open={identityHistoryOpen || (sheetOpen && activeSheet === "searchHistory")} removingQuery={removingHistoryQuery} />

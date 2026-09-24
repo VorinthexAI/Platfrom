@@ -16,6 +16,13 @@ const contextSchema = z.strictObject({ teamKey: keySchema, scopeKey: keySchema }
 export type EmailContext = z.infer<typeof contextSchema>;
 const EMAIL_RETURN_URI = "https://vorinthex.com/capability/signal";
 
+export function emailConnectionErrorMessage(code: string) {
+  if (code === "gmail_api_unavailable") return "Gmail connections are temporarily unavailable. Please try again later.";
+  if (code === "gmail_scope_missing") return "Google did not grant Gmail access. Reconnect and approve the requested permissions.";
+  if (code === "access_denied") return "Gmail access was declined.";
+  return "Email connection could not be completed. Please try again.";
+}
+
 export const emailFilterSchema = z.enum(["all", "important", "urgent", "purchases", "needs_action", "filtered", "unread", "favorite", "trash"]);
 export type EmailFilter = z.infer<typeof emailFilterSchema>;
 export const emailReadStateSchema = z.enum(["read", "unread"]);
@@ -497,7 +504,7 @@ export async function launchEmailConnection(connection: z.input<typeof emailConn
   const params = Linking.parse(result.url).queryParams ?? {};
   const error = typeof params.email_connection_error === "string" ? params.email_connection_error : null;
   const code = typeof params.email_connection_code === "string" ? params.email_connection_code : null;
-  if (error) throw new Error("Email connection was not completed.");
+  if (error) throw new Error(emailConnectionErrorMessage(error));
   if (!code) throw new Error("The email provider returned an incomplete connection response.");
   return exchangeEmailConnection(code);
 }

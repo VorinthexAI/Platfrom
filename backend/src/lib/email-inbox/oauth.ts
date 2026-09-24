@@ -4,17 +4,32 @@ import { requireTeamAccess, requireScopeAccess } from '@/lib/founders/access';
 import { redisConnection } from '@/lib/redis';
 import { createConnectorRepository, type ConnectorRepository } from './connector-repository';
 import { createInboxRepository, type InboxRepository } from './inbox-repository';
-import { buildGmailAuthorizationUrl, createGmailClient, createPkce, exchangeGmailCode } from './gmail';
+import { buildGmailAuthorizationUrl, createGmailClient, createPkce, exchangeGmailCode, GmailApiError } from './gmail';
 import { EmailWatchRepairPendingError } from './service';
 
 const STATE_PREFIX = 'email:oauth:state:';
 const GRANT_PREFIX = 'email:oauth:grant:';
 
-export interface EmailOAuthFailureDiagnostic { stage: string; databaseCode?: number; providerStatus?: number }
+export interface EmailOAuthFailureDiagnostic { stage: string; databaseCode?: number; providerStatus?: number; providerReason?: 'SERVICE_DISABLED' | 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' | 'GMAIL_DISABLED' }
+
+function gmailFailureReason(error: unknown): EmailOAuthFailureDiagnostic['providerReason'] {
+  if (!(error instanceof GmailApiError)) return undefined;
+  const body = error.metadata.details && typeof error.metadata.details === 'object' ? error.metadata.details as { error?: { details?: unknown } } : undefined;
+  const details = Array.isArray(body?.error?.details) ? body.error.details : [];
+  const reasons = [
+    ...error.reasons,
+    ...details.flatMap((item) => item && typeof item === 'object' && 'reason' in item && typeof item.reason === 'string' ? [item.reason] : []),
+  ];
+  if (reasons.some((reason) => ['SERVICE_DISABLED', 'accessNotConfigured', 'API_DISABLED'].includes(reason))) return 'SERVICE_DISABLED';
+  if (reasons.some((reason) => ['ACCESS_TOKEN_SCOPE_INSUFFICIENT', 'insufficientPermissions'].includes(reason))) return 'ACCESS_TOKEN_SCOPE_INSUFFICIENT';
+  if (reasons.some((reason) => ['GMAIL_DISABLED', 'mailServiceDisabled'].includes(reason))) return 'GMAIL_DISABLED';
+  return undefined;
+}
 
 function failureDiagnostic(stage: string, error: unknown): EmailOAuthFailureDiagnostic {
   const details = typeof error === 'object' && error !== null ? error as Record<string, unknown> : {};
-  return { stage, ...(typeof details.errorNum === 'number' ? { databaseCode: details.errorNum } : {}), ...(typeof details.status === 'number' ? { providerStatus: details.status } : {}) };
+  const providerReason = gmailFailureReason(error);
+  return { stage, ...(typeof details.errorNum === 'number' ? { databaseCode: details.errorNum } : {}), ...(typeof details.status === 'number' ? { providerStatus: details.status } : {}), ...(providerReason ? { providerReason } : {}) };
 }
 const stateSchema = z.object({
   userKey: z.string().cuid(), teamKey: z.string().min(1), scopeKey: z.string().cuid(),
@@ -146,7 +161,8 @@ export function createEmailOAuthService(options: {
         // Never log callback URLs, authorization codes, tokens, or provider bodies.
         try { (options.reportFailure ?? ((diagnostic) => console.warn('email oauth connection failed', diagnostic)))(failureDiagnostic(stage, error)); } catch { /* Diagnostics cannot prevent the app return. */ }
         if (reconnect) await connectors.rollbackReconnect({ connectorKey: reconnect.connectorKey, connectorRevision: reconnect.connectorRevision, previousConnector: reconnect.previous, inboxKey: reconnect.inboxKey, inboxRevision: reconnect.inboxRevision, previousInbox: reconnect.previousInbox }).catch(() => false);
-        redirect.searchParams.set('email_connection_error', 'connection_failed');
+        const reason = gmailFailureReason(error);
+        redirect.searchParams.set('email_connection_error', stage === 'gmail-profile' && reason === 'SERVICE_DISABLED' ? 'gmail_api_unavailable' : stage === 'gmail-profile' && reason === 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' ? 'gmail_scope_missing' : 'connection_failed');
       }
       return redirect.toString();
     },

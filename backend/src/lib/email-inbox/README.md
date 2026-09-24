@@ -3,7 +3,7 @@
 ## Production Provider Setup Checklist
 
 - Configure and verify the Google OAuth consent screen, including the production domain, privacy policy, requested Gmail scopes, and Google verification where required.
-- Enable the Gmail API in the Google Cloud project used by the production OAuth client.
+- Enable the Gmail API in the Google Cloud project used by the production OAuth client. OAuth consent can succeed even when that API is disabled; the first Gmail profile request will then return HTTP 403 and the app cannot finish connecting.
 - Create `GMAIL_PUBSUB_TOPIC` and grant `gmail-api-push@system.gserviceaccount.com` the Pub/Sub Publisher role on that topic.
 - Create an authenticated push subscription for the topic. Use a dedicated service account and the production email webhook URL, and configure the webhook audience expected by the backend.
 - Set `GMAIL_OAUTH_CLIENT_ID` and `GMAIL_OAUTH_CLIENT_SECRET` (or their `GOOGLE_OAUTH_*` fallbacks), `BACKEND_PUBLIC_URL`, `GMAIL_PUBSUB_TOPIC`, `GMAIL_PUBSUB_PUSH_AUDIENCE`, `GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL`, `GMAIL_PUBSUB_SUBSCRIPTION`, `EMAIL_CONNECTOR_CREDENTIAL_KEYS`, `EMAIL_CONNECTOR_ACTIVE_KEY_ID`, `EMAIL_CONNECTOR_MOBILE_REDIRECT_URIS`, and `REDIS_URL` or `JOB_REDIS_URL` in the encrypted environment registry.
@@ -42,7 +42,9 @@ Connection failures log a fixed stage (`token-exchange`, `gmail-profile`,
 `gmail-watch`, `initial-sync-enqueue`, or `connection-grant`) and numeric
 provider/database codes when available. These diagnostics deliberately exclude
 authorization codes, state tokens, credentials, email addresses, and provider
-response bodies. Retry connection with a fresh OAuth flow after a deployment;
+response bodies. Recognized disabled-API and missing-scope errors return safe,
+specific mobile messages without exposing provider payloads. Retry connection
+with a fresh OAuth flow after the API is enabled or a deployment;
 authorization state and grants are one-time and short-lived.
 
 Manual synchronization and Gmail subscription notifications are independent ingestion entry points. Both converge on the same provider-thread parser, pass every message through the canonical inbox sorter, and persist private `emailInboxes`, `emailThreads`, `emailMessages`, `emailDrafts`, `emailTones`, `emailReplyContext`, `emailWritingProfiles`, and `emailAttachments` rows. Archive and Gallery receive ordinary user-owned exports only; they are not Signal's lifecycle source. Subscription workers must call the system-only `ingestSubscriptionNotification`, never `sync`; that canonical operation owns exact-connector authorization and durable pending-history marking/clearing.

@@ -79,6 +79,7 @@ import {
   deleteEmailMessageTranslationsForContext,
   deleteEmailReplyContextsForContext,
   deleteEmailToneForContext,
+  emailConnectionErrorMessage,
   exchangeEmailConnection,
   findSimilarEmailMessagesForContext,
   fetchEmailOverviewForContext,
@@ -1084,7 +1085,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   }, [params.email_connection_code]);
   useEffect(() => {
     if (params.email_connection_error)
-      notifyLatest("Email connection was not completed.");
+      notifyLatest(emailConnectionErrorMessage(params.email_connection_error));
   }, [params.email_connection_error]);
   function resetNewEmail(preserveDraftKey?: string) {
     invalidateNewEmailAlternatives(preserveDraftKey);

@@ -46,14 +46,14 @@ model.
 
 ## Focused evaluation
 
-`workspace-context.test.ts` covers 20 representative cross-collection and
+`workspace-context.test.ts` covers focused cross-collection and
 account-grounding scenarios, including deep reads, exact counts, redaction,
 ambiguity, and unavailable sources. `core.test.ts` verifies that Core either
 answers directly or calls `agent.context` once before its final answering turn.
 The OpenRouter provider tests cover Jev's Decisions API transport.
 
 With `OPENROUTER_API_KEY` already in the process environment, these focused
-tests additionally run four Jev routing/timing cases and three live Core
+tests additionally run five Jev routing/timing cases and three live Core
 tool-selection cases. They use synthetic questions and injected account data,
 report Jev p50/p95 latency, and never print or persist the credential.
 

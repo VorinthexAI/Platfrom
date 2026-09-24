@@ -3,6 +3,7 @@ import { createEmailOAuthService, type OAuthStore } from './oauth';
 import { teamConnectorSchema } from './connector-schema';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { EmailWatchRepairPendingError } from './service';
+import { GmailApiError } from './gmail';
 
 const previousClientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
 const previousClientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
@@ -39,6 +40,31 @@ describe('email OAuth state', () => {
     expect(diagnostics).toEqual([{ stage: 'token-exchange', providerStatus: 403 }]);
     expect(JSON.stringify(diagnostics)).not.toMatch(/private-code|access-token|person@example|private-provider/);
     await expect(oauth.callback({ state, code: 'private-code' })).rejects.toThrow('invalid or expired');
+  });
+
+  test('returns a safe actionable error when the Gmail API is disabled for the OAuth project', async () => {
+    const diagnostics: unknown[] = [];
+    const oauth = createEmailOAuthService({
+      store, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey }),
+      exchange: async () => ({ identity: { providerAccountId: 'google-1', email: 'person@example.com' }, scopes: ['https://mail.google.com/'], credentials: { accessToken: 'private-access', refreshToken: 'private-refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' } }),
+      profile: async () => { throw new GmailApiError(403, ['PERMISSION_DENIED'], { providerMessage: 'private-access person@example.com', details: { error: { details: [{ reason: 'SERVICE_DISABLED', metadata: { service: 'gmail.googleapis.com', consumer: 'private-id' } }] } } }); },
+      reportFailure: (value) => { diagnostics.push(value); },
+    });
+    const state = new URL((await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
+    const redirect = new URL(await oauth.callback({ state, code: 'provider-code' }));
+    expect(redirect.searchParams.get('email_connection_error')).toBe('gmail_api_unavailable');
+    expect(diagnostics).toEqual([{ stage: 'gmail-profile', providerStatus: 403, providerReason: 'SERVICE_DISABLED' }]);
+    expect(JSON.stringify(diagnostics)).not.toMatch(/private-access|private-refresh|person@example|private-id|provider-code/);
+  });
+
+  test('distinguishes a missing Gmail scope from a disabled provider API', async () => {
+    const oauth = createEmailOAuthService({
+      store, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey }),
+      exchange: async () => ({ identity: { providerAccountId: 'google-1', email: 'person@example.com' }, scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' } }),
+      profile: async () => { throw new GmailApiError(403, ['insufficientPermissions']); },
+    });
+    const state = new URL((await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
+    expect(new URL(await oauth.callback({ state, code: 'provider-code' })).searchParams.get('email_connection_error')).toBe('gmail_scope_missing');
   });
 
   test('binds state to access context and consumes denial callbacks once', async () => {
