@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import ReferralFallbackPage, { isValidReferralCode, metadata } from "./page";
+import ReferralFallbackPage, { metadata } from "./page";
+import { isValidReferralCode } from "./referral-code";
 
 describe("referral acquisition fallback", () => {
   test("accepts only an exact uppercase 12-character hex code", () => {

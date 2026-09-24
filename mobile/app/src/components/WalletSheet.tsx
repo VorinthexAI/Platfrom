@@ -20,11 +20,20 @@ function sparkLabel(amount: string) {
   return `${amount} ${amount === "1" || amount === "less than 1" ? "Spark" : "Sparks"}`;
 }
 
+// These priced actions are intentionally absent from the public Spark costs list.
+const unlistedActionNames: Readonly<Record<string, string>> = {
+  "place.find-city": "View city",
+  "profile.badge.generate": "Generate a profile badge",
+};
+
 function spendName(toolSlug: string | undefined, charges: ReadonlyArray<{ key: string; name: string }>) {
-  return charges.find((charge) => charge.key === toolSlug)?.name ?? toolSlug ?? "Spark charge";
+  if (!toolSlug) return "Spark action";
+  return charges.find((charge) => charge.key === toolSlug)?.name
+    ?? unlistedActionNames[toolSlug]
+    ?? toolSlug.replaceAll(/[.-]/g, " ").replace(/^./, (first) => first.toUpperCase());
 }
 
-export type WalletHelp = "storage" | "ai" | "charges";
+export type WalletHelp = "storage" | "ai" | "actions";
 
 function SectionHelp({ label, onPress }: { label: string; onPress: () => void }) {
   return <ButtonSizeProvider overrideParent size="sm"><Button accessibilityLabel={label} contentMode="raw" iconOnly onPress={onPress} size="sm" variant="icon"><HelpIcon size="sm" /></Button></ButtonSizeProvider>;
@@ -59,8 +68,8 @@ export function WalletSheet({ onOpenHelp, userKey }: { onOpenHelp: (help: Wallet
       contentContainerStyle={styles.content}
       data={spends}
       keyExtractor={(item) => item.key}
-      ListEmptyComponent={historyQuery.isPending ? <View accessibilityLabel="Loading Spark charges" accessibilityRole="progressbar" style={styles.state}>{[0, 1, 2].map((key) => <Skeleton key={key} style={styles.listSkeleton} />)}</View> : historyQuery.isError ? <View style={styles.state}><Text accessibilityRole="alert" style={styles.error}>Spark charges could not be loaded.</Text><Button onPress={() => void historyQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : <Text style={styles.empty}>No static Spark charges yet.</Text>}
-      ListFooterComponent={historyQuery.isFetchNextPageError ? <Button onPress={() => void historyQuery.fetchNextPage()} size="md" variant="secondary">Retry more charges</Button> : historyQuery.isFetchingNextPage ? <Skeleton accessibilityLabel="Loading more Spark charges" accessibilityRole="progressbar" style={styles.listSkeleton} /> : null}
+      ListEmptyComponent={historyQuery.isPending ? <View accessibilityLabel="Loading action history" accessibilityRole="progressbar" style={styles.state}>{[0, 1, 2].map((key) => <Skeleton key={key} style={styles.listSkeleton} />)}</View> : historyQuery.isError ? <View style={styles.state}><Text accessibilityRole="alert" style={styles.error}>Action history could not be loaded.</Text><Button onPress={() => void historyQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : <Text style={styles.empty}>No paid actions yet.</Text>}
+      ListFooterComponent={historyQuery.isFetchNextPageError ? <Button onPress={() => void historyQuery.fetchNextPage()} size="md" variant="secondary">Retry more actions</Button> : historyQuery.isFetchingNextPage ? <Skeleton accessibilityLabel="Loading more actions" accessibilityRole="progressbar" style={styles.listSkeleton} /> : null}
       ListHeaderComponent={<View style={styles.header}>
         <View style={styles.section}>
           <Text style={styles.title}>Spark balance</Text>
@@ -78,7 +87,7 @@ export function WalletSheet({ onOpenHelp, userKey }: { onOpenHelp: (help: Wallet
           <View style={styles.titleRow}><Text style={styles.title}>AI usage</Text><SectionHelp label="What counts as AI usage?" onPress={() => onOpenHelp("ai")} /></View>
           {billingSummaryQuery.isPending ? <Skeleton style={styles.summarySkeleton} /> : billingSummaryQuery.isError ? <Text accessibilityRole="alert" style={styles.summary}>AI usage is unavailable.</Text> : <Text style={styles.summary}>{sparkLabel(formatSpentSparks(billingSummaryQuery.data.aiUsageMicroSparks))} spent</Text>}
         </View>
-        <View style={styles.titleRow}><Text style={styles.title}>Charges</Text><SectionHelp label="What are static Spark charges?" onPress={() => onOpenHelp("charges")} /></View>
+        <View style={styles.titleRow}><Text style={styles.title}>Action history</Text><SectionHelp label="What is action history?" onPress={() => onOpenHelp("actions")} /></View>
       </View>}
       onEndReached={loadMore}
       onEndReachedThreshold={0.4}

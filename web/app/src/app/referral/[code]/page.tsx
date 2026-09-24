@@ -4,8 +4,7 @@ import { notFound } from "next/navigation";
 import { Button } from "@vorinthex/shared/ui/components";
 import { ArrowRightIcon } from "@vorinthex/shared/ui/icons";
 import styles from "@/components/private/PrivateFallback.module.css";
-
-const REFERRAL_CODE_PATTERN = /^[0-9A-F]{12}$/;
+import { isValidReferralCode } from "./referral-code";
 
 export const metadata: Metadata = {
   title: "Open referral in Vorinthex Core",
@@ -18,10 +17,6 @@ export const metadata: Metadata = {
     nosnippet: true,
   },
 };
-
-export function isValidReferralCode(code: string) {
-  return REFERRAL_CODE_PATTERN.test(code);
-}
 
 export default async function ReferralFallbackPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
