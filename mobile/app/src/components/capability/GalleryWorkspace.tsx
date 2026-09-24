@@ -4346,7 +4346,7 @@ const styles = StyleSheet.create({
   imageFrameSelected: { borderColor: palette.silver50, borderWidth: 2 },
   selectionBadge: { position: "absolute", top: 4, right: 4, width: 20, height: 20, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: palette.silver50 },
   image: { width: "100%", height: "100%" },
-  emptyState: { flex: 1, width: "100%", minHeight: 360, alignItems: "center", justifyContent: "center", gap: 14 },
+  emptyState: { flexGrow: 1, width: "100%", alignItems: "center", justifyContent: "center", gap: 14 },
   emptyText: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 13 },
   emptyPlusButton: { width: 44, height: 44 },
   aiResponse: { paddingHorizontal: 14, paddingVertical: 9, color: palette.silver300, fontFamily: fonts.regular, fontSize: 12, lineHeight: 17, borderRadius: radii.md, backgroundColor: palette.panel },

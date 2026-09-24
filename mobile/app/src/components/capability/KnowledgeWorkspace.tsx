@@ -4149,9 +4149,8 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
   const rootSearchActive = Boolean(rootSearchQuery.trim() || selectedTags.length);
   const folderSearchActive = Boolean(query.trim() || selectedTags.length);
   const archiveViewConstrained = showOnlyFavorites || showHidden;
-  const folderEmptyMessage = archiveViewConstrained ? "No folders matching these filters." : "No folders here yet.";
+  const folderEmptyMessage = archiveViewConstrained ? "No matching folders." : "No folders yet.";
   const documentEmptyMessage = archiveViewConstrained ? `No ${folderContentTab} matching these filters.` : folderContentTab === "files" ? "No files here yet." : "No documents here yet.";
-  const rootSearchEmpty = Boolean(rootSearchActive && !rootSearchError && !rootSearching && rootSearchResults && (folderContentTab === "folders" ? rootSearchFolders.length === 0 : rootSearchDocuments.length === 0));
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}><WorkspaceAppSwitcher active="archive" /><ProfileHeaderRight /></View>
@@ -4182,7 +4181,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
             </View>
             {bulkToolbar}
             {filterBadges}
-            <View style={[styles.rootContent, rootSearchEmpty && styles.searchRootContent]}>
+            <View style={styles.rootContent}>
               <Tabs accessibilityRole="tablist" style={styles.folderTabs}>
                 <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "folders" }} onPress={() => selectFolderContentTab("folders")} size="xs" style={styles.folderTab} variant={folderContentTab === "folders" ? "secondary" : "ghost"}>Folders</Button>
                 <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "documents" }} onPress={() => selectFolderContentTab("documents")} size="xs" style={styles.folderTab} variant={folderContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
@@ -4190,7 +4189,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
               </Tabs>
               {rootSearchActive ? rootSearchError ? <View style={styles.sheetEmptyContent}><Button onPress={() => setRootSearchRevision((value) => value + 1)} size="md" variant="secondary">Retry search</Button></View> : rootSearching || !rootSearchResults ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folder search results" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.loadingGrid]}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel="Loading search results" accessibilityRole="progressbar" style={styles.rootDocuments}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? <View accessibilityLiveRegion="polite" style={[styles.rootFolderGrid, rootSearchFolders.length === 0 && styles.searchEmptyContent]}>
                 {rootSearchFolders.map((folder) => { const selected = selectedFolders.some(({ key }) => key === folder.key); return <View key={folder.key} style={[styles.rootFolderCard, selected && styles.selectedItem, { width: archiveCardSize, height: archiveCardSize }]}><FolderCover folder={folder} /><Button accessibilityState={{ selected }} contentMode="raw" onLongPress={() => handleFolderLongPress(folder)} onPress={() => handleFolderPress(folder)} shape="rounded" size="xl" style={[styles.rootFolderMain, folderHasCover(folder) && styles.coveredFolderMain]} variant="ghost">{folderHasCover(folder) ? null : <FolderIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.archiveCardLabel, folderHasCover(folder) && styles.coveredFolderLabel]}>{folder.name}</Text></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>; })}
-                {rootSearchFolders.length === 0 ? <Text style={styles.empty}>No folders matching these filters.</Text> : null}
+                {rootSearchFolders.length === 0 ? <Text style={styles.empty}>No matching folders.</Text> : null}
               </View> : <View accessibilityLiveRegion="polite" style={[styles.rootDocuments, rootSearchDocuments.length === 0 && styles.searchEmptyContent]}>
                 {rootSearchDocuments.map((document) => { const selected = selectedDocuments.some(({ key }) => key === document.documentKey); return <Button accessibilityState={{ selected }} contentMode="raw" key={document.documentKey} onLongPress={() => handleSearchDocumentLongPress(document)} onPress={() => handleSearchDocumentPress(document)} size="sm" style={[styles.documentButton, selected && styles.selectedDocumentItem]} variant={selected ? "ghost" : "secondary"}><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{documentPillName(document)}</Text></Button>; })}
                 {rootSearchDocuments.length === 0 ? <Text style={styles.empty}>No {folderContentTab === "files" ? "files" : "documents"} matching these filters.</Text> : null}
@@ -4251,7 +4250,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
                   <Button accessibilityState={{ selected }} contentMode="raw" onLongPress={() => handleFolderLongPress(folder)} onPress={() => handleFolderPress(folder)} shape="rounded" size="xl" style={[styles.rootFolderMain, folderHasCover(folder) && styles.coveredFolderMain]} variant="ghost">{folderHasCover(folder) ? null : <FolderIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.archiveCardLabel, folderHasCover(folder) && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
                   {selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}
                 </View>; })}
-                {folderSearchFolders.length === 0 ? <Text style={styles.empty}>No folders matching these filters.</Text> : null}
+                {folderSearchFolders.length === 0 ? <Text style={styles.empty}>No matching folders.</Text> : null}
               </View>
             ) : <View accessibilityLiveRegion="polite" style={[styles.folderDocuments, styles.folderTabContent, folderSearchDocuments.length === 0 && styles.searchEmptyContent]}>
               {folderSearchDocuments.map((document) => { const selected = selectedDocuments.some(({ key }) => key === document.documentKey); return <Button accessibilityState={{ selected }} contentMode="raw" key={document.documentKey} onLongPress={() => handleSearchDocumentLongPress(document)} onPress={() => handleSearchDocumentPress(document)} size="sm" style={[styles.documentButton, selected && styles.selectedDocumentItem]} variant={selected ? "ghost" : "secondary"}>
@@ -4473,7 +4472,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
                   <FolderCover folder={folder} />
                   <Button contentMode="raw" onPress={() => { closeSheet(); requestAnimationFrame(() => handleFolderPress(folder)); }} shape="rounded" size="md" style={[styles.rootFolderMain, folderHasCover(folder) && styles.coveredFolderMain]} variant="ghost">{folderHasCover(folder) ? null : <FolderIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.archiveCardLabel, folderHasCover(folder) && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
                 </View>)}
-                {similarFolders.length === 0 ? <Text style={styles.empty}>No matching folders found.</Text> : null}
+                {similarFolders.length === 0 ? <Text style={styles.empty}>No matching folders.</Text> : null}
               </View> : null}
               {!similarLoading && similarContentTab !== "folders" ? <View style={similarTabDocuments.length > 0 ? styles.folderDocuments : styles.similarEmpty}>
                 {similarTabDocuments.map((document) => <Button contentMode="raw" key={document.key} onPress={() => { closeSheet(); requestAnimationFrame(() => { void openArchiveDocument(document); }); }} size="md" style={styles.documentButton} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{documentPillName(document)}</Text><ScannedBadge document={document} /></Button>)}
@@ -4672,7 +4671,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
                   <Button accessibilityLabel={`Manage ${folder.name}`} contentMode="raw" onPress={() => showFolderActions(folder)} size="md" style={styles.managedTileAction} variant="icon"><MoreHorizontalIcon size="sm" /></Button>
                 </View>
               ))}
-              {!librarySearchError && !librarySearching && librarySearchResults && !showArchiveRoot && visibleFolders.length === 0 ? <Text style={styles.empty}>No folders match this search.</Text> : null}
+              {!librarySearchError && !librarySearching && librarySearchResults && !showArchiveRoot && visibleFolders.length === 0 ? <Text style={styles.empty}>No matching folders.</Text> : null}
             </ScrollView>
           </>
         ) : null}
@@ -4728,12 +4727,11 @@ const styles = StyleSheet.create({
   searchHistoryButton: { width: 44, height: 44 },
   rootSearchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 13 },
   rootSearchResults: { gap: 7 },
-  rootContent: { width: "100%", gap: spacing.md },
-  searchRootContent: { flexGrow: 1 },
+  rootContent: { flexGrow: 1, width: "100%", gap: spacing.md },
   searchEmptyContent: { flexGrow: 1, width: "100%", flexDirection: "column", alignContent: "center", alignItems: "center", justifyContent: "center" },
   emptyTabContent: { flexDirection: "column", flexWrap: "nowrap", alignContent: "stretch" },
-  rootDocuments: { width: "100%", gap: 7 },
-  rootFolderGrid: { width: "100%", alignContent: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  rootDocuments: { flexGrow: 1, width: "100%", gap: 7 },
+  rootFolderGrid: { flexGrow: 1, width: "100%", alignContent: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: 10 },
   loadingGrid: { flex: 1 },
   rootFolderCard: { position: "relative", borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised, overflow: "hidden" },
   selectedItem: { borderColor: palette.silver50, shadowColor: palette.silver50, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.62, shadowRadius: 5, elevation: 4 },
@@ -4755,12 +4753,12 @@ const styles = StyleSheet.create({
   folderTitleActions: { flexDirection: "row", alignItems: "center", gap: 4 },
   folderTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel },
   folderTab: { flex: 1 },
-  folderDocuments: { width: "100%", gap: 7 },
+  folderDocuments: { flexGrow: 1, width: "100%", gap: 7 },
   folderTabContent: { flexGrow: 1 },
   similarPanel: { flex: 1, minHeight: 0, gap: spacing.md },
   similarResults: { flexGrow: 1, paddingBottom: spacing.lg },
   similarEmpty: { flexGrow: 1, minHeight: 320, alignItems: "center", justifyContent: "center" },
-  folderEmptyState: { flexGrow: 1, minHeight: 360, width: "100%", alignItems: "center", justifyContent: "center", gap: 14 },
+  folderEmptyState: { flexGrow: 1, width: "100%", alignItems: "center", justifyContent: "center", gap: 14 },
   emptyPlusButton: { height: 44, width: 44 },
   documentButton: { width: "100%", minHeight: 38, justifyContent: "flex-start", paddingHorizontal: 14 },
   documentButtonLabel: { flex: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "left" },

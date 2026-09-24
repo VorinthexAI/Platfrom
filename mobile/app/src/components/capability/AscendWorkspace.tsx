@@ -1164,7 +1164,7 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
           </View>
           <Button accessibilityLabel="Selected audio book actions" contentMode="raw" disabled={bulkLoading} onPress={() => open("bulkActions")} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
         </Tabs> : null}
-        <ScrollView alwaysBounceVertical contentContainerStyle={styles.library} refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />} showsVerticalScrollIndicator={false}>
+        <ScrollView alwaysBounceVertical contentContainerStyle={[styles.library, (!overviewQuery.isPending || searchActive) && !searchPending && (!overviewQuery.error || searchActive) && !searchError && filteredBooks.length === 0 && styles.emptyLibrary]} refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />} showsVerticalScrollIndicator={false}>
           {(!searchActive && overviewQuery.isPending) || searchPending ? <View accessibilityLabel={searchActive ? "Searching audio books" : "Loading audio books"} accessibilityRole="progressbar" onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} style={styles.grid}>{Array.from({ length: COLUMNS }, (_, index) => <Skeleton key={index} style={{ width: cardWidth, height: (cardWidth * 16) / 9, borderRadius: radii.sm, backgroundColor: palette.hairlineBright, opacity: 0.72 }} />)}</View> : (!searchActive && overviewQuery.error) || searchError ? <View style={styles.state}><Text style={styles.stateTitle}>{searchError ? "Audio book search failed." : "Audio books could not be loaded."}</Text><Button onPress={() => void (searchError ? searchQuery.refetch() : overviewQuery.refetch())} size="sm" variant="secondary">Retry</Button></View> : (
             <View onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} style={styles.grid}>
               {filteredBooks.map((book, index) => {
@@ -1173,7 +1173,7 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
               })}
             </View>
           )}
-          {(!overviewQuery.isPending || searchActive) && !searchPending && (!overviewQuery.error || searchActive) && !searchError && filteredBooks.length === 0 ? <View style={[styles.state, searchActive && styles.searchEmptyState]}><Text style={styles.stateTitle}>{searchActive || showOnlyFavorites || books.length ? "No audio books matching these filters." : "No audio books yet."}</Text>{!books.length && !searchActive && !showOnlyFavorites ? <Button accessibilityLabel="Create audio book" contentMode="raw" onPress={beginCreate} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : null}
+          {(!overviewQuery.isPending || searchActive) && !searchPending && (!overviewQuery.error || searchActive) && !searchError && filteredBooks.length === 0 ? <View style={styles.state}><Text style={styles.stateTitle}>{searchActive || showOnlyFavorites || books.length ? "No audio books matching these filters." : "No audio books yet."}</Text>{!books.length && !searchActive && !showOnlyFavorites ? <Button accessibilityLabel="Create audio book" contentMode="raw" onPress={beginCreate} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button> : null}</View> : null}
         </ScrollView>
       </>}
       <CoreComposer
@@ -1494,6 +1494,7 @@ const styles = StyleSheet.create({
   bulkToolbarClose: { height: 28, width: 28, paddingHorizontal: 0, paddingVertical: 0 },
   bulkSelectionText: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12 },
   library: { flexGrow: 1, paddingHorizontal: spacing.md, paddingBottom: 140 },
+  emptyLibrary: { paddingBottom: 0 },
   grid: {
     width: "100%",
     flexDirection: "row",
@@ -1561,12 +1562,11 @@ const styles = StyleSheet.create({
   },
   generationFill: { height: "100%", backgroundColor: palette.silver100 },
   state: {
-    minHeight: 360,
+    flexGrow: 1,
     alignItems: "center",
     justifyContent: "center",
     gap: 14,
   },
-  searchEmptyState: { flexGrow: 1 },
   emptyPlusButton: { width: 44, height: 44 },
   stateTitle: {
     color: palette.silver300,
