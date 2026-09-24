@@ -1,5 +1,7 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
+import { executeAction } from '@/lib/ai/router';
+import { decisionOutputSchema } from '@/lib/ai/actions/decide';
 import { gatherWorkspaceContext } from './workspace-context';
 
 const folderKey = newId(), documentKey = newId(), bookKey = newId(), inboxKey = newId(), collectionKey = newId();
@@ -159,3 +161,33 @@ describe('one-pass workspace evidence', () => {
     expect(f.calls).toContainEqual(expect.objectContaining({ collectionSlugs: ['books'], operation: 'get', key: bookKey }));
   });
 });
+
+// Opt-in, real-provider timing checks: the default suite remains deterministic.
+// Run with an existing OPENROUTER_API_KEY; never print or persist the credential.
+const liveDecision = process.env.OPENROUTER_API_KEY ? test : test.skip;
+const decisionLatencyMs: number[] = [];
+afterAll(() => {
+  if (!decisionLatencyMs.length) return;
+  const sorted = [...decisionLatencyMs].sort((a, b) => a - b);
+  console.info('Jev workspace decision latency', { samples: sorted.length, p50Ms: sorted[Math.floor((sorted.length - 1) * 0.5)], p95Ms: sorted[Math.ceil(sorted.length * 0.95) - 1] });
+});
+
+for (const { question, expected } of [
+  { question: 'What files and documents are in my Personal folder?', expected: ['folders', 'documents', 'files'] },
+  { question: 'What is the Clear Decisions audiobook about, and what is my Sparks balance?', expected: ['books', 'billing'] },
+  { question: 'What emails are in my Work inbox?', expected: ['email-messages'] },
+  { question: 'Hur många dokument finns i min Personal mapp?', expected: ['documents'] },
+]) {
+  liveDecision(`Jev routes and times: ${question}`, async () => {
+    const f = fixture({}); let decisions = 0;
+    const result = await gatherWorkspaceContext(question, context, { ...f.dependencies, decide: async (state, questions) => {
+      const started = performance.now();
+      const response = await executeAction({ mode: 'auto', teamKey, actionSlug: 'decide' }, { state, questions }, { timeoutMs: 2_000 });
+      decisionLatencyMs.push(Math.round(performance.now() - started));
+      decisions++;
+      return decisionOutputSchema.parse(response.output);
+    } });
+    expect(decisions).toBe(1);
+    expect(result.coverage.requested).toEqual(expect.arrayContaining(expected));
+  }, 10_000);
+}

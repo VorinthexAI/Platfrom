@@ -15,8 +15,10 @@ agent candidate set to prevent recursive orchestration.
 Model selections and native calls are untrusted and rechecked before each
 dispatch.
 
-Core gathers private workspace evidence before its first answering model turn.
-`workspace-context.ts` sends the question and the authorized collection catalog
+Core has exactly one model-facing read tool, `agent.context`, and invokes it only
+when the current request needs private workspace or account data. It is removed
+from subsequent model turns after one invocation; general questions skip it.
+`workspace-context.ts` sends the trusted current request and collection catalog
 to the provider-neutral `decide` action (TypeSafe Jev via the OpenRouter Decisions
 API). The returned choices select read modes only, not database keys, arbitrary
 queries, or authority. Canonical collection services then perform scoped discovery,
@@ -24,7 +26,7 @@ exact counts, relationship expansion, and detail reads in parallel. The model
 receives bounded, allowlisted JSON without database identifiers. Navigation
 references remain server-side for conversation persistence. Missing or truncated
 sources carry explicit coverage status rather than implying zero results. Core
-streams one answer from that evidence; image creation remains a separate mutation.
+streams one answer after the tool result; image creation remains a separate mutation.
 
 Tools execute only through canonical `runTool` adapters with trusted
 `ToolContext` and hashed per-call request keys. Equal call fingerprints share
@@ -46,9 +48,14 @@ model.
 
 `workspace-context.test.ts` covers 20 representative cross-collection and
 account-grounding scenarios, including deep reads, exact counts, redaction,
-ambiguity, and unavailable sources. `core.test.ts` verifies one answering
-stream with trusted JSON context and no model-facing search loop. The OpenRouter
-provider tests cover Jev's Decisions API transport.
+ambiguity, and unavailable sources. `core.test.ts` verifies that Core either
+answers directly or calls `agent.context` once before its final answering turn.
+The OpenRouter provider tests cover Jev's Decisions API transport.
+
+With `OPENROUTER_API_KEY` already in the process environment, these focused
+tests additionally run four Jev routing/timing cases and three live Core
+tool-selection cases. They use synthetic questions and injected account data,
+report Jev p50/p95 latency, and never print or persist the credential.
 
 The attachment performance evaluation compares direct-provider execution with
 the complete upload, canonicalization, conversation SSE, and asynchronous

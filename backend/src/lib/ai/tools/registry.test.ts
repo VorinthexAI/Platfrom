@@ -18,11 +18,11 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(189);
-    expect(MODEL_TOOL_NAMES).toHaveLength(184);
-    expect(TOOL_DEFINITIONS).toHaveLength(184);
+    expect(TOOL_NAMES).toHaveLength(190);
+    expect(MODEL_TOOL_NAMES).toHaveLength(185);
+    expect(TOOL_DEFINITIONS).toHaveLength(185);
     expect(TOOL_NAMES).not.toContain('document.scan');
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 143);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 144);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...MODEL_TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
@@ -180,7 +180,11 @@ describe('unified tool registry', () => {
     expect(toolInputSchemas['scope.delete'].parse({ targetScopeKey: newId() })).toHaveProperty('targetScopeKey');
     for (const name of ['scope.list', 'scope.create', 'scope.select', 'scope.prioritize', 'scope.update', 'scope.delete']) for (const field of ['teamKey', 'scopeKey', 'userKey', 'teamMembershipKey', 'idempotencyKey']) expect(() => toolInputSchemas[name].parse({ ...(name === 'scope.create' ? { name: 'Plans' } : name === 'scope.list' ? {} : { targetScopeKey: newId() }), ...(name === 'scope.update' ? { coverImageKey: null } : {}), [field]: newId() })).toThrow('Unrecognized key');
     expect(TOOL_NAMES.every((name) => !name.includes('_'))).toBe(true);
-    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['conversation.create', 'conversation.list', 'conversation.search', 'conversation.rename', 'conversation.favorite', 'conversation.delete', 'conversation.message.list', 'conversation.message.delete', 'conversation.message.send', 'app.generate-image', 'agent.guide', 'agents.core']));
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(['conversation.create', 'conversation.list', 'conversation.search', 'conversation.rename', 'conversation.favorite', 'conversation.delete', 'conversation.message.list', 'conversation.message.delete', 'conversation.message.send', 'app.generate-image', 'agent.context', 'agent.guide', 'agents.core']));
+    expect(TOOL_NAMES.filter((name) => name === 'agent.context')).toHaveLength(1);
+    expect(toolInputSchemas['agent.context'].parse({})).toEqual({});
+    expect(() => toolInputSchemas['agent.context'].parse({ userKey: newId() })).toThrow('Unrecognized key');
+    expect(isToolReadOnly('agent.context', {})).toBe(true);
     expect(TOOL_NAMES.filter((name) => name === 'agents.core')).toHaveLength(1);
     expect(TOOL_NAMES).not.toContain('assistant.query');
     expect(toolInputSchemas['agent.guide'].parse({ mode: 'recommend' })).toEqual({ mode: 'recommend' });
@@ -328,6 +332,20 @@ describe('unified tool registry', () => {
     expect(result).toEqual({ message: 'Hello.', tools: [] });
     expect(inputs).toHaveLength(1);
     await expect(runTool('agents.core', '', { message: 'hello' }, { contentContext, agentDependencies: { stream: async function* () {} } })).rejects.toThrow('trusted request key');
+  });
+
+  test('agent.context uses the trusted user request, keeps navigation identifiers server-side, and cannot be called without a request', async () => {
+    const teamKey = newId(), scopeKey = newId(), userKey = newId(), documentKey = newId();
+    const contentContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey, userId: userKey, status: 'active' } } } as ToolContext;
+    const received: unknown[] = [], links: unknown[] = [];
+    const evidence = { sections: { documents: { mode: 'inspect' as const, items: [{ name: 'Notes', content: 'The complete text.' }], coverage: 'complete' as const } }, coverage: { requested: ['documents' as const], unavailable: [], truncated: [] }, navigation: [{ query: 'Notes', limit: 1, groups: [{ collectionSlug: 'documents' as const, results: [{ key: documentKey, label: 'Notes' }] }] }] };
+    const deps = { contentContext, requestKey: 'one-context-call', currentUserMessageContent: 'Tell me about my Notes', recentConversationContext: ['We discussed Notes'], onEvidence: (value: unknown) => { links.push(value); }, agentDependencies: { workspaceContext: async (question: string, context: ToolContext, _options?: unknown, history: readonly string[] = []) => { received.push({ question, context, history }); return evidence; } } };
+    const result = await runTool('agent.context', '', {}, deps);
+    expect(received).toEqual([{ question: 'Tell me about my Notes', context: contentContext, history: ['We discussed Notes'] }]);
+    expect(result).toMatchObject({ sections: { documents: { items: [{ content: 'The complete text.' }] } } });
+    expect(JSON.stringify(result)).not.toContain(documentKey);
+    expect(links).toHaveLength(1);
+    await expect(runTool('agent.context', '', {}, { contentContext, requestKey: 'missing-request', agentDependencies: deps.agentDependencies })).rejects.toThrow('trusted current user request');
   });
 
   test('executes inbox ingestion tools only through trusted system context', async () => {

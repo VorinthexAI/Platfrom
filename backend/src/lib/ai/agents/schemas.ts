@@ -34,7 +34,6 @@ export const internalAgentRequestSchema = z.object({
   generateName: z.boolean().default(false),
   attachments: z.array(internalAgentAttachmentSchema).max(CORE_CHAT_MAX_ATTACHMENTS).default([]),
   preloadedTools: z.array(preloadedAgentToolSchema).max(1).default([]),
-  workspaceContext: z.unknown().refine((value) => { try { return Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8') <= 100_000; } catch { return false; } }, 'Workspace context exceeds 100000 bytes.').optional(),
 }).strict().superRefine((value, context) => {
   if (Buffer.byteLength(JSON.stringify({ currentConversationSummary: value.currentConversationSummary, context: value.context ?? [], recalledContext: value.recalledContext ?? [] }), 'utf8') > 250_000) {
     context.addIssue({ code: 'custom', path: ['recalledContext'], message: 'Serialized conversation context exceeds 250000 bytes.' });
@@ -60,7 +59,7 @@ export const agentToolInvocationSchema = z.object({
 
 export const agentToolStatusSchema = agentToolInvocationSchema.extend({
   status: z.enum(['succeeded', 'failed']),
-  result: boundedUnknownSchema.optional(),
+  result: z.unknown().refine((value) => { try { return Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8') <= 100_000; } catch { return false; } }, 'Tool evidence exceeds 100000 bytes.').optional(),
   error: z.string().min(1).max(1_000).optional(),
 }).strict().superRefine((value, context) => {
   if (value.status === 'succeeded' && value.result === undefined) context.addIssue({ code: 'custom', path: ['result'], message: 'A succeeded tool requires a result.' });

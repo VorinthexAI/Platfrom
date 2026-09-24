@@ -88,6 +88,8 @@ export interface ToolDependencies extends RouterDependencies, DocumentParseDepen
   conversationService?: AgentToolDependencies['conversations'];
   currentConversationKey?: string;
   currentUserMessageContent?: string;
+  recentConversationContext?: string[];
+  onEvidence?: (retrievals: import('@/lib/app-search/service').AppSearchRetrieval[]) => void;
   currentReferenceImageKeys?: string[];
   currentStagedImageArtifactKeys?: string[];
   agentDependencies?: AgentRuntimeDependencies;
@@ -126,7 +128,7 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
       return images.generate(input, destination, dependencies.contentContext, dependencies.requestKey, references);
     }
     const agentDefinition = agentToolDefinitionsByName.get(toolName);
-    if (agentDefinition) return agentDefinition.execute(rawInput, { context: dependencies.contentContext, conversations: dependencies.conversationService, requestKey: dependencies.requestKey, agentDependencies: dependencies.agentDependencies });
+    if (agentDefinition) return agentDefinition.execute(rawInput, { context: dependencies.contentContext, conversations: dependencies.conversationService, requestKey: dependencies.requestKey, agentDependencies: dependencies.agentDependencies, currentUserMessageContent: dependencies.currentUserMessageContent, recentConversationContext: dependencies.recentConversationContext, onEvidence: dependencies.onEvidence, signal: dependencies.signal });
     const conversationDefinition = conversationToolDefinitionsByName.get(toolName);
     if (conversationDefinition) return conversationDefinition.execute(rawInput, { context: dependencies.contentContext, conversations: dependencies.conversationService, requestKey: dependencies.requestKey, currentConversationKey: dependencies.currentConversationKey, currentReferenceImageKeys: dependencies.currentReferenceImageKeys });
     const workspaceDefinition = workspaceToolDefinitionsByName.get(toolName);

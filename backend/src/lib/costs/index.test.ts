@@ -111,6 +111,9 @@ describe('Spark costs', () => {
     expect(calculateActionCostMicroSparks('image', { inputTokens: 0, outputTokens: 0 }, { operation: 'describe', images: ['a', 'b'] })).toBe(10_000_000);
     expect(calculateActionCostMicroSparks('image', { inputTokens: 0, outputTokens: 0 }, { operation: 'describe-visual-identity', images: ['a', 'b'] })).toBe(10_000_000);
     expect(calculateActionCostMicroSparks('embed', { inputTokens: 1_000_000, outputTokens: 0 })).toBe(0);
+    expect(calculateActionCostMicroSparks('decide', { inputTokens: 1_000_000, outputTokens: 0 })).toBe(0);
+    expect(calculateActionCostMicroSparks('decide', { inputTokens: 1_000_000, outputTokens: 40 })).toBe(400);
+    expect(calculateActionCostMicroSparks('decide', { inputTokens: 0, outputTokens: 1_000_000 })).toBe(10_000_000);
     expect(() => calculateActionCostMicroSparks('text', { inputTokens: 0.5, outputTokens: 0 })).toThrow('safe integer');
   });
 

@@ -18,6 +18,8 @@ speech, image analysis, and structured extraction.
 The provider-neutral `decide` action binds TypeSafe Jev to the OpenRouter
 Decisions API. It returns typed source-selection choices for a server-owned
 read plan; the selected service still performs all authorization and data reads.
+Its fallback user price is zero per input token and 10 Sparks per million output
+tokens, with no fixed tool-call fee.
 
 ## Tools Versus Actions
 

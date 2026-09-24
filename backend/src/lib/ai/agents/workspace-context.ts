@@ -43,6 +43,15 @@ export interface WorkspaceContextDependencies {
   subscription?: typeof commerceService.getCurrentSubscription;
 }
 
+/** Jev sees only the question and an allowlisted capability catalog, never account rows or identities. */
+export function buildWorkspaceDecisionInput(message: string, history: readonly string[] = []) {
+  const sources = sourceSchema.options;
+  const questions = Object.fromEntries(sources.map((source) => [source, { type: 'choice', instructions: `Should ${source} be read to answer the user's current question? Choose count for exact quantities.`, criteria: MODES }]));
+  const catalog = sources.map((source) => `${source}: ${source in APP_SEARCH_COLLECTION_ADAPTERS ? APP_SEARCH_COLLECTION_ADAPTERS[source as AppSearchCollectionSlug].description : source === 'billing' ? 'Sparks balance, storage charges, and account billing' : source === 'referrals' ? 'Personal referral and reward information' : source === 'subscription' ? 'Current subscription status, plan, renewal date, and cancellation state' : 'The authenticated user profile'}`).join('\n');
+  const state = `User question: ${message.slice(0, 2_000)}\nRecent context for references: ${history.slice(-2).join(' ').slice(0, 1_000)}\nAccessible sources:\n${catalog}\nChoose all sources needed. A folder contains both documents and files. Do not infer that a title alone answers a question about its content.`;
+  return { state, questions };
+}
+
 function owner(context: ToolContext) {
   const principal = context.principal;
   if (principal.kind !== 'member' || principal.userTeam.status !== 'active' || principal.userTeam.teamKey !== context.teamKey || principal.userTeam.userId !== principal.user.key) throw new Error('An active authorized user membership is required.');
@@ -63,10 +72,8 @@ function fallback(message: string): Partial<Record<Source, Mode>> {
 export async function gatherWorkspaceContext(message: string, context: ToolContext, dependencies: WorkspaceContextDependencies = {}, history: readonly string[] = []): Promise<WorkspaceContextResult> {
   const user = owner(context);
   const sources = sourceSchema.options;
-  const questions = Object.fromEntries(sources.map((source) => [source, { type: 'choice', instructions: `Should ${source} be read to answer the user's current question? Choose count for exact quantities.`, criteria: MODES }]));
-  const catalog = sources.map((source) => `${source}: ${source in APP_SEARCH_COLLECTION_ADAPTERS ? APP_SEARCH_COLLECTION_ADAPTERS[source as AppSearchCollectionSlug].description : source === 'billing' ? 'Sparks balance, storage charges, and account billing' : source === 'referrals' ? 'Personal referral and reward information' : source === 'subscription' ? 'Current subscription status, plan, renewal date, and cancellation state' : 'The authenticated user profile'}`).join('\n');
+  const { state, questions } = buildWorkspaceDecisionInput(message, history);
   const query = `${history.slice(-2).join(' ')} ${message}`.trim().slice(0, 500);
-  const state = `User question: ${message.slice(0, 2_000)}\nRecent context for references: ${history.slice(-2).join(' ').slice(0, 1_000)}\nAccessible sources:\n${catalog}\nChoose all sources needed. A folder contains both documents and files. Do not infer that a title alone answers a question about its content.`;
   let modes: Partial<Record<Source, Mode>>;
   try {
     const raw = dependencies.decide ? await dependencies.decide(state, questions, context) : (await executeAction({ mode: 'auto', teamKey: context.teamKey, actionSlug: 'decide' }, { state, questions }, { timeoutMs: 2_000, signal: dependencies.signal })).output;

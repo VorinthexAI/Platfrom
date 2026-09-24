@@ -116,6 +116,19 @@ describe('tool events', () => {
     expect(charges).toEqual([]);
   });
 
+  test('charges agent.context only for Jev output tokens at the decide fallback rate', async () => {
+    const charges: Record<string, unknown>[] = [];
+    const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;
+    await observeToolExecution('agent.context', context, async () => {
+      await recordActionUsage('decide', { state: 'Which collections?' }, { inputTokens: 1_000_000, outputTokens: 40, totalTokens: 1_000_040 });
+    }, {
+      idempotencyKey: 'context-read-1', recorder: async () => {}, getBalance: async () => 1_000_000,
+      charge: async (_userKey, input) => { charges.push(input); return { status: 'applied', transaction: { key: 'context-charge', eventKey: input.eventKey } } as never; },
+    });
+    expect(charges).toHaveLength(1);
+    expect(charges[0]).toMatchObject({ kind: 'action', actionSlug: 'decide', microSparks: 400, metadata: { inputTokens: 1_000_000, outputTokens: 40 } });
+  });
+
   test('never charges failed work even when an enclosed action is priced', async () => {
     const events: Record<string, unknown>[] = []; let charges = 0;
     const context = { teamKey: 'team-1', runtimeScopeKey: 'scope-1', principal: { kind: 'member', user: { key: 'user-1' }, userTeam: { key: 'member-1', teamKey: 'team-1', userId: 'user-1', status: 'active' } } } as never;

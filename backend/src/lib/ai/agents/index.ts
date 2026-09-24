@@ -93,7 +93,7 @@ function currentRequestMessage(request: InternalAgentRequest, includeAttachments
 }
 
 function userMessages(request: InternalAgentRequest): CoreChatMessage[] {
-  const background: CoreChatMessage = { role: 'user', content: [{ type: 'text', text: JSON.stringify({ ...(request.currentConversationSummary ? { currentConversationSummary: request.currentConversationSummary } : {}), recalledContext: request.recalledContext ?? [], currentDate: request.currentDate, ...(request.workspaceContext ? { workspaceContext: request.workspaceContext } : {}) }) }] };
+  const background: CoreChatMessage = { role: 'user', content: [{ type: 'text', text: JSON.stringify({ ...(request.currentConversationSummary ? { currentConversationSummary: request.currentConversationSummary } : {}), recalledContext: request.recalledContext ?? [], currentDate: request.currentDate }) }] };
   const recent: CoreChatMessage[] = (request.context ?? []).map(({ role, content }) => ({ role, content: [{ type: 'text', text: content }] }));
   const preloaded = request.preloadedTools.flatMap((tool, index): CoreChatMessage[] => {
     const toolCallId = `preloaded-${index + 1}`;
@@ -193,13 +193,14 @@ export async function runAgent(
     ? generateConversationName(context.toolContext.teamKey, request.message, stream, dependencies.router).catch(() => undefined)
     : undefined;
   let emittedCalls = 0;
+  let contextRead = false;
   let turn = 0;
 
   while (true) {
     const finalTurn = emittedCalls >= MAX_TOOL_CALLS;
     const stage = turn === 0 ? 'initial' as const : 'continuation' as const;
     const startedAt = performance.now();
-    const toolDefinitions = finalTurn ? undefined : allowedNames.map((toolName) => definitionsByName.get(toolName)!);
+    const toolDefinitions = finalTurn ? undefined : allowedNames.filter((name) => name !== 'agent.context' || !contextRead).map((toolName) => definitionsByName.get(toolName)!);
     const input = coreChatInputSchema.parse({
       systemPrompt: runtimeDefinition.systemPrompt,
       messages,
@@ -253,6 +254,7 @@ export async function runAgent(
     if (calls.length > MAX_TOOL_CALLS - emittedCalls) throw new Error(`The agent exceeded its ${MAX_TOOL_CALLS}-call limit.`);
 
     const preparedCalls = calls.map(({ toolCall: call }) => {
+      if (call.name === 'agent.context' && contextRead) throw new Error('The agent has already read its workspace context for this request.');
       if (!allowedNameSet.has(call.name)) throw new Error(`The agent requested an unauthorized tool: ${call.name}`);
       let invocation = agentToolInvocationSchema.parse({ slug: call.name, arguments: context.normalizeToolArguments?.(call.name, call.arguments) ?? call.arguments });
       let invalidArguments = false;
@@ -265,6 +267,7 @@ export async function runAgent(
     });
     if (preparedCalls.length > 1 && preparedCalls.some(({ readOnly }) => !readOnly)) throw new Error('The agent returned multiple tool calls when every call must be read-only.');
     emittedCalls += preparedCalls.length;
+    if (preparedCalls.some(({ invocation }) => invocation.slug === 'agent.context')) contextRead = true;
     observe({ stage, outcome: 'selected', candidateCount: toolDefinitions?.length ?? 0, selectedToolCount: preparedCalls.length, confidence: 'high', durationMs: performance.now() - startedAt });
 
     const assistantContent: CoreChatMessage['content'] = preparedCalls.map(({ call, invocation }) => ({ type: 'tool-call' as const, toolCallId: call.id, name: call.name, arguments: invocation.arguments, ...(call.opaqueState ? { opaqueState: call.opaqueState } : {}) }));
@@ -275,7 +278,7 @@ export async function runAgent(
       const prior = executions.get(fingerprint);
       if (prior) return prior;
       const singleShotPrior = singleShotExecutions.get(invocation.slug);
-      if (invocation.slug === 'app.generate-image' && singleShotPrior) return singleShotPrior;
+      if ((invocation.slug === 'app.generate-image' || invocation.slug === 'agent.context') && singleShotPrior) return singleShotPrior;
       const promise = (async (): Promise<ExecutionOutcome> => {
         if (invalidArguments) {
           const status = agentToolStatusSchema.parse({ ...invocation, status: 'failed', error: 'Tool arguments were invalid. Correct the arguments without adding identity, scope, or unrelated fields, then retry.' });
@@ -291,8 +294,11 @@ export async function runAgent(
             conversationService: context.conversationService,
             currentConversationKey: context.currentConversationKey,
             currentUserMessageContent: context.currentUserMessageContent,
+            recentConversationContext: request.context?.slice(-2).map(({ content }) => content),
+            onEvidence: context.onEvidence,
             currentReferenceImageKeys: context.currentReferenceImageKeys,
             currentStagedImageArtifactKeys: context.currentStagedImageArtifactKeys,
+            agentDependencies: dependencies,
             requestKey: fingerprint,
           });
           let finish = false;
@@ -310,7 +316,7 @@ export async function runAgent(
         }
       })();
       executions.set(fingerprint, promise);
-      if (invocation.slug === 'app.generate-image') singleShotExecutions.set(invocation.slug, promise);
+      if (invocation.slug === 'app.generate-image' || invocation.slug === 'agent.context') singleShotExecutions.set(invocation.slug, promise);
       return promise;
     };
 

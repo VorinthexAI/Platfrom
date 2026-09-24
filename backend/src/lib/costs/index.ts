@@ -67,7 +67,7 @@ export const TOOL_COST_RULES: Readonly<Record<string, PublicFixedCostRule>> = Ob
 export const ACTION_COST_RULES: Readonly<Record<string, FixedCostRule>> = Object.freeze({});
 
 export const ACTION_PRICED_OPERATION_TOOL_SLUGS = Object.freeze([
-  'agents.core', 'app.enhance', 'app.search', 'app.speech', 'app.translate',
+  'agent.context', 'agents.core', 'app.enhance', 'app.search', 'app.speech', 'app.translate',
   'book.goal.suggest', 'book.preview', 'book.topic.suggest',
   'app.generate-image', 'conversation.message.send',
   'document.parse', 'document.rewrite', 'document.summarize', 'document.topics',
@@ -263,6 +263,10 @@ export function calculateActionCostMicroSparks(actionSlug: string, usage: Readon
     numerator = images * BigInt(operation === 'generate' ? 10 : 5) * BigInt(MICRO_SPARKS_PER_SPARK);
   } else if (actionSlug === 'embed') {
     return 0;
+  } else if (actionSlug === 'decide') {
+    // 10 Sparks per million output tokens = 10 microSparks per output token.
+    // Jev's input tokens are deliberately free to the user.
+    numerator = outputTokens * 10n;
   }
   const rounded = numerator === 0n ? 0n : (numerator + denominator - 1n) / denominator;
   return toSafeNumber(rounded, 'action cost');

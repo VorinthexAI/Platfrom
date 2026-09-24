@@ -62,6 +62,12 @@ Specialized tools remain separate for similarity and duplicate detection,
 signed downloads, persisted generated artifacts, conversation history, and
 other semantics that are not ordinary resource queries.
 
+`agent.context` is Core's only model-visible read tool. Its strict input is an
+empty object; the server supplies the current user request, authorized
+`ToolContext`, and recent conversation context. It assembles bounded deep
+evidence through existing canonical read services, without passing database
+keys to Core. Jev's `decide` action selects sources inside this single tool call.
+
 `agent.guide` derives deterministic keys for the protected guides seeded into
 the authorized runtime scope and reads them through the canonical
 `document.read` Content operation. It never accepts document, scope, or storage
