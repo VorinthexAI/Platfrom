@@ -129,6 +129,7 @@ export function createCommerceService({ repository, provider, createProvider = c
     const references = [data.customer?.external_id, data.metadata?.userKey].filter((value): value is string => typeof value === 'string');
     if (new Set(references).size > 1) throw new CommerceError('INVALID_REFERENCE', 'Webhook contains conflicting user identities.');
     const value = references[0];
+    if (!value && data.customer?.external_id === null) return null;
     const parsed = z.string().cuid().safeParse(value);
     if (!parsed.success) throw new CommerceError('INVALID_REFERENCE', 'Webhook references an unknown user identity.');
     return parsed.data;
@@ -224,13 +225,23 @@ export function createCommerceService({ repository, provider, createProvider = c
       try {
         const providerIdempotencyKey = `checkout:${createHash('sha256').update(`${trustedUserKey}\u0000${idempotencyKey}`).digest('hex')}`;
         const customer = await emailRecipient(trustedUserKey);
+        if (customer) {
+          const existing = await polar().findCustomerByEmail(customer.email);
+          if (existing?.external_id && existing.external_id !== trustedUserKey) {
+            const oldUserKey = z.string().cuid().safeParse(existing.external_id);
+            if (!oldUserKey.success || await repository.userExists(oldUserKey.data)) throw new CommerceError('INVALID_REFERENCE', 'This email is linked to a different account.');
+            await polar().deleteCustomerByExternalId(oldUserKey.data);
+          } else if (existing && existing.external_id === null) {
+            throw new CommerceError('INVALID_REFERENCE', 'This email is linked to a customer without an account identity.');
+          }
+        }
         const checkout = await polar().createCheckout({ providerProductId: product.providerProductId, userKey: trustedUserKey, productId: product.productId, idempotencyKey: providerIdempotencyKey, successUrl: CHECKOUT_SUCCESS_URL, returnUrl: CHECKOUT_RETURN_URL, customerIpAddress,
           ...(customer ? { customerEmail: customer.email, ...(customer.name?.trim() ? { customerName: customer.name.trim().slice(0, 256) } : {}) } : {}),
         });
         const saved = await repository.completeCheckout(claimed.checkout.key, checkout.id, checkout.url, now().toISOString());
         return checkoutCreateResultSchema.parse({ key: saved.key, status: saved.status, url: saved.checkoutUrl });
       } catch (error) {
-        if (error instanceof PolarProviderError && !error.retryable) await repository.failCheckout(claimed.checkout.key, error.code, now().toISOString());
+        if ((error instanceof CommerceError && error.code === 'INVALID_REFERENCE') || (error instanceof PolarProviderError && !error.retryable)) await repository.failCheckout(claimed.checkout.key, error.code, now().toISOString());
         throw error;
       }
     },
@@ -326,6 +337,9 @@ export function createCommerceService({ repository, provider, createProvider = c
         if (subscription.customer.external_id === trustedUserKey && !['canceled', 'unpaid', 'incomplete_expired'].includes(subscription.status)) providerIds.add(subscription.id);
       }
       for (const providerSubscriptionId of providerIds) await provider.revokeSubscription(providerSubscriptionId);
+      // Polar retains customers and their immutable external IDs after local deletion.
+      // Anonymizing the old customer releases the email for a new account's checkout.
+      await provider.deleteCustomerByExternalId(trustedUserKey);
       return { revoked: providerIds.size };
     },
     async recoverUserPendingCheckouts(trustedUserKey: string, pendingCutoff: string) {
@@ -353,6 +367,7 @@ export function createCommerceService({ repository, provider, createProvider = c
       }
       if (['order.created', 'order.paid', 'order.updated'].includes(event.type) && (event.type === 'order.paid' || event.data.status === 'paid')) {
         const userKey = userReference(event.data);
+        if (!userKey) return { ignored: true };
         const product = await productReference(event.data, userKey, event.data.subscription_id ?? undefined);
         const result = await applyPaidOrderFacts({ providerOrderId: event.data.id, userKey, productId: product.productId, providerProductId: event.data.product_id ?? event.data.product?.id, providerSubscriptionId: event.data.subscription_id ?? null, billingReason: event.data.billing_reason, amountCents: event.data.total_amount, baseAmountCents: event.data.subtotal_amount, netAmountCents: event.data.net_amount, discountAmountCents: event.data.discount_amount, currency: event.data.currency, paidAt: occurredAt });
         return { processed: true, fulfillment: result.status };
@@ -364,6 +379,7 @@ export function createCommerceService({ repository, provider, createProvider = c
       }
       if (event.type.startsWith('subscription.')) {
         const userKey = userReference(event.data);
+        if (!userKey) return { ignored: true };
         const product = await productReference(event.data, userKey, event.data.id);
         const status = subscriptionStatusSchema.safeParse(event.data.status);
         if (!status.success) return { ignored: true };

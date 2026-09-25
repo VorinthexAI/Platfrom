@@ -150,6 +150,28 @@ describe('Polar provider adapter', () => {
     await expect(forbidden.revokeSubscription('subscription-1')).rejects.toMatchObject({ code: 'REJECTED', status: 403 });
   });
 
+  test('anonymizes the deleted user customer by external ID and accepts only 204 or 404', async () => {
+    const urls: string[] = [];
+    const provider = createPolarProvider({ environment: 'sandbox', accessToken: 'token' }, async (url, init) => {
+      urls.push(String(url));
+      expect(init?.method).toBe('DELETE');
+      return new Response(null, { status: urls.length === 1 ? 204 : 404 });
+    });
+    await expect(provider.deleteCustomerByExternalId('old-user')).resolves.toBe(true);
+    await expect(provider.deleteCustomerByExternalId('old-user')).resolves.toBe(false);
+    expect(urls).toEqual(Array(2).fill('https://sandbox-api.polar.sh/v1/customers/external/old-user?anonymize=true'));
+    const forbidden = createPolarProvider({ environment: 'sandbox', accessToken: 'token' }, async () => new Response(null, { status: 403 }));
+    await expect(forbidden.deleteCustomerByExternalId('old-user')).rejects.toMatchObject({ code: 'REJECTED', status: 403 });
+  });
+
+  test('looks up an exact Polar email before reusing it for a new account', async () => {
+    const provider = createPolarProvider({ environment: 'sandbox', accessToken: 'token' }, async (url) => {
+      expect(String(url)).toBe('https://sandbox-api.polar.sh/v1/customers/?email=person%2Btest%40example.com&limit=100&page=1');
+      return Response.json({ items: [{ email: 'person+test@example.com', external_id: 'old-user' }], pagination: { max_page: 1 } });
+    });
+    await expect(provider.findCustomerByEmail('person+test@example.com')).resolves.toMatchObject({ external_id: 'old-user' });
+  });
+
   test('verifies current Standard Webhooks signatures over the exact raw body and headers', () => {
     const secret = `whsec_${Buffer.from('polar-current-secret').toString('base64')}`;
     const webhook = new Webhook(secret);

@@ -105,7 +105,6 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const { showToast } = useToast();
   const { showToast: showAccountResultToast } = useRawToast();
   const deletingAccount = useRef(false);
-  const [accountDeletionPending, setAccountDeletionPending] = useState(false);
   const user = useAuthStore((state) => state.user);
   const teamKey = useAuthStore((state) => String(state.team?.key ?? ""));
   const scopeKey = useAuthStore((state) => String(state.scope?.key ?? ""));
@@ -257,18 +256,18 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
     if (deletingAccount.current) return;
     const owner = useAuthStore.getState().user?.key;
     deletingAccount.current = true;
-    setAccountDeletionPending(true);
-    void deleteAccount().then(() => {
-      if (useAuthStore.getState().status !== "unauthenticated") return;
-      setSheet(undefined);
-      queryClient.clear();
-      router.replace("/auth");
-      showAccountResultToast({ title: "Your account has been deleted.", duration: 3_000 });
+    const pending = deleteAccount();
+    setSheet(undefined);
+    queryClient.clear();
+    router.replace("/auth");
+    void pending.then(() => {
+      if (useAuthStore.getState().status === "unauthenticated") showAccountResultToast({ title: "Your account has been deleted.", duration: 3_000 });
     }).catch(() => {
       if (useAuthStore.getState().user?.key !== owner) return;
+      router.replace("/settings");
       showAccountResultToast({ title: "Your account could not be deleted. Please try again.", duration: 3_000 });
       void queryClient.invalidateQueries();
-    }).finally(() => { deletingAccount.current = false; setAccountDeletionPending(false); });
+    }).finally(() => { deletingAccount.current = false; });
   };
 
   const logOut = () => {
@@ -626,7 +625,7 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
       <Text style={styles.scopeHelp}>{cancellationPeriodEnd ? `Your subscription remains active until ${cancellationPeriodEnd}, then it will not renew.` : "Your subscription remains active through the current billing period, then it will not renew."}</Text>
     </BottomSheet>
 
-    <BottomSheet dismissible={!accountDeletionPending} focusKey="profile-delete-account" footer={<><Button disabled={accountDeletionPending} onPress={permanentlyDeleteAccount} size="md" variant="primary">Delete</Button><Button disabled={accountDeletionPending} onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open && !accountDeletionPending) setSheet(undefined); }} open={sheet === "delete-account"} title="Delete account?" />
+    <BottomSheet focusKey="profile-delete-account" footer={<><Button onPress={permanentlyDeleteAccount} size="md" variant="primary">Delete</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "delete-account"} title="Delete account?" />
 
     <BottomSheet description={referralMode === "share" ? "Invite a friend with your code and earn Sparks as they get started." : "Apply the referral code from the person who invited you."} dismissible={!redeemingReferral} focusKey="profile-referral" footer={<>{referralMode === "share" ? referralUnused ? <Button disabled={sharingReferral} loading={sharingReferral} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button> : null : <Button disabled={!referralCodeValid || redeemingReferral || Boolean(referralRedemption)} loading={redeemingReferral} onPress={() => void submitReferralCode()} size="md" variant="primary">{referralRedemption ? "Code applied" : "Use code"}</Button>}<Button disabled={redeemingReferral} onPress={closeReferralSheet} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open && !redeemingReferral) closeReferralSheet(); }} open={sheet === "referral"} title="Referral">
       <ScrollView contentContainerStyle={styles.referralContent} showsVerticalScrollIndicator={false}>

@@ -8,6 +8,8 @@ const polarCurrency = z.string().regex(/^[a-zA-Z]{3}$/);
 const polarAmount = z.number().int().safe().nonnegative();
 const polarMetadata = z.record(z.union([z.string(), z.number(), z.boolean()]));
 const polarCustomerSchema = z.object({ id: polarId, external_id: z.string().trim().min(1).max(200).nullable() }).passthrough();
+const polarCustomerByEmailSchema = z.object({ email: z.string().email(), external_id: z.string().trim().min(1).max(200).nullable() }).passthrough();
+const customerListResponseSchema = z.object({ items: z.array(polarCustomerByEmailSchema), pagination: z.object({ max_page: z.number().int().nonnegative() }).passthrough() }).passthrough();
 const polarProductReferenceSchema = z.object({ id: polarId, metadata: polarMetadata }).passthrough();
 const checkoutResponseSchema = z.object({ id: polarId, url: polarCheckoutUrlSchema, status: z.string() }).passthrough();
 const subscriptionResponseSchema = z.object({
@@ -119,6 +121,11 @@ export function createPolarProvider(configuration = polarConfiguration(), fetche
     } finally { clearTimeout(timeout); }
   }
   return Object.freeze({
+    async findCustomerByEmail(email: string) {
+      const customers = customerListResponseSchema.parse(await request(`/customers/?email=${encodeURIComponent(email)}&limit=100&page=1`, { method: 'GET' }, customerListResponseSchema));
+      if (customers.pagination.max_page > 1) throw new PolarProviderError('INVALID_RESPONSE', 'Polar returned multiple pages for an exact customer email.', true);
+      return customers.items.find((customer) => customer.email.toLowerCase() === email.toLowerCase()) ?? null;
+    },
     async listProducts() {
       const products: z.infer<typeof productResponseSchema>[] = [];
       for (let page = 1, maxPage = 1; page <= maxPage; page += 1) {
@@ -167,6 +174,23 @@ export function createPolarProvider(configuration = polarConfiguration(), fetche
         throw error;
       }
     },
+    async deleteCustomerByExternalId(userKey: string) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), configuration.timeoutMs ?? 10_000);
+      try {
+        const response = await fetcher(`${baseUrl}/customers/external/${encodeURIComponent(userKey)}?anonymize=true`, {
+          method: 'DELETE', signal: controller.signal,
+          headers: { Authorization: `Bearer ${configuration.accessToken}`, Accept: 'application/json' },
+        });
+        if (response.status === 404) return false;
+        if (response.status !== 204) throw new PolarProviderError('REJECTED', `Polar request failed with status ${response.status}.`, response.status === 429 || response.status >= 500, response.status);
+        return true;
+      } catch (error) {
+        if (error instanceof PolarProviderError) throw error;
+        if (error instanceof DOMException && error.name === 'AbortError') throw new PolarProviderError('TIMEOUT', 'Polar request timed out.', true);
+        throw new PolarProviderError('REJECTED', 'Polar request failed.', true);
+      } finally { clearTimeout(timeout); }
+    },
     async createProduct(input: { name: string; productId: string; priceCents: number; billingPeriod: 'week' | 'month' | null }) {
       return productResponseSchema.parse(await request('/products/', { method: 'POST', body: JSON.stringify({ name: input.name, recurring_interval: input.billingPeriod, prices: [{ amount_type: 'fixed', price_currency: 'usd', price_amount: input.priceCents, tax_behavior: 'exclusive' }], metadata: { productId: input.productId } }) }, productResponseSchema));
     },
@@ -196,7 +220,7 @@ export function verifyPolarWebhookSignature(input: { rawBody: string; webhookId?
 }
 
 type CompletePolarProvider = ReturnType<typeof createPolarProvider>;
-export type PolarProvider = Pick<CompletePolarProvider, 'listProducts' | 'createCheckout' | 'updateSubscription' | 'scheduleSubscriptionProduct' | 'revokeSubscription' | 'createProduct' | 'updateProduct'> & Partial<Pick<CompletePolarProvider, 'getSubscription' | 'listOrders' | 'listSubscriptions'>>;
+export type PolarProvider = Pick<CompletePolarProvider, 'findCustomerByEmail' | 'listProducts' | 'createCheckout' | 'updateSubscription' | 'scheduleSubscriptionProduct' | 'revokeSubscription' | 'deleteCustomerByExternalId' | 'createProduct' | 'updateProduct'> & Partial<Pick<CompletePolarProvider, 'getSubscription' | 'listOrders' | 'listSubscriptions'>>;
 export type PolarReconciliationProvider = Required<Pick<CompletePolarProvider, 'listOrders' | 'listSubscriptions'>>;
 export type PolarProduct = Awaited<ReturnType<PolarProvider['listProducts']>>[number];
 export type PolarOrder = z.infer<typeof polarOrderSchema>;

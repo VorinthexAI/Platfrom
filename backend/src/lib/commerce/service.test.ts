@@ -47,7 +47,7 @@ describe('canonical commerce service', () => {
     const userKey = newId(); let claimed: PaymentCheckout | undefined; let providerInput: unknown;
     const service = createCommerceService({
       repository: repository({ listProducts: async () => COMMERCE_CATALOG.filter((product) => product.active), getProductByProductId: async () => ({ ...COMMERCE_CATALOG[3], providerProductId: 'remote-topup' }), claimCheckout: async (input) => { claimed = input; return { status: 'claimed', checkout: input }; } }),
-      provider: { listProducts: async () => [], createCheckout: async (input: Parameters<NonNullable<Parameters<typeof createCommerceService>[0]['provider']>['createCheckout']>[0]) => { providerInput = input; return { id: 'checkout-1', url: 'https://polar.sh/checkout/1', status: 'open' }; }, updateSubscription: async () => { throw new Error('unused'); }, createProduct: async () => { throw new Error('unused'); }, updateProduct: async () => { throw new Error('unused'); } } as never,
+      provider: { listProducts: async () => [], findCustomerByEmail: async () => null, createCheckout: async (input: Parameters<NonNullable<Parameters<typeof createCommerceService>[0]['provider']>['createCheckout']>[0]) => { providerInput = input; return { id: 'checkout-1', url: 'https://polar.sh/checkout/1', status: 'open' }; }, updateSubscription: async () => { throw new Error('unused'); }, createProduct: async () => { throw new Error('unused'); }, updateProduct: async () => { throw new Error('unused'); } } as never,
       now: () => new Date(at), createKey: newId,
       getEmailRecipient: async (key) => { expect(key).toBe(userKey); return { email: 'signed-in@example.com', name: ' Signed In ' }; },
     });
@@ -290,6 +290,15 @@ describe('canonical commerce service', () => {
     expect(writes).toBe(0);
   });
 
+  test('ignores late events for anonymized customers without an account identity', async () => {
+    let writes = 0;
+    const service = createCommerceService({ repository: repository({ fulfillPaidOrder: async (input) => { writes += 1; return repository().fulfillPaidOrder(input); }, upsertSubscription: async (input) => { writes += 1; return { status: 'applied', subscription: input }; } }) });
+    const customer = { external_id: null };
+    await expect(service.processWebhook({ type: 'order.paid', data: { id: 'old-order', customer } })).resolves.toEqual({ ignored: true });
+    await expect(service.processWebhook({ type: 'subscription.revoked', data: { id: 'old-subscription', customer } })).resolves.toEqual({ ignored: true });
+    expect(writes).toBe(0);
+  });
+
   test('persists subscription lifecycle and cancel/restore transitions while hiding provider IDs', async () => {
     const userKey = newId(); let providerCalls = 0; const cancellationEmails: string[] = []; let current: Subscription = { key: newId(), userKey, productKey: COMMERCE_CATALOG[0].key, providerSubscriptionId: 'subscription-1', status: 'active', cancelAtPeriodEnd: false, currentPeriodStart: at, currentPeriodEnd: '2026-09-12T10:00:00.000Z', providerModifiedAt: null, createdAt: at, updatedAt: at };
     const service = createCommerceService({ repository: repository({ getCurrentSubscription: async () => current, upsertSubscription: async (input) => ({ status: 'applied', subscription: current = input }) }), provider: { listProducts: async () => [], createCheckout: async () => { throw new Error('unused'); }, updateSubscription: async (_id: string, cancel: boolean) => { providerCalls += 1; return { id: 'subscription-1', status: 'active', cancel_at_period_end: cancel, current_period_start: current.currentPeriodStart!, current_period_end: current.currentPeriodEnd!, modified_at: '2026-09-05T09:59:59.000Z' }; }, createProduct: async () => { throw new Error('unused'); }, updateProduct: async () => { throw new Error('unused'); } } as never, getEmailRecipient: async () => ({ email: 'person@example.com', name: 'Ada' }), sendSubscriptionCancellationEmail: async (input) => { cancellationEmails.push(`${input.email}:${input.name}`); }, now: () => new Date(at) });
@@ -387,22 +396,79 @@ describe('canonical commerce service', () => {
   });
 
   test('revokes every locally billable subscription before account deletion', async () => {
-    const userKey = newId(); const revoked: string[] = [];
+    const userKey = newId(); const revoked: string[] = []; const deleted: string[] = [];
     const base: Subscription = { key: newId(), userKey, productKey: COMMERCE_CATALOG[0].key, providerSubscriptionId: 'active-subscription', status: 'active', cancelAtPeriodEnd: false, currentPeriodStart: at, currentPeriodEnd: at, providerModifiedAt: at, createdAt: at, updatedAt: at };
     const service = createCommerceService({
       repository: repository({ listSubscriptionsByUser: async () => [base, { ...base, key: newId(), providerSubscriptionId: 'past-due-subscription', status: 'past_due' }, { ...base, key: newId(), providerSubscriptionId: 'canceled-subscription', status: 'canceled' }] }),
-      provider: { revokeSubscription: async (id: string) => { revoked.push(id); return null; } } as never,
+      provider: { revokeSubscription: async (id: string) => { revoked.push(id); return null; }, deleteCustomerByExternalId: async (key: string) => { deleted.push(key); return true; } } as never,
     });
     await expect(service.revokeUserSubscriptions(userKey)).resolves.toEqual({ revoked: 2 });
     expect(revoked).toEqual(['active-subscription', 'past-due-subscription']);
+    expect(deleted).toEqual([userKey]);
   });
 
   test('revokes a provider subscription missed by local webhook projection before account deletion', async () => {
     const userKey = newId(); const revoked: string[] = [];
     const remote = { id: 'remote-only-subscription', status: 'active', customer: { external_id: userKey } };
-    const service = createCommerceService({ repository: repository({ listSubscriptionsByUser: async () => [] }), provider: { listSubscriptions: async () => [remote], revokeSubscription: async (id: string) => { revoked.push(id); return null; } } as never });
+    const service = createCommerceService({ repository: repository({ listSubscriptionsByUser: async () => [] }), provider: { listSubscriptions: async () => [remote], revokeSubscription: async (id: string) => { revoked.push(id); return null; }, deleteCustomerByExternalId: async () => true } as never });
     await expect(service.revokeUserSubscriptions(userKey)).resolves.toEqual({ revoked: 1 });
     expect(revoked).toEqual(['remote-only-subscription']);
+  });
+
+  test('repairs a previously deleted account customer before same-email checkout and credits the new user only', async () => {
+    const oldUserKey = newId(), newUserKey = newId();
+    const customers = new Map([['person@example.com', oldUserKey]]);
+    const grants: string[] = [], emails: string[] = [];
+    const service = createCommerceService({
+      repository: repository({
+        userExists: async (key) => key === newUserKey,
+        listSubscriptionsByUser: async () => [],
+        fulfillPaidOrder: async (input) => { grants.push(input.userKey); return repository().fulfillPaidOrder(input); },
+      }),
+      getEmailRecipient: async () => ({ email: 'person@example.com' }),
+      sendTopUpPurchaseEmail: async () => { emails.push('top-up'); },
+      sendSubscriptionPurchaseEmail: async () => { emails.push('subscription'); },
+      applyFirstPaidReward: async () => ({ status: 'not-attributed' }),
+      provider: {
+        listSubscriptions: async () => [],
+        findCustomerByEmail: async () => customers.has('person@example.com') ? { email: 'person@example.com', external_id: customers.get('person@example.com') } : null,
+        deleteCustomerByExternalId: async (key: string) => { if (customers.get('person@example.com') === key) customers.delete('person@example.com'); return true; },
+        createCheckout: async ({ userKey }: { userKey: string }) => { if (customers.has('person@example.com') && customers.get('person@example.com') !== userKey) throw new Error('Email belongs to another customer'); customers.set('person@example.com', userKey); return { id: newId(), status: 'open', url: 'https://sandbox.polar.sh/checkout/new' }; },
+      } as never,
+    });
+    await service.createCheckout({ productId: 'topup.small' }, newUserKey, 'top-up');
+    await service.createCheckout({ productId: 'nova.weekly' }, newUserKey, 'subscription');
+    for (const [productId, providerProductId, billingReason, providerSubscriptionId, price] of [
+      ['topup.small', 'remote-topup', 'purchase', null, 999],
+      ['nova.weekly', 'remote-weekly', 'subscription_create', 'new-subscription', 799],
+    ] as const) {
+      await service.processWebhook({ type: 'order.paid', timestamp: at, data: { id: `order-${productId}`, status: 'paid', customer: { external_id: newUserKey }, metadata: { userKey: newUserKey, productId }, product_id: providerProductId, billing_reason: billingReason, subscription_id: providerSubscriptionId, subtotal_amount: price, net_amount: price, discount_amount: 0, total_amount: price, currency: 'usd' } });
+    }
+    expect(customers.get('person@example.com')).toBe(newUserKey);
+    expect(grants).toEqual([newUserKey, newUserKey]);
+    expect(emails).toEqual(['top-up', 'subscription']);
+    await expect(service.applyPaidOrderFacts({ providerOrderId: 'late-old-order', userKey: oldUserKey, productId: 'topup.small', providerProductId: 'remote-topup', providerSubscriptionId: null, billingReason: 'purchase', amountCents: 999, baseAmountCents: 999, netAmountCents: 999, discountAmountCents: 0, currency: 'usd', paidAt: at })).resolves.toEqual({ status: 'ignored_deleted_user' });
+    expect(grants).toHaveLength(2);
+  });
+
+  test('never removes a different active user customer sharing the checkout email', async () => {
+    const oldUserKey = newId(), newUserKey = newId(); let deleted = false; let failed = false;
+    const service = createCommerceService({
+      repository: repository({ userExists: async (key) => key === oldUserKey || key === newUserKey, failCheckout: async () => { failed = true; } }),
+      getEmailRecipient: async () => ({ email: 'person@example.com' }),
+      provider: { findCustomerByEmail: async () => ({ email: 'person@example.com', external_id: oldUserKey }), deleteCustomerByExternalId: async () => { deleted = true; return true; }, createCheckout: async () => { throw new Error('Checkout must not proceed.'); } } as never,
+    });
+    await expect(service.createCheckout({ productId: 'topup.small' }, newUserKey, 'top-up')).rejects.toMatchObject({ code: 'INVALID_REFERENCE' });
+    expect(deleted).toBe(false);
+    expect(failed).toBe(true);
+  });
+
+  test('does not report account commerce cleanup complete when Polar refuses customer deletion', async () => {
+    const service = createCommerceService({
+      repository: repository({ listSubscriptionsByUser: async () => [] }),
+      provider: { listSubscriptions: async () => [], deleteCustomerByExternalId: async () => { throw new PolarProviderError('REJECTED', 'forbidden', false, 403); } } as never,
+    });
+    await expect(service.revokeUserSubscriptions(newId())).rejects.toMatchObject({ code: 'REJECTED', status: 403 });
   });
 
   test('allows account deletion without Polar only when no local subscription needs revocation', async () => {

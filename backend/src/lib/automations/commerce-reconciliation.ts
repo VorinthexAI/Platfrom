@@ -24,6 +24,9 @@ export function latestClosedCommerceDay(now: Date): CommerceReconciliationWindow
 type ReconciliationService = Pick<CommerceService, 'applyPaidOrderFacts' | 'applyRefundFacts' | 'applySubscriptionFacts'>;
 
 function references(resource: { customer: { external_id: string | null }; product: { id: string; metadata: Record<string, string | number | boolean> } | null; metadata: Record<string, string | number | boolean> }) {
+  // Polar retains historic orders and subscriptions after customer deletion,
+  // but removes the customer's external ID. Never assign them to a new user.
+  if (resource.customer.external_id === null) return null;
   const userKey = z.string().cuid().parse(resource.customer.external_id);
   const metadataUserKey = resource.metadata.userKey;
   if (metadataUserKey !== undefined && metadataUserKey !== userKey) throw new Error('Polar resource customer and user metadata do not agree.');
@@ -49,6 +52,7 @@ export async function reconcileCommerceDay(rawWindow: unknown, dependencies: {
     if (!order.paid) throw new Error(`Polar order ${order.id} has an inconsistent paid status.`);
     if (!['purchase', 'subscription_create', 'subscription_cycle'].includes(order.billing_reason)) continue;
     const reference = references(order);
+    if (!reference) continue;
     const fulfillment = await dependencies.service.applyPaidOrderFacts({
       providerOrderId: order.id,
       ...reference,
@@ -71,6 +75,7 @@ export async function reconcileCommerceDay(rawWindow: unknown, dependencies: {
   const subscriptions = (await dependencies.provider.listSubscriptions()).map((value) => polarSubscriptionSchema.parse(value));
   for (const subscription of subscriptions) {
     const reference = references(subscription);
+    if (!reference) continue;
     const providerModifiedAt = subscription.modified_at ?? subscription.created_at;
     await dependencies.service.applySubscriptionFacts({
       providerSubscriptionId: subscription.id,

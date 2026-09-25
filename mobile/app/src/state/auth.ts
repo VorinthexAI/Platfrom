@@ -269,19 +269,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
   deleteAccount: () => {
     if (deletion) return deletion;
+    const previous = get();
+    if (previous.status !== "authenticated") return Promise.reject(new Error("Please sign in again before deleting your account."));
+    const operation = ++authOperation;
+    endSessionRequests();
+    set(signedOutState);
     deletion = (async () => {
-      const { session } = await tokenVault.snapshot();
-      if (!session || get().status !== "authenticated") throw new Error("Please sign in again before deleting your account.");
-      const operation = ++authOperation;
-      endSessionRequests();
       try {
+        const { session } = await tokenVault.snapshot();
+        if (!session) throw new Error("Please sign in again before deleting your account.");
         await deleteRemoteAccount(session);
         if (operation !== authOperation) return;
         confirmedScope = null;
         await Promise.allSettled([tokenVault.clear(), clearAuthContext(), clearPendingReferralCode(), markPostDeletionOnboarding()]);
-        set(signedOutState);
       } catch {
-        if (operation === authOperation && get().status === "authenticated") resumeSessionRequests();
+        if (operation === authOperation) {
+          set(previous);
+          resumeSessionRequests();
+        }
         throw new Error("Your account could not be deleted. Please try again.");
       }
     })().finally(() => { deletion = undefined; });

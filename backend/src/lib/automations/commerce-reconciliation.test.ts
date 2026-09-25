@@ -46,4 +46,13 @@ describe('nightly commerce reconciliation', () => {
     await expect(reconcileCommerceDay({ start: '2026-01-18T00:00:00.000Z', end: '2026-01-19T00:00:00.000Z' }, { provider: { listOrders: async () => [], listSubscriptions: async () => [] }, service: service as never, now: () => new Date('2026-01-18T23:59:59.999Z') })).rejects.toThrow('fully closed');
     await expect(reconcileCommerceDay({ start: '2026-01-17T00:00:00.000Z', end: '2026-01-18T00:00:00.000Z' }, { provider: { listOrders: async () => [order({ metadata: { userKey: userB, productId: 'nova.weekly' } })] as never, listSubscriptions: async () => [] }, service: service as never, now: () => new Date('2026-01-19T00:00:00.000Z') })).rejects.toThrow('do not agree');
   });
+
+  test('skips historic orders whose Polar customer was deleted while processing a new account', async () => {
+    const received: string[] = [];
+    const deleted = order({ customer: { id: 'customer-a', external_id: null } });
+    const fresh = order({ id: 'new-order', customer: { id: 'customer-b', external_id: userB }, metadata: { userKey: userB, productId: 'nova.weekly' } });
+    const service = { applyPaidOrderFacts: async ({ userKey }: { userKey: string }) => { received.push(userKey); return { status: 'applied' }; }, applyRefundFacts: async () => {}, applySubscriptionFacts: async () => { throw new Error('Historic subscriptions must be skipped.'); } };
+    await expect(reconcileCommerceDay({ start: '2026-01-17T00:00:00.000Z', end: '2026-01-18T00:00:00.000Z' }, { provider: { listOrders: async () => [deleted, fresh], listSubscriptions: async () => [subscription({ customer: { id: 'customer-a', external_id: null } })] } as never, service: service as never, now: () => new Date('2026-01-19T00:00:00.000Z') })).resolves.toEqual({ orders: 2, appliedOrders: 1, refunds: 0, subscriptions: 1 });
+    expect(received).toEqual([userB]);
+  });
 });
