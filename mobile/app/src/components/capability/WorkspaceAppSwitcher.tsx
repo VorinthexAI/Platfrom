@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import { useState, type ReactNode } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
@@ -42,12 +42,13 @@ export function WorkspaceAppSwitcher({ active, backSize = "xs", identity = "acti
     setOpen(false);
     setCustomizeOpen(false);
     if (slug === active) {
-      onSelectActive?.();
+      if (onSelectActive) onSelectActive();
+      else router.replace(`/capability/${slug}` as Href);
       return;
     }
     if (!onBeforeSelect || onBeforeSelect(slug)) {
       enterWorkspace(slug);
-      router.replace({ pathname: "/capability/[slug]", params: { slug } });
+      router.replace(`/capability/${slug}` as Href);
     }
   }
 
@@ -73,7 +74,7 @@ export function WorkspaceAppSwitcher({ active, backSize = "xs", identity = "acti
     const nextVisible = visibleWorkspaceSlugs(next, rootTeamMember);
     if (!nextVisible.includes(active) && nextVisible[0] && (!onBeforeSelect || onBeforeSelect(nextVisible[0]))) {
       enterWorkspace(nextVisible[0]);
-      router.replace({ pathname: "/capability/[slug]", params: { slug: nextVisible[0] } });
+      router.replace(`/capability/${nextVisible[0]}` as Href);
     }
     void patchJson<{ scopeKeys: string[] }, WorkspacePickerState>("/auth/me/workspace-apps", { scopeKeys })
       .then((server) => applyWorkspacePicker(server))

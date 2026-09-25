@@ -168,7 +168,7 @@ function errorMessage(error: unknown) {
     ? error.message
     : "The request could not be completed.";
 }
-export function Cover({ book, index = 0 }: { book: Book; index?: number }) {
+export function Cover({ book, index = 0, onImageError, onImageLoad }: { book: Book; index?: number; onImageError?: () => void; onImageLoad?: () => void }) {
   const [fallbackSize, setFallbackSize] = useState({ height: 0, width: 0 });
   const fallbackLogoSize = Math.max(56, Math.min(96, Math.round(fallbackSize.width * 0.58)));
   if (book.managed)
@@ -189,23 +189,11 @@ export function Cover({ book, index = 0 }: { book: Book; index?: number }) {
         </View>
       </View>
     );
-  if (book.coverUrl)
-    return (
-      <Image
-        accessibilityLabel={`${book.title} audio book cover`}
-        contentFit="cover"
-        source={book.coverUrl}
-        style={styles.cover}
-        transition={180}
-      />
-    );
   return (
-    <LinearGradient
-      colors={GRADIENTS[index % GRADIENTS.length]!}
-      end={{ x: 1, y: 1 }}
-      start={{ x: 0, y: 0 }}
-      style={styles.cover}
-    />
+    <View style={styles.cover}>
+      <LinearGradient colors={GRADIENTS[index % GRADIENTS.length]!} end={{ x: 1, y: 1 }} start={{ x: 0, y: 0 }} style={styles.cover} />
+      {book.coverUrl ? <Image accessibilityLabel={`${book.title} audio book cover`} contentFit="cover" onError={onImageError} onLoad={onImageLoad} source={book.coverUrl} style={styles.cover} transition={180} /> : null}
+    </View>
   );
 }
 
@@ -327,11 +315,12 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
   const briefTransformationGeneration = useRef(0);
   const longPressedBook = useRef<string | undefined>(undefined);
   const bulkMutationLocked = useRef(false);
+  const retriedCovers = useRef(new Set<string>());
 
   const overviewQuery = useQuery({
     queryKey: ascendQueryKeys.overview(context),
     queryFn: fetchBooksOverview,
-    refetchInterval: (query) => query.state.data?.books.some(({ status }) => ACTIVE_STATUSES.includes(status)) ? 2_000 : false,
+    refetchInterval: (query) => query.state.data?.books.some((book) => ACTIVE_STATUSES.includes(book.status) || book.status === "ready" && !book.managed && !book.coverUrl && Date.now() - Date.parse(book.updatedAt) < 120_000) ? 2_000 : false,
   });
   const searchQuery = useQuery({
     queryKey: ascendQueryKeys.search(context, searchTerm, selectedTagKeys),
@@ -1156,7 +1145,7 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
           <View style={styles.rootSearch}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search audio books" editable={rootSearchFocusable} focusable={rootSearchFocusable} onChangeText={(value) => { setQuery(value); if (!value.trim()) setSearchTerm(""); }} placeholder="Search..." ref={rootSearchInputRef} style={styles.rootSearchInput} value={query} />{query ? <Button accessibilityLabel="Clear audio book search" contentMode="raw" iconOnly onPress={() => { setQuery(""); setSearchTerm(""); }} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}</View>
           <Button accessibilityLabel="Filter audio books" contentMode="raw" onPress={() => open("filter")} size="sm" style={styles.searchHistoryButton} variant="icon"><FilterIcon size="sm" variant={showOnlyFavorites || selectedTags.length ? "accent" : "default"} /></Button>
         </View>
-        <TagFilterLane context={contentContext} />
+        {selectedTags.length ? <View style={styles.tagFilterRow}><TagFilterLane context={contentContext} /></View> : null}
         {selectionActive ? <Tabs accessibilityLabel="Selected audio book toolbar" style={styles.bulkToolbar}>
           <View style={styles.bulkToolbarSelection}>
             <Button accessibilityLabel="Clear selection" contentMode="raw" disabled={bulkLoading} onPress={() => setSelectedBookKeys([])} size="xs" style={styles.bulkToolbarClose} variant="secondary"><CloseIcon size="sm" /></Button>
@@ -1169,7 +1158,7 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
             <View onLayout={({ nativeEvent }) => setGridWidth(nativeEvent.layout.width)} style={styles.grid}>
               {filteredBooks.map((book, index) => {
                 const selected = selectedBookKeys.includes(book.key);
-                return <View key={book.key} style={[styles.bookCardFrame, selected && styles.selectedItem, { width: cardWidth, height: (cardWidth * 16) / 9 }]}><Button accessibilityActions={[{ name: "longpress", label: selected ? `Deselect ${book.title}` : `Select ${book.title}` }]} accessibilityLabel={book.title} accessibilityRole="button" accessibilityState={{ selected }} contentMode="raw" onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleBookLongPress(book.key, false); }} onLongPress={() => handleBookLongPress(book.key)} onPress={() => handleBookPress(book)} shape="rounded" size="md" style={styles.bookCard} variant="ghost"><Cover book={book} index={index} /><LinearGradient colors={["transparent", "rgba(0,0,0,0.08)", "rgba(0,0,0,0.58)"]} locations={[0, 0.58, 1]} style={styles.cardShade} /><View style={styles.cardCopy}><Text numberOfLines={3} style={styles.cardTitle}>{book.title}</Text></View></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>;
+                return <View key={book.key} style={[styles.bookCardFrame, selected && styles.selectedItem, { width: cardWidth, height: (cardWidth * 16) / 9 }]}><Button accessibilityActions={[{ name: "longpress", label: selected ? `Deselect ${book.title}` : `Select ${book.title}` }]} accessibilityLabel={book.title} accessibilityRole="button" accessibilityState={{ selected }} contentMode="raw" onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") handleBookLongPress(book.key, false); }} onLongPress={() => handleBookLongPress(book.key)} onPress={() => handleBookPress(book)} shape="rounded" size="md" style={styles.bookCard} variant="ghost"><Cover book={book} index={index} onImageError={() => { if (!book.coverUrl || retriedCovers.current.has(book.key)) return; retriedCovers.current.add(book.key); void queryClient.invalidateQueries({ queryKey: ascendQueryKeys.all(context), refetchType: "active" }); }} onImageLoad={() => retriedCovers.current.delete(book.key)} /><LinearGradient colors={["transparent", "rgba(0,0,0,0.08)", "rgba(0,0,0,0.58)"]} locations={[0, 0.58, 1]} style={styles.cardShade} /><View style={styles.cardCopy}><Text numberOfLines={3} style={styles.cardTitle}>{book.title}</Text></View></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>;
               })}
             </View>
           )}
@@ -1467,6 +1456,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: GRID_GAP,
   },
+  tagFilterRow: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
   rootSearch: {
     minHeight: 44,
     flex: 1,

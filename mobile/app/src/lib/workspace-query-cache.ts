@@ -685,9 +685,13 @@ export function patchCachedBook(queryClient: QueryClient, context: WorkspaceCont
 }
 
 export function patchCachedBookMetadata(queryClient: QueryClient, context: WorkspaceContext, book: Book) {
-  patchCachedBook(queryClient, context, book);
+  const retainCover = (current: Book) => book.coverUrl !== undefined || current.coverUrl === undefined ? book : { ...book, coverUrl: current.coverUrl };
+  queryClient.setQueryData<{ books: Book[] }>(ascendQueryKeys.overview(context), (overview) => overview ? {
+    books: overview.books.map((candidate) => candidate.key === book.key ? retainCover(candidate) : candidate),
+  } : overview);
+  queryClient.setQueriesData<Book[]>({ queryKey: ascendQueryKeys.searches(context) }, (books) => books?.map((candidate) => candidate.key === book.key ? retainCover(candidate) : candidate));
   queryClient.setQueryData<BookDetail>(ascendQueryKeys.detail(context, book.key), (detail) => detail ? {
-    book,
+    book: retainCover(detail.book),
     chapters: detail.chapters,
   } : detail);
 }
