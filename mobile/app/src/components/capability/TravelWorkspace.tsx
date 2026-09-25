@@ -28,6 +28,7 @@ import { TagFilterSheet } from "@/components/TagFilterSheet";
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import { InteractiveGlobe } from "@/components/three/InteractiveGlobe";
 import { assistantIconSource, capabilityIconSource } from "@/data/capability-icons";
+import { actionToast } from "@/lib/action-toast";
 import { isSparkFundingError } from "@/lib/domain-error-observer";
 import { COUNTRIES, globeCountryByCode, type CountryProperties } from "@/lib/globe-data";
 import { normalizeCapturedPng, type CapturedImage } from "@/lib/captured-image";
@@ -757,7 +758,7 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     setPlaceBulkDeleteOpen(false);
     setPlaceBulkMenuOpen(false);
     setSelectedTablePlaceKeys([]);
-    showToast({ title: keys.length === 1 ? "Place deleted" : "Places deleted", duration: 2_000 });
+    showToast({ title: actionToast(keys.length, "Place", "places", "deleted"), duration: 2_000 });
     const optimisticReady = queryClient.cancelQueries({ queryKey: compassQueryKeys.all(travelContext) }).catch(() => undefined).then(() => {
       keys.forEach((placeKey) => removeCachedCompassPlace(queryClient, travelContext, placeKey));
     });
@@ -780,9 +781,7 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     const selected = keys.map((key) => selectedByKey.get(key)).filter((place): place is Place => Boolean(place));
     const selectionComplete = selected.length > 0 && selected.length === keys.length;
     const one = keys.length === 1;
-    const successTitle = patch.status === "visited" ? one ? "Place marked as visited" : "Places marked as visited"
-      : patch.status === "wishlist" ? one ? "Place marked as want to go" : "Places marked as want to go"
-        : patch.isFavorite ? one ? "Place favorited" : "Places favorited" : one ? "Place unfavorited" : "Places unfavorited";
+    const successTitle = actionToast(keys.length, "Place", "places", patch.status === "visited" ? "marked as visited" : patch.status === "wishlist" ? "marked as want to go" : patch.isFavorite ? "favorited" : "unfavorited");
     onApplied();
     showToast({ title: selectionComplete ? successTitle : one ? "Place could not be updated" : "Some places could not be updated", duration: 2_000 });
     void Promise.allSettled(selected.map((place) => updateSavedPlace(place, patch))).then((results) => {
@@ -1475,9 +1474,7 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     });
     const selectionComplete = selected.length > 0 && selected.length === selectedTableTripKeys.length;
     const one = selectedTableTripKeys.length === 1;
-    const successTitle = patch.status === "completed" ? one ? "Trip marked as completed" : "Trips marked as completed"
-      : patch.status === "planned" ? one ? "Trip marked as planned" : "Trips marked as planned"
-        : patch.isFavorite ? one ? "Trip favorited" : "Trips favorited" : one ? "Trip unfavorited" : "Trips unfavorited";
+    const successTitle = actionToast(selectedTableTripKeys.length, "Trip", "trips", patch.status === "completed" ? "marked as completed" : patch.status === "planned" ? "marked as planned" : patch.isFavorite ? "favorited" : "unfavorited");
     setSelectedTableTripKeys([]);
     setTripTableBulkMenuOpen(false);
     showToast({ title: selectionComplete ? successTitle : one ? "Trip could not be updated" : "Some trips could not be updated", duration: 2_000 });
@@ -1513,7 +1510,7 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     setTripTableBulkDeleteOpen(false);
     setTripTableBulkMenuOpen(false);
     setSelectedTableTripKeys([]);
-    showToast({ title: keys.length === 1 ? "Trip deleted" : "Trips deleted", duration: 2_000 });
+    showToast({ title: actionToast(keys.length, "Trip", "trips", "deleted"), duration: 2_000 });
     const tripsKey = compassQueryKeys.trips(travelContext);
     void Promise.allSettled(keys.map(async (tripKey) => {
       const version = nextTripMutationVersion(tripKey);
@@ -1742,11 +1739,10 @@ function GeneratedDocumentSheets<T extends GeneratedDocument>({ appendGeneration
   const removeSelected = () => {
     if (!appendGeneration || activeSelectedKeys.length === 0 || removing) return;
     const keys = [...activeSelectedKeys];
-    const one = keys.length === 1;
     setRemovedDocumentKeys((current) => [...new Set([...current, ...keys])]);
     setSelectedDocumentKeys([]);
     setRemoveConfirmOpen(false);
-    showToast({ title: one ? `${singular} deleted` : `${label} deleted`, duration: 2_000 });
+    showToast({ title: actionToast(keys.length, singular, label.toLocaleLowerCase(), "deleted"), duration: 2_000 });
     setRemoving(true);
     void Promise.allSettled(keys.map((key) => deleteContentDocument(key))).then((outcomes) => {
       const failed = keys.filter((_, index) => outcomes[index]?.status === "rejected");

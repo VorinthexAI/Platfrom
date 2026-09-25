@@ -27,6 +27,7 @@ import { BrandedCameraModal } from "@/components/capability/BrandedCameraModal";
 import { SearchHistorySheet } from "@/components/SearchHistorySheet";
 import { ConversationRetrievalSheet } from "@/components/ConversationRetrievalSheet";
 import { ProfileHeaderRight } from "@/components/ProfileAvatarButton";
+import { actionToast } from "@/lib/action-toast";
 import {
   addConversationToUnfilteredLists,
   conversationAttachmentsForRender,
@@ -1019,7 +1020,7 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
       if (selectedRef.current?.key === conversation.key) { setSelected(optimistic); selectedRef.current = optimistic; rememberConversation(optimistic, capturedContext); }
     }
     setSelectedConversationKeys([]); openSheet("chats");
-    showToast({ title: `${targets.length} ${targets.length === 1 ? "chat" : "chats"} ${isFavorite ? "favorited" : "unfavorited"}`, duration: 2_000 });
+    showToast({ title: actionToast(targets.length, "Chat", "chats", isFavorite ? "favorited" : "unfavorited"), duration: 2_000 });
     void Promise.all(targets.map(async (conversation) => {
       const controller = operationController();
       try { return { conversation, updated: await updateConversation(capturedContext, conversation.key, { isFavorite }, controller.signal), succeeded: true as const }; }
@@ -1052,7 +1053,7 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
       setSelected(undefined); selectedRef.current = undefined; rememberConversation(undefined, capturedContext);
     }
     setSelectedConversationKeys([]); openSheet("chats");
-    showToast({ title: `${targets.length} ${targets.length === 1 ? "chat" : "chats"} deleted`, duration: 2_000 });
+    showToast({ title: actionToast(targets.length, "Chat", "chats", "deleted"), duration: 2_000 });
     void Promise.all(targets.map(async (conversation) => {
       const controller = operationController();
       try { await deleteConversation(capturedContext, conversation.key, controller.signal); return { conversation, deleted: true as const }; }

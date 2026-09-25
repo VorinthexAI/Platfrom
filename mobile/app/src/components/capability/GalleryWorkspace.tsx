@@ -31,6 +31,7 @@ import { ResourceTagsSheet } from "@/components/ResourceTagsSheet";
 import { TagFilterLane } from "@/components/TagFilterLane";
 import { TagFilterSheet } from "@/components/TagFilterSheet";
 import { assistantIconSource, contentPresentationIconSource } from "@/data/capability-icons";
+import { actionToast, countedToastNoun } from "@/lib/action-toast";
 import {
   askGalleryAssistant,
   createGalleryCollection,
@@ -1561,7 +1562,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
     const previous = selectedImage;
     const { isCurrent } = captureGalleryContextGuard();
     setBusy(true);
-    notify("Image updated");
+    notify(editFavorite !== previous.isFavorite && (favoriteOnly || editName.trim() === previous.filename) ? `Image ${editFavorite ? "favorited" : "unfavorited"}` : "Image updated");
     try {
       const { image } = favoriteOnly ? await setGalleryImageFavorite(previous.key, editFavorite) : await updateGalleryImage(previous.key, editName.trim(), editFavorite);
       if (!isCurrent()) return;
@@ -1682,7 +1683,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
     const eligible = targets.filter(({ isFavorite }) => !isFavorite);
     if (eligible.length === 0) {
       closeSheet();
-      notify(favorites.length ? `Can't delete ${favorites.length} favorite item${favorites.length === 1 ? "" : "s"}` : "Collections could not be deleted");
+      notify(favorites.length ? `Can't delete ${countedToastNoun(favorites.length, "favorite item", "favorite items")}` : "Collections could not be deleted");
       return;
     }
     const { isCurrent } = captureGalleryContextGuard();
@@ -1690,7 +1691,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
     updateCollectionSingleton((current) => current.filter(({ key }) => !keys.has(key)));
     setSelectedCollectionKeys(favorites.map(({ key }) => key));
     closeSheet();
-    notify(eligible.length === 1 ? "Collection deleted" : "Collections deleted");
+    notify(actionToast(eligible.length, "Collection", "collections", "deleted"));
     void Promise.allSettled(eligible.map((collection) => deleteGalleryCollection(collection.key))).then((outcomes) => {
       if (!isCurrent()) return;
       const failed = eligible.filter((_, index) => outcomes[index]?.status === "rejected");
@@ -1835,7 +1836,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
     const { favoriteImages: localFavorites, eligibleImages } = partitionFavoriteGalleryImages(targets);
     if (eligibleImages.length === 0) {
       goBackSheet();
-      notify(`Can't delete ${localFavorites.length} favorite item${localFavorites.length === 1 ? "" : "s"}`);
+      notify(`Can't delete ${countedToastNoun(localFavorites.length, "favorite item", "favorite items")}`);
       return;
     }
     const { isCurrent } = captureGalleryContextGuard();
@@ -1847,13 +1848,13 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
     setDuplicateSelectedImageKeys((current) => current.filter((key) => remainingDuplicates.some((image) => image.key === key)));
     queryClient.setQueryData(queryKey, { images: remainingDuplicates });
     closeSheet();
-    notify("Duplicates deleted");
+    notify(actionToast(eligibleImages.length, "Duplicate image", "duplicate images", "deleted"));
     void deleteGalleryCollectionDuplicates(collectionKey, eligibleImages.map(({ key }) => key)).then((deleted) => {
       if (!isCurrent()) return;
       const reconciled = reconcileGalleryDuplicateDeletion(eligibleImages, deleted);
       applyAuthoritativeFavoriteImages(reconciled.favoriteImages);
       const failed = reconciled.favoriteImages.length + reconciled.unknownImages.length;
-      if (failed) { notify(`${reconciled.removedImages.length} deleted, ${failed} could not be deleted`); void load(latestActiveCollection(), true); }
+      if (failed) { notify(eligibleImages.length === 1 ? "Duplicate image could not be deleted" : `${reconciled.removedImages.length} deleted, ${failed} could not be deleted`); void load(latestActiveCollection(), true); }
       if (deleted.deletedImageKeys.length) void invalidateCompassTrips();
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
       void queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "none" });
@@ -2007,7 +2008,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
     const { favoriteImages: localFavorites, eligibleImages } = partitionFavoriteGalleryImages(targets);
     if (eligibleImages.length === 0) {
       goBackSheet();
-      notify(`Can't delete ${localFavorites.length} favorite item${localFavorites.length === 1 ? "" : "s"}`);
+      notify(`Can't delete ${countedToastNoun(localFavorites.length, "favorite item", "favorite items")}`);
       return;
     }
     const { generation, isCurrent } = captureGalleryContextGuard();
@@ -2015,7 +2016,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
     cleanupCollectionKeyRef.current = undefined;
     invalidateCleanupLoad();
     closeSheet();
-    notify(eligibleImages.length === 1 ? "Image deleted" : "Images deleted");
+    notify(actionToast(eligibleImages.length, "Image", "images", "deleted"));
     void (async () => {
       let deletedCount = 0;
       let failedCount = 0;
@@ -2028,7 +2029,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
         } catch { failedCount += chunk.length; }
       }
       if (!isCurrent()) return;
-      if (failedCount) { notify(`${deletedCount} deleted, ${failedCount} could not be deleted`); void load(latestActiveCollection(), true); }
+      if (failedCount) { notify(eligibleImages.length === 1 ? "Image could not be deleted" : `${deletedCount} deleted, ${failedCount} could not be deleted`); void load(latestActiveCollection(), true); }
       void invalidateCompassTrips();
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
       void refreshCollectionSingletonAfterImageDeletion(generation);
@@ -2289,7 +2290,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
     setSelectedIdentityKeys([]);
     setIdentityActionsOpen(false);
     setIdentityConfirmDeleteOpen(false);
-    notify(`Deleted ${identityKeys.length} visual identit${identityKeys.length === 1 ? "y" : "ies"}`);
+    notify(actionToast(identityKeys.length, "Visual identity", "visual identities", "deleted"));
     const persistedKeys = identityKeys.filter((key) => !key.startsWith("optimistic-"));
     void Promise.allSettled(persistedKeys.map((key) => deleteGallerySubject(key))).then((outcomes) => {
       if (!isCurrentContextGeneration(generation, refreshContextGeneration.current)) return;
@@ -2297,7 +2298,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
       if (failed.size) {
         failed.forEach((key) => deletedIdentityKeys.current.delete(key));
         setSubjects((current) => [...current.filter(({ key }) => !failed.has(key)), ...previous.filter(({ key }) => failed.has(key))]);
-        notify(`${identityKeys.length - failed.size} deleted, ${failed.size} failed`);
+        notify(identityKeys.length === 1 ? "Visual identity could not be deleted" : `${identityKeys.length - failed.size} deleted, ${failed.size} failed`);
       }
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(galleryContext) });
     });
@@ -2401,7 +2402,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
     if (!selectedImages.length || !selectedImages.every((image) => canMutateInCollection(image, latest))) return;
     const { isCurrent } = captureGalleryContextGuard();
     const nextFavorite = !selectedImages.every(({ isFavorite }) => isFavorite);
-    notify(nextFavorite ? "Added to favorites" : "Removed from favorites");
+    notify(actionToast(selectedImages.length, "Image", "images", nextFavorite ? "favorited" : "unfavorited"));
     const previous = [...selectedImages];
     const optimistic = previous.map((image) => ({ ...image, isFavorite: nextFavorite, updatedAt: new Date().toISOString() }));
     replaceVisibleImages(optimistic);
@@ -2445,7 +2446,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
     if (!selectedCollections.length || !selectedCollections.every((collection) => collection.access.canManage && !isManagedGalleryCollection(collection))) return;
     const { isCurrent } = captureGalleryContextGuard();
     const nextFavorite = !selectedCollections.every(({ isFavorite }) => isFavorite);
-    notify(nextFavorite ? "Added to favorites" : "Removed from favorites");
+    notify(actionToast(selectedCollections.length, "Collection", "collections", nextFavorite ? "favorited" : "unfavorited"));
     const previous = [...selectedCollections];
     const optimistic = previous.map((collection) => ({ ...collection, isFavorite: nextFavorite, updatedAt: new Date().toISOString() }));
     updateCollectionSingleton((current) => current.map((collection) => optimistic.find(({ key }) => key === collection.key) ?? collection));
@@ -2499,7 +2500,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
     const { favoriteImages: localFavorites, eligibleImages } = partitionFavoriteGalleryImages(targets);
     if (eligibleImages.length === 0) {
       closeSheet();
-      notify(`Can't delete ${localFavorites.length} favorite item${localFavorites.length === 1 ? "" : "s"}`);
+      notify(`Can't delete ${countedToastNoun(localFavorites.length, "favorite item", "favorite items")}`);
       return;
     }
     const { generation, isCurrent } = captureGalleryContextGuard();
@@ -2514,13 +2515,13 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
     }
     setSelectedImageKeys([]);
     closeSheet();
-    notify(eligibleImages.length === 1 ? "Image deleted" : "Images deleted");
+    notify(actionToast(eligibleImages.length, "Image", "images", "deleted"));
     void deleteGalleryImages(keys)
       .then((result) => {
         if (!isCurrent()) return;
         const reconciled = reconcileGalleryImageDeletion(eligibleImages, result);
         const failed = reconciled.favoriteImages.length + reconciled.unknownImages.length;
-        if (failed) { notify(`${reconciled.deletedImages.length} deleted, ${failed} could not be deleted`); void load(latestActiveCollection(), true); }
+        if (failed) { notify(eligibleImages.length === 1 ? "Image could not be deleted" : `${reconciled.deletedImages.length} deleted, ${failed} could not be deleted`); void load(latestActiveCollection(), true); }
         if (reconciled.deletedImages.length) {
           void invalidateCompassTrips();
           void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
@@ -2574,7 +2575,7 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
     setShowingCollectionOverview(false);
     setShowingSearchResults(false);
     closeSheet();
-    notify(`${selected.length} image${selected.length === 1 ? "" : "s"} ${mode === "move" ? "moved" : "copied"}`);
+    notify(actionToast(selected.length, "Image", "images", mode === "move" ? "moved" : "copied"));
     void transferGalleryCollectionImages({ sourceCollectionKey: sourceCollection.key, destinationCollectionKeys: destinationKeys, imageKeys, mode })
       .then(() => {
         if (!isCurrent()) return;

@@ -56,6 +56,7 @@ import { SearchHistorySheet } from "@/components/SearchHistorySheet";
 import { TagFilterLane } from "@/components/TagFilterLane";
 import { TagFilterSheet } from "@/components/TagFilterSheet";
 import { assistantIconSource, contentPresentationIconSource } from "@/data/capability-icons";
+import { actionToast } from "@/lib/action-toast";
 import { type CapabilitySlug } from "@/data/registry";
 import { subscribeAppEvent } from "@/lib/app-events";
 import type { CommunicationTab } from "@/lib/communication-client";
@@ -1834,7 +1835,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     setRootBulkBusy(true);
     for (const account of snapshot) patchSignalInbox(queryClient, context, { ...account, isFavorite });
     setSelectedInboxes([]);
-    notify(isFavorite ? `${snapshot.length} inbox${snapshot.length === 1 ? "" : "es"} favorited` : `${snapshot.length} inbox${snapshot.length === 1 ? "" : "es"} unfavorited`);
+    notify(actionToast(snapshot.length, "Inbox", "inboxes", isFavorite ? "favorited" : "unfavorited"));
     const results = await Promise.allSettled(snapshot.map((account) => updateEmailInboxForContext(context, { connectorKey: account.connectorKey, isFavorite }, randomUUID())));
     if (!contextIsCurrent(context)) return;
     results.forEach((result, index) => {
@@ -1843,7 +1844,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       if (result.status === "fulfilled" && metadataRequests.current.get(owner.targetKey) === owner.request) patchSignalInbox(queryClient, context, result.value);
     });
     const failures = results.filter(({ status }) => status === "rejected").length;
-    if (failures) notify(`${failures} inbox${failures === 1 ? "" : "es"} could not be updated`);
+    if (failures) notify(actionToast(failures, "Inbox", "inboxes", "could not be updated"));
     setRootBulkBusy(false);
     void queryClient.fetchQuery({ queryKey: signalQueryKeys.overview(context), queryFn: () => fetchEmailOverviewForContext(context), staleTime: 0 });
   }
@@ -1867,7 +1868,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     const results = await Promise.allSettled(snapshot.map(({ connectorKey }) => disconnectEmailForContext(context, connectorKey)));
     if (!contextIsCurrent(context)) return;
     const failures = results.filter(({ status }) => status === "rejected").length;
-    if (failures) notify(`${failures} inbox${failures === 1 ? "" : "es"} could not be deleted`);
+    if (failures) notify(actionToast(failures, "Inbox", "inboxes", "could not be deleted"));
     setRootBulkBusy(false);
     void queryClient.fetchQuery({ queryKey: signalQueryKeys.overview(context), queryFn: () => fetchEmailOverviewForContext(context), staleTime: 0 });
   }
@@ -2085,7 +2086,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     applyOptimisticThreads(context, connectorKey, optimistic);
     clearThreadSelection();
     setSheetOpen(false);
-    notify(action === "trash" ? `${snapshot.length} moved to trash` : action === "favorite" ? (isFavorite ? `${snapshot.length} favorited` : `${snapshot.length} unfavorited`) : (isRead ? `${snapshot.length} marked read` : `${snapshot.length} marked unread`));
+    notify(actionToast(snapshot.length, "Email thread", "email threads", action === "trash" ? "moved to Trash" : action === "favorite" ? isFavorite ? "favorited" : "unfavorited" : isRead ? "marked read" : "marked unread"));
     try {
       const report = action === "favorite"
         ? await setEmailThreadsFavoriteForContext(context, threadKeys, isFavorite, requestKey)
@@ -2104,7 +2105,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       applyAuthoritativeThreads(context, connectorKey, succeeded);
       applyDeletedThreadKeys(context, connectorKey, deletedKeys, snapshot);
       applyOptimisticThreads(context, connectorKey, snapshot.filter(({ key }) => failedKeys.includes(key)));
-      if (failedKeys.length || repairPendingKeys.length) notify(`${succeededKeys.size + deletedKeys.length} updated, ${failedKeys.length} failed${repairPendingKeys.length ? `, ${repairPendingKeys.length} pending repair` : ""}`);
+      if (failedKeys.length || repairPendingKeys.length) notify(snapshot.length === 1 ? "Email thread could not be updated" : `${succeededKeys.size + deletedKeys.length} updated, ${failedKeys.length} failed${repairPendingKeys.length ? `, ${repairPendingKeys.length} pending repair` : ""}`);
     } catch (failure) {
       if (generation === bulkGeneration.current && contextIsCurrent(context) && initialConnectorKey === connectorKey) {
         clearPendingThreadFields(threadKeys, [action]);
@@ -2604,7 +2605,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     setGeneratedSelection(operation.kind, []);
     if (operation.kind === "translation" && selectedTranslationKey && requestedKeys.includes(selectedTranslationKey)) { setSelectedTranslationKey(undefined); setReaderSheet("translate"); }
     if (operation.kind === "summary" && selectedSummaryKey && requestedKeys.includes(selectedSummaryKey)) { setSelectedSummaryKey(undefined); setReaderSheet("summaryVersions"); }
-    notify(`${requestedKeys.length} ${operation.kind}${requestedKeys.length === 1 ? "" : "s"} deleted`);
+    notify(actionToast(requestedKeys.length, operation.kind === "summary" ? "Summary" : "Translation", operation.kind === "summary" ? "summaries" : "translations", "deleted"));
     try {
       const result = operation.kind === "translation"
         ? await deleteEmailMessageTranslationsForContext(operation.context, { messageKey: operation.messageKey, translationKeys: requestedKeys }, requestKey)
@@ -2622,7 +2623,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         if (operation.kind === "translation") queryClient.setQueryData(queryKey, (value: { messageKey: string; versions: EmailTranslationVersion[] } | undefined) => restoreMissingSignalTranslationVersions(value, snapshotRecords as EmailTranslationVersion[], failedKeys));
         else queryClient.setQueryData(queryKey, (value: { messageKey: string; summaries: EmailSummary[] } | undefined) => restoreMissingSignalSummaries(value, snapshotRecords as EmailSummary[], failedKeys));
         setGeneratedSelection(operation.kind, failedKeys);
-        notify(deletedKeys.length ? `${deletedKeys.length} deleted, ${failedKeys.length} could not be deleted` : `${failedKeys.length} ${operation.kind}${failedKeys.length === 1 ? "" : "s"} could not be deleted`);
+        notify(deletedKeys.length ? `${deletedKeys.length} deleted, ${failedKeys.length} could not be deleted` : actionToast(failedKeys.length, operation.kind === "summary" ? "Summary" : "Translation", operation.kind === "summary" ? "summaries" : "translations", "could not be deleted"));
       }
     } catch (failure) {
       if (current()) {
@@ -3075,7 +3076,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       }
       setSheet("trashRoot");
       setSheetError(undefined);
-      if (failures.size) notify(`${cleared} trashed thread${cleared === 1 ? "" : "s"} permanently deleted, ${failures.size} inbox${failures.size === 1 ? "" : "es"} failed`);
+      if (failures.size) notify(groups.length === 1 ? "Inbox trash could not be cleared" : `${cleared} trashed thread${cleared === 1 ? "" : "s"} permanently deleted, ${failures.size} inbox${failures.size === 1 ? "" : "es"} failed`);
       setTrashClearBusy(false);
     }
     trashClearInFlight.current = false;

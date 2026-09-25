@@ -10,6 +10,7 @@ import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, CloseIcon, MoreHorizontal
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { useSessionToast as useToast } from "@/hooks/use-session-toast";
+import { actionToast } from "@/lib/action-toast";
 
 import { createGalleryCollectionHighlight, deleteGalleryCollectionHighlight, fetchGalleryCollectionHighlight, getGalleryContext, isGalleryClientErrorCode, listGalleryCollectionHighlights, resolveGalleryHighlightSlides, type GalleryCollection, type GalleryHighlight, type GalleryHighlightDetail } from "@/lib/gallery-client";
 import { HIGHLIGHT_SLIDE_DURATION_MS, initialHighlightPlaybackState, reduceHighlightPlayback } from "@/lib/gallery-highlight-playback";
@@ -161,13 +162,13 @@ export function GalleryHighlights({ collection, initialHighlightKey, onClose, op
     highlightKeys.forEach((highlightKey) => queryClient.removeQueries({ queryKey: galleryQueryKeys.highlight(galleryContext, collection.key, highlightKey), exact: true }));
     setSelectedHighlightKeys([]);
     setActiveSheet("player");
-    notify(`Deleted ${highlightKeys.length} ${highlightKeys.length === 1 ? "highlight" : "highlights"}`);
+    notify(actionToast(highlightKeys.length, "Highlight", "highlights", "deleted"));
     void Promise.allSettled(highlightKeys.map((highlightKey) => deleteGalleryCollectionHighlight(highlightKey))).then((outcomes) => {
       highlightKeys.forEach((key) => pendingHighlightDeletes.current.delete(key));
       const failed = new Set(highlightKeys.filter((_, index) => outcomes[index]?.status === "rejected"));
       if (failed.size) {
         setHighlights((current) => [...current.filter(({ key }) => !failed.has(key)), ...previous.filter(({ key }) => failed.has(key))]);
-        notify(`${highlightKeys.length - failed.size} deleted, ${failed.size} failed`);
+        notify(highlightKeys.length === 1 ? "Highlight could not be deleted" : `${highlightKeys.length - failed.size} deleted, ${failed.size} failed`);
       }
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.highlights(galleryContext, collection.key), exact: true, refetchType: "none" });
     });

@@ -13,6 +13,7 @@ import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 import { useErrorFeedback } from "@/hooks/use-error-feedback";
+import { actionToast } from "@/lib/action-toast";
 import { isNearScrollEnd } from "@vorinthex/shared/lib/pagination";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
@@ -106,13 +107,13 @@ export function SignalWorkspace({ initialCompose, initialTab = "unread", initial
     if (!selectedThreads.length || bulkBusy || tab === "sent") return;
     setBulkBusy(true);
     setSheet(undefined);
-    showToast({ title: selectedThreads.length === 1 ? `Message marked ${read ? "read" : "unread"}.` : `${selectedThreads.length} messages marked ${read ? "read" : "unread"}.`, duration: 2_500 });
+    showToast({ title: `${actionToast(selectedThreads.length, "Message", "messages", `marked ${read ? "read" : "unread"}`)}.`, duration: 2_500 });
     try {
       const results = await Promise.allSettled(selectedThreads.map((thread) => markCommunicationThreadRead(thread.key, context, read)));
       const failedKeys = selectedThreads.filter((_, index) => results[index]?.status === "rejected").map(({ key }) => key);
       setSelectedKeys(failedKeys);
       await queryClient.invalidateQueries({ queryKey: communicationQueryKeys.all(context), refetchType: "active" });
-      if (failedKeys.length) showToast({ title: `${selectedThreads.length - failedKeys.length} updated, ${failedKeys.length} failed`, duration: 2_500 });
+      if (failedKeys.length) showToast({ title: selectedThreads.length === 1 ? "Message could not be updated." : `${selectedThreads.length - failedKeys.length} updated, ${failedKeys.length} failed`, duration: 2_500 });
     } finally { setBulkBusy(false); }
   };
   const openCompose = (kind: SupportComposeKind) => {

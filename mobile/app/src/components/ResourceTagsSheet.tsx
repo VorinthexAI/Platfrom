@@ -11,6 +11,7 @@ import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 import { TagCreateSheet, TagSheetEmptyState } from "@/components/TagSheetShared";
 import { useErrorFeedback } from "@/hooks/use-error-feedback";
 import { appSearchQueryRoot } from "@/lib/app-search-client";
+import { actionToast } from "@/lib/action-toast";
 import type { ContentContext } from "@/lib/content-client";
 import { appendResourceTag, createResourceTagKey, createScopeTag, groupResourceTagAssignmentRequests, normalizeResourceTagTargets, persistResourceTagAssignments, removeResourceTag, replaceResourceTag, resolvePendingResourceTagDraft, type ResourceTagAssignmentState, type ResourceTagTarget, type ScopeTag } from "@/lib/tag-client";
 import { applyResourceTagDraft, refreshResourceTagAssignments, refreshScopeTags, resourceTagAssignmentsQueryKey, resourceTagState, scopeTagsQueryKey, toggleResourceTagDraft, type ResourceTagDraft } from "@/lib/tag-query-cache";
@@ -135,7 +136,7 @@ export function ResourceTagsSheet({ context, targets, open, onApply, onClose }: 
     queryClient.setQueryData(queryKey, optimistic);
     onClose();
     onApply?.();
-    if (Object.keys(draft).length) showToast({ title: "Tags updated", duration: 2_000 });
+    if (Object.keys(draft).length) showToast({ title: actionToast(Object.keys(draft).length, "Tag", "tags", "updated"), duration: 2_000 });
     void (async () => {
       const resolved = await resolvePendingResourceTagDraft(draft, new Map(pendingCreationsRef.current));
       let baseline = resolved.failedKeys.reduce(removeResourceTag, previous);
@@ -151,7 +152,7 @@ export function ResourceTagsSheet({ context, targets, open, onApply, onClose }: 
       } catch (caught) {
         if (queryClient.getQueryData(queryKey) === resolvedOptimistic) queryClient.setQueryData(queryKey, baseline);
         try { await refreshResourceTagAssignments(queryClient, context, normalizedTargets); } catch { /* Keep the best available local state when reconciliation is unavailable. */ }
-        showToast({ title: caught instanceof Error ? caught.message : "Tags could not be updated.", duration: 3_000 });
+        showToast({ title: caught instanceof Error ? caught.message : `${actionToast(Object.keys(resolved.draft).length, "Tag", "tags", "could not be updated")}.`, duration: 3_000 });
         return;
       }
       try { await refreshResourceTagAssignments(queryClient, context, normalizedTargets); } catch { /* Preserve the optimistic success when reconciliation is unavailable. */ }

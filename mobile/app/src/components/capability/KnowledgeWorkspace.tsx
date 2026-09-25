@@ -167,6 +167,7 @@ import { pauseOwnedPlayer } from "@/lib/audio-player-lifecycle";
 import { tagFilterContextKey } from "@/lib/tag-client";
 import { filterByHiddenView, hideUserSource, isUserHidden, listUserHiddens, revealUserSource, type HiddenViewFilters, type UserHiddenRecord, type UserHiddenSource } from "@/lib/user-hidden-client";
 import { EMPTY_SELECTED_TAGS, useUiStore } from "@/state/ui";
+import { actionToast, countedToastNoun } from "@/lib/action-toast";
 
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
 type WorkspaceMode = "auto" | "folders" | "folder" | "editor" | "viewer";
@@ -175,8 +176,16 @@ type DocumentTransformation = "enhance" | "translate";
 type DestinationAction = "upload" | "move" | "copy";
 type UploadBatchItem = { id: string; mutationKey: string; file: File; name: string; mimeType: string; status: "pending" | "uploading" | "success" | "error"; error?: string };
 type ProcessingScanItem = { id: string; folderKey?: string; name: string };
+
 type NarrationChunk = { durationMs: number; url: string };
 type PendingCreate = { name: string; content: string; folderKey?: string; mutationKey: string };
+
+function selectionToastNouns(folders: readonly ContentFolder[], documents: readonly ContentDocument[]) {
+  if (!documents.length) return { singular: "Folder", plural: "folders" };
+  if (!folders.length && documents.every(({ extension }) => Boolean(extension))) return { singular: "File", plural: "files" };
+  if (!folders.length && documents.every(({ extension }) => !extension)) return { singular: "Document", plural: "documents" };
+  return { singular: "Item", plural: "items" };
+}
 
 type NotePassage = DocumentPassage & { start?: number; end?: number };
 
@@ -3077,7 +3086,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
           setRootDocuments(location.documents);
         }
       }
-      if (failureCount > 0) notify(successCount > 0 ? `${successCount} uploaded, ${failureCount} failed` : "Files could not be uploaded");
+      if (failureCount > 0) notify(successCount > 0 ? `${successCount} uploaded, ${failureCount} failed` : actionToast(failureCount, "File", "files", "could not be uploaded"));
       uploadBatchRef.current = [];
       setUploadBatch([]);
       setUploadFolderKey(undefined);
@@ -3376,7 +3385,8 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     bulkMutationLocked.current = true;
     setSheetError(undefined);
     // Capture ancestry before optimistic cache changes; preparation runs after dismissal.
-    notify(`${selectedFoldersSnapshot.length + selectedDocumentsSnapshot.length} items ${action === "move" ? "moved" : "copied"}`);
+    const { singular, plural } = selectionToastNouns(selectedFoldersSnapshot, selectedDocumentsSnapshot);
+    notify(actionToast(selectedFoldersSnapshot.length + selectedDocumentsSnapshot.length, singular, plural, action === "move" ? "moved" : "copied"));
     const resources = resolveStructuralResources(selectedFoldersSnapshot, selectedDocumentsSnapshot);
     let operationFolders = selectedFoldersSnapshot;
     let operationDocuments = selectedDocumentsSnapshot;
@@ -3570,7 +3580,11 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     const folderSnapshot = [...selectedFolders];
     const documentSnapshot = [...selectedDocuments];
     const selection: ContentSelection = { folderKeys: folderSnapshot.map(({ key }) => key), documentKeys: documentSnapshot.map(({ key }) => key) };
-    if (folderSnapshot.length + documentSnapshot.length) notify(nextFavorite ? "Added to favorites" : "Removed from favorites");
+    const selectionCount = folderSnapshot.length + documentSnapshot.length;
+    if (selectionCount) {
+      const { singular, plural } = selectionToastNouns(folderSnapshot, documentSnapshot);
+      notify(actionToast(selectionCount, singular, plural, nextFavorite ? "favorited" : "unfavorited"));
+    }
     const updatedAt = new Date().toISOString();
     folderSnapshot.forEach((folder) => replaceFolder({ ...folder, isFavorite: nextFavorite }, false));
     documentSnapshot.forEach((document) => replaceDocument({ ...document, isFavorite: nextFavorite, updatedAt }, false));
@@ -3694,7 +3708,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     const localFavoriteCount = favoriteFolders.length + favoriteDocuments.length;
     if (localFavoriteCount > 0 && eligibleFolders.length === 0 && eligibleDocuments.length === 0) {
       closeSheet(true);
-      notify(`Can't delete ${localFavoriteCount} favorite item${localFavoriteCount === 1 ? "" : "s"}`);
+      notify(`Can't delete ${countedToastNoun(localFavoriteCount, "favorite item", "favorite items")}`);
       return;
     }
     bulkMutationLocked.current = true;
@@ -3739,7 +3753,10 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
       && requestContextKey === contentContextKeyRef.current;
     const resources = resolveStructuralResources(eligibleFolders, eligibleDocuments);
     const deletingCount = eligibleFolders.length + eligibleDocuments.length;
-    if (deletingCount) notify(`${deletingCount} item${deletingCount === 1 ? "" : "s"} deleted`);
+    if (deletingCount) {
+      const { singular, plural } = selectionToastNouns(eligibleFolders, eligibleDocuments);
+      notify(actionToast(deletingCount, singular, plural, "deleted"));
+    }
     let committed = false;
     void (async () => {
       try {
@@ -3770,7 +3787,7 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
         }
         void queryClient.invalidateQueries({ queryKey: contentQueryKeys.locations(contentContext), refetchType: "none" }).catch(() => undefined);
         if (favoriteCount > 0 || outcome.failed) notify(favoriteCount > 0
-          ? `Can't delete ${favoriteCount} favorite item${favoriteCount === 1 ? "" : "s"}`
+          ? `Can't delete ${countedToastNoun(favoriteCount, "favorite item", "favorite items")}`
           : outcome.succeeded ? `${outcome.succeeded} deleted, ${outcome.failed} failed` : "Items could not be deleted");
       } catch (cause) {
         if (committed) {

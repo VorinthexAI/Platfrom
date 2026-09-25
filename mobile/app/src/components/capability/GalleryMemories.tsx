@@ -10,6 +10,7 @@ import { CheckIcon, CloseIcon, MoreHorizontalIcon } from "@vorinthex/shared/ui/i
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { useSessionToast as useToast } from "@/hooks/use-session-toast";
+import { actionToast } from "@/lib/action-toast";
 
 import { createGalleryCollectionMemory, deleteGalleryCollectionMemory, fetchGalleryCollectionMemory, getGalleryContext, isGalleryClientErrorCode, isGalleryMemoryExhaustion, listGalleryCollectionMemories, type GalleryCollection, type GalleryMemory } from "@/lib/gallery-client";
 import { galleryMemoryTypedText, galleryMemoryTypingDuration, splitGalleryMemoryText } from "@/lib/gallery-memory-typing";
@@ -177,13 +178,13 @@ export function GalleryMemories({ collection, initialMemoryKey, onClose, open }:
     memoryKeys.forEach((memoryKey) => queryClient.removeQueries({ queryKey: galleryQueryKeys.memory(galleryContext, collection.key, memoryKey), exact: true }));
     setSelectedMemoryKeys([]);
     setActiveSheet("list");
-    notify(`Deleted ${memoryKeys.length} ${memoryKeys.length === 1 ? "memory" : "memories"}`);
+    notify(actionToast(memoryKeys.length, "Memory", "memories", "deleted"));
     void Promise.allSettled(memoryKeys.map((memoryKey) => deleteGalleryCollectionMemory(memoryKey, collection.key))).then((outcomes) => {
       memoryKeys.forEach((key) => pendingMemoryDeletes.current.delete(key));
       const failed = new Set(memoryKeys.filter((_, index) => outcomes[index]?.status === "rejected"));
       if (failed.size) {
         setMemories((current) => [...current.filter(({ key }) => !failed.has(key)), ...previous.filter(({ key }) => failed.has(key))]);
-        notify(`${memoryKeys.length - failed.size} deleted, ${failed.size} failed`);
+        notify(memoryKeys.length === 1 ? "Memory could not be deleted" : `${memoryKeys.length - failed.size} deleted, ${failed.size} failed`);
       }
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.memories(galleryContext, collection.key), exact: true, refetchType: "none" });
     });

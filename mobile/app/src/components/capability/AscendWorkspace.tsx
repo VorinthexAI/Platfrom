@@ -59,6 +59,7 @@ import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitch
 import { assistantIconSource, vorinthexMarkSource } from "@/data/capability-icons";
 import { enhanceAppTextForContext, translateAppTextForContext } from "@/lib/app-transformation-client";
 import { languageForCountryCode } from "@/lib/auth-helpers";
+import { actionToast, countedToastNoun } from "@/lib/action-toast";
 import { isSparkFundingError } from "@/lib/domain-error-observer";
 import { audioTimelineDuration, audioTimelinePosition, formatAudioTime, resolveAudioTimelinePosition } from "@/lib/audio-playback-timeline";
 import { useBookPlayback } from "@/lib/book-playback";
@@ -877,7 +878,7 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
     });
     if (bulk) setSelectedBookKeys([]);
     setSheetOpen(false);
-    showToast({ title: `${targets.length} ${targets.length === 1 ? "audio book" : "audio books"} ${isFavorite ? "favorited" : "unfavorited"}`, duration: 2_000 });
+    showToast({ title: actionToast(targets.length, "Audio book", "audio books", isFavorite ? "favorited" : "unfavorited"), duration: 2_000 });
     void Promise.allSettled(targets.map((book) => setBookFavorite(book.key, isFavorite))).then((results) => {
       const failedKeys: string[] = [];
       results.forEach((result, index) => {
@@ -905,7 +906,7 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
       bulkMutationLocked.current = false;
       setSheetOpen(false);
       setSheet(undefined);
-      showToast({ title: `Can't delete ${favorites.length} favorite audio book${favorites.length === 1 ? "" : "s"}`, duration: 2_500 });
+      showToast({ title: `Can't delete ${countedToastNoun(favorites.length, "favorite audio book", "favorite audio books")}`, duration: 2_500 });
       return;
     }
     eligible.forEach((book) => {
@@ -915,7 +916,7 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
     setSelectedBookKeys(favorites.map(({ key }) => key));
     setSheetOpen(false);
     setSheet(undefined);
-    showToast({ title: `${eligible.length} ${eligible.length === 1 ? "audio book" : "audio books"} deleted`, duration: 2_000 });
+    showToast({ title: actionToast(eligible.length, "Audio book", "audio books", "deleted"), duration: 2_000 });
     const results = await Promise.allSettled(eligible.map(async (book) => {
       await deleteBook(book.key, randomUUID());
       return book;
@@ -925,7 +926,7 @@ export function AscendWorkspace({ initialAction, initialBookKey, initialSearchQu
     staleFavorites.forEach((book) => patchCachedBook(queryClient, context, book));
     failed.forEach((book) => patchCachedBook(queryClient, context, book));
     bulkMutationLocked.current = false;
-    if (staleFavorites.length) showToast({ title: `Can't delete ${staleFavorites.length} favorite audio book${staleFavorites.length === 1 ? "" : "s"}`, duration: 2_500 });
+    if (staleFavorites.length) showToast({ title: `Can't delete ${countedToastNoun(staleFavorites.length, "favorite audio book", "favorite audio books")}`, duration: 2_500 });
     else if (failed.length) showToast({ title: failed.length === eligible.length ? "Audio book deletion failed" : "Some audio books could not be deleted", duration: 4_000 });
   }
   function deleteSelectedBook() {
