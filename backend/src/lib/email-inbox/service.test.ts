@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { createEmailService as createEmailServiceImplementation, EmailWatchRepairPendingError, emailDraftComposeInputSchema, emailDraftCreateInputSchema, emailDraftUpdateInputSchema, emailOverviewInputSchema, emailToneCreateInputSchema, emailToneUpdateInputSchema, publishEmailAttachmentDeletionEvents, rawEmail, validateDraftIdentity } from './service';
+import { createEmailService as createEmailServiceImplementation, emailDraftComposeInputSchema, emailDraftCreateInputSchema, emailDraftUpdateInputSchema, emailOverviewInputSchema, emailToneCreateInputSchema, emailToneUpdateInputSchema, publishEmailAttachmentDeletionEvents, rawEmail, validateDraftIdentity } from './service';
 import { GmailApiError } from './gmail';
 import { createEmailRepository, decodeEmailCursor, emailMessageKey, EmailRepositoryError } from './repository';
 import { newId } from '@/lib/ids';
@@ -532,6 +532,23 @@ describe('email synchronization', () => {
     expect(charges).toHaveLength(1);
   });
 
+  test('initial mailbox snapshots only list Gmail threads from the last 90 days', async () => {
+    const queries: Array<{ limit: number; pageToken?: string; q?: string }> = [];
+    const service = createEmailService({
+      repository: { reconcileInbox: async () => undefined, syncThread: async () => thread, deleteProviderThread: async () => undefined } as never,
+      connectors: { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true } as never,
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
+      client: () => ({
+        profile: async () => ({ historyId: 'history-2' }),
+        listThreads: async (limit: number, pageToken?: string, q?: string) => { queries.push({ limit, pageToken, q }); return { threads: [] }; },
+      }) as never,
+      sparkBilling: { chargeExecution: async () => ({ status: 'applied', claimOwner: 'owner', transaction: { key: 'charge' } }) as never, completeExecution: async () => true },
+      publishInboxChanged: async () => undefined,
+    });
+    await service.initialSync({ ...actor, userKey: 'system' }, connector.key);
+    expect(queries).toEqual([{ limit: 500, q: 'newer_than:90d' }]);
+  });
+
   test('rejects an unfunded initial import before provider access or persistence', async () => {
     let profileCalls = 0, stateWrites = 0;
     const service = createEmailService({
@@ -969,6 +986,26 @@ describe('email synchronization', () => {
     expect(events.indexOf('failed')).toBeLessThan(events.indexOf('sibling settled'));
     expect(events.indexOf('sibling settled')).toBeLessThan(events.indexOf('state:error'));
     expect(events.indexOf('state:error')).toBeLessThan(events.indexOf('released'));
+  });
+
+  test('subscription ingestion idles without error when Gmail quota is exceeded', async () => {
+    const states: string[] = [];
+    const service = createEmailService({
+      repository: { reconcileInbox: async () => undefined } as never,
+      connectors: {
+        getExact: async () => ({ ...connector, historyId: '1', lastSyncedAt: now }),
+        credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }),
+        claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined,
+        setSyncState: async (_key: string, state: string) => { states.push(state); return true; },
+        markNotificationPending: async () => true, clearPendingNotification: async () => true,
+      } as never,
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
+      client: () => ({ profile: async () => ({ historyId: '2' }), history: async () => { throw new GmailApiError(403, ['rateLimitExceeded'], { providerMessage: 'Quota exceeded for quota metric Total Query Cost' }); } }) as never,
+      publishInboxChanged: async () => undefined,
+    });
+    await expect(service.ingestSubscriptionNotification({ ...actor, userKey: 'system' }, connector.key, '2')).resolves.toMatchObject({ synced: 0 });
+    expect(states).toContain('idle');
+    expect(states).not.toContain('error');
   });
 
   test('persists incremental history overflow and consumes it before advancing history', async () => {
@@ -1925,20 +1962,6 @@ describe('inbox watch subscription', () => {
     } finally { if (previous === undefined) delete process.env.GMAIL_PUBSUB_TOPIC; else process.env.GMAIL_PUBSUB_TOPIC = previous; }
   });
 
-  test('defers an unconfigured Gmail watch only when a durable repair was queued', async () => {
-    const previous = process.env.GMAIL_PUBSUB_TOPIC;
-    delete process.env.GMAIL_PUBSUB_TOPIC;
-    try {
-      const events: string[] = [];
-      const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }) };
-      const service = createEmailService({ connectors: connectors as never, repository: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ watch: async () => { events.push('provider'); throw new Error('should not run'); } }) as never, enqueueWatchRepair: async () => { events.push('repair'); return { jobId: 'durable-watch-intent' }; } });
-      await expect(service.registerWatch(actor, connector.key)).rejects.toBeInstanceOf(EmailWatchRepairPendingError);
-      expect(events).toEqual(['repair']);
-      const unavailable = createEmailService({ connectors: connectors as never, repository: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ watch: async () => { throw new Error('should not run'); } }) as never, enqueueWatchRepair: async () => { throw new Error('queue unavailable'); } });
-      await expect(unavailable.registerWatch(actor, connector.key)).rejects.toThrow('queue unavailable');
-    } finally { if (previous === undefined) delete process.env.GMAIL_PUBSUB_TOPIC; else process.env.GMAIL_PUBSUB_TOPIC = previous; }
-  });
-
   test('queues prompt watch retry and rejects stale watch persistence', async () => {
     const previous = process.env.GMAIL_PUBSUB_TOPIC;
     process.env.GMAIL_PUBSUB_TOPIC = 'projects/example/topics/inbox';
@@ -2622,6 +2645,21 @@ describe('custom tone metadata', () => {
     });
     await expect(service.ensureInbox(actor, { ...connector, scopes: [...connector.scopes], syncEnabled: true, syncStatus: 'idle' }, { name: 'Work' })).resolves.toBeDefined();
     expect(initialized).toBe(true);
+  });
+
+  test('accepts OAuth upsert connectors that include a revision fence', async () => {
+    let parsedConnector: { key?: string } | undefined;
+    const service = createEmailService({
+      repository: { initializeTones: async () => [] } as never,
+      inboxes: { ensure: async (value) => { parsedConnector = value; return { revision: 'inbox' }; } } as never,
+      connectors: {} as never,
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
+      embed: async () => embedding,
+    });
+    const upserted = { ...connector, scopes: [...connector.scopes], syncEnabled: true, syncStatus: 'idle', revision: 'connector-upsert' };
+    await expect(service.ensureInbox(actor, upserted, { name: 'Work' })).resolves.toBeDefined();
+    expect(parsedConnector).toMatchObject({ key: connector.key });
+    expect(parsedConnector).not.toHaveProperty('revision');
   });
 
   test('embeds only the tone name, preserves instruction-only embeddings, and rejects tone covers', async () => {

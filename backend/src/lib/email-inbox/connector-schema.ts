@@ -58,7 +58,7 @@ export const TEAM_CONNECTORS_COLLECTION = USER_CONNECTORS_COLLECTION;
 /** @deprecated Use userConnectorSchema. */
 export const teamConnectorSchema = z.preprocess((value) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-  const { createdByTeamMembershipKey, billingUserKey, ...connector } = value as Record<string, unknown>;
+  const { createdByTeamMembershipKey, billingUserKey, revision: _revision, ...connector } = value as Record<string, unknown>;
   return { ...connector, userKey: connector.userKey ?? billingUserKey ?? connector.key ?? createdByTeamMembershipKey };
 }, userConnectorSchema);
 /** @deprecated Use UserConnector. */

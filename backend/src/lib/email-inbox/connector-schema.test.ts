@@ -12,6 +12,14 @@ describe('team connector mail projection', () => {
     expect(() => teamConnectorSchema.parse({ ...connector, accessToken: 'secret' })).toThrow();
   });
 
+  test('strips repository revision fences so OAuth upsert results can initialize inboxes', () => {
+    const connector = teamConnectorSchema.parse({
+      key: 'cmrnlzf650002qc7k4p5zem5w', teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', provider: 'gmail', providerAccountId: 'google-1', email: 'person@example.com', encryptedCredentials: 'cipher', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByTeamMembershipKey: 'cmrnlzf640001qc7kazsr96k5', status: 'active', createdAt: now, updatedAt: now, revision: 'connector-upsert',
+    });
+    expect(connector).not.toHaveProperty('revision');
+    expect(connector).toMatchObject({ key: 'cmrnlzf650002qc7k4p5zem5w', email: 'person@example.com' });
+  });
+
   test('accepts only strict Gmail OAuth credentials', () => {
     expect(emailConnectorCredentialsSchema.parse({ accessToken: 'token', tokenType: 'Bearer', expiresAt: now })).toMatchObject({ accessToken: 'token' });
     expect(() => emailConnectorCredentialsSchema.parse({ username: 'person@example.com', appPassword: 'secret' })).toThrow();

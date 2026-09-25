@@ -205,10 +205,6 @@ export function createConnectorRepository(database: Database = db) {
       const cursor = await database.query(`FOR connector IN @@collection FILTER connector.provider == "gmail" && connector.status != "revoked" && connector.syncEnabled != false && (connector.watchExpiresAt == null || connector.watchExpiresAt <= @before) RETURN { teamKey: connector.teamKey, scopeKey: connector.scopeKey, connectorKey: connector._key }`, { '@collection': USER_CONNECTORS_COLLECTION, before });
       return cursor.all() as Promise<Array<{ teamKey: string; scopeKey: string; connectorKey: string }>>;
     },
-    async listUnwatchedSyncTargets(now: string) {
-      const cursor = await database.query(`FOR connector IN @@collection FILTER connector.provider == "gmail" && connector.status == "active" && connector.syncEnabled != false && connector.initialSyncCompleted == true && (connector.watchExpiresAt == null || connector.watchExpiresAt <= @now) RETURN { teamKey: connector.teamKey, scopeKey: connector.scopeKey, connectorKey: connector._key }`, { '@collection': USER_CONNECTORS_COLLECTION, now });
-      return cursor.all() as Promise<Array<{ teamKey: string; scopeKey: string; connectorKey: string }>>;
-    },
     async claimSync(key: string, token: string, expiresAt: string) {
       const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.status != "revoked" && connector.syncEnabled != false && (connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now) && (connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now) UPDATE connector WITH { syncLeaseToken: @token, syncLeaseExpiresAt: @expiresAt } IN @@collection RETURN true', { '@collection': USER_CONNECTORS_COLLECTION, key, token, expiresAt, now: new Date().toISOString() });
       return (await cursor.next()) === true;

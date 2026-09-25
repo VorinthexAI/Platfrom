@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { completeEmailConnectorReconciliation, emailClearTrashJobId, emailInitialSyncJobId, emailRepairJobId, emailRepairJobOptions, emailSyncJobSchema, emailWatchJobOptions, emailWatchRenewalJobId, enqueueEmailInitialSync, enqueueEmailSyncContinuation, enqueueEmailUnwatchedSync, initialSyncJobSchema, processEmailSyncJob, recoverEmailSyncQueue } from './sync-queue';
+import { completeEmailConnectorReconciliation, emailClearTrashJobId, emailInitialSyncJobId, emailRepairJobId, emailRepairJobOptions, emailSyncJobSchema, emailWatchJobOptions, emailWatchRenewalJobId, enqueueEmailInitialSync, enqueueEmailSyncContinuation, initialSyncJobSchema, processEmailSyncJob, recoverEmailSyncQueue } from './sync-queue';
 import { GmailApiError } from './gmail';
 
 const operationKey = '11111111-1111-4111-8111-111111111111';
@@ -59,25 +59,6 @@ describe('email synchronization jobs', () => {
     expect(await processEmailSyncJob(queued[0]!.data, { service: service as never })).toEqual({ synchronized: 1 });
     expect(calls).toEqual([[{ userKey: 'system', teamKey: target.teamKey, scopeKey: target.scopeKey }, target.connectorKey]]);
     await expect(processEmailSyncJob(queued[0]!.data, { service: { initialSync: async () => ({ synced: 100, initialSyncCompleted: false }) } as never })).rejects.toThrow('remains incomplete');
-  });
-
-  test('polls only completed connectors without an active Gmail watch through canonical subscription ingestion', async () => {
-    const jobs: Array<{ name: string; data: any; options: any }> = [];
-    const queue = { add: async (name: string, data: any, options: any) => { jobs.push({ name, data, options }); return { id: options.jobId }; } };
-    const at = new Date('2026-08-24T12:04:00.000Z');
-    const first = await enqueueEmailUnwatchedSync(at, queue as never);
-    expect((await enqueueEmailUnwatchedSync(new Date('2026-08-24T12:14:00.000Z'), queue as never)).jobId).toBe(first.jobId);
-    expect((await enqueueEmailUnwatchedSync(new Date('2026-08-24T12:15:00.000Z'), queue as never)).jobId).not.toBe(first.jobId);
-    const target = { teamKey: 'team-1', scopeKey: 'cmrnlzf640001qc7kazsr96k5', connectorKey: 'cmrnlzf650002qc7k4p5zem5w' };
-    const calls: unknown[] = [];
-    const connectors = { listUnwatchedSyncTargets: async (now: string) => { expect(Date.parse(now)).toBeGreaterThan(0); return [target]; } };
-    expect(await processEmailSyncJob(jobs[0]!.data, { connectors: connectors as never, queue: queue as never })).toEqual({ synchronized: 1 });
-    const child = jobs.at(-1)!;
-    expect(child.data).toMatchObject({ kind: 'connector-sync', ...target });
-    expect(child.data.sourceKey).toMatch(/^[a-f0-9]{64}$/);
-    await processEmailSyncJob(child.data, { service: { continueSubscription: async (...args: unknown[]) => { calls.push(args); return { synced: 1 }; } } as never });
-    expect(calls).toEqual([[{ userKey: 'system', teamKey: target.teamKey, scopeKey: target.scopeKey }, target.connectorKey]]);
-    expect(() => emailSyncJobSchema.parse({ ...jobs[0]!.data, accessToken: 'secret' })).toThrow();
   });
 
   test('removes waiting intents but leaves active jobs to converge on retry', async () => {

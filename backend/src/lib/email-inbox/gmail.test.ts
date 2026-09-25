@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { classifyEmailWithFallback, deterministicEmailClassification, emailLabelsVisibleInInbox, inboxCategoryFor } from './classification';
-import { buildGmailAuthorizationUrl, createGmailClient, decodeGmailAttachmentData, decodeRfc2047Words, discoverGmailAttachmentParts, emailAddresses, emailAddressWithName, gmailAttachmentParts, GmailApiError, GmailPermanentAttachmentError, isRetryableGmailError, MAX_GMAIL_ATTACHMENT_BYTES, MAX_GMAIL_ATTACHMENTS, messageBodies, normalizeGmailAttachmentFilename } from './gmail';
+import { buildGmailAuthorizationUrl, createGmailClient, decodeGmailAttachmentData, decodeRfc2047Words, discoverGmailAttachmentParts, emailAddresses, emailAddressWithName, gmailAttachmentParts, GmailApiError, GmailPermanentAttachmentError, isGmailQuotaExceeded, isRetryableGmailError, MAX_GMAIL_ATTACHMENT_BYTES, MAX_GMAIL_ATTACHMENTS, messageBodies, normalizeGmailAttachmentFilename } from './gmail';
 
 describe('Gmail connector protocol', () => {
   test('reports supported attachments omitted by the canonical count bound', () => {
@@ -141,6 +141,7 @@ describe('Gmail connector protocol', () => {
       return Response.json({ threads: [], history: [] });
     }) as typeof fetch);
     await client.listThreads(100, 'next-page');
+    await client.listThreads(500, undefined, 'newer_than:90d');
     await client.history('history-1', 'history-page');
     await client.threadMetadata('thread-1');
     await client.message('message-1');
@@ -154,23 +155,25 @@ describe('Gmail connector protocol', () => {
     expect(requests[0]).not.toContain('q=');
     expect(requests[0]).toContain('includeSpamTrash=true');
     expect(requests[0]).toContain('pageToken=next-page');
-    expect(requests[1]).toContain('startHistoryId=history-1');
+    expect(requests[1]).toContain('q=newer_than%3A90d');
+    expect(requests[1]).toContain('includeSpamTrash=true');
+    expect(requests[2]).toContain('startHistoryId=history-1');
     expect(requests.join(' ')).not.toContain('private-access-token');
-    expect(requests[2]).toContain('/threads/thread-1?format=minimal');
-    expect(requests[3]).toContain('/messages/message-1?format=full');
-    expect(bodies[4]).toBe(JSON.stringify({ topicName: 'projects/project/topics/gmail' }));
-    expect(requests[5]).toContain('/threads/thread-1/trash');
-    expect(bodies[5]).toBe('{}');
-    expect(requests[6]).toContain('/threads/thread-1/modify');
-    expect(bodies[6]).toBe(JSON.stringify({ addLabelIds: ['STARRED'], removeLabelIds: [] }));
-    expect(requests[7]).toContain('/messages?');
-    expect(requests[7]).toContain('labelIds=TRASH');
-    expect(requests[7]).toContain('includeSpamTrash=true');
-    expect(requests[7]).toContain('maxResults=500');
-    expect(requests[7]).toContain('pageToken=trash-page');
-    expect(requests[8]).toContain('/messages/batchDelete');
-    expect(bodies[8]).toBe(JSON.stringify({ ids: ['message-1', 'message-2'] }));
-    expect(bodies[9]).toBe('token=private-access-token');
+    expect(requests[3]).toContain('/threads/thread-1?format=minimal');
+    expect(requests[4]).toContain('/messages/message-1?format=full');
+    expect(bodies[5]).toBe(JSON.stringify({ topicName: 'projects/project/topics/gmail' }));
+    expect(requests[6]).toContain('/threads/thread-1/trash');
+    expect(bodies[6]).toBe('{}');
+    expect(requests[7]).toContain('/threads/thread-1/modify');
+    expect(bodies[7]).toBe(JSON.stringify({ addLabelIds: ['STARRED'], removeLabelIds: [] }));
+    expect(requests[8]).toContain('/messages?');
+    expect(requests[8]).toContain('labelIds=TRASH');
+    expect(requests[8]).toContain('includeSpamTrash=true');
+    expect(requests[8]).toContain('maxResults=500');
+    expect(requests[8]).toContain('pageToken=trash-page');
+    expect(requests[9]).toContain('/messages/batchDelete');
+    expect(bodies[9]).toBe(JSON.stringify({ ids: ['message-1', 'message-2'] }));
+    expect(bodies[10]).toBe('token=private-access-token');
   });
 
   test('validates Google revocation responses while allowing idempotent retries', async () => {
@@ -191,6 +194,9 @@ describe('Gmail connector protocol', () => {
     expect(isRetryableGmailError(new GmailApiError(403, ['forbidden']))).toBe(false);
     expect(isRetryableGmailError(new GmailApiError(408))).toBe(true);
     expect(isRetryableGmailError(new GmailApiError(429))).toBe(true);
+    expect(isGmailQuotaExceeded(new GmailApiError(403, ['rateLimitExceeded'], { providerMessage: 'Quota exceeded for quota metric Total Query Cost' }))).toBe(true);
+    expect(isGmailQuotaExceeded(new AggregateError([new GmailApiError(403, [], { providerMessage: 'Quota exceeded for quota metric Total Query Cost' })]))).toBe(true);
+    expect(isGmailQuotaExceeded(new GmailApiError(403, ['forbidden']))).toBe(false);
   });
 
   test('retries bounded safe requests with Retry-After and jitter', async () => {

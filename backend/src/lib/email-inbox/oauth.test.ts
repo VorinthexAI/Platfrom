@@ -37,7 +37,7 @@ describe('email OAuth state', () => {
     const state = new URL((await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
     const redirect = new URL(await oauth.callback({ state, code: 'private-code' }));
     expect(redirect.searchParams.get('email_connection_error')).toBe('gmail_authorization_failed');
-    expect(diagnostics).toEqual([{ stage: 'token-exchange', providerStatus: 403 }]);
+    expect(diagnostics).toEqual([{ stage: 'token-exchange', errorName: 'Error', providerStatus: 403 }]);
     expect(JSON.stringify(diagnostics)).not.toMatch(/private-code|access-token|person@example|private-provider/);
     await expect(oauth.callback({ state, code: 'private-code' })).rejects.toThrow('invalid or expired');
   });
@@ -53,7 +53,7 @@ describe('email OAuth state', () => {
     const state = new URL((await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
     const redirect = new URL(await oauth.callback({ state, code: 'provider-code' }));
     expect(redirect.searchParams.get('email_connection_error')).toBe('gmail_api_unavailable');
-    expect(diagnostics).toEqual([{ stage: 'gmail-profile', providerStatus: 403, providerReason: 'SERVICE_DISABLED' }]);
+    expect(diagnostics).toEqual([{ stage: 'gmail-profile', errorName: 'GmailApiError', providerStatus: 403, providerReason: 'SERVICE_DISABLED' }]);
     expect(JSON.stringify(diagnostics)).not.toMatch(/private-access|private-refresh|person@example|private-id|provider-code/);
   });
 
@@ -160,12 +160,13 @@ describe('email OAuth state', () => {
     }
   });
 
-  test('issues a grant when watch fails only after a durable repair intent is confirmed', async () => {
+  test('does not complete a Gmail connection until its watch is registered, even with a repair queued', async () => {
     const now = '2026-08-11T12:00:00.000Z';
     const connector = teamConnectorSchema.parse({ key: userKey, teamKey: 'team-1', scopeKey, provider: 'gmail', providerAccountId: 'google-watch-repair', email: 'person@example.com', encryptedCredentials: 'ciphertext', encryptionKeyId: 'v1', accessTokenFingerprint: 'a'.repeat(64), scopes: ['email'], createdByTeamMembershipKey: scopeKey, status: 'active', createdAt: now, updatedAt: now });
+    let rolledBack = false;
     const oauth = createEmailOAuthService({
       store, enqueueInitialSync,
-      connectors: { findExact: async () => connector, credentials: () => ({ accessToken: 'old', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now }), upsert: async () => ({ ...connector, revision: 'upsert' }), setSyncState: async () => 'sync', getByKey: async () => connector } as never,
+      connectors: { findExact: async () => connector, credentials: () => ({ accessToken: 'old', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now }), upsert: async () => ({ ...connector, revision: 'upsert' }), setSyncState: async () => 'sync', getByKey: async () => connector, rollbackReconnect: async () => { rolledBack = true; return true; } } as never,
       inboxes: { getByConnector: async () => null } as never,
       authorize: async () => ({ teamMembershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), ensureInbox: async () => ({ revision: 'inbox' }), inboxView: async () => ({ connectorKey: connector.key }),
       registerWatch: async () => { throw new EmailWatchRepairPendingError(new Error('watch rejected')); },
@@ -173,9 +174,9 @@ describe('email OAuth state', () => {
     });
     const state = new URL((await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
     const redirect = new URL(await oauth.callback({ state, code: 'provider-code' }));
-    const code = redirect.searchParams.get('email_connection_code');
-    expect(code).toStartWith('vrtx_email_grant_');
-    expect(await oauth.exchange({ userKey, teamKey: 'team-1', scopeKey, code: code! })).toEqual({ connectorKey: connector.key });
+    expect(redirect.searchParams.get('email_connection_error')).toBe('gmail_watch_unavailable');
+    expect(redirect.searchParams.has('email_connection_code')).toBe(false);
+    expect(rolledBack).toBe(true);
   });
 
   test('recovers refresh tokens only from the exact provider account', async () => {

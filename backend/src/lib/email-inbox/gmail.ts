@@ -130,10 +130,18 @@ export class GmailPermanentAttachmentError extends Error {
 }
 
 const RETRYABLE_GMAIL_REASONS = new Set(['backendError', 'internalError', 'quotaExceeded', 'rateLimitExceeded', 'userRateLimitExceeded', 'RESOURCE_EXHAUSTED', 'UNAVAILABLE']);
+const GMAIL_QUOTA_REASONS = new Set(['quotaExceeded', 'rateLimitExceeded', 'userRateLimitExceeded', 'RESOURCE_EXHAUSTED']);
 const RETRYABLE_TRANSPORT_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'ETIMEDOUT', 'EAI_AGAIN']);
 export function isRetryableGmailError(error: unknown) {
   return error instanceof GmailApiError
     && (error.status === 408 || error.status === 429 || error.status >= 500 || (error.status === 403 && error.reasons.some((reason) => RETRYABLE_GMAIL_REASONS.has(reason))));
+}
+
+export function isGmailQuotaExceeded(error: unknown): boolean {
+  if (error instanceof AggregateError) return error.errors.some(isGmailQuotaExceeded);
+  return error instanceof GmailApiError && error.status === 403 && (
+    error.reasons.some((reason) => GMAIL_QUOTA_REASONS.has(reason)) || /quota exceeded/i.test(error.message)
+  );
 }
 
 function isRetryableTransportError(error: unknown) {
@@ -425,9 +433,10 @@ export function createGmailClient(accessToken: string, fetcher: typeof fetch = f
   };
   return {
     profile: () => request<z.infer<typeof profileSchema>>('/profile').then((value) => profileSchema.parse(value)),
-    async listThreads(maxResults = 100, pageToken?: string) {
+    async listThreads(maxResults = 100, pageToken?: string, q?: string) {
       const query = new URLSearchParams({ maxResults: String(maxResults), includeSpamTrash: 'true' });
       if (pageToken) query.set('pageToken', pageToken);
+      if (q) query.set('q', q);
       return request<{ threads?: Array<{ id: string }>; nextPageToken?: string }>(`/threads?${query}`);
     },
     async history(startHistoryId: string, pageToken?: string) {

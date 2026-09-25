@@ -5,12 +5,11 @@ import { redisConnection } from '@/lib/redis';
 import { createConnectorRepository, type ConnectorRepository } from './connector-repository';
 import { createInboxRepository, type InboxRepository } from './inbox-repository';
 import { buildGmailAuthorizationUrl, createGmailClient, createPkce, exchangeGmailCode, GmailApiError } from './gmail';
-import { EmailWatchRepairPendingError } from './service';
 
 const STATE_PREFIX = 'email:oauth:state:';
 const GRANT_PREFIX = 'email:oauth:grant:';
 
-export interface EmailOAuthFailureDiagnostic { stage: string; databaseCode?: number; providerStatus?: number; providerReason?: 'SERVICE_DISABLED' | 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' | 'GMAIL_DISABLED' }
+export interface EmailOAuthFailureDiagnostic { stage: string; errorName?: string; databaseCode?: number; providerStatus?: number; providerReason?: 'SERVICE_DISABLED' | 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' | 'GMAIL_DISABLED' }
 
 function gmailFailureReason(error: unknown): EmailOAuthFailureDiagnostic['providerReason'] {
   if (!(error instanceof GmailApiError)) return undefined;
@@ -29,7 +28,7 @@ function gmailFailureReason(error: unknown): EmailOAuthFailureDiagnostic['provid
 function failureDiagnostic(stage: string, error: unknown): EmailOAuthFailureDiagnostic {
   const details = typeof error === 'object' && error !== null ? error as Record<string, unknown> : {};
   const providerReason = gmailFailureReason(error);
-  return { stage, ...(typeof details.errorNum === 'number' ? { databaseCode: details.errorNum } : {}), ...(typeof details.status === 'number' ? { providerStatus: details.status } : {}), ...(providerReason ? { providerReason } : {}) };
+  return { stage, ...(error instanceof Error && error.name ? { errorName: error.name.slice(0, 80) } : {}), ...(typeof details.errorNum === 'number' ? { databaseCode: details.errorNum } : {}), ...(typeof details.status === 'number' ? { providerStatus: details.status } : {}), ...(providerReason ? { providerReason } : {}) };
 }
 const stateSchema = z.object({
   userKey: z.string().cuid(), teamKey: z.string().min(1), scopeKey: z.string().cuid(),
@@ -145,11 +144,8 @@ export function createEmailOAuthService(options: {
           reconnect.connectorRevision = activated.revision;
         }
         stage = 'gmail-watch';
-        try {
-          const watch = await registerWatch({ userKey: state.userKey, teamKey: state.teamKey, scopeKey: state.scopeKey }, connector.key, reconnect.connectorRevision) as { connectorRevision?: string } | undefined;
-          if (watch?.connectorRevision) reconnect.connectorRevision = watch.connectorRevision;
-        }
-        catch (error) { if (!(error instanceof EmailWatchRepairPendingError)) throw error; }
+        const watch = await registerWatch({ userKey: state.userKey, teamKey: state.teamKey, scopeKey: state.scopeKey }, connector.key, reconnect.connectorRevision) as { connectorRevision?: string } | undefined;
+        if (watch?.connectorRevision) reconnect.connectorRevision = watch.connectorRevision;
         stage = 'initial-sync-enqueue';
         await enqueueInitialSync({ teamKey: state.teamKey, scopeKey: state.scopeKey, connectorKey: connector.key, operationKey: randomUUID() });
         stage = 'connection-grant';

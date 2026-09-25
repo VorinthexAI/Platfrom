@@ -837,6 +837,12 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     return queryClient.invalidateQueries({ queryKey: signalQueryKeys.overviews(context), refetchType: "none" });
   }
   function completeConnection(connector: EmailConnector) {
+    setSheetOpen(false);
+    setSheet(undefined);
+    inboxTabRef.current = "unread";
+    setInboxTab("unread");
+    requestedInboxQuery.current = setEmailOverviewReadState(requestedInboxQuery.current, "unread");
+    setInboxControlsQuery(requestedInboxQuery.current);
     const context = { teamKey: emailContext.teamKey, scopeKey: emailContext.scopeKey };
     const generation = ++operationGeneration.current;
     clearSignalThreadTombstones(context, connector.connectorKey);
@@ -3228,7 +3234,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   </>;
   const draftEmpty = Boolean(inboxTab === "drafts" && !draftsQuery.isPending && !draftSearching && !draftsQuery.error && !draftSearchError && !visibleInboxDrafts.length);
   const messageEmpty = Boolean(inboxTab !== "drafts" && !loading && !inboxQueryPending && !initialSyncPending && !loadError && !overview?.threads.length);
-  const inboxInitialLoading = !overview && (loading || inboxQueryPending || initialSyncPending);
+  const inboxInitialLoading = inboxTab !== "drafts" && (loading || inboxQueryPending || initialSyncPending) && !overview?.threads.length;
   return (
     <View style={styles.root}>
       <View accessibilityElementsHidden={readerSheetOpen} importantForAccessibility={readerSheetOpen ? "no-hide-descendants" : "auto"} pointerEvents={readerSheetOpen ? "none" : "auto"} style={styles.workspaceSurface}>
