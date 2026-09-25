@@ -2651,12 +2651,12 @@ describe('custom tone metadata', () => {
     let parsedConnector: { key?: string } | undefined;
     const service = createEmailService({
       repository: { initializeTones: async () => [] } as never,
-      inboxes: { ensure: async (value) => { parsedConnector = value; return { revision: 'inbox' }; } } as never,
+      inboxes: { ensure: async (value: { key?: string }) => { parsedConnector = value; return { revision: 'inbox' }; } } as never,
       connectors: {} as never,
       authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       embed: async () => embedding,
     });
-    const upserted = { ...connector, scopes: [...connector.scopes], syncEnabled: true, syncStatus: 'idle', revision: 'connector-upsert' };
+    const upserted = { ...connector, scopes: [...connector.scopes], syncEnabled: true, syncStatus: 'idle' as const, revision: 'connector-upsert' };
     await expect(service.ensureInbox(actor, upserted, { name: 'Work' })).resolves.toBeDefined();
     expect(parsedConnector).toMatchObject({ key: connector.key });
     expect(parsedConnector).not.toHaveProperty('revision');

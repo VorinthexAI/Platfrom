@@ -838,7 +838,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   }
   function completeConnection(connector: EmailConnector) {
     setSheetOpen(false);
-    setSheet(undefined);
+    setSheet("plus");
     inboxTabRef.current = "unread";
     setInboxTab("unread");
     requestedInboxQuery.current = setEmailOverviewReadState(requestedInboxQuery.current, "unread");
