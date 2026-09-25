@@ -1167,7 +1167,6 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
     if (activeCollection && !initialTarget?.access?.canContribute) return;
     const selectedAssets = assets.slice(0, MAX_GALLERY_UPLOAD_IMAGES);
     if (selectedAssets.length === 0) return;
-    if (initialTarget) notify("Upload started");
     const batchKey = initialTarget ? `upload-${currentTimestamp()}-${randomToken()}` : undefined;
     const createdAt = new Date().toISOString();
     const clientKeys = selectedAssets.map((_, index) => `${currentTimestamp()}-${index}-${randomToken()}`);
@@ -1283,7 +1282,6 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
     }
     clearCollectionSearch(false);
     const batchKey = `upload-${currentTimestamp()}-${randomToken()}`;
-    notify("Upload started");
     const createdAt = new Date().toISOString();
     setOptimisticMediaItems((current) => [...files.map((file) => ({ ...file, batchKey, collectionKey: targetCollection.key, createdAt })), ...current]);
     updateCollectionSingleton((current) => current.map((collection) => (collection.key === targetCollection.key ? { ...collection, count: collection.count + files.length } : collection)));
@@ -1316,7 +1314,6 @@ export function GalleryWorkspace({ initialAction, initialCollectionKey, initialH
       return;
     }
     const batchKey = `upload-${currentTimestamp()}-${randomToken()}`;
-    if (showFeedback) notify("Upload started");
     const createdAt = new Date().toISOString();
     setOptimisticMediaItems((current) => [...files.map((file) => ({ ...file, batchKey, collectionKey, createdAt })), ...current]);
     if (targetCollection) updateCollectionSingleton((current) => current.map((collection) => (collection.key === collectionKey ? { ...collection, count: collection.count + files.length } : collection)));

@@ -3026,7 +3026,6 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
       uploadBatchRef.current = batch;
       setUploadBatch(batch);
       setUploading(true);
-      if (batch.length) notify("Upload started");
       setFolderContentTab("files");
       closeSheet();
       const pendingFolder = folderKey ? pendingFolderCreates.current.get(folderKey) : undefined;
@@ -3131,7 +3130,6 @@ export function KnowledgeWorkspace({ initialAction, initialCollectionKind, initi
     setScanError(undefined);
     try {
       if (scanSessionSize(pages) > MAX_DOCUMENT_SCAN_BYTES) throw new Error("Scanned pages must be 16 MB or smaller in total.");
-      notify("Document scan started");
       const prepared = pages.map((page, index) => ({ name: `scan-page-${index + 1}.png`, size: page.sizeBytes, type: "image/png", uri: page.uri }));
       if (generation !== scanGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
       processingStarted = true;

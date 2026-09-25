@@ -322,8 +322,8 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     const candidates = savedTableSearchActive ? tripSearchQuery.data ?? [] : trips;
     return candidates.filter((trip) => (!tripFavoritesOnly || trip.isFavorite) && (!tripCompletedOnly || trip.status === "completed"));
   }, [savedTableSearchActive, tripCompletedOnly, tripFavoritesOnly, tripSearchQuery.data, trips]);
-  const selectedTrip = selectedTripKey ? trips.find(({ key }) => key === selectedTripKey) : undefined;
-  const selectedPlace = selectedPlaceKey
+  const selectedTrip = selectedTripKey && !selectedTripKey.startsWith("optimistic-") ? trips.find(({ key }) => key === selectedTripKey) : undefined;
+  const selectedPlace = selectedPlaceKey && !selectedPlaceKey.startsWith("optimistic-")
     ? places.find(({ key }) => key === selectedPlaceKey)
       ?? selectedTrip?.places.find(({ key }) => key === selectedPlaceKey)
       ?? trips.flatMap(({ places: tripPlaces }) => tripPlaces).find(({ key }) => key === selectedPlaceKey)
@@ -601,6 +601,7 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   }
 
   function openSavedPlace(place: Place) {
+    if (place.key.startsWith("optimistic-")) return;
     void overviewQuery.refetch();
     void tripsQuery.refetch();
     const country = countryByCode.get(place.countryCode) ?? { countryCode: place.countryCode, name: place.kind === "country" ? place.name : place.countryCode, continent: "Unknown", latitude: place.latitude, longitude: place.longitude };
@@ -652,12 +653,18 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
     queryClient.setQueryData(overviewKey, (current: CompassOverview | undefined) => addOptimisticCompassPlace(current, { key: optimisticKey, name: input.name, summary: input.summary, countryCode: input.countryCode, kind, latitude: input.latitude, longitude: input.longitude, status: "wishlist", isFavorite: false, createdAt: new Date().toISOString(), ...(coverUrl ? { coverUrl } : {}) }));
     void createPlace(input).then((place) => {
       queryClient.setQueryData(overviewKey, (current: CompassOverview | undefined) => reconcileOptimisticCompassPlace(current, optimisticKey, place));
+      setSelectedPlaceKey((current) => current === optimisticKey ? place.key : current);
+      setSelectedPlaceSnapshot((current) => current?.key === optimisticKey ? place : current);
+      setSelectedTablePlaceKeys((current) => current.map((key) => key === optimisticKey ? place.key : key));
       setSelectedPlaceKeys((current) => current.map((key) => key === optimisticKey ? place.key : key));
       pendingPlaceSaveRef.current.delete(saveIdentity);
       setPendingPlaceSaves((current) => current.filter((identity) => identity !== saveIdentity));
       void queryClient.invalidateQueries({ queryKey: galleryQueryKeys.all(travelContext) });
     }).catch((error: unknown) => {
       queryClient.setQueryData(overviewKey, (current: CompassOverview | undefined) => removeOptimisticCompassPlace(current, optimisticKey));
+      setSelectedPlaceKey((current) => current === optimisticKey ? undefined : current);
+      setSelectedPlaceSnapshot((current) => current?.key === optimisticKey ? undefined : current);
+      setSelectedTablePlaceKeys((current) => current.filter((key) => key !== optimisticKey));
       setSelectedPlaceKeys((current) => current.filter((key) => key !== optimisticKey));
       pendingPlaceSaveRef.current.delete(saveIdentity);
       setPendingPlaceSaves((current) => current.filter((identity) => identity !== saveIdentity));
@@ -688,6 +695,7 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   }
 
   function updateSavedPlace(place: Place, patch: Partial<Pick<Place, "status" | "isFavorite">>) {
+    if (place.key.startsWith("optimistic-")) return Promise.reject(new Error("Wait for this place to finish saving."));
     const previous = optimisticPlaceRef.current.get(place.key) ?? authoritativePlaceRef.current.get(place.key) ?? place;
     authoritativePlaceRef.current.set(place.key, authoritativePlaceRef.current.get(place.key) ?? place);
     const version = (placeMutationVersion.current.get(place.key) ?? 0) + 1;
@@ -721,10 +729,12 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   }
 
   function toggleTablePlaceSelection(key: string) {
+    if (key.startsWith("optimistic-")) return;
     setSelectedTablePlaceKeys((current) => current.includes(key) ? current.filter((candidate) => candidate !== key) : [...current, key]);
   }
 
   function handleTablePlaceLongPress(key: string) {
+    if (key.startsWith("optimistic-")) return;
     const enteringSelection = selectedTablePlaceKeys.length === 0 && !selectedTablePlaceKeys.includes(key);
     toggleTablePlaceSelection(key);
     if (enteringSelection) void Haptics.selectionAsync();
@@ -981,10 +991,12 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
         optimisticTripRef.current.delete(optimisticKey);
         optimisticTripRef.current.set(nextTrip.key, nextTrip);
         queryClient.setQueryData(tripsKey, (current: Trip[] | undefined) => reconcileOptimisticCompassTrip(current, optimisticKey, nextTrip));
+        setSelectedTripKey((current) => current === optimisticKey ? nextTrip.key : current);
       } catch (error) {
         await queryClient.cancelQueries({ queryKey: tripsKey, exact: true }).catch(() => undefined);
         optimisticTripRef.current.delete(optimisticKey);
         queryClient.setQueryData(tripsKey, (current: Trip[] | undefined) => removeOptimisticCompassTrip(current, optimisticKey));
+        setSelectedTripKey((current) => current === optimisticKey ? undefined : current);
         if (!isSparkFundingError(error)) showToast({ title: "Trip could not be created", duration: 2_000 });
       }
     })();
@@ -1111,6 +1123,7 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   }
 
   function optimisticTripUpdate(tripKey: string, update: (current: Trip) => Trip, request: (optimistic: Trip, version: number) => Promise<Trip>, failureTitle: string, successTitle: string, reportFailure = true) {
+    if (tripKey.startsWith("optimistic-")) return Promise.resolve(false);
     const cached = queryClient.getQueryData<Trip[]>(compassQueryKeys.trips(travelContext))?.find(({ key }) => key === tripKey);
     const previous = optimisticTripRef.current.get(tripKey) ?? cached;
     if (!previous) return Promise.resolve(false);
@@ -1444,10 +1457,12 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
   }
 
   function toggleTableTripSelection(key: string) {
+    if (key.startsWith("optimistic-")) return;
     setSelectedTableTripKeys((current) => current.includes(key) ? current.filter((candidate) => candidate !== key) : [...current, key]);
   }
 
   function handleTableTripLongPress(key: string) {
+    if (key.startsWith("optimistic-")) return;
     const enteringSelection = selectedTableTripKeys.length === 0 && !selectedTableTripKeys.includes(key);
     toggleTableTripSelection(key);
     if (enteringSelection) void Haptics.selectionAsync();
@@ -1617,7 +1632,8 @@ export function TravelWorkspace({ initialAction, initialCollectionKind, initialC
 }
 
 function PlaceCard({ accessibilityLongPress = false, cardSize, disabled = false, onLongPress, onPress, place, selectable = false, selected = false }: { accessibilityLongPress?: boolean; cardSize?: number; disabled?: boolean; onLongPress?: () => void; onPress: () => void; place: Place; selectable?: boolean; selected?: boolean }) {
-  return <View style={[styles.squareCard, selected && styles.squareCardSelected, { width: cardSize, height: cardSize }]}>{place.coverUrl ? <Image cachePolicy="memory-disk" contentFit="cover" priority="high" source={{ uri: place.coverUrl, cacheKey: `compass-place-cover:${place.key}` }} style={StyleSheet.absoluteFill} /> : null}<Button accessibilityActions={accessibilityLongPress ? [{ name: "longpress", label: selected ? `Deselect ${place.name}` : `Select ${place.name}` }] : undefined} accessibilityLabel={`${disabled ? "Saving" : selectable ? selected ? "Deselect" : "Select" : "Open"} ${place.name}, ${place.status === "wishlist" ? "want to go" : "visited"}${place.isFavorite ? ", favorite" : ""}`} accessibilityState={selectable ? { disabled, selected } : undefined} contentMode="raw" disabled={disabled} onAccessibilityAction={accessibilityLongPress ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") onLongPress?.(); } : undefined} onLongPress={onLongPress} onPress={onPress} shape="rounded" size="md" style={[styles.cardMain, place.coverUrl && styles.coveredCardMain]} variant="ghost">{place.coverUrl ? null : place.kind === "country" ? <GlobeIcon size="lg" /> : <LocationPinIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.cardLabel, place.coverUrl && styles.coveredCardLabel]}>{place.name}</Text></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>;
+  const saving = disabled || place.key.startsWith("optimistic-");
+  return <View style={[styles.squareCard, selected && styles.squareCardSelected, { width: cardSize, height: cardSize }]}>{place.coverUrl ? <Image cachePolicy="memory-disk" contentFit="cover" priority="high" source={{ uri: place.coverUrl, cacheKey: `compass-place-cover:${place.key}` }} style={StyleSheet.absoluteFill} /> : null}<Button accessibilityActions={accessibilityLongPress ? [{ name: "longpress", label: selected ? `Deselect ${place.name}` : `Select ${place.name}` }] : undefined} accessibilityLabel={`${saving ? "Saving" : selectable ? selected ? "Deselect" : "Select" : "Open"} ${place.name}, ${place.status === "wishlist" ? "want to go" : "visited"}${place.isFavorite ? ", favorite" : ""}`} accessibilityState={selectable ? { disabled: saving, selected } : undefined} contentMode="raw" disabled={saving} onAccessibilityAction={accessibilityLongPress ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") onLongPress?.(); } : undefined} onLongPress={onLongPress} onPress={onPress} shape="rounded" size="md" style={[styles.cardMain, place.coverUrl && styles.coveredCardMain]} variant="ghost">{place.coverUrl ? null : place.kind === "country" ? <GlobeIcon size="lg" /> : <LocationPinIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.cardLabel, place.coverUrl && styles.coveredCardLabel]}>{place.name}</Text></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>;
 }
 
 function TripPlaceArc({ onFocus, onOpen, places, selectedKey }: { onFocus: (key: string) => void; onOpen: (place: Place) => void; places: Place[]; selectedKey?: string }) {
@@ -1647,7 +1663,8 @@ function QueryFailure({ message, onRetry, sheet = false }: { message: string; on
 }
 
 function TripCard({ accessibilityLongPress = false, cardSize, onLongPress, onPress, selectable = false, selected = false, trip }: { accessibilityLongPress?: boolean; cardSize?: number; onLongPress?: () => void; onPress: () => void; selectable?: boolean; selected?: boolean; trip: Trip }) {
-  return <View style={[styles.squareCard, selected && styles.squareCardSelected, { width: cardSize, height: cardSize }]}>{trip.coverUrl ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: trip.coverUrl, cacheKey: `compass-trip-cover:${trip.places[0]?.key ?? trip.key}` }} style={StyleSheet.absoluteFill} /> : null}<Button accessibilityActions={accessibilityLongPress ? [{ name: "longpress", label: selected ? `Deselect ${trip.name}` : `Select ${trip.name}` }] : undefined} accessibilityLabel={`${selectable ? selected ? "Deselect" : "Select" : "Open"} ${trip.name}, ${trip.status}${trip.isFavorite ? ", favorite" : ""}`} accessibilityState={selectable ? { selected } : undefined} contentMode="raw" onAccessibilityAction={accessibilityLongPress ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") onLongPress?.(); } : undefined} onLongPress={onLongPress} onPress={onPress} shape="rounded" size="md" style={[styles.cardMain, trip.coverUrl && styles.coveredCardMain]} variant="ghost">{trip.coverUrl ? null : <GlobeIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.cardLabel, trip.coverUrl && styles.coveredCardLabel]}>{trip.name}</Text></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>;
+  const saving = trip.key.startsWith("optimistic-");
+  return <View style={[styles.squareCard, selected && styles.squareCardSelected, { width: cardSize, height: cardSize }]}>{trip.coverUrl ? <Image cachePolicy="memory-disk" contentFit="cover" source={{ uri: trip.coverUrl, cacheKey: `compass-trip-cover:${trip.places[0]?.key ?? trip.key}` }} style={StyleSheet.absoluteFill} /> : null}<Button accessibilityActions={accessibilityLongPress ? [{ name: "longpress", label: selected ? `Deselect ${trip.name}` : `Select ${trip.name}` }] : undefined} accessibilityLabel={`${saving ? "Saving" : selectable ? selected ? "Deselect" : "Select" : "Open"} ${trip.name}, ${trip.status}${trip.isFavorite ? ", favorite" : ""}`} accessibilityState={selectable ? { disabled: saving, selected } : { disabled: saving }} contentMode="raw" disabled={saving} onAccessibilityAction={accessibilityLongPress ? ({ nativeEvent }) => { if (nativeEvent.actionName === "longpress") onLongPress?.(); } : undefined} onLongPress={onLongPress} onPress={onPress} shape="rounded" size="md" style={[styles.cardMain, trip.coverUrl && styles.coveredCardMain]} variant="ghost">{trip.coverUrl ? null : <GlobeIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.cardLabel, trip.coverUrl && styles.coveredCardLabel]}>{trip.name}</Text></Button>{selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}</View>;
 }
 
 function BulkToolbar({ count, onClear, onMore }: { count: number; onClear: () => void; onMore: () => void }) {

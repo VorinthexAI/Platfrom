@@ -5,7 +5,7 @@ import { appSearchResults, searchApp } from "@/lib/app-search-client";
 import { assistantChangesSchema } from "@/lib/assistant-changes";
 import { useAuthStore } from "@/state/auth";
 
-const keySchema = z.string().min(1);
+const keySchema = z.string().cuid();
 
 export const placeSchema = z.strictObject({
   key: keySchema,
