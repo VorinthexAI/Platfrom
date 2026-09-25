@@ -8,7 +8,7 @@ import { EVENT_IDENTIFIER_HEADER } from '@/lib/ai/events/event-identifier';
 import { DEVICE_IDENTIFIER_HEADER } from '@/lib/ai/events/device';
 import { handleResendWebhook, RESEND_WEBHOOK_V1_PATH } from './resend';
 import { GMAIL_WEBHOOK_V1_PATH, handleGmailWebhook } from './email-webhook';
-import { closeEmailSyncQueue, enqueueEmailWatchRenewal, recoverEmailSyncQueue, startEmailSyncWorker } from '@/lib/email-inbox/sync-queue';
+import { closeEmailSyncQueue, enqueueEmailUnwatchedSync, enqueueEmailWatchRenewal, recoverEmailSyncQueue, startEmailSyncWorker } from '@/lib/email-inbox/sync-queue';
 import { closeGalleryUploadQueue, recoverGalleryUploadQueue, startGalleryUploadWorker } from '@/lib/gallery/upload-queue';
 import { registerRoutes } from './routes';
 import { closeConversationImageTurnQueue, recoverConversationImageTurnQueue, startConversationImageTurnWorker } from '@/lib/conversations/image-turn-queue';
@@ -103,6 +103,7 @@ if (import.meta.main) {
   startBookRefundWorker();
   void recoverGalleryUploadQueue().catch((error) => console.error('gallery upload queue recovery failed', { error }));
   void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error }));
+  void enqueueEmailUnwatchedSync().catch((error) => console.error('email unwatched synchronization enqueue failed', { error }));
   void recoverEmailSyncQueue().catch((error) => console.error('email synchronization queue recovery failed', { error }));
   void recoverConversationImageTurnQueue().catch((error) => console.error('conversation image queue recovery failed', { error }));
   void recoverConversationAttachmentPersistenceQueue().catch((error) => console.error('conversation attachment persistence queue recovery failed', { error }));
@@ -111,6 +112,7 @@ if (import.meta.main) {
   void defaultBookService.recoverGenerations().catch((error) => console.error('book generation recovery failed', { error }));
   void recoverAppNotificationQueue().catch((error) => console.error('app notification queue recovery failed', { error }));
   const renewalTimer = setInterval(() => { void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error })); }, 6 * 60 * 60_000);
+  const unwatchedSyncTimer = setInterval(() => { void enqueueEmailUnwatchedSync().catch((error) => console.error('email unwatched synchronization enqueue failed', { error })); }, 15 * 60_000);
   const emailRecoveryTimer = setInterval(() => { void recoverEmailSyncQueue().catch((error) => console.error('email synchronization queue recovery failed', { error })); }, 60_000);
   const galleryRecoveryTimer = setInterval(() => { void recoverGalleryUploadQueue().catch((error) => console.error('gallery upload queue recovery failed', { error })); }, 60_000);
   const conversationImageRecoveryTimer = setInterval(() => { void recoverConversationImageTurnQueue().catch((error) => console.error('conversation image queue recovery failed', { error })); }, 60_000);
@@ -125,6 +127,7 @@ if (import.meta.main) {
     shuttingDown = true;
     server.stop(false);
     clearInterval(renewalTimer);
+    clearInterval(unwatchedSyncTimer);
     clearInterval(emailRecoveryTimer);
     clearInterval(galleryRecoveryTimer);
     clearInterval(conversationImageRecoveryTimer);

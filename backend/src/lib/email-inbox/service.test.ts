@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { createEmailService as createEmailServiceImplementation, emailDraftComposeInputSchema, emailDraftCreateInputSchema, emailDraftUpdateInputSchema, emailOverviewInputSchema, emailToneCreateInputSchema, emailToneUpdateInputSchema, publishEmailAttachmentDeletionEvents, rawEmail, validateDraftIdentity } from './service';
+import { createEmailService as createEmailServiceImplementation, EmailWatchRepairPendingError, emailDraftComposeInputSchema, emailDraftCreateInputSchema, emailDraftUpdateInputSchema, emailOverviewInputSchema, emailToneCreateInputSchema, emailToneUpdateInputSchema, publishEmailAttachmentDeletionEvents, rawEmail, validateDraftIdentity } from './service';
 import { GmailApiError } from './gmail';
 import { createEmailRepository, decodeEmailCursor, emailMessageKey, EmailRepositoryError } from './repository';
 import { newId } from '@/lib/ids';
@@ -1922,6 +1922,20 @@ describe('inbox watch subscription', () => {
       const service = createEmailService({ connectors: connectors as never, repository: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ watch: async () => { events.push('provider'); return { historyId: '1', expiration: String(Date.now() + 60_000) }; } }) as never, enqueueWatchRepair: async () => { events.push('intent'); return { jobId: 'watch' }; }, completeWatchRepair: async () => { events.push('complete'); } });
       await service.registerWatch(actor, connector.key);
       expect(events).toEqual(['intent', 'provider', 'persist', 'complete']);
+    } finally { if (previous === undefined) delete process.env.GMAIL_PUBSUB_TOPIC; else process.env.GMAIL_PUBSUB_TOPIC = previous; }
+  });
+
+  test('defers an unconfigured Gmail watch only when a durable repair was queued', async () => {
+    const previous = process.env.GMAIL_PUBSUB_TOPIC;
+    delete process.env.GMAIL_PUBSUB_TOPIC;
+    try {
+      const events: string[] = [];
+      const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }) };
+      const service = createEmailService({ connectors: connectors as never, repository: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ watch: async () => { events.push('provider'); throw new Error('should not run'); } }) as never, enqueueWatchRepair: async () => { events.push('repair'); return { jobId: 'durable-watch-intent' }; } });
+      await expect(service.registerWatch(actor, connector.key)).rejects.toBeInstanceOf(EmailWatchRepairPendingError);
+      expect(events).toEqual(['repair']);
+      const unavailable = createEmailService({ connectors: connectors as never, repository: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ watch: async () => { throw new Error('should not run'); } }) as never, enqueueWatchRepair: async () => { throw new Error('queue unavailable'); } });
+      await expect(unavailable.registerWatch(actor, connector.key)).rejects.toThrow('queue unavailable');
     } finally { if (previous === undefined) delete process.env.GMAIL_PUBSUB_TOPIC; else process.env.GMAIL_PUBSUB_TOPIC = previous; }
   });
 

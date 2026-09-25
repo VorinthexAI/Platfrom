@@ -19,6 +19,10 @@ const EMAIL_RETURN_URI = "https://vorinthex.com/capability/signal";
 export function emailConnectionErrorMessage(code: string) {
   if (code === "gmail_api_unavailable") return "Gmail connections are temporarily unavailable. Please try again later.";
   if (code === "gmail_scope_missing") return "Google did not grant Gmail access. Reconnect and approve the requested permissions.";
+  if (code === "gmail_account_unavailable") return "Gmail is unavailable for this Google account.";
+  if (code === "gmail_authorization_failed") return "Google authorization could not be completed. Try connecting again.";
+  if (code === "gmail_watch_unavailable") return "Gmail live updates are unavailable. Try connecting again later.";
+  if (code === "gmail_sync_unavailable") return "Gmail synchronization is unavailable. Try connecting again later.";
   if (code === "access_denied") return "Gmail access was declined.";
   return "Email connection could not be completed. Please try again.";
 }

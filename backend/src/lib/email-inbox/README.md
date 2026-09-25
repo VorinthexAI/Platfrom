@@ -10,6 +10,14 @@
 - Run Redis, the email synchronization workers, and Gmail watch renewal continuously.
 - Monitor OAuth failures, webhook authentication, queue depth and retries, sync errors, expiring watches, and token refresh failures. Test connect, initial sync, push sync, watch renewal, send, and disconnect with production-like accounts before launch.
 
+If watch registration is unavailable during OAuth but the watch-repair job was
+durably queued, the connection can finish and the separate initial sync still
+runs. Until the Pub/Sub topic and publisher permission are restored, the backend
+checks initially synced, unwatched inboxes every 15 minutes via the same
+canonical subscription ingestion path; the daily watch-renewal worker retries
+missing watches. If the repair queue itself is unavailable, connection fails
+rather than leaving an untracked watch failure.
+
 Signal email connectors support Gmail only. End users authorize Gmail through Google OAuth and never configure cloud resources or workers.
 
 ### OAuth scope verification and callback compatibility

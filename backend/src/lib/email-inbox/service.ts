@@ -1280,9 +1280,13 @@ export function createEmailService(options: {
         if (repairQueued) return { watchExpiresAt: null, skipped: true };
         throw new EmailRepositoryError('not_found', 'No connected email account');
       }
-      const topic = watchTopic();
-      if (!topic) throw new Error('GMAIL_PUBSUB_TOPIC is not configured');
       const repairJobId = repairQueued ? null : await queueWatchRepair(actor, connectorKey);
+      const topic = watchTopic();
+      if (!topic) {
+        const error = new Error('GMAIL_PUBSUB_TOPIC is not configured');
+        if (repairJobId) throw new EmailWatchRepairPendingError(error);
+        throw error;
+      }
       let watch: Awaited<ReturnType<GmailClient['watch']>>;
       let connectorRevision: string;
       try {

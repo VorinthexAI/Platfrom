@@ -36,7 +36,7 @@ describe('email OAuth state', () => {
     });
     const state = new URL((await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
     const redirect = new URL(await oauth.callback({ state, code: 'private-code' }));
-    expect(redirect.searchParams.get('email_connection_error')).toBe('connection_failed');
+    expect(redirect.searchParams.get('email_connection_error')).toBe('gmail_authorization_failed');
     expect(diagnostics).toEqual([{ stage: 'token-exchange', providerStatus: 403 }]);
     expect(JSON.stringify(diagnostics)).not.toMatch(/private-code|access-token|person@example|private-provider/);
     await expect(oauth.callback({ state, code: 'private-code' })).rejects.toThrow('invalid or expired');
@@ -133,7 +133,7 @@ describe('email OAuth state', () => {
     });
     const state = new URL((await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
     const redirect = new URL(await oauth.callback({ state, code: 'provider-code' }));
-    expect(redirect.searchParams.get('email_connection_error')).toBe('connection_failed');
+    expect(redirect.searchParams.get('email_connection_error')).toBe('gmail_sync_unavailable');
     expect(redirect.searchParams.get('email_connection_code')).toBeNull();
     expect(rollback).toMatchObject({ connectorKey: connector.key, connectorRevision: 'watch', previousConnector: connector });
   });
@@ -154,7 +154,7 @@ describe('email OAuth state', () => {
       const state = new URL((await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
       const redirect = new URL(await oauth.callback({ state, code: 'provider-code' }));
       expect(redirect.searchParams.get('email_connection_code')).toBeNull();
-      expect(redirect.searchParams.get('email_connection_error')).toBe('connection_failed');
+      expect(redirect.searchParams.get('email_connection_error')).toBe('gmail_watch_unavailable');
       expect(rollback).toBe(1);
       expect([...values.keys()].some((key) => key.startsWith('email:oauth:grant:'))).toBe(false);
     }

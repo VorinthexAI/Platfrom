@@ -233,6 +233,15 @@ describe('team connector repository', () => {
     expect(calls[2]!.query).toContain('connector.initialSyncCompleted != true');
   });
 
+  test('selects only active, initially synced Gmail connectors whose watch is unavailable', async () => {
+    let query = '';
+    const database = { collection: () => ({}), query: async (text: string) => { query = text; return { all: async () => [{ teamKey: 'team-1', scopeKey, connectorKey: teamMembershipKey }] }; } };
+    expect(await createConnectorRepository(database as never).listUnwatchedSyncTargets('2026-08-24T12:00:00.000Z')).toEqual([{ teamKey: 'team-1', scopeKey, connectorKey: teamMembershipKey }]);
+    expect(query).toContain('connector.status == "active"');
+    expect(query).toContain('connector.initialSyncCompleted == true');
+    expect(query).toContain('connector.watchExpiresAt == null || connector.watchExpiresAt <= @now');
+  });
+
   test('renews watch metadata without changing the persisted History or pending continuation cursor', async () => {
     const record: Record<string, any> = {
       ...teamConnectorSchema.parse({

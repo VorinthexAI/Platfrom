@@ -29,6 +29,7 @@ const notificationJobSchema = z.object({
 const renewalJobSchema = z.object({ schemaVersion: z.literal(1), kind: z.literal('renew-watches'), day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).strict();
 // One-release tombstone: deployed queues can still contain jobs written by the removed polling scheduler.
 const legacyPollingJobSchema = z.object({ schemaVersion: z.literal(1), kind: z.literal('poll-connectors'), bucket: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/) }).strict();
+const unwatchedSyncJobSchema = z.object({ schemaVersion: z.literal(1), kind: z.literal('sync-unwatched'), bucket: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/) }).strict();
 const connectorSyncJobSchema = z.object({
   schemaVersion: z.literal(1), kind: z.literal('connector-sync'), teamKey: z.string().min(1).max(160), scopeKey: z.string().min(1).max(160), connectorKey: z.string().min(1).max(160), sourceKey: z.string().regex(/^[a-f0-9]{64}$/), requestedAt: z.string().datetime(),
 }).strict();
@@ -59,7 +60,7 @@ const clearTrashJobSchema = z.object({
 const watchJobSchema = z.object({
   schemaVersion: z.literal(1), kind: z.literal('watch-reconciliation'), teamKey: z.string().min(1).max(160), scopeKey: z.string().cuid(), connectorKey: z.string().cuid(), operationKey: z.string().uuid(), requestedAt: z.string().datetime(),
 }).strict();
-export const emailSyncJobSchema = z.discriminatedUnion('kind', [notificationJobSchema, renewalJobSchema, legacyPollingJobSchema, initialSyncJobSchema, connectorSyncJobSchema, connectorNotificationJobSchema, connectorWatchJobSchema, connectorJobSchema, clearTrashJobSchema, watchJobSchema]).superRefine((value, context) => {
+export const emailSyncJobSchema = z.discriminatedUnion('kind', [notificationJobSchema, renewalJobSchema, legacyPollingJobSchema, unwatchedSyncJobSchema, initialSyncJobSchema, connectorSyncJobSchema, connectorNotificationJobSchema, connectorWatchJobSchema, connectorJobSchema, clearTrashJobSchema, watchJobSchema]).superRefine((value, context) => {
   if (value.kind !== 'connector-reconciliation') return;
   if ((value.reason === 'send') === Boolean(value.operation)) context.addIssue({ code: 'custom', message: 'send repair must omit operation; thread repair must include operation', path: ['operation'] });
   if ((value.reason === 'send') !== Boolean(value.sendDraftKey)) context.addIssue({ code: 'custom', message: 'send repair must identify exactly one draft', path: ['sendDraftKey'] });
@@ -171,6 +172,13 @@ export async function enqueueEmailWatchRenewal(now = new Date(), targetQueue: Qu
   return { jobId: queued.id! };
 }
 
+export async function enqueueEmailUnwatchedSync(now = new Date(), targetQueue: QueueAccess = getQueue(RENEWAL_QUEUE_NAME)) {
+  const bucket = new Date(Math.floor(now.getTime() / (15 * 60_000)) * 15 * 60_000).toISOString().slice(0, 16);
+  const job = unwatchedSyncJobSchema.parse({ schemaVersion: 1, kind: 'sync-unwatched', bucket });
+  const queued = await targetQueue.add('sync-unwatched', job, { ...emailWatchJobOptions, jobId: stableId('sync-unwatched', bucket) });
+  return { jobId: queued.id! };
+}
+
 export async function enqueueEmailConnectorReconciliation(input: Omit<z.input<typeof connectorJobSchema>, 'schemaVersion' | 'kind' | 'requestedAt'>, targetQueue: QueueAccess = getQueue(SYNC_QUEUE_NAME)) {
   const job = connectorJobSchema.parse({ schemaVersion: 1, kind: 'connector-reconciliation', ...input, requestedAt: new Date().toISOString() });
   const queued = await targetQueue.add('connector-reconciliation', job, { ...emailRepairJobOptions, jobId: emailRepairJobId(job) });
@@ -232,6 +240,11 @@ export async function processEmailSyncJob(raw: unknown, dependencies: {
   }
   if (job.kind === 'poll-connectors') {
     return { synchronized: 0 };
+  }
+  if (job.kind === 'sync-unwatched') {
+    const targets = await connectors.listUnwatchedSyncTargets(new Date().toISOString());
+    await enqueueConnectorChildren({ kind: 'connector-sync', sourceKey: stableId('sync-unwatched', job.bucket), targets, queue: dependencies.queue ?? getQueue(SYNC_QUEUE_NAME) });
+    return { synchronized: targets.length };
   }
   if (job.kind === 'initial-sync') {
     const result = await trusted('inbox.sync', { connectorKey: job.connectorKey }, trustedDependencies(job.teamKey, job.scopeKey)) as { initialSyncCompleted?: boolean; alreadyCompleted?: boolean };

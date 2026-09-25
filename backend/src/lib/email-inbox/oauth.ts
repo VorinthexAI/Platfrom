@@ -162,7 +162,14 @@ export function createEmailOAuthService(options: {
         try { (options.reportFailure ?? ((diagnostic) => console.warn('email oauth connection failed', diagnostic)))(failureDiagnostic(stage, error)); } catch { /* Diagnostics cannot prevent the app return. */ }
         if (reconnect) await connectors.rollbackReconnect({ connectorKey: reconnect.connectorKey, connectorRevision: reconnect.connectorRevision, previousConnector: reconnect.previous, inboxKey: reconnect.inboxKey, inboxRevision: reconnect.inboxRevision, previousInbox: reconnect.previousInbox }).catch(() => false);
         const reason = gmailFailureReason(error);
-        redirect.searchParams.set('email_connection_error', stage === 'gmail-profile' && reason === 'SERVICE_DISABLED' ? 'gmail_api_unavailable' : stage === 'gmail-profile' && reason === 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' ? 'gmail_scope_missing' : 'connection_failed');
+        const code = stage === 'gmail-profile' && reason === 'SERVICE_DISABLED' ? 'gmail_api_unavailable'
+          : stage === 'gmail-profile' && reason === 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' ? 'gmail_scope_missing'
+          : stage === 'gmail-profile' && reason === 'GMAIL_DISABLED' ? 'gmail_account_unavailable'
+          : stage === 'token-exchange' ? 'gmail_authorization_failed'
+          : stage === 'gmail-watch' ? 'gmail_watch_unavailable'
+          : stage === 'initial-sync-enqueue' ? 'gmail_sync_unavailable'
+          : 'connection_failed';
+        redirect.searchParams.set('email_connection_error', code);
       }
       return redirect.toString();
     },
