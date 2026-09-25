@@ -25,15 +25,17 @@ const MAX_ITEMS = 12;
 const MODES = { skip: 'The request does not need this data.', inspect: 'Read actual resources and their underlying content to answer.', count: 'An exact inventory or quantity is requested.' };
 const SAFE_FIELDS = new Set(['name', 'title', 'collectionName', 'description', 'summary', 'summaries', 'versions', 'version', 'versionHistoryIncomplete', 'guides', 'references', 'topic', 'style', 'sourceTitle', 'subtitle', 'content', 'finalContent', 'generatedContent', 'instruction', 'caption', 'text', 'filename', 'mimeType', 'status', 'kind', 'role', 'city', 'country', 'countryCode', 'latitude', 'longitude', 'width', 'height', 'imageCount', 'slideCount', 'images', 'createdAt', 'updatedAt', 'lastMessageAt', 'subject', 'from', 'to', 'body', 'message', 'intent', 'priority', 'state', 'isFavorite', 'unread', 'isRead', 'email', 'estimatedMinutes', 'chapterCount', 'sizeBytes', 'count', 'position', 'goal', 'audience', 'outcome', 'language', 'progressPercent', 'chapters', 'folder', 'collections', 'trips', 'places', 'attachments', 'messages', 'thread', 'tags', 'tag', 'target', 'type', 'label', 'prompt', 'usageCount', 'generatedAt', 'sparkBalance', 'sparkDebt', 'spendingBlocked', 'bytes', 'estimatedMonthlyMicroSparks', 'sourceImageCount', 'storage', 'transactions', 'amountSparks', 'code', 'attributionCount', 'invitees', 'displayName', 'signupRewardEarned', 'firstPaidRewardStatus', 'cancelAtPeriodEnd', 'currentPeriodStart', 'currentPeriodEnd', 'billingPeriod', 'priceCents', 'currency']);
 
-function project(value: unknown, budget = MAX_ITEM_BYTES): unknown {
+export function projectWorkspaceEvidence(value: unknown, budget = MAX_ITEM_BYTES): unknown {
   if (typeof value === 'string') return value.slice(0, budget);
   if (typeof value === 'number' || typeof value === 'boolean' || value === null) return value;
-  if (Array.isArray(value)) return value.slice(0, MAX_ITEMS).map((item) => project(item, Math.min(budget, 4_000)));
+  if (Array.isArray(value)) return value.slice(0, MAX_ITEMS).map((item) => projectWorkspaceEvidence(item, Math.min(budget, 4_000)));
   if (!value || typeof value !== 'object') return undefined;
-  return Object.fromEntries(Object.entries(value).filter(([field]) => SAFE_FIELDS.has(field)).map(([field, item]) => [field, project(item, ['content', 'body', 'text', 'finalContent', 'generatedContent', 'instruction', 'message'].includes(field) ? budget : 2_000)]).filter(([, item]) => item !== undefined));
+  return Object.fromEntries(Object.entries(value).filter(([field]) => SAFE_FIELDS.has(field)).map(([field, item]) => [field, projectWorkspaceEvidence(item, ['content', 'body', 'text', 'finalContent', 'generatedContent', 'instruction', 'message'].includes(field) ? budget : 2_000)]).filter(([, item]) => item !== undefined));
 }
 
-function materialTruncated(value: unknown, budget = MAX_ITEM_BYTES): boolean {
+const project = projectWorkspaceEvidence;
+
+export function materialTruncated(value: unknown, budget = MAX_ITEM_BYTES): boolean {
   if (typeof value === 'string') return value.length > budget;
   if (Array.isArray(value)) return value.length > MAX_ITEMS || value.some((item) => materialTruncated(item, Math.min(budget, 4_000)));
   return Boolean(value && typeof value === 'object' && Object.entries(value).some(([field, item]) => SAFE_FIELDS.has(field) && materialTruncated(item, ['content', 'body', 'text', 'finalContent', 'generatedContent', 'instruction', 'message'].includes(field) ? budget : 2_000)));

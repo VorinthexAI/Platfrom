@@ -104,6 +104,18 @@ describe('OpenRouter provider', () => {
     expect(result.output).toMatchObject({ text: 'Current answer' });
   });
 
+  test('forces a trusted current-scope read without enabling native web tools', async () => {
+    let body: any;
+    const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {
+      body = JSON.parse(String(init?.body));
+      return Response.json({ choices: [{ message: { content: null, tool_calls: [{ id: 'read', function: { name: 'agent.query', arguments: '{"requests":[{"operation":"count","resource":"images"}]}' } }] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 } });
+    }) as typeof fetch);
+    await provider.execute(request('text', { ...chatInput, tools: [{ name: 'agent.query', inputSchema: { type: 'object' } }], options: { toolChoice: 'required' } }));
+    expect(body.tool_choice).toBe('required');
+    expect(body.tools).toHaveLength(1);
+    expect(body.tools[0].function.name).toBe('agent.query');
+  });
+
   test('adds one model-selected native web tool and server-owned tool limit', async () => {
     let body: any;
     const provider = createOpenRouterProvider({ apiKey: 'key' }, (async (_target, init) => {

@@ -251,6 +251,8 @@ export interface GalleryOperationContext {
   canManageScope?: typeof repository.canManageScope;
   canContributeToCollection?: typeof repository.canContributeToCollection;
   listOverview?: typeof repository.listOverview;
+  getImage?: typeof repository.getImage;
+  canAccessImage?: typeof repository.canAccessImage;
   searchAccessibleCollections?: typeof repository.searchAccessibleCollections;
   canMutateImage?: typeof repository.canMutateImage;
   canFavoriteImage?: typeof repository.canFavoriteImage;
@@ -643,6 +645,17 @@ async function overview(rawInput: unknown, context: GalleryOperationContext) {
     nextCursor: images.nextCursor,
     canCreateCollections,
   };
+}
+
+/** Authorized single-image detail read for current-scope workspace queries. */
+async function readImage(rawInput: unknown, context: GalleryOperationContext) {
+  const { imageKey } = z.object({ imageKey: z.string().cuid() }).strict().parse(rawInput);
+  const membership = await authorize(context);
+  const image = await (context.getImage ?? repository.getImage)(imageKey);
+  if (!image || image.scopeKey !== context.scopeKey || !(await (context.canAccessImage ?? repository.canAccessImage)(context.scopeKey, imageKey, membership.key))) {
+    throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.');
+  }
+  return { image: await safeImage(image) };
 }
 
 async function createCollection(
@@ -2039,6 +2052,7 @@ export const galleryOperationInputSchemas = {
 
 export const galleryOperations = {
   overview,
+  readImage,
   createCollection,
   updateCollection,
   deleteCollection,

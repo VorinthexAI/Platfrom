@@ -7,7 +7,7 @@ import { applyCanonicalSeed, canonicalSeedMigration, RETIRED_SEEDED_SCOPE_SLUGS,
 test('registers canonical seed in the graph migration sequence', () => {
   expect(graphMigrations.map(({ id }) => id)).toContain('0018-canonical-seed');
   expect(canonicalSeedMigration.id).toBe('0018-canonical-seed');
-  expect(graphMigrations.at(-1)?.id).toBe('0019-user-notifications');
+  expect(graphMigrations.at(-1)?.id).toBe('0020-workspace-search');
 });
 
 test('seeds only the live Vorinthex AI, Core, HQ, and product scopes', () => {

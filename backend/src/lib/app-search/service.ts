@@ -41,7 +41,7 @@ export const APP_SEARCH_COLLECTION_ADAPTERS = Object.freeze({
   documents: { description: 'Saved text notes and readable documents without a file extension; searched by title and content.', operations: ['search', 'list', 'count', 'sum', 'get', 'summarize'], filters: ['folderKey', 'rootOnly', 'includeDescendants', 'createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], fields: ['key', 'scopeKey', 'name', 'folderKey', 'folder', 'extension', 'mimeType', 'sizeBytes', 'managed', 'structuralProtection', 'isFavorite', 'content', 'createdAt', 'updatedAt', 'tags'], sumFields: { sizeBytes: { description: 'Bytes used by stored original files; native notes without an original contribute no value.', unit: 'bytes' } } },
   files: { description: 'Uploaded or stored files with a file extension; searched by filename and extracted readable content.', operations: ['search', 'list', 'count', 'sum', 'get', 'summarize'], filters: ['folderKey', 'rootOnly', 'includeDescendants', 'createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], fields: ['key', 'scopeKey', 'name', 'folderKey', 'folder', 'extension', 'mimeType', 'sizeBytes', 'managed', 'structuralProtection', 'isFavorite', 'content', 'createdAt', 'updatedAt', 'tags'], sumFields: { sizeBytes: { description: 'Bytes used by stored original files.', unit: 'bytes' } } },
   collections: { description: 'Named Gallery albums that group images; searched by album name and description, not individual image content.', operations: ['search', 'list', 'count', 'get'], filters: ['createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], fields: ['key', 'name', 'description', 'purpose', 'mutationPolicy', 'presentation', 'isFavorite', 'count', 'role', 'isOwned', 'createdAt', 'updatedAt', 'tags'] },
-  images: { description: 'Individual pictures and generated visuals; searched by filename, caption, depicted content, place, and visible text.', operations: ['search', 'list', 'count', 'sum'], filters: ['collectionKey', 'createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], fields: ['key', 'filename', 'caption', 'mimeType', 'sizeBytes', 'width', 'height', 'city', 'country', 'countryCode', 'origin', 'isFavorite', 'createdAt', 'updatedAt', 'collections', 'tags'], sumFields: { sizeBytes: { description: 'Bytes used by unique stored images.', unit: 'bytes' } } },
+  images: { description: 'Individual pictures and generated visuals; searched by filename, caption, depicted content, place, and visible text.', operations: ['search', 'list', 'count', 'sum', 'get'], filters: ['collectionKey', 'createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], fields: ['key', 'filename', 'caption', 'mimeType', 'sizeBytes', 'width', 'height', 'city', 'country', 'countryCode', 'origin', 'isFavorite', 'createdAt', 'updatedAt', 'collections', 'tags'], sumFields: { sizeBytes: { description: 'Bytes used by unique stored images.', unit: 'bytes' } } },
   inboxes: { description: 'Connected email inboxes within private Signal; searched by inbox name, address, and description, not message content.', operations: ['search', 'list', 'count', 'get'], filters: ['createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], fields: ['key', 'connectorKey', 'provider', 'email', 'name', 'description', 'isFavorite', 'status', 'syncEnabled', 'syncStatus', 'lastSyncedAt', 'createdAt', 'updatedAt', 'tags'], statuses: ['active', 'error', 'revoked'] },
   'email-tones': { description: 'Saved Signal writing styles used when composing connected email; searched by tone name and instruction.', operations: ['search', 'list', 'count'], filters: ['createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], fields: ['key', 'slug', 'name', 'instruction', 'isFavorite', 'createdAt', 'updatedAt', 'tags'] },
   'email-messages': { description: 'Connected email conversations in private Signal, organized into Urgent, Important, Purchases, and Filtered categories; searched by sender, subject, summary, intent, and body.', operations: ['search', 'list', 'count', 'get'], filters: ['connectorKey', 'readState', 'emailFacets', 'createdFrom', 'createdTo', 'tagNames', 'tagKeys', 'tagMatch'], fields: ['key', 'subject', 'summary', 'content', 'intent', 'priority', 'state', 'lastMessageAt', 'unread', 'isRead', 'isFavorite', 'inboxCategory', 'createdAt', 'updatedAt', 'tags'] },
@@ -486,6 +486,7 @@ export interface AppSearchDependencies extends Pick<ExecuteActionOptions, 'signa
   gallerySearch?: typeof galleryOperations.search;
   galleryCollectionSearch?: typeof searchGalleryCollections;
   galleryOverview?: typeof galleryOperations.overview;
+  galleryReadImage?: typeof galleryOperations.readImage;
   email?: EmailService;
   travel?: TravelService;
   countries?: CountrySearchService;
@@ -666,10 +667,35 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
 
       const archiveList = async (slug: 'folders' | 'documents' | 'files', all = false) => {
         const results: Record<string, unknown>[] = [];
+        if (slug !== 'folders' && !input.filters?.rootOnly && (!input.filters?.folderKey || input.filters.includeDescendants)) {
+          const folderKeys: string[] = [];
+          let folderCursor: string | undefined;
+          do {
+            const page = await executeContent('folder.list', { scopeKey: context.runtimeScopeKey, ...(input.filters?.folderKey ? { parentFolderKey: input.filters.folderKey } : {}), includeDescendants: true, cursor: folderCursor, limit: 100 }, context, dependencies.contentDependencies) as { folders: Array<{ key: string }>; cursor?: string };
+            folderKeys.push(...page.folders.map(({ key }) => key));
+            folderCursor = page.cursor;
+          } while (folderCursor);
+          const locations: Array<string | undefined> = [input.filters?.folderKey, ...folderKeys];
+          for (let index = 0; index < locations.length && (all || results.length < input.limit); index += 4) {
+            const pages = await Promise.all(locations.slice(index, index + 4).map(async (folderKey) => {
+              const items: Record<string, unknown>[] = [];
+              let cursor: string | undefined;
+              do {
+                const page = await executeContent('document.list', { scopeKey: context.runtimeScopeKey, ...(folderKey ? { folderKey } : {}), ...creationDateRange(input), cursor, limit: 100 }, context, dependencies.contentDependencies) as { documents: Record<string, unknown>[]; cursor?: string };
+                items.push(...page.documents.filter((item) => slug === 'files' ? Boolean(item.extension) : !item.extension).map(projectDocument));
+                cursor = page.cursor;
+              } while (cursor && (all || items.length < input.limit));
+              return items;
+            }));
+            results.push(...pages.flat());
+          }
+          const selected = results.filter((item) => isCandidate(slug, item));
+          return all ? selected : selected.slice(0, input.limit);
+        }
         let cursor: string | undefined;
         do {
           if (slug === 'folders') {
-            const output = await executeContent('folder.list', { scopeKey: context.runtimeScopeKey, ...(input.filters?.folderKey ? { parentFolderKey: input.filters.folderKey } : {}), ...(input.filters?.includeDescendants !== undefined ? { includeDescendants: input.filters.includeDescendants } : {}), ...creationDateRange(input), cursor, limit: all ? 100 : input.limit }, context, dependencies.contentDependencies) as { folders: Record<string, unknown>[]; cursor?: string };
+            const output = await executeContent('folder.list', { scopeKey: context.runtimeScopeKey, ...(input.filters?.folderKey ? { parentFolderKey: input.filters.folderKey } : {}), ...(input.filters?.includeDescendants !== undefined ? { includeDescendants: input.filters.includeDescendants } : !input.filters?.rootOnly && !input.filters?.folderKey ? { includeDescendants: true } : {}), ...creationDateRange(input), cursor, limit: all ? 100 : input.limit }, context, dependencies.contentDependencies) as { folders: Record<string, unknown>[]; cursor?: string };
             results.push(...output.folders.map(projectFolder)); cursor = output.cursor;
           } else {
             const output = await executeContent('document.list', { scopeKey: context.runtimeScopeKey, ...(input.filters?.folderKey ? { folderKey: input.filters.folderKey, ...(input.filters.includeDescendants !== undefined ? { includeDescendants: input.filters.includeDescendants } : {}) } : {}), ...creationDateRange(input), cursor, limit: 100 }, context, dependencies.contentDependencies) as { documents: Record<string, unknown>[]; cursor?: string };
@@ -814,6 +840,7 @@ export function createAppSearchService(defaults: AppSearchDependencies = {}) {
         else if (collectionSlug === 'documents' || collectionSlug === 'files') results = batchData(await executeContent('document.find', { documentKeys: [input.key], include: ['content', 'folder'] }, context, dependencies.contentDependencies)).filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object').map(projectDocument).filter((item) => collectionSlug === 'files' ? Boolean(item.extension) : !item.extension);
         else if (collectionSlug === 'books') { const detail = await books.detail(input.key!, trusted.serviceContext, trusted.userKey); results = [{ ...detail.book, chapters: detail.chapters }]; }
         else if (collectionSlug === 'collections') results = (await (dependencies.galleryOverview ?? galleryOperations.overview)({ collectionKey: input.key, limit: 1 }, galleryContext) as { collections: Array<{ key?: unknown }> }).collections.filter(({ key }) => key === input.key);
+        else if (collectionSlug === 'images') results = [(await (dependencies.galleryReadImage ?? galleryOperations.readImage)({ imageKey: input.key }, galleryContext)).image];
         else if (collectionSlug === 'inboxes') results = (await email.overview(emailActor, {})).accounts.filter(({ key }) => key === input.key);
         else if (collectionSlug === 'email-messages') { const thread = await email.threadForTool(emailActor, input.key!); results = thread ? [thread] : []; }
         else if (collectionSlug === 'trips') results = (await travel.listTrips(trusted.serviceContext, trusted.userKey)).trips.filter(({ key }) => key === input.key);

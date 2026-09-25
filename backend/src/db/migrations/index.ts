@@ -17,7 +17,8 @@ import { seedCountryEmbeddingsMigration } from './0016-country-embeddings';
 import { hiddenScopeVisibilityMigration } from './0017-hidden-scope-visibility';
 import { canonicalSeedMigration } from './0018-canonical-seed';
 import { userNotificationsMigration } from './0019-user-notifications';
+import { workspaceSearchMigration } from './0020-workspace-search';
 import type { GraphMigration } from './types';
 
 // Add each new migration here once. Applied entries are immutable.
-export const graphMigrations: readonly GraphMigration[] = [legacySchemaMigration, sparkEventIndexMigration, fundingRequirementIndexMigration, eventDeviceMigration, canonicalManagedArchiveFoldersMigration, initialAudiobookMigration, managedAudiobookLiveCoverMigration, privateEmailOwnershipMigration, userInboxMigration, conversationMessageRecallIndexMigration, conversationAttachmentArtifactsMigration, retireNavigationVisitsMigration, conversationArchiveProjectionMigration, repairConversationArchiveProjectionMigration, removeUnnamedConversationProjectionsMigration, seedCountryEmbeddingsMigration, hiddenScopeVisibilityMigration, canonicalSeedMigration, userNotificationsMigration];
+export const graphMigrations: readonly GraphMigration[] = [legacySchemaMigration, sparkEventIndexMigration, fundingRequirementIndexMigration, eventDeviceMigration, canonicalManagedArchiveFoldersMigration, initialAudiobookMigration, managedAudiobookLiveCoverMigration, privateEmailOwnershipMigration, userInboxMigration, conversationMessageRecallIndexMigration, conversationAttachmentArtifactsMigration, retireNavigationVisitsMigration, conversationArchiveProjectionMigration, repairConversationArchiveProjectionMigration, removeUnnamedConversationProjectionsMigration, seedCountryEmbeddingsMigration, hiddenScopeVisibilityMigration, canonicalSeedMigration, userNotificationsMigration, workspaceSearchMigration];

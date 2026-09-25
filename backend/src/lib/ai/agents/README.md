@@ -15,18 +15,25 @@ agent candidate set to prevent recursive orchestration.
 Model selections and native calls are untrusted and rechecked before each
 dispatch.
 
-Core has exactly one model-facing read tool, `agent.context`, and invokes it only
-when the current request needs private workspace or account data. It is removed
-from subsequent model turns after one invocation; general questions skip it.
-`workspace-context.ts` sends the trusted current request and collection catalog
-to the provider-neutral `decide` action (TypeSafe Jev via the OpenRouter Decisions
-API). The returned choices select read modes only, not database keys, arbitrary
-queries, or authority. Canonical collection services then perform scoped discovery,
-exact counts, relationship expansion, and detail reads in parallel. The model
-receives bounded, allowlisted JSON without database identifiers. Navigation
-references remain server-side for conversation persistence. Missing or truncated
-sources carry explicit coverage status rather than implying zero results. Core
-streams one answer after the tool result; image creation remains a separate mutation.
+Core uses `agent.query` for one batched read when the current request needs
+private data in Archive, Gallery, Signal, Compass, or Ascend. The current-scope
+ArangoSearch view indexes approved fields on original records and stays in sync
+with database writes. Named resources are discovered in the view, then
+reauthorized and hydrated through canonical services. Collection/image and
+inbox/thread relationships use the owning services. Exact counts and sums
+come from canonical operations, not bounded search hits. The trusted server
+stores selected parent references with the conversation for follow-up turns;
+authorized search/list/get results also emit navigable references through the
+trusted `onEvidence` channel. Completed conversation messages persist up to
+four retrieval groups; the mobile Core pill sheet opens their destination
+screens. Core never receives raw resource keys. `workspace-context.ts` still serves
+legacy `agent.context` callers, but is not in Core's allowlist.
+
+`fresh-read.ts` checks whether a phrase shared by the latest question and
+recent conversation resolves to authorized indexed data. When it does, the
+first Core provider call requires `agent.query`, instead of allowing an answer
+from potentially stale history. This is an indexed data check, not a list of
+language-specific keywords, and it does not add a model/tool round trip.
 
 Tools execute only through canonical `runTool` adapters with trusted
 `ToolContext` and hashed per-call request keys. Equal call fingerprints share
@@ -46,10 +53,27 @@ model.
 
 ## Focused evaluation
 
-`workspace-context.test.ts` covers focused cross-collection and
-account-grounding scenarios, including deep reads, exact counts, redaction,
-ambiguity, and unavailable sources. `core.test.ts` verifies that Core either
-answers directly or calls `agent.context` once before its final answering turn.
+`workspace-query.test.ts` exercises batched canonical reads, named parent
+resolution, exact aggregates, follow-up references, and a deterministic Core
+turn transcript in `workspace-query-transcript.txt`. `core.test.ts` verifies
+that Core answers directly or calls its read capability once before answering.
+
+For a paid end-to-end check with the real model and local ArangoDB, run
+`bun run --cwd backend test:e2e:core-query-live`. This loads the unlocked dev
+provider configuration, creates a disposable database with a dummy user and
+linked Archive, Gallery, Signal, Compass, and Ascend data, then attempts 50
+persistent paid conversation turns. The fixture includes a real PNG in local S3
+and verifies native index create/edit/delete behavior. It drops the temporary
+database and removes the PNG, and refuses non-local database/storage hosts.
+Every actual question, answer, tool call, evidence result, and heuristic verdict
+is written to `backend/scripts/core-query-live-transcript.txt`. For a focused
+paid recheck use `bun run --cwd backend test:e2e:core-query-live --turns=13,17,28`;
+it writes `backend/scripts/core-query-live-recheck.txt` without overwriting the
+50-turn record. The original low-scoring run is preserved as
+`backend/scripts/core-query-live-baseline.txt` so changes can be compared. A
+verdict checks selected fixture facts and tool outcomes; the complete answer
+still needs review for unsupported extra claims. The deterministic no-provider
+transcript remains separate.
 The OpenRouter provider tests cover Jev's Decisions API transport.
 
 With `OPENROUTER_API_KEY` already in the process environment, these focused

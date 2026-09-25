@@ -67,7 +67,7 @@ export const TOOL_COST_RULES: Readonly<Record<string, PublicFixedCostRule>> = Ob
 export const ACTION_COST_RULES: Readonly<Record<string, FixedCostRule>> = Object.freeze({});
 
 export const ACTION_PRICED_OPERATION_TOOL_SLUGS = Object.freeze([
-  'agent.context', 'agents.core', 'app.enhance', 'app.search', 'app.speech', 'app.translate',
+  'agent.context', 'agent.query', 'agents.core', 'app.enhance', 'app.search', 'app.speech', 'app.translate',
   'book.goal.suggest', 'book.preview', 'book.topic.suggest',
   'app.generate-image', 'conversation.message.send',
   'document.parse', 'document.rewrite', 'document.summarize', 'document.topics',

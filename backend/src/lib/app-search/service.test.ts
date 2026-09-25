@@ -98,7 +98,7 @@ describe('app search service', () => {
     expect(APP_SEARCH_COLLECTION_ADAPTERS.trips.fields).toEqual(expect.arrayContaining(['status', 'isFavorite', 'createdAt', 'updatedAt']));
     expect(APP_SEARCH_COLLECTION_ADAPTERS.books.statuses).toEqual(['queued', 'researching', 'planning', 'writing', 'narrating', 'finalizing', 'failed', 'ready', 'cancelled']);
     expect(APP_SEARCH_COLLECTION_ADAPTERS.books.fields).toEqual(expect.arrayContaining(['title', 'status', 'isFavorite', 'createdAt', 'updatedAt']));
-    expect(APP_SEARCH_COLLECTION_ADAPTERS.images.operations).toEqual(['search', 'list', 'count', 'sum']);
+    expect(APP_SEARCH_COLLECTION_ADAPTERS.images.operations).toEqual(['search', 'list', 'count', 'sum', 'get']);
     expect(APP_SEARCH_COLLECTION_ADAPTERS.images.sumFields).toEqual({ sizeBytes: { description: expect.any(String), unit: 'bytes' } });
     expect(APP_SEARCH_COLLECTION_ADAPTERS.documents.fields).toEqual(expect.arrayContaining(['mimeType', 'sizeBytes']));
     expect(APP_SEARCH_COLLECTION_ADAPTERS.inboxes.description).toContain('private Signal');
@@ -227,10 +227,10 @@ describe('app search service', () => {
     } as never;
     const service = createAppSearchService({
       scopeTags,
-      executeContent: (async () => ({ documents: [
+      executeContent: (async (tool: string) => tool === 'folder.list' ? { folders: [] } : { documents: [
         { key: documentKey, scopeKey, name: 'Tagged document', isFavorite: false, createdAt: date, updatedAt: date },
         { key: excludedKey, scopeKey, name: 'Only one tag', isFavorite: false, createdAt: date, updatedAt: date },
-      ] })) as never,
+      ] }) as never,
       travel: { overview: async () => ({ places: [
         { key: placeKey, kind: 'place', name: 'Tagged place', summary: 'Matches every tag', countryCode: 'SE', latitude: 59.3, longitude: 18.1, status: 'wishlist', isFavorite: false, createdAt: date },
         { key: excludedKey, kind: 'place', name: 'Other place', summary: 'Does not match', countryCode: 'SE', latitude: 59.3, longitude: 18.1, status: 'wishlist', isFavorite: false, createdAt: date },
@@ -336,6 +336,38 @@ describe('app search service', () => {
     expect(calls).toEqual([{ tool: 'document.summarize', input: { documentKeys: [documentKey], topic: 'risks', style: 'brief', language: 'Swedish', persist: false } }]);
   });
 
+  test('gets image detail through the authorized Gallery operation', async () => {
+    const imageKey = newId();
+    let received: unknown;
+    const service = createAppSearchService({ galleryReadImage: (async (input: unknown, galleryContext: unknown) => {
+      received = { input, galleryContext };
+      return { image: { key: imageKey, filename: 'photo.jpg', caption: 'Red boat', sizeBytes: 1024 } };
+    }) as never });
+    const result = await service.search({ operation: 'get', collectionSlugs: ['images'], key: imageKey }, context);
+    expect(result).toMatchObject({ groups: [{ collectionSlug: 'images', results: [{ caption: 'Red boat' }] }] });
+    expect(received).toMatchObject({ input: { imageKey }, galleryContext: { scopeKey, teamKey } });
+  });
+
+  test('counts and lists documents inside every authorized folder when no location filter is supplied', async () => {
+    const first = newId(), second = newId(), at = '2026-09-24T00:00:00.000Z';
+    const seen: Array<{ tool: string; input: any }> = [];
+    const service = createAppSearchService({
+      scopeTags: { listTargetTags: async () => ({}) } as never,
+      executeContent: (async (tool: string, input: any) => {
+        seen.push({ tool, input });
+        if (tool === 'folder.list') return { folders: input.parentFolderKey === first ? [{ key: second }] : [{ key: first }, { key: second }] };
+        return { documents: input.folderKey === first ? [{ key: newId(), scopeKey, name: 'A', isFavorite: false, createdAt: at, updatedAt: at }, { key: newId(), scopeKey, name: 'B', isFavorite: false, createdAt: at, updatedAt: at }] : input.folderKey === second ? [{ key: newId(), scopeKey, name: 'C', isFavorite: false, createdAt: at, updatedAt: at }] : [] };
+      }) as never,
+    });
+    const count = await service.search({ operation: 'count', collectionSlugs: ['documents'] }, context);
+    expect(count).toEqual({ operation: 'count', groups: [{ collectionSlug: 'documents', count: 3 }] });
+    const list = await service.search({ operation: 'list', collectionSlugs: ['documents'], limit: 10 }, context);
+    expect((list as { groups: Array<{ results: unknown[] }> }).groups[0]?.results).toHaveLength(3);
+    expect(seen.some(({ tool, input }) => tool === 'folder.list' && input.includeDescendants === true)).toBe(true);
+    expect((await service.search({ operation: 'count', collectionSlugs: ['documents'], filters: { folderKey: first, includeDescendants: true } }, context)).groups).toEqual([{ collectionSlug: 'documents', count: 3 }]);
+    expect((await service.search({ operation: 'count', collectionSlugs: ['documents'], filters: { rootOnly: true } }, context)).groups).toEqual([{ collectionSlug: 'documents', count: 0 }]);
+  });
+
   test('rejects missing and type-mismatched get results and empty summaries', async () => {
     const resourceKey = newId();
     const missingThread = createAppSearchService({ email: { threadForTool: async () => undefined } as never });
@@ -429,7 +461,7 @@ describe('app search service', () => {
       { key: newId(), status: 'ready', isFavorite: true, estimatedMinutes: 20, chapterCount: 3, createdAt: date },
       { key: newId(), status: 'failed', isFavorite: true, estimatedMinutes: 5, chapterCount: 1, createdAt: date },
     ];
-    const service = createAppSearchService({ executeContent: (async () => ({ documents })) as never, books: { overview: async () => ({ books }) } as never });
+    const service = createAppSearchService({ executeContent: (async (tool: string) => tool === 'folder.list' ? { folders: [] } : { documents }) as never, books: { overview: async () => ({ books }) } as never });
     await expect(service.search({ operation: 'sum', collectionSlugs: ['documents', 'files'], field: 'sizeBytes' }, context)).resolves.toEqual({ operation: 'sum', groups: [
       { collectionSlug: 'documents', field: 'sizeBytes', sum: 11, unit: 'bytes', matchedCount: 2, valueCount: 1 },
       { collectionSlug: 'files', field: 'sizeBytes', sum: 13, unit: 'bytes', matchedCount: 1, valueCount: 1 },
@@ -878,10 +910,13 @@ describe('app search service', () => {
   });
 
   test('forwards Archive hierarchy and creation filters to deterministic document lists', async () => {
-    const folderKey = newId(); const boundary = '2026-08-01T00:00:00.000Z'; let received: any;
-    const service = createAppSearchService({ executeContent: (async (tool: string, input: unknown) => { received = { tool, input }; return { documents: [] }; }) as never });
+    const folderKey = newId(); const boundary = '2026-08-01T00:00:00.000Z'; const received: any[] = [];
+    const service = createAppSearchService({ executeContent: (async (tool: string, input: unknown) => { received.push({ tool, input }); return tool === 'folder.list' ? { folders: [] } : { documents: [] }; }) as never });
     await service.search({ operation: 'list', collectionSlugs: ['documents'], filters: { folderKey, includeDescendants: true, createdFrom: boundary, createdTo: boundary } }, context);
-    expect(received).toEqual({ tool: 'document.list', input: { scopeKey, folderKey, includeDescendants: true, createdFrom: boundary, createdTo: boundary, cursor: undefined, limit: 100 } });
+    expect(received).toEqual([
+      { tool: 'folder.list', input: { scopeKey, parentFolderKey: folderKey, includeDescendants: true, cursor: undefined, limit: 100 } },
+      { tool: 'document.list', input: { scopeKey, folderKey, createdFrom: boundary, createdTo: boundary, cursor: undefined, limit: 100 } },
+    ]);
   });
 
   test('strips only the versioned connector field and rejects any other non-legacy inbox field', async () => {

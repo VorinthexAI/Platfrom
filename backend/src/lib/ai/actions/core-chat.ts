@@ -50,8 +50,10 @@ export const coreChatInputSchema = z.object({
     voiceKey: z.string().min(1).optional(),
     temperature: z.number().min(0).max(2).optional(),
     maxTokens: z.number().int().positive().optional(),
+    toolChoice: z.literal('required').optional(),
   }).strict().optional(),
 }).strict().superRefine((value, context) => {
+  if (value.options?.toolChoice === 'required' && !value.tools?.length) context.addIssue({ code: 'custom', path: ['options', 'toolChoice'], message: 'Required tool choice needs a tool definition.' });
   let imageCount = 0;
   let imageBytes = 0;
   let fileBytes = 0;

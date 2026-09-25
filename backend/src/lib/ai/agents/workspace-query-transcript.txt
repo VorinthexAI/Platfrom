@@ -1,0 +1,24 @@
+# Isolated Core query fixture
+
+These answers use a scripted provider and dummy canonical services, not a live model or user database.
+
+User: How many images are in Summer?
+Core (scripted): Summer has 2 images.
+
+User: How many MB is this?
+Core (scripted): The images in Summer use 3.15 MB in total.
+
+User: Which memories are in this collection?
+Core (scripted): Summer has a memory about a train journey through Sweden.
+
+User: How many images and which audio books do we have?
+Core (scripted): There are 2 images. Your audiobook is A Clear Path.
+
+User: What does the document Itinerary say?
+Core (scripted): Itinerary says train to Stockholm on Friday.
+
+User: Which emails are in the Work inbox?
+Core (scripted): Work contains Trip confirmation.
+
+User: Find anything about journey.
+Core (scripted): I found Itinerary and Nordic route.

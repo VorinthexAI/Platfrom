@@ -18,11 +18,11 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(190);
-    expect(MODEL_TOOL_NAMES).toHaveLength(185);
-    expect(TOOL_DEFINITIONS).toHaveLength(185);
+    expect(TOOL_NAMES).toHaveLength(191);
+    expect(MODEL_TOOL_NAMES).toHaveLength(186);
+    expect(TOOL_DEFINITIONS).toHaveLength(186);
     expect(TOOL_NAMES).not.toContain('document.scan');
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 144);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 145);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...MODEL_TOOL_NAMES]);
     expect(TOOL_NAMES).not.toContain('chat');
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');

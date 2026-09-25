@@ -5,7 +5,6 @@ import type { ToolContext } from '@/lib/ai/tools';
 import { coreAgent, executeCoreAgent } from './core';
 import type { WorkspaceContextResult } from './workspace-context';
 import { coreAgentToolInputSchema } from './schemas';
-import { createAgentContextTool } from '@/lib/ai/tools/agent-tool-definitions';
 
 const userKey = newId(), teamKey = newId(), scopeKey = newId();
 const toolContext = { teamKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userTeam: { key: newId(), teamKey, userId: userKey, status: 'active' } } } as ToolContext;
@@ -16,15 +15,15 @@ function runtime(answer = 'Your appointment is Thursday.', inputLog: CoreChatInp
     workspaceContext: async (_message: string, _context: ToolContext): Promise<WorkspaceContextResult> => context,
     stream: async function* (_team: string, input: CoreChatInput) {
       inputLog.push(input);
-      if (readPrivate && input.tools?.some(({ name }) => name === 'agent.context')) yield { type: 'tool-call' as const, toolCall: { id: 'context-read', name: 'agent.context', arguments: {} } };
+      if (readPrivate && input.tools?.some(({ name }) => name === 'agent.query')) yield { type: 'tool-call' as const, toolCall: { id: 'context-read', name: 'agent.query', arguments: { requests: [{ operation: 'search', resource: 'documents', query: 'appointment' }] } } };
       else yield { type: 'text-delta' as const, text: answer };
       yield { type: 'done' as const };
     },
     tools: {
       names: coreAgent.allowlist,
       definitions: coreAgent.allowlist.map((name) => ({ name, description: name, inputSchema: { type: 'object', additionalProperties: false } })),
-      execute: async (name: string, raw: unknown, tool: any) => name === 'agent.context'
-        ? createAgentContextTool(deps.workspaceContext).execute(raw, { context: tool.contentContext, requestKey: tool.requestKey, currentUserMessageContent: tool.currentUserMessageContent, recentConversationContext: tool.recentConversationContext, onEvidence: tool.onEvidence })
+      execute: async (name: string, _raw: unknown, tool: any) => name === 'agent.query'
+        ? deps.workspaceContext(tool.currentUserMessageContent, tool.contentContext).then((result) => { if (result.navigation?.length) tool.onEvidence?.(result.navigation); const { navigation: _navigation, ...evidence } = result; return evidence; })
         : { queued: true },
     },
   };
@@ -33,24 +32,37 @@ function runtime(answer = 'Your appointment is Thursday.', inputLog: CoreChatInp
 
 describe('single-pass Core grounding', () => {
   test('does not expose the collection search loop to the response model', () => {
-    expect(coreAgent.allowlist).toEqual(['agent.context', 'app.generate-image']);
-    expect(coreAgent.systemPrompt).toContain('agent.context exactly once');
+    expect(coreAgent.allowlist).toEqual(['agent.query', 'app.generate-image']);
+    expect(coreAgent.systemPrompt).toContain('agent.query once');
   });
   test('accepts only message and bounded conversation context from the model-visible input', () => {
     expect(coreAgentToolInputSchema.parse({ message: 'hello' })).toEqual({ message: 'hello', generateName: false });
     for (const field of ['teamKey', 'scopeKey', 'userKey', 'workspaceContext', 'systemPrompt']) expect(() => coreAgentToolInputSchema.parse({ message: 'hello', [field]: 'forged' })).toThrow();
   });
-  test('calls agent.context once on demand and answers in the next turn', async () => {
+  test('calls agent.query once on demand and answers in the next turn', async () => {
     const inputs: CoreChatInput[] = []; let calls = 0; const deps = runtime(undefined, inputs, evidence, true);
     deps.workspaceContext = async () => { calls++; return evidence; };
     const response = await executeCoreAgent(request(), { toolContext }, deps);
     expect(response.message).toContain('Thursday');
     expect(calls).toBe(1);
     expect(inputs).toHaveLength(2);
-    expect(inputs[0]!.tools?.map(({ name }) => name)).toEqual(['agent.context']);
+    expect(inputs[0]!.tools?.map(({ name }) => name)).toEqual(['agent.query']);
     expect(inputs[1]!.tools).toBeUndefined();
     expect(inputs[1]!.messages.at(-2)!.content[0]).toMatchObject({ type: 'tool-result', result: { result: evidence } });
     expect(JSON.stringify(inputs[0]!.messages)).not.toContain('workspaceContext');
+  });
+  test('requires a fresh read when trusted recent resource context matches the current question', async () => {
+    const inputs: CoreChatInput[] = []; const deps = runtime(undefined, inputs, evidence, true);
+    const checked: string[] = [];
+    const response = await executeCoreAgent(request('Which inbox contains my rail booking?', { context: [{ role: 'assistant', content: 'The rail booking email says Friday at 09:15.', createdAt: '2026-09-24T00:00:00.000Z' }] }), { toolContext }, {
+      ...deps,
+      freshReadRequired: async (message, selected, history) => { checked.push(message, selected.runtimeScopeKey, ...history); return true; },
+    });
+    expect(checked).toEqual(['Which inbox contains my rail booking?', scopeKey, 'The rail booking email says Friday at 09:15.']);
+    expect(inputs[0]!.options?.toolChoice).toBe('required');
+    expect(inputs[0]!.tools?.map(({ name }) => name)).toEqual(['agent.query']);
+    expect(inputs[1]!.tools).toBeUndefined();
+    expect(response.tools.filter(({ slug }) => slug === 'agent.query')).toHaveLength(1);
   });
   test('streams answer text immediately once the evidence is ready', async () => {
     const deltas: string[] = []; let reads = 0; const deps = runtime();
@@ -64,9 +76,9 @@ describe('single-pass Core grounding', () => {
     const deps = runtime();
     deps.workspaceContext = async () => { reads++; return evidence; };
     deps.stream = async function* (_team, input) {
-      if (input.tools?.some(({ name }) => name === 'agent.context')) {
-        yield { type: 'tool-call' as const, toolCall: { id: 'one', name: 'agent.context', arguments: {} } };
-        yield { type: 'tool-call' as const, toolCall: { id: 'two', name: 'agent.context', arguments: {} } };
+      if (input.tools?.some(({ name }) => name === 'agent.query')) {
+        yield { type: 'tool-call' as const, toolCall: { id: 'one', name: 'agent.query', arguments: { requests: [{ operation: 'search', resource: 'documents', query: 'appointment' }] } } };
+        yield { type: 'tool-call' as const, toolCall: { id: 'two', name: 'agent.query', arguments: { requests: [{ operation: 'search', resource: 'documents', query: 'appointment' }] } } };
       } else yield { type: 'text-delta' as const, text: 'One grounded answer.' };
       yield { type: 'done' as const };
     };
@@ -85,7 +97,7 @@ describe('single-pass Core grounding', () => {
     const partial = { sections: { documents: { mode: 'inspect' as const, items: [], coverage: 'unavailable' as const } }, coverage: { requested: ['documents' as const], unavailable: ['documents' as const], truncated: [] } };
     await executeCoreAgent(request(), { toolContext }, runtime('I could not verify your documents.', inputs, partial, true));
     expect((inputs[1]!.messages.at(-2)!.content[0] as any).result.result.coverage.unavailable).toEqual(['documents']);
-    expect(coreAgent.systemPrompt).toContain('not evidence that nothing exists');
+    expect(coreAgent.systemPrompt).toContain('not evidence of absence');
   });
   test('keeps the authenticated scope on the context call without passing identifiers as model input', async () => {
     let selected: unknown;
@@ -105,7 +117,7 @@ describe('single-pass Core grounding', () => {
     const inputs: CoreChatInput[] = [];
     const result = await executeCoreAgent(request('Explain Archive', { preloadedTools: [{ slug: 'agent.guide', arguments: { mode: 'explain' }, result: { mode: 'explain', guides: [{ title: 'Archive', content: 'Notes and files' }] } }] }), { toolContext }, runtime('It holds your notes.', inputs));
     expect(result.tools).toContainEqual(expect.objectContaining({ slug: 'agent.guide', status: 'succeeded' }));
-    expect(inputs[0]!.tools?.map(({ name }) => name)).toEqual(['agent.context']);
+    expect(inputs[0]!.tools?.map(({ name }) => name)).toEqual(['agent.query']);
   });
   test('preserves direct image attachments without a collection lookup roundtrip', async () => {
     const inputs: CoreChatInput[] = [];
@@ -115,7 +127,7 @@ describe('single-pass Core grounding', () => {
   test('does not offer image mutations when reading an existing generated image', async () => {
     const inputs: CoreChatInput[] = [];
     await executeCoreAgent(request('What can you tell me about my generated image?'), { toolContext }, runtime('It shows a landscape.', inputs));
-    expect(inputs[0]!.tools?.map(({ name }) => name)).toEqual(['agent.context']);
+    expect(inputs[0]!.tools?.map(({ name }) => name)).toEqual(['agent.query']);
   });
   test('supports production image creation via the existing mutation tool', async () => {
     const image = { type: 'tool-call' as const, toolCall: { id: 'image-1', name: 'app.generate-image', arguments: { prompt: 'A tree' } } };
@@ -145,11 +157,11 @@ for (const { message, readsExpected } of [
   { message: 'What is my Sparks balance?', readsExpected: 1 },
   { message: 'Hur många dokument har jag i mappen Personal?', readsExpected: 1 },
 ]) {
-  liveCoreDecision(`real Core model chooses agent.context for: ${message}`, async () => {
+  liveCoreDecision(`real Core model chooses agent.query for: ${message}`, async () => {
     let reads = 0;
     const started = performance.now();
     const output = await executeCoreAgent(request(message), { toolContext }, { tools: { execute: async (name) => {
-      if (name !== 'agent.context') throw new Error(`Unexpected capability ${name}`);
+      if (name !== 'agent.query') throw new Error(`Unexpected capability ${name}`);
       reads++;
       return { sections: { billing: { mode: 'inspect', items: [{ sparkBalance: 123 }], coverage: 'complete' }, documents: { mode: 'count', items: [], total: 1, coverage: 'complete' } }, coverage: { requested: ['billing', 'documents'], unavailable: [], truncated: [] } };
     } } });

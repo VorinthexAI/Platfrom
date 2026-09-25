@@ -31,6 +31,7 @@ export interface AgentRuntimeDependencies {
     dependencies?: ToolDependencies;
   };
   onRoutingMetric?: (metric: AgentRoutingMetric) => void;
+  freshReadRequired?: (message: string, context: ToolContext, history: readonly string[]) => Promise<boolean>;
 }
 
 export type AgentRoutingMetric = {
@@ -55,6 +56,7 @@ export interface AgentExecutionContext {
   onToolSucceeded?: (slug: string, arguments_: unknown, result: unknown) => boolean | void;
   onEvidence?: (retrievals: AppSearchRetrieval[]) => void;
   normalizeToolArguments?: (slug: string, arguments_: unknown) => unknown;
+  requireWorkspaceRead?: boolean;
 }
 
 export const REGISTERED_AGENTS = Object.freeze([
@@ -200,12 +202,12 @@ export async function runAgent(
     const finalTurn = emittedCalls >= MAX_TOOL_CALLS;
     const stage = turn === 0 ? 'initial' as const : 'continuation' as const;
     const startedAt = performance.now();
-    const toolDefinitions = finalTurn ? undefined : allowedNames.filter((name) => name !== 'agent.context' || !contextRead).map((toolName) => definitionsByName.get(toolName)!);
+    const toolDefinitions = finalTurn ? undefined : allowedNames.filter((name) => !['agent.context', 'agent.query'].includes(name) || !contextRead).map((toolName) => definitionsByName.get(toolName)!);
     const input = coreChatInputSchema.parse({
-      systemPrompt: runtimeDefinition.systemPrompt,
+      systemPrompt: contextRead ? `${runtimeDefinition.systemPrompt}\nThe workspace read has finished. Answer from the available evidence now. No further workspace reads or tool calls are available in this turn.` : runtimeDefinition.systemPrompt,
       messages,
       ...(toolDefinitions?.length ? { tools: toolDefinitions } : {}),
-      options: { maxTokens: 8_192, temperature: 0.2 },
+      options: { maxTokens: 8_192, temperature: 0.2, ...(turn === 0 && context.requireWorkspaceRead && toolDefinitions?.some(({ name }) => name === 'agent.query') ? { toolChoice: 'required' as const } : {}) },
     });
     const calls: Extract<ProviderStreamChunk, { type: 'tool-call' }>[] = [];
     let rawText = '';
@@ -219,7 +221,7 @@ export async function runAgent(
       for await (const chunk of stream(context.toolContext.teamKey, input, {
         ...dependencies.router,
         signal,
-        capabilities: { ...dependencies.router?.capabilities, ...definition.capabilities },
+        capabilities: { ...dependencies.router?.capabilities, ...definition.capabilities, ...(contextRead || turn === 0 && context.requireWorkspaceRead ? { webGrounding: undefined } : {}) },
         timeoutMs: dependencies.router?.timeoutMs ?? 60_000,
       })) {
         if (!receivedChunk) { receivedChunk = true; clearTimeout(initialResponseTimer); }
@@ -254,7 +256,7 @@ export async function runAgent(
     if (calls.length > MAX_TOOL_CALLS - emittedCalls) throw new Error(`The agent exceeded its ${MAX_TOOL_CALLS}-call limit.`);
 
     const preparedCalls = calls.map(({ toolCall: call }) => {
-      if (call.name === 'agent.context' && contextRead) throw new Error('The agent has already read its workspace context for this request.');
+      if ((call.name === 'agent.context' || call.name === 'agent.query') && contextRead) throw new Error('The agent has already read its workspace context for this request.');
       if (!allowedNameSet.has(call.name)) throw new Error(`The agent requested an unauthorized tool: ${call.name}`);
       let invocation = agentToolInvocationSchema.parse({ slug: call.name, arguments: context.normalizeToolArguments?.(call.name, call.arguments) ?? call.arguments });
       let invalidArguments = false;
@@ -267,7 +269,7 @@ export async function runAgent(
     });
     if (preparedCalls.length > 1 && preparedCalls.some(({ readOnly }) => !readOnly)) throw new Error('The agent returned multiple tool calls when every call must be read-only.');
     emittedCalls += preparedCalls.length;
-    if (preparedCalls.some(({ invocation }) => invocation.slug === 'agent.context')) contextRead = true;
+    if (preparedCalls.some(({ invocation }) => invocation.slug === 'agent.context' || invocation.slug === 'agent.query')) contextRead = true;
     observe({ stage, outcome: 'selected', candidateCount: toolDefinitions?.length ?? 0, selectedToolCount: preparedCalls.length, confidence: 'high', durationMs: performance.now() - startedAt });
 
     const assistantContent: CoreChatMessage['content'] = preparedCalls.map(({ call, invocation }) => ({ type: 'tool-call' as const, toolCallId: call.id, name: call.name, arguments: invocation.arguments, ...(call.opaqueState ? { opaqueState: call.opaqueState } : {}) }));
@@ -278,7 +280,7 @@ export async function runAgent(
       const prior = executions.get(fingerprint);
       if (prior) return prior;
       const singleShotPrior = singleShotExecutions.get(invocation.slug);
-      if ((invocation.slug === 'app.generate-image' || invocation.slug === 'agent.context') && singleShotPrior) return singleShotPrior;
+      if ((invocation.slug === 'app.generate-image' || invocation.slug === 'agent.context' || invocation.slug === 'agent.query') && singleShotPrior) return singleShotPrior;
       const promise = (async (): Promise<ExecutionOutcome> => {
         if (invalidArguments) {
           const status = agentToolStatusSchema.parse({ ...invocation, status: 'failed', error: 'Tool arguments were invalid. Correct the arguments without adding identity, scope, or unrelated fields, then retry.' });
@@ -316,7 +318,7 @@ export async function runAgent(
         }
       })();
       executions.set(fingerprint, promise);
-      if (invocation.slug === 'app.generate-image' || invocation.slug === 'agent.context') singleShotExecutions.set(invocation.slug, promise);
+      if (invocation.slug === 'app.generate-image' || invocation.slug === 'agent.context' || invocation.slug === 'agent.query') singleShotExecutions.set(invocation.slug, promise);
       return promise;
     };
 

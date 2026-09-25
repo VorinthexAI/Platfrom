@@ -528,6 +528,23 @@ describe('private conversations', () => {
     expect(replayEvents.at(-1)).toMatchObject({ type: 'done', replayed: true, message: { retrievals: persisted } });
   });
 
+  test('persists agent.query navigation references from the trusted side channel on the assistant message', async () => {
+    const documentKey = newId(), bookKey = newId(), imageKey = newId(); let persisted: unknown[] = []; const events: any[] = [];
+    const { repository } = repositoryMock({ completeTurn: async (_owner, _conversation, _key, content, embedding, retrievals, completedAt) => { persisted = retrievals; return { message: message({ content, embedding, retrievals, completedAt }), nameApplied: false }; } });
+    const retrievals = [
+      { source: 'results' as const, limit: 10, groups: [{ collectionSlug: 'documents' as const, results: [{ key: documentKey, label: 'Train Notes' }] }] },
+      { source: 'results' as const, limit: 10, groups: [{ collectionSlug: 'books' as const, results: [{ key: bookKey, label: 'Quiet Astronomy' }] }] },
+      { source: 'results' as const, limit: 10, groups: [{ collectionSlug: 'images' as const, results: [{ key: imageKey, label: 'A blue boat' }] }] },
+    ];
+    await createConversationService({ repository, embed: async () => [1], core: async (_request, execution) => {
+      execution.onEvidence?.(retrievals);
+      execution.onToolSucceeded?.('agent.query', { requests: [{ operation: 'search', resource: 'workspace', query: 'Stockholm' }] }, { results: [{ resource: 'workspace', matches: [{ name: 'Train Notes' }] }] });
+      return { message: 'The train leaves at 09:15.', tools: [] };
+    } }).turn({ conversationKey, message: 'What is in my workspace?', requestKey: 'query-pills' }, context, (event) => { events.push(event); });
+    expect(persisted).toEqual(retrievals);
+    expect(events.at(-1)).toMatchObject({ type: 'done', message: { retrievals } });
+  });
+
   test('keeps a completed agent answer successful when semantic indexing fails', async () => {
     const events: any[] = []; let completedEmbedding: number[] | undefined | null = null;
     const { repository, failed } = repositoryMock({

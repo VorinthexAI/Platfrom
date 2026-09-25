@@ -22,6 +22,7 @@
     "test:email-attachments:live": "bun --no-env-file run scripts/email-attachments-live.ts",
     "test:e2e:archive-api": "bun run load-local-env && bun --env-file=.env.local run scripts/archive-api-e2e.ts",
     "test:e2e:core-attachments-performance": "bun run load-local-env && bun --env-file=.env.local run scripts/core-attachment-performance-live.ts",
+    "test:e2e:core-query-live": "CORE_QUERY_LIVE=true bun run scripts/core-query-live-e2e.ts",
     "test:e2e:travel": "bun run load-local-env && bun --env-file=.env.local run scripts/travel-e2e.ts",
     "test:e2e:place-guide": "bun run load-local-env && bun --env-file=.env.local run scripts/place-guide-live.ts",
     "test:e2e:rag-live": "bun run scripts/rag-live-e2e.ts",

@@ -62,11 +62,20 @@ Specialized tools remain separate for similarity and duplicate detection,
 signed downloads, persisted generated artifacts, conversation history, and
 other semantics that are not ordinary resource queries.
 
-`agent.context` is Core's only model-visible read tool. Its strict input is an
+`agent.context` is a legacy single-pass read tool. Its strict input is an
 empty object; the server supplies the current user request, authorized
 `ToolContext`, and recent conversation context. It assembles bounded deep
 evidence through existing canonical read services, without passing database
 keys to Core. Jev's `decide` action selects sources inside this single tool call.
+
+Core now uses `agent.query` for batched, current-scope workspace reads. Its
+strict requests support named resource discovery, list, count, sum, and read;
+it resolves named parents and recent references on the trusted server and
+executes the same canonical `app.search` or Gallery operations as other entry
+points. The ArangoSearch view indexes the original records automatically,
+without a mirrored copy. Navigable result keys are projected only into the
+conversation's trusted evidence channel, not the model-facing query result.
+`agent.context` remains registered for legacy callers.
 
 `agent.guide` derives deterministic keys for the protected guides seeded into
 the authorized runtime scope and reads them through the canonical

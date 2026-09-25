@@ -165,6 +165,7 @@ function chatBody(chat: ChatInput, model: string, capabilities?: ProviderExecuti
     messages: chatMessages(chat),
     ...(routing ? { provider: routing } : {}),
     ...(functionTools.length || webGrounding ? { tools: [...functionTools, ...(webGrounding ? [{ type: 'openrouter:web_search', parameters: { engine: 'native' } }] : [])] } : {}),
+    ...(chat.options?.toolChoice === 'required' ? { tool_choice: 'required' } : {}),
     ...(webGrounding ? { max_tool_calls: 2 } : {}),
     ...(hasPdf ? { plugins: [{ id: 'file-parser', pdf: { engine: 'cloudflare-ai' } }] } : {}),
     ...(chat.responseFormat ? { response_format: { type: 'json_schema', json_schema: { name: chat.responseFormat.name, strict: true, schema: chat.responseFormat.schema } } } : {}),

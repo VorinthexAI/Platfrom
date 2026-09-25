@@ -1,0 +1,40 @@
+# Real Core conversation against an isolated dummy database
+
+Provider: live configured Core model. Data: synthetic and stored in a temporary local ArangoDB database.
+Question and answer text below is the actual provider output, not scripted.
+
+Fixture: two albums share one boat image; Aurora Album has two images (3,145,728 bytes) and a memory. City Nights includes a real PNG sign reading KUST 42.
+Archive has three notes in two folders. Ascend has two audiobooks with chapters. Compass has a two-city trip with folder and album attachments plus saved guidance. Signal has two private threads, a draft, and a tone.
+
+## Turn 1 · Gallery
+User: How many images are in my Aurora Album?
+Core: There are 2 images in your Aurora Album on Vorinthex AI.
+Duration: 2995 ms
+Fresh-read gate: not required
+Pills: collections: Aurora Album
+Tools: agent.query {"requests":[{"resource":"images","operation":"count","parent":{"name":"Aurora Album","resource":"collections"}}]} [succeeded] Evidence: {"results":[{"resource":"images","status":"complete","evidence":{"operation":"count","groups":[{"collectionSlug":"images","count":2}]},"within":{"resource":"collections","name":"Aurora Album"}}]}
+Verdict: passed
+
+## Turn 2 · Gallery
+User: How many MB do the images in this collection use?
+Core: The images in the Aurora Album collection use 3.14 MB.
+Duration: 3194 ms
+Fresh-read gate: not required
+Pills: collections: Aurora Album
+Tools: agent.query {"requests":[{"parent":{"resource":"collections","name":"Aurora Album"},"operation":"sum","resource":"images"}]} [succeeded] Evidence: {"results":[{"resource":"images","status":"complete","evidence":{"operation":"sum","groups":[{"collectionSlug":"images","field":"sizeBytes","sum":3145728,"unit":"bytes","matchedCount":2,"valueCount":2,"megabytes":3.145728,"mebibytes":3}]},"within":{"resource":"collections","name":"Aurora Album"}}]}
+Verdict: passed
+
+## Turn 3 · Gallery
+User: Which memories do we have in this collection?
+Core: The Aurora Album collection contains one memory: watching a blue boat drift past the lakeside at sunset.
+Duration: 2409 ms
+Fresh-read gate: not required
+Pills: memories: We watched a blue boat drift past the lakeside at sunset.; collections: Aurora Album
+Tools: agent.query {"requests":[{"operation":"list","resource":"memories","parent":{"resource":"collections","name":"Aurora Album"}}]} [succeeded] Evidence: {"results":[{"resource":"memories","status":"complete","items":[{"createdAt":"2026-09-25T17:28:32.407Z","text":"We watched a blue boat drift past the lakeside at sunset."}],"within":{"resource":"collections","name":"Aurora Album"}}]}
+Verdict: passed
+
+Persisted conversation messages: 6
+Passed: 3/3
+
+Native index create/edit/delete check: passed
+

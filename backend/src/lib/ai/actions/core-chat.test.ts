@@ -2,6 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { CORE_CHAT_MAX_FILE_BYTES, CORE_CHAT_MAX_IMAGE_BYTES, coreChatInputSchema } from './core-chat';
 
 describe('core chat input', () => {
+  test('requires at least one callable tool for trusted required-tool selection', () => {
+    const messages = [{ role: 'user', content: [{ type: 'text', text: 'What is in this collection?' }] }];
+    expect(() => coreChatInputSchema.parse({ messages, options: { toolChoice: 'required' } })).toThrow('needs a tool definition');
+    expect(coreChatInputSchema.parse({ messages, tools: [{ name: 'agent.query', inputSchema: { type: 'object' } }], options: { toolChoice: 'required' } }).options?.toolChoice).toBe('required');
+  });
   test('rejects trusted web grounding capabilities in model input', () => {
     const input = { messages: [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'Hello' }] }] };
     expect(() => coreChatInputSchema.parse({ ...input, webGrounding: 'model-selected' })).toThrow();
