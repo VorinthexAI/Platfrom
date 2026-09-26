@@ -125,9 +125,9 @@ describe('app notifications', () => {
       createNotification: async (...args: unknown[]) => { created.push(args); order.push('persist'); return { key: 'inbound-1', recipients: 1, deliveries: 1, replayed: false }; },
     } as any;
     const service = createAppNotificationService({ repository, embed: async (text) => { order.push(`embed:${text}`); return Array(EMBEDDING_DIMENSIONS).fill(0.25); }, enqueue: async (key) => { order.push(`enqueue:${key}`); }, publishChanged: async (key, event) => { order.push(`publish:${key}:${event}`); } });
-    await service.notifyInboundEmail({ userKey, teamKey, scopeKey, title: 'Invoice', message: 'billing@example.com: Receipt attached', idempotencyKey: 'inbox.inbound:connector:message' });
+    await service.notifyInboundEmail({ userKey, teamKey, scopeKey, title: 'Invoice', message: 'billing@example.com: Receipt attached', idempotencyKey: 'inbox.inbound:connector:message', connectorKey: 'connector-1', threadKey: 'thread-1', messageKey: 'message-1' });
     expect(order).toEqual(['embed:Invoice\n\nbilling@example.com: Receipt attached', 'persist', `publish:${userKey}:communication.changed`, 'enqueue:inbound-1']);
-    expect(created[0]).toEqual([{ title: 'Invoice', message: 'billing@example.com: Receipt attached', userKeys: [userKey], notifyAll: false }, { actorUserKey: userKey, teamKey, scopeKey, idempotencyKey: 'inbox.inbound:connector:message' }, [userKey], expect.any(Array)]);
+    expect(created[0]).toEqual([{ title: 'Invoice', message: 'billing@example.com: Receipt attached', userKeys: [userKey], notifyAll: false }, { actorUserKey: userKey, teamKey, scopeKey, idempotencyKey: 'inbox.inbound:connector:message', destination: { kind: 'email-thread', connectorKey: 'connector-1', threadKey: 'thread-1', messageKey: 'message-1' } }, [userKey], expect.any(Array)]);
   });
 
   test('atomically fences one warning per UTC day and lifecycle while persisting embedding metadata and delivery rows', async () => {

@@ -93,7 +93,16 @@ export function SignalWorkspace({ initialCompose, initialTab = "unread", initial
   }, [context, opened, queryClient]);
 
   const setRoute = (params: Record<string, string | undefined>) => router.setParams({ inbox: "internal", compose: undefined, thread: undefined, ...params });
-  const openThread = (thread: CommunicationThread) => { setSelected(thread); setSelectedKeys([]); setRoute({ tab, thread: thread.key }); };
+  const openThread = (thread: CommunicationThread) => {
+    setSelectedKeys([]);
+    if (thread.connectorKey && thread.threadKey) {
+      if (!thread.isRead) void markCommunicationThreadRead(thread.key, context).then(() => { void queryClient.invalidateQueries({ queryKey: communicationQueryKeys.lists(context) }); }).catch(() => undefined);
+      router.push({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: thread.connectorKey, signalThreadKey: thread.threadKey, ...(thread.messageKey ? { signalMessageKey: thread.messageKey } : {}) } });
+      return;
+    }
+    setSelected(thread);
+    setRoute({ tab, thread: thread.key });
+  };
   const closeThread = () => { setSelected(undefined); setRoute({ tab }); };
   const chooseTab = (next: CommunicationTab) => { setTab(next); setSelected(undefined); setSelectedKeys([]); setRoute({ tab: next }); };
   const chooseReadState = (next: CommunicationReadState) => { setTab(next); setSelectedKeys([]); setSheet(undefined); setRoute({ tab: next }); };

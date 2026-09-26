@@ -60,13 +60,14 @@ export function createAppNotificationService(dependencies: { repository?: AppNot
       if (result.deliveries > 0) await enqueue(result.key);
       return result;
     },
-    async notifyInboundEmail(input: { userKey: string; teamKey: string; scopeKey: string; title: string; message: string; idempotencyKey: string }) {
+    async notifyInboundEmail(input: { userKey: string; teamKey: string; scopeKey: string; title: string; message: string; idempotencyKey: string; connectorKey: string; threadKey: string; messageKey?: string }) {
       const title = z.string().trim().min(1).max(100).parse(input.title);
       const message = z.string().trim().min(1).max(1_000).parse(input.message);
+      const destination = { kind: 'email-thread' as const, connectorKey: z.string().min(1).max(160).parse(input.connectorKey), threadKey: z.string().min(1).max(160).parse(input.threadKey), ...(input.messageKey ? { messageKey: z.string().min(1).max(160).parse(input.messageKey) } : {}) };
       const embedding = currentEmbeddingSchema.parse(await (dependencies.embed ?? ((text) => embedText({ text, purpose: 'document' })))(`${title}\n\n${message}`));
       const result = await repository.createNotification(
         { title, message, userKeys: [input.userKey], notifyAll: false },
-        { actorUserKey: input.userKey, teamKey: input.teamKey, scopeKey: input.scopeKey, idempotencyKey: input.idempotencyKey },
+        { actorUserKey: input.userKey, teamKey: input.teamKey, scopeKey: input.scopeKey, idempotencyKey: input.idempotencyKey, destination },
         [input.userKey],
         embedding,
       );

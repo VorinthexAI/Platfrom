@@ -1,7 +1,7 @@
 import * as Linking from "expo-linking";
 import type { Href } from "expo-router";
 
-export const MANAGED_INBOX_DEEP_LINK_HREF = "/capability/signal";
+export const MANAGED_INBOX_DEEP_LINK_HREF = "/capability/signal?inbox=internal&tab=unread";
 
 const DEEP_LINK_ROUTES = Object.freeze(["/capability/signal"]);
 

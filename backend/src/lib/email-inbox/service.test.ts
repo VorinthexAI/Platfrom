@@ -765,6 +765,9 @@ describe('email synchronization', () => {
       title: 'Review',
       message: `${message.from}: ${message.summary}`.slice(0, 1000),
       idempotencyKey: `inbox.inbound:${connector.key}:${raw.id}`,
+      connectorKey: connector.key,
+      threadKey: thread.key,
+      messageKey: emailMessageKey(userKey, connector.key, raw.id),
     }]);
     expect(persisted[0]).toMatchObject({
       thread: { inboxCategory: 'Urgent', embeddingContentVersion: 4, archiveRepresentation: { semanticChunkCount: 1 } },

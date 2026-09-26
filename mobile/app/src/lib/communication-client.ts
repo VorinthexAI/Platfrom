@@ -19,14 +19,21 @@ export const communicationThreadSchema = z.strictObject({
   preview: z.string().trim().min(1).max(8_000),
   isRead: z.boolean(),
   updatedAt: dateSchema,
+  connectorKey: keySchema.optional(),
+  threadKey: keySchema.optional(),
+  messageKey: keySchema.optional(),
 });
 
 const notificationSchema = z.strictObject({
   key: keySchema,
-  title: z.string().trim().min(1).max(100),
-  message: z.string().trim().min(1).max(1_000),
+  title: z.string().trim().min(1).max(200),
+  message: z.string().trim().min(1).max(8_000),
   isRead: z.boolean(),
   createdAt: dateSchema,
+  kind: z.literal("email-thread").optional(),
+  connectorKey: keySchema.optional(),
+  threadKey: keySchema.optional(),
+  messageKey: keySchema.optional(),
 });
 const ticketSchema = z.strictObject({
   key: keySchema,
@@ -52,7 +59,15 @@ function requestContext(context: CommunicationContext) {
 }
 
 function fromNotification(item: z.infer<typeof notificationSchema>): CommunicationThread {
-  return communicationThreadSchema.parse({ key: item.key, kind: "notification", subject: item.title, preview: item.message, isRead: item.isRead, updatedAt: item.createdAt });
+  return communicationThreadSchema.parse({
+    key: item.key,
+    kind: "notification",
+    subject: item.title,
+    preview: item.message,
+    isRead: item.isRead,
+    updatedAt: item.createdAt,
+    ...(item.kind === "email-thread" && item.connectorKey && item.threadKey ? { connectorKey: item.connectorKey, threadKey: item.threadKey, ...(item.messageKey ? { messageKey: item.messageKey } : {}) } : {}),
+  });
 }
 
 function fromTicket(item: z.infer<typeof ticketSchema>): CommunicationThread {

@@ -3,6 +3,7 @@ import { currentEmbeddingSchema } from '@/lib/embeddings';
 
 export const USER_NOTIFICATIONS_COLLECTION = 'userNotifications';
 export const userNotificationReadStateSchema = z.enum(['read', 'unread']);
+export const userNotificationDestinationKindSchema = z.literal('email-thread');
 export const userNotificationSchema = z.object({
   key: z.string().cuid(),
   userKey: z.string().cuid(),
@@ -12,6 +13,10 @@ export const userNotificationSchema = z.object({
   message: z.string().trim().min(1).max(8_000),
   readAt: z.string().datetime().nullable(),
   sourceKey: z.string().cuid().optional(),
+  kind: userNotificationDestinationKindSchema.optional(),
+  connectorKey: z.string().min(1).max(160).optional(),
+  threadKey: z.string().min(1).max(160).optional(),
+  messageKey: z.string().min(1).max(160).optional(),
   embedding: currentEmbeddingSchema.nullish(),
   createdAt: z.string().datetime(),
 }).strip();
@@ -21,6 +26,10 @@ export const safeUserNotificationSchema = z.object({
   message: userNotificationSchema.shape.message,
   isRead: z.boolean(),
   createdAt: userNotificationSchema.shape.createdAt,
+  kind: userNotificationDestinationKindSchema.optional(),
+  connectorKey: z.string().min(1).max(160).optional(),
+  threadKey: z.string().min(1).max(160).optional(),
+  messageKey: z.string().min(1).max(160).optional(),
 }).strict();
 export const userNotificationListInputSchema = z.object({
   readState: userNotificationReadStateSchema,

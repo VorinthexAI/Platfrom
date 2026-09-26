@@ -503,7 +503,7 @@ export function createEmailService(options: {
   getUser?: (userKey: string) => Promise<Pick<User, 'name' | 'alias'> | null>;
   idempotency?: { claim: typeof claimContentIdempotency; start: typeof startContentIdempotency; complete: typeof completeContentIdempotency; fail: typeof failContentIdempotency; renew?: typeof renewContentIdempotency; release: typeof releaseContentIdempotency };
   sparkBilling?: Pick<typeof sparkService, 'chargeExecution' | 'completeExecution'>;
-  notifyInboundEmail?: (input: { userKey: string; teamKey: string; scopeKey: string; title: string; message: string; idempotencyKey: string }) => Promise<unknown>;
+  notifyInboundEmail?: (input: { userKey: string; teamKey: string; scopeKey: string; title: string; message: string; idempotencyKey: string; connectorKey: string; threadKey: string; messageKey?: string }) => Promise<unknown>;
 } = {}) {
   const repository = options.repository ?? createEmailRepository(undefined, publishUserEvent);
   const connectors = options.connectors ?? createConnectorRepository();
@@ -1208,6 +1208,9 @@ export function createEmailService(options: {
                   title: persisted.subject.slice(0, 100) || 'New email',
                   message: `${latest.from}: ${preview}`.trim().slice(0, 1000) || 'New email in Signal',
                   idempotencyKey: `inbox.inbound:${account.key}:${latest.providerMessageId}`,
+                  connectorKey: account.key,
+                  threadKey: persisted.key,
+                  messageKey: emailMessageKey(account.userKey, account.key, latest.providerMessageId),
                 }).catch((error) => console.error('inbound email notification failed', { connectorKey: account.key, threadKey: persisted.key, error }));
               }
             }

@@ -39,7 +39,10 @@ export function createUserNotificationService(options: { repository?: UserNotifi
       const userKey = memberUserKey(context);
       const value = await repository.get(userKey, z.string().cuid().parse(notificationKey));
       if (!value) throw new UserNotificationNotFoundError('Notification was not found.');
-      return safeUserNotificationSchema.parse({ key: value.key, title: value.title, message: value.message, isRead: value.readAt !== null, createdAt: value.createdAt });
+      return safeUserNotificationSchema.parse({
+        key: value.key, title: value.title, message: value.message, isRead: value.readAt !== null, createdAt: value.createdAt,
+        ...(value.kind === 'email-thread' && value.connectorKey && value.threadKey ? { kind: value.kind, connectorKey: value.connectorKey, threadKey: value.threadKey, ...(value.messageKey ? { messageKey: value.messageKey } : {}) } : {}),
+      });
     },
     async search(embedding, query, context, input) {
       return repository.search(memberUserKey(context), embedding, query, input);

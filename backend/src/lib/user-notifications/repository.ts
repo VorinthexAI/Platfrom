@@ -17,7 +17,10 @@ export interface UserNotificationRepository {
 }
 
 function publicNotification(value: UserNotification, score?: number) {
-  return safeUserNotificationSchema.extend({ score: z.number().optional() }).parse({ key: value.key, title: value.title, message: value.message, isRead: value.readAt !== null, createdAt: value.createdAt, ...(score === undefined ? {} : { score }) });
+  const destination = value.kind === 'email-thread' && value.connectorKey && value.threadKey
+    ? { kind: value.kind, connectorKey: value.connectorKey, threadKey: value.threadKey, ...(value.messageKey ? { messageKey: value.messageKey } : {}) }
+    : {};
+  return safeUserNotificationSchema.extend({ score: z.number().optional() }).parse({ key: value.key, title: value.title, message: value.message, isRead: value.readAt !== null, createdAt: value.createdAt, ...destination, ...(score === undefined ? {} : { score }) });
 }
 
 export function createUserNotificationRepository(database: QueryDatabase = db): UserNotificationRepository {

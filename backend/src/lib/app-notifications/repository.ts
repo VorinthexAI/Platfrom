@@ -68,8 +68,9 @@ export function createAppNotificationRepository(
       return await cursor.all();
     },
 
-    async createNotification(input: AppNotifyInput, trusted: { actorUserKey: string; teamKey: string; scopeKey: string; idempotencyKey: string }, recipientUserKeys: string[], embedding: number[]) {
-      const requestHash = createHash('sha256').update(JSON.stringify({ title: input.title, message: input.message, notifyAll: input.notifyAll, userKeys: input.userKeys ? [...input.userKeys].sort() : undefined, recipientUserKeys: [...recipientUserKeys].sort() })).digest('hex');
+    async createNotification(input: AppNotifyInput, trusted: { actorUserKey: string; teamKey: string; scopeKey: string; idempotencyKey: string; destination?: { kind: 'email-thread'; connectorKey: string; threadKey: string; messageKey?: string } }, recipientUserKeys: string[], embedding: number[]) {
+      const destination = trusted.destination ?? {};
+      const requestHash = createHash('sha256').update(JSON.stringify({ title: input.title, message: input.message, notifyAll: input.notifyAll, userKeys: input.userKeys ? [...input.userKeys].sort() : undefined, recipientUserKeys: [...recipientUserKeys].sort(), destination })).digest('hex');
       const existingCursor = await database.query<{ key: string; requestHash: string; recipients: number; deliveries: number }>('FOR item IN appNotifications FILTER item.teamKey == @teamKey && item.actorUserKey == @actorUserKey && item.idempotencyKey == @idempotencyKey LIMIT 1 RETURN { key: item._key, requestHash: item.requestHash, recipients: item.recipientCount, deliveries: item.deliveryCount }', trusted);
       const existing = await existingCursor.next();
       if (existing) {
@@ -83,11 +84,11 @@ export function createAppNotificationRepository(
         LET subscriptions = (FOR item IN pushSubscriptions FILTER item.userKey IN @recipientUserKeys RETURN item)
         INSERT { _key: @key, actorUserKey: @actorUserKey, teamKey: @teamKey, scopeKey: @scopeKey, idempotencyKey: @idempotencyKey, requestHash: @requestHash, title: @title, message: @message, recipientCount: LENGTH(@recipientUserKeys), deliveryCount: LENGTH(subscriptions), embedding: @embedding, embeddingState: "ready", embeddedAt: @now, embeddingProvider: @embeddingProvider, embeddingModel: @embeddingModel, embeddingDimensions: @embeddingDimensions, createdAt: @now } INTO appNotifications
         LET stored = (FOR recipient IN @recipients
-          INSERT { _key: recipient.key, userKey: recipient.userKey, teamKey: @teamKey, scopeKey: @scopeKey, title: @title, message: @message, readAt: null, sourceKey: @key, embedding: @embedding, createdAt: @now } INTO userNotifications
+          INSERT MERGE({ _key: recipient.key, userKey: recipient.userKey, teamKey: @teamKey, scopeKey: @scopeKey, title: @title, message: @message, readAt: null, sourceKey: @key, embedding: @embedding, createdAt: @now }, @destination) INTO userNotifications
           INSERT { _key: CONCAT(@key, "-", recipient.userKey), notificationKey: @key, userKey: recipient.userKey, teamKey: @teamKey, readAt: null, createdAt: @now, updatedAt: @now } INTO appNotificationRecipients RETURN 1)
         LET deliveries = (FOR subscription IN subscriptions INSERT { _key: CONCAT(@key, "-", subscription._key), notificationKey: @key, subscriptionKey: subscription._key, userKey: subscription.userKey, projectId: subscription.projectId, status: "queued", attempts: 0, createdAt: @now, updatedAt: @now } INTO pushDeliveries RETURN 1)
         RETURN { deliveries: LENGTH(deliveries) }
-      `, { ...trusted, key, requestHash, title: input.title, message: input.message, recipientUserKeys, recipients, embedding: currentEmbeddingSchema.parse(embedding), ...embeddingMetadata(), now });
+      `, { ...trusted, destination, key, requestHash, title: input.title, message: input.message, recipientUserKeys, recipients, embedding: currentEmbeddingSchema.parse(embedding), ...embeddingMetadata(), now });
       const result = (await cursor.next())!;
       return { key, recipients: recipientUserKeys.length, deliveries: result.deliveries, replayed: false };
     },
