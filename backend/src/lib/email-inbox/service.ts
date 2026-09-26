@@ -1610,7 +1610,6 @@ export function createEmailService(options: {
       overwrite = z.boolean().parse(overwrite);
       expectedRevision = expectedRevision == null ? expectedRevision : z.string().min(1).parse(expectedRevision);
       if (connector.userKey !== actor.userKey || connector.teamKey !== actor.teamKey || connector.scopeKey !== destinationScope(actor)) throw new EmailRepositoryError('forbidden');
-      await repository.initializeTones(actor.userKey, privateScope(actor), (text) => embed({ text }, actor.teamKey));
       const embedding = await embed({ text: buildEmbeddingText(inboxEmbeddingFields, metadata)! }, actor.teamKey);
       logEmailFlow('inbox.ensure.begin', { connectorKey: connector.key, overwrite, expectedRevision: expectedRevision ?? null, status: connector.status });
       const inbox = await inboxes.ensure(connector, metadata, embedding, overwrite, expectedRevision);

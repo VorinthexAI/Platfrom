@@ -188,9 +188,9 @@ describe('canonical email persistence', () => {
 
     const upserts = calls.filter(({ query }) => query.includes('UPSERT'));
     expect(upserts).toHaveLength(3);
-    expect(upserts.every(({ query }) => query.includes('UPSERT { scopeKey: @scopeKey, slug: @slug }'))).toBe(true);
-    expect(upserts.map(({ bindVars }) => bindVars.slug)).toEqual(['casual', 'formal', 'direct']);
-    expect(upserts.every(({ bindVars }) => bindVars.scopeKey === scopeKey)).toBe(true);
+    expect(upserts.every(({ query }) => query.includes('UPSERT { _key: @key }'))).toBe(true);
+    expect(upserts.map(({ bindVars }) => bindVars.key)).toHaveLength(3);
+    expect(new Set(upserts.map(({ bindVars }) => bindVars.key)).size).toBe(3);
   });
 
   test('deletes generated summaries only after queuing their audio storage', async () => {

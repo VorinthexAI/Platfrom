@@ -2637,7 +2637,7 @@ describe('custom tone metadata', () => {
   test('allows the connector owner to initialize their inbox regardless of workspace role', async () => {
     let initialized = false;
     const service = createEmailService({
-      repository: { initializeTones: async () => { initialized = true; return []; } } as never,
+      repository: {} as never,
       inboxes: { ensure: async () => { initialized = true; return {}; } } as never,
       connectors: {} as never,
       authorize: async () => ({ teamMembershipKey: scopeKey, role: 'moderator' }),
@@ -2650,7 +2650,7 @@ describe('custom tone metadata', () => {
   test('accepts OAuth upsert connectors that include a revision fence', async () => {
     let parsedConnector: { key?: string } | undefined;
     const service = createEmailService({
-      repository: { initializeTones: async () => [] } as never,
+      repository: {} as never,
       inboxes: { ensure: async (value: { key?: string }) => { parsedConnector = value; return { revision: 'inbox' }; } } as never,
       connectors: {} as never,
       authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
