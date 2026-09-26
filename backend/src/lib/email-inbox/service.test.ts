@@ -610,6 +610,41 @@ describe('email synchronization', () => {
     expect(claims).toBe(0);
   });
 
+  test('subscription ingest uses history without lastSyncedAt and never lists the mailbox', async () => {
+    const account = { ...connector, historyId: '100' };
+    const raw = gmailMessage('changed-message', 'changed-thread');
+    const historyStarts: string[] = [];
+    let listed = 0;
+    const gmail = {
+      profile: async () => ({ historyId: '125' }),
+      listThreads: async () => { listed += 1; throw new Error('subscription ingest must not list the mailbox'); },
+      history: async (historyId: string) => {
+        historyStarts.push(historyId);
+        return { historyId: '125', history: [{ messagesAdded: [{ message: { id: raw.id, threadId: raw.threadId } }] }] };
+      },
+      threadMetadata: async () => ({ id: raw.threadId, messages: [raw] }),
+      message: async () => raw,
+    };
+    const service = createEmailService({
+      repository: { syncThread: async () => thread, thread: async () => ({ thread, messages: [{ ...message, providerMessageId: raw.id }] }), deleteProviderThread: async () => undefined, subscriptionDraftForMessage: async () => ({ ...draft, creationSource: 'subscription' }) } as never,
+      connectors: {
+        getExact: async () => account,
+        markNotificationPending: async () => true,
+        clearPendingNotification: async () => true,
+        credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }),
+        claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined,
+        setSyncState: async () => true,
+      } as never,
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
+      client: () => gmail as never,
+      classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }),
+      embed: async () => embedding,
+    });
+    await expect(service.ingestSubscriptionNotification({ ...actor, userKey: 'system' }, connector.key, '125')).resolves.toMatchObject({ synced: 1 });
+    expect(historyStarts).toEqual(['100']);
+    expect(listed).toBe(0);
+  });
+
   test('treats subscription history as trigger metadata and ingests from the persisted cursor', async () => {
     const account = { ...connector, historyId: '100', lastSyncedAt: now };
     const raw = gmailMessage('changed-message', 'changed-thread');

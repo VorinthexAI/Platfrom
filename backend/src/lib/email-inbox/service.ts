@@ -1110,12 +1110,13 @@ export function createEmailService(options: {
         let pendingHistoryId: string | undefined;
         let fullSync = false;
         const subscriptionMessages = new Map((lifecycle === 'subscription' ? previousAccount.syncPendingSubscriptionMessages ?? [] : []).map((message) => [message.id, message]));
+        const subscriptionThreadIds = () => [...new Set([...subscriptionMessages.values()].map((message) => message.threadId).filter(Boolean))];
         if (previousAccount.syncPendingThreadIds?.length && previousAccount.syncPendingHistoryId) {
           threadIds = lifecycle === 'initial' ? previousAccount.syncPendingThreadIds : previousAccount.syncPendingThreadIds.slice(0, 100);
           pendingThreadIds = lifecycle === 'initial' ? [] : previousAccount.syncPendingThreadIds.slice(100);
           pendingHistoryId = previousAccount.syncPendingHistoryId;
           profile.historyId = pendingThreadIds.length ? previousAccount.historyId! : pendingHistoryId;
-        } else if (previousAccount?.lastSyncedAt && previousAccount.historyId) {
+        } else if (previousAccount.historyId && (lifecycle === 'subscription' || previousAccount.lastSyncedAt)) {
           try {
             const changed = new Set<string>();
             let pageToken: string | undefined;
@@ -1147,8 +1148,14 @@ export function createEmailService(options: {
               seenTokens.add(pageToken);
             }
             if (overflowed) {
-              threadIds = await fullThreadIds();
-              fullSync = true;
+              if (lifecycle === 'subscription') {
+                threadIds = subscriptionThreadIds();
+                fullSync = false;
+                ingestLog('history-overflow', { threadCount: threadIds.length, completedHistoryId });
+              } else {
+                threadIds = await fullThreadIds();
+                fullSync = true;
+              }
               profile.historyId = completedHistoryId;
             } else {
               const ordered = [...changed].reverse();
@@ -1160,8 +1167,18 @@ export function createEmailService(options: {
           } catch (error) {
             const status = providerStatus(error);
             if (status !== 404) throw error;
-            threadIds = await fullThreadIds(); fullSync = true;
+            if (lifecycle === 'subscription') {
+              ingestLog('history-expired', { previousHistoryId: previousAccount.historyId ?? null });
+              threadIds = subscriptionThreadIds();
+              fullSync = false;
+            } else {
+              threadIds = await fullThreadIds(); fullSync = true;
+            }
           }
+        } else if (lifecycle === 'subscription') {
+          ingestLog('no-history-cursor');
+          threadIds = subscriptionThreadIds();
+          fullSync = false;
         } else { threadIds = await fullThreadIds(); fullSync = true; }
         threadIds = [...new Set(threadIds)];
         ingestLog('plan', { fullSync, threadIds, threadCount: threadIds.length, pendingThreadCount: pendingThreadIds?.length ?? 0, pendingHistoryId: pendingHistoryId ?? null, subscriptionMessageIds: [...subscriptionMessages.keys()], historyOverflow: fullSync && Boolean(previousAccount.historyId) });
