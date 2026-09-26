@@ -49,12 +49,12 @@ export function createGmailWebhookHandler(options: {
   return async (c: Context) => {
     const token = c.req.header('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
     if (!token) {
-      logEmailFlow('gmail.webhook.unauthenticated', { path: c.req.path });
+      logEmailFlow('ingest.webhook.unauthenticated', { path: c.req.path });
       return c.json({ error: 'webhook authentication required' }, 401);
     }
     const identity = await (options.verify ?? verifyGoogleOidcToken)(token, { audience: required('GMAIL_PUBSUB_PUSH_AUDIENCE'), email: required('GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL') }).catch(() => null);
     if (!identity) {
-      logEmailFlow('gmail.webhook.invalid-identity', { path: c.req.path });
+      logEmailFlow('ingest.webhook.invalid-identity', { path: c.req.path });
       return c.json({ error: 'invalid webhook identity' }, 401);
     }
     let envelope: z.infer<typeof envelopeSchema>;
@@ -67,15 +67,15 @@ export function createGmailWebhookHandler(options: {
       const decoded = bytes.toString('utf8');
       notification = notificationSchema.parse(JSON.parse(decoded));
     } catch (error) {
-      logEmailFlow('gmail.webhook.invalid-payload', { error: error instanceof Error ? error.message.slice(0, 400) : 'invalid webhook payload' });
+      logEmailFlow('ingest.webhook.invalid-payload', { error: error instanceof Error ? error.message.slice(0, 400) : 'invalid webhook payload' });
       return c.json({ error: 'invalid webhook payload' }, 400);
     }
-    logEmailFlow('gmail.webhook.received', { historyId: notification.historyId, messageId: envelope.message.messageId });
-    await (options.enqueue ?? enqueueEmailSyncNotification)({
-      emailAddress: notification.emailAddress, historyId: notification.historyId, messageId: envelope.message.messageId,
-      subscription: envelope.subscription, publishTime: envelope.message.publishTime,
-    });
-    logEmailFlow('gmail.webhook.enqueued', { historyId: notification.historyId, messageId: envelope.message.messageId });
+      logEmailFlow('ingest.webhook.received', { historyId: notification.historyId, messageId: envelope.message.messageId, emailAddress: notification.emailAddress, subscription: envelope.subscription, publishTime: envelope.message.publishTime ?? null, deliveryAttempt: envelope.deliveryAttempt ?? null });
+      const queued = await (options.enqueue ?? enqueueEmailSyncNotification)({
+        emailAddress: notification.emailAddress, historyId: notification.historyId, messageId: envelope.message.messageId,
+        subscription: envelope.subscription, publishTime: envelope.message.publishTime,
+      });
+      logEmailFlow('ingest.webhook.enqueued', { historyId: notification.historyId, messageId: envelope.message.messageId, emailAddress: notification.emailAddress, jobId: queued && typeof queued === 'object' && 'jobId' in queued ? queued.jobId : null });
     return c.body(null, 204);
   };
 }

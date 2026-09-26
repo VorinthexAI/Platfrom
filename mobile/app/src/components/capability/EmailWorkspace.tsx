@@ -484,6 +484,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const [draftSearching, setDraftSearching] = useState(false);
   const [draftSearchError, setDraftSearchError] = useState<string>();
   const [draftSearchRevision, setDraftSearchRevision] = useState(0);
+  const draftSearchGeneration = useRef(0);
   const [draftPages, setDraftPages] = useState<{ drafts: EmailDraft[]; nextCursor: string | null }>({ drafts: [], nextCursor: null });
   const loadingMoreDrafts = useRef(false);
   const draftPageGeneration = useRef(0);
@@ -1497,16 +1498,22 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     return result;
   }
   function chooseReadState(readState: EmailReadState) {
-    const wasSent = inboxTabRef.current === "sent";
+    const leavingMailbox = inboxTabRef.current === "sent" || inboxTabRef.current === "drafts";
     inboxTabRef.current = readState;
     setInboxTab(readState);
-    if (!wasSent && readState === requestedInboxQuery.current.readState) return;
+    if (!leavingMailbox && readState === requestedInboxQuery.current.readState) return;
     void changeInboxQuery(setEmailOverviewReadState(requestedInboxQuery.current, readState));
+  }
+  function chooseDrafts() {
+    inboxTabRef.current = "drafts";
+    setInboxTab("drafts");
+    setSelectedThreads([]);
   }
   function chooseSentMailbox() {
     inboxTabRef.current = "sent";
     setInboxTab("sent");
     setSelectedThreads([]);
+    setInboxView((current) => current.overview ? { ...current, overview: { ...current.overview, threads: [], nextCursor: null } } : current);
     void load(requestedInboxQuery.current);
   }
   function openInboxDraft(saved: EmailDraft) {
@@ -1567,15 +1574,16 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         setDraftSearchError(undefined);
         return;
       }
+      const generation = ++draftSearchGeneration.current;
       setDraftSearching(true);
       setDraftSearchError(undefined);
       try {
         const drafts = await searchEmailDraftsForContext(emailContext, initialConnectorKey, next, recordHistory, signal, selectedTagKeys);
-        if (!signal?.aborted) setDraftSearchResults({ connectorKey: initialConnectorKey, query: next, tagKeys: selectedTagKey, drafts });
+        if (generation === draftSearchGeneration.current) setDraftSearchResults({ connectorKey: initialConnectorKey, query: next, tagKeys: selectedTagKey, drafts });
       } catch (failure) {
-        if (!signal?.aborted) setDraftSearchError(messageFor(failure));
+        if (generation === draftSearchGeneration.current && !signal?.aborted) setDraftSearchError(messageFor(failure));
       } finally {
-        if (!signal?.aborted) setDraftSearching(false);
+        if (generation === draftSearchGeneration.current) setDraftSearching(false);
       }
       return;
     }
@@ -1595,7 +1603,8 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         setDraftSearchError(undefined);
       } else {
         const current = requestedInboxQuery.current;
-        const loadIdentity = `${current.readState}:${current.facets.join(",")}:${current.search}:${selectedTagKey}`;
+        const mailbox = inboxTab === "sent" ? "sent" : undefined;
+        const loadIdentity = `${mailbox ?? current.readState}:${mailbox ? "" : current.facets.join(",")}:${current.search}:${selectedTagKey}`;
         if (current.search || overviewLoadQuery.current !== loadIdentity) void searchLatest("", false);
       }
       return;
@@ -3190,7 +3199,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const newEmailReviewTransformation = editorTransformation?.target === "newEmailReview" ? editorTransformation.action : undefined;
   const draftTransformation = editorTransformation?.target === "draft" ? editorTransformation.action : undefined;
   const replyTransformation = editorTransformation?.target === "reply" ? editorTransformation.action : undefined;
-  const inboxQueryPending = inboxControlsQuery !== inboxQuery;
+  const inboxQueryPending = inboxControlsQuery.readState !== inboxQuery.readState || inboxControlsQuery.search !== inboxQuery.search || inboxControlsQuery.mailbox !== inboxQuery.mailbox || inboxControlsQuery.facets.join(",") !== inboxQuery.facets.join(",");
   const workspaceBusy = Boolean(busy || bulkBusy);
   const sheetTransitionGeneration = formTransitionGeneration.current;
   const formSheet = sheet === "connectForm" || sheet === "toneCreate" || sheet === "inboxEdit" || sheet === "toneEdit";
@@ -3244,9 +3253,11 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     <Button disabled={replySending || Boolean(replyTransformation) || !replyBody.trim()} onPress={requestSuggestedReplySend} size="md" variant="primary">Reply</Button>
     <Button disabled={replySending || Boolean(replyTransformation)} onPress={closeReplyEditor} size="md" variant="secondary">Close</Button>
   </>;
-  const draftEmpty = Boolean(inboxTab === "drafts" && !draftsQuery.isPending && !draftSearching && !draftsQuery.error && !draftSearchError && !visibleInboxDrafts.length);
-  const messageEmpty = Boolean(inboxTab !== "drafts" && !loading && !inboxQueryPending && !initialSyncPending && !loadError && !overview?.threads.length);
-  const inboxInitialLoading = inboxTab !== "drafts" && (loading || inboxQueryPending || initialSyncPending) && !overview?.threads.length;
+  const draftsLoading = (draftsQuery.isLoading || draftSearching) && !visibleInboxDrafts.length;
+  const draftEmpty = Boolean(inboxTab === "drafts" && !draftsLoading && !draftsQuery.error && !draftSearchError && !visibleInboxDrafts.length);
+  const mailboxLoading = loading || inboxQueryPending || inboxTab !== "sent" && initialSyncPending;
+  const messageEmpty = Boolean(inboxTab !== "drafts" && !mailboxLoading && !loadError && !overview?.threads.length);
+  const inboxInitialLoading = inboxTab !== "drafts" && mailboxLoading && !overview?.threads.length;
   return (
     <View style={styles.root}>
       <View accessibilityElementsHidden={readerSheetOpen} importantForAccessibility={readerSheetOpen ? "no-hide-descendants" : "auto"} pointerEvents={readerSheetOpen ? "none" : "auto"} style={styles.workspaceSurface}>
@@ -3438,7 +3449,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
           <View style={styles.categoryTabsFrame}>
             <Tabs accessibilityLabel="Email read state" accessibilityRole="tablist" style={styles.categoryTabs}>
               {(["read", "unread"] as const).map((readState) => <Button accessibilityRole="tab" accessibilityState={{ selected: inboxTab === readState }} key={readState} onPress={() => chooseReadState(readState)} size="xs" style={styles.categoryTab} variant={inboxTab === readState ? "secondary" : "ghost"}>{readState === "read" ? "Read" : "Unread"}</Button>)}
-              <Button accessibilityRole="tab" accessibilityState={{ selected: inboxTab === "drafts" }} onPress={() => { inboxTabRef.current = "drafts"; setInboxTab("drafts"); setSelectedThreads([]); }} size="xs" style={styles.categoryTab} variant={inboxTab === "drafts" ? "secondary" : "ghost"}>Drafts</Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: inboxTab === "drafts" }} onPress={chooseDrafts} size="xs" style={styles.categoryTab} variant={inboxTab === "drafts" ? "secondary" : "ghost"}>Drafts</Button>
               <Button accessibilityRole="tab" accessibilityState={{ selected: sentView }} onPress={() => chooseSentMailbox()} size="xs" style={styles.categoryTab} variant={sentView ? "secondary" : "ghost"}>Sent</Button>
             </Tabs>
           </View>
@@ -3460,7 +3471,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
             scrollEventThrottle={120}
             showsVerticalScrollIndicator={false}
           >
-            {inboxTab === "drafts" ? draftsQuery.isPending || draftSearching || Boolean((normalizedInboxSearch || selectedTagKeys.length) && !activeDraftSearchResults) ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading drafts" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : visibleInboxDrafts.map((saved) => <Button accessibilityLabel={`${saved.variant === "new" ? saved.subject : "Reply"}, to ${saved.to.join(", ")}`} contentMode="raw" key={saved.key} onPress={() => openInboxDraft(saved)} shape="pill" size="sm" style={styles.threadCard} variant="secondary"><MailIcon size="sm" /><View style={styles.threadBody}><Text numberOfLines={1} style={styles.subject}>{saved.variant === "new" ? saved.subject : "Reply"}</Text><Text numberOfLines={1} style={styles.rowSubtitle}>To: {saved.to.join(", ")}</Text></View></Button>) : inboxInitialLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading inbox messages" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : overview?.threads.map((thread) => (
+            {inboxTab === "drafts" ? draftsLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading drafts" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : visibleInboxDrafts.map((saved) => <Button accessibilityLabel={`${saved.variant === "new" ? saved.subject : "Reply"}, to ${saved.to.join(", ")}`} contentMode="raw" key={saved.key} onPress={() => openInboxDraft(saved)} shape="pill" size="sm" style={styles.threadCard} variant="secondary"><MailIcon size="sm" /><View style={styles.threadBody}><Text numberOfLines={1} style={styles.subject}>{saved.variant === "new" ? saved.subject : "Reply"}</Text><Text numberOfLines={1} style={styles.rowSubtitle}>To: {saved.to.join(", ")}</Text></View></Button>) : inboxInitialLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading inbox messages" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : overview?.threads.map((thread) => (
               <Button
                 accessibilityActions={sentView ? undefined : [{ name: "longpress", label: selectedThreads.some(({ key }) => key === thread.key) ? `Deselect ${thread.subject}` : `Select ${thread.subject}` }]}
                 accessibilityLabel={`${!thread.isRead ? "Unread, " : ""}${shortAddress(thread.latestFrom)}, ${thread.subject}`}
@@ -3487,6 +3498,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
                 </View>
               </Button>
             ))}
+            {inboxTab !== "drafts" && loadError ? <Button onPress={() => void load(retryInboxQuery ?? requestedInboxQuery.current)} size="md" variant="secondary">Retry</Button> : null}
             {draftEmpty ? <View style={styles.empty}><Text style={styles.centerText}>{normalizedInboxSearch || selectedTagKeys.length ? "No matching drafts." : "No drafts yet."}</Text></View> : null}
             {messageEmpty ? (
               <View style={styles.empty}>

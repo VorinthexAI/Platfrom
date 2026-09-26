@@ -6,7 +6,7 @@ import { emailLabelsVisibleInInbox, inboxCategoryFor, type InboxCategory } from 
 import { emailMessageKey, emailThreadKey, type EmailRepository } from './repository';
 import { latestEmailMessage } from './message-order';
 import type { StagedEmailAttachment } from './attachment-ingestion';
-import { logEmailFlow } from './flow-log';
+
 
 type StoredFields = 'key' | 'threadKey' | 'createdAt' | 'updatedAt';
 type PreparedMessageInput = Omit<EmailMessage, StoredFields | 'embedding' | 'embeddingContentVersion' | 'inboxCategory' | 'unread' | 'attachmentAvailability'> & Partial<Pick<EmailMessage, StoredFields | 'unread' | 'attachmentAvailability'>> & { userKey?: string };
@@ -144,31 +144,6 @@ export async function sortAndPersistInboxThread(input: {
   };
   const content = emailMessageSemanticText(latest.message);
   const archiveRepresentation = await input.prepareDocument({ name: thread.subject, content, semanticSource: content });
-  logEmailFlow('inbox.sort.classify', {
-    connectorKey: input.lease.connectorKey,
-    providerThreadId: input.thread.providerThreadId,
-    threadKey,
-    subject: latest.message.subject,
-    from: latest.message.from,
-    messageCount: input.messages.length,
-    inboxCategory,
-    intent: latest.classification.intent,
-    priority: latest.classification.priority,
-    state: latest.classification.state,
-    category: latest.classification.category,
-    inInbox: emailLabelsVisibleInInbox(labels),
-    labels,
-    unread: labels.includes('UNREAD'),
-    messages: classified.map(({ message, classification }) => ({
-      providerMessageId: message.providerMessageId,
-      subject: message.subject,
-      from: message.from,
-      inboxCategory: inboxCategoryFor(message.labels ?? [], classification),
-      labels: message.labels ?? [],
-      unread: message.unread ?? false,
-      sentAt: message.sentAt,
-    })),
-  });
   await input.beforePersist();
   const stored = await input.repository.syncThread({
     thread: { ...thread, embedding: archiveRepresentation.embedding, archiveRepresentation },

@@ -109,6 +109,7 @@ async function enqueueConnectorChildren(input: ConnectorChildrenInput) {
 export async function enqueueEmailSyncNotification(input: Omit<z.input<typeof notificationJobSchema>, 'schemaVersion' | 'kind'>) {
   const job = notificationJobSchema.parse({ schemaVersion: 1, kind: 'notification', ...input, emailAddress: input.emailAddress.toLowerCase() });
   const queued = await getQueue(SYNC_QUEUE_NAME).add('notification', job, { ...jobOptions, jobId: stableId(job.subscription, job.messageId) });
+  logEmailFlow('ingest.queue.notification', { emailAddress: job.emailAddress, historyId: job.historyId, messageId: job.messageId, jobId: queued.id ?? null });
   return { jobId: queued.id! };
 }
 
@@ -122,7 +123,6 @@ export async function enqueueEmailSyncContinuation(input: { teamKey: string; sco
 export async function enqueueEmailInitialSync(input: Omit<z.input<typeof initialSyncJobSchema>, 'schemaVersion' | 'kind' | 'requestedAt'>, targetQueue: ChildQueueAccess = getQueue(INITIAL_SYNC_QUEUE_NAME)) {
   const job = initialSyncJobSchema.parse({ schemaVersion: 1, kind: 'initial-sync', ...input, requestedAt: new Date().toISOString() });
   const queued = await targetQueue.add('initial-sync', job, { ...jobOptions, jobId: emailInitialSyncJobId(job) });
-  logEmailFlow('inbox.queue.enqueue-initial-sync', { connectorKey: job.connectorKey, operationKey: job.operationKey, jobId: queued.id ?? null });
   return { jobId: queued.id! };
 }
 
@@ -217,13 +217,14 @@ export async function processEmailSyncJob(raw: unknown, dependencies: {
   recordEvent?: ToolEventRecorder;
 } = {}): Promise<EmailSyncResult> {
   const job = emailSyncJobSchema.parse(raw);
-  logEmailFlow('inbox.queue.job', { kind: job.kind, ...('connectorKey' in job ? { connectorKey: job.connectorKey, teamKey: job.teamKey, scopeKey: job.scopeKey } : {}), ...('emailAddress' in job ? { hasEmail: true, historyId: job.historyId } : {}) });
+  const ingestJob = job.kind === 'notification' || job.kind === 'connector-notification';
+  if (ingestJob) logEmailFlow('ingest.queue.job', { kind: job.kind, ...('connectorKey' in job ? { connectorKey: job.connectorKey, teamKey: job.teamKey, scopeKey: job.scopeKey } : {}), ...('emailAddress' in job ? { emailAddress: job.emailAddress, historyId: job.historyId, messageId: job.messageId } : {}), ...('notificationHistoryId' in job ? { notificationHistoryId: job.notificationHistoryId } : {}) });
   try {
     const result = await runEmailSyncJob(job, dependencies);
-    logEmailFlow('inbox.queue.job.ok', { kind: job.kind, ...('connectorKey' in job ? { connectorKey: job.connectorKey } : {}), result });
+    if (ingestJob) logEmailFlow('ingest.queue.job.ok', { kind: job.kind, ...('connectorKey' in job ? { connectorKey: job.connectorKey } : {}), result });
     return result;
   } catch (error) {
-    logEmailFlow('inbox.queue.job.failed', { kind: job.kind, ...('connectorKey' in job ? { connectorKey: job.connectorKey } : {}), error });
+    if (ingestJob) logEmailFlow('ingest.queue.job.failed', { kind: job.kind, ...('connectorKey' in job ? { connectorKey: job.connectorKey } : {}), error });
     throw error;
   }
 }
@@ -246,8 +247,13 @@ async function runEmailSyncJob(job: EmailSyncJob, dependencies: {
   });
   if (job.kind === 'notification') {
     const targets = await connectors.listSyncTargetsByEmail(job.emailAddress);
+    logEmailFlow('ingest.queue.targets', { emailAddress: job.emailAddress, historyId: job.historyId, targetCount: targets.length, targets });
     const marked = await Promise.all(targets.map(({ connectorKey }) => connectors.markNotificationPending(connectorKey, job.historyId)));
-    if (marked.some((value) => !value)) throw new Error('Email notification target changed before durable scheduling');
+    if (marked.some((value) => !value)) {
+      logEmailFlow('ingest.queue.mark-failed', { emailAddress: job.emailAddress, historyId: job.historyId, marked });
+      throw new Error('Email notification target changed before durable scheduling');
+    }
+    if (!targets.length) logEmailFlow('ingest.queue.no-targets', { emailAddress: job.emailAddress, historyId: job.historyId });
     await enqueueConnectorChildren({ kind: 'connector-notification', sourceKey: stableId(job.subscription, job.messageId), notificationHistoryId: job.historyId, targets, queue: dependencies.queue ?? getQueue(SYNC_QUEUE_NAME) });
     return { synchronized: targets.length };
   }
@@ -255,9 +261,7 @@ async function runEmailSyncJob(job: EmailSyncJob, dependencies: {
     return { synchronized: 0 };
   }
   if (job.kind === 'initial-sync') {
-    logEmailFlow('inbox.queue.initial-sync.begin', { connectorKey: job.connectorKey, operationKey: job.operationKey });
     const result = await trusted('inbox.sync', { connectorKey: job.connectorKey }, trustedDependencies(job.teamKey, job.scopeKey)) as { initialSyncCompleted?: boolean; alreadyCompleted?: boolean };
-    logEmailFlow('inbox.queue.initial-sync.ok', { connectorKey: job.connectorKey, result });
     if ('initialSyncCompleted' in result && !result.initialSyncCompleted) throw new Error('Email initial synchronization remains incomplete');
     return { synchronized: 'alreadyCompleted' in result && result.alreadyCompleted ? 0 : 1 };
   }
