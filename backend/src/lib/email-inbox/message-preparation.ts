@@ -148,6 +148,8 @@ export async function sortAndPersistInboxThread(input: {
     connectorKey: input.lease.connectorKey,
     providerThreadId: input.thread.providerThreadId,
     threadKey,
+    subject: latest.message.subject,
+    from: latest.message.from,
     messageCount: input.messages.length,
     inboxCategory,
     intent: latest.classification.intent,
@@ -157,6 +159,15 @@ export async function sortAndPersistInboxThread(input: {
     inInbox: emailLabelsVisibleInInbox(labels),
     labels,
     unread: labels.includes('UNREAD'),
+    messages: classified.map(({ message, classification }) => ({
+      providerMessageId: message.providerMessageId,
+      subject: message.subject,
+      from: message.from,
+      inboxCategory: inboxCategoryFor(message.labels ?? [], classification),
+      labels: message.labels ?? [],
+      unread: message.unread ?? false,
+      sentAt: message.sentAt,
+    })),
   });
   await input.beforePersist();
   return input.repository.syncThread({

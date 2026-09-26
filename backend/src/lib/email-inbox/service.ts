@@ -1163,6 +1163,7 @@ export function createEmailService(options: {
         } else { threadIds = await fullThreadIds(); fullSync = true; }
         threadIds = [...new Set(threadIds)];
         logEmailFlow('inbox.sync.plan', { connectorKey: account.key, lifecycle, fullSync, threadCount: threadIds.length, pendingThreadCount: pendingThreadIds?.length ?? 0, pendingHistoryId: pendingHistoryId ?? null });
+        const categoryCounts = { Urgent: 0, Important: 0, Purchases: 0, Filtered: 0, skipped: 0 };
         const processThread = async (providerThreadId: string) => {
           let resource: GmailThreadResource | null;
           try { resource = await runSyncOperation(() => connection.gmail.threadMetadata(providerThreadId)); }
@@ -1175,6 +1176,7 @@ export function createEmailService(options: {
             const deleted = await repository.deleteProviderThread(account.userKey, account.key, providerThreadId, { connectorKey: account.key, token: leaseToken });
             await publishInboxChangedDurably(destinationScope(actor));
             if (deleted?.attachmentMutation) await publishAttachmentChanged(destinationScope(actor), deleted.attachmentMutation).catch(() => undefined);
+            categoryCounts.skipped += 1;
             return 0;
           }
           if (!resource.messages?.length) {
@@ -1182,11 +1184,15 @@ export function createEmailService(options: {
             const deleted = await repository.deleteProviderThread(account.userKey, account.key, providerThreadId, { connectorKey: account.key, token: leaseToken });
             await publishInboxChangedDurably(destinationScope(actor));
             if (deleted?.attachmentMutation) await publishAttachmentChanged(destinationScope(actor), deleted.attachmentMutation).catch(() => undefined);
+            categoryCounts.skipped += 1;
             return 0;
           }
           logEmailFlow('inbox.sync.thread.begin', { connectorKey: account.key, providerThreadId, messages: resource.messages.length, lifecycle });
           const persisted = await persistProviderThread(actor, account, connection.gmail, resource, leaseToken, ensureLease, runSyncOperation, lifecycle === 'subscription' ? subscriptionMessages : undefined);
-          logEmailFlow('inbox.sync.thread.ok', { connectorKey: account.key, providerThreadId, threadKey: persisted?.key ?? null, inboxCategory: persisted?.inboxCategory ?? null, inInbox: persisted?.inInbox ?? null });
+          const inboxCategory = persisted?.inboxCategory;
+          if (inboxCategory === 'Urgent' || inboxCategory === 'Important' || inboxCategory === 'Purchases' || inboxCategory === 'Filtered') categoryCounts[inboxCategory] += 1;
+          else categoryCounts.skipped += 1;
+          logEmailFlow('inbox.sync.thread.ok', { connectorKey: account.key, providerThreadId, threadKey: persisted?.key ?? null, subject: persisted?.subject ?? null, from: persisted?.latestFrom ?? null, inboxCategory: inboxCategory ?? null, inInbox: persisted?.inInbox ?? null, unread: persisted?.unread ?? null, labels: persisted?.labels ?? [] });
           if (lifecycle === 'subscription' && persisted && persisted.inInbox !== false) {
             const latest = latestEmailMessage((await repository.thread(account.userKey, persisted.key)).messages);
             if (latest && subscriptionMessages.has(latest.providerMessageId)) {
@@ -1224,7 +1230,7 @@ export function createEmailService(options: {
         await publishInboxChangedDurably(destinationScope(actor));
         if (pendingThreadIds?.length && pendingHistoryId) await enqueueSyncContinuation({ teamKey: actor.teamKey, scopeKey: destinationScope(actor), connectorKey: account.key, pendingHistoryId, pendingThreadIds });
         const result = { synced, lastSyncedAt: new Date().toISOString() };
-        logEmailFlow('inbox.sync.ok', { connectorKey: account.key, lifecycle, synced, fullSync, pendingThreadCount: pendingThreadIds?.length ?? 0, initialSyncCompleted: !pendingThreadIds?.length });
+        logEmailFlow('inbox.sync.ok', { connectorKey: account.key, lifecycle, synced, fullSync, pendingThreadCount: pendingThreadIds?.length ?? 0, initialSyncCompleted: !pendingThreadIds?.length, categoryCounts });
         return lifecycle === 'initial' ? { ...result, initialSyncCompleted: !pendingThreadIds?.length } : result;
       } catch (error) {
         logEmailFlow('inbox.sync.failed', { connectorKey: account.key, lifecycle, synced, quotaExceeded: isGmailQuotaExceeded(error), error });
