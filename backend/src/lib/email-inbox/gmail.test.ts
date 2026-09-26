@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { classifyEmailWithFallback, deterministicEmailClassification, emailLabelsVisibleInInbox, inboxCategoryFor } from './classification';
-import { buildGmailAuthorizationUrl, createGmailClient, decodeGmailAttachmentData, decodeRfc2047Words, discoverGmailAttachmentParts, emailAddresses, emailAddressWithName, gmailAttachmentParts, GmailApiError, GmailPermanentAttachmentError, htmlToReadableText, isGmailQuotaExceeded, isRetryableGmailError, MAX_GMAIL_ATTACHMENT_BYTES, MAX_GMAIL_ATTACHMENTS, messageBodies, normalizeGmailAttachmentFilename, readableEmailBody } from './gmail';
+import { buildGmailAuthorizationUrl, compactEmailText, createGmailClient, decodeGmailAttachmentData, decodeRfc2047Words, discoverGmailAttachmentParts, emailAddresses, emailAddressWithName, gmailAttachmentParts, GmailApiError, GmailPermanentAttachmentError, hasGmailMailScope, htmlToReadableText, isGmailQuotaExceeded, isRetryableGmailError, MAX_GMAIL_ATTACHMENT_BYTES, MAX_GMAIL_ATTACHMENTS, messageBodies, normalizeGmailAttachmentFilename, readableEmailBody } from './gmail';
 
 describe('Gmail connector protocol', () => {
   test('reports supported attachments omitted by the canonical count bound', () => {
@@ -25,6 +25,8 @@ describe('Gmail connector protocol', () => {
     expect(url.searchParams.get('include_granted_scopes')).toBe('true');
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');
     expect(url.searchParams.get('scope')).toContain('https://mail.google.com/');
+    expect(hasGmailMailScope(['openid', 'email'])).toBe(false);
+    expect(hasGmailMailScope(['openid', 'email', 'https://mail.google.com/'])).toBe(true);
     expect(url.searchParams.get('scope')).not.toContain('gmail.modify');
     expect(url.searchParams.get('scope')).not.toContain('gmail.send');
     expect(url.searchParams.get('redirect_uri')).toBe('https://api.example.com/api/v1/auth/mobile/oauth/google/callback');
@@ -100,6 +102,8 @@ describe('Gmail connector protocol', () => {
     expect(htmlToReadableText('<p>Hello&nbsp;world</p><a href="https://track.example/x">Click</a>')).toBe('Hello world\nClick');
     expect(readableEmailBody('http://track.example/x  http://track.example/y', '<p>Invoice for April</p>')).toBe('Invoice for April');
     expect(readableEmailBody('Plain &amp; simple')).toBe('Plain & simple');
+    expect(compactEmailText('Hello\n\n\n\nWorld\n  \n  \nNext')).toBe('Hello\n\nWorld\n\nNext');
+    expect(htmlToReadableText('<p>One</p><p></p><p></p><p>Two</p>')).toBe('One\n\nTwo');
   });
 
   test('classifies provider labels and urgent subjects deterministically', () => {

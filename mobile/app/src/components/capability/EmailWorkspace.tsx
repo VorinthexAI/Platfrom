@@ -232,6 +232,9 @@ function messageFor(error: unknown) {
     ? error.message
     : "Email could not complete that request.";
 }
+function compactEmailBody(value: string) {
+  return value.replace(/\r\n?/g, "\n").replace(/[^\S\n]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
 function shortAddress(value?: string) {
   return value?.split("@")[0]?.replace(/[._-]+/g, " ") || "Unknown sender";
 }
@@ -287,6 +290,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     email_connection_error?: string;
   }>();
   const processedConnectionCode = useRef<string | undefined>(undefined);
+  const processedConnectionError = useRef<string | undefined>(undefined);
   const rootSearchInputRef = useRef<ComponentRef<typeof TextInput>>(null);
   const sheetInputRef = useRef<ComponentRef<typeof TextInput>>(null);
   const readerInputRef = useRef<ComponentRef<typeof TextInput>>(null);
@@ -1090,9 +1094,16 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       )
       .finally(() => setBusy(undefined));
   }, [params.email_connection_code]);
+  const reportConnectionError = useEffectEvent((message: string) => {
+    if (!message || processedConnectionError.current === message) return;
+    processedConnectionError.current = message;
+    notifyLatest(message);
+    setSheetError(undefined);
+    setSheet("connectForm");
+    setSheetOpen(true);
+  });
   useEffect(() => {
-    if (params.email_connection_error)
-      notifyLatest(emailConnectionErrorMessage(params.email_connection_error));
+    if (params.email_connection_error) reportConnectionError(emailConnectionErrorMessage(params.email_connection_error));
   }, [params.email_connection_error]);
   function resetNewEmail(preserveDraftKey?: string) {
     invalidateNewEmailAlternatives(preserveDraftKey);
@@ -1313,7 +1324,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     try {
       connector = await launchEmailConnection({ name, ...(description ? { description } : {}) });
     } catch (failure) {
-      setSheetError(messageFor(failure));
+      reportConnectionError(messageFor(failure));
     } finally {
       setBusy(undefined);
     }
@@ -3502,7 +3513,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
             {openingThreadKey === selected.thread.key && !selectedMessage ? <View accessibilityLabel={`Loading ${selected.thread.subject}`} accessibilityRole="progressbar" style={[styles.readerDocument, styles.readerSkeleton]}><Skeleton style={styles.readerBodySkeleton} /></View> : selectedMessage ? <View accessibilityLabel={`Email: ${selectedMessage.subject}`} style={styles.readerDocument}>
               <ScrollView alwaysBounceVertical contentContainerStyle={[styles.readerDocumentContent, { paddingBottom: insets.bottom + spacing.lg }]} refreshControl={<PullToRefresh onRefresh={refreshActiveView} refreshing={userRefreshing} />} showsVerticalScrollIndicator={false}>
                 <Text selectable style={styles.messageSubject}>{selectedMessage.subject}</Text>
-                <Text selectable style={styles.readerBody}>{selectedMessage.body}</Text>
+                <Text selectable style={styles.readerBody}>{compactEmailBody(selectedMessage.body)}</Text>
                 {selectedMessage.attachmentAvailability === "truncated" || selectedMessage.attachmentAvailability === "failed" || (selectedMessage.hasAttachments && !selectedMessage.attachments?.length) ? <View accessibilityLabel="Some email attachment details are unavailable" style={styles.attachmentLabel}><FileIcon size="sm" variant="muted" /><Text style={styles.attachmentText}>{selectedMessage.unavailableAttachmentCount ? `${selectedMessage.unavailableAttachmentCount} attachment${selectedMessage.unavailableAttachmentCount === 1 ? "" : "s"} unavailable` : "Attachment details unavailable"}</Text></View> : null}
               </ScrollView>
             </View> : null}
@@ -3557,7 +3568,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       </BottomSheet>
 
       <BottomSheet hideHeading onOpenChange={setRootBulkMenuOpen} open={rootBulkMenuOpen && selectedInboxes.length > 0} title="Selected inbox actions"><BottomSheetMenu><BottomSheetItem disabled={rootBulkBusy || !permissions.canMutate} onPress={openSelectedInboxTags} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem><BottomSheetItem disabled={rootBulkBusy || !permissions.canMutate} onPress={() => { setRootBulkMenuOpen(false); void setSelectedInboxesFavorite(); }} style={styles.sheetAction} variant="secondary">{selectedInboxes.every(({ isFavorite }) => isFavorite) ? "Unfavorite" : "Favorite"}</BottomSheetItem>{permissions.canManageConnector ? <BottomSheetItem disabled={rootBulkBusy} onPress={() => { setRootBulkMenuOpen(false); setRootDisconnectOpen(true); }} style={styles.sheetAction} variant="secondary">Delete</BottomSheetItem> : null}</BottomSheetMenu></BottomSheet>
-      <BottomSheet dismissible={!rootBulkBusy} footer={<><Button disabled={rootBulkBusy} onPress={() => void performRootInboxDisconnect()} size="md" variant="primary">Delete</Button><Button disabled={rootBulkBusy} onPress={() => setRootDisconnectOpen(false)} size="md" variant="secondary">Cancel</Button></>} onOpenChange={(open) => { if (!open && !rootBulkBusy) setRootDisconnectOpen(false); }} open={rootDisconnectOpen && selectedInboxes.length > 0} title={selectedInboxes.length === 1 ? "Delete inbox?" : `Delete ${selectedInboxes.length} inboxes?`}><Text style={styles.confirmText}>This removes the selected Signal inbox connection and local Signal data. It does not delete messages from your email provider.</Text></BottomSheet>
+      <BottomSheet dismissible={!rootBulkBusy} footer={<><Button disabled={rootBulkBusy} onPress={() => void performRootInboxDisconnect()} size="md" variant="primary">Delete</Button><Button disabled={rootBulkBusy} onPress={() => setRootDisconnectOpen(false)} size="md" variant="secondary">Cancel</Button></>} onOpenChange={(open) => { if (!open && !rootBulkBusy) setRootDisconnectOpen(false); }} open={rootDisconnectOpen && selectedInboxes.length > 0} title={selectedInboxes.length === 1 ? "Delete inbox?" : `Delete ${selectedInboxes.length} inboxes?`} />
 
       <SearchHistorySheet error={searchHistoryError} history={searchHistory} loading={searchHistoryLoading} onClose={closeSearchHistory} onRemove={(item) => void removeSearchHistory(item)} onSelect={applySearchHistory} open={sheetOpen && sheet === "searchHistory"} removingQuery={removingHistoryQuery} />
       <TagFilterSheet context={historyContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />
@@ -3734,8 +3745,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
               {!selected.thread.labels?.includes("TRASH") ? <BottomSheetItem disabled={!permissions.canMutate || trashBusy} onPress={() => void openReaderFlow("delete")} style={styles.sheetAction} variant="secondary">Move to trash</BottomSheetItem> : null}
             </> : inboxActionItems}
           </BottomSheetMenu>
-        ) : sheet === "disconnect" ? (
-          <Text style={styles.confirmText}>This removes the Signal inbox connection and local Signal data. It does not delete messages from your email provider.</Text>
         ) : null}
       </BottomSheet>
       </View>

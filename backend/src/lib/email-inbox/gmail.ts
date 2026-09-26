@@ -2,11 +2,16 @@ import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import type { EmailConnectorCredentials, OAuthEmailConnectorCredentials } from './connector-schema';
 
+export const GMAIL_MAIL_SCOPE = 'https://mail.google.com/';
 export const GMAIL_SCOPES = [
   'openid',
   'email',
-  'https://mail.google.com/',
+  GMAIL_MAIL_SCOPE,
 ] as const;
+
+export function hasGmailMailScope(scopes: readonly string[]) {
+  return scopes.some((scope) => scope === GMAIL_MAIL_SCOPE);
+}
 
 const tokenSchema = z.object({
   access_token: z.string().min(1), refresh_token: z.string().min(1).optional(),
@@ -367,16 +372,21 @@ function decodeHtmlEntities(value: string) {
 }
 
 export function htmlToReadableText(value: string) {
-  return decodeHtmlEntities(value
+  return compactEmailText(decodeHtmlEntities(value
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<head[\s\S]*?<\/head>/gi, ' ')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|h[1-6]|li|tr)[^>]*>/gi, '\n')
     .replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, '$1')
-    .replace(/<[^>]+>/g, ' '))
+    .replace(/<[^>]+>/g, ' ')));
+}
+
+export function compactEmailText(value: string) {
+  return value
+    .replace(/\r\n?/g, '\n')
     .replace(/[^\S\n]+/g, ' ')
-    .replace(/ ?\n ?/g, '\n')
+    .replace(/ *\n */g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -384,12 +394,7 @@ export function htmlToReadableText(value: string) {
 export function readableEmailBody(text: string, html?: string) {
   const fromHtml = html ? htmlToReadableText(html) : '';
   if (fromHtml) return fromHtml;
-  const fromText = decodeHtmlEntities(text)
-    .replace(/[^\S\n]+/g, ' ')
-    .replace(/ ?\n ?/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-  return fromText || '(Empty message)';
+  return compactEmailText(decodeHtmlEntities(text)) || '(Empty message)';
 }
 
 export function createGmailClient(accessToken: string, fetcher: typeof fetch = fetch, options: {

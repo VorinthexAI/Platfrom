@@ -5,7 +5,7 @@ import { redisConnection } from '@/lib/redis';
 import { createConnectorRepository, type ConnectorRepository } from './connector-repository';
 import { createInboxRepository, type InboxRepository } from './inbox-repository';
 import { logEmailFlow } from './flow-log';
-import { buildGmailAuthorizationUrl, createGmailClient, createPkce, exchangeGmailCode, GmailApiError } from './gmail';
+import { buildGmailAuthorizationUrl, createGmailClient, createPkce, exchangeGmailCode, GmailApiError, hasGmailMailScope } from './gmail';
 
 const STATE_PREFIX = 'email:oauth:state:';
 const GRANT_PREFIX = 'email:oauth:grant:';
@@ -124,6 +124,9 @@ export function createEmailOAuthService(options: {
         stage = 'token-exchange';
         logEmailFlow('oauth.callback.stage', { stage, userKey: state.userKey });
         const result = await exchange(input.code, state.verifier, state.nonce);
+        stage = 'gmail-scope';
+        logEmailFlow('oauth.callback.stage', { stage, userKey: state.userKey, scopes: result.scopes, hasRefreshToken: Boolean(result.credentials.refreshToken) });
+        if (!hasGmailMailScope(result.scopes)) throw new Error('Gmail mail scope was not granted');
         stage = 'gmail-profile';
         logEmailFlow('oauth.callback.stage', { stage, userKey: state.userKey, scopes: result.scopes, hasRefreshToken: Boolean(result.credentials.refreshToken) });
         const providerProfile = await profile(result.credentials.accessToken);
@@ -181,7 +184,7 @@ export function createEmailOAuthService(options: {
         if (reconnect) await connectors.rollbackReconnect({ connectorKey: reconnect.connectorKey, connectorRevision: reconnect.connectorRevision, previousConnector: reconnect.previous, inboxKey: reconnect.inboxKey, inboxRevision: reconnect.inboxRevision, previousInbox: reconnect.previousInbox }).catch(() => false);
         const reason = gmailFailureReason(error);
         const code = stage === 'gmail-profile' && reason === 'SERVICE_DISABLED' ? 'gmail_api_unavailable'
-          : stage === 'gmail-profile' && reason === 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' ? 'gmail_scope_missing'
+          : stage === 'gmail-scope' || (stage === 'gmail-profile' && reason === 'ACCESS_TOKEN_SCOPE_INSUFFICIENT') ? 'gmail_scope_missing'
           : stage === 'gmail-profile' && reason === 'GMAIL_DISABLED' ? 'gmail_account_unavailable'
           : stage === 'token-exchange' ? 'gmail_authorization_failed'
           : stage === 'gmail-watch' ? 'gmail_watch_unavailable'

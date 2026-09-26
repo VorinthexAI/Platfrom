@@ -60,11 +60,26 @@ describe('email OAuth state', () => {
   test('distinguishes a missing Gmail scope from a disabled provider API', async () => {
     const oauth = createEmailOAuthService({
       store, connectors: {} as never, authorize: async () => ({ teamMembershipKey: scopeKey }),
-      exchange: async () => ({ identity: { providerAccountId: 'google-1', email: 'person@example.com' }, scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' } }),
+      exchange: async () => ({ identity: { providerAccountId: 'google-1', email: 'person@example.com' }, scopes: ['openid', 'email', 'https://mail.google.com/'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' } }),
       profile: async () => { throw new GmailApiError(403, ['insufficientPermissions']); },
     });
     const state = new URL((await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
     expect(new URL(await oauth.callback({ state, code: 'provider-code' })).searchParams.get('email_connection_error')).toBe('gmail_scope_missing');
+  });
+
+  test('rejects omitted Gmail mail access before persistence or Spark-backed sync', async () => {
+    let upserts = 0, profiles = 0, jobs = 0;
+    const oauth = createEmailOAuthService({
+      store,
+      connectors: { upsert: async () => { upserts += 1; throw new Error('must not persist'); } } as never,
+      authorize: async () => ({ teamMembershipKey: scopeKey }),
+      exchange: async () => ({ identity: { providerAccountId: 'google-1', email: 'person@example.com' }, scopes: ['openid', 'email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' } }),
+      profile: async () => { profiles += 1; return { historyId: 'history-1' }; },
+      enqueueInitialSync: async () => { jobs += 1; },
+    });
+    const state = new URL((await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
+    expect(new URL(await oauth.callback({ state, code: 'provider-code' })).searchParams.get('email_connection_error')).toBe('gmail_scope_missing');
+    expect({ upserts, profiles, jobs }).toEqual({ upserts: 0, profiles: 0, jobs: 0 });
   });
 
   test('binds state to access context and consumes denial callbacks once', async () => {
@@ -106,7 +121,7 @@ describe('email OAuth state', () => {
       ensureInbox: async (_actor, _connector, metadata, overwrite) => { expect(metadata).toEqual({ name: 'Work' }); expect(overwrite).toBe(false); },
       inboxView: async () => ({ key: scopeKey, connectorKey: connector.key, name: 'Work', email: connector.email }),
       registerWatch: async (actor, connectorKey) => { expect(actor).toEqual({ userKey, teamKey: 'team-1', scopeKey }); expect(connectorKey).toBe(connector.key); watchWrites += 1; },
-      exchange: async () => ({ identity: { providerAccountId: 'google-1', email: 'person@example.com' }, scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
+      exchange: async () => ({ identity: { providerAccountId: 'google-1', email: 'person@example.com' }, scopes: ['openid', 'email', 'https://mail.google.com/'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
     const started = await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' });
     const state = new URL(started.authorizationUrl).searchParams.get('state')!;
@@ -129,7 +144,7 @@ describe('email OAuth state', () => {
     const oauth = createEmailOAuthService({
       store, connectors: { findExact: async () => connector, credentials: () => ({ accessToken: 'old', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now }), upsert: async () => ({ ...connector, revision: 'upsert' }), setSyncState: async () => 'sync', rollbackReconnect: async (input: unknown) => { rollback = input; return true; } } as never,
       inboxes: { getByConnector: async () => null } as never, authorize: async () => ({ teamMembershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), ensureInbox: async () => ({ revision: 'inbox' }), registerWatch: async () => ({ connectorRevision: 'watch' }),
-      enqueueInitialSync: async () => { throw new Error('queue unavailable'); }, exchange: async () => ({ identity: { providerAccountId: connector.providerAccountId, email: connector.email }, scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
+      enqueueInitialSync: async () => { throw new Error('queue unavailable'); }, exchange: async () => ({ identity: { providerAccountId: connector.providerAccountId, email: connector.email }, scopes: ['openid', 'email', 'https://mail.google.com/'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
     const state = new URL((await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
     const redirect = new URL(await oauth.callback({ state, code: 'provider-code' }));
@@ -149,7 +164,7 @@ describe('email OAuth state', () => {
         inboxes: {} as never,
         authorize: async () => ({ teamMembershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), ensureInbox: async () => ({ revision: 'inbox' }),
         registerWatch: async () => { throw new Error(failure); },
-        exchange: async () => ({ identity: { providerAccountId: connector.providerAccountId, email: connector.email }, scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
+        exchange: async () => ({ identity: { providerAccountId: connector.providerAccountId, email: connector.email }, scopes: ['openid', 'email', 'https://mail.google.com/'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
       });
       const state = new URL((await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
       const redirect = new URL(await oauth.callback({ state, code: 'provider-code' }));
@@ -170,7 +185,7 @@ describe('email OAuth state', () => {
       inboxes: { getByConnector: async () => null } as never,
       authorize: async () => ({ teamMembershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), ensureInbox: async () => ({ revision: 'inbox' }), inboxView: async () => ({ connectorKey: connector.key }),
       registerWatch: async () => { throw new EmailWatchRepairPendingError(new Error('watch rejected')); },
-      exchange: async () => ({ identity: { providerAccountId: connector.providerAccountId, email: connector.email }, scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
+      exchange: async () => ({ identity: { providerAccountId: connector.providerAccountId, email: connector.email }, scopes: ['openid', 'email', 'https://mail.google.com/'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
     const state = new URL((await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
     const redirect = new URL(await oauth.callback({ state, code: 'provider-code' }));
@@ -200,7 +215,7 @@ describe('email OAuth state', () => {
     const oauth = createEmailOAuthService({
       store, connectors: connectors as never, inboxes: { getByConnector: async () => null } as never, enqueueInitialSync, authorize: async () => ({ teamMembershipKey: scopeKey }), profile: async () => ({ historyId: 'history-2' }), registerWatch: async () => undefined,
       ensureInbox: async (_actor, _connector, metadata, overwrite) => { expect(metadata).toEqual({ name: 'Work' }); expect(overwrite).toBe(true); },
-      exchange: async () => ({ identity: { providerAccountId: 'google-2', email: 'second@example.com' }, scopes: ['email'], credentials: { accessToken: 'new-access', refreshToken: undefined, tokenType: 'Bearer', expiresAt: now } }),
+      exchange: async () => ({ identity: { providerAccountId: 'google-2', email: 'second@example.com' }, scopes: ['openid', 'email', 'https://mail.google.com/'], credentials: { accessToken: 'new-access', refreshToken: undefined, tokenType: 'Bearer', expiresAt: now } }),
     });
     const started = await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' });
     const state = new URL(started.authorizationUrl).searchParams.get('state')!;
@@ -225,7 +240,7 @@ describe('email OAuth state', () => {
     };
     const oauth = createEmailOAuthService({
       store, connectors: connectors as never, inboxes: { getByConnector: async () => null } as never, enqueueInitialSync, authorize: async () => ({ teamMembershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), registerWatch: async () => undefined,
-      exchange: async () => ({ identity: { providerAccountId: 'google-revoked', email: 'revoked@example.com' }, scopes: ['email'], credentials: { accessToken: 'new-access', refreshToken: undefined, tokenType: 'Bearer', expiresAt: now } }),
+      exchange: async () => ({ identity: { providerAccountId: 'google-revoked', email: 'revoked@example.com' }, scopes: ['openid', 'email', 'https://mail.google.com/'], credentials: { accessToken: 'new-access', refreshToken: undefined, tokenType: 'Bearer', expiresAt: now } }),
     });
     const started = await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' });
     const state = new URL(started.authorizationUrl).searchParams.get('state')!;
@@ -251,7 +266,7 @@ describe('email OAuth state', () => {
     const oauth = createEmailOAuthService({
       store, connectors: connectors as never, inboxes: { getByConnector: async () => null, restoreAfterReconnectFailure: async () => true } as never, enqueueInitialSync, authorize: async () => ({ teamMembershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }),
       ensureInbox: async () => { throw new Error('metadata failed'); },
-      exchange: async () => ({ identity: { providerAccountId: 'google-new', email: 'new@example.com' }, scopes: ['email'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
+      exchange: async () => ({ identity: { providerAccountId: 'google-new', email: 'new@example.com' }, scopes: ['openid', 'email', 'https://mail.google.com/'], credentials: { accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
     const started = await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' });
     const state = new URL(started.authorizationUrl).searchParams.get('state')!;
@@ -277,7 +292,7 @@ describe('email OAuth state', () => {
     const oauth = createEmailOAuthService({
       store, connectors: connectors as never, inboxes: { getByConnector: async () => null, restoreAfterReconnectFailure: async () => true } as never, enqueueInitialSync, authorize: async () => ({ teamMembershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }),
       ensureInbox: async () => { throw new Error('metadata failed'); },
-      exchange: async () => ({ identity: { providerAccountId: 'google-existing', email: 'existing@example.com' }, scopes: ['email'], credentials: { accessToken: 'new', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
+      exchange: async () => ({ identity: { providerAccountId: 'google-existing', email: 'existing@example.com' }, scopes: ['openid', 'email', 'https://mail.google.com/'], credentials: { accessToken: 'new', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
     const started = await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' });
     const state = new URL(started.authorizationUrl).searchParams.get('state')!;
@@ -297,7 +312,7 @@ describe('email OAuth state', () => {
     const oauth = createEmailOAuthService({
       store, connectors: connectors as never, inboxes: { getByConnector: async () => previousInbox } as never, enqueueInitialSync, authorize: async () => ({ teamMembershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }),
       ensureInbox: async (_actor, _connector, _metadata, _overwrite, expectedRevision) => { expectedInboxRevision = expectedRevision; throw new Error('inbox revision conflict'); },
-      exchange: async () => ({ identity: { providerAccountId: previous.providerAccountId, email: previous.email }, scopes: ['email'], credentials: { accessToken: 'new', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
+      exchange: async () => ({ identity: { providerAccountId: previous.providerAccountId, email: previous.email }, scopes: ['openid', 'email', 'https://mail.google.com/'], credentials: { accessToken: 'new', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
     const state = new URL((await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Replacement', returnUri: 'vorinthexcore://capability/signal' })).authorizationUrl).searchParams.get('state')!;
     expect(new URL(await oauth.callback({ state, code: 'provider-code' })).searchParams.get('email_connection_error')).toBe('connection_failed');
@@ -332,7 +347,7 @@ describe('email OAuth state', () => {
     const oauth = createEmailOAuthService({
       store: failingStore, connectors: connectors as never, inboxes: inboxes as never, enqueueInitialSync, authorize: async () => ({ teamMembershipKey: scopeKey }), profile: async () => ({ historyId: 'new-history' }), registerWatch: async () => undefined,
       ensureInbox: async () => ({ revision: 'inbox-write' }),
-      exchange: async () => ({ identity: { providerAccountId: previous.providerAccountId, email: previous.email }, scopes: ['email'], credentials: { accessToken: 'new', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
+      exchange: async () => ({ identity: { providerAccountId: previous.providerAccountId, email: previous.email }, scopes: ['openid', 'email', 'https://mail.google.com/'], credentials: { accessToken: 'new', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
     const started = await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Replacement', returnUri: 'vorinthexcore://capability/signal' });
     const state = new URL(started.authorizationUrl).searchParams.get('state')!;
@@ -363,7 +378,7 @@ describe('email OAuth state', () => {
     const oauth = createEmailOAuthService({
       store: failingStore, connectors: connectors as never, inboxes: {} as never, enqueueInitialSync,
       authorize: async () => ({ teamMembershipKey: scopeKey }), profile: async () => ({ historyId: 'history' }), registerWatch: async () => undefined, ensureInbox: async () => ({ revision: 'inbox-write' }),
-      exchange: async () => ({ identity: { providerAccountId: pending.providerAccountId, email: pending.email }, scopes: ['email'], credentials: { accessToken: 'new', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
+      exchange: async () => ({ identity: { providerAccountId: pending.providerAccountId, email: pending.email }, scopes: ['openid', 'email', 'https://mail.google.com/'], credentials: { accessToken: 'new', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
     const started = await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Work', returnUri: 'vorinthexcore://capability/signal' });
     const state = new URL(started.authorizationUrl).searchParams.get('state')!;
@@ -409,7 +424,7 @@ describe('email OAuth state', () => {
         if (concurrentEdit === 'inbox') { inboxRevision = 'concurrent-inbox'; concurrentValue = 'inbox'; throw new Error('inbox conflict'); }
         return { revision: 'callback-inbox' };
       },
-      exchange: async () => ({ identity: { providerAccountId: previous.providerAccountId, email: previous.email }, scopes: ['email'], credentials: { accessToken: 'new', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
+      exchange: async () => ({ identity: { providerAccountId: previous.providerAccountId, email: previous.email }, scopes: ['openid', 'email', 'https://mail.google.com/'], credentials: { accessToken: 'new', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: now } }),
     });
     const started = await oauth.start({ userKey, teamKey: 'team-1', scopeKey, name: 'Replacement', returnUri: 'vorinthexcore://capability/signal' });
     const state = new URL(started.authorizationUrl).searchParams.get('state')!;
