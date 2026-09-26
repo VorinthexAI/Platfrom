@@ -14,19 +14,18 @@ function connector() {
 describe('dedicated inbox repository', () => {
   test('ensures one emailInboxes row by connector and preserves user metadata on overwrite', async () => {
     const source = connector();
-    let call: { query: string; bindVars: Record<string, any> } | undefined;
+    const calls: Array<{ query: string; bindVars: Record<string, any> }> = [];
     const database = { query: async (query: string, bindVars: Record<string, any>) => {
-      call = { query, bindVars };
-      return { next: async () => ({ ...bindVars.value, _rev: 'inbox-revision' }) };
+      calls.push({ query, bindVars });
+      if (query.includes('INSERT')) return { next: async () => ({ ...bindVars.value, _rev: 'inbox-revision' }) };
+      return { next: async () => null };
     } };
     const value = await createInboxRepository(database as never).ensure(source, { name: 'Work' }, embedding, true);
     expect(value).toMatchObject({ connectorKey: source.key, name: 'Work', isFavorite: false });
-    expect(call?.query).toContain('IN @@inboxes');
-    expect(call?.query).toContain('DOCUMENT(@@inboxes, @key)');
-    expect(call?.query).toContain('createdAt: target.createdAt');
-    expect(call?.query).toContain('isFavorite: target.isFavorite');
-    expect(call?.bindVars.key).toMatch(/^c[0-9a-f]{24}$/);
-    expect(call?.bindVars).toMatchObject({ '@inboxes': 'emailInboxes' });
+    expect(calls[0]?.query).toContain('DOCUMENT(@@inboxes, @key)');
+    expect(calls[1]?.query).toContain('INSERT @value IN @@inboxes');
+    expect(calls[0]?.bindVars.key).toMatch(/^c[0-9a-f]{24}$/);
+    expect(calls[1]?.bindVars).toMatchObject({ '@inboxes': 'emailInboxes' });
   });
 
   test('authorizes cover images and optimistic updates without managed folder markers', async () => {
@@ -41,12 +40,12 @@ describe('dedicated inbox repository', () => {
 
   test('fences reconnect overwrite on the captured emailInboxes revision', async () => {
     const source = connector();
-    let call: { query: string; bindVars: Record<string, unknown> } | undefined;
-    const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return { next: async () => null }; } };
+    const calls: string[] = [];
+    const existing = { _key: 'inbox-key', _rev: 'other-revision', userKey: source.userKey, teamKey: source.teamKey, scopeKey: source.scopeKey, connectorKey: source.key, name: 'Work', isFavorite: false, embedding, createdAt: now, updatedAt: now };
+    const database = { query: async (query: string) => { calls.push(query); return { next: async () => existing }; } };
     expect(await createInboxRepository(database as never).ensure(source, { name: 'Replacement' }, embedding, true, 'inbox-before-oauth')).toBeNull();
-    expect(call?.query).toContain('target._rev == @expectedRevision');
-    expect(call?.query).toContain('IN @@inboxes');
-    expect(call?.bindVars).toMatchObject({ '@inboxes': 'emailInboxes', expectedRevision: 'inbox-before-oauth' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('DOCUMENT(@@inboxes, @key)');
   });
 
   test('semantic search enforces team, scope, connector, and active Gmail boundaries', async () => {

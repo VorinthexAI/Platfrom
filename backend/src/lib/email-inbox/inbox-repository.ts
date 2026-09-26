@@ -28,8 +28,20 @@ export function createInboxRepository(database: Database = db) {
       const key = emailInboxKey(connector.scopeKey, connector.key);
       const value = emailInboxSchema.parse({ key, userKey: connector.userKey, teamKey: connector.teamKey, scopeKey: connector.scopeKey, connectorKey: connector.key, name: metadata.name, ...(metadata.description ? { description: metadata.description } : {}), isFavorite: false, embedding, createdAt: timestamp, updatedAt: timestamp });
       try {
-        const cursor = await database.query(`LET connector = DOCUMENT(userConnectors, @connectorKey) FILTER connector != null && connector.userKey == @userKey && connector.provider == "gmail" LET existing = FIRST(FOR inbox IN @@inboxes FILTER inbox.userKey == @userKey && inbox.connectorKey == @connectorKey LIMIT 1 RETURN inbox) LET keyed = DOCUMENT(@@inboxes, @key) LET target = existing != null ? existing : (keyed != null && keyed.userKey == @userKey && keyed.connectorKey == @connectorKey ? keyed : null) FILTER target == null ? (@expectedRevision == null && keyed == null) : (!@overwrite || target._rev == @expectedRevision) LET written = target == null ? (INSERT @value IN @@inboxes OPTIONS { keepNull: false } RETURN NEW)[0] : (@overwrite ? (UPDATE target WITH MERGE(@value, { _key: target._key, createdAt: target.createdAt, isFavorite: target.isFavorite, coverImageKey: target.coverImageKey }) IN @@inboxes OPTIONS { keepNull: false } RETURN NEW)[0] : target) RETURN written`, { '@inboxes': EMAIL_INBOXES_COLLECTION, connectorKey: connector.key, userKey: connector.userKey, key, overwrite, expectedRevision: expectedRevision ?? null, value: toArangoDoc(value) });
-        const raw = await cursor.next();
+        const found = await database.query(`LET connector = DOCUMENT(userConnectors, @connectorKey) FILTER connector != null && connector.userKey == @userKey && connector.provider == "gmail" LET existing = FIRST(FOR inbox IN @@inboxes FILTER inbox.userKey == @userKey && inbox.connectorKey == @connectorKey LIMIT 1 RETURN inbox) LET keyed = DOCUMENT(@@inboxes, @key) RETURN existing != null ? existing : (keyed != null && keyed.userKey == @userKey && keyed.connectorKey == @connectorKey ? keyed : null)`, { '@inboxes': EMAIL_INBOXES_COLLECTION, connectorKey: connector.key, userKey: connector.userKey, key });
+        const target = await found.next() as Record<string, unknown> | null;
+        if (target == null) {
+          if (expectedRevision != null) return null;
+          const created = await database.query('INSERT @value IN @@inboxes OPTIONS { keepNull: false } RETURN NEW', { '@inboxes': EMAIL_INBOXES_COLLECTION, value: toArangoDoc(value) });
+          const raw = await created.next();
+          return raw ? { ...parse(raw), revision: revision(raw) } : null;
+        }
+        if (!overwrite) return { ...parse(target), revision: revision(target) };
+        if (expectedRevision != null && revision(target) !== expectedRevision) return null;
+        const stored = toArangoDoc(value);
+        const { _key: _ignoredKey, createdAt: _ignoredCreatedAt, isFavorite: _ignoredFavorite, coverImageKey: _ignoredCover, ...patch } = stored;
+        const updated = await database.query('UPDATE @id WITH MERGE(@patch, { createdAt: @createdAt, isFavorite: @isFavorite, coverImageKey: @coverImageKey }) IN @@inboxes OPTIONS { keepNull: false } RETURN NEW', { '@inboxes': EMAIL_INBOXES_COLLECTION, id: String(target._id ?? `${EMAIL_INBOXES_COLLECTION}/${String(target._key ?? key)}`), patch, createdAt: target.createdAt, isFavorite: target.isFavorite ?? false, coverImageKey: target.coverImageKey ?? null });
+        const raw = await updated.next();
         return raw ? { ...parse(raw), revision: revision(raw) } : null;
       } catch (caught) {
         if (!isArangoUniqueConstraintError(caught)) throw caught;
