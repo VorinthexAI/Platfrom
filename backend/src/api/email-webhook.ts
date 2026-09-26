@@ -6,33 +6,31 @@ import { enqueueEmailSyncNotification } from '@/lib/email-inbox/sync-queue';
 
 export const GMAIL_WEBHOOK_V1_PATH = '/api/v1/webhooks/gmail/pubsub';
 const pubsubMessageSchema = z.object({
-  data: z.string().min(1).max(4096).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
-  messageId: z.string().min(1).max(500).optional(),
-  message_id: z.string().min(1).max(500).optional(),
-  publishTime: z.string().datetime().optional(),
-  publish_time: z.string().datetime().optional(),
-  attributes: z.record(z.string().max(1000)).optional(),
+  data: z.string().min(1).max(8192),
+  messageId: z.coerce.string().min(1).max(500).optional(),
+  message_id: z.coerce.string().min(1).max(500).optional(),
+  publishTime: z.string().min(1).max(100).optional(),
+  publish_time: z.string().min(1).max(100).optional(),
+  attributes: z.record(z.string(), z.unknown()).optional(),
   orderingKey: z.string().max(1000).optional(),
   ordering_key: z.string().max(1000).optional(),
-}).strict().superRefine((message, context) => {
+}).passthrough().superRefine((message, context) => {
   if (!message.messageId && !message.message_id) context.addIssue({ code: z.ZodIssueCode.custom, message: 'message ID is required' });
-  if (message.messageId && message.message_id && message.messageId !== message.message_id) context.addIssue({ code: z.ZodIssueCode.custom, message: 'message ID aliases disagree' });
-  if (message.publishTime && message.publish_time && message.publishTime !== message.publish_time) context.addIssue({ code: z.ZodIssueCode.custom, message: 'publish time aliases disagree' });
-  if (message.orderingKey && message.ordering_key && message.orderingKey !== message.ordering_key) context.addIssue({ code: z.ZodIssueCode.custom, message: 'ordering key aliases disagree' });
-  if (message.attributes && Object.keys(message.attributes).length > 20) context.addIssue({ code: z.ZodIssueCode.custom, message: 'too many message attributes' });
+  if (message.messageId && message.message_id && String(message.messageId) !== String(message.message_id)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'message ID aliases disagree' });
 }).transform((message) => ({
   data: message.data,
-  messageId: message.messageId ?? message.message_id!,
+  messageId: String(message.messageId ?? message.message_id),
   publishTime: message.publishTime ?? message.publish_time,
-  attributes: message.attributes,
-  orderingKey: message.orderingKey ?? message.ordering_key,
 }));
 const envelopeSchema = z.object({
   message: pubsubMessageSchema,
   subscription: z.string().min(1).max(1000),
-  deliveryAttempt: z.number().int().positive().optional(),
-}).strict();
-const notificationSchema = z.object({ emailAddress: z.string().email(), historyId: z.string().regex(/^\d+$/) }).strict();
+  deliveryAttempt: z.coerce.number().int().positive().optional(),
+}).passthrough();
+const notificationSchema = z.object({
+  emailAddress: z.string().email(),
+  historyId: z.union([z.string(), z.number()]).transform((value) => String(value)).pipe(z.string().regex(/^\d+$/)),
+}).passthrough();
 
 export function isGmailWebhookPath(path: string) {
   return path.replace(/\/+$/, '') === GMAIL_WEBHOOK_V1_PATH;
@@ -68,7 +66,8 @@ export function createGmailWebhookHandler(options: {
       if (bytes.byteLength > 2048) throw new Error('Webhook notification is too large');
       const decoded = bytes.toString('utf8');
       notification = notificationSchema.parse(JSON.parse(decoded));
-    } catch {
+    } catch (error) {
+      logEmailFlow('gmail.webhook.invalid-payload', { error: error instanceof Error ? error.message.slice(0, 400) : 'invalid webhook payload' });
       return c.json({ error: 'invalid webhook payload' }, 400);
     }
     logEmailFlow('gmail.webhook.received', { historyId: notification.historyId, messageId: envelope.message.messageId });

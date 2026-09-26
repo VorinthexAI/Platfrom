@@ -154,11 +154,12 @@ export async function recoverEmailSyncQueue(dependencies: {
         await removeFailed(syncQueue, jobId);
         await syncQueue.add('connector-notification', job, { ...jobOptions, jobId });
       } else {
-        const sourceKey = stableId('sync-recovery', target.connectorKey, target.pendingHistoryId ?? 'error');
+        const bucket = new Date().toISOString().slice(0, 16);
+        const sourceKey = stableId('sync-recovery', target.connectorKey, target.pendingHistoryId ?? `stale:${bucket}`);
         const job = connectorSyncJobSchema.parse({ schemaVersion: 1, kind: 'connector-sync', teamKey: target.teamKey, scopeKey: target.scopeKey, connectorKey: target.connectorKey, sourceKey, requestedAt: new Date().toISOString() });
         const jobId = stableId('connector-sync', sourceKey, target.teamKey, target.scopeKey, target.connectorKey);
         await removeFailed(syncQueue, jobId);
-        await syncQueue.add('connector-sync', job, { ...jobOptions, jobId });
+        await syncQueue.add('connector-sync', job, { ...jobOptions, removeOnComplete: true, jobId });
       }
     } catch { failures += 1; }
   }

@@ -230,6 +230,7 @@ describe('email synchronization jobs', () => {
     expect(queued.map(({ options }) => options.jobId)).toEqual(firstIds);
     expect(removals).toBe(3);
     expect(queued[0]!.options.removeOnComplete).toBe(true);
+    expect(queued[2]!.options.removeOnComplete).toBe(true);
   });
 
   test('safely drains persisted jobs from the removed connector polling scheduler', async () => {
