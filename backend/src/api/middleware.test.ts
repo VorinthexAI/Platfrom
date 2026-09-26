@@ -63,7 +63,7 @@ describe('application key middleware', () => {
 
   test('does not look up apps for health or the public registry', async () => {
     const exempt = createBindEventApp(async () => { throw new Error('must not query'); });
-    for (const path of ['/api/v1/health', '/api/v1/apps', '/api/v1/products', '/api/v1/costs']) await exempt(middlewareContext(path), async () => undefined);
+    for (const path of ['/api/v1/health', '/api/v1/apps', '/api/v1/products', '/api/v1/costs', '/api/v1/webhooks/gmail/pubsub', '/api/v1/webhooks/resend', '/api/v1/webhooks/polar']) await exempt(middlewareContext(path), async () => undefined);
   });
 });
 
@@ -170,7 +170,8 @@ describe('rate limit middleware', () => {
     expect(limited.headers.get('ratelimit-limit')).toBe('2');
     expect(Number(limited.headers.get('retry-after'))).toBeGreaterThan(0);
     expect((await app.request('/api/v1/private', { headers: { 'x-forwarded-for': '203.0.113.2' } })).status).toBe(200);
-    expect((await app.request('/api/v1/webhooks/polar', { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.1' } })).status).toBe(429);
+    expect((await app.request('/api/v1/webhooks/polar', { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.1' } })).status).toBe(200);
+    expect((await app.request('/api/v1/webhooks/gmail/pubsub', { method: 'POST', headers: { 'x-forwarded-for': '203.0.113.1' } })).status).toBe(200);
   });
 
   test('bypasses normal requests when disabled', async () => {

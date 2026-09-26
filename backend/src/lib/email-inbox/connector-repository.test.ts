@@ -232,6 +232,8 @@ describe('team connector repository', () => {
     expect(calls[1]!.query).toContain('LENGTH(NOT_NULL(connector.syncPendingThreadIds, [])) == 0');
     expect(calls[1]!.query).toContain('connector.historyId >= @historyId');
     expect(calls[2]!.query).toContain('connector.initialSyncCompleted != true');
+    expect(calls[2]!.query).toContain('connector.lastSyncedAt <= @staleBefore');
+    expect(typeof calls[2]!.bindVars.staleBefore).toBe('string');
   });
 
   test('renews watch metadata without changing the persisted History or pending continuation cursor', async () => {

@@ -5,7 +5,7 @@
 - Configure and verify the Google OAuth consent screen, including the production domain, privacy policy, requested Gmail scopes, and Google verification where required.
 - Enable the Gmail API in the Google Cloud project used by the production OAuth client. OAuth consent can succeed even when that API is disabled; the first Gmail profile request will then return HTTP 403 and the app cannot finish connecting.
 - Create `GMAIL_PUBSUB_TOPIC` and grant `gmail-api-push@system.gserviceaccount.com` the Pub/Sub Publisher role on that topic.
-- Create an authenticated push subscription for the topic. Use a dedicated service account and the production email webhook URL, and configure the webhook audience expected by the backend.
+- Create an authenticated push subscription for the topic. Use a dedicated service account and `https://api.vorinthex.com/api/v1/webhooks/gmail/pubsub` (DNS-only, not the Cloudflare apex). Set `GMAIL_PUBSUB_PUSH_AUDIENCE` to that same URL.
 - Set `GMAIL_OAUTH_CLIENT_ID` and `GMAIL_OAUTH_CLIENT_SECRET` (or their `GOOGLE_OAUTH_*` fallbacks), `BACKEND_PUBLIC_URL`, `GMAIL_PUBSUB_TOPIC`, `GMAIL_PUBSUB_PUSH_AUDIENCE`, `GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL`, `GMAIL_PUBSUB_SUBSCRIPTION`, `EMAIL_CONNECTOR_CREDENTIAL_KEYS`, `EMAIL_CONNECTOR_ACTIVE_KEY_ID`, `EMAIL_CONNECTOR_MOBILE_REDIRECT_URIS`, and `REDIS_URL` or `JOB_REDIS_URL` in the encrypted environment registry.
 - Run Redis, the email synchronization workers, and Gmail watch renewal continuously.
 - Monitor OAuth failures, webhook authentication, queue depth and retries, sync errors, expiring watches, and token refresh failures. Test connect, initial sync, push sync, watch renewal, send, and disconnect with production-like accounts before launch.

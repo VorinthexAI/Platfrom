@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { verifyGoogleOidcToken } from '@/lib/google-oidc';
+import { logEmailFlow } from '@/lib/email-inbox/flow-log';
 import { enqueueEmailSyncNotification } from '@/lib/email-inbox/sync-queue';
 
 export const GMAIL_WEBHOOK_V1_PATH = '/api/v1/webhooks/gmail/pubsub';
@@ -49,9 +50,15 @@ export function createGmailWebhookHandler(options: {
 } = {}) {
   return async (c: Context) => {
     const token = c.req.header('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
-    if (!token) return c.json({ error: 'webhook authentication required' }, 401);
+    if (!token) {
+      logEmailFlow('gmail.webhook.unauthenticated', { path: c.req.path });
+      return c.json({ error: 'webhook authentication required' }, 401);
+    }
     const identity = await (options.verify ?? verifyGoogleOidcToken)(token, { audience: required('GMAIL_PUBSUB_PUSH_AUDIENCE'), email: required('GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL') }).catch(() => null);
-    if (!identity) return c.json({ error: 'invalid webhook identity' }, 401);
+    if (!identity) {
+      logEmailFlow('gmail.webhook.invalid-identity', { path: c.req.path });
+      return c.json({ error: 'invalid webhook identity' }, 401);
+    }
     let envelope: z.infer<typeof envelopeSchema>;
     let notification: z.infer<typeof notificationSchema>;
     try {
@@ -64,10 +71,12 @@ export function createGmailWebhookHandler(options: {
     } catch {
       return c.json({ error: 'invalid webhook payload' }, 400);
     }
+    logEmailFlow('gmail.webhook.received', { historyId: notification.historyId, messageId: envelope.message.messageId });
     await (options.enqueue ?? enqueueEmailSyncNotification)({
       emailAddress: notification.emailAddress, historyId: notification.historyId, messageId: envelope.message.messageId,
       subscription: envelope.subscription, publishTime: envelope.message.publishTime,
     });
+    logEmailFlow('gmail.webhook.enqueued', { historyId: notification.historyId, messageId: envelope.message.messageId });
     return c.body(null, 204);
   };
 }

@@ -185,11 +185,11 @@ export function createConnectorRepository(database: Database = db) {
       `, { '@collection': USER_CONNECTORS_COLLECTION, key, historyId: z.string().regex(/^\d+$/).parse(historyId) });
       return (await cursor.next()) === true;
     },
-    async listSyncRecoveryTargets() {
+    async listSyncRecoveryTargets(staleBefore = new Date(Date.now() - 90_000).toISOString()) {
       const cursor = await database.query(`
         FOR connector IN @@collection
           FILTER connector.provider == "gmail" && connector.status != "revoked" && connector.syncEnabled != false
-          FILTER connector.initialSyncCompleted != true || connector.pendingNotificationHistoryId != null || LENGTH(NOT_NULL(connector.syncPendingThreadIds, [])) > 0 || connector.syncStatus == "error"
+          FILTER connector.initialSyncCompleted != true || connector.pendingNotificationHistoryId != null || LENGTH(NOT_NULL(connector.syncPendingThreadIds, [])) > 0 || connector.syncStatus == "error" || connector.lastSyncedAt == null || connector.lastSyncedAt <= @staleBefore
           RETURN {
             teamKey: connector.teamKey,
             scopeKey: connector.scopeKey,
@@ -198,7 +198,7 @@ export function createConnectorRepository(database: Database = db) {
             pendingNotificationHistoryId: connector.pendingNotificationHistoryId,
             pendingHistoryId: connector.syncPendingHistoryId
           }
-      `, { '@collection': USER_CONNECTORS_COLLECTION });
+      `, { '@collection': USER_CONNECTORS_COLLECTION, staleBefore });
       return cursor.all() as Promise<Array<{ teamKey: string; scopeKey: string; connectorKey: string; initialSyncCompleted: boolean; pendingNotificationHistoryId?: string; pendingHistoryId?: string }>>;
     },
     async listWatchRenewalTargets(before: string) {
