@@ -503,6 +503,7 @@ export function createEmailService(options: {
   getUser?: (userKey: string) => Promise<Pick<User, 'name' | 'alias'> | null>;
   idempotency?: { claim: typeof claimContentIdempotency; start: typeof startContentIdempotency; complete: typeof completeContentIdempotency; fail: typeof failContentIdempotency; renew?: typeof renewContentIdempotency; release: typeof releaseContentIdempotency };
   sparkBilling?: Pick<typeof sparkService, 'chargeExecution' | 'completeExecution'>;
+  notifyInboundEmail?: (input: { userKey: string; teamKey: string; scopeKey: string; title: string; message: string; idempotencyKey: string }) => Promise<unknown>;
 } = {}) {
   const repository = options.repository ?? createEmailRepository(undefined, publishUserEvent);
   const connectors = options.connectors ?? createConnectorRepository();
@@ -534,6 +535,7 @@ export function createEmailService(options: {
   const getUser = options.getUser ?? getUserById;
   const idempotency = options.idempotency ?? { claim: claimContentIdempotency, start: startContentIdempotency, complete: completeContentIdempotency, fail: failContentIdempotency, renew: renewContentIdempotency, release: releaseContentIdempotency };
   const sparkBilling = options.sparkBilling ?? sparkService;
+  const notifyInboundEmail = options.notifyInboundEmail ?? (async (input) => (await import('@/lib/app-notifications/service')).appNotificationService.notifyInboundEmail(input));
   const watchTopic = () => process.env.GMAIL_PUBSUB_TOPIC?.trim() || null;
   const beginRepair = async (actor: EmailActor, connectorKey: string, reason: 'favorite' | 'read-state' | 'trash' | 'send', operation?: { kind: 'favorite'; threadKeys: string[]; isFavorite: boolean } | { kind: 'read-state'; threadKeys: string[]; isRead: boolean } | { kind: 'trash'; threadKeys: string[] }, sendDraftKey?: string) => {
     const result = await enqueueRepair({ teamKey: actor.teamKey, scopeKey: destinationScope(actor), connectorKey, reason, operationKey: randomUUID(), ...(operation ? { operation } : {}), ...(sendDraftKey ? { sendDraftKey } : {}) });
@@ -1197,6 +1199,17 @@ export function createEmailService(options: {
             if (latest && subscriptionMessages.has(latest.providerMessageId)) {
               await service.createDraftIfNeeded(actor, { connectorKey: account.key, threadKey: persisted.key, messageKey: emailMessageKey(account.userKey, account.key, latest.providerMessageId) })
                 .catch((error) => console.error('automatic email draft creation failed', { connectorKey: account.key, threadKey: persisted.key, error }));
+              if (latest.direction === 'inbound' && (inboxCategory === 'Urgent' || inboxCategory === 'Important' || inboxCategory === 'Purchases')) {
+                const preview = (latest.summary || latest.body).replace(/\s+/g, ' ').trim();
+                await notifyInboundEmail({
+                  userKey: account.userKey,
+                  teamKey: actor.teamKey,
+                  scopeKey: destinationScope(actor),
+                  title: persisted.subject.slice(0, 100) || 'New email',
+                  message: `${latest.from}: ${preview}`.trim().slice(0, 1000) || 'New email in Signal',
+                  idempotencyKey: `inbox.inbound:${account.key}:${latest.providerMessageId}`,
+                }).catch((error) => console.error('inbound email notification failed', { connectorKey: account.key, threadKey: persisted.key, error }));
+              }
             }
           }
           await publishInboxChangedDurably(destinationScope(actor));

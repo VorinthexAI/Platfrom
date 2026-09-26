@@ -60,6 +60,20 @@ export function createAppNotificationService(dependencies: { repository?: AppNot
       if (result.deliveries > 0) await enqueue(result.key);
       return result;
     },
+    async notifyInboundEmail(input: { userKey: string; teamKey: string; scopeKey: string; title: string; message: string; idempotencyKey: string }) {
+      const title = z.string().trim().min(1).max(100).parse(input.title);
+      const message = z.string().trim().min(1).max(1_000).parse(input.message);
+      const embedding = currentEmbeddingSchema.parse(await (dependencies.embed ?? ((text) => embedText({ text, purpose: 'document' })))(`${title}\n\n${message}`));
+      const result = await repository.createNotification(
+        { title, message, userKeys: [input.userKey], notifyAll: false },
+        { actorUserKey: input.userKey, teamKey: input.teamKey, scopeKey: input.scopeKey, idempotencyKey: input.idempotencyKey },
+        [input.userKey],
+        embedding,
+      );
+      if (!result.replayed) await publishChanged(input.userKey, 'communication.changed').catch(() => undefined);
+      if (result.deliveries > 0) await enqueue(result.key);
+      return result;
+    },
     async notifyStorageRetentionWarning(rawInput: z.input<typeof storageRetentionWarningInputSchema>) {
       const input = storageRetentionWarningInputSchema.parse(rawInput);
       const content = storageRetentionWarningContent(input.monthlyCostSparks, input.wipeDueAt, input.now);

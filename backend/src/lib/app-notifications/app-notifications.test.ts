@@ -115,6 +115,21 @@ describe('app notifications', () => {
     expect(order.slice(-2)).toEqual(['persist', 'publish:user:communication.changed']);
   });
 
+  test('notifies the inbox owner of inbound Signal mail without a member actor', async () => {
+    const order: string[] = [];
+    const created: unknown[] = [];
+    const userKey = newId();
+    const teamKey = newId();
+    const scopeKey = newId();
+    const repository = {
+      createNotification: async (...args: unknown[]) => { created.push(args); order.push('persist'); return { key: 'inbound-1', recipients: 1, deliveries: 1, replayed: false }; },
+    } as any;
+    const service = createAppNotificationService({ repository, embed: async (text) => { order.push(`embed:${text}`); return Array(EMBEDDING_DIMENSIONS).fill(0.25); }, enqueue: async (key) => { order.push(`enqueue:${key}`); }, publishChanged: async (key, event) => { order.push(`publish:${key}:${event}`); } });
+    await service.notifyInboundEmail({ userKey, teamKey, scopeKey, title: 'Invoice', message: 'billing@example.com: Receipt attached', idempotencyKey: 'inbox.inbound:connector:message' });
+    expect(order).toEqual(['embed:Invoice\n\nbilling@example.com: Receipt attached', 'persist', `publish:${userKey}:communication.changed`, 'enqueue:inbound-1']);
+    expect(created[0]).toEqual([{ title: 'Invoice', message: 'billing@example.com: Receipt attached', userKeys: [userKey], notifyAll: false }, { actorUserKey: userKey, teamKey, scopeKey, idempotencyKey: 'inbox.inbound:connector:message' }, [userKey], expect.any(Array)]);
+  });
+
   test('atomically fences one warning per UTC day and lifecycle while persisting embedding metadata and delivery rows', async () => {
     const queries: Array<{ query: string; bind?: Record<string, unknown> }> = [];
     const repository = createAppNotificationRepository({ query: async (query: string, bind?: Record<string, unknown>) => { queries.push({ query, bind }); return { next: async () => ({ key: 'warning', deliveries: 1 }) }; } } as never);
@@ -204,19 +219,24 @@ describe('app notifications', () => {
     expect(source).not.toContain('userInboxThreads');
   });
 
-  test('suppresses device deliveries for active users without removing their history', async () => {
+  test('delivers device pushes even when the recipient is present in the app', async () => {
+    process.env.EXPO_PUSH_TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString('base64');
     const activeUserKey = newId();
-    const suppressed: string[][] = [];
+    const sent: unknown[] = [];
     let reads = 0;
     const repository = {
-      pendingDeliveries: async () => reads++ === 0 ? [{ key: 'delivery-1', userKey: activeUserKey, tokenCiphertext: 'unused', projectId: newId(), title: 'Ready', message: 'Body', notificationKey: 'notification-1' }] : [],
-      suppressDeliveries: async (keys: string[]) => { suppressed.push(keys); },
+      pendingDeliveries: async () => reads++ === 0 ? [{ key: 'delivery-1', userKey: activeUserKey, tokenCiphertext: encryptPushToken('ExpoPushToken[active-1]'), projectId: newId(), title: 'Ready', message: 'Body', notificationKey: 'notification-1' }] : [],
+      recordTickets: async () => undefined,
     } as any;
-    await expect(processAppNotificationJob({ kind: 'send', notificationKey: 'notification-1', check: 1 }, repository, async () => new Set([activeUserKey]))).resolves.toEqual({ processed: 0, suppressed: 1 });
-    expect(suppressed).toEqual([['delivery-1']]);
+    await expect(processAppNotificationJob({ kind: 'send', notificationKey: 'notification-1', check: 1 }, repository, async () => new Set([activeUserKey]), {
+      sendPush: async (messages) => { sent.push(messages); return [{ status: 'ok', id: 'receipt-1' }]; },
+      schedule: async () => undefined,
+      deepLinkUrl: 'https://app.example.com/capability/signal',
+    })).resolves.toEqual({ processed: 1 });
+    expect(sent).toHaveLength(1);
   });
 
-  test('suppresses every active device while delivering and mapping tickets for inactive users', async () => {
+  test('delivers every queued device and maps tickets without suppressing in-app recipients', async () => {
     process.env.EXPO_PUSH_TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString('base64');
     const activeUserKey = newId();
     const inactiveUserKey = newId();
@@ -224,28 +244,29 @@ describe('app notifications', () => {
     const delivery = (key: string, userKey: string, token: string) => ({ key, userKey, tokenCiphertext: encryptPushToken(token), projectId, title: 'Ready', message: 'Body', notificationKey: 'notification-1', signalThreadKey: 'thread-1', signalMessageKey: 'message-1' });
     const initial = [delivery('active-1', activeUserKey, 'ExpoPushToken[active-1]'), delivery('active-2', activeUserKey, 'ExpoPushToken[active-2]'), delivery('inactive-1', inactiveUserKey, 'ExpoPushToken[inactive-1]'), delivery('inactive-2', inactiveUserKey, 'ExpoPushToken[inactive-2]')];
     let reads = 0;
-    const suppressed: string[][] = [];
     const recorded: unknown[] = [];
     const sent: unknown[] = [];
     const scheduled: unknown[] = [];
     const repository = {
       pendingDeliveries: async () => reads++ === 0 ? initial : [],
-      suppressDeliveries: async (keys: string[]) => { suppressed.push(keys); },
       recordTickets: async (results: unknown) => { recorded.push(results); },
     } as any;
     const result = await processAppNotificationJob({ kind: 'send', notificationKey: 'notification-1', check: 3 }, repository, async () => new Set([activeUserKey]), {
-      sendPush: async (messages) => { sent.push(messages); return [{ status: 'ok', id: 'receipt-1' }, { status: 'error', details: { error: 'DeviceNotRegistered' } }]; },
+      sendPush: async (messages) => { sent.push(messages); return messages.map((message, index) => index % 2 === 0 ? { status: 'ok' as const, id: `receipt-${index}` } : { status: 'error' as const, details: { error: 'DeviceNotRegistered' } }); },
       schedule: async (...args) => { scheduled.push(args); },
-      deepLinkUrl: 'https://app.example.com/capability/signal?inbox=internal&tab=unread',
+      deepLinkUrl: 'https://app.example.com/capability/signal',
     });
-    expect(result).toEqual({ processed: 2, suppressed: 2 });
-    expect(suppressed).toEqual([['active-1', 'active-2']]);
+    expect(result).toEqual({ processed: 4 });
     expect(sent).toEqual([[
-      { to: 'ExpoPushToken[inactive-1]', title: 'Ready', body: 'Body', data: { v: '4', url: 'https://app.example.com/capability/signal?inbox=internal&tab=unread', notificationKey: 'notification-1' } },
-      { to: 'ExpoPushToken[inactive-2]', title: 'Ready', body: 'Body', data: { v: '4', url: 'https://app.example.com/capability/signal?inbox=internal&tab=unread', notificationKey: 'notification-1' } },
+      { to: 'ExpoPushToken[active-1]', title: 'Ready', body: 'Body', data: { v: '4', url: 'https://app.example.com/capability/signal', notificationKey: 'notification-1' } },
+      { to: 'ExpoPushToken[active-2]', title: 'Ready', body: 'Body', data: { v: '4', url: 'https://app.example.com/capability/signal', notificationKey: 'notification-1' } },
+      { to: 'ExpoPushToken[inactive-1]', title: 'Ready', body: 'Body', data: { v: '4', url: 'https://app.example.com/capability/signal', notificationKey: 'notification-1' } },
+      { to: 'ExpoPushToken[inactive-2]', title: 'Ready', body: 'Body', data: { v: '4', url: 'https://app.example.com/capability/signal', notificationKey: 'notification-1' } },
     ]]);
     expect(recorded).toEqual([[
-      { key: 'inactive-1', status: 'receipt_pending', receiptId: 'receipt-1', deviceNotRegistered: false },
+      { key: 'active-1', status: 'receipt_pending', receiptId: 'receipt-0', deviceNotRegistered: false },
+      { key: 'active-2', status: 'failed', error: 'DeviceNotRegistered', deviceNotRegistered: true },
+      { key: 'inactive-1', status: 'receipt_pending', receiptId: 'receipt-2', deviceNotRegistered: false },
       { key: 'inactive-2', status: 'failed', error: 'DeviceNotRegistered', deviceNotRegistered: true },
     ]]);
     expect((scheduled[0] as unknown[])?.[0]).toBe('receipts');

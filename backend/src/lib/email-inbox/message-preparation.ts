@@ -170,7 +170,7 @@ export async function sortAndPersistInboxThread(input: {
     })),
   });
   await input.beforePersist();
-  return input.repository.syncThread({
+  const stored = await input.repository.syncThread({
     thread: { ...thread, embedding: archiveRepresentation.embedding, archiveRepresentation },
     messages,
     reconcileMessages: input.reconcileMessages,
@@ -178,4 +178,5 @@ export async function sortAndPersistInboxThread(input: {
     attachmentCommits: input.attachmentCommits,
     subscriptionBilling: input.subscriptionBilling,
   });
+  return { ...stored, inboxCategory, subject: thread.subject, inInbox: thread.inInbox };
 }

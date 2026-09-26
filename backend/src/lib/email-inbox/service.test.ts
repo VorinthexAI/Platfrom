@@ -737,6 +737,7 @@ describe('email synchronization', () => {
     const raw = gmailMessage('changed-message', 'changed-thread');
     const persisted: unknown[] = [];
     let automaticDraftChecks = 0;
+    const notices: unknown[] = [];
     for (const source of ['sync', 'subscription'] as const) {
       const account = { ...connector, historyId: '100', lastSyncedAt: now };
       let saved: unknown;
@@ -747,6 +748,7 @@ describe('email synchronization', () => {
         client: () => ({ profile: async () => ({ historyId: '125' }), history: async () => ({ historyId: '125', history: [{ messagesAdded: [{ message: { id: raw.id, threadId: raw.threadId } }] }] }), threadMetadata: async () => ({ id: raw.threadId, messages: [raw] }), message: async () => raw }) as never,
         classify: async () => ({ priority: 'urgent', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }),
         embed: async () => embedding,
+        notifyInboundEmail: async (input) => { notices.push(input); },
       });
       if (source === 'sync') await service.sync(actor, connector.key);
       else await service.ingestSubscriptionNotification({ ...actor, userKey: 'system' }, connector.key, '999');
@@ -756,6 +758,14 @@ describe('email synchronization', () => {
     }
     expect(persisted[0]).toEqual(persisted[1]);
     expect(automaticDraftChecks).toBe(1);
+    expect(notices).toEqual([{
+      userKey,
+      teamKey: actor.teamKey,
+      scopeKey: actor.scopeKey,
+      title: 'Review',
+      message: `${message.from}: ${message.summary}`.slice(0, 1000),
+      idempotencyKey: `inbox.inbound:${connector.key}:${raw.id}`,
+    }]);
     expect(persisted[0]).toMatchObject({
       thread: { inboxCategory: 'Urgent', embeddingContentVersion: 4, archiveRepresentation: { semanticChunkCount: 1 } },
       messages: [{ inboxCategory: 'Urgent', embeddingContentVersion: 4, archiveRepresentation: { semanticChunkCount: 1 } }],

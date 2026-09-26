@@ -4,7 +4,6 @@ import { createRedisConnection } from '@/lib/redis';
 import { appNotificationRepository, type AppNotificationRepository } from './repository';
 import { decryptPushToken } from './token-crypto';
 import { getExpoPushReceipts, sendExpoPush } from './expo-provider';
-import { getActivePresenceUserKeys } from '@/lib/presence/session-state';
 import { managedInboxDeepLinkUrl } from './deep-links';
 
 const QUEUE_NAME = 'app-push-notifications';
@@ -32,15 +31,11 @@ export async function enqueueAppNotification(notificationKey: string) {
   await target.add('send', { kind: 'send', notificationKey, check: 1 }, { ...options, jobId: id });
 }
 
-export async function processAppNotificationJob(raw: unknown, repository: AppNotificationRepository = appNotificationRepository, activeUsers: typeof getActivePresenceUserKeys = getActivePresenceUserKeys, dependencies: ProcessorDependencies = {}) {
+export async function processAppNotificationJob(raw: unknown, repository: AppNotificationRepository = appNotificationRepository, _activeUsers?: unknown, dependencies: ProcessorDependencies = {}) {
   const job = jobSchema.parse(raw);
   const schedule = dependencies.schedule ?? ((name, data, jobOptions) => getQueue().add(name, data, jobOptions));
   if (job.kind === 'send') {
-    const allPending = await repository.pendingDeliveries(job.notificationKey);
-    const activeUserKeys = await activeUsers(allPending.map(({ userKey }) => userKey));
-    const suppressed = allPending.filter(({ userKey }) => activeUserKeys.has(userKey));
-    await repository.suppressDeliveries(suppressed.map(({ key }) => key));
-    const pending = allPending.filter(({ userKey }) => !activeUserKeys.has(userKey));
+    const pending = await repository.pendingDeliveries(job.notificationKey);
     const byProject = new Map<string, typeof pending>();
     for (const delivery of pending) byProject.set(delivery.projectId, [...(byProject.get(delivery.projectId) ?? []), delivery]);
     for (const deliveries of byProject.values()) for (let index = 0; index < deliveries.length; index += 100) {
@@ -54,7 +49,7 @@ export async function processAppNotificationJob(raw: unknown, repository: AppNot
     }
     if (job.check < 3 && (await repository.pendingDeliveries(job.notificationKey)).length) await schedule('send', { kind: 'send', notificationKey: job.notificationKey, check: job.check + 1 }, { ...options, delay: 2 ** job.check * 1_000, jobId: `send-${job.notificationKey}-${job.check + 1}` });
     if (pending.length) await schedule('receipts', { kind: 'receipts', notificationKey: job.notificationKey, check: 1 }, { ...options, delay: 15 * 60_000, jobId: `receipts-${job.notificationKey}-1` });
-    return { processed: pending.length, suppressed: suppressed.length };
+    return { processed: pending.length };
   }
   const pending = await repository.pendingReceipts(job.notificationKey);
   for (let index = 0; index < pending.length; index += 300) {
