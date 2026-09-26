@@ -153,12 +153,17 @@ describe('team connector repository', () => {
   test('blocks new connector work while provider revocation is pending', async () => {
     let call: { query: string; bindVars: Record<string, unknown> } | undefined;
     const database = { collection: () => ({}), query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return { next: async () => null }; } };
-    expect(await createConnectorRepository(database as never).claimDisconnect(teamMembershipKey, '2026-08-11T12:00:00.000Z')).toBeNull();
+    expect(await createConnectorRepository(database as never).claimDisconnect(teamMembershipKey)).toBeNull();
     expect(call?.query).toContain('syncEnabled: false');
     expect(call?.query).toContain('status: "error"');
+    expect(call?.query).toContain('OPTIONS { keepNull: false }');
+    expect(call?.query).toContain('syncLeaseToken: null');
+    expect(call?.query).toContain('sendLeaseToken: null');
     expect(call?.query).not.toContain('billingStatus');
-    expect(call?.query).toContain('connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now');
-    expect(call?.query).toContain('connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now');
+    expect(call?.query).not.toContain('expectedUpdatedAt');
+    expect(call?.query).not.toContain('connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now');
+    expect(call?.query).not.toContain('connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now');
+    expect(call?.bindVars).toMatchObject({ key: teamMembershipKey });
   });
 
   test('makes connector sync and send claims mutually exclusive', async () => {

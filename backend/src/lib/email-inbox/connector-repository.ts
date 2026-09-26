@@ -229,9 +229,9 @@ export function createConnectorRepository(database: Database = db) {
     async releaseSend(key: string, token: string) {
       await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.sendLeaseToken == @token UPDATE connector WITH { sendLeaseToken: null, sendLeaseExpiresAt: null } IN @@collection OPTIONS { keepNull: false }', { '@collection': USER_CONNECTORS_COLLECTION, key, token });
     },
-    async claimDisconnect(key: string, expectedUpdatedAt: string) {
+    async claimDisconnect(key: string) {
       const updatedAt = new Date().toISOString();
-      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.updatedAt == @expectedUpdatedAt && connector.status != "revoked" && (connector.syncLeaseExpiresAt == null || connector.syncLeaseExpiresAt <= @now) && (connector.sendLeaseExpiresAt == null || connector.sendLeaseExpiresAt <= @now) UPDATE connector WITH { status: "error", syncEnabled: false, syncStatus: "idle", lastError: "Email disconnect is pending", updatedAt: @updatedAt } IN @@collection RETURN NEW', { '@collection': USER_CONNECTORS_COLLECTION, key, expectedUpdatedAt, now: updatedAt, updatedAt });
+      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.status != "revoked" UPDATE connector WITH { status: "error", syncEnabled: false, syncStatus: "idle", lastError: "Email disconnect is pending", syncLeaseToken: null, syncLeaseExpiresAt: null, sendLeaseToken: null, sendLeaseExpiresAt: null, updatedAt: @updatedAt } IN @@collection OPTIONS { keepNull: false } RETURN NEW', { '@collection': USER_CONNECTORS_COLLECTION, key, updatedAt });
       const raw = await cursor.next();
       return raw ? parse(raw) : null;
     },

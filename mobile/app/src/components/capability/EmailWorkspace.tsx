@@ -3307,7 +3307,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
               <PlusIcon size="sm" />
             </Button>
           </View>
-          {rootBulkToolbar}
           <View style={styles.rootActions}>
             <View style={styles.rootSearch}>
               <SearchIcon size="sm" variant="muted" />
@@ -3335,6 +3334,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
             </Button>
           </View>
           <TagFilterLane context={historyContext} />
+          {rootBulkToolbar}
           <View style={styles.rootContent}>
             <Tabs accessibilityLabel="Signal root categories" accessibilityRole="tablist" style={styles.rootTabs}>
               <Button accessibilityRole="tab" accessibilityState={{ selected: rootTab === "inboxes" }} onPress={() => setRootTab("inboxes")} size="xs" style={styles.rootTab} variant={rootTab === "inboxes" ? "secondary" : "ghost"}>Inboxes</Button>

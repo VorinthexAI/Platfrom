@@ -2987,12 +2987,43 @@ describe('multi-inbox account authorization', () => {
     await expect(service.disconnect(actor, connector.key)).rejects.toThrow('changed while deleting the inbox');
   });
 
-  test('does not disconnect a connector while its send lease is active', async () => {
+  test('disconnects a connector even while a sync or send lease is active', async () => {
+    const disconnecting = { ...connector, status: 'error' as const, syncEnabled: false, updatedAt: '2026-08-11T12:01:00.000Z' };
+    const calls: string[] = [];
+    const service = createEmailService({
+      repository: { purgeConnectorMailbox: async () => { calls.push('purge'); return { storageKeys: [] }; } } as never,
+      connectors: {
+        getExact: async () => connector,
+        claimDisconnect: async (key: string) => { calls.push(`claim:${key}`); return disconnecting; },
+        credentials: () => ({ accessToken: 'access', tokenType: 'Bearer', expiresAt: '2027-01-01T00:00:00.000Z' }),
+        listSyncTargetsByEmail: async () => [{ connectorKey: 'other' }],
+      } as never,
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
+      publishInboxChanged: async () => undefined,
+    });
+    await expect(service.disconnect(actor, connector.key)).resolves.toEqual({ disconnected: true });
+    expect(calls).toEqual([`claim:${connector.key}`, 'purge']);
+  });
+
+  test('treats a concurrent inbox deletion as already disconnected', async () => {
     const service = createEmailService({
       repository: {} as never,
-      connectors: { getExact: async () => connector, claimDisconnect: async () => null } as never,
+      connectors: {
+        getExact: async () => connector,
+        claimDisconnect: async () => null,
+      } as never,
       authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
     });
+    let reads = 0;
+    const racing = createEmailService({
+      repository: {} as never,
+      connectors: {
+        getExact: async () => { reads += 1; return reads === 1 ? connector : null; },
+        claimDisconnect: async () => null,
+      } as never,
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
+    });
+    await expect(racing.disconnect(actor, connector.key)).resolves.toEqual({ disconnected: true });
     await expect(service.disconnect(actor, connector.key)).rejects.toThrow('changed while disconnecting');
   });
 });

@@ -1914,12 +1914,23 @@ export function createEmailService(options: {
       connectorKey = keySchema.parse(connectorKey);
       const connector = await connectors.getExact(actor.userKey, connectorKey);
       if (!connector || connector.status === 'revoked') return { disconnected: true };
-      const disconnecting = await connectors.claimDisconnect(connector.key, connector.updatedAt);
-      if (!disconnecting) throw new EmailRepositoryError('conflict', 'Email connector changed while disconnecting');
+      const disconnecting = await connectors.claimDisconnect(connector.key);
+      if (!disconnecting) {
+        const current = await connectors.getExact(actor.userKey, connectorKey);
+        if (!current || current.status === 'revoked') return { disconnected: true };
+        throw new EmailRepositoryError('conflict', 'Email connector changed while disconnecting');
+      }
       let credentials: ReturnType<ConnectorRepository['credentials']> | undefined;
       try { credentials = connectors.credentials(disconnecting); } catch { credentials = undefined; }
       const remaining = (await connectors.listSyncTargetsByEmail(disconnecting.email)).filter((target) => target.connectorKey !== disconnecting.key);
-      const purged = await repository.purgeConnectorMailbox(privateScope(actor), actor.userKey, disconnecting.key);
+      let purged: { storageKeys: string[] };
+      try {
+        purged = await repository.purgeConnectorMailbox(privateScope(actor), actor.userKey, disconnecting.key);
+      } catch (error) {
+        const current = await connectors.getExact(actor.userKey, connectorKey);
+        if (!current || current.status === 'revoked') return { disconnected: true };
+        throw error;
+      }
       await Promise.all(purged.storageKeys.map(async (storageKey) => {
         try { await storage.delete(storageKey); await acknowledgeStorageDeletionKey(storageKey); } catch { /* Durable deletion jobs retry failed cleanup. */ }
       }));
