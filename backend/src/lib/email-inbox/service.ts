@@ -1606,8 +1606,13 @@ export function createEmailService(options: {
       if (connector.userKey !== actor.userKey || connector.teamKey !== actor.teamKey || connector.scopeKey !== destinationScope(actor)) throw new EmailRepositoryError('forbidden');
       await repository.initializeTones(actor.userKey, privateScope(actor), (text) => embed({ text }, actor.teamKey));
       const embedding = await embed({ text: buildEmbeddingText(inboxEmbeddingFields, metadata)! }, actor.teamKey);
+      logEmailFlow('inbox.ensure.begin', { connectorKey: connector.key, overwrite, expectedRevision: expectedRevision ?? null, status: connector.status });
       const inbox = await inboxes.ensure(connector, metadata, embedding, overwrite, expectedRevision);
-      if (!inbox) throw new EmailRepositoryError('conflict', 'Inbox metadata changed while reconnecting email');
+      if (!inbox) {
+        logEmailFlow('inbox.ensure.conflict', { connectorKey: connector.key, overwrite, expectedRevision: expectedRevision ?? null });
+        throw new EmailRepositoryError('conflict', 'Inbox metadata changed while reconnecting email');
+      }
+      logEmailFlow('inbox.ensure.ok', { connectorKey: connector.key, inboxKey: inbox.key, revision: inbox.revision });
       return inbox;
     },
     async inboxView(actor: EmailActor, connectorKey: string) {

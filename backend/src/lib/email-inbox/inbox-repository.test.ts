@@ -22,8 +22,10 @@ describe('dedicated inbox repository', () => {
     const value = await createInboxRepository(database as never).ensure(source, { name: 'Work' }, embedding, true);
     expect(value).toMatchObject({ connectorKey: source.key, name: 'Work', isFavorite: false });
     expect(call?.query).toContain('IN @@inboxes');
-    expect(call?.query).toContain('createdAt: OLD.createdAt');
-    expect(call?.query).toContain('isFavorite: OLD.isFavorite');
+    expect(call?.query).toContain('DOCUMENT(@@inboxes, @key)');
+    expect(call?.query).toContain('createdAt: target.createdAt');
+    expect(call?.query).toContain('isFavorite: target.isFavorite');
+    expect(call?.bindVars.key).toMatch(/^c[0-9a-f]{24}$/);
     expect(call?.bindVars).toMatchObject({ '@inboxes': 'emailInboxes' });
   });
 
@@ -42,7 +44,7 @@ describe('dedicated inbox repository', () => {
     let call: { query: string; bindVars: Record<string, unknown> } | undefined;
     const database = { query: async (query: string, bindVars: Record<string, unknown>) => { call = { query, bindVars }; return { next: async () => null }; } };
     expect(await createInboxRepository(database as never).ensure(source, { name: 'Replacement' }, embedding, true, 'inbox-before-oauth')).toBeNull();
-    expect(call?.query).toContain('existing._rev == @expectedRevision');
+    expect(call?.query).toContain('target._rev == @expectedRevision');
     expect(call?.query).toContain('IN @@inboxes');
     expect(call?.bindVars).toMatchObject({ '@inboxes': 'emailInboxes', expectedRevision: 'inbox-before-oauth' });
   });
