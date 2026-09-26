@@ -1772,34 +1772,56 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     return { kind: "image", ref, image: direct, collection } as const;
   }
   async function openReceivedAttachments(preferredMessageKey?: string) {
-    const message = selected?.messages.find(({ key }) => key === preferredMessageKey) ?? selectedMessage;
-    if (!message) return;
     const threadKey = selected?.thread.key;
-    if (!threadKey) return;
-    const inbound = (selected?.messages ?? [message]).filter((item) => item.direction === "inbound");
-    const refs = [...new Map((inbound.length ? inbound : [message]).flatMap((item) => (item.attachments ?? []).map((ref) => [`${ref.type}:${ref.key}`, ref] as const))).values()];
-    const source = { threadKey, messageKey: message.key };
-    const contentContext = getContentContext();
+    if (!threadKey || !initialConnectorKey) return;
     const generation = detailGeneration.current;
     const request = ++receivedAttachmentsRequest.current;
-    const requestIsCurrent = () => request === receivedAttachmentsRequest.current
-      && generation === detailGeneration.current
-      && selectedThreadKeyRef.current === source.threadKey
-      && selectedMessageKeyRef.current === source.messageKey;
+    const contentContext = getContentContext();
     setAttachmentsOpen(true);
     setReceivedAttachments([]);
     setReceivedAttachmentsError(undefined);
-    setReceivedAttachmentsLoading(refs.length > 0);
-    if (!refs.length) return;
-    const settled = await Promise.allSettled(refs.map((ref): Promise<ReceivedAttachment> => ref.type === "document"
-      ? getContentDocument(queryClient, contentContext, ref.key).then((document) => ({ kind: "document", ref, document, source } as const))
-      : resolveGalleryAttachment({ ...ref, type: "image" }).then((attachment) => ({ ...attachment, source }))));
-    if (!requestIsCurrent()) return;
-    const resolved = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
-    setReceivedAttachments(resolved);
-    const failures = settled.length - resolved.length;
-    if (failures) setReceivedAttachmentsError(`${failures} attachment${failures === 1 ? "" : "s"} could not be loaded.`);
-    setReceivedAttachmentsLoading(false);
+    setReceivedAttachmentsLoading(true);
+    try {
+      const detail = await queryClient.fetchQuery({ queryKey: signalQueryKeys.detail(emailContext, initialConnectorKey, threadKey), queryFn: () => fetchEmailThreadForContext(emailContext, threadKey), staleTime: 0 });
+      const message = detail.messages.find(({ key }) => key === preferredMessageKey) ?? detail.messages.find(({ key }) => key === selectedMessageKeyRef.current) ?? detail.messages[0];
+      if (!message) return;
+      const inbound = detail.messages.filter((item) => item.direction === "inbound");
+      const refs = [...new Map((inbound.length ? inbound : [message]).flatMap((item) => (item.attachments ?? []).map((ref) => [`${ref.type}:${ref.key}`, ref] as const))).values()];
+      const source = { threadKey, messageKey: message.key };
+      const requestIsCurrent = () => request === receivedAttachmentsRequest.current
+        && generation === detailGeneration.current
+        && selectedThreadKeyRef.current === source.threadKey;
+      if (!requestIsCurrent()) return;
+      if (!refs.length) {
+        setReceivedAttachmentsLoading(false);
+        return;
+      }
+      const settled = await Promise.allSettled(refs.map(async (ref): Promise<ReceivedAttachment> => {
+        if (ref.type === "document") {
+          try {
+            return { kind: "document", ref, document: await getContentDocument(queryClient, contentContext, ref.key), source } as const;
+          } catch {
+            const attachment = await resolveGalleryAttachment({ type: "image", key: ref.key });
+            return { ...attachment, source };
+          }
+        }
+        try {
+          const attachment = await resolveGalleryAttachment({ ...ref, type: "image" });
+          return { ...attachment, source };
+        } catch {
+          return { kind: "document", ref: { type: "document", key: ref.key }, document: await getContentDocument(queryClient, contentContext, ref.key), source } as const;
+        }
+      }));
+      if (!requestIsCurrent()) return;
+      const resolved = settled.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+      setReceivedAttachments(resolved);
+      const failures = settled.length - resolved.length;
+      if (failures) setReceivedAttachmentsError(`${failures} attachment${failures === 1 ? "" : "s"} could not be loaded.`);
+    } catch (failure) {
+      if (request === receivedAttachmentsRequest.current) setReceivedAttachmentsError(messageFor(failure));
+    } finally {
+      if (request === receivedAttachmentsRequest.current) setReceivedAttachmentsLoading(false);
+    }
   }
   function openReceivedAttachment(attachment: ReceivedAttachment) {
     if (!initialConnectorKey) return;
@@ -3364,7 +3386,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
           >
             {rootTab === "inboxes" ? loading || rootFilterActive && (rootSearching || rootSearchResults?.tab !== "inboxes" || rootSearchResults?.filterKey !== rootFilterKey) ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading Signal cards" accessibilityRole="progressbar" key={index} style={[styles.rootCardSkeleton, { width: rootCardSize, height: rootCardSize }]} />) : (
               <>
-                {loadError ? <Button onPress={() => void load()} size="md" variant="secondary">Retry</Button> : null}
                 {managedInboxVisible ? <View style={[styles.rootCard, { width: rootCardSize, height: rootCardSize }]}>
                   <Button accessibilityLabel="Open Vorinthex AI inbox" contentMode="raw" onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "unread", inbox: "internal" } })} shape="rounded" size="xl" style={styles.rootCardMain} variant="ghost">
                     <Image accessibilityLabel="Vorinthex AI inbox cover" contentFit="contain" source={contentPresentationIconSource.platform} style={styles.managedInboxLogo} />

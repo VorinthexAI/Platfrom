@@ -1,7 +1,6 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { verifyGoogleOidcToken } from '@/lib/google-oidc';
-import { logEmailFlow } from '@/lib/email-inbox/flow-log';
 import { enqueueEmailSyncNotification } from '@/lib/email-inbox/sync-queue';
 
 export const GMAIL_WEBHOOK_V1_PATH = '/api/v1/webhooks/gmail/pubsub';
@@ -49,12 +48,10 @@ export function createGmailWebhookHandler(options: {
   return async (c: Context) => {
     const token = c.req.header('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
     if (!token) {
-      logEmailFlow('ingest.webhook.unauthenticated', { path: c.req.path });
       return c.json({ error: 'webhook authentication required' }, 401);
     }
     const identity = await (options.verify ?? verifyGoogleOidcToken)(token, { audience: required('GMAIL_PUBSUB_PUSH_AUDIENCE'), email: required('GMAIL_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL') }).catch(() => null);
     if (!identity) {
-      logEmailFlow('ingest.webhook.invalid-identity', { path: c.req.path });
       return c.json({ error: 'invalid webhook identity' }, 401);
     }
     let envelope: z.infer<typeof envelopeSchema>;
@@ -66,16 +63,13 @@ export function createGmailWebhookHandler(options: {
       if (bytes.byteLength > 2048) throw new Error('Webhook notification is too large');
       const decoded = bytes.toString('utf8');
       notification = notificationSchema.parse(JSON.parse(decoded));
-    } catch (error) {
-      logEmailFlow('ingest.webhook.invalid-payload', { error: error instanceof Error ? error.message.slice(0, 400) : 'invalid webhook payload' });
+    } catch {
       return c.json({ error: 'invalid webhook payload' }, 400);
     }
-      logEmailFlow('ingest.webhook.received', { historyId: notification.historyId, messageId: envelope.message.messageId, emailAddress: notification.emailAddress, subscription: envelope.subscription, publishTime: envelope.message.publishTime ?? null, deliveryAttempt: envelope.deliveryAttempt ?? null });
-      const queued = await (options.enqueue ?? enqueueEmailSyncNotification)({
-        emailAddress: notification.emailAddress, historyId: notification.historyId, messageId: envelope.message.messageId,
-        subscription: envelope.subscription, publishTime: envelope.message.publishTime,
-      });
-      logEmailFlow('ingest.webhook.enqueued', { historyId: notification.historyId, messageId: envelope.message.messageId, emailAddress: notification.emailAddress, jobId: queued && typeof queued === 'object' && 'jobId' in queued ? queued.jobId : null });
+    await (options.enqueue ?? enqueueEmailSyncNotification)({
+      emailAddress: notification.emailAddress, historyId: notification.historyId, messageId: envelope.message.messageId,
+      subscription: envelope.subscription, publishTime: envelope.message.publishTime,
+    });
     return c.body(null, 204);
   };
 }

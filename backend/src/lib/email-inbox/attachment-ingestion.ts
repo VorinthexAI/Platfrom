@@ -426,13 +426,14 @@ async function ensureExportContainers(
   connectorKey: string,
   teamMembershipKey: string,
   now: string,
+  userKey?: string,
 ) {
   const { rootKey, inboxKey, collectionKey } = emailExportContainerKeys(
     scopeKey,
     connectorKey,
   );
   const embedding = zeroEmbedding();
-  const source = await database.query('FOR inbox IN emailInboxes FILTER inbox.scopeKey == @scopeKey && inbox.connectorKey == @connectorKey LIMIT 1 RETURN inbox.name', { scopeKey, connectorKey });
+  const source = await database.query('FOR inbox IN emailInboxes FILTER inbox.connectorKey == @connectorKey && (inbox.scopeKey == @scopeKey || inbox.userKey == @userKey) LIMIT 1 RETURN inbox.name', { scopeKey, connectorKey, userKey: userKey ?? null });
   const inboxName = await source.next();
   if (typeof inboxName !== 'string') throw new Error('Attachment export inbox is unavailable');
   // ArangoDB forbids reading a collection again after modifying it in one AQL
@@ -483,6 +484,7 @@ export function createEmailAttachmentIngestionService(
         input.connectorKey,
         input.teamMembershipKey,
         now().toISOString(),
+        input.userKey,
       );
       if (input.part.type === "document") {
         const exportKey = stableKey("email-archive-export", input.bindingKey);

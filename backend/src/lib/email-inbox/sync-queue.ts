@@ -3,7 +3,6 @@ import { Queue, Worker, type Job, type JobsOptions } from 'bullmq';
 import { z } from 'zod';
 import { createRedisConnection } from '@/lib/redis';
 import { createConnectorRepository } from './connector-repository';
-import { logEmailFlow } from './flow-log';
 import { createSystemEmailService } from './service';
 import { startAttachmentExportWorker } from './attachment-export-queue';
 import { runTrustedTool } from '@/lib/ai/tools';
@@ -109,7 +108,6 @@ async function enqueueConnectorChildren(input: ConnectorChildrenInput) {
 export async function enqueueEmailSyncNotification(input: Omit<z.input<typeof notificationJobSchema>, 'schemaVersion' | 'kind'>) {
   const job = notificationJobSchema.parse({ schemaVersion: 1, kind: 'notification', ...input, emailAddress: input.emailAddress.toLowerCase() });
   const queued = await getQueue(SYNC_QUEUE_NAME).add('notification', job, { ...jobOptions, jobId: stableId(job.subscription, job.messageId) });
-  logEmailFlow('ingest.queue.notification', { emailAddress: job.emailAddress, historyId: job.historyId, messageId: job.messageId, jobId: queued.id ?? null });
   return { jobId: queued.id! };
 }
 
@@ -216,17 +214,7 @@ export async function processEmailSyncJob(raw: unknown, dependencies: {
   runTrusted?: (name: TrustedEmailToolName, input: unknown, dependencies: TrustedEmailToolDependencies) => Promise<unknown>;
   recordEvent?: ToolEventRecorder;
 } = {}): Promise<EmailSyncResult> {
-  const job = emailSyncJobSchema.parse(raw);
-  const ingestJob = job.kind === 'notification' || job.kind === 'connector-notification';
-  if (ingestJob) logEmailFlow('ingest.queue.job', { kind: job.kind, ...('connectorKey' in job ? { connectorKey: job.connectorKey, teamKey: job.teamKey, scopeKey: job.scopeKey } : {}), ...('emailAddress' in job ? { emailAddress: job.emailAddress, historyId: job.historyId, messageId: job.messageId } : {}), ...('notificationHistoryId' in job ? { notificationHistoryId: job.notificationHistoryId } : {}) });
-  try {
-    const result = await runEmailSyncJob(job, dependencies);
-    if (ingestJob) logEmailFlow('ingest.queue.job.ok', { kind: job.kind, ...('connectorKey' in job ? { connectorKey: job.connectorKey } : {}), result });
-    return result;
-  } catch (error) {
-    if (ingestJob) logEmailFlow('ingest.queue.job.failed', { kind: job.kind, ...('connectorKey' in job ? { connectorKey: job.connectorKey } : {}), error });
-    throw error;
-  }
+  return runEmailSyncJob(emailSyncJobSchema.parse(raw), dependencies);
 }
 
 async function runEmailSyncJob(job: EmailSyncJob, dependencies: {
@@ -247,13 +235,8 @@ async function runEmailSyncJob(job: EmailSyncJob, dependencies: {
   });
   if (job.kind === 'notification') {
     const targets = await connectors.listSyncTargetsByEmail(job.emailAddress);
-    logEmailFlow('ingest.queue.targets', { emailAddress: job.emailAddress, historyId: job.historyId, targetCount: targets.length, targets });
     const marked = await Promise.all(targets.map(({ connectorKey }) => connectors.markNotificationPending(connectorKey, job.historyId)));
-    if (marked.some((value) => !value)) {
-      logEmailFlow('ingest.queue.mark-failed', { emailAddress: job.emailAddress, historyId: job.historyId, marked });
-      throw new Error('Email notification target changed before durable scheduling');
-    }
-    if (!targets.length) logEmailFlow('ingest.queue.no-targets', { emailAddress: job.emailAddress, historyId: job.historyId });
+    if (marked.some((value) => !value)) throw new Error('Email notification target changed before durable scheduling');
     await enqueueConnectorChildren({ kind: 'connector-notification', sourceKey: stableId(job.subscription, job.messageId), notificationHistoryId: job.historyId, targets, queue: dependencies.queue ?? getQueue(SYNC_QUEUE_NAME) });
     return { synchronized: targets.length };
   }

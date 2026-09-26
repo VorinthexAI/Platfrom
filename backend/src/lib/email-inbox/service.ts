@@ -22,7 +22,6 @@ import { inboxEmbeddingFields, type Inbox } from './inbox-schema';
 import { generateDocumentSummary, generateDocumentTranslation } from '@/lib/ai/actions/document-text-generation';
 import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import { newId } from '@/lib/ids';
-import { logEmailFlow } from './flow-log';
 import { prepareAndPersistEmailThread, sortAndPersistInboxThread } from './message-preparation';
 import { compareEmailMessages, latestEmailMessage } from './message-order';
 import { claimContentIdempotency, completeContentIdempotency, failContentIdempotency, releaseContentIdempotency, renewContentIdempotency, startContentIdempotency } from '@/lib/db/content-idempotency.node';
@@ -499,7 +498,7 @@ export function createEmailService(options: {
   enqueueClearTrash?: (input: { teamKey: string; scopeKey: string; connectorKey: string; operationKey: string; trashSnapshotAt: string; messages: Array<{ id: string; threadId: string }> }) => Promise<{ jobId: string; messages?: Array<{ id: string; threadId: string }>; trashSnapshotAt?: string } | unknown>;
   completeClearTrash?: (jobId: string) => Promise<unknown>;
   enqueueSyncContinuation?: (input: { teamKey: string; scopeKey: string; connectorKey: string; pendingHistoryId: string; pendingThreadIds: string[] }) => Promise<unknown>;
-  attachmentIngestion?: Pick<EmailAttachmentIngestionService, 'ingest' | 'ingestMessage'> & Partial<Pick<EmailAttachmentIngestionService, 'stageMessage' | 'renew' | 'compensate'>>;
+  attachmentIngestion?: Pick<EmailAttachmentIngestionService, 'ingest' | 'ingestMessage'> & Partial<Pick<EmailAttachmentIngestionService, 'stageMessage' | 'renew' | 'compensate' | 'retryExport'>>;
   getUser?: (userKey: string) => Promise<Pick<User, 'name' | 'alias'> | null>;
   idempotency?: { claim: typeof claimContentIdempotency; start: typeof startContentIdempotency; complete: typeof completeContentIdempotency; fail: typeof failContentIdempotency; renew?: typeof renewContentIdempotency; release: typeof releaseContentIdempotency };
   sparkBilling?: Pick<typeof sparkService, 'chargeExecution' | 'completeExecution'>;
@@ -666,7 +665,10 @@ export function createEmailService(options: {
     const messages: ReadEmailMessage[] = [];
     for (const message of page.messages) {
       const safe = publicMessage(message);
-      if (message.attachments?.length) safe.attachments = await repository.attachmentReferencesForRead(privateScope(actor), message.attachments);
+      if (message.attachments?.length) {
+        if (attachmentIngestion.retryExport) await Promise.all(message.attachments.map((ref) => attachmentIngestion.retryExport!(ref.key).catch(() => undefined)));
+        safe.attachments = await repository.attachmentReferencesForRead(privateScope(actor), message.attachments);
+      }
       const body = safe.body.slice(0, TOOL_MESSAGE_BODY_LIMIT);
       if (bodyCharacters + body.length > TOOL_THREAD_BODY_LIMIT) break;
       bodyCharacters += body.length;
@@ -883,11 +885,14 @@ export function createEmailService(options: {
         } : {};
       })(),
       });
-      if (stagedAttachments.length) await publishAttachmentChanged(destinationScope(actor), {
-        documentKeys: stagedAttachments.flatMap((item) => item.targetType === 'document' ? [item.targetKey] : []),
-        imageKeys: stagedAttachments.flatMap((item) => item.targetType === 'image' ? [item.targetKey] : []),
-        collectionKeys: stagedAttachments.flatMap((item) => item.collectionKey ? [item.collectionKey] : []),
-      }).catch(() => undefined);
+      if (stagedAttachments.length) {
+        if (attachmentIngestion.retryExport) await Promise.all(stagedAttachments.map((item) => attachmentIngestion.retryExport!(item.bindingKey).catch(() => undefined)));
+        await publishAttachmentChanged(destinationScope(actor), {
+          documentKeys: stagedAttachments.flatMap((item) => item.targetType === 'document' ? [item.targetKey] : []),
+          imageKeys: stagedAttachments.flatMap((item) => item.targetType === 'image' ? [item.targetKey] : []),
+          collectionKeys: stagedAttachments.flatMap((item) => item.collectionKey ? [item.collectionKey] : []),
+        }).catch(() => undefined);
+      }
       return persisted;
     } catch (error) {
       if (stagedAttachments.length && attachmentIngestion.compensate) await attachmentIngestion.compensate(stagedAttachments, destinationScope(actor));
@@ -1041,28 +1046,19 @@ export function createEmailService(options: {
     async ingestMailboxRuntime(actor: EmailActor, connectorKey: string, lifecycle: 'ordinary' | 'initial' | 'subscription' = 'ordinary') {
       await mutate(actor, ['owner', 'admin', 'moderator']);
       connectorKey = keySchema.parse(connectorKey);
-      const ingestLog = (event: string, details: Record<string, unknown> = {}) => {
-        if (lifecycle !== 'subscription') return;
-        logEmailFlow(`ingest.${event}`, { userKey: actor.userKey, teamKey: actor.teamKey, scopeKey: actor.scopeKey, connectorKey, ...details });
-      };
-      ingestLog('begin', { actorUserKey: actor.userKey });
       const connection = await active(actor, connectorKey);
       if (!connection) {
-        ingestLog('no-connection');
         throw new EmailRepositoryError('not_found', 'No connected email account');
       }
       const account = connection.connector;
-      ingestLog('connector', { email: account.email, status: account.status, syncEnabled: account.syncEnabled !== false, historyId: account.historyId ?? null, lastSyncedAt: account.lastSyncedAt ?? null, initialSyncCompleted: account.initialSyncCompleted, pendingHistoryId: account.pendingNotificationHistoryId ?? null, pendingThreadCount: account.syncPendingThreadIds?.length ?? 0, pendingSubscriptionMessages: account.syncPendingSubscriptionMessages?.length ?? 0 });
       if (lifecycle === 'initial' && account.initialSyncCompleted) return { synced: 0, alreadyCompleted: true };
       if (lifecycle === 'ordinary' && account.syncPendingSubscriptionMessages?.length) return { synced: 0, busy: true, lastSyncedAt: account.lastSyncedAt ?? null };
       const previousAccount = account;
       const leaseToken = randomUUID();
       if (!await connectors.claimSync(account.key, leaseToken, new Date(Date.now() + 30 * 60_000).toISOString())) {
-        ingestLog('busy', { lastSyncedAt: account.lastSyncedAt ?? null });
         if (actor.userKey === 'system') throw new EmailRepositoryError('conflict', 'Email synchronization is already running');
         return { synced: 0, busy: true, lastSyncedAt: account.lastSyncedAt ?? null };
       }
-      ingestLog('lease-claimed');
       const ensureLease = async () => {
         if (!await connectors.renewSync(account.key, leaseToken, new Date(Date.now() + 30 * 60_000).toISOString())) throw new EmailRepositoryError('conflict', 'Email synchronization lease was lost');
       };
@@ -1087,7 +1083,6 @@ export function createEmailService(options: {
         }
         if (!await connectors.setSyncState(account.key, 'syncing', { leaseToken })) throw new EmailRepositoryError('conflict', 'Email synchronization lease was lost');
         const profile = await runSyncOperation(() => connection.gmail.profile());
-        ingestLog('profile', { historyId: profile.historyId, previousHistoryId: previousAccount.historyId ?? null, lastSyncedAt: previousAccount.lastSyncedAt ?? null });
         const fullThreadIds = async () => {
           const ids = new Set<string>();
           const seenTokens = new Set<string>();
@@ -1151,7 +1146,6 @@ export function createEmailService(options: {
               if (lifecycle === 'subscription') {
                 threadIds = subscriptionThreadIds();
                 fullSync = false;
-                ingestLog('history-overflow', { threadCount: threadIds.length, completedHistoryId });
               } else {
                 threadIds = await fullThreadIds();
                 fullSync = true;
@@ -1168,7 +1162,6 @@ export function createEmailService(options: {
             const status = providerStatus(error);
             if (status !== 404) throw error;
             if (lifecycle === 'subscription') {
-              ingestLog('history-expired', { previousHistoryId: previousAccount.historyId ?? null });
               threadIds = subscriptionThreadIds();
               fullSync = false;
             } else {
@@ -1176,12 +1169,10 @@ export function createEmailService(options: {
             }
           }
         } else if (lifecycle === 'subscription') {
-          ingestLog('no-history-cursor');
           threadIds = subscriptionThreadIds();
           fullSync = false;
         } else { threadIds = await fullThreadIds(); fullSync = true; }
         threadIds = [...new Set(threadIds)];
-        ingestLog('plan', { fullSync, threadIds, threadCount: threadIds.length, pendingThreadCount: pendingThreadIds?.length ?? 0, pendingHistoryId: pendingHistoryId ?? null, subscriptionMessageIds: [...subscriptionMessages.keys()], historyOverflow: fullSync && Boolean(previousAccount.historyId) });
         const categoryCounts = { Urgent: 0, Important: 0, Purchases: 0, Filtered: 0, skipped: 0 };
         const processThread = async (providerThreadId: string) => {
           let resource: GmailThreadResource | null;
@@ -1206,24 +1197,17 @@ export function createEmailService(options: {
             categoryCounts.skipped += 1;
             return 0;
           }
-          ingestLog('thread.begin', { providerThreadId, messages: resource.messages.length, labels: resource.messages.flatMap((message) => message.labelIds ?? []).slice(0, 40) });
           const persisted = await persistProviderThread(actor, account, connection.gmail, resource, leaseToken, ensureLease, runSyncOperation, lifecycle === 'subscription' ? subscriptionMessages : undefined);
           const inboxCategory = persisted?.inboxCategory;
           if (inboxCategory === 'Urgent' || inboxCategory === 'Important' || inboxCategory === 'Purchases' || inboxCategory === 'Filtered') categoryCounts[inboxCategory] += 1;
           else categoryCounts.skipped += 1;
-          ingestLog('thread.ok', { providerThreadId, threadKey: persisted?.key ?? null, subject: persisted?.subject ?? null, from: persisted?.latestFrom ?? null, inboxCategory: inboxCategory ?? null, inInbox: persisted?.inInbox ?? null, unread: persisted?.unread ?? null, labels: persisted?.labels ?? [] });
           if (lifecycle === 'subscription' && persisted && persisted.inInbox !== false) {
             const latest = latestEmailMessage((await repository.thread(account.userKey, persisted.key)).messages);
-            if (!latest) ingestLog('notify.skip', { providerThreadId, threadKey: persisted.key, reason: 'no-latest-message' });
-            else if (!subscriptionMessages.has(latest.providerMessageId)) ingestLog('notify.skip', { providerThreadId, threadKey: persisted.key, providerMessageId: latest.providerMessageId, reason: 'not-in-subscription-delta', subscriptionMessageIds: [...subscriptionMessages.keys()] });
-            else {
+            if (latest && subscriptionMessages.has(latest.providerMessageId)) {
               await service.createDraftIfNeeded(actor, { connectorKey: account.key, threadKey: persisted.key, messageKey: emailMessageKey(account.userKey, account.key, latest.providerMessageId) })
-                .catch((error) => { ingestLog('draft.failed', { threadKey: persisted.key, error }); console.error('automatic email draft creation failed', { connectorKey: account.key, threadKey: persisted.key, error }); });
-              if (latest.direction !== 'inbound') ingestLog('notify.skip', { providerThreadId, threadKey: persisted.key, providerMessageId: latest.providerMessageId, reason: 'not-inbound', direction: latest.direction, inboxCategory: inboxCategory ?? null });
-              else if (inboxCategory !== 'Urgent' && inboxCategory !== 'Important' && inboxCategory !== 'Purchases') ingestLog('notify.skip', { providerThreadId, threadKey: persisted.key, providerMessageId: latest.providerMessageId, reason: 'category-filtered', inboxCategory: inboxCategory ?? null, from: latest.from, subject: persisted.subject });
-              else {
+                .catch((error) => { console.error('automatic email draft creation failed', { connectorKey: account.key, threadKey: persisted.key, error }); });
+              if (latest.direction === 'inbound' && (inboxCategory === 'Urgent' || inboxCategory === 'Important' || inboxCategory === 'Purchases')) {
                 const preview = (latest.summary || latest.body).replace(/\s+/g, ' ').trim();
-                ingestLog('notify.begin', { providerThreadId, threadKey: persisted.key, providerMessageId: latest.providerMessageId, inboxCategory, from: latest.from, subject: persisted.subject });
                 await notifyInboundEmail({
                   userKey: account.userKey,
                   teamKey: actor.teamKey,
@@ -1234,10 +1218,10 @@ export function createEmailService(options: {
                   connectorKey: account.key,
                   threadKey: persisted.key,
                   messageKey: emailMessageKey(account.userKey, account.key, latest.providerMessageId),
-                }).then(() => ingestLog('notify.ok', { threadKey: persisted.key, providerMessageId: latest.providerMessageId, inboxCategory })).catch((error) => { ingestLog('notify.failed', { threadKey: persisted.key, error }); console.error('inbound email notification failed', { connectorKey: account.key, threadKey: persisted.key, error }); });
+                }).catch((error) => { console.error('inbound email notification failed', { connectorKey: account.key, threadKey: persisted.key, error }); });
               }
             }
-          } else if (lifecycle === 'subscription') ingestLog('notify.skip', { providerThreadId, threadKey: persisted?.key ?? null, reason: persisted ? 'not-in-inbox' : 'not-persisted', inInbox: persisted?.inInbox ?? null });
+          }
           await publishInboxChangedDurably(destinationScope(actor));
           if (persisted?.attachmentMutation?.documentKeys.length || persisted?.attachmentMutation?.imageKeys.length) await publishAttachmentChanged(destinationScope(actor), persisted.attachmentMutation).catch(() => undefined);
           return 1;
@@ -1246,7 +1230,6 @@ export function createEmailService(options: {
           const results = await Promise.allSettled(threadIds.slice(offset, offset + SYNC_THREAD_CONCURRENCY).map(processThread));
           const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
           if (failures.length) {
-            ingestLog('batch-failed', { errors: failures.map(({ reason }) => reason) });
             throw new AggregateError(failures.map(({ reason }) => reason), 'Email synchronization batch failed');
           }
           synced += results.reduce<number>((total, result) => total + (result.status === 'fulfilled' ? result.value : 0), 0);
@@ -1271,10 +1254,8 @@ export function createEmailService(options: {
         await publishInboxChangedDurably(destinationScope(actor));
         if (pendingThreadIds?.length && pendingHistoryId) await enqueueSyncContinuation({ teamKey: actor.teamKey, scopeKey: destinationScope(actor), connectorKey: account.key, pendingHistoryId, pendingThreadIds });
         const result = { synced, lastSyncedAt: new Date().toISOString() };
-        ingestLog('ok', { synced, fullSync, pendingThreadCount: pendingThreadIds?.length ?? 0, categoryCounts });
         return lifecycle === 'initial' ? { ...result, initialSyncCompleted: !pendingThreadIds?.length } : result;
       } catch (error) {
-        ingestLog('failed', { synced, quotaExceeded: isGmailQuotaExceeded(error), error });
         if (await connectors.renewSync(account.key, leaseToken, new Date(Date.now() + 30 * 60_000).toISOString())) {
           if (isGmailQuotaExceeded(error)) {
             await connectors.setSyncState(account.key, 'idle', { leaseToken, markSynced: false });
@@ -1306,29 +1287,14 @@ export function createEmailService(options: {
       if (actor.userKey !== 'system') throw new EmailRepositoryError('forbidden', 'Email subscription ingestion is system-only');
       connectorKey = keySchema.parse(connectorKey);
       notificationHistoryId = notificationHistoryIdSchema.parse(notificationHistoryId);
-      logEmailFlow('ingest.subscription.begin', { connectorKey, notificationHistoryId, teamKey: actor.teamKey, scopeKey: actor.scopeKey });
       const connector = await connectors.getExact(actor.userKey, connectorKey);
       if (!connector || connector.status === 'revoked' || connector.syncEnabled === false) {
-        logEmailFlow('ingest.subscription.unavailable', { connectorKey, notificationHistoryId, status: connector?.status ?? null, syncEnabled: connector?.syncEnabled ?? null });
         return { synced: 0, unavailable: true };
       }
-      logEmailFlow('ingest.subscription.connector', { connectorKey, email: connector.email, status: connector.status, historyId: connector.historyId ?? null, lastSyncedAt: connector.lastSyncedAt ?? null });
-      if (!await connectors.markNotificationPending(connectorKey, notificationHistoryId)) {
-        logEmailFlow('ingest.subscription.pending-conflict', { connectorKey, notificationHistoryId });
-        throw new EmailRepositoryError('conflict', 'Email notification target changed before ingestion');
-      }
-      try {
-        const result = await service.ingestMailboxRuntime(actor, connectorKey, 'subscription');
-        if (!await connectors.clearPendingNotification(connectorKey, notificationHistoryId)) {
-          logEmailFlow('ingest.subscription.clear-conflict', { connectorKey, notificationHistoryId, result });
-          throw new EmailRepositoryError('conflict', 'Email notification ingestion has a newer cursor or pending continuation');
-        }
-        logEmailFlow('ingest.subscription.ok', { connectorKey, notificationHistoryId, result });
-        return result;
-      } catch (error) {
-        logEmailFlow('ingest.subscription.failed', { connectorKey, notificationHistoryId, error });
-        throw error;
-      }
+      if (!await connectors.markNotificationPending(connectorKey, notificationHistoryId)) throw new EmailRepositoryError('conflict', 'Email notification target changed before ingestion');
+      const result = await service.ingestMailboxRuntime(actor, connectorKey, 'subscription');
+      if (!await connectors.clearPendingNotification(connectorKey, notificationHistoryId)) throw new EmailRepositoryError('conflict', 'Email notification ingestion has a newer cursor or pending continuation');
+      return result;
     },
     async continueSubscription(actor: EmailActor, connectorKey: string) {
       if (actor.userKey !== 'system') throw new EmailRepositoryError('forbidden', 'Email subscription continuation is system-only');
@@ -1365,7 +1331,6 @@ export function createEmailService(options: {
     async registerWatch(actor: EmailActor, connectorKey: string, expectedRevision?: string, repairQueued = false) {
       await mutate(actor, ['owner', 'admin', 'moderator']);
       connectorKey = keySchema.parse(connectorKey);
-      logEmailFlow('gmail.watch.begin', { userKey: actor.userKey, connectorKey, expectedRevision: expectedRevision ?? null, repairQueued });
       expectedRevision = expectedRevision === undefined ? undefined : z.string().min(1).parse(expectedRevision);
       const connection = await active(actor, connectorKey);
       if (!connection) {
@@ -1373,24 +1338,20 @@ export function createEmailService(options: {
         throw new EmailRepositoryError('not_found', 'No connected email account');
       }
       const topic = watchTopic();
-      logEmailFlow('gmail.watch.topic', { connectorKey, configured: Boolean(topic) });
       if (!topic) throw new Error('GMAIL_PUBSUB_TOPIC is not configured');
       const repairJobId = repairQueued ? null : await queueWatchRepair(actor, connectorKey);
       let watch: Awaited<ReturnType<GmailClient['watch']>>;
       let connectorRevision: string;
       try {
         watch = await connection.gmail.watch(topic);
-        logEmailFlow('gmail.watch.provider', { connectorKey, expiration: watch.expiration, historyId: watch.historyId });
         const updatedRevision = await connectors.updateWatch(connection.connector.key, watch, expectedRevision, connection.connector.updatedAt);
         if (!updatedRevision) throw new EmailRepositoryError('conflict', 'Email connector changed while initializing its watch');
         connectorRevision = updatedRevision;
       } catch (error) {
-        logEmailFlow('gmail.watch.failed', { connectorKey, repairQueued: Boolean(repairJobId), error });
         if (repairJobId) throw new EmailWatchRepairPendingError(error);
         throw error;
       }
        if (repairJobId) await completeWatchRepair(repairJobId).catch((error) => console.error('email watch intent completion failed', { jobId: repairJobId, error }));
-      logEmailFlow('gmail.watch.ok', { connectorKey, connectorRevision, watchExpiresAt: new Date(Number(watch.expiration)).toISOString() });
       return { watchExpiresAt: new Date(Number(watch.expiration)).toISOString(), ...(connectorRevision ? { connectorRevision } : {}) };
     },
     async threadForTool(actor: EmailActor, threadKey: string, cursor?: string) {
@@ -1670,13 +1631,10 @@ export function createEmailService(options: {
       expectedRevision = expectedRevision == null ? expectedRevision : z.string().min(1).parse(expectedRevision);
       if (connector.userKey !== actor.userKey || connector.teamKey !== actor.teamKey || connector.scopeKey !== destinationScope(actor)) throw new EmailRepositoryError('forbidden');
       const embedding = await embed({ text: buildEmbeddingText(inboxEmbeddingFields, metadata)! }, actor.teamKey);
-      logEmailFlow('inbox.ensure.begin', { connectorKey: connector.key, overwrite, expectedRevision: expectedRevision ?? null, status: connector.status });
       const inbox = await inboxes.ensure(connector, metadata, embedding, overwrite, expectedRevision);
       if (!inbox) {
-        logEmailFlow('inbox.ensure.conflict', { connectorKey: connector.key, overwrite, expectedRevision: expectedRevision ?? null });
         throw new EmailRepositoryError('conflict', 'Inbox metadata changed while reconnecting email');
       }
-      logEmailFlow('inbox.ensure.ok', { connectorKey: connector.key, inboxKey: inbox.key, revision: inbox.revision });
       return inbox;
     },
     async inboxView(actor: EmailActor, connectorKey: string) {
