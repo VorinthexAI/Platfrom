@@ -2203,7 +2203,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   function changeNewEmailRecipientInput(value: string) {
     setNewEmailRecipientInput(value);
     setNewEmailRecipientError(undefined);
-    if (/[,;\s]$/.test(value) || emailAddressSchema.safeParse(value.trim()).success) commitNewEmailRecipients(value);
   }
   function advanceNewEmailRecipients() {
     if (!commitNewEmailRecipients()) return;
@@ -3750,7 +3749,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       >
         <ScrollView contentContainerStyle={styles.newEmailForm} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Text style={styles.inputLabel}>Email addresses</Text>
-          <TextInput accessibilityLabel="Email recipients" autoCapitalize="none" autoCorrect={false} editable={!newEmailSending} keyboardType="email-address" onBlur={() => { if (newEmailRecipientInput.trim()) commitNewEmailRecipients(); }} onChangeText={changeNewEmailRecipientInput} onSubmitEditing={() => commitNewEmailRecipients()} placeholder="Email address" ref={newEmailRecipientInputRef} value={newEmailRecipientInput} />
+          <TextInput accessibilityLabel="Email recipients" autoCapitalize="none" autoCorrect={false} blurOnSubmit={false} editable={!newEmailSending} keyboardType="email-address" onBlur={() => { if (newEmailRecipientInput.trim()) commitNewEmailRecipients(); }} onChangeText={changeNewEmailRecipientInput} onSubmitEditing={() => commitNewEmailRecipients()} placeholder="Email address" ref={newEmailRecipientInputRef} returnKeyType="done" value={newEmailRecipientInput} />
           <ButtonSizeProvider overrideParent size="xs"><View accessibilityLabel="Committed email recipients" style={styles.recipientChips}>{newEmailRecipients.map((address) => <View key={address.toLocaleLowerCase()} style={[styles.recipientChip, styles.recipientChipCompact]}><Button accessibilityLabel={`Focus recipient input for ${address}`} contentMode="raw" disabled={newEmailSending} onPress={() => newEmailRecipientInputRef.current?.focus()} size="xs" style={styles.recipientChipMain} variant="ghost"><Text style={styles.recipientChipText}>{address}</Text></Button><Button accessibilityLabel={`Remove recipient ${address}`} contentMode="raw" disabled={newEmailSending} hitSlop={10} iconOnly onPress={() => removeNewEmailRecipient(address)} shape="pill" size="xs" style={[styles.recipientChipRemove, styles.recipientChipRemoveCompact]} variant="secondary"><CloseIcon size="xs" /></Button></View>)}</View></ButtonSizeProvider>
         </ScrollView>
       </BottomSheet>
