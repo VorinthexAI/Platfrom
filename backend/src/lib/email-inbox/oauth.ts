@@ -4,6 +4,7 @@ import { requireTeamAccess, requireScopeAccess } from '@/lib/founders/access';
 import { redisConnection } from '@/lib/redis';
 import { createConnectorRepository, type ConnectorRepository } from './connector-repository';
 import { createInboxRepository, type InboxRepository } from './inbox-repository';
+import { logEmailFlow } from './flow-log';
 import { buildGmailAuthorizationUrl, createGmailClient, createPkce, exchangeGmailCode, GmailApiError } from './gmail';
 
 const STATE_PREFIX = 'email:oauth:state:';
@@ -90,21 +91,30 @@ export function createEmailOAuthService(options: {
   });
   return {
     async start(input: { userKey: string; teamKey: string; scopeKey: string; provider?: 'gmail'; name: string; description?: string; returnUri: string }) {
+      logEmailFlow('oauth.start.begin', { userKey: input.userKey, teamKey: input.teamKey, scopeKey: input.scopeKey, returnUri: input.returnUri, hasDescription: Boolean(input.description) });
       await authorize(input.userKey, input.teamKey, input.scopeKey);
       const state = token('vrtx_email_state_');
       const nonce = randomBytes(24).toString('base64url');
       const pkce = createPkce();
       const record = stateSchema.parse({ ...input, provider: input.provider ?? 'gmail', returnUri: allowedReturnUri(input.returnUri), verifier: pkce.verifier, nonce });
       if (!(await store.put(`${STATE_PREFIX}${state}`, JSON.stringify(record), 600))) throw new Error('Could not create email authorization state');
+      logEmailFlow('oauth.start.ok', { userKey: input.userKey, teamKey: input.teamKey, scopeKey: input.scopeKey, returnUri: record.returnUri });
       return { authorizationUrl: buildGmailAuthorizationUrl({ state, nonce, codeChallenge: pkce.challenge }) };
     },
     async callback(input: { state: string; code?: string; error?: string }) {
+      logEmailFlow('oauth.callback.begin', { hasState: Boolean(input.state), hasCode: Boolean(input.code), providerError: input.error ?? null });
       const encoded = await store.take(`${STATE_PREFIX}${input.state}`);
-      if (!encoded) throw new Error('Email authorization state is invalid or expired');
+      if (!encoded) {
+        logEmailFlow('oauth.callback.missing-state', { hasState: Boolean(input.state) });
+        throw new Error('Email authorization state is invalid or expired');
+      }
       const state = stateSchema.parse(JSON.parse(encoded));
       const redirect = new URL(state.returnUri);
+      logEmailFlow('oauth.callback.state', { userKey: state.userKey, teamKey: state.teamKey, scopeKey: state.scopeKey, returnUri: state.returnUri });
       if (input.error || !input.code) {
-        redirect.searchParams.set('email_connection_error', input.error ?? 'authorization_denied');
+        const code = input.error ?? 'authorization_denied';
+        logEmailFlow('oauth.callback.provider-denied', { userKey: state.userKey, error: code });
+        redirect.searchParams.set('email_connection_error', code);
         return redirect.toString();
       }
       let reconnect: { connectorKey: string; connectorRevision: string; inboxKey?: string; inboxRevision?: string; previous: Awaited<ReturnType<ConnectorRepository['findExact']>>; previousInbox: Awaited<ReturnType<InboxRepository['getByConnector']>> } | undefined;
@@ -112,10 +122,13 @@ export function createEmailOAuthService(options: {
       try {
         await authorize(state.userKey, state.teamKey, state.scopeKey);
         stage = 'token-exchange';
+        logEmailFlow('oauth.callback.stage', { stage, userKey: state.userKey });
         const result = await exchange(input.code, state.verifier, state.nonce);
         stage = 'gmail-profile';
+        logEmailFlow('oauth.callback.stage', { stage, userKey: state.userKey, scopes: result.scopes, hasRefreshToken: Boolean(result.credentials.refreshToken) });
         const providerProfile = await profile(result.credentials.accessToken);
         stage = 'connector-persistence';
+        logEmailFlow('oauth.callback.stage', { stage, userKey: state.userKey, historyId: providerProfile.historyId });
         const previous = await connectors.findExact(state.userKey, result.identity.providerAccountId, state.provider);
         const previousInbox = previous ? await inboxes.getByConnector(state.userKey, previous.key) : null;
         if (!result.credentials.refreshToken && previous && previous.status !== 'revoked' && previous.encryptedCredentials !== 'revoked') {
@@ -130,10 +143,14 @@ export function createEmailOAuthService(options: {
           expectedRevision: previous?.revision ?? null,
         });
         reconnect = { connectorKey: connector.key, connectorRevision: connector.revision, previous, previousInbox };
+        logEmailFlow('oauth.callback.connector', { connectorKey: connector.key, initializeInactive, hadPrevious: Boolean(previous), status: connector.status });
         stage = 'inbox-initialization';
+        logEmailFlow('oauth.callback.stage', { stage, connectorKey: connector.key });
         const initializedInbox = await ensureInbox({ userKey: state.userKey, teamKey: state.teamKey, scopeKey: state.scopeKey }, connector, { name: state.name, ...(state.description ? { description: state.description } : {}) }, previous !== null, previousInbox?.revision ?? null) as { key?: string; revision?: string } | undefined;
         if (initializedInbox?.revision) { reconnect.inboxKey = initializedInbox.key; reconnect.inboxRevision = initializedInbox.revision; }
+        logEmailFlow('oauth.callback.inbox', { connectorKey: connector.key, inboxKey: initializedInbox?.key ?? null });
         stage = 'sync-initialization';
+        logEmailFlow('oauth.callback.stage', { stage, connectorKey: connector.key });
         const syncRevision = await connectors.setSyncState(connector.key, 'idle', { historyId: providerProfile.historyId, pendingHistoryId: null, pendingThreadIds: null, pendingSubscriptionMessages: null, resetLastSynced: true, markSynced: false, expectedRevision: reconnect.connectorRevision });
         if (!syncRevision) throw new Error('Could not initialize email synchronization state');
         reconnect.connectorRevision = syncRevision;
@@ -144,14 +161,19 @@ export function createEmailOAuthService(options: {
           reconnect.connectorRevision = activated.revision;
         }
         stage = 'gmail-watch';
+        logEmailFlow('oauth.callback.stage', { stage, connectorKey: connector.key, connectorRevision: reconnect.connectorRevision });
         const watch = await registerWatch({ userKey: state.userKey, teamKey: state.teamKey, scopeKey: state.scopeKey }, connector.key, reconnect.connectorRevision) as { connectorRevision?: string } | undefined;
         if (watch?.connectorRevision) reconnect.connectorRevision = watch.connectorRevision;
+        logEmailFlow('oauth.callback.watch', { connectorKey: connector.key, watchRevision: watch?.connectorRevision ?? null });
         stage = 'initial-sync-enqueue';
+        logEmailFlow('oauth.callback.stage', { stage, connectorKey: connector.key });
         await enqueueInitialSync({ teamKey: state.teamKey, scopeKey: state.scopeKey, connectorKey: connector.key, operationKey: randomUUID() });
         stage = 'connection-grant';
+        logEmailFlow('oauth.callback.stage', { stage, connectorKey: connector.key });
         const grant = token('vrtx_email_grant_');
         const payload = grantSchema.parse({ userKey: state.userKey, teamKey: state.teamKey, scopeKey: state.scopeKey, connectorKey: connector.key });
         if (!(await store.put(`${GRANT_PREFIX}${grant}`, JSON.stringify(payload), 300))) throw new Error('Could not create email connection grant');
+        logEmailFlow('oauth.callback.grant', { connectorKey: connector.key, userKey: state.userKey, returnUri: state.returnUri });
         redirect.searchParams.set('email_connection_code', grant);
       } catch (error) {
         // Never log callback URLs, authorization codes, tokens, or provider bodies.
@@ -165,18 +187,30 @@ export function createEmailOAuthService(options: {
           : stage === 'gmail-watch' ? 'gmail_watch_unavailable'
           : stage === 'initial-sync-enqueue' ? 'gmail_sync_unavailable'
           : 'connection_failed';
+        logEmailFlow('oauth.callback.failed', { stage, userKey: state.userKey, connectorKey: reconnect?.connectorKey ?? null, error, code });
         redirect.searchParams.set('email_connection_error', code);
       }
       return redirect.toString();
     },
     async exchange(input: { userKey: string; teamKey: string; scopeKey: string; code: string }) {
+      logEmailFlow('oauth.exchange.begin', { userKey: input.userKey, teamKey: input.teamKey, scopeKey: input.scopeKey, hasCode: Boolean(input.code) });
       const encoded = await store.take(`${GRANT_PREFIX}${input.code}`);
-      if (!encoded) return null;
+      if (!encoded) {
+        logEmailFlow('oauth.exchange.invalid', { userKey: input.userKey, reason: 'missing-grant' });
+        return null;
+      }
       const grant = grantSchema.parse(JSON.parse(encoded));
-      if (grant.userKey !== input.userKey || grant.teamKey !== input.teamKey || grant.scopeKey !== input.scopeKey) return null;
+      if (grant.userKey !== input.userKey || grant.teamKey !== input.teamKey || grant.scopeKey !== input.scopeKey) {
+        logEmailFlow('oauth.exchange.invalid', { userKey: input.userKey, reason: 'actor-mismatch', grantUserKey: grant.userKey, connectorKey: grant.connectorKey });
+        return null;
+      }
       await authorize(input.userKey, input.teamKey, input.scopeKey);
       const connector = await connectors.getByKey(grant.connectorKey);
-      if (!connector || connector.status !== 'active' || connector.userKey !== input.userKey) return null;
+      if (!connector || connector.status !== 'active' || connector.userKey !== input.userKey) {
+        logEmailFlow('oauth.exchange.invalid', { userKey: input.userKey, reason: 'connector-unavailable', connectorKey: grant.connectorKey, status: connector?.status ?? null });
+        return null;
+      }
+      logEmailFlow('oauth.exchange.ok', { userKey: input.userKey, connectorKey: connector.key });
       return inboxView({ userKey: input.userKey, teamKey: input.teamKey, scopeKey: input.scopeKey }, connector.key);
     },
   };

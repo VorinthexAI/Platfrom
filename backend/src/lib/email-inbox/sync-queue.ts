@@ -3,6 +3,7 @@ import { Queue, Worker, type Job, type JobsOptions } from 'bullmq';
 import { z } from 'zod';
 import { createRedisConnection } from '@/lib/redis';
 import { createConnectorRepository } from './connector-repository';
+import { logEmailFlow } from './flow-log';
 import { createSystemEmailService } from './service';
 import { startAttachmentExportWorker } from './attachment-export-queue';
 import { runTrustedTool } from '@/lib/ai/tools';
@@ -121,6 +122,7 @@ export async function enqueueEmailSyncContinuation(input: { teamKey: string; sco
 export async function enqueueEmailInitialSync(input: Omit<z.input<typeof initialSyncJobSchema>, 'schemaVersion' | 'kind' | 'requestedAt'>, targetQueue: ChildQueueAccess = getQueue(INITIAL_SYNC_QUEUE_NAME)) {
   const job = initialSyncJobSchema.parse({ schemaVersion: 1, kind: 'initial-sync', ...input, requestedAt: new Date().toISOString() });
   const queued = await targetQueue.add('initial-sync', job, { ...jobOptions, jobId: emailInitialSyncJobId(job) });
+  logEmailFlow('inbox.queue.enqueue-initial-sync', { connectorKey: job.connectorKey, operationKey: job.operationKey, jobId: queued.id ?? null });
   return { jobId: queued.id! };
 }
 
@@ -214,6 +216,24 @@ export async function processEmailSyncJob(raw: unknown, dependencies: {
   recordEvent?: ToolEventRecorder;
 } = {}): Promise<EmailSyncResult> {
   const job = emailSyncJobSchema.parse(raw);
+  logEmailFlow('inbox.queue.job', { kind: job.kind, ...('connectorKey' in job ? { connectorKey: job.connectorKey, teamKey: job.teamKey, scopeKey: job.scopeKey } : {}), ...('emailAddress' in job ? { hasEmail: true, historyId: job.historyId } : {}) });
+  try {
+    const result = await runEmailSyncJob(job, dependencies);
+    logEmailFlow('inbox.queue.job.ok', { kind: job.kind, ...('connectorKey' in job ? { connectorKey: job.connectorKey } : {}), result });
+    return result;
+  } catch (error) {
+    logEmailFlow('inbox.queue.job.failed', { kind: job.kind, ...('connectorKey' in job ? { connectorKey: job.connectorKey } : {}), error });
+    throw error;
+  }
+}
+
+async function runEmailSyncJob(job: EmailSyncJob, dependencies: {
+  connectors?: ReturnType<typeof createConnectorRepository>;
+  service?: ReturnType<typeof createSystemEmailService>;
+  queue?: ChildQueueAccess;
+  runTrusted?: (name: TrustedEmailToolName, input: unknown, dependencies: TrustedEmailToolDependencies) => Promise<unknown>;
+  recordEvent?: ToolEventRecorder;
+} = {}): Promise<EmailSyncResult> {
   const connectors = dependencies.connectors ?? createConnectorRepository();
   const service = dependencies.service ?? createSystemEmailService({ connectors });
   const trusted = dependencies.runTrusted ?? runTrustedTool;
@@ -234,7 +254,9 @@ export async function processEmailSyncJob(raw: unknown, dependencies: {
     return { synchronized: 0 };
   }
   if (job.kind === 'initial-sync') {
+    logEmailFlow('inbox.queue.initial-sync.begin', { connectorKey: job.connectorKey, operationKey: job.operationKey });
     const result = await trusted('inbox.sync', { connectorKey: job.connectorKey }, trustedDependencies(job.teamKey, job.scopeKey)) as { initialSyncCompleted?: boolean; alreadyCompleted?: boolean };
+    logEmailFlow('inbox.queue.initial-sync.ok', { connectorKey: job.connectorKey, result });
     if ('initialSyncCompleted' in result && !result.initialSyncCompleted) throw new Error('Email initial synchronization remains incomplete');
     return { synchronized: 'alreadyCompleted' in result && result.alreadyCompleted ? 0 : 1 };
   }

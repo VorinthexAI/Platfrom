@@ -22,6 +22,7 @@ import { inboxEmbeddingFields, type Inbox } from './inbox-schema';
 import { generateDocumentSummary, generateDocumentTranslation } from '@/lib/ai/actions/document-text-generation';
 import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import { newId } from '@/lib/ids';
+import { logEmailFlow } from './flow-log';
 import { prepareAndPersistEmailThread, sortAndPersistInboxThread } from './message-preparation';
 import { compareEmailMessages, latestEmailMessage } from './message-order';
 import { claimContentIdempotency, completeContentIdempotency, failContentIdempotency, releaseContentIdempotency, renewContentIdempotency, startContentIdempotency } from '@/lib/db/content-idempotency.node';
@@ -994,10 +995,12 @@ export function createEmailService(options: {
     async sort(actor: EmailActor, rawInput: unknown) {
       await mutate(actor, ['owner', 'admin', 'moderator']);
       const { connectorKey } = inboxSortInputSchema.parse(rawInput);
+      logEmailFlow('inbox.sort.begin', { userKey: actor.userKey, teamKey: actor.teamKey, scopeKey: actor.scopeKey, connectorKey });
       const connection = await active(actor, connectorKey);
       if (!connection) throw new EmailRepositoryError('not_found', 'No connected email account');
       const leaseToken = randomUUID();
       if (!await connectors.claimSync(connectorKey, leaseToken, new Date(Date.now() + 30 * 60_000).toISOString())) {
+        logEmailFlow('inbox.sort.busy', { connectorKey });
         return { connectorKey, threadsProcessed: 0, messagesProcessed: 0, busy: true };
       }
       const ensureLease = async () => {
@@ -1005,6 +1008,7 @@ export function createEmailService(options: {
       };
       try {
         const mailbox = await repository.mailbox(privateScope(actor), connectorKey);
+        logEmailFlow('inbox.sort.mailbox', { connectorKey, threads: mailbox.threads.length, messages: mailbox.messages.length });
         const messagesByThread = new Map<string, EmailMessage[]>();
         for (const message of mailbox.messages) {
           const messages = messagesByThread.get(message.threadKey) ?? [];
@@ -1029,9 +1033,14 @@ export function createEmailService(options: {
           });
           threadsProcessed += 1;
           messagesProcessed += messages.length;
+          logEmailFlow('inbox.sort.thread', { connectorKey, threadKey: thread.key, providerThreadId: thread.providerThreadId, messages: messages.length, inboxCategory: thread.inboxCategory });
         }
         if (threadsProcessed) await publishInboxChanged(destinationScope(actor));
+        logEmailFlow('inbox.sort.ok', { connectorKey, threadsProcessed, messagesProcessed });
         return { connectorKey, threadsProcessed, messagesProcessed, busy: false };
+      } catch (error) {
+        logEmailFlow('inbox.sort.failed', { connectorKey, error });
+        throw error;
       } finally {
         await connectors.releaseSync(connectorKey, leaseToken);
       }
@@ -1039,6 +1048,7 @@ export function createEmailService(options: {
     async ingestMailboxRuntime(actor: EmailActor, connectorKey: string, lifecycle: 'ordinary' | 'initial' | 'subscription' = 'ordinary') {
       await mutate(actor, ['owner', 'admin', 'moderator']);
       connectorKey = keySchema.parse(connectorKey);
+      logEmailFlow('inbox.sync.begin', { userKey: actor.userKey, teamKey: actor.teamKey, scopeKey: actor.scopeKey, connectorKey, lifecycle });
       const connection = await active(actor, connectorKey);
       if (!connection) throw new EmailRepositoryError('not_found', 'No connected email account');
       const account = connection.connector;
@@ -1047,6 +1057,7 @@ export function createEmailService(options: {
       const previousAccount = account;
       const leaseToken = randomUUID();
       if (!await connectors.claimSync(account.key, leaseToken, new Date(Date.now() + 30 * 60_000).toISOString())) {
+        logEmailFlow('inbox.sync.busy', { connectorKey: account.key, lifecycle, lastSyncedAt: account.lastSyncedAt ?? null });
         if (actor.userKey === 'system') throw new EmailRepositoryError('conflict', 'Email synchronization is already running');
         return { synced: 0, busy: true, lastSyncedAt: account.lastSyncedAt ?? null };
       }
@@ -1074,6 +1085,7 @@ export function createEmailService(options: {
         }
         if (!await connectors.setSyncState(account.key, 'syncing', { leaseToken })) throw new EmailRepositoryError('conflict', 'Email synchronization lease was lost');
         const profile = await runSyncOperation(() => connection.gmail.profile());
+        logEmailFlow('inbox.sync.profile', { connectorKey: account.key, lifecycle, historyId: profile.historyId, previousHistoryId: previousAccount.historyId ?? null, lastSyncedAt: previousAccount.lastSyncedAt ?? null, initialSyncCompleted: previousAccount.initialSyncCompleted });
         const fullThreadIds = async () => {
           const ids = new Set<string>();
           const seenTokens = new Set<string>();
@@ -1150,6 +1162,7 @@ export function createEmailService(options: {
           }
         } else { threadIds = await fullThreadIds(); fullSync = true; }
         threadIds = [...new Set(threadIds)];
+        logEmailFlow('inbox.sync.plan', { connectorKey: account.key, lifecycle, fullSync, threadCount: threadIds.length, pendingThreadCount: pendingThreadIds?.length ?? 0, pendingHistoryId: pendingHistoryId ?? null });
         const processThread = async (providerThreadId: string) => {
           let resource: GmailThreadResource | null;
           try { resource = await runSyncOperation(() => connection.gmail.threadMetadata(providerThreadId)); }
@@ -1171,7 +1184,9 @@ export function createEmailService(options: {
             if (deleted?.attachmentMutation) await publishAttachmentChanged(destinationScope(actor), deleted.attachmentMutation).catch(() => undefined);
             return 0;
           }
+          logEmailFlow('inbox.sync.thread.begin', { connectorKey: account.key, providerThreadId, messages: resource.messages.length, lifecycle });
           const persisted = await persistProviderThread(actor, account, connection.gmail, resource, leaseToken, ensureLease, runSyncOperation, lifecycle === 'subscription' ? subscriptionMessages : undefined);
+          logEmailFlow('inbox.sync.thread.ok', { connectorKey: account.key, providerThreadId, threadKey: persisted?.key ?? null, inboxCategory: persisted?.inboxCategory ?? null, inInbox: persisted?.inInbox ?? null });
           if (lifecycle === 'subscription' && persisted && persisted.inInbox !== false) {
             const latest = latestEmailMessage((await repository.thread(account.userKey, persisted.key)).messages);
             if (latest && subscriptionMessages.has(latest.providerMessageId)) {
@@ -1209,8 +1224,10 @@ export function createEmailService(options: {
         await publishInboxChangedDurably(destinationScope(actor));
         if (pendingThreadIds?.length && pendingHistoryId) await enqueueSyncContinuation({ teamKey: actor.teamKey, scopeKey: destinationScope(actor), connectorKey: account.key, pendingHistoryId, pendingThreadIds });
         const result = { synced, lastSyncedAt: new Date().toISOString() };
+        logEmailFlow('inbox.sync.ok', { connectorKey: account.key, lifecycle, synced, fullSync, pendingThreadCount: pendingThreadIds?.length ?? 0, initialSyncCompleted: !pendingThreadIds?.length });
         return lifecycle === 'initial' ? { ...result, initialSyncCompleted: !pendingThreadIds?.length } : result;
       } catch (error) {
+        logEmailFlow('inbox.sync.failed', { connectorKey: account.key, lifecycle, synced, quotaExceeded: isGmailQuotaExceeded(error), error });
         if (isGmailQuotaExceeded(error)) {
           if (await connectors.renewSync(account.key, leaseToken, new Date(Date.now() + 30 * 60_000).toISOString())) {
             await connectors.setSyncState(account.key, 'idle', { leaseToken, markSynced: false });
@@ -1283,6 +1300,7 @@ export function createEmailService(options: {
     async registerWatch(actor: EmailActor, connectorKey: string, expectedRevision?: string, repairQueued = false) {
       await mutate(actor, ['owner', 'admin', 'moderator']);
       connectorKey = keySchema.parse(connectorKey);
+      logEmailFlow('gmail.watch.begin', { userKey: actor.userKey, connectorKey, expectedRevision: expectedRevision ?? null, repairQueued });
       expectedRevision = expectedRevision === undefined ? undefined : z.string().min(1).parse(expectedRevision);
       const connection = await active(actor, connectorKey);
       if (!connection) {
@@ -1290,20 +1308,24 @@ export function createEmailService(options: {
         throw new EmailRepositoryError('not_found', 'No connected email account');
       }
       const topic = watchTopic();
+      logEmailFlow('gmail.watch.topic', { connectorKey, configured: Boolean(topic) });
       if (!topic) throw new Error('GMAIL_PUBSUB_TOPIC is not configured');
       const repairJobId = repairQueued ? null : await queueWatchRepair(actor, connectorKey);
       let watch: Awaited<ReturnType<GmailClient['watch']>>;
       let connectorRevision: string;
       try {
         watch = await connection.gmail.watch(topic);
+        logEmailFlow('gmail.watch.provider', { connectorKey, expiration: watch.expiration, historyId: watch.historyId });
         const updatedRevision = await connectors.updateWatch(connection.connector.key, watch, expectedRevision, connection.connector.updatedAt);
         if (!updatedRevision) throw new EmailRepositoryError('conflict', 'Email connector changed while initializing its watch');
         connectorRevision = updatedRevision;
       } catch (error) {
+        logEmailFlow('gmail.watch.failed', { connectorKey, repairQueued: Boolean(repairJobId), error });
         if (repairJobId) throw new EmailWatchRepairPendingError(error);
         throw error;
       }
        if (repairJobId) await completeWatchRepair(repairJobId).catch((error) => console.error('email watch intent completion failed', { jobId: repairJobId, error }));
+      logEmailFlow('gmail.watch.ok', { connectorKey, connectorRevision, watchExpiresAt: new Date(Number(watch.expiration)).toISOString() });
       return { watchExpiresAt: new Date(Number(watch.expiration)).toISOString(), ...(connectorRevision ? { connectorRevision } : {}) };
     },
     async threadForTool(actor: EmailActor, threadKey: string, cursor?: string) {
