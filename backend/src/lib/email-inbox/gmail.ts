@@ -354,6 +354,44 @@ export function messageBodies(part: GmailPart | undefined): { text: string; html
   return { text: text.trim(), html: html.trim() || undefined, hasAttachments };
 }
 
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&nbsp;|&#160;|&#xA0;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)));
+}
+
+export function htmlToReadableText(value: string) {
+  return decodeHtmlEntities(value
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<head[\s\S]*?<\/head>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|h[1-6]|li|tr)[^>]*>/gi, '\n')
+    .replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, '$1')
+    .replace(/<[^>]+>/g, ' '))
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/ ?\n ?/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+export function readableEmailBody(text: string, html?: string) {
+  const fromHtml = html ? htmlToReadableText(html) : '';
+  if (fromHtml) return fromHtml;
+  const fromText = decodeHtmlEntities(text)
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/ ?\n ?/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return fromText || '(Empty message)';
+}
+
 export function createGmailClient(accessToken: string, fetcher: typeof fetch = fetch, options: {
   sleep?: (milliseconds: number) => Promise<void>;
   random?: () => number;

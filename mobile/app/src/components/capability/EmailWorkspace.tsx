@@ -3174,8 +3174,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
 
   const overviewSelectedAccount = overview?.selectedAccount;
   const activeSelectedAccount = overviewSelectedAccount?.connectorKey === initialConnectorKey ? overviewSelectedAccount : selectedAccount;
-  const initialSyncPending = Boolean(initialConnectorKey && activeSelectedAccount && !activeSelectedAccount.initialSyncCompleted && activeSelectedAccount.syncStatus !== "error");
-  useErrorFeedback([activeSelectedAccount?.syncStatus === "error" && !activeSelectedAccount.initialSyncCompleted ? activeSelectedAccount.syncError ?? "Initial inbox sync failed and will retry automatically." : undefined]);
+  const initialSyncPending = Boolean(initialConnectorKey && activeSelectedAccount && !activeSelectedAccount.initialSyncCompleted);
   const connected = Boolean(activeSelectedAccount);
   const newEmailBodyTransformation = editorTransformation?.target === "newEmail" ? editorTransformation.action : undefined;
   const newEmailReviewTransformation = editorTransformation?.target === "newEmailReview" ? editorTransformation.action : undefined;
@@ -3208,7 +3207,10 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     {sheet === "toneEdit" && permissions.canMutate && !editingTone?.slug ? <Button disabled={Boolean(busy)} onPress={() => setSheet("toneDelete")} size="md" variant="danger">Delete</Button> : null}
     <Button disabled={Boolean(busy)} onPress={requestFormClose} size="md" variant="secondary">Close</Button>
   </> : undefined;
-  const sheetFooter = sheet === "bulkTrash" ? <>
+  const sheetFooter = sheet === "disconnect" ? <>
+    <Button disabled={Boolean(busy)} onPress={() => void disconnect()} size="md" variant="primary">Delete</Button>
+    <Button disabled={Boolean(busy)} onPress={() => setSheet("account")} size="md" variant="secondary">Close</Button>
+  </> : sheet === "bulkTrash" ? <>
     <Button disabled={bulkBusy} onPress={() => void runBulkAction("trash")} size="md" variant="primary">Move to trash</Button>
     <Button disabled={bulkBusy} onPress={() => setSheet("bulkActions")} size="md" variant="secondary">Cancel</Button>
   </> : sheet === "trashRoot" ? <>
@@ -3556,7 +3558,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       </BottomSheet>
 
       <BottomSheet hideHeading onOpenChange={setRootBulkMenuOpen} open={rootBulkMenuOpen && selectedInboxes.length > 0} title="Selected inbox actions"><BottomSheetMenu><BottomSheetItem disabled={rootBulkBusy || !permissions.canMutate} onPress={openSelectedInboxTags} style={styles.sheetAction} variant="secondary">Tags</BottomSheetItem><BottomSheetItem disabled={rootBulkBusy || !permissions.canMutate} onPress={() => { setRootBulkMenuOpen(false); void setSelectedInboxesFavorite(); }} style={styles.sheetAction} variant="secondary">{selectedInboxes.every(({ isFavorite }) => isFavorite) ? "Unfavorite" : "Favorite"}</BottomSheetItem>{permissions.canManageConnector ? <BottomSheetItem disabled={rootBulkBusy} onPress={() => { setRootBulkMenuOpen(false); setRootDisconnectOpen(true); }} style={styles.sheetAction} variant="secondary">Delete</BottomSheetItem> : null}</BottomSheetMenu></BottomSheet>
-      <BottomSheet dismissible={!rootBulkBusy} onOpenChange={(open) => { if (!open && !rootBulkBusy) setRootDisconnectOpen(false); }} open={rootDisconnectOpen && selectedInboxes.length > 0} title={selectedInboxes.length === 1 ? "Delete inbox?" : `Delete ${selectedInboxes.length} inboxes?`}><View style={styles.sheetItems}><Text style={styles.confirmText}>This removes the selected Signal inbox connection and local Signal data. It does not delete messages from your email provider.</Text><Button disabled={rootBulkBusy} onPress={() => void performRootInboxDisconnect()} size="md" variant="danger">Delete</Button><Button disabled={rootBulkBusy} onPress={() => setRootDisconnectOpen(false)} size="md" variant="secondary">Cancel</Button></View></BottomSheet>
+      <BottomSheet dismissible={!rootBulkBusy} footer={<><Button disabled={rootBulkBusy} onPress={() => void performRootInboxDisconnect()} size="md" variant="primary">Delete</Button><Button disabled={rootBulkBusy} onPress={() => setRootDisconnectOpen(false)} size="md" variant="secondary">Cancel</Button></>} onOpenChange={(open) => { if (!open && !rootBulkBusy) setRootDisconnectOpen(false); }} open={rootDisconnectOpen && selectedInboxes.length > 0} title={selectedInboxes.length === 1 ? "Delete inbox?" : `Delete ${selectedInboxes.length} inboxes?`}><Text style={styles.confirmText}>This removes the selected Signal inbox connection and local Signal data. It does not delete messages from your email provider.</Text></BottomSheet>
 
       <SearchHistorySheet error={searchHistoryError} history={searchHistory} loading={searchHistoryLoading} onClose={closeSearchHistory} onRemove={(item) => void removeSearchHistory(item)} onSelect={applySearchHistory} open={sheetOpen && sheet === "searchHistory"} removingQuery={removingHistoryQuery} />
       <TagFilterSheet context={historyContext} onClose={() => setTagFilterOpen(false)} open={tagFilterOpen} />
@@ -3734,24 +3736,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
             </> : inboxActionItems}
           </BottomSheetMenu>
         ) : sheet === "disconnect" ? (
-          <View style={styles.sheetItems}>
-            <Button
-              disabled={Boolean(busy)}
-              onPress={() => void disconnect()}
-              size="md"
-              variant="danger"
-            >
-              Delete
-            </Button>
-            <Button
-              disabled={Boolean(busy)}
-              onPress={() => setSheet("account")}
-              size="md"
-              variant="secondary"
-            >
-              Close
-            </Button>
-          </View>
+          <Text style={styles.confirmText}>This removes the Signal inbox connection and local Signal data. It does not delete messages from your email provider.</Text>
         ) : null}
       </BottomSheet>
       </View>

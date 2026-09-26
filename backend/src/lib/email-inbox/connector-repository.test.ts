@@ -204,7 +204,8 @@ describe('team connector repository', () => {
     }
     expect(calls[0]!.query).toContain('connector.status != "revoked"');
     expect(calls[0]!.query).not.toContain('connector.status == "active"');
-    expect(calls[1]!.query).toContain('connector.status == "active"');
+    expect(calls[1]!.query).toContain('connector.status != "revoked"');
+    expect(calls[1]!.query).not.toContain('connector.status == "active"');
     expect(calls[0]!.query).toContain('connector.syncLeaseToken == @token');
     expect(calls[1]!.query).toContain('connector.sendLeaseToken == @token');
   });

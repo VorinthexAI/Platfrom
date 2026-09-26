@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { classifyEmailWithFallback, deterministicEmailClassification, emailLabelsVisibleInInbox, inboxCategoryFor } from './classification';
-import { buildGmailAuthorizationUrl, createGmailClient, decodeGmailAttachmentData, decodeRfc2047Words, discoverGmailAttachmentParts, emailAddresses, emailAddressWithName, gmailAttachmentParts, GmailApiError, GmailPermanentAttachmentError, isGmailQuotaExceeded, isRetryableGmailError, MAX_GMAIL_ATTACHMENT_BYTES, MAX_GMAIL_ATTACHMENTS, messageBodies, normalizeGmailAttachmentFilename } from './gmail';
+import { buildGmailAuthorizationUrl, createGmailClient, decodeGmailAttachmentData, decodeRfc2047Words, discoverGmailAttachmentParts, emailAddresses, emailAddressWithName, gmailAttachmentParts, GmailApiError, GmailPermanentAttachmentError, htmlToReadableText, isGmailQuotaExceeded, isRetryableGmailError, MAX_GMAIL_ATTACHMENT_BYTES, MAX_GMAIL_ATTACHMENTS, messageBodies, normalizeGmailAttachmentFilename, readableEmailBody } from './gmail';
 
 describe('Gmail connector protocol', () => {
   test('reports supported attachments omitted by the canonical count bound', () => {
@@ -94,6 +94,12 @@ describe('Gmail connector protocol', () => {
       mimeType: 'text/plain', headers: [{ name: 'Content-Type', value: 'text/plain; charset=x-unsupported' }],
       body: { data: Buffer.from('UTF-8 fallback').toString('base64url') },
     }).text).toBe('UTF-8 fallback');
+  });
+
+  test('extracts readable text from HTML email bodies', () => {
+    expect(htmlToReadableText('<p>Hello&nbsp;world</p><a href="https://track.example/x">Click</a>')).toBe('Hello world\nClick');
+    expect(readableEmailBody('http://track.example/x  http://track.example/y', '<p>Invoice for April</p>')).toBe('Invoice for April');
+    expect(readableEmailBody('Plain &amp; simple')).toBe('Plain & simple');
   });
 
   test('classifies provider labels and urgent subjects deterministically', () => {

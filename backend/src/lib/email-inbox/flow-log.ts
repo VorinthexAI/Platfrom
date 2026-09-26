@@ -13,7 +13,11 @@ function sanitize(value: unknown, depth = 0): unknown {
     return value;
   }
   if (typeof value === 'number' || typeof value === 'boolean') return value;
-  if (value instanceof Error) return { name: value.name, message: SECRET.test(value.message) ? '[redacted]' : value.message.slice(0, 400) };
+  if (value instanceof Error) return {
+    name: value.name,
+    message: SECRET.test(value.message) ? '[redacted]' : value.message.slice(0, 400),
+    ...('errors' in value && Array.isArray(value.errors) ? { errors: sanitize(value.errors, depth + 1) } : {}),
+  };
   if (Array.isArray(value)) return value.slice(0, 200).map((item) => sanitize(item, depth + 1));
   if (typeof value === 'object') {
     return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 80).map(([key, item]) => [key, SECRET.test(key) ? '[redacted]' : sanitize(item, depth + 1)]));

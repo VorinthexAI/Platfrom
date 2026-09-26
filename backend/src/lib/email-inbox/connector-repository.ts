@@ -223,7 +223,7 @@ export function createConnectorRepository(database: Database = db) {
     },
     async renewSend(key: string, token: string, expiresAt: string) {
       const now = new Date().toISOString();
-      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.status == "active" && connector.syncEnabled != false && connector.sendLeaseToken == @token && connector.sendLeaseExpiresAt > @now UPDATE connector WITH { sendLeaseExpiresAt: @expiresAt } IN @@collection RETURN true', { '@collection': USER_CONNECTORS_COLLECTION, key, token, expiresAt, now });
+      const cursor = await database.query('FOR connector IN @@collection FILTER connector._key == @key && connector.status != "revoked" && connector.syncEnabled != false && connector.sendLeaseToken == @token && connector.sendLeaseExpiresAt > @now UPDATE connector WITH { sendLeaseExpiresAt: @expiresAt } IN @@collection RETURN true', { '@collection': USER_CONNECTORS_COLLECTION, key, token, expiresAt, now });
       return (await cursor.next()) === true;
     },
     async releaseSend(key: string, token: string) {

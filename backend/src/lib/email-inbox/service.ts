@@ -11,7 +11,7 @@ import { buildEmbeddingText } from '@/lib/db/base';
 import { classifyEmailWithFallback, inboxCategorySchema } from './classification';
 import { connectorPublic, createConnectorRepository, type ConnectorRepository } from './connector-repository';
 import { createEmailRepository, draftKeyFromOutboundMessageId, EMAIL_OVERVIEW_FACETS, emailMessageKey, encodeEmailCursor, EmailRepositoryError, normalizeEmailOverviewFacets, type EmailOverviewLegacyFilter, type EmailRepository } from './repository';
-import { createGmailClient, emailAddresses, emailAddressWithName, GmailApiError, header, isGmailQuotaExceeded, isRetryableGmailError, messageBodies, refreshGmailCredentials, type GmailClient, type GmailMessageResource, type GmailThreadResource } from './gmail';
+import { createGmailClient, emailAddresses, emailAddressWithName, GmailApiError, header, isGmailQuotaExceeded, isRetryableGmailError, messageBodies, readableEmailBody, refreshGmailCredentials, type GmailClient, type GmailMessageResource, type GmailThreadResource } from './gmail';
 import { documentStorage, type DocumentObjectStorage } from '@/lib/ai/document-processing/storage';
 import { prepareDocumentRepresentation } from '@/lib/ai/document-processing';
 import { documentEmbed } from '@/lib/ai/document-processing/actions';
@@ -213,10 +213,9 @@ async function defaultAccess(actor: EmailActor) {
   return { teamMembershipKey: membership.key, role: 'owner' as const };
 }
 
-function stripHtml(value: string) { return value.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); }
 function safeHeader(value: string, maximum = 998) { return value.replace(/[\r\n\0-\x1f\x7f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maximum); }
 function cleanSubject(value: string) { return safeHeader(value) || '(No subject)'; }
-function cleanBody(text: string, html?: string) { return text.trim() || stripHtml(html ?? '') || '(Empty message)'; }
+function cleanBody(text: string, html?: string) { return readableEmailBody(text, html); }
 function summary(value: string) { return value.replace(/\s+/g, ' ').trim().slice(0, 400) || '(Empty message)'; }
 function messageId(value: string) { return /^<[^<>\r\n]{1,998}>$/.test(value.trim()) ? value.trim() : undefined; }
 function messageIdList(value: string) { return [...value.matchAll(/<[^<>\r\n]{1,998}>/g)].map(([id]) => id); }
@@ -248,7 +247,7 @@ function publicMessage(value: EmailMessage) {
   const { key, threadKey, from, fromName, to, cc, bcc, subject, body, summary, replyTo, replyDepth, labels, unread, direction, sentAt, hasAttachments, attachmentAvailability, unavailableAttachmentCount, attachments, inboxCategory, createdAt, updatedAt } = value;
   return {
     key, threadKey, from, ...(fromName ? { fromName } : {}), to, ...(cc ? { cc } : {}), ...(bcc ? { bcc } : {}),
-    subject, body, summary, ...(replyTo ? { replyTo } : {}), ...(replyDepth !== undefined ? { replyDepth } : {}),
+    subject, body: readableEmailBody(body), summary, ...(replyTo ? { replyTo } : {}), ...(replyDepth !== undefined ? { replyDepth } : {}),
     ...(labels ? { labels } : {}), unread, isRead: !unread, direction, sentAt, hasAttachments, attachmentAvailability,
     ...(unavailableAttachmentCount !== undefined ? { unavailableAttachmentCount } : {}),
     ...(attachments?.length ? { attachments } : {}), inboxCategory, createdAt, updatedAt,
@@ -1207,7 +1206,10 @@ export function createEmailService(options: {
         for (let offset = 0; offset < threadIds.length; offset += SYNC_THREAD_CONCURRENCY) {
           const results = await Promise.allSettled(threadIds.slice(offset, offset + SYNC_THREAD_CONCURRENCY).map(processThread));
           const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
-          if (failures.length) throw new AggregateError(failures.map(({ reason }) => reason), 'Email synchronization batch failed');
+          if (failures.length) {
+            logEmailFlow('inbox.sync.batch-failed', { connectorKey: account.key, lifecycle, errors: failures.map(({ reason }) => reason) });
+            throw new AggregateError(failures.map(({ reason }) => reason), 'Email synchronization batch failed');
+          }
           synced += results.reduce<number>((total, result) => total + (result.status === 'fulfilled' ? result.value : 0), 0);
         }
         await ensureLease();
@@ -1234,17 +1236,18 @@ export function createEmailService(options: {
         return lifecycle === 'initial' ? { ...result, initialSyncCompleted: !pendingThreadIds?.length } : result;
       } catch (error) {
         logEmailFlow('inbox.sync.failed', { connectorKey: account.key, lifecycle, synced, quotaExceeded: isGmailQuotaExceeded(error), error });
-        if (isGmailQuotaExceeded(error)) {
-          if (await connectors.renewSync(account.key, leaseToken, new Date(Date.now() + 30 * 60_000).toISOString())) {
+        if (await connectors.renewSync(account.key, leaseToken, new Date(Date.now() + 30 * 60_000).toISOString())) {
+          if (isGmailQuotaExceeded(error)) {
             await connectors.setSyncState(account.key, 'idle', { leaseToken, markSynced: false });
             await publishInboxChanged(destinationScope(actor));
+          } else {
+            const message = error instanceof Error ? error.message : 'Email synchronization failed';
+            if (await connectors.setSyncState(account.key, 'error', { error: message, leaseToken })) await publishInboxChanged(destinationScope(actor));
           }
+        }
+        if (isGmailQuotaExceeded(error)) {
           const result = { synced, lastSyncedAt: new Date().toISOString() };
           return lifecycle === 'initial' ? { ...result, initialSyncCompleted: false } : result;
-        }
-        if (await connectors.renewSync(account.key, leaseToken, new Date(Date.now() + 30 * 60_000).toISOString())) {
-          const message = error instanceof Error ? error.message : 'Email synchronization failed';
-          if (await connectors.setSyncState(account.key, 'error', { error: message, leaseToken })) await publishInboxChanged(destinationScope(actor));
         }
         throw error;
       } finally {
