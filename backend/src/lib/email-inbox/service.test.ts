@@ -810,6 +810,23 @@ describe('email synchronization', () => {
     });
   });
 
+  test('does not push Filtered subscription mail', async () => {
+    const raw = gmailMessage('changed-message', 'changed-thread');
+    const notices: unknown[] = [];
+    const account = { ...connector, historyId: '100', lastSyncedAt: now };
+    const service = createEmailService({
+      repository: { syncThread: async () => ({ ...thread, inboxCategory: 'Filtered', inInbox: true, subject: 'Sale' }), thread: async () => ({ thread: { ...thread, inboxCategory: 'Filtered' }, messages: [{ ...message, providerMessageId: raw.id }] }), deleteProviderThread: async () => undefined, subscriptionDraftForMessage: async () => ({ ...draft, creationSource: 'subscription' }) } as never,
+      connectors: { getExact: async () => account, markNotificationPending: async () => true, clearPendingNotification: async () => true, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true } as never,
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
+      client: () => ({ profile: async () => ({ historyId: '125' }), history: async () => ({ historyId: '125', history: [{ messagesAdded: [{ message: { id: raw.id, threadId: raw.threadId } }] }] }), threadMetadata: async () => ({ id: raw.threadId, messages: [raw] }), message: async () => raw }) as never,
+      classify: async () => ({ priority: 'low', state: 'filtered', category: 'promotions', isPurchase: false, intent: 'Filtered' }),
+      embed: async () => embedding,
+      notifyInboundEmail: async (input) => { notices.push(input); },
+    });
+    await expect(service.ingestSubscriptionNotification({ ...actor, userKey: 'system' }, connector.key, '999')).resolves.toMatchObject({ synced: 1 });
+    expect(notices).toEqual([]);
+  });
+
   test('rejects member-triggered subscription ingestion before touching connector state', async () => {
     let connectorReads = 0;
     const service = createEmailService({
