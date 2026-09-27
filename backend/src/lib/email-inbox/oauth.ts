@@ -5,6 +5,7 @@ import { redisConnection } from '@/lib/redis';
 import { createConnectorRepository, type ConnectorRepository } from './connector-repository';
 import { createInboxRepository, type InboxRepository } from './inbox-repository';
 import { buildGmailAuthorizationUrl, createGmailClient, createPkce, exchangeGmailCode, GmailApiError, hasGmailMailScope } from './gmail';
+import { logEmailMutation, logEmailMutationError } from './mutation-log';
 
 const STATE_PREFIX = 'email:oauth:state:';
 const GRANT_PREFIX = 'email:oauth:grant:';
@@ -90,37 +91,48 @@ export function createEmailOAuthService(options: {
   });
   return {
     async start(input: { userKey: string; teamKey: string; scopeKey: string; provider?: 'gmail'; name: string; description?: string; returnUri: string }) {
+      logEmailMutation('oauth.start', { userKey: input.userKey, teamKey: input.teamKey, scopeKey: input.scopeKey, name: input.name });
       await authorize(input.userKey, input.teamKey, input.scopeKey);
       const state = token('vrtx_email_state_');
       const nonce = randomBytes(24).toString('base64url');
       const pkce = createPkce();
       const record = stateSchema.parse({ ...input, provider: input.provider ?? 'gmail', returnUri: allowedReturnUri(input.returnUri), verifier: pkce.verifier, nonce });
       if (!(await store.put(`${STATE_PREFIX}${state}`, JSON.stringify(record), 600))) throw new Error('Could not create email authorization state');
+      logEmailMutation('oauth.start.ok', { userKey: input.userKey, scopeKey: input.scopeKey });
       return { authorizationUrl: buildGmailAuthorizationUrl({ state, nonce, codeChallenge: pkce.challenge }) };
     },
     async callback(input: { state: string; code?: string; error?: string }) {
+      logEmailMutation('oauth.callback', { hasCode: Boolean(input.code), googleError: input.error ?? null });
       const encoded = await store.take(`${STATE_PREFIX}${input.state}`);
       if (!encoded) {
+        logEmailMutation('oauth.callback.stale-state', {});
         throw new Error('Email authorization state is invalid or expired');
       }
       const state = stateSchema.parse(JSON.parse(encoded));
       const redirect = new URL(state.returnUri);
       if (input.error || !input.code) {
         const code = input.error ?? 'authorization_denied';
+        logEmailMutation('oauth.callback.denied', { code });
         redirect.searchParams.set('email_connection_error', code);
         return redirect.toString();
       }
       let reconnect: { connectorKey: string; connectorRevision: string; inboxKey?: string; inboxRevision?: string; previous: Awaited<ReturnType<ConnectorRepository['findExact']>>; previousInbox: Awaited<ReturnType<InboxRepository['getByConnector']>> } | undefined;
       let stage = 'authorize';
       try {
+        logEmailMutation('oauth.callback.stage', { stage, userKey: state.userKey, scopeKey: state.scopeKey });
         await authorize(state.userKey, state.teamKey, state.scopeKey);
         stage = 'token-exchange';
+        logEmailMutation('oauth.callback.stage', { stage });
         const result = await exchange(input.code, state.verifier, state.nonce);
         stage = 'gmail-scope';
+        logEmailMutation('oauth.callback.stage', { stage, scopes: result.scopes, hasRefreshToken: Boolean(result.credentials.refreshToken) });
         if (!hasGmailMailScope(result.scopes)) throw new Error('Gmail mail scope was not granted');
         stage = 'gmail-profile';
+        logEmailMutation('oauth.callback.stage', { stage });
         const providerProfile = await profile(result.credentials.accessToken);
+        logEmailMutation('oauth.callback.profile', { historyId: providerProfile.historyId });
         stage = 'connector-persistence';
+        logEmailMutation('oauth.callback.stage', { stage });
         const previous = await connectors.findExact(state.userKey, result.identity.providerAccountId, state.provider);
         const previousInbox = previous ? await inboxes.getByConnector(state.userKey, previous.key) : null;
         if (!result.credentials.refreshToken && previous && previous.status !== 'revoked' && previous.encryptedCredentials !== 'revoked') {
@@ -135,10 +147,13 @@ export function createEmailOAuthService(options: {
           expectedRevision: previous?.revision ?? null,
         });
         reconnect = { connectorKey: connector.key, connectorRevision: connector.revision, previous, previousInbox };
+        logEmailMutation('oauth.callback.connector', { connectorKey: connector.key, email: result.identity.email, scopes: result.scopes, reconnect: Boolean(previous) });
         stage = 'inbox-initialization';
+        logEmailMutation('oauth.callback.stage', { stage, connectorKey: connector.key });
         const initializedInbox = await ensureInbox({ userKey: state.userKey, teamKey: state.teamKey, scopeKey: state.scopeKey }, connector, { name: state.name, ...(state.description ? { description: state.description } : {}) }, previous !== null, previousInbox?.revision ?? null) as { key?: string; revision?: string } | undefined;
         if (initializedInbox?.revision) { reconnect.inboxKey = initializedInbox.key; reconnect.inboxRevision = initializedInbox.revision; }
         stage = 'sync-initialization';
+        logEmailMutation('oauth.callback.stage', { stage, connectorKey: connector.key });
         const syncRevision = await connectors.setSyncState(connector.key, 'idle', { historyId: providerProfile.historyId, pendingHistoryId: null, pendingThreadIds: null, pendingSubscriptionMessages: null, resetLastSynced: true, markSynced: false, expectedRevision: reconnect.connectorRevision });
         if (!syncRevision) throw new Error('Could not initialize email synchronization state');
         reconnect.connectorRevision = syncRevision;
@@ -149,16 +164,21 @@ export function createEmailOAuthService(options: {
           reconnect.connectorRevision = activated.revision;
         }
         stage = 'gmail-watch';
+        logEmailMutation('oauth.callback.stage', { stage, connectorKey: connector.key });
         const watch = await registerWatch({ userKey: state.userKey, teamKey: state.teamKey, scopeKey: state.scopeKey }, connector.key, reconnect.connectorRevision) as { connectorRevision?: string } | undefined;
         if (watch?.connectorRevision) reconnect.connectorRevision = watch.connectorRevision;
         stage = 'initial-sync-enqueue';
+        logEmailMutation('oauth.callback.stage', { stage, connectorKey: connector.key });
         await enqueueInitialSync({ teamKey: state.teamKey, scopeKey: state.scopeKey, connectorKey: connector.key, operationKey: randomUUID() });
         stage = 'connection-grant';
+        logEmailMutation('oauth.callback.stage', { stage, connectorKey: connector.key });
         const grant = token('vrtx_email_grant_');
         const payload = grantSchema.parse({ userKey: state.userKey, teamKey: state.teamKey, scopeKey: state.scopeKey, connectorKey: connector.key });
         if (!(await store.put(`${GRANT_PREFIX}${grant}`, JSON.stringify(payload), 300))) throw new Error('Could not create email connection grant');
         redirect.searchParams.set('email_connection_code', grant);
+        logEmailMutation('oauth.callback.ok', { connectorKey: connector.key, stage });
       } catch (error) {
+        logEmailMutationError('oauth.callback.fail', error, { ...failureDiagnostic(stage, error) });
         // Never log callback URLs, authorization codes, tokens, or provider bodies.
         try { (options.reportFailure ?? ((diagnostic) => console.warn('email oauth connection failed', diagnostic)))(failureDiagnostic(stage, error)); } catch { /* Diagnostics cannot prevent the app return. */ }
         if (reconnect) await connectors.rollbackReconnect({ connectorKey: reconnect.connectorKey, connectorRevision: reconnect.connectorRevision, previousConnector: reconnect.previous, inboxKey: reconnect.inboxKey, inboxRevision: reconnect.inboxRevision, previousInbox: reconnect.previousInbox }).catch(() => false);
@@ -175,19 +195,24 @@ export function createEmailOAuthService(options: {
       return redirect.toString();
     },
     async exchange(input: { userKey: string; teamKey: string; scopeKey: string; code: string }) {
+      logEmailMutation('oauth.exchange', { userKey: input.userKey, scopeKey: input.scopeKey });
       const encoded = await store.take(`${GRANT_PREFIX}${input.code}`);
       if (!encoded) {
+        logEmailMutation('oauth.exchange.stale-grant', { userKey: input.userKey, scopeKey: input.scopeKey });
         return null;
       }
       const grant = grantSchema.parse(JSON.parse(encoded));
       if (grant.userKey !== input.userKey || grant.teamKey !== input.teamKey || grant.scopeKey !== input.scopeKey) {
+        logEmailMutation('oauth.exchange.scope-mismatch', { userKey: input.userKey, scopeKey: input.scopeKey, connectorKey: grant.connectorKey });
         return null;
       }
       await authorize(input.userKey, input.teamKey, input.scopeKey);
       const connector = await connectors.getByKey(grant.connectorKey);
       if (!connector || connector.status !== 'active' || connector.userKey !== input.userKey) {
+        logEmailMutation('oauth.exchange.inactive', { userKey: input.userKey, connectorKey: grant.connectorKey, status: connector?.status ?? null });
         return null;
       }
+      logEmailMutation('oauth.exchange.ok', { connectorKey: connector.key, status: connector.status });
       return inboxView({ userKey: input.userKey, teamKey: input.teamKey, scopeKey: input.scopeKey }, connector.key);
     },
   };

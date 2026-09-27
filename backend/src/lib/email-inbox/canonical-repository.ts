@@ -268,7 +268,7 @@ export function createCanonicalEmailRepository(database: Database, error: Reposi
         LET removedDrafts = (FOR draft IN emailDrafts FILTER draft._key IN draftKeys REMOVE draft IN emailDrafts RETURN 1)
         LET removedThreads = (FOR thread IN emailThreads FILTER thread.scopeKey == @scopeKey && thread._key IN emptyThreadKeys REMOVE thread IN emailThreads RETURN 1)
         RETURN { threadsDeleted: LENGTH(removedThreads), documentsDeleted: LENGTH(removedMessages) + LENGTH(removedDrafts) + LENGTH(removedThreads) }
-      `, { now, scopeKey: input.scopeKey, accountKey: input.accountKey, providerMessageIds: input.providerMessageIds, snapshot: input.trashSnapshotAt })));
+      `, { scopeKey: input.scopeKey, accountKey: input.accountKey, providerMessageIds: input.providerMessageIds, snapshot: input.trashSnapshotAt })));
       const result = await cursor.next() as { threadsDeleted: number; documentsDeleted: number } | undefined;
       if (!result) throw error('conflict', 'Email connector or Trash snapshot changed before clearing Trash');
       return { ...result, attachmentMutation: { documentKeys: [], imageKeys: [], collectionKeys: [] } };

@@ -1354,11 +1354,14 @@ export function createEmailService(options: {
       let watch: Awaited<ReturnType<GmailClient['watch']>>;
       let connectorRevision: string;
       try {
+        logEmailMutation('oauth.watch.start', { connectorKey, topic });
         watch = await connection.gmail.watch(topic);
         const updatedRevision = await connectors.updateWatch(connection.connector.key, watch, expectedRevision, connection.connector.updatedAt);
         if (!updatedRevision) throw new EmailRepositoryError('conflict', 'Email connector changed while initializing its watch');
         connectorRevision = updatedRevision;
+        logEmailMutation('oauth.watch.ok', { connectorKey, expiration: watch.expiration });
       } catch (error) {
+        logEmailMutationError('oauth.watch.fail', error, { connectorKey, repairQueued });
         if (repairJobId) throw new EmailWatchRepairPendingError(error);
         throw error;
       }
