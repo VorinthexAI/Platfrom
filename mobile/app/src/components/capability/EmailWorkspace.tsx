@@ -799,8 +799,13 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       if (options.signal?.aborted) return "superseded" as const;
       const active = generation === overviewGeneration.current
         && (!continuation ? request === overviewRequest.current : pageGeneration === overviewPageGeneration.current);
+      const message = messageFor(failure);
+      if (/not available in this scope/i.test(message)) {
+        if (active) setLoadError(undefined);
+        return "superseded" as const;
+      }
       if (active) {
-        setLoadError(messageFor(failure));
+        setLoadError(message);
       }
       return active ? "failed" as const : "superseded" as const;
     } finally {
@@ -3140,7 +3145,8 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       if (!operationIsCurrent(generation, context) || initialConnectorKey !== connectorKey) return;
       router.replace({ pathname: "/capability/[slug]", params: { slug: "signal" } });
     } catch (failure) {
-      if (operationIsCurrent(generation, context) && initialConnectorKey === connectorKey) notify(messageFor(failure));
+      const message = messageFor(failure);
+      if (operationIsCurrent(generation, context) && initialConnectorKey === connectorKey && !/not available in this scope/i.test(message)) notify(message);
     } finally {
       if (generation === operationGeneration.current) setBusy(undefined);
     }
@@ -3266,11 +3272,12 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     <Button disabled={replySending || Boolean(replyTransformation) || !replyBody.trim()} onPress={requestSuggestedReplySend} size="md" variant="primary">Reply</Button>
     <Button disabled={replySending || Boolean(replyTransformation)} onPress={closeReplyEditor} size="md" variant="secondary">Close</Button>
   </>;
-  const draftsLoading = (draftsQuery.isLoading || draftSearching) && !visibleInboxDrafts.length;
+  const draftsLoading = draftsQuery.isLoading || draftSearching;
   const draftEmpty = Boolean(inboxTab === "drafts" && !draftsLoading && !draftsQuery.error && !draftSearchError && !visibleInboxDrafts.length);
   const mailboxLoading = loading || inboxQueryPending || inboxTab !== "sent" && initialSyncPending;
+  const inboxSearching = Boolean(normalizedInboxSearch || selectedTagKeys.length);
   const messageEmpty = Boolean(inboxTab !== "drafts" && !mailboxLoading && !loadError && !overview?.threads.length);
-  const inboxInitialLoading = inboxTab !== "drafts" && mailboxLoading && !overview?.threads.length;
+  const inboxInitialLoading = inboxTab !== "drafts" && mailboxLoading && (!overview?.threads.length || inboxSearching);
   return (
     <View style={styles.root}>
       <View accessibilityElementsHidden={readerSheetOpen} importantForAccessibility={readerSheetOpen ? "no-hide-descendants" : "auto"} pointerEvents={readerSheetOpen ? "none" : "auto"} style={styles.workspaceSurface}>

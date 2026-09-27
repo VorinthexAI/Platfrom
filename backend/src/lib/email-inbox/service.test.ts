@@ -532,7 +532,7 @@ describe('email synchronization', () => {
     expect(charges).toHaveLength(1);
   });
 
-  test('initial mailbox snapshots only list Gmail threads from the last 90 days', async () => {
+  test('initial mailbox snapshots list only the 25 newest Gmail threads', async () => {
     const queries: Array<{ limit: number; pageToken?: string; q?: string }> = [];
     const service = createEmailService({
       repository: { reconcileInbox: async () => undefined, syncThread: async () => thread, deleteProviderThread: async () => undefined } as never,
@@ -540,13 +540,13 @@ describe('email synchronization', () => {
       authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       client: () => ({
         profile: async () => ({ historyId: 'history-2' }),
-        listThreads: async (limit: number, pageToken?: string, q?: string) => { queries.push({ limit, pageToken, q }); return { threads: [] }; },
+        listThreads: async (limit: number, pageToken?: string, q?: string) => { queries.push({ limit, pageToken, q }); return { threads: [], nextPageToken: 'page-2' }; },
       }) as never,
       sparkBilling: { chargeExecution: async () => ({ status: 'applied', claimOwner: 'owner', transaction: { key: 'charge' } }) as never, completeExecution: async () => true },
       publishInboxChanged: async () => undefined,
     });
     await service.initialSync({ ...actor, userKey: 'system' }, connector.key);
-    expect(queries).toEqual([{ limit: 500, q: 'newer_than:90d' }]);
+    expect(queries).toEqual([{ limit: 25 }]);
   });
 
   test('rejects an unfunded initial import before provider access or persistence', async () => {
@@ -838,9 +838,9 @@ describe('email synchronization', () => {
       repository: { syncThread: async (input: unknown) => { synced.push(input); return thread; }, reconcileInbox: async () => undefined, deleteProviderThread: async () => undefined } as never,
       connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, embed: async () => embedding, ask, publishInboxChanged: async () => undefined,
     });
-    expect(await syncService.sync(actor, connector.key)).toMatchObject({ synced: 50 });
-    expect(asks).toBe(50);
-    expect(synced).toHaveLength(50);
+    expect(await syncService.sync(actor, connector.key)).toMatchObject({ synced: 25 });
+    expect(asks).toBe(25);
+    expect(synced).toHaveLength(25);
     expect(synced.every((item) => item.thread.inboxCategory === 'Important' && item.messages[0].body === 'Hello\n\nworld\n\nNext')).toBe(true);
 
     const mailboxThreads = ids.map((id) => ({ ...thread, key: id, providerThreadId: id }));
@@ -850,7 +850,7 @@ describe('email synchronization', () => {
       connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({}) as never, embed: async () => embedding, ask,
     });
     await expect(sortService.sort(actor, { connectorKey: connector.key })).resolves.toEqual({ connectorKey: connector.key, threadsProcessed: 50, messagesProcessed: 50, busy: false });
-    expect(asks).toBe(100);
+    expect(asks).toBe(75);
     expect(sorted).toHaveLength(50);
     expect(sorted.every((item) => item.thread.inboxCategory === 'Important' && item.messages[0].body === 'Hello\n\nworld\n\nNext')).toBe(true);
   });
@@ -928,7 +928,7 @@ describe('email synchronization', () => {
     });
   });
 
-  test('synchronizes only the latest Gmail page and reconciles it when complete', async () => {
+  test('synchronizes only the latest Gmail page without reconciling a partial mailbox', async () => {
     const synced: unknown[] = [];
     const reconciled: unknown[] = [];
     const embeddedTexts: string[] = [];
@@ -958,7 +958,7 @@ describe('email synchronization', () => {
       'Review\n\nsender@example.com\n\nReview\n\nPlease review this.',
     ]);
     expect((synced[0] as any).messages[0]).toMatchObject({ from: 'sender@example.com', fromName: 'Sender Name' });
-    expect(reconciled).toEqual([[userKey, userKey, ['thread-1'], { connectorKey: userKey, token: expect.any(String) }]]);
+    expect(reconciled).toEqual([]);
   });
 
   test('keeps Spam and Trash visible in Filtered while SENT-only threads stay outside the inbox', async () => {
@@ -982,49 +982,30 @@ describe('email synchronization', () => {
     ]);
   });
 
-  test('follows full snapshot pages, deduplicates threads, and reconciles stale records after all 101+ threads are processed', async () => {
-    let active = 0, maximum = 0, embedded = 0;
-    const publications: string[] = [];
+  test('imports only the first 25 Gmail threads and does not reconcile the rest of the mailbox', async () => {
     const saved: unknown[] = [];
     const reconciled: string[][] = [];
-    const deleted: unknown[][] = [];
-    const attachmentPublications: unknown[] = [];
-    const stale = new Set(['stale-thread']);
-    const ids = Array.from({ length: 125 }, (_, index) => `thread-${index}`);
     const pageTokens: Array<string | undefined> = [];
+    const ids = Array.from({ length: 40 }, (_, index) => `thread-${index}`);
     const gmail = {
       profile: async () => ({ historyId: 'history-2' }),
       listThreads: async (_limit: number, pageToken?: string) => {
         pageTokens.push(pageToken);
-        return pageToken
-          ? { threads: [{ id: ids[49]! }, ...ids.slice(50).map((id) => ({ id }))] }
-          : { threads: ids.slice(0, 50).map((id) => ({ id })), nextPageToken: 'page-2' };
+        return { threads: ids.map((id) => ({ id })), nextPageToken: 'page-2' };
       },
-      threadMetadata: async (id: string) => {
-        active += 1; maximum = Math.max(maximum, active);
-        await Bun.sleep(1);
-        active -= 1;
-        return { id, messages: [gmailMessage(`message-${id}`, id)] };
-      },
+      threadMetadata: async (id: string) => ({ id, messages: [gmailMessage(`message-${id}`, id)] }),
       message: async (id: string) => gmailMessage(id, id.replace('message-', '')),
     };
-    const repository = { syncThread: async (input: unknown) => { saved.push(input); return thread; }, reconcileInbox: async (_scopeKey: string, _connectorKey: string, snapshotIds: string[]) => { reconciled.push(snapshotIds); publications.push('reconciled'); return [...stale]; }, deleteProviderThread: async (...input: unknown[]) => { deleted.push(input); stale.clear(); return { documentsDeleted: 3, attachmentMutation: { documentKeys: ['document-1'], imageKeys: ['image-1'], collectionKeys: ['collection-1'] } }; } };
-    const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', refreshToken: 'refresh', tokenType: 'Bearer', expiresAt: '2027-08-11T12:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => { embedded += 1; return embedding; }, publishInboxChanged: async () => { publications.push('published'); }, publishAttachmentChanged: async (_scopeKey, mutation) => { attachmentPublications.push(mutation); } });
-    expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 125 });
-    expect(saved).toHaveLength(125);
-    expect(maximum).toBe(8);
-    expect(embedded).toBe(250);
-    expect(publications.filter((event) => event === 'published')).toHaveLength(127);
-    expect(publications.slice(-3)).toEqual(['reconciled', 'published', 'published']);
-    expect(pageTokens).toEqual([undefined, 'page-2']);
-    expect(reconciled).toEqual([ids]);
-    expect(deleted).toEqual([[userKey, userKey, 'stale-thread', { connectorKey: userKey, token: expect.any(String) }]]);
-    expect(attachmentPublications).toEqual([{ documentKeys: ['document-1'], imageKeys: ['image-1'], collectionKeys: ['collection-1'] }]);
-    expect(stale.size).toBe(0);
+    const repository = { syncThread: async (input: unknown) => { saved.push(input); return thread; }, reconcileInbox: async (_scopeKey: string, _connectorKey: string, snapshotIds: string[]) => { reconciled.push(snapshotIds); return []; }, deleteProviderThread: async () => undefined };
+    const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
+    expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 25 });
+    expect(saved).toHaveLength(25);
+    expect(pageTokens).toEqual([undefined]);
+    expect(reconciled).toEqual([]);
   });
 
-  test('publishes the no-change full snapshot only after reconciliation without attachment invalidations', async () => {
+  test('publishes the no-change snapshot without mailbox reconciliation or attachment invalidations', async () => {
     const order: string[] = [];
     let attachmentPublications = 0;
     const service = createEmailService({
@@ -1036,7 +1017,7 @@ describe('email synchronization', () => {
       publishAttachmentChanged: async () => { attachmentPublications += 1; },
     });
     await service.sync(actor, connector.key);
-    expect(order).toEqual(['reconciled', 'published', 'published']);
+    expect(order).toEqual(['published']);
     expect(attachmentPublications).toBe(0);
   });
 
@@ -1062,29 +1043,23 @@ describe('email synchronization', () => {
     expect(maximum).toBeGreaterThan(1);
   });
 
-  test('rejects repeated full-snapshot continuations without reconciling an incomplete snapshot', async () => {
+  test('ignores further Gmail thread pages after the 25 newest threads', async () => {
     let reconciliations = 0;
+    const listed: Array<string | undefined> = [];
     const gmail = {
       profile: async () => ({ historyId: 'history-2' }),
-      listThreads: async () => ({ threads: [{ id: 'thread-1' }], nextPageToken: 'repeated' }),
+      listThreads: async (_limit: number, pageToken?: string) => {
+        listed.push(pageToken);
+        return { threads: [{ id: 'thread-1' }], nextPageToken: 'page-2' };
+      },
+      threadMetadata: async (id: string) => ({ id, messages: [gmailMessage(`message-${id}`, id)] }),
+      message: async (id: string) => gmailMessage(id, id.replace('message-', '')),
     };
-    const repository = { reconcileInbox: async () => { reconciliations += 1; } };
+    const repository = { syncThread: async () => thread, reconcileInbox: async () => { reconciliations += 1; }, deleteProviderThread: async () => undefined };
     const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, publishInboxChanged: async () => undefined });
-    await expect(service.sync(actor, connector.key)).rejects.toThrow('repeated a continuation token');
-    expect(reconciliations).toBe(0);
-  });
-
-  test('fails explicitly rather than claiming completion above the full-snapshot safety limit', async () => {
-    let reconciliations = 0;
-    const gmail = {
-      profile: async () => ({ historyId: 'history-2' }),
-      listThreads: async () => ({ threads: Array.from({ length: 100_001 }, (_, index) => ({ id: `thread-${index}` })) }),
-    };
-    const repository = { reconcileInbox: async () => { reconciliations += 1; } };
-    const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
-    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, publishInboxChanged: async () => undefined });
-    await expect(service.sync(actor, connector.key)).rejects.toThrow('exceeds the 100000 thread safety limit');
+    const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
+    expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 1 });
+    expect(listed).toEqual([undefined]);
     expect(reconciliations).toBe(0);
   });
 
@@ -1446,9 +1421,9 @@ describe('email synchronization', () => {
     const repository = { syncThread: async () => thread, reconcileInbox: async (_scopeKey: string, _connectorKey: string, ids: string[]) => { reconciled.push(ids); }, deleteProviderThread: async () => undefined };
     const connectors = { getExact: async () => ({ ...connector, historyId: 'history-1', lastSyncedAt: now }), credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async (_key: string, state: string, input: any) => { if (state === 'idle') idleStates.push(input); return true; } };
     const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, publishInboxChanged: async () => undefined });
-    expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 101 });
+    expect(await service.sync(actor, connector.key)).toMatchObject({ synced: 25 });
     expect(idleStates[0]).toMatchObject({ historyId: 'history-2', pendingHistoryId: null, pendingThreadIds: null });
-    expect(reconciled).toEqual([snapshotIds]);
+    expect(reconciled).toEqual([]);
   });
 
   test('bounds provider message fetch concurrency within a large thread', async () => {
@@ -1895,7 +1870,23 @@ describe('canonical inbox intelligence operations', () => {
     const gmail = { listTrashMessages: async () => pages.shift()!, batchDeleteMessages: async (ids: string[]) => { events.push(['delete', ids]); }, threadMetadata: async () => { throw new GmailApiError(404); } };
     const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, enqueueClearTrash: async () => { events.push('intent'); return { jobId: 'clear-job' }; }, completeClearTrash: async () => { events.push('complete'); }, publishInboxChanged: async () => { events.push('publish'); } });
     expect(await service.clearTrash(actor, { connectorKey: connector.key })).toEqual({ connectorKey: connector.key, providerMessagesDeleted: 3, threadsDeleted: 2, documentsDeleted: 5 });
-    expect(events).toEqual(['intent', ['delete', ['a', 'b', 'c']], ['remove-thread', userKey, connector.key, 't', { connectorKey: connector.key, token: expect.any(String) }], ['local', { scopeKey: userKey, accountKey: connector.key, providerMessageIds: ['b', 'a', 'c'], trashSnapshotAt: expect.any(String), lease: { connectorKey: connector.key, token: expect.any(String) } }], 'publish', 'complete']);
+    expect(events).toEqual(['intent', ['delete', ['a', 'b', 'c']], ['remove-thread', userKey, connector.key, 't'], ['local', { scopeKey: userKey, accountKey: connector.key, providerMessageIds: ['b', 'a', 'c'], trashSnapshotAt: expect.any(String) }], 'publish', 'complete']);
+  });
+
+  test('clears Trash while the connector sync lease is held', async () => {
+    const scoped = { ...connector, scopes: ['https://mail.google.com/'] };
+    let providerCalls = 0, localWrites = 0;
+    const service = createEmailService({
+      repository: { clearTrash: async () => { localWrites += 1; return { threadsDeleted: 1, documentsDeleted: 1 }; }, deleteProviderThread: async () => undefined } as never,
+      connectors: { getExact: async () => scoped, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => false } as never,
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
+      client: () => ({ listTrashMessages: async () => ({ messages: [{ id: 'trashed', threadId: 't' }] }), batchDeleteMessages: async () => { providerCalls += 1; }, threadMetadata: async () => { throw new GmailApiError(404); } }) as never,
+      enqueueClearTrash: async () => ({ jobId: 'clear' }),
+      completeClearTrash: async () => undefined,
+      publishInboxChanged: async () => undefined,
+    });
+    expect(await service.clearTrash(actor, { connectorKey: connector.key })).toMatchObject({ providerMessagesDeleted: 1, threadsDeleted: 1 });
+    expect({ providerCalls, localWrites }).toEqual({ providerCalls: 1, localWrites: 1 });
   });
 
   test('keeps clear-Trash continuation pending across local crashes', async () => {
@@ -1941,7 +1932,7 @@ describe('canonical inbox intelligence operations', () => {
     const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding, enqueueClearTrash: async () => ({ jobId: 'clear' }), completeClearTrash: async () => undefined, publishInboxChanged: async () => undefined });
     await service.clearTrash(actor, { connectorKey: connector.key });
     expect(removals).toEqual([]);
-    expect(writes[0]).toMatchObject({ reconcileMessages: true, thread: { providerThreadId: 'mixed-thread', unread: true, labels: ['INBOX', 'UNREAD'] }, messages: [{ providerMessageId: 'survivor', unread: true }] });
+    expect(writes).toEqual([]);
     expect(cleanups[0]).toMatchObject({ providerMessageIds: ['trashed'] });
   });
 
@@ -1983,38 +1974,29 @@ describe('canonical inbox intelligence operations', () => {
     ]);
   });
 
-  test('publishes only attachment deletions committed before a surviving-thread reconciliation failure', async () => {
+  test('clears local Trash after Gmail delete even when mixed threads still exist at the provider', async () => {
     const scoped = { ...connector, scopes: ['https://mail.google.com/'] };
-    const events: string[] = [];
     let clearCalls = 0;
     const repository = {
-      syncThread: async (input: any) => {
-        if (input.thread.providerThreadId === 'thread-b') throw new Error('database unavailable');
-        return { ...thread, attachmentMutation: { documentKeys: ['document-a', 'document-a'], imageKeys: [], collectionKeys: [] } };
-      },
+      syncThread: async () => { throw new Error('must not persist during clear trash'); },
       deleteProviderThread: async () => undefined,
-      clearTrash: async () => { clearCalls += 1; return { threadsDeleted: 0, documentsDeleted: 0 }; },
+      clearTrash: async () => { clearCalls += 1; return { threadsDeleted: 0, documentsDeleted: 2 }; },
     };
     const messages = [{ id: 'trash-a', threadId: 'thread-a' }, { id: 'trash-b', threadId: 'thread-b' }];
     const gmail = {
       listTrashMessages: async () => ({ messages }), batchDeleteMessages: async () => undefined,
       threadMetadata: async (id: string) => ({ id, messages: [{ id: `survivor-${id}`, threadId: id }] }),
-      message: async (id: string) => providerMessage(id, id.replace('survivor-', '')),
     };
     const service = createEmailService({
       repository: repository as never,
       connectors: { getExact: async () => scoped, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined } as never,
       authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never,
-      classify: async () => ({ priority: 'normal', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }), embed: async () => embedding,
       enqueueClearTrash: async () => ({ jobId: 'partial' }),
-      publishAttachmentChanged: async (key, mutation) => publishEmailAttachmentDeletionEvents(key, mutation, {
-        scope: async (_scope, event) => { events.push(event); },
-        collection: async (_collection, event) => { events.push(event); },
-      }),
+      completeClearTrash: async () => undefined,
+      publishInboxChanged: async () => undefined,
     });
-    await expect(service.clearTrash(actor, { connectorKey: connector.key })).rejects.toThrow('local cleanup is pending');
-    expect(clearCalls).toBe(0);
-    expect(events).toEqual(['content.changed']);
+    await expect(service.clearTrash(actor, { connectorKey: connector.key })).resolves.toMatchObject({ providerMessagesDeleted: 2, documentsDeleted: 2 });
+    expect(clearCalls).toBe(1);
   });
 
   test('checks the persisted Gmail scope regardless of workspace role before clear-Trash access', async () => {
