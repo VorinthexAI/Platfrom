@@ -783,6 +783,7 @@ describe('email synchronization', () => {
         client: () => ({ profile: async () => ({ historyId: '125' }), history: async () => ({ historyId: '125', history: [{ messagesAdded: [{ message: { id: raw.id, threadId: raw.threadId } }] }] }), threadMetadata: async () => ({ id: raw.threadId, messages: [raw] }), message: async () => raw }) as never,
         classify: async () => ({ priority: 'urgent', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }),
         embed: async () => embedding,
+        ask: async () => ({ output: { text: 'Ada asked you to review the notes.' } }) as never,
         notifyInboundEmail: async (input) => { notices.push(input); },
       });
       if (source === 'sync') await service.sync(actor, connector.key);
@@ -798,7 +799,7 @@ describe('email synchronization', () => {
       teamKey: actor.teamKey,
       scopeKey: actor.scopeKey,
       title: 'Review',
-      message: `${message.from}: ${message.summary}`.slice(0, 1000),
+      message: 'Ada asked you to review the notes.',
       idempotencyKey: `inbox.inbound:${connector.key}:${raw.id}`,
       connectorKey: connector.key,
       threadKey: thread.key,
@@ -825,6 +826,34 @@ describe('email synchronization', () => {
     });
     await expect(service.ingestSubscriptionNotification({ ...actor, userKey: 'system' }, connector.key, '999')).resolves.toMatchObject({ synced: 1 });
     expect(notices).toEqual([]);
+  });
+
+  test('falls back to a truncated preview when inbound push generation fails', async () => {
+    const raw = gmailMessage('changed-message', 'changed-thread');
+    const notices: unknown[] = [];
+    const account = { ...connector, historyId: '100', lastSyncedAt: now };
+    const service = createEmailService({
+      repository: { syncThread: async () => thread, thread: async () => ({ thread, messages: [{ ...message, providerMessageId: raw.id }] }), deleteProviderThread: async () => undefined, subscriptionDraftForMessage: async () => ({ ...draft, creationSource: 'subscription' }) } as never,
+      connectors: { getExact: async () => account, markNotificationPending: async () => true, clearPendingNotification: async () => true, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true } as never,
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
+      client: () => ({ profile: async () => ({ historyId: '125' }), history: async () => ({ historyId: '125', history: [{ messagesAdded: [{ message: { id: raw.id, threadId: raw.threadId } }] }] }), threadMetadata: async () => ({ id: raw.threadId, messages: [raw] }), message: async () => raw }) as never,
+      classify: async () => ({ priority: 'urgent', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }),
+      embed: async () => embedding,
+      ask: (async () => { throw new Error('unavailable'); }) as never,
+      notifyInboundEmail: async (input) => { notices.push(input); },
+    });
+    await expect(service.ingestSubscriptionNotification({ ...actor, userKey: 'system' }, connector.key, '999')).resolves.toMatchObject({ synced: 1 });
+    expect(notices).toEqual([{
+      userKey,
+      teamKey: actor.teamKey,
+      scopeKey: actor.scopeKey,
+      title: 'Review',
+      message: `${message.from}: ${message.summary}`.slice(0, 1000),
+      idempotencyKey: `inbox.inbound:${connector.key}:${raw.id}`,
+      connectorKey: connector.key,
+      threadKey: thread.key,
+      messageKey: emailMessageKey(userKey, connector.key, raw.id),
+    }]);
   });
 
   test('rejects member-triggered subscription ingestion before touching connector state', async () => {
