@@ -31,6 +31,7 @@ import { teamConnectorSchema } from './connector-schema';
 import { getDefaultUserSearchService, type UserSearchService } from '@/lib/user-searches/service';
 import MailComposer from 'nodemailer/lib/mail-composer';
 import { createEmailAttachmentIngestionService, type EmailAttachmentIngestionService, type StagedEmailAttachment } from './attachment-ingestion';
+import { logEmailMutation, logEmailMutationError } from './mutation-log';
 import { getUserById, type User } from '@/lib/db/users.node';
 import { INBOX_INITIAL_SYNC_SPARKS, MICRO_SPARKS_PER_SPARK } from '@/lib/costs';
 import { sparkService } from '@/lib/sparks/service';
@@ -702,18 +703,22 @@ export function createEmailService(options: {
         items[index] = { threadKey: threadKeys[index]!, status: 'failed', error: error instanceof Error ? error.message : 'Email thread was not found' };
       }
     }
+    logEmailMutation('thread-mutation.start', { kind: input.mutation.kind, repairQueued: Boolean(input.repairQueued), threadKeys, mutation: input.mutation });
     for (const connectorKey of [...groups.keys()].sort()) {
       const selected = groups.get(connectorKey)!;
       let connection: Awaited<ReturnType<typeof active>>;
       try { connection = await active(actor, connectorKey); }
       catch (error) {
+        logEmailMutationError('thread-mutation.connector-unavailable', error, { connectorKey, kind: input.mutation.kind });
         for (const { index } of selected) items[index] = { threadKey: threadKeys[index]!, status: 'failed', error: error instanceof Error ? error.message : 'Email connector is unavailable' };
         continue;
       }
       if (!connection) {
+        logEmailMutation('thread-mutation.no-connector', { connectorKey, kind: input.mutation.kind });
         for (const { index } of selected) items[index] = { threadKey: threadKeys[index]!, status: 'failed', error: 'No connected email account' };
         continue;
       }
+      logEmailMutation('thread-mutation.connector', { connectorKey, kind: input.mutation.kind, syncStatus: connection.connector.syncStatus, syncLeaseExpiresAt: connection.connector.syncLeaseExpiresAt ?? null, sendLeaseExpiresAt: connection.connector.sendLeaseExpiresAt ?? null, scopes: connection.connector.scopes });
       let repairJobId: string | null = null;
       let repairPending = false;
       try {
@@ -726,19 +731,24 @@ export function createEmailService(options: {
         for (const { index, detail } of selected) {
           const fail = (status: 'failed' | 'repairPending', error: unknown) => {
             if (status === 'repairPending') repairPending = true;
+            logEmailMutationError(`thread-mutation.${status}`, error, { connectorKey, kind: input.mutation.kind, threadKey: detail.thread.key, providerThreadId: detail.thread.providerThreadId });
             items[index] = { threadKey: detail.thread.key, status, error: error instanceof Error ? error.message : 'Email operation failed' };
           };
           try {
+            logEmailMutation('thread-mutation.gmail.start', { connectorKey, kind: input.mutation.kind, threadKey: detail.thread.key, providerThreadId: detail.thread.providerThreadId });
             if (input.mutation.kind === 'favorite') await connection.gmail.modifyThread(detail.thread.providerThreadId, input.mutation.isFavorite ? ['STARRED'] : [], input.mutation.isFavorite ? [] : ['STARRED']);
             else if (input.mutation.kind === 'read-state') await connection.gmail.modifyThread(detail.thread.providerThreadId, input.mutation.isRead ? [] : ['UNREAD'], input.mutation.isRead ? ['UNREAD'] : []);
             else await connection.gmail.trashThread(detail.thread.providerThreadId);
+            logEmailMutation('thread-mutation.gmail.ok', { connectorKey, kind: input.mutation.kind, threadKey: detail.thread.key, providerThreadId: detail.thread.providerThreadId });
           } catch (error) {
+            logEmailMutationError('thread-mutation.gmail.fail', error, { connectorKey, kind: input.mutation.kind, threadKey: detail.thread.key, providerThreadId: detail.thread.providerThreadId, status: providerStatus(error) });
             if (providerStatus(error) === 404) {
               try {
                 const deleted = await repository.deleteProviderThread(privateScope(actor), connectorKey, detail.thread.providerThreadId);
                 locallyConvergedDeletion = true;
                 if (deleted?.attachmentMutation) await publishAttachmentChanged(destinationScope(actor), deleted.attachmentMutation).catch(() => undefined);
                 items[index] = { threadKey: detail.thread.key, status: 'deleted', error: 'Email thread was not found at the provider and was deleted locally' };
+                logEmailMutation('thread-mutation.gmail.404-deleted-local', { connectorKey, threadKey: detail.thread.key, providerThreadId: detail.thread.providerThreadId });
               } catch (deleteError) { fail('repairPending', deleteError); continue; }
               continue;
             }
@@ -746,12 +756,15 @@ export function createEmailService(options: {
             continue;
           }
           try {
+            logEmailMutation('thread-mutation.local.start', { connectorKey, kind: input.mutation.kind, threadKey: detail.thread.key });
             const updated = await repository.mutateThreadState({ scopeKey: privateScope(actor), accountKey: connectorKey, threadKey: detail.thread.key, mutation: input.mutation });
             items[index] = { threadKey: detail.thread.key, status: 'succeeded', thread: publicThread(updated) };
+            logEmailMutation('thread-mutation.local.ok', { connectorKey, kind: input.mutation.kind, threadKey: detail.thread.key, isFavorite: updated.isFavorite, isRead: !updated.unread, labels: updated.labels });
           } catch (error) { fail('repairPending', error); }
         }
         if (!repairPending && !input.repairQueued) await finishRepair(repairJobId);
       } catch (error) {
+        logEmailMutationError('thread-mutation.group-fail', error, { connectorKey, kind: input.mutation.kind });
         repairPending = repairJobId !== null || input.repairQueued === true;
         for (const { index, detail } of selected) if (items[index]?.status === 'failed' && items[index]?.error === 'Email thread was not found') items[index] = { threadKey: detail.thread.key, status: repairPending ? 'repairPending' : 'failed', error: error instanceof Error ? error.message : 'Email operation failed' };
       }
@@ -759,6 +772,7 @@ export function createEmailService(options: {
     const succeeded = items.filter(({ status }) => status === 'succeeded' || status === 'deleted').length;
     const failed = items.filter(({ status }) => status === 'failed').length;
     const repairPending = items.filter(({ status }) => status === 'repairPending').length;
+    logEmailMutation('thread-mutation.done', { kind: input.mutation.kind, requested: items.length, succeeded, failed, repairPending, items: items.map((item) => ({ threadKey: item.threadKey, status: item.status, ...('error' in item ? { error: item.error } : {}) })) });
     if (succeeded || locallyConvergedDeletion) await publishInboxChanged(destinationScope(actor));
     return publicEmailThreadMutationResultSchema.parse({ requested: items.length, succeeded, failed, repairPending, items });
   };
@@ -1823,8 +1837,12 @@ export function createEmailService(options: {
       return publicEmailClearTrashResultSchema.parse(await withReceipt(actor, 'email.trash.clear', requestKey, parsedInput, async () => {
       const { connectorKey } = parsedInput;
       const selected = await connectors.getExact(actor.userKey, connectorKey);
+      logEmailMutation('clear-trash.start', { connectorKey, continuationQueued, requestKey: requestKey ?? null, scopes: selected?.scopes ?? null, syncStatus: selected?.syncStatus ?? null, syncLeaseExpiresAt: selected?.syncLeaseExpiresAt ?? null, status: selected?.status ?? null });
       if (!selected || selected.status === 'revoked' || selected.syncEnabled === false) throw new EmailRepositoryError('not_found', 'No connected email account');
-      if (!selected.scopes.includes('https://mail.google.com/')) throw new EmailRepositoryError('conflict', 'Clearing Gmail Trash requires reconnecting this inbox and granting permanent-delete access');
+      if (!selected.scopes.includes('https://mail.google.com/')) {
+        logEmailMutation('clear-trash.missing-scope', { connectorKey, scopes: selected.scopes });
+        throw new EmailRepositoryError('conflict', 'Clearing Gmail Trash requires reconnecting this inbox and granting permanent-delete access');
+      }
       const connection = await active(actor, connectorKey);
       if (!connection) throw new EmailRepositoryError('not_found', 'No connected email account');
       let intentJobId: string | null = null;
@@ -1855,6 +1873,7 @@ export function createEmailService(options: {
           }
           const unique = new Map(messages.map((message) => [message.id, message]));
           messages = [...unique.values()];
+          logEmailMutation('clear-trash.listed', { connectorKey, count: messages.length });
           const operationKey = requestKey ? requestOperationKey(actor.teamKey, actor.scopeKey, actor.userKey, 'email.trash.clear', requestKey) : randomUUID();
           const intent = await enqueueClearTrash({ teamKey: actor.teamKey, scopeKey: actor.scopeKey, connectorKey, operationKey, trashSnapshotAt, messages });
           intentJobId = intent && typeof intent === 'object' && 'jobId' in intent && typeof intent.jobId === 'string' ? intent.jobId : null;
@@ -1865,8 +1884,15 @@ export function createEmailService(options: {
         providerSnapshotCompleted = true;
         for (let offset = 0; offset < messages.length; offset += 500) {
           const ids = messages.slice(offset, offset + 500).map(({ id }) => id).sort();
-          try { await connection.gmail.batchDeleteMessages(ids); providerMessagesDeleted += ids.length; }
-          catch (error) { if (providerStatus(error) === 404) providerMessagesDeleted += ids.length; }
+          try {
+            logEmailMutation('clear-trash.gmail-delete.start', { connectorKey, count: ids.length });
+            await connection.gmail.batchDeleteMessages(ids);
+            providerMessagesDeleted += ids.length;
+            logEmailMutation('clear-trash.gmail-delete.ok', { connectorKey, count: ids.length });
+          } catch (error) {
+            logEmailMutationError('clear-trash.gmail-delete.fail', error, { connectorKey, count: ids.length, status: providerStatus(error) });
+            if (providerStatus(error) === 404) providerMessagesDeleted += ids.length;
+          }
         }
         for (const providerThreadId of [...new Set(messages.map(({ threadId }) => threadId))].sort()) {
           try {
@@ -1878,13 +1904,16 @@ export function createEmailService(options: {
             } catch { /* Local thread cleanup retries independently of Gmail metadata. */ }
           }
         }
+        logEmailMutation('clear-trash.local.start', { connectorKey, providerMessageIds: messages.length, trashSnapshotAt });
         const local = await repository.clearTrash({ scopeKey: privateScope(actor), accountKey: connectorKey, providerMessageIds: messages.map(({ id }) => id), trashSnapshotAt });
+        logEmailMutation('clear-trash.local.ok', { connectorKey, threadsDeleted: local.threadsDeleted, documentsDeleted: local.documentsDeleted, providerMessagesDeleted });
         attachmentMutation = mergeAttachmentMutations(attachmentMutation, local.attachmentMutation);
         await publishInboxChanged(destinationScope(actor));
         await publishCommittedAttachmentMutation();
         if (!continuationQueued && intentJobId) await completeClearTrash(intentJobId).catch((error) => console.error('email clear-trash intent completion failed', { jobId: intentJobId, error }));
         return publicEmailClearTrashResultSchema.parse({ connectorKey, providerMessagesDeleted, threadsDeleted: local.threadsDeleted, documentsDeleted: local.documentsDeleted });
       } catch (error) {
+        logEmailMutationError('clear-trash.fail', error, { connectorKey, providerSnapshotCompleted, providerMessagesDeleted });
         await publishCommittedAttachmentMutation();
         if (providerSnapshotCompleted && !knownProviderError(error)) throw new EmailRepositoryError('conflict', 'Email Trash was cleared, but local cleanup is pending; retry the operation');
         throw error;
@@ -1895,6 +1924,7 @@ export function createEmailService(options: {
       await mutate(actor, ['owner', 'admin']);
       connectorKey = keySchema.parse(connectorKey);
       const connector = await connectors.getExact(actor.userKey, connectorKey);
+      logEmailMutation('disconnect.start', { connectorKey, status: connector?.status ?? null, syncStatus: connector?.syncStatus ?? null, syncLeaseExpiresAt: connector?.syncLeaseExpiresAt ?? null });
       if (!connector || connector.status === 'revoked') return { disconnected: true };
       const disconnecting = await connectors.claimDisconnect(connector.key);
       if (!disconnecting) {
@@ -1907,8 +1937,11 @@ export function createEmailService(options: {
       const remaining = (await connectors.listSyncTargetsByEmail(disconnecting.email)).filter((target) => target.connectorKey !== disconnecting.key);
       let purged: { storageKeys: string[] };
       try {
+        logEmailMutation('disconnect.purge.start', { connectorKey });
         purged = await repository.purgeConnectorMailbox(privateScope(actor), actor.userKey, disconnecting.key);
+        logEmailMutation('disconnect.purge.ok', { connectorKey, storageKeys: purged.storageKeys.length });
       } catch (error) {
+        logEmailMutationError('disconnect.purge.fail', error, { connectorKey });
         const current = await connectors.getExact(actor.userKey, connectorKey);
         if (!current || current.status === 'revoked') return { disconnected: true };
         throw error;
