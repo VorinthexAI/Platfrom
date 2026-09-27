@@ -768,14 +768,15 @@ describe('email synchronization', () => {
     expect(cursor).toBe('101');
   });
 
-  test('parses sync and subscription messages through identical sorting and Archive preparation', async () => {
+  test('runs text sort on sync without push and on new subscription inbound with push', async () => {
     const raw = gmailMessage('changed-message', 'changed-thread');
     const persisted: unknown[] = [];
+    const asks: string[] = [];
     let automaticDraftChecks = 0;
     const notices: unknown[] = [];
     for (const source of ['sync', 'subscription'] as const) {
       const account = { ...connector, historyId: '100', lastSyncedAt: now };
-      let saved: unknown;
+      let saved: any;
       const service = createEmailService({
         repository: { syncThread: async (input: unknown) => { saved = input; return thread; }, thread: async () => ({ thread, messages: [{ ...message, providerMessageId: raw.id }] }), deleteProviderThread: async () => undefined, subscriptionDraftForMessage: async () => { automaticDraftChecks += 1; return { ...draft, creationSource: 'subscription' }; } } as never,
         connectors: { getExact: async () => account, markNotificationPending: async () => true, clearPendingNotification: async () => true, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true } as never,
@@ -783,6 +784,7 @@ describe('email synchronization', () => {
         client: () => ({ profile: async () => ({ historyId: '125' }), history: async () => ({ historyId: '125', history: [{ messagesAdded: [{ message: { id: raw.id, threadId: raw.threadId } }] }] }), threadMetadata: async () => ({ id: raw.threadId, messages: [raw] }), message: async () => raw }) as never,
         embed: async () => embedding,
         ask: (async (_team: string, input: { responseFormat?: { name: string } }) => {
+          asks.push(input.responseFormat?.name ?? '');
           const push = input.responseFormat?.name === 'inbox_sort_push';
           return { output: { text: JSON.stringify({ category: 'Urgent', body: 'Please review this.', ...(push ? { message: 'Ada asked you to review the notes.' } : {}) }) } };
         }) as never,
@@ -790,11 +792,16 @@ describe('email synchronization', () => {
       });
       if (source === 'sync') await service.sync(actor, connector.key);
       else await service.ingestSubscriptionNotification({ ...actor, userKey: 'system' }, connector.key, '999');
-      const { subscriptionBilling, ...canonical } = saved as Record<string, unknown>;
-      persisted.push({ ...canonical, lease: { ...((saved as { lease: Record<string, unknown> }).lease), token: 'normalized' } });
-      if (source === 'subscription') expect(subscriptionBilling).toEqual({ userKey, providerMessageIds: [raw.id] });
+      persisted.push(saved);
+      if (source === 'sync') {
+        expect(asks).toEqual(['inbox_sort']);
+        expect(saved.thread.inboxCategory).toBe('Urgent');
+      } else {
+        expect(asks).toEqual(['inbox_sort', 'inbox_sort_push']);
+        expect(saved.subscriptionBilling).toEqual({ userKey, providerMessageIds: [raw.id] });
+        expect(saved.thread.inboxCategory).toBe('Urgent');
+      }
     }
-    expect(persisted[0]).toEqual(persisted[1]);
     expect(automaticDraftChecks).toBe(1);
     expect(notices).toEqual([{
       userKey,
@@ -807,10 +814,45 @@ describe('email synchronization', () => {
       threadKey: thread.key,
       messageKey: emailMessageKey(userKey, connector.key, raw.id),
     }]);
-    expect(persisted[0]).toMatchObject({
-      thread: { inboxCategory: 'Urgent', embeddingContentVersion: 4, archiveRepresentation: { semanticChunkCount: 1 } },
-      messages: [{ inboxCategory: 'Urgent', embeddingContentVersion: 4, archiveRepresentation: { semanticChunkCount: 1 } }],
+  });
+
+  test('syncs and sorts 50 dummy threads one by one and survives OpenRouter 429', async () => {
+    const ids = Array.from({ length: 50 }, (_, index) => `thread-${index + 1}`);
+    const messy = 'Hello\n\n\n\n   world   \n\nNext';
+    const dummy = (id: string) => ({
+      ...gmailMessage(`message-${id}`, id),
+      payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: '"Sender Name" <sender@example.com>' }, { name: 'To', value: 'me@example.com' }, { name: 'Subject', value: `Review ${id}` }], body: { data: Buffer.from(messy).toString('base64url') } },
     });
+    const synced: any[] = [];
+    const sorted: any[] = [];
+    let asks = 0;
+    const ask = (async () => { asks += 1; throw Object.assign(new Error('OpenRouter text request failed with status 429'), { status: 429 }); }) as never;
+    const connectors = { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true };
+    const gmail = {
+      profile: async () => ({ historyId: 'history-2' }),
+      listThreads: async () => ({ threads: ids.map((id) => ({ id })) }),
+      threadMetadata: async (id: string) => ({ id, messages: [dummy(id)] }),
+      message: async (id: string) => dummy(id.replace('message-', '')),
+    };
+    const syncService = createEmailService({
+      repository: { syncThread: async (input: unknown) => { synced.push(input); return thread; }, reconcileInbox: async () => undefined, deleteProviderThread: async () => undefined } as never,
+      connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => gmail as never, embed: async () => embedding, ask, publishInboxChanged: async () => undefined,
+    });
+    expect(await syncService.sync(actor, connector.key)).toMatchObject({ synced: 50 });
+    expect(asks).toBe(50);
+    expect(synced).toHaveLength(50);
+    expect(synced.every((item) => item.thread.inboxCategory === 'Important' && item.messages[0].body === 'Hello\n\nworld\n\nNext')).toBe(true);
+
+    const mailboxThreads = ids.map((id) => ({ ...thread, key: id, providerThreadId: id }));
+    const mailboxMessages = ids.map((id) => ({ ...message, key: id, threadKey: id, providerMessageId: `message-${id}`, subject: `Review ${id}`, body: messy }));
+    const sortService = createEmailService({
+      repository: { mailbox: async () => ({ threads: mailboxThreads, messages: mailboxMessages }), syncThread: async (input: unknown) => { sorted.push(input); return thread; } } as never,
+      connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({}) as never, embed: async () => embedding, ask,
+    });
+    await expect(sortService.sort(actor, { connectorKey: connector.key })).resolves.toEqual({ connectorKey: connector.key, threadsProcessed: 50, messagesProcessed: 50, busy: false });
+    expect(asks).toBe(100);
+    expect(sorted).toHaveLength(50);
+    expect(sorted.every((item) => item.thread.inboxCategory === 'Important' && item.messages[0].body === 'Hello\n\nworld\n\nNext')).toBe(true);
   });
 
   test('does not push Filtered subscription mail', async () => {

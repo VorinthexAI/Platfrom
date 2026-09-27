@@ -8,7 +8,7 @@ import { getDefaultScopeMemberRepository } from '@/lib/ai/scopes';
 import type { EmailDraft, EmailMessage, EmailThread } from './archive-payloads';
 import { emailAttachmentRefsSchema, emailMessageSemanticText, emailReplyContextSemanticText, type EmailAttachmentRef, type EmailReplyContext } from './archive-payloads';
 import { buildEmbeddingText } from '@/lib/db/base';
-import { classifyEmailWithFallback, inboxCategoryFor, inboxCategorySchema, sortInboxMessage } from './classification';
+import { classifyEmailWithFallback, inboxCategoryFor, inboxCategorySchema, sortInboxMessage, sortInboxMessageFallback } from './classification';
 import { connectorPublic, createConnectorRepository, type ConnectorRepository } from './connector-repository';
 import { createEmailRepository, draftKeyFromOutboundMessageId, EMAIL_OVERVIEW_FACETS, emailMessageKey, encodeEmailCursor, EmailRepositoryError, normalizeEmailOverviewFacets, type EmailOverviewLegacyFilter, type EmailRepository } from './repository';
 import { createGmailClient, emailAddresses, emailAddressWithName, GmailApiError, header, isGmailQuotaExceeded, isRetryableGmailError, messageBodies, readableEmailBody, refreshGmailCredentials, type GmailClient, type GmailMessageResource, type GmailThreadResource } from './gmail';
@@ -812,12 +812,22 @@ export function createEmailService(options: {
   const projectReplyContext = ({ key, name, text, createdAt, updatedAt }: EmailReplyContext) => ({ key, name, text, createdAt, updatedAt });
   const generate = async (teamKey: string, request: { systemPrompt: string; text: string; temperature: number; maxTokens: number }) => (await ask<ChatOutput>(teamKey, { systemPrompt: request.systemPrompt, messages: [{ role: 'user', content: [{ type: 'text', text: request.text }] }], options: { temperature: request.temperature, maxTokens: request.maxTokens } })).output.text;
   const classifyOverride = options.classify;
-  const sortMessage = (push: boolean) => async (teamKey: string, message: { labels?: string[]; subject: string; from: string; body: string; direction: 'inbound' | 'outbound'; providerMessageId: string }) => {
+  const sortFields = (message: { labels?: string[]; subject: string; from: string; body: string; direction: 'inbound' | 'outbound' }) => ({ labels: message.labels ?? [], subject: message.subject, from: message.from, body: message.body, direction: message.direction });
+  let sortTail = Promise.resolve();
+  const runSortSerial = async <T>(work: () => Promise<T>) => {
+    const previous = sortTail;
+    let release!: () => void;
+    sortTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous.catch(() => undefined);
+    try { return await work(); } finally { release(); }
+  };
+  const sortMessage = (mode: 'compact' | 'ai', push: boolean) => async (teamKey: string, message: { labels?: string[]; subject: string; from: string; body: string; direction: 'inbound' | 'outbound'; providerMessageId: string }) => {
     if (classifyOverride) {
-      const classification = await classifyOverride(teamKey, { labels: message.labels ?? [], subject: message.subject, from: message.from, body: message.body, direction: message.direction });
+      const classification = await classifyOverride(teamKey, sortFields(message));
       return { classification, body: message.body, inboxCategory: inboxCategoryFor(message.labels ?? [], classification) };
     }
-    return sortInboxMessage(teamKey, { labels: message.labels ?? [], subject: message.subject, from: message.from, body: message.body, direction: message.direction, push }, ask);
+    if (mode === 'compact') return sortInboxMessageFallback({ ...sortFields(message), push: false });
+    return sortInboxMessage(teamKey, { ...sortFields(message), push }, ask);
   };
   const prepareArchiveDocument = (teamKey: string, runOperation: AsyncLimiter = runImmediately) => (input: { name: string; content: string; semanticSource: string }) => prepareDocumentRepresentation(input, {
     documentEmbed: (document) => documentEmbed(document, {
@@ -881,7 +891,10 @@ export function createEmailService(options: {
       messages: parsed.map((providerMessage) => ({ ...providerMessage, userKey: account.userKey, scopeKey: account.userKey, accountKey: account.key, summary: summary(providerMessage.body) })),
       reconcileMessages: true,
       classify: (teamKey, input) => runOperation(() => classify(teamKey, input)),
-      sortMessage: (teamKey, message) => runOperation(() => sortMessage(Boolean(subscriptionMessages?.has(message.providerMessageId) && message.direction === 'inbound'))(teamKey, message)),
+      sortMessage: (teamKey, message) => runSortSerial(() => runOperation(() => {
+        const push = Boolean(subscriptionMessages?.has(message.providerMessageId) && message.direction === 'inbound');
+        return sortMessage('ai', push)(teamKey, message);
+      })),
       prepareDocument: prepareArchiveDocument(actor.teamKey, runOperation),
       repository, beforePersist: async () => { await heartbeat(); if (heartbeatFailure) throw heartbeatFailure; }, lease: { kind: 'sync', connectorKey: account.key, token: leaseToken }, attachmentCommits: stagedAttachments,
       ...(() => {
@@ -1038,7 +1051,7 @@ export function createEmailService(options: {
             messages,
             reconcileMessages: false,
             classify,
-            sortMessage: sortMessage(false),
+            sortMessage: (teamKey, message) => runSortSerial(() => sortMessage('ai', false)(teamKey, message)),
             prepareDocument: prepareArchiveDocument(actor.teamKey),
             repository,
             beforePersist: ensureLease,

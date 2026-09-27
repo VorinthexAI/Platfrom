@@ -73,9 +73,9 @@ describe('canonical mail preparation', () => {
       beforePersist: async () => undefined,
       lease: { kind: 'sync', connectorKey, token: 'lease-token' },
     });
-    expect(maxClassifications).toBeLessThanOrEqual(8);
+    expect(maxClassifications).toBe(1);
     expect(maxEmbeddings).toBeLessThanOrEqual(8);
-    expect(maxClassifications).toBeGreaterThan(1);
+    expect(maxEmbeddings).toBeGreaterThan(1);
   });
 
   test('derives thread state from visible Inbox messages without historical Trash or Spam contamination', async () => {

@@ -447,7 +447,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string>();
   const [userRefreshing, setUserRefreshing] = useState(false);
-  const [retryInboxQuery, setRetryInboxQuery] = useState<EmailOverviewQuery>();
+
   const [busy, setBusy] = useState<BusyAction>();
   const [openingThreadKey, setOpeningThreadKey] = useState<string>();
   const [sheet, setSheet] = useState<Sheet>("plus");
@@ -751,7 +751,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     if (!options.cursor && !options.silent) {
       setLoading(true);
       setLoadError(undefined);
-      setRetryInboxQuery(undefined);
     }
     try {
       const keyedQuery = mailbox === "sent" ? { ...nextQuery, mailbox: "sent" as const } : nextQuery;
@@ -784,7 +783,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         && (!continuation ? request === overviewRequest.current : pageGeneration === overviewPageGeneration.current);
       if (active) {
         if (options.commitQuery) committedInboxQuery.current = nextQuery;
-        setRetryInboxQuery(undefined);
         setSelectedThreads((current) => current.map((selectedThread) => visibleValue.threads.find(({ key }) => key === selectedThread.key) ?? selectedThread));
         setInboxView((current) => {
           const nextOverview = options.cursor && current.overview ? {
@@ -803,7 +801,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         && (!continuation ? request === overviewRequest.current : pageGeneration === overviewPageGeneration.current);
       if (active) {
         setLoadError(messageFor(failure));
-        if (initialConnectorKey) setRetryInboxQuery(nextQuery);
       }
       return active ? "failed" as const : "superseded" as const;
     } finally {
@@ -868,12 +865,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const refreshFromInboxEvent = useEffectEvent(async () => {
     draftPageGeneration.current += 1;
     draftPageRequest.current += 1;
-    await Promise.all([
-      queryClient.cancelQueries({ queryKey: signalQueryKeys.overviews(emailContext) }),
-      queryClient.cancelQueries({ queryKey: signalQueryKeys.details(emailContext) }),
-      queryClient.cancelQueries({ queryKey: signalQueryKeys.generated(emailContext) }),
-      ...(initialConnectorKey ? [queryClient.cancelQueries({ queryKey: signalQueryKeys.drafts(emailContext, initialConnectorKey) })] : []),
-    ]);
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: signalQueryKeys.overviews(emailContext), refetchType: "none" }),
       queryClient.invalidateQueries({ queryKey: signalQueryKeys.details(emailContext), refetchType: "none" }),
@@ -3519,7 +3510,6 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
                 </View>
               </Button>
             ))}
-            {inboxTab !== "drafts" && loadError ? <Button onPress={() => void load(retryInboxQuery ?? requestedInboxQuery.current)} size="md" variant="secondary">Retry</Button> : null}
             {draftEmpty ? <View style={styles.empty}><Text style={styles.centerText}>{normalizedInboxSearch || selectedTagKeys.length ? "No matching drafts." : "No drafts yet."}</Text></View> : null}
             {messageEmpty ? (
               <View style={styles.empty}>

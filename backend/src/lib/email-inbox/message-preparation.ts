@@ -17,6 +17,7 @@ type CurrentMessageInput = Omit<SyncThreadInput['messages'][number], 'userKey' |
 
 function summary(value: string) { return value.replace(/\s+/g, ' ').trim().slice(0, 400) || '(Empty message)'; }
 const PREPARATION_CONCURRENCY = 8;
+const SORT_MESSAGE_CONCURRENCY = 1;
 async function mapConcurrent<T, R>(values: T[], concurrency: number, operation: (value: T) => Promise<R>) {
   const results = new Array<R>(values.length);
   let next = 0;
@@ -88,7 +89,7 @@ export async function sortAndPersistInboxThread(input: {
     });
     return { classification, body: message.body, inboxCategory: inboxCategoryFor(message.labels ?? [], classification) } satisfies InboxSortMessageResult;
   });
-  const classified = await mapConcurrent(input.messages, PREPARATION_CONCURRENCY, async (message) => {
+  const classified = await mapConcurrent(input.messages, SORT_MESSAGE_CONCURRENCY, async (message) => {
     const sorted = await sortMessage(input.teamKey, message);
     return { message: { ...message, body: sorted.body }, classification: sorted.classification, inboxCategory: sorted.inboxCategory, pushMessage: sorted.pushMessage };
   });
