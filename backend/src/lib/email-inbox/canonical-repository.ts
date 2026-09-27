@@ -249,7 +249,26 @@ export function createCanonicalEmailRepository(database: Database, error: Reposi
     async reconcileInbox(scopeKey: string, accountKey: string, providerThreadIds: string[], lease: { connectorKey: string; token: string }) { const cursor = await database.query('LET connector = DOCUMENT(@@connectors, @connectorKey) FILTER connector != null && connector.syncLeaseToken == @token && connector.syncLeaseExpiresAt > @now RETURN (FOR thread IN emailThreads FILTER thread.scopeKey == @scopeKey && thread.accountKey == @accountKey && thread.providerThreadId NOT IN @keep SORT thread.providerThreadId RETURN thread.providerThreadId)', { '@connectors': TEAM_CONNECTORS_COLLECTION, connectorKey: lease.connectorKey, token: lease.token, now: new Date().toISOString(), scopeKey, accountKey, keep: providerThreadIds }); const value = await cursor.next(); if (!value) throw error('conflict', 'Email synchronization lease was lost before reconciling the inbox'); return value; },
     async clearTrash(input: { scopeKey: string; accountKey: string; providerMessageIds: string[]; trashSnapshotAt: string; lease?: { connectorKey: string; token: string } }) {
       const now = new Date().toISOString();
-      const cursor = await retryOnContention(() => mailboxTransaction([EMAIL_THREADS_COLLECTION, EMAIL_MESSAGES_COLLECTION, EMAIL_DRAFTS_COLLECTION, 'tagAssignments'], async (trx) => trx.query(`LET removedMessages = (FOR message IN emailMessages FILTER message.scopeKey == @scopeKey && message.accountKey == @accountKey FILTER message.providerMessageId IN @providerMessageIds || ("TRASH" IN (message.labels || []) && message.updatedAt <= @snapshot) REMOVE message IN emailMessages RETURN OLD) LET threadKeys = UNIQUE(removedMessages[*].threadKey) LET emptyThreadKeys = (FOR threadKey IN threadKeys FILTER LENGTH(FOR message IN emailMessages FILTER message.scopeKey == @scopeKey && message.threadKey == threadKey LIMIT 1 RETURN 1) == 0 RETURN threadKey) LET draftKeys = (FOR draft IN emailDrafts FILTER draft.scopeKey == @scopeKey && draft.variant == "reply" && draft.threadKey IN emptyThreadKeys RETURN draft._key) LET cleanupTags = (FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && ((assignment.sourceType == "email-message" && assignment.sourceKey IN removedMessages[*]._key) || (assignment.sourceType == "email-draft" && assignment.sourceKey IN draftKeys) || (assignment.sourceType == "email-thread" && assignment.sourceKey IN emptyThreadKeys)) REMOVE assignment IN tagAssignments RETURN 1) LET removedDrafts = (FOR draft IN emailDrafts FILTER draft._key IN draftKeys REMOVE draft IN emailDrafts RETURN 1) LET removedThreads = (FOR thread IN emailThreads FILTER thread.scopeKey == @scopeKey && thread._key IN emptyThreadKeys REMOVE thread IN emailThreads RETURN 1) RETURN { threadsDeleted: LENGTH(removedThreads), documentsDeleted: LENGTH(removedMessages) + LENGTH(removedDrafts) + LENGTH(removedThreads) }`, { now, scopeKey: input.scopeKey, accountKey: input.accountKey, providerMessageIds: input.providerMessageIds, snapshot: input.trashSnapshotAt })));
+      const cursor = await retryOnContention(() => mailboxTransaction([EMAIL_THREADS_COLLECTION, EMAIL_MESSAGES_COLLECTION, EMAIL_DRAFTS_COLLECTION, 'tagAssignments'], async (trx) => trx.query(`
+        LET toRemove = (
+          FOR message IN emailMessages
+          FILTER message.scopeKey == @scopeKey && message.accountKey == @accountKey
+          FILTER message.providerMessageId IN @providerMessageIds || ("TRASH" IN (message.labels || []) && message.updatedAt <= @snapshot)
+          RETURN message
+        )
+        LET remainingThreadKeys = (
+          FOR message IN emailMessages
+          FILTER message.scopeKey == @scopeKey && message.accountKey == @accountKey && message._key NOT IN toRemove[*]._key
+          RETURN DISTINCT message.threadKey
+        )
+        LET removedMessages = (FOR message IN toRemove REMOVE message IN emailMessages RETURN OLD)
+        LET emptyThreadKeys = MINUS(UNIQUE(toRemove[*].threadKey), remainingThreadKeys)
+        LET draftKeys = (FOR draft IN emailDrafts FILTER draft.scopeKey == @scopeKey && draft.variant == "reply" && draft.threadKey IN emptyThreadKeys RETURN draft._key)
+        LET cleanupTags = (FOR assignment IN tagAssignments FILTER assignment.scopeKey == @scopeKey && ((assignment.sourceType == "email-message" && assignment.sourceKey IN removedMessages[*]._key) || (assignment.sourceType == "email-draft" && assignment.sourceKey IN draftKeys) || (assignment.sourceType == "email-thread" && assignment.sourceKey IN emptyThreadKeys)) REMOVE assignment IN tagAssignments RETURN 1)
+        LET removedDrafts = (FOR draft IN emailDrafts FILTER draft._key IN draftKeys REMOVE draft IN emailDrafts RETURN 1)
+        LET removedThreads = (FOR thread IN emailThreads FILTER thread.scopeKey == @scopeKey && thread._key IN emptyThreadKeys REMOVE thread IN emailThreads RETURN 1)
+        RETURN { threadsDeleted: LENGTH(removedThreads), documentsDeleted: LENGTH(removedMessages) + LENGTH(removedDrafts) + LENGTH(removedThreads) }
+      `, { now, scopeKey: input.scopeKey, accountKey: input.accountKey, providerMessageIds: input.providerMessageIds, snapshot: input.trashSnapshotAt })));
       const result = await cursor.next() as { threadsDeleted: number; documentsDeleted: number } | undefined;
       if (!result) throw error('conflict', 'Email connector or Trash snapshot changed before clearing Trash');
       return { ...result, attachmentMutation: { documentKeys: [], imageKeys: [], collectionKeys: [] } };
