@@ -1865,19 +1865,17 @@ export function createEmailService(options: {
         providerSnapshotCompleted = true;
         for (let offset = 0; offset < messages.length; offset += 500) {
           const ids = messages.slice(offset, offset + 500).map(({ id }) => id).sort();
-          try { await connection.gmail.batchDeleteMessages(ids); }
-          catch (error) {
-            if (providerStatus(error) !== 404) throw error;
-          }
-          providerMessagesDeleted += ids.length;
+          try { await connection.gmail.batchDeleteMessages(ids); providerMessagesDeleted += ids.length; }
+          catch (error) { if (providerStatus(error) === 404) providerMessagesDeleted += ids.length; }
         }
         for (const providerThreadId of [...new Set(messages.map(({ threadId }) => threadId))].sort()) {
           try {
             await connection.gmail.threadMetadata(providerThreadId);
-          } catch (error) {
-            if (providerStatus(error) !== 404) throw error;
-            const deleted = await repository.deleteProviderThread(privateScope(actor), connectorKey, providerThreadId);
-            attachmentMutation = mergeAttachmentMutations(attachmentMutation, deleted?.attachmentMutation);
+          } catch {
+            try {
+              const deleted = await repository.deleteProviderThread(privateScope(actor), connectorKey, providerThreadId);
+              attachmentMutation = mergeAttachmentMutations(attachmentMutation, deleted?.attachmentMutation);
+            } catch { /* Local thread cleanup retries independently of Gmail metadata. */ }
           }
         }
         const local = await repository.clearTrash({ scopeKey: privateScope(actor), accountKey: connectorKey, providerMessageIds: messages.map(({ id }) => id), trashSnapshotAt });

@@ -2042,24 +2042,13 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       if (!readInFlight.current.has(thread.key) || !contextIsCurrent(context)) return;
       const item = report.items[0];
       if (item?.status === "succeeded") {
-        clearPendingThreadFields([thread.key], ["read"]);
         applyAuthoritativeThreads(context, connectorKey, [item.thread]);
-        setSelected((current) => current?.thread.key === thread.key ? { ...current, thread: item.thread } : current);
+        setSelected((current) => current?.thread.key === thread.key ? { ...current, thread: overlayPendingSignalThread(item.thread, pendingThreadFields.current) } : current);
       } else if (item?.status === "deleted") {
         applyDeletedThreadKeys(context, connectorKey, [thread.key], [thread]);
-      } else if (item?.status === "repairPending") {
-        retainRepairPendingField(thread.key, "read");
-      } else {
-        clearPendingThreadFields([thread.key], ["read"]);
-        applyOptimisticThreads(context, connectorKey, [thread]);
-        setSelected((current) => current?.thread.key === thread.key ? { ...current, thread } : current);
-      }
+      } else retainRepairPendingField(thread.key, "read");
     } catch {
-      if (readInFlight.current.has(thread.key) && contextIsCurrent(context)) {
-        clearPendingThreadFields([thread.key], ["read"]);
-        applyOptimisticThreads(context, connectorKey, [thread]);
-        setSelected((current) => current?.thread.key === thread.key ? { ...current, thread } : current);
-      }
+      if (readInFlight.current.has(thread.key) && contextIsCurrent(context)) retainRepairPendingField(thread.key, "read");
     } finally {
       readInFlight.current.delete(thread.key);
     }
@@ -2085,26 +2074,12 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       const report = await setEmailThreadsReadStateForContext(context, [thread.key], nextRead, requestKey);
       if (!readInFlight.current.has(thread.key) || !contextIsCurrent(context)) return;
       const item = report.items[0];
-      if (item?.status === "succeeded") {
-        clearPendingThreadFields([thread.key], ["read"]);
-        applyAuthoritativeThreads(context, connectorKey, [item.thread]);
-      } else if (item?.status === "deleted") {
-        applyDeletedThreadKeys(context, connectorKey, [thread.key], [thread]);
-      } else if (item?.status === "repairPending") {
-        retainRepairPendingField(thread.key, "read");
-        notify("Email read update is pending repair.");
-      } else {
-        clearPendingThreadFields([thread.key], ["read"]);
-        applyOptimisticThreads(context, connectorKey, [thread]);
-        notify(item?.error ?? "Email read state was not updated.");
-      }
+      if (item?.status === "succeeded") applyAuthoritativeThreads(context, connectorKey, [item.thread]);
+      else if (item?.status === "deleted") applyDeletedThreadKeys(context, connectorKey, [thread.key], [thread]);
+      else retainRepairPendingField(thread.key, "read");
       setSheetOpen(false);
-    } catch (failure) {
-      if (readInFlight.current.has(thread.key) && contextIsCurrent(context)) {
-        clearPendingThreadFields([thread.key], ["read"]);
-        applyOptimisticThreads(context, connectorKey, [thread]);
-        notify(messageFor(failure));
-      }
+    } catch {
+      if (readInFlight.current.has(thread.key) && contextIsCurrent(context)) retainRepairPendingField(thread.key, "read");
     } finally {
       readInFlight.current.delete(thread.key);
       setReadBusy(false);
@@ -2144,22 +2119,13 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
           : await trashEmailThreadsForContext(context, threadKeys, requestKey);
       if (generation !== bulkGeneration.current || !contextIsCurrent(context) || initialConnectorKey !== connectorKey) return;
       const succeeded = successfulThreads(report);
-      const succeededKeys = new Set(succeeded.map(({ key }) => key));
       const deletedKeys = report.items.flatMap((item) => item.status === "deleted" ? [item.threadKey] : []);
-      const failedKeys = report.items.flatMap((item) => item.status === "failed" ? [item.threadKey] : []);
-      const repairPendingKeys = report.items.flatMap((item) => item.status === "repairPending" ? [item.threadKey] : []);
-      for (const threadKey of repairPendingKeys) retainRepairPendingField(threadKey, action);
-      const completedKeys = [...succeededKeys, ...deletedKeys, ...failedKeys];
-      clearPendingThreadFields(completedKeys, [action]);
       applyAuthoritativeThreads(context, connectorKey, succeeded);
       applyDeletedThreadKeys(context, connectorKey, deletedKeys, snapshot);
-      applyOptimisticThreads(context, connectorKey, snapshot.filter(({ key }) => failedKeys.includes(key)));
-      if (failedKeys.length || repairPendingKeys.length) notify(snapshot.length === 1 ? "Email thread could not be updated" : `${succeededKeys.size + deletedKeys.length} updated, ${failedKeys.length} failed${repairPendingKeys.length ? `, ${repairPendingKeys.length} pending repair` : ""}`);
-    } catch (failure) {
+      for (const item of report.items) if (item.status === "failed" || item.status === "repairPending") retainRepairPendingField(item.threadKey, action);
+    } catch {
       if (generation === bulkGeneration.current && contextIsCurrent(context) && initialConnectorKey === connectorKey) {
-        clearPendingThreadFields(threadKeys, [action]);
-        applyOptimisticThreads(context, connectorKey, snapshot);
-        notify(messageFor(failure));
+        for (const threadKey of threadKeys) retainRepairPendingField(threadKey, action);
       }
     } finally {
       if (action === "read") threadKeys.forEach((key) => readInFlight.current.delete(key));
@@ -2188,26 +2154,11 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       const report = await setEmailThreadsFavoriteForContext(context, [threadKey], nextFavorite, requestKey);
       if (generation !== favoriteGeneration.current || !contextIsCurrent(context) || initialConnectorKey !== connectorKey) return;
       const item = report.items[0];
-      if (item?.status === "succeeded") {
-        clearPendingThreadFields([threadKey], ["favorite"]);
-        applyAuthoritativeThreads(context, connectorKey, [item.thread]);
-      } else if (item?.status === "deleted") {
-        applyDeletedThreadKeys(context, connectorKey, [threadKey], [previous]);
-      } else if (item?.status === "repairPending") {
-        retainRepairPendingField(threadKey, "favorite");
-        void queryClient.invalidateQueries({ queryKey: signalQueryKeys.accountOverviews(context, connectorKey), refetchType: "none" });
-        notify("Email favorite update is pending repair.");
-      } else {
-        clearPendingThreadFields([threadKey], ["favorite"]);
-        applyOptimisticThreads(context, connectorKey, [previous]);
-        notify(item?.error ?? "Email favorite was not updated.");
-      }
-    } catch (failure) {
-      if (generation === favoriteGeneration.current && contextIsCurrent(context) && initialConnectorKey === connectorKey) {
-        clearPendingThreadFields([threadKey], ["favorite"]);
-        applyOptimisticThreads(context, connectorKey, [previous]);
-        notify(messageFor(failure));
-      }
+      if (item?.status === "succeeded") applyAuthoritativeThreads(context, connectorKey, [item.thread]);
+      else if (item?.status === "deleted") applyDeletedThreadKeys(context, connectorKey, [threadKey], [previous]);
+      else retainRepairPendingField(threadKey, "favorite");
+    } catch {
+      if (generation === favoriteGeneration.current && contextIsCurrent(context) && initialConnectorKey === connectorKey) retainRepairPendingField(threadKey, "favorite");
     } finally {
       if (generation === favoriteGeneration.current) {
         favoriteInFlight.current = false;
@@ -3014,26 +2965,11 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       const report = await trashEmailThreadsForContext(context, [threadKey], requestKey);
       if (generation !== trashGeneration.current || !contextIsCurrent(context)) return;
       const item = report.items[0];
-      if (item?.status === "succeeded") {
-        clearPendingThreadFields([threadKey], ["trash"]);
-        applyAuthoritativeThreads(context, connectorKey, [item.thread]);
-      } else if (item?.status === "deleted") {
-        applyDeletedThreadKeys(context, connectorKey, [threadKey], [previousThread]);
-      } else if (item?.status === "repairPending") {
-        retainRepairPendingField(threadKey, "trash");
-        void queryClient.invalidateQueries({ queryKey: signalQueryKeys.accountOverviews(context, connectorKey), refetchType: "none" });
-        notify("Trash update is pending repair.");
-      } else {
-        clearPendingThreadFields([threadKey], ["trash"]);
-        applyOptimisticThreads(context, connectorKey, [previousThread]);
-        notify(item?.error ?? "Email thread was not moved to Trash.");
-      }
-    } catch (failure) {
-      if (generation === trashGeneration.current && contextIsCurrent(context)) {
-        clearPendingThreadFields([threadKey], ["trash"]);
-        applyOptimisticThreads(context, connectorKey, [previousThread]);
-        notify(messageFor(failure));
-      }
+      if (item?.status === "succeeded") applyAuthoritativeThreads(context, connectorKey, [item.thread]);
+      else if (item?.status === "deleted") applyDeletedThreadKeys(context, connectorKey, [threadKey], [previousThread]);
+      else retainRepairPendingField(threadKey, "trash");
+    } catch {
+      if (generation === trashGeneration.current && contextIsCurrent(context)) retainRepairPendingField(threadKey, "trash");
     } finally {
       trashInFlight.current = false;
       if (generation === trashGeneration.current) setTrashBusy(false);

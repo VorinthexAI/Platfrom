@@ -369,15 +369,17 @@ export function settleMatchingSignalRepairPendingFields(pending: SignalPendingTh
   const settledThreadKeys: string[] = [];
   for (const thread of updates) {
     const desired = nextPending.get(thread.key);
+    if (!desired) continue;
     const repairFields = nextRepairPending.get(thread.key);
-    if (!desired || !repairFields) continue;
-    for (const field of [...repairFields]) {
+    for (const field of ["favorite", "read", "trash"] as const) {
+      if (desired[field] === undefined) continue;
       if (!authoritativeThreadMatchesPendingField(thread, field, desired)) continue;
       delete desired[field];
-      repairFields.delete(field);
+      repairFields?.delete(field);
     }
     if (Object.keys(desired).length) nextPending.set(thread.key, desired);
     else nextPending.delete(thread.key);
+    if (!repairFields) continue;
     if (repairFields.size) nextRepairPending.set(thread.key, repairFields);
     else {
       nextRepairPending.delete(thread.key);
