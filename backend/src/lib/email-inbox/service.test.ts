@@ -1825,7 +1825,7 @@ describe('canonical inbox intelligence operations', () => {
     const service = createEmailService({ repository: repository as never, connectors: connectors as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: (token) => ({ modifyThread: async (providerThreadId: string) => { order.push(`provider:${token}:${providerThreadId}`); } }) as never, enqueueRepair: async ({ connectorKey }) => { order.push(`intent:${connectorKey}`); return { jobId: `job:${connectorKey}` }; }, completeRepair: async () => undefined, publishInboxChanged: async () => undefined });
     const result = await service.setReadState(actor, { threadKeys: [thread.key, missingKey, secondThreadKey], isRead: true });
     expect(result).toMatchObject({ requested: 3, succeeded: 2, failed: 1, repairPending: 0, items: [{ threadKey: thread.key, status: 'succeeded' }, { threadKey: missingKey, status: 'failed' }, { threadKey: secondThreadKey, status: 'succeeded' }] });
-    expect(order.filter((item) => item.startsWith('claim:'))).toEqual([`claim:${secondConnector.key}`, `claim:${connector.key}`].sort());
+    expect(order.filter((item) => item.startsWith('provider:')).sort()).toEqual([`provider:${connector.key}:thread-1`, `provider:${secondConnector.key}:thread-2`].sort());
     expect(order.filter((item) => item.startsWith('intent:'))).toHaveLength(2);
   });
   test('leaves a pre-created durable intent when provider trash succeeds but local persistence fails', async () => {
@@ -1840,28 +1840,37 @@ describe('canonical inbox intelligence operations', () => {
     expect(repairs).toEqual([expect.objectContaining({ reason: 'trash', operationKey: expect.any(String) })]);
   });
 
-  test('does not enqueue or call Gmail trash while sync/send owns the connector lease', async () => {
-    let providerCalls = 0, intents = 0;
-    const service = createEmailService({ repository: { thread: async () => ({ thread, messages: [message] }) } as never, connectors: { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => false } as never, authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }), client: () => ({ trashThread: async () => { providerCalls += 1; } }) as never, enqueueRepair: async () => { intents += 1; } });
-    expect(await service.trashThread(actor, { threadKey: thread.key })).toMatchObject({ failed: 1, items: [{ status: 'failed', error: expect.stringContaining('already running') }] });
-    expect({ providerCalls, intents }).toEqual({ providerCalls: 0, intents: 0 });
+  test('trashes a visible thread while the connector sync lease is held', async () => {
+    let providerCalls = 0, localWrites = 0, intents = 0;
+    const service = createEmailService({
+      repository: { thread: async () => ({ thread, messages: [message] }), mutateThreadState: async () => { localWrites += 1; return thread; } } as never,
+      connectors: { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => false } as never,
+      authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
+      client: () => ({ trashThread: async () => { providerCalls += 1; } }) as never,
+      enqueueRepair: async () => { intents += 1; return { jobId: 'trash-job' }; },
+      completeRepair: async () => undefined,
+      publishInboxChanged: async () => undefined,
+    });
+    expect(await service.trashThread(actor, { threadKey: thread.key })).toMatchObject({ succeeded: 1, failed: 0, repairPending: 0, items: [{ status: 'succeeded' }] });
+    expect({ providerCalls, localWrites, intents }).toEqual({ providerCalls: 1, localWrites: 1, intents: 1 });
   });
 
-  test('keeps a delayed connector-reconciliation intent pending while another job owns the active lease', async () => {
+  test('applies delayed connector-reconciliation read state while another job owns the sync lease', async () => {
     let providerCalls = 0, localWrites = 0;
     const service = createEmailService({
       repository: { thread: async () => ({ thread, messages: [message] }), mutateThreadState: async () => { localWrites += 1; return thread; } } as never,
       connectors: { getExact: async () => connector, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => false } as never,
       authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       client: () => ({ modifyThread: async () => { providerCalls += 1; } }) as never,
+      publishInboxChanged: async () => undefined,
     });
     await expect(service.setReadState(actor, { threadKey: thread.key, isRead: true }, true)).resolves.toMatchObject({
-      succeeded: 0,
+      succeeded: 1,
       failed: 0,
-      repairPending: 1,
-      items: [{ threadKey: thread.key, status: 'repairPending', error: expect.stringContaining('already running') }],
+      repairPending: 0,
+      items: [{ threadKey: thread.key, status: 'succeeded' }],
     });
-    expect({ providerCalls, localWrites }).toEqual({ providerCalls: 0, localWrites: 0 });
+    expect({ providerCalls, localWrites }).toEqual({ providerCalls: 1, localWrites: 1 });
   });
 
   test('does not mutate locally when provider trash fails and reports failed reconciliation after provider success', async () => {

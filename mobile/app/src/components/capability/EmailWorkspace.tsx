@@ -3669,10 +3669,10 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
             {!initialConnectorKey ? <BottomSheetItem disabled={Boolean(busy) || !permissions.canManageConnector} onPress={openConnectForm} style={styles.sheetAction} variant="secondary">Connect email</BottomSheetItem> : null}
           </BottomSheetMenu>
         ) : sheet === "trashRoot" ? (
-          <ScrollView contentContainerStyle={styles.trashRootContent} showsVerticalScrollIndicator={false}>
+          <ScrollView contentContainerStyle={[styles.trashRootContent, !trashRootLoading && !trashRootError && !trashGroups.some(({ threads, error }) => threads.length || error) && styles.sheetEmptyContent]} showsVerticalScrollIndicator={false} style={styles.sheetList}>
             {trashRootError ? <Button onPress={() => void openTrashRoot()} size="md" variant="secondary">Retry</Button> : null}
             {trashRootLoading ? Array.from({ length: 3 }, (_, index) => <Skeleton accessibilityLabel="Loading Trash" accessibilityRole="progressbar" key={index} style={styles.threadRowSkeleton} />) : null}
-            {!trashRootLoading && !trashRootError && !trashGroups.some(({ threads, error }) => threads.length || error) ? <View style={styles.empty}><Text style={styles.centerText}>No trashed messages yet.</Text></View> : null}
+            {!trashRootLoading && !trashRootError && !trashGroups.some(({ threads, error }) => threads.length || error) ? <Text style={styles.centerText}>No trashed messages yet.</Text> : null}
             {trashGroups.flatMap(({ threads }) => threads).map((thread) => <Button accessibilityLabel={`${!thread.isRead ? "Unread, " : ""}${shortAddress(thread.latestFrom)}, ${thread.subject}`} contentMode="raw" key={thread.key} onPress={() => { setSheetOpen(false); void openThread(thread); }} shape="pill" size="sm" style={styles.threadCard} variant="secondary"><MailIcon size="sm" /><View style={styles.threadBody}><Text numberOfLines={1} style={[styles.subject, !thread.isRead && styles.subjectUnread]}>{thread.subject}</Text></View></Button>)}
           </ScrollView>
         ) : sheet === "clearTrash" ? (
@@ -4375,7 +4375,7 @@ const styles = StyleSheet.create({
   receivedAttachmentLabel: { width: "100%", color: palette.silver100, fontFamily: fonts.medium, fontSize: 11, textAlign: "center" },
   receivedAttachmentImageLabel: { position: "absolute", right: 4, bottom: 4, left: 4, width: "auto", paddingHorizontal: 4, paddingVertical: 3, overflow: "hidden", borderRadius: radii.sm, backgroundColor: "rgba(0,0,0,0.68)", color: palette.silver50 },
   sheetItems: { gap: 10 },
-  trashRootContent: { gap: spacing.sm, paddingTop: spacing.sm, paddingBottom: spacing.xl },
+  trashRootContent: { flexGrow: 1, gap: spacing.sm, paddingTop: spacing.sm, paddingBottom: spacing.xl },
   metadataForm: { flexGrow: 1, gap: 12, paddingBottom: spacing.xl },
   inboxEditForm: { gap: spacing.lg },
   formScroll: { flex: 1 },

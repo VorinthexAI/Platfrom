@@ -716,14 +716,6 @@ export function createEmailService(options: {
         for (const { index } of selected) items[index] = { threadKey: threadKeys[index]!, status: 'failed', error: 'No connected email account' };
         continue;
       }
-      const leaseToken = randomUUID();
-      if (!await connectors.claimSync(connectorKey, leaseToken, new Date(Date.now() + 30 * 60_000).toISOString())) {
-        for (const { index } of selected) items[index] = { threadKey: threadKeys[index]!, status: input.repairQueued ? 'repairPending' : 'failed', error: 'Email synchronization or sending is already running' };
-        continue;
-      }
-      const ensureLease = async () => {
-        if (!await connectors.renewSync(connectorKey, leaseToken, new Date(Date.now() + 30 * 60_000).toISOString())) throw new EmailRepositoryError('conflict', `Email ${input.mutation.kind} lease was lost`);
-      };
       let repairJobId: string | null = null;
       let repairPending = false;
       try {
@@ -739,15 +731,13 @@ export function createEmailService(options: {
             items[index] = { threadKey: detail.thread.key, status, error: error instanceof Error ? error.message : 'Email operation failed' };
           };
           try {
-            await ensureLease();
             if (input.mutation.kind === 'favorite') await connection.gmail.modifyThread(detail.thread.providerThreadId, input.mutation.isFavorite ? ['STARRED'] : [], input.mutation.isFavorite ? [] : ['STARRED']);
             else if (input.mutation.kind === 'read-state') await connection.gmail.modifyThread(detail.thread.providerThreadId, input.mutation.isRead ? [] : ['UNREAD'], input.mutation.isRead ? ['UNREAD'] : []);
             else await connection.gmail.trashThread(detail.thread.providerThreadId);
           } catch (error) {
             if (providerStatus(error) === 404) {
               try {
-                await ensureLease();
-                const deleted = await repository.deleteProviderThread(privateScope(actor), connectorKey, detail.thread.providerThreadId, { connectorKey, token: leaseToken });
+                const deleted = await repository.deleteProviderThread(privateScope(actor), connectorKey, detail.thread.providerThreadId);
                 locallyConvergedDeletion = true;
                 if (deleted?.attachmentMutation) await publishAttachmentChanged(destinationScope(actor), deleted.attachmentMutation).catch(() => undefined);
                 items[index] = { threadKey: detail.thread.key, status: 'deleted', error: 'Email thread was not found at the provider and was deleted locally' };
@@ -758,8 +748,7 @@ export function createEmailService(options: {
             continue;
           }
           try {
-            await ensureLease();
-            const updated = await repository.mutateThreadState({ scopeKey: privateScope(actor), accountKey: connectorKey, threadKey: detail.thread.key, mutation: input.mutation, lease: { connectorKey, token: leaseToken } });
+            const updated = await repository.mutateThreadState({ scopeKey: privateScope(actor), accountKey: connectorKey, threadKey: detail.thread.key, mutation: input.mutation });
             items[index] = { threadKey: detail.thread.key, status: 'succeeded', thread: publicThread(updated) };
           } catch (error) { fail('repairPending', error); }
         }
@@ -767,7 +756,7 @@ export function createEmailService(options: {
       } catch (error) {
         repairPending = repairJobId !== null || input.repairQueued === true;
         for (const { index, detail } of selected) if (items[index]?.status === 'failed' && items[index]?.error === 'Email thread was not found') items[index] = { threadKey: detail.thread.key, status: repairPending ? 'repairPending' : 'failed', error: error instanceof Error ? error.message : 'Email operation failed' };
-      } finally { await connectors.releaseSync(connectorKey, leaseToken).catch(() => undefined); }
+      }
     }
     const succeeded = items.filter(({ status }) => status === 'succeeded' || status === 'deleted').length;
     const failed = items.filter(({ status }) => status === 'failed').length;
