@@ -508,6 +508,11 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
   const metadataOverview = metadataQuery.data;
   const metadataAccounts = useMemo(() => metadataOverview?.accounts ?? overview?.accounts ?? [], [metadataOverview?.accounts, overview?.accounts]);
   const selectedAccount = initialConnectorKey ? metadataAccounts.find(({ connectorKey }) => connectorKey === initialConnectorKey) ?? overview?.selectedAccount ?? undefined : undefined;
+  useEffect(() => {
+    if (!initialConnectorKey || metadataQuery.isPending) return;
+    if (metadataAccounts.some((account) => account.connectorKey === initialConnectorKey)) return;
+    router.replace({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: undefined, signalThreadKey: undefined, signalMessageKey: undefined, signalReturn: undefined } });
+  }, [initialConnectorKey, metadataAccounts, metadataQuery.isPending, router]);
   const toneRecords = metadataOverview?.tones ?? [];
   const tonesLoading = metadataQuery.isPending;
   const toneError = metadataQuery.error ? messageFor(metadataQuery.error) : undefined;
@@ -1129,7 +1134,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
     clearSelectedThread();
     allowNavigation.current = true;
     if (navigatedFromRoot && router.canGoBack()) router.back();
-    else router.replace({ pathname: "/capability/[slug]", params: { slug: "signal" } });
+    else router.replace({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: undefined, signalThreadKey: undefined, signalMessageKey: undefined, signalReturn: undefined } });
   }
   function openNewEmail() {
     if (trashBusy || sendGeneration.current !== undefined || busy === "send") return;
@@ -2497,7 +2502,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
         if (initialConnectorKey && (!navigatedFromRoot || !router.canGoBack())) {
           event.preventDefault();
           allowNavigation.current = true;
-          router.replace({ pathname: "/capability/[slug]", params: { slug: "signal" } });
+          router.replace({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: undefined, signalThreadKey: undefined, signalMessageKey: undefined, signalReturn: undefined } });
         }
       }),
     [navigation, busy, initialConnectorKey, navigatedFromRoot, newEmailAlternativesOpen, newEmailAttachmentsOpen, newEmailContentOpen, newEmailRecipientsOpen, newEmailReviewOpen, router, selected, sheet, sheetOpen],
@@ -3143,7 +3148,7 @@ function EmailWorkspaceSession({ emailContext, initialCollectionKind, initialCon
       clearSelectedThread();
       await queryClient.fetchQuery({ queryKey: signalQueryKeys.overview(context), queryFn: () => fetchEmailOverviewForContext(context), staleTime: 0 });
       if (!operationIsCurrent(generation, context) || initialConnectorKey !== connectorKey) return;
-      router.replace({ pathname: "/capability/[slug]", params: { slug: "signal" } });
+      router.replace({ pathname: "/capability/[slug]", params: { slug: "signal", connectorKey: undefined, signalThreadKey: undefined, signalMessageKey: undefined, signalReturn: undefined } });
     } catch (failure) {
       const message = messageFor(failure);
       if (operationIsCurrent(generation, context) && initialConnectorKey === connectorKey && !/not available in this scope/i.test(message)) notify(message);

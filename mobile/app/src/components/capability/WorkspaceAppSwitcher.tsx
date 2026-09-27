@@ -1,4 +1,4 @@
-import { useRouter, type Href } from "expo-router";
+import { useRouter } from "expo-router";
 import { useState, type ReactNode } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
@@ -38,17 +38,57 @@ export function WorkspaceAppSwitcher({ active, backSize = "xs", identity = "acti
   const displayedIcon = identity === "core" ? assistantIconSource : capabilityIconSource[selected.slug];
   const cardSize = gridWidth > 0 ? Math.floor((gridWidth - 10) / 2) : 140;
 
+  function openWorkspace(slug: CapabilitySlug) {
+    router.replace({
+      pathname: "/capability/[slug]",
+      params: {
+        slug,
+        action: undefined,
+        assetKey: undefined,
+        bookKey: undefined,
+        collectionKind: undefined,
+        compose: undefined,
+        connectorKey: undefined,
+        countryCode: undefined,
+        documentKey: undefined,
+        documentTitle: undefined,
+        draftKey: undefined,
+        highlightKey: undefined,
+        memoryKey: undefined,
+        subjectKey: undefined,
+        imageKey: undefined,
+        inbox: undefined,
+        initialQuery: undefined,
+        placeKey: undefined,
+        tab: undefined,
+        thread: undefined,
+        toneKey: undefined,
+        returnTripKey: undefined,
+        returnTripName: undefined,
+        returnSignalConnectorKey: undefined,
+        returnSignalThreadKey: undefined,
+        returnSignalMessageKey: undefined,
+        signalReturn: undefined,
+        signalThreadKey: undefined,
+        signalMessageKey: undefined,
+        openSignalAttachments: undefined,
+        tripKey: undefined,
+        openTripAssets: undefined,
+      },
+    });
+  }
+
   function select(slug: CapabilitySlug) {
     setOpen(false);
     setCustomizeOpen(false);
     if (slug === active) {
       if (onSelectActive) onSelectActive();
-      else router.replace(`/capability/${slug}` as Href);
+      else openWorkspace(slug);
       return;
     }
     if (!onBeforeSelect || onBeforeSelect(slug)) {
       enterWorkspace(slug);
-      router.replace(`/capability/${slug}` as Href);
+      openWorkspace(slug);
     }
   }
 
@@ -74,7 +114,7 @@ export function WorkspaceAppSwitcher({ active, backSize = "xs", identity = "acti
     const nextVisible = visibleWorkspaceSlugs(next, rootTeamMember);
     if (!nextVisible.includes(active) && nextVisible[0] && (!onBeforeSelect || onBeforeSelect(nextVisible[0]))) {
       enterWorkspace(nextVisible[0]);
-      router.replace(`/capability/${nextVisible[0]}` as Href);
+      openWorkspace(nextVisible[0]);
     }
     void patchJson<{ scopeKeys: string[] }, WorkspacePickerState>("/auth/me/workspace-apps", { scopeKeys })
       .then((server) => applyWorkspacePicker(server))
