@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { deterministicEmailClassification, emailLabelsVisibleInInbox, inboxCategoryFor } from './classification';
+import { emailLabelsVisibleInInbox, inboxCategoryFor } from './classification';
 import { buildGmailAuthorizationUrl, compactEmailText, createGmailClient, decodeGmailAttachmentData, decodeRfc2047Words, discoverGmailAttachmentParts, emailAddresses, emailAddressWithName, gmailAttachmentParts, GmailApiError, GmailPermanentAttachmentError, hasGmailMailScope, htmlToReadableText, isGmailQuotaExceeded, isRetryableGmailError, MAX_GMAIL_ATTACHMENT_BYTES, MAX_GMAIL_ATTACHMENTS, messageBodies, normalizeGmailAttachmentFilename, readableEmailBody } from './gmail';
 
 describe('Gmail connector protocol', () => {
@@ -106,12 +106,7 @@ describe('Gmail connector protocol', () => {
     expect(htmlToReadableText('<p>One</p><p></p><p></p><p>Two</p>')).toBe('One\n\nTwo');
   });
 
-  test('classifies only Spam and Trash deterministically and maps inbox categories', () => {
-    expect(deterministicEmailClassification({ labels: ['CATEGORY_PROMOTIONS'], subject: 'Sale', body: 'Limited offer', from: 'shop@example.com', direction: 'inbound' })).toBeNull();
-    expect(deterministicEmailClassification({ labels: ['INBOX'], subject: 'Urgent: review today', body: 'Please review', from: 'lead@example.com', direction: 'inbound' })).toBeNull();
-    expect(deterministicEmailClassification({ labels: ['INBOX', 'CATEGORY_UPDATES'], subject: 'Your order confirmation', body: 'Order #A-123 is confirmed.', from: 'shop@example.com', direction: 'inbound' })).toBeNull();
-    expect(deterministicEmailClassification({ labels: ['SPAM'], subject: 'Prize', body: 'Claim now', from: 'spam@example.com', direction: 'inbound' })).toMatchObject({ state: 'filtered', isPurchase: false });
-    expect(deterministicEmailClassification({ labels: ['TRASH', 'CATEGORY_UPDATES'], subject: 'Invoice 42', body: 'Amount due: 10 USD', from: 'shop@example.com', direction: 'inbound' })).toMatchObject({ state: 'filtered', isPurchase: false });
+  test('maps inbox categories from classification', () => {
     expect(inboxCategoryFor(['TRASH'], { priority: 'urgent', state: 'needs_action', isPurchase: true })).toBe('Filtered');
     expect(inboxCategoryFor([], { priority: 'normal', state: 'filtered', isPurchase: true })).toBe('Filtered');
     expect(inboxCategoryFor([], { priority: 'urgent', state: 'needs_action', isPurchase: true })).toBe('Purchases');

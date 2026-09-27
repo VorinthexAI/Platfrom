@@ -781,9 +781,11 @@ describe('email synchronization', () => {
         connectors: { getExact: async () => account, markNotificationPending: async () => true, clearPendingNotification: async () => true, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true } as never,
         authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
         client: () => ({ profile: async () => ({ historyId: '125' }), history: async () => ({ historyId: '125', history: [{ messagesAdded: [{ message: { id: raw.id, threadId: raw.threadId } }] }] }), threadMetadata: async () => ({ id: raw.threadId, messages: [raw] }), message: async () => raw }) as never,
-        classify: async () => ({ priority: 'urgent', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }),
         embed: async () => embedding,
-        ask: async () => ({ output: { text: 'Ada asked you to review the notes.' } }) as never,
+        ask: (async (_team: string, input: { responseFormat?: { name: string } }) => {
+          const push = input.responseFormat?.name === 'inbox_sort_push';
+          return { output: { text: JSON.stringify({ category: 'Urgent', body: 'Please review this.', ...(push ? { message: 'Ada asked you to review the notes.' } : {}) }) } };
+        }) as never,
         notifyInboundEmail: async (input) => { notices.push(input); },
       });
       if (source === 'sync') await service.sync(actor, connector.key);
@@ -837,7 +839,6 @@ describe('email synchronization', () => {
       connectors: { getExact: async () => account, markNotificationPending: async () => true, clearPendingNotification: async () => true, credentials: () => ({ accessToken: 'access', expiresAt: '2027-01-01T00:00:00.000Z' }), claimSync: async () => true, renewSync: async () => true, releaseSync: async () => undefined, setSyncState: async () => true } as never,
       authorize: async () => ({ teamMembershipKey: scopeKey, role: 'owner' }),
       client: () => ({ profile: async () => ({ historyId: '125' }), history: async () => ({ historyId: '125', history: [{ messagesAdded: [{ message: { id: raw.id, threadId: raw.threadId } }] }] }), threadMetadata: async () => ({ id: raw.threadId, messages: [raw] }), message: async () => raw }) as never,
-      classify: async () => ({ priority: 'urgent', state: 'needs_action', category: 'primary', isPurchase: false, intent: 'Review' }),
       embed: async () => embedding,
       ask: (async () => { throw new Error('unavailable'); }) as never,
       notifyInboundEmail: async (input) => { notices.push(input); },
@@ -848,7 +849,7 @@ describe('email synchronization', () => {
       teamKey: actor.teamKey,
       scopeKey: actor.scopeKey,
       title: 'Review',
-      message: `${message.from}: ${message.summary}`.slice(0, 1000),
+      message: 'sender@example.com: Please review this.',
       idempotencyKey: `inbox.inbound:${connector.key}:${raw.id}`,
       connectorKey: connector.key,
       threadKey: thread.key,

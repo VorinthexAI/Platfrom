@@ -1,7 +1,7 @@
 import type { PreparedDocumentRepresentation } from '@/lib/ai/document-processing';
 import type { EmailMessage, EmailThread } from './archive-payloads';
 import { emailMessageSemanticText } from './archive-payloads';
-import type { classifyEmailWithFallback } from './classification';
+import type { classifyEmailWithFallback, InboxSortMessageResult } from './classification';
 import { emailLabelsVisibleInInbox, inboxCategoryFor, type InboxCategory } from './classification';
 import { emailMessageKey, emailThreadKey, type EmailRepository } from './repository';
 import { latestEmailMessage } from './message-order';
@@ -70,7 +70,8 @@ export async function sortAndPersistInboxThread(input: {
   thread: PreparedThreadInput;
   messages: PreparedMessageInput[];
   reconcileMessages?: boolean;
-  classify: typeof classifyEmailWithFallback;
+  classify?: typeof classifyEmailWithFallback;
+  sortMessage?: (teamKey: string, message: PreparedMessageInput) => Promise<InboxSortMessageResult>;
   prepareDocument: (input: { name: string; content: string; semanticSource: string }) => Promise<PreparedDocumentRepresentation>;
   repository: Pick<EmailRepository, 'syncThread'>;
   lease: { kind: 'sync'; connectorKey: string; token: string };
@@ -81,39 +82,37 @@ export async function sortAndPersistInboxThread(input: {
   if (!input.messages.length) throw new Error('Email thread has no messages');
   const userKey = input.thread.userKey ?? input.thread.scopeKey;
   if (new Set(input.messages.map(({ providerMessageId }) => providerMessageId)).size !== input.messages.length) throw new Error('Email provider thread contains duplicate message IDs');
-  const classified = await mapConcurrent(input.messages, PREPARATION_CONCURRENCY, async (message) => {
-    const classification = await input.classify(input.teamKey, {
+  const sortMessage: (teamKey: string, message: PreparedMessageInput) => Promise<InboxSortMessageResult> = input.sortMessage ?? (async (teamKey, message) => {
+    const classification = await input.classify!(teamKey, {
       labels: message.labels ?? [], subject: message.subject, from: message.from, body: message.body, direction: message.direction,
     });
-    return { message, classification };
+    return { classification, body: message.body, inboxCategory: inboxCategoryFor(message.labels ?? [], classification) } satisfies InboxSortMessageResult;
+  });
+  const classified = await mapConcurrent(input.messages, PREPARATION_CONCURRENCY, async (message) => {
+    const sorted = await sortMessage(input.teamKey, message);
+    return { message: { ...message, body: sorted.body }, classification: sorted.classification, inboxCategory: sorted.inboxCategory, pushMessage: sorted.pushMessage };
   });
   const visible = classified.filter(({ message }) => message.labels?.includes('INBOX'));
   const relevant = visible.length ? visible : classified;
-  // Inbox membership determines visibility/categories, not conversation chronology.
-  // Include sent and archived replies, but do not let discarded messages replace
-  // the active conversation's preview or action state.
   const conversation = classified.filter(({ message }) => !message.labels?.some((label) => ['TRASH', 'SPAM', 'DRAFT'].includes(label)));
   const chronological = conversation.length ? conversation : relevant;
   const latestMessage = latestEmailMessage(chronological.map(({ message }) => message))!;
   const latest = chronological.find(({ message }) => message.providerMessageId === latestMessage.providerMessageId)!;
   const labels = [...new Set(relevant.flatMap(({ message }) => message.labels ?? []))];
-  const inboxCategory: InboxCategory = relevant.some(({ message, classification }) => inboxCategoryFor(message.labels ?? [], classification) === 'Filtered')
-    ? 'Filtered'
-    : relevant.some(({ message, classification }) => inboxCategoryFor(message.labels ?? [], classification) === 'Purchases') ? 'Purchases'
-    : relevant.some(({ message, classification }) => inboxCategoryFor(message.labels ?? [], classification) === 'Urgent') ? 'Urgent' : 'Important';
+  const inboxCategory: InboxCategory = latest.inboxCategory;
   const starred = labels.includes('STARRED');
-  const threadKey = emailThreadKey(input.thread.scopeKey, input.thread.accountKey, input.thread.providerThreadId);
-  const messages = await mapConcurrent(classified, PREPARATION_CONCURRENCY, async ({ message, classification }) => {
-    const { providerThreadId: _providerThreadId, ...messageFields } = withoutStored(message as unknown as Record<string, unknown>);
+  const messages = await mapConcurrent(classified, PREPARATION_CONCURRENCY, async ({ message, inboxCategory: messageCategory }) => {
+    const { providerThreadId: _providerThreadId, bodyHtml: _bodyHtml, ...messageFields } = withoutStored(message as unknown as Record<string, unknown>);
     const data = {
       ...messageFields,
       userKey: message.userKey ?? userKey,
       scopeKey: message.scopeKey,
       accountKey: message.accountKey,
       providerMessageId: message.providerMessageId,
+      body: message.body,
       unread: message.unread ?? false,
       summary: summary(message.body),
-      inboxCategory: inboxCategoryFor(message.labels ?? [], classification),
+      inboxCategory: messageCategory,
       embeddingContentVersion: 4 as const,
     };
     const content = emailMessageSemanticText(message);
@@ -153,5 +152,5 @@ export async function sortAndPersistInboxThread(input: {
     attachmentCommits: input.attachmentCommits,
     subscriptionBilling: input.subscriptionBilling,
   });
-  return { ...stored, inboxCategory, subject: thread.subject, inInbox: thread.inInbox };
+  return { ...stored, inboxCategory, subject: thread.subject, inInbox: thread.inInbox, ...(latest.pushMessage ? { pushMessage: latest.pushMessage } : {}) };
 }

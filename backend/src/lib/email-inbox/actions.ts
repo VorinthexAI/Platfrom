@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { coreChatInputSchema, decisionInputSchema, decisionOutputSchema, type CoreChatInput } from '@/lib/ai/actions';
+import { coreChatInputSchema, type CoreChatInput } from '@/lib/ai/actions';
 import { executeAction, type ExecuteActionOptions } from '@/lib/ai/router';
 import type { ChatOutput } from '@/lib/ai/providers/types';
 import { currentEmbeddingSchema, prepareEmbeddingText, type EmbedTextInput } from '@/lib/embeddings';
@@ -9,12 +9,6 @@ export async function executeEmailAsk<TOutput = ChatOutput>(teamKey: string, raw
   return executeAction<typeof input, TOutput>({
     mode: 'auto', teamKey, actionSlug: 'text',
   }, input, options);
-}
-
-export async function executeEmailDecide(teamKey: string, rawInput: unknown, options: ExecuteActionOptions = {}) {
-  const input = decisionInputSchema.parse(rawInput);
-  const response = await executeAction<typeof input, z.infer<typeof decisionOutputSchema>>({ mode: 'auto', teamKey, actionSlug: 'decide' }, input, options);
-  return decisionOutputSchema.parse(response.output);
 }
 
 const emailEmbeddingInputSchema = z.object({ text: z.string().trim().min(1), purpose: z.enum(['document', 'query']).default('document') }).strict();
