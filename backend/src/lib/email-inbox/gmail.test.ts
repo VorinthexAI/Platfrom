@@ -30,6 +30,7 @@ describe('Gmail connector protocol', () => {
     expect(url.searchParams.get('scope')).not.toContain('gmail.modify');
     expect(url.searchParams.get('scope')).not.toContain('gmail.send');
     expect(url.searchParams.get('redirect_uri')).toBe('https://api.example.com/api/v1/auth/mobile/oauth/google/callback');
+    expect(url.searchParams.get('hl')).toBe('en');
   });
 
   test('parses display-name addresses and nested MIME bodies', () => {

@@ -53,6 +53,7 @@ export function buildGmailAuthorizationUrl(input: { state: string; nonce: string
   url.searchParams.set('nonce', input.nonce);
   url.searchParams.set('code_challenge', input.codeChallenge);
   url.searchParams.set('code_challenge_method', 'S256');
+  url.searchParams.set('hl', 'en');
   return url.toString();
 }
 
