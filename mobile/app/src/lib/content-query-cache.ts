@@ -1,55 +1,25 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { appendCursorItems } from "@vorinthex/shared/lib/pagination";
-import type { UserHiddenRecord } from "./user-hidden-client";
 
 import {
-  ARCHIVE_FILE_EXTENSIONS,
-  ARCHIVE_LOCATION_PAGE_SIZE,
-  listContentDocumentPage,
-  listContentFolderTree,
-  listContentDocumentAudioVersions,
-  listContentDocumentSummaries,
-  getContentDocumentTopics,
-  readContentDocument,
+  FILE_LOCATION_PAGE_SIZE,
+  listContentFilePage,
+  listContentFolderPage,
   type ContentContext,
-  type ContentDocument,
-  type ContentDocumentAudioVersion,
-  type ContentDocumentSummary,
+  type ContentFile,
   type ContentFolder,
 } from "./content-client";
 
-export type ContentLocation = { folders: ContentFolder[]; documents: ContentDocument[]; documentCursor?: string; fileCursor?: string };
-export type FolderContentTab = "folders" | "documents" | "files";
+export type ContentLocation = { folders: ContentFolder[]; files: ContentFile[]; folderCursor?: string; fileCursor?: string };
 
-export function populatedContentTab(location: ContentLocation, selected: FolderContentTab): FolderContentTab {
-  const populated: Record<FolderContentTab, boolean> = {
-    folders: location.folders.length > 0,
-    documents: location.documents.some(({ extension }) => !extension),
-    files: location.documents.some(({ extension }) => Boolean(extension)),
-  };
-  return (["folders", "documents", "files"] as const).find((tab) => populated[tab]) ?? selected;
-}
-
-const contextKey = (context: ContentContext) => [context.userKey ?? "", context.teamKey, context.scopeKey] as const;
+const contextKey = (context: ContentContext) => [context.userKey ?? "", context.scopeKey] as const;
 
 export const contentQueryKeys = {
-  all: (context: ContentContext) => ["archive", ...contextKey(context)] as const,
-  folderTree: (context: ContentContext) => [...contentQueryKeys.all(context), "folder-tree"] as const,
-  userHiddens: (context: ContentContext) => [...contentQueryKeys.all(context), "user-hiddens"] as const,
+  all: (context: ContentContext) => ["files", ...contextKey(context)] as const,
   locations: (context: ContentContext) => [...contentQueryKeys.all(context), "locations"] as const,
   location: (context: ContentContext, folderKey?: string) => [...contentQueryKeys.locations(context), folderKey ?? null] as const,
-  document: (context: ContentContext, documentKey: string) => [...contentQueryKeys.all(context), "documents", documentKey] as const,
-  audioVersions: (context: ContentContext, documentKey: string) => [...contentQueryKeys.document(context, documentKey), "audio-versions"] as const,
-  summaries: (context: ContentContext, documentKey: string) => [...contentQueryKeys.document(context, documentKey), "summaries"] as const,
-  topics: (context: ContentContext, documentKey: string) => [...contentQueryKeys.document(context, documentKey), "topics"] as const,
+  file: (context: ContentContext, fileKey: string) => [...contentQueryKeys.all(context), "files", fileKey] as const,
 };
-
-export function patchContentUserHiddens(queryClient: QueryClient, context: ContentContext, update: (current: UserHiddenRecord[]) => UserHiddenRecord[]) {
-  const key = contentQueryKeys.userHiddens(context);
-  const previous = queryClient.getQueryData<UserHiddenRecord[]>(key) ?? [];
-  queryClient.setQueryData(key, update(previous));
-  return previous;
-}
 
 export function contentFolderChildren(tree: readonly ContentFolder[], parentFolderKey?: string) {
   return tree.filter((folder) => folder.parentFolderKey === parentFolderKey)
@@ -69,39 +39,15 @@ export function contentFolderStack(tree: readonly ContentFolder[], folderKey?: s
   return stack;
 }
 
-export function contentFolderDescendantKeys(tree: readonly ContentFolder[], folderKeys: readonly string[]) {
-  const blocked = new Set(folderKeys);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    tree.forEach((folder) => {
-      if (folder.parentFolderKey && blocked.has(folder.parentFolderKey) && !blocked.has(folder.key)) {
-        blocked.add(folder.key);
-        changed = true;
-      }
-    });
-  }
-  return [...blocked];
-}
-
-export function getContentFolderTree(queryClient: QueryClient, context: ContentContext) {
-  return queryClient.fetchQuery({
-    queryKey: contentQueryKeys.folderTree(context),
-    queryFn: ({ signal }) => listContentFolderTree(signal, context),
-    staleTime: 30_000,
-  });
-}
-
 export function getContentLocation(queryClient: QueryClient, context: ContentContext, folderKey?: string) {
   return queryClient.fetchQuery({
     queryKey: contentQueryKeys.location(context, folderKey),
     queryFn: async ({ signal }) => {
-      const [tree, page, files] = await Promise.all([
-        getContentFolderTree(queryClient, context),
-        listContentDocumentPage(folderKey, signal, context),
-        listContentDocumentPage(folderKey, signal, context, undefined, ARCHIVE_LOCATION_PAGE_SIZE, ARCHIVE_FILE_EXTENSIONS),
+      const [foldersPage, filesPage] = await Promise.all([
+        listContentFolderPage(folderKey, signal, context),
+        listContentFilePage(folderKey, signal, context),
       ]);
-      return { folders: contentFolderChildren(tree, folderKey), documents: appendCursorItems(page.documents, files.documents, ({ key }) => key), documentCursor: page.cursor, fileCursor: files.cursor };
+      return { folders: foldersPage.folders, files: filesPage.files, folderCursor: foldersPage.cursor, fileCursor: filesPage.cursor };
     },
     staleTime: 30_000,
   });
@@ -113,208 +59,66 @@ export async function refreshContentLocation(queryClient: QueryClient, context: 
   return getContentLocation(queryClient, context, folderKey);
 }
 
-export async function fillContentLocationDocuments(location: ContentLocation, input: { folderKey?: string; context: ContentContext; tab: FolderContentTab; minCount: number; signal?: AbortSignal }) {
-  if (input.tab === "folders") return location;
-  const files = input.tab === "files";
-  const match = files ? (document: ContentDocument) => Boolean(document.extension) : (document: ContentDocument) => !document.extension;
+export async function fillContentLocationFiles(location: ContentLocation, input: { folderKey?: string; context: ContentContext; minCount: number; signal?: AbortSignal }) {
   let next = location;
-  let cursor = files ? next.fileCursor : next.documentCursor;
+  let cursor = next.fileCursor;
   let started = false;
-  while (next.documents.filter(match).length < input.minCount) {
+  while (next.files.length < input.minCount) {
     if (started && !cursor) break;
     started = true;
-    const page = await listContentDocumentPage(input.folderKey, input.signal, input.context, cursor, ARCHIVE_LOCATION_PAGE_SIZE, files ? ARCHIVE_FILE_EXTENSIONS : undefined);
-    next = { folders: next.folders, documents: appendCursorItems(next.documents, page.documents, ({ key }) => key), documentCursor: files ? next.documentCursor : page.cursor, fileCursor: files ? page.cursor : next.fileCursor };
+    const page = await listContentFilePage(input.folderKey, input.signal, input.context, cursor, FILE_LOCATION_PAGE_SIZE);
+    next = { ...next, files: appendCursorItems(next.files, page.files, ({ key }) => key), fileCursor: page.cursor };
     cursor = page.cursor;
   }
   return next;
 }
 
-export function getContentDocument(queryClient: QueryClient, context: ContentContext, documentKey: string) {
-  return queryClient.fetchQuery({
-    queryKey: contentQueryKeys.document(context, documentKey),
-    queryFn: () => readContentDocument(documentKey, context),
-  });
-}
-
-export async function refreshContentDocument(queryClient: QueryClient, context: ContentContext, documentKey: string) {
-  await queryClient.invalidateQueries({ queryKey: contentQueryKeys.document(context, documentKey), exact: true, refetchType: "none" });
-  return getContentDocument(queryClient, context, documentKey);
-}
-
-export function getContentDocumentAudioVersions(queryClient: QueryClient, context: ContentContext, documentKey: string) {
-  return queryClient.fetchQuery({
-    queryKey: contentQueryKeys.audioVersions(context, documentKey),
-    queryFn: () => listContentDocumentAudioVersions(documentKey),
-    staleTime: 0,
-  });
-}
-
-export async function refreshContentDocumentAudioVersions(queryClient: QueryClient, context: ContentContext, documentKey: string) {
-  await queryClient.invalidateQueries({ queryKey: contentQueryKeys.audioVersions(context, documentKey), exact: true, refetchType: "none" });
-  return getContentDocumentAudioVersions(queryClient, context, documentKey);
-}
-
-export function addCachedContentDocumentAudioVersion(queryClient: QueryClient, context: ContentContext, version: ContentDocumentAudioVersion) {
-  queryClient.setQueryData<ContentDocumentAudioVersion[]>(contentQueryKeys.audioVersions(context, version.documentKey), (current = []) => [
-    version,
-    ...current.filter(({ key }) => key !== version.key),
-  ].sort((left, right) => left.version - right.version));
-  return version;
-}
-
-export function updateCachedContentDocumentAudioPlayback(queryClient: QueryClient, context: ContentContext, documentKey: string, audioVersionKey: string, playbackPositionMs: number) {
-  queryClient.setQueryData<ContentDocumentAudioVersion[]>(contentQueryKeys.audioVersions(context, documentKey), (current = []) => current.map((version) => ({
-    ...version,
-    isCurrent: version.key === audioVersionKey,
-    ...(version.key === audioVersionKey ? { playbackPositionMs } : {}),
-  })));
-}
-
-export function clearCachedContentDocumentAudioPlayback(queryClient: QueryClient, context: ContentContext, documentKey: string) {
-  queryClient.setQueryData<ContentDocumentAudioVersion[]>(contentQueryKeys.audioVersions(context, documentKey), (current = []) => current.map((version) => ({ ...version, isCurrent: false })));
-}
-
-export function getContentDocumentSummaries(queryClient: QueryClient, context: ContentContext, documentKey: string) {
-  return queryClient.fetchQuery({
-    queryKey: contentQueryKeys.summaries(context, documentKey),
-    queryFn: () => listContentDocumentSummaries(documentKey),
-    staleTime: Infinity,
-  });
-}
-
-export function addCachedContentDocumentSummary(queryClient: QueryClient, context: ContentContext, summary: ContentDocumentSummary) {
-  queryClient.setQueryData<ContentDocumentSummary[]>(contentQueryKeys.summaries(context, summary.documentKey), (current = []) => [
-    summary,
-    ...current.filter(({ key }) => key !== summary.key),
-  ].sort((left, right) => left.version - right.version));
-  return queryClient.getQueryData<ContentDocumentSummary[]>(contentQueryKeys.summaries(context, summary.documentKey))?.find(({ key }) => key === summary.key) ?? summary;
-}
-
-export async function refreshContentDocumentSummaries(queryClient: QueryClient, context: ContentContext, documentKey: string) {
-  await queryClient.invalidateQueries({ queryKey: contentQueryKeys.summaries(context, documentKey), exact: true, refetchType: "none" });
-  return getContentDocumentSummaries(queryClient, context, documentKey);
-}
-
-export function getCachedContentDocumentTopics(queryClient: QueryClient, context: ContentContext, documentKey: string) {
-  return queryClient.fetchQuery({
-    queryKey: contentQueryKeys.topics(context, documentKey),
-    queryFn: ({ signal }) => getContentDocumentTopics(documentKey, signal),
-    gcTime: Infinity,
-    staleTime: Infinity,
-  });
-}
-
-export async function invalidateContentDocumentTopics(queryClient: QueryClient, context: ContentContext, documentKey: string) {
-  await queryClient.cancelQueries({ queryKey: contentQueryKeys.topics(context, documentKey), exact: true });
-  await queryClient.invalidateQueries({ queryKey: contentQueryKeys.topics(context, documentKey), exact: true, refetchType: "none" });
-}
-
-export function replaceCachedContentDocument(queryClient: QueryClient, context: ContentContext, updated: ContentDocument) {
-  replaceCachedContentDocuments(queryClient, context, [updated]);
-}
-
-export function replaceCachedContentDocuments(queryClient: QueryClient, context: ContentContext, updated: readonly ContentDocument[]) {
-  const updates = new Map(updated.map((document) => [document.key, document]));
-  queryClient.setQueriesData<ContentLocation>({ queryKey: contentQueryKeys.locations(context) }, (location) => location ? {
-    ...location,
-    documents: location.documents.map((document) => updates.get(document.key) ?? document),
-  } : location);
-  updated.forEach((document) => queryClient.setQueryData<ContentDocument & { content: string }>(contentQueryKeys.document(context, document.key), (cached) => cached ? { ...cached, ...document } : cached));
-}
-
-export function addCachedContentDocument(queryClient: QueryClient, context: ContentContext, folderKey: string | undefined, document: ContentDocument) {
+export function addCachedContentFile(queryClient: QueryClient, context: ContentContext, folderKey: string | undefined, file: ContentFile) {
   queryClient.setQueryData<ContentLocation>(contentQueryKeys.location(context, folderKey), (location) => location ? {
     ...location,
-    documents: [...location.documents.filter((current) => current.key !== document.key), document]
-      .sort((left, right) => left.name.localeCompare(right.name)),
+    files: [...location.files.filter((current) => current.key !== file.key), file].sort((left, right) => left.name.localeCompare(right.name)),
   } : location);
 }
 
 export function addCachedContentFolder(queryClient: QueryClient, context: ContentContext, parentFolderKey: string | undefined, folder: ContentFolder) {
-  queryClient.setQueryData<ContentFolder[]>(contentQueryKeys.folderTree(context), (tree) => tree ? [
-    ...tree.filter((current) => current.key !== folder.key),
-    folder,
-  ] : tree);
   queryClient.setQueryData<ContentLocation>(contentQueryKeys.location(context, parentFolderKey), (location) => location ? {
     ...location,
-    folders: [...location.folders.filter((current) => current.key !== folder.key), folder]
-      .sort((left, right) => left.name.localeCompare(right.name)),
+    folders: [...location.folders.filter((current) => current.key !== folder.key), folder].sort((left, right) => left.name.localeCompare(right.name)),
   } : location);
 }
 
-export function seedCachedContentFolderLocation(queryClient: QueryClient, context: ContentContext, folderKey: string) {
-  queryClient.setQueryData<ContentLocation>(contentQueryKeys.location(context, folderKey), (location) => location ?? { folders: [], documents: [] });
-}
-
-export function removeCachedContentFolderLocation(queryClient: QueryClient, context: ContentContext, folderKey: string) {
-  queryClient.removeQueries({ queryKey: contentQueryKeys.location(context, folderKey), exact: true });
-}
-
-export function removeCachedContentDocument(queryClient: QueryClient, context: ContentContext, folderKey: string | undefined, documentKey: string) {
-  queryClient.setQueryData<ContentLocation>(contentQueryKeys.location(context, folderKey), (location) => location ? {
-    ...location,
-    documents: location.documents.filter((document) => document.key !== documentKey),
-  } : location);
-}
-
-export function removeCachedContentDocumentEverywhere(queryClient: QueryClient, context: ContentContext, documentKey: string) {
-  removeCachedContentDocumentsEverywhere(queryClient, context, [documentKey]);
-}
-
-export function removeCachedContentDocumentsEverywhere(queryClient: QueryClient, context: ContentContext, documentKeys: readonly string[]) {
-  const removed = new Set(documentKeys);
+export function replaceCachedContentFile(queryClient: QueryClient, context: ContentContext, updated: ContentFile) {
   queryClient.setQueriesData<ContentLocation>({ queryKey: contentQueryKeys.locations(context) }, (location) => location ? {
     ...location,
-    documents: location.documents.filter((document) => !removed.has(document.key)),
+    files: location.files.map((file) => file.key === updated.key ? updated : file),
   } : location);
-  documentKeys.forEach((documentKey) => {
-    queryClient.removeQueries({ queryKey: contentQueryKeys.document(context, documentKey) });
-  });
 }
 
-export function removeCachedContentFolder(queryClient: QueryClient, context: ContentContext, parentFolderKey: string | undefined, folderKey: string) {
-  queryClient.setQueryData<ContentFolder[]>(contentQueryKeys.folderTree(context), (tree) => tree?.filter((folder) => folder.key !== folderKey));
-  queryClient.setQueryData<ContentLocation>(contentQueryKeys.location(context, parentFolderKey), (location) => location ? {
+export function replaceCachedContentFolder(queryClient: QueryClient, context: ContentContext, updated: ContentFolder) {
+  queryClient.setQueriesData<ContentLocation>({ queryKey: contentQueryKeys.locations(context) }, (location) => location ? {
+    ...location,
+    folders: location.folders.map((folder) => folder.key === updated.key ? updated : folder),
+  } : location);
+}
+
+export function removeCachedContentFile(queryClient: QueryClient, context: ContentContext, fileKey: string) {
+  queryClient.setQueriesData<ContentLocation>({ queryKey: contentQueryKeys.locations(context) }, (location) => location ? {
+    ...location,
+    files: location.files.filter((file) => file.key !== fileKey),
+  } : location);
+}
+
+export function removeCachedContentFolder(queryClient: QueryClient, context: ContentContext, folderKey: string) {
+  queryClient.setQueriesData<ContentLocation>({ queryKey: contentQueryKeys.locations(context) }, (location) => location ? {
     ...location,
     folders: location.folders.filter((folder) => folder.key !== folderKey),
   } : location);
 }
 
-export function removeCachedContentFoldersEverywhere(queryClient: QueryClient, context: ContentContext, folderKeys: readonly string[]) {
-  if (!folderKeys.length) return;
-  queryClient.setQueryData<ContentFolder[]>(contentQueryKeys.folderTree(context), (tree) => {
-    if (!tree) return tree;
-    const removed = new Set(contentFolderDescendantKeys(tree, folderKeys));
-    return tree.filter((folder) => !removed.has(folder.key));
-  });
-  queryClient.removeQueries({ queryKey: contentQueryKeys.locations(context) });
-}
-
-export function replaceCachedContentFolder(queryClient: QueryClient, context: ContentContext, updated: ContentFolder) {
-  replaceCachedContentFolders(queryClient, context, [updated]);
-}
-
-export function replaceCachedContentFolders(queryClient: QueryClient, context: ContentContext, updated: readonly ContentFolder[]) {
-  const updates = new Map(updated.map((folder) => [folder.key, folder]));
-  queryClient.setQueryData<ContentFolder[]>(contentQueryKeys.folderTree(context), (tree) => tree?.map((folder) => updates.get(folder.key) ?? folder));
-  queryClient.setQueriesData<ContentLocation>({ queryKey: contentQueryKeys.locations(context) }, (location) => location ? {
-    ...location,
-    folders: location.folders.map((folder) => updates.get(folder.key) ?? folder),
-  } : location);
-}
-
 export async function invalidateContentLocations(queryClient: QueryClient, context: ContentContext, folderKeys: (string | undefined)[]) {
-  await Promise.all([
-    queryClient.invalidateQueries({ queryKey: contentQueryKeys.folderTree(context), exact: true, refetchType: "none" }),
-    ...[...new Set(folderKeys)].map((folderKey) => queryClient.invalidateQueries({
-      queryKey: contentQueryKeys.location(context, folderKey),
-      exact: true,
-      refetchType: "none",
-    })),
-  ]);
-}
-
-export function replaceCachedContentDocumentDetail(queryClient: QueryClient, context: ContentContext, updated: ContentDocument) {
-  queryClient.setQueryData<ContentDocument & { content: string }>(contentQueryKeys.document(context, updated.key), (document) => document ? { ...document, ...updated } : document);
+  await Promise.all([...new Set(folderKeys)].map((folderKey) => queryClient.invalidateQueries({
+    queryKey: contentQueryKeys.location(context, folderKey),
+    exact: true,
+    refetchType: "none",
+  })));
 }

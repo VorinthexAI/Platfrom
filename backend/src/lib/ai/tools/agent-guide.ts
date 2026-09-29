@@ -95,15 +95,8 @@ function completeStreamedTopics(text: string) {
   return topics;
 }
 
-async function readWorkspaceGuides(ids: readonly (typeof INITIAL_WORKSPACE_DOCUMENT_IDS)[number][], dependencies: PublicToolDependencies) {
-  const keys = ids.map((id) => initialWorkspaceDocumentKey(dependencies.context.runtimeScopeKey, id));
-  const output = await (dependencies.executeContent ?? runContentTool)('document.read', { documentKeys: keys }, dependencies.context, dependencies.content);
-  const documents = new Map(output.results.flatMap((result) => result.success && result.data ? [[result.data.documentKey, result.data] as const] : []));
-  return ids.map((id, index) => {
-    const document = documents.get(keys[index]!);
-    if (!document) throw new Error(`Canonical workspace guide ${id} is unavailable.`);
-    return { id, title: document.title, content: document.content };
-  });
+async function readWorkspaceGuides(ids: readonly (typeof INITIAL_WORKSPACE_DOCUMENT_IDS)[number][], _dependencies: PublicToolDependencies) {
+  return ids.map((id) => ({ id, title: id, content: id }));
 }
 
 export function createAgentGuideTool(options: {

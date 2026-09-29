@@ -30,11 +30,10 @@ export function AppQueryProvider({ children }: { children: ReactNode }) {
 function ScopeBootstrap() {
   const status = useAuthStore((state) => state.status);
   const userKey = useAuthStore((state) => String(state.user?.key ?? ""));
-  const teamKey = useAuthStore((state) => String(state.team?.key ?? ""));
   useQuery({
-    queryKey: scopeListQueryKey(userKey, teamKey),
-    queryFn: ({ signal }) => listScopes(teamKey, signal),
-    enabled: status === "authenticated" && Boolean(userKey && teamKey),
+    queryKey: scopeListQueryKey(userKey),
+    queryFn: ({ signal }) => listScopes(signal),
+    enabled: status === "authenticated" && Boolean(userKey),
   });
   return null;
 }

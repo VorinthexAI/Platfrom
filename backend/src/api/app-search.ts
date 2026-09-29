@@ -1,56 +1,23 @@
 import type { Context } from 'hono';
-import { z, ZodError } from 'zod';
-import { appSearchInputShape, createAppSearchService, projectAppSearchRetrieval, validateAppSearchInput, type AppSearchDependencies, type AppSearchService } from '@/lib/app-search/service';
-import { authorizeContentExecution, ContentError, type RunAuthenticatedContentToolOptions } from '@/lib/ai/tools';
-import type { ToolContext } from '@/lib/ai/tools/tool-context';
+import { z } from 'zod';
+import { searchFiles } from '@/lib/app-search/service';
+import { authorizeContentExecution } from '@/lib/ai/tools';
 import { getAuthIdentity } from './security';
-import { parseJson } from './validation';
-import { sparkErrorResponse } from './errors';
-import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
-import { toolEventService, type ToolEventRecorder } from '@/lib/ai/events/service';
-import { createHash } from 'node:crypto';
-import { authenticatedTeamContext } from './auth';
+import { parseJson, strictObject } from './validation';
 
-export const appSearchHttpInputSchema = z.object({ ...appSearchInputShape,
-  teamKey: z.string().trim().min(1),
+const schema = strictObject({
   scopeKey: z.string().cuid(),
-}).strict().superRefine(validateAppSearchInput);
+  query: z.string().trim().min(1).max(500).optional(),
+  operation: z.enum(['search', 'list', 'count']).optional(),
+  collectionSlugs: z.array(z.enum(['folders', 'files'])).min(1).max(2).optional(),
+  folderKey: z.string().cuid().optional(),
+  limit: z.number().int().min(1).max(50).optional(),
+});
 
-export interface AppSearchHandlerDependencies {
-  getIdentity?: typeof getAuthIdentity;
-  authorize?: (input: { teamKey: string; scopeKey: string }, options: Omit<RunAuthenticatedContentToolOptions, 'execute'>) => Promise<{ input: { teamKey: string; scopeKey: string }; context: ToolContext }>;
-  authorizationOptions?: Omit<RunAuthenticatedContentToolOptions, 'authenticatedUserKey' | 'execute'>;
-  service?: AppSearchService;
-  searchDependencies?: AppSearchDependencies;
-  recordEvent?: ToolEventRecorder;
-  appScopeKey?: string;
-  billing?: ToolBillingDependencies;
+export async function searchApp(c: Context) {
+  const identity = await getAuthIdentity(c);
+  if (!identity) return c.json({ success: false, error: 'authentication required' }, 401);
+  const body = await parseJson(c, schema);
+  const { context } = await authorizeContentExecution({ scopeKey: body.scopeKey }, { authenticatedUserKey: identity.key });
+  return c.json({ success: true, data: await searchFiles(context, body) });
 }
-
-export function createAppSearchHandler(dependencies: AppSearchHandlerDependencies = {}) {
-  return async (c: Context) => {
-    const identity = await (dependencies.getIdentity ?? getAuthIdentity)(c);
-    if (!identity) return c.json({ success: false, error: 'authentication required' }, 401);
-    try {
-      const { teamKey, scopeKey, ...input } = await parseJson(c, appSearchHttpInputSchema);
-      const { context } = await (dependencies.authorize ?? authorizeContentExecution)({ teamKey, scopeKey }, {
-        ...dependencies.authorizationOptions,
-        ...authenticatedTeamContext(identity),
-      });
-      const idempotencyKey = z.string().trim().min(1).max(200).parse(c.req.header('idempotency-key') ?? createHash('sha256').update(JSON.stringify({ teamKey, scopeKey, input })).digest('hex'));
-      const output = await observeToolExecution('app.search', context, () => (dependencies.service ?? createAppSearchService()).search(input, context, {
-        ...dependencies.searchDependencies,
-        signal: c.req.raw.signal,
-      }), { recorder: dependencies.recordEvent ?? toolEventService.record, appScopeKey: dependencies.appScopeKey, idempotencyKey, input, ...dependencies.billing });
-      return c.json({ success: true, data: { ...output, retrieval: projectAppSearchRetrieval(input, output) } });
-    } catch (error) {
-      const billing = sparkErrorResponse(c, error); if (billing) return billing;
-      if (error instanceof ContentError) return c.json({ success: false, error: error.toJSON() }, error.code === 'CONTENT_FORBIDDEN' || error.code === 'CONTENT_UNAUTHORIZED' ? 403 : error.code === 'CONTENT_NOT_FOUND' ? 404 : error.code === 'CONTENT_CONFLICT' ? 409 : 400);
-      if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ success: false, error: 'invalid app search request' }, 400);
-      console.error('app search failed', { error });
-      return c.json({ success: false, error: 'app search failed' }, 500);
-    }
-  };
-}
-
-export const searchApp = createAppSearchHandler();

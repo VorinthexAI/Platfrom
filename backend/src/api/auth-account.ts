@@ -26,8 +26,8 @@ export async function buildAuthAccountResponse(
     key: context.scope.key,
     name: context.scope.name,
     slug: context.scope.slug,
-    role: context.scopeMembership.role,
-    membership_key: context.scopeMembership.key,
+    role: 'owner' as const,
+    membership_key: user.key,
   };
   return {
     rootTeamMember,
@@ -43,14 +43,14 @@ export async function buildAuthAccountResponse(
       is_onboarded: user.isOnboarded,
     },
     team: {
-      key: context.team.key,
-      name: context.team.name,
-      slug: context.team.slug,
+      key: user.key,
+      name: context.scope.name,
+      slug: context.scope.slug,
     },
     teamMembership: {
-      key: context.membership.key,
-      role: context.membership.teamRole,
-      title: context.membership.teamTitle,
+      key: user.key,
+      role: 'owner' as const,
+      title: null,
     },
     scope: selectedScope,
   };

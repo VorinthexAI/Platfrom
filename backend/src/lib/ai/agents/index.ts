@@ -291,7 +291,6 @@ export async function runAgent(
         try {
           const result = await execute(invocation.slug, invocation.arguments, {
             ...dependencies.tools?.dependencies, ...dependencies.router,
-            teamKey: context.toolContext.teamKey,
             contentContext: context.toolContext,
             conversationService: context.conversationService,
             currentConversationKey: context.currentConversationKey,

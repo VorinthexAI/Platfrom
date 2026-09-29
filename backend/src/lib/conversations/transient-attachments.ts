@@ -96,7 +96,7 @@ export class TransientAttachmentError extends Error {
 
 export function normalizeTransientAttachmentError(error: unknown) {
   if (error instanceof TransientAttachmentError) return error;
-  if (error instanceof GalleryImageInputError) return new TransientAttachmentError(400, error.code, error.message);
+  if (error instanceof GalleryImageInputError) return new TransientAttachmentError(400, error.code, error instanceof Error ? error.message : 'Invalid image');
   if (error instanceof ZodError || error instanceof SyntaxError) return new TransientAttachmentError(400, 'ATTACHMENT_INVALID_INPUT', 'Attachment request input was invalid.');
   console.error('transient attachment request failed', { error });
   return new TransientAttachmentError(500, 'ATTACHMENT_FAILED', 'Attachment processing failed.');

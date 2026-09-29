@@ -17,12 +17,6 @@ let requestIdentityHeaders: RequestIdentityHeadersProvider = async () => {
 };
 
 export const CANONICAL_APP_SLUGS = [
-  "vorinthex-ai",
-  "archive",
-  "gallery",
-  "compass",
-  "signal",
-  "ascend",
   "core",
 ] as const;
 

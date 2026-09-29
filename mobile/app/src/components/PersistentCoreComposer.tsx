@@ -102,10 +102,10 @@ type ConversationRestoreResult = "restored" | "empty" | "suppressed";
 const now = () => new Date().toISOString();
 const clientKey = (kind: string) => `optimistic-${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const PRESERVE_MESSAGE_POSITION = { minIndexForVisible: 0 } as const;
-const DOCUMENT_MIME_TYPES = ["text/plain", "text/markdown", "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"] as const;
+const DOCUMENT_MIME_TYPES = ["text/plain", "text/markdown", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"] as const;
 const documentMimeType = (filename: string) => {
   const extension = filename.split(".").at(-1)?.toLowerCase();
-  return extension === "txt" ? "text/plain" : extension === "md" ? "text/markdown" : extension === "pdf" ? "application/pdf" : extension === "doc" ? "application/msword" : extension === "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : undefined;
+  return extension === "txt" ? "text/plain" : extension === "md" ? "text/markdown" : extension === "pdf" ? "application/pdf" : extension === "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : undefined;
 };
 function displayAttachmentFilename(filename: string) {
   try { return decodeURIComponent(filename.replace(/\+/g, "%20")); }
@@ -155,7 +155,7 @@ function ConversationImageAttachment({ attachment, contextIdentity, onOpen }: { 
   useEffect(() => {
     if (local || !image) return;
     const collectionKey = galleryImageCollectionKey(image);
-    const galleryContext = { teamKey: contextIdentity.split(":")[1] ?? "", scopeKey: contextIdentity.split(":")[2] ?? "" };
+    const galleryContext = { teamKey: contextIdentity.split(":")[0] ?? "", scopeKey: contextIdentity.split(":")[1] ?? "" };
     queryClient.setQueryData(galleryQueryKeys.image(galleryContext, collectionKey, image.key), { images: [image] });
     if (collectionKey) void queryClient.prefetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, collectionKey), queryFn: () => fetchGalleryOverview(collectionKey, undefined, 100) });
   }, [contextIdentity, image, local, queryClient]);
@@ -231,11 +231,10 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
   const { showToast } = useToast();
   const userKey = useAuthStore((state) => state.user?.key ?? "");
   const coreFunded = (useWholeSparkBalance(userKey).data ?? 0) > 0;
-  const teamKey = useAuthStore((state) => String(state.team?.key ?? ""));
   const scopeKey = useAuthStore((state) => String(state.scope?.key ?? ""));
-  const context = useMemo(() => ({ userKey, teamKey, scopeKey }), [teamKey, scopeKey, userKey]);
+  const context = useMemo(() => ({ userKey, scopeKey }), [scopeKey, userKey]);
   const identity = conversationContextIdentity(context);
-  const configured = Boolean(userKey && teamKey && scopeKey);
+  const configured = Boolean(userKey && scopeKey);
   const greetingRequest = useUiStore((state) => state.agentGreetingRequest);
   const [sheet, setSheet] = useState<Sheet>();
   const [selected, setSelected] = useState<Conversation>();
@@ -329,7 +328,7 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
     const destination = conversationRetrievalDestination(result);
     if (!destination) return;
     closeRetrievals();
-    router.push(destination);
+    router.push(destination as unknown as Parameters<typeof router.push>[0]);
   }, [closeRetrievals, router]);
 
   const listFilter = useMemo(() => ({ query: committedQuery, favoriteOnly: false }), [committedQuery]);
@@ -406,7 +405,9 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
     if (attachment.kind === "document") { setSelectedAttachment(attachment); setSheet("attachmentActions"); }
     else {
       const collectionKey = image ? galleryImageCollectionKey(image) : undefined;
-      router.push({ pathname: "/capability/[slug]", params: { slug: "gallery", imageKey: attachment.key, ...(collectionKey ? { assetKey: collectionKey } : {}) } });
+      setSelectedGeneratedImageKey(attachment.key);
+      setSelectedGeneratedImageCollectionKey(collectionKey);
+      setSheet("imageActions");
     }
   }, [router]);
   useEffect(() => {
@@ -1247,8 +1248,8 @@ export function PersistentCoreComposer(props: CoreComposerProps) {
     <BottomSheet footer={<><Button onPress={confirmDelete} size="md" variant="primary">Delete</Button><Button onPress={() => openSheet("current")} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open && sheet === "delete") openSheet("current"); }} open={sheet === "delete" && Boolean(actionConversation)} title="Delete chat?" />
     <BottomSheet hideHeading onOpenChange={(open) => { if (!open && (sheet === "messageActions" || sheet === "deleteMessage")) { setSheet(undefined); setSelectedMessage(undefined); } }} open={sheet === "messageActions" || sheet === "deleteMessage"} title=""><BottomSheetMenu><BottomSheetItem onPress={shareSelectedMessage} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Share message</BottomSheetItem><BottomSheetItem onPress={() => openSheet("deleteMessage")} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Delete</BottomSheetItem></BottomSheetMenu></BottomSheet>
     <BottomSheet footer={<><Button onPress={confirmMessageDelete} size="md" variant="primary">Delete</Button><Button onPress={() => openSheet("messageActions")} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open && sheet === "deleteMessage") openSheet("messageActions"); }} open={sheet === "deleteMessage" && Boolean(selectedMessage)} title="Delete message?" />
-    <BottomSheet hideHeading onOpenChange={(open) => { if (!open) { setSheet(undefined); setSelectedAttachment(undefined); } }} open={sheet === "attachmentActions" && Boolean(selectedAttachment)} title=""><BottomSheetMenu><BottomSheetItem onPress={() => { const attachment = selectedAttachment; setSheet(undefined); setSelectedAttachment(undefined); if (attachment) router.push({ pathname: "/capability/[slug]", params: { slug: "archive", documentKey: attachment.key, documentTitle: attachment.filename } }); }} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Open file</BottomSheetItem></BottomSheetMenu></BottomSheet>
-    <BottomSheet hideHeading onOpenChange={(open) => { if (!open) { setSheet(undefined); setSelectedGeneratedImageKey(undefined); setSelectedGeneratedImageCollectionKey(undefined); } }} open={sheet === "imageActions" && Boolean(selectedGeneratedImageKey)} title=""><BottomSheetMenu><BottomSheetItem onPress={() => { if (selectedGeneratedImageKey) setEditReferenceImageKey(selectedGeneratedImageKey); openSheet(undefined); setSelectedGeneratedImageKey(undefined); setSelectedGeneratedImageCollectionKey(undefined); setComposerFocusRequest((current) => current + 1); }} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Edit image</BottomSheetItem><BottomSheetItem onPress={() => { const imageKey = selectedGeneratedImageKey; const assetKey = selectedGeneratedImageCollectionKey; openSheet(undefined); setSelectedGeneratedImageKey(undefined); setSelectedGeneratedImageCollectionKey(undefined); if (imageKey) router.push({ pathname: "/capability/[slug]", params: { slug: "gallery", imageKey, ...(assetKey ? { assetKey } : {}) } }); }} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Open image</BottomSheetItem></BottomSheetMenu></BottomSheet>
+    <BottomSheet hideHeading onOpenChange={(open) => { if (!open) { setSheet(undefined); setSelectedAttachment(undefined); } }} open={sheet === "attachmentActions" && Boolean(selectedAttachment)} title=""><BottomSheetMenu><BottomSheetItem onPress={() => { const attachment = selectedAttachment; setSheet(undefined); setSelectedAttachment(undefined); if (attachment) router.push({ pathname: "/home", params: { fileKey: attachment.key, fileTitle: attachment.filename } } as unknown as Parameters<typeof router.push>[0]); }} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Open file</BottomSheetItem></BottomSheetMenu></BottomSheet>
+    <BottomSheet hideHeading onOpenChange={(open) => { if (!open) { setSheet(undefined); setSelectedGeneratedImageKey(undefined); setSelectedGeneratedImageCollectionKey(undefined); } }} open={sheet === "imageActions" && Boolean(selectedGeneratedImageKey)} title=""><BottomSheetMenu><BottomSheetItem onPress={() => { if (selectedGeneratedImageKey) setEditReferenceImageKey(selectedGeneratedImageKey); openSheet(undefined); setSelectedGeneratedImageKey(undefined); setSelectedGeneratedImageCollectionKey(undefined); setComposerFocusRequest((current) => current + 1); }} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Edit image</BottomSheetItem></BottomSheetMenu></BottomSheet>
   </>;
 }
 

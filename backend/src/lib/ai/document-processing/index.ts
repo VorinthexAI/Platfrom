@@ -1,4 +1,4 @@
-import type { Document } from '@/lib/db/documents.node';
+import type { Document } from './actions';
 import { documentParseInputSchema, type DocumentParseInput } from './schemas';
 import {
   documentEmbed,
@@ -92,7 +92,7 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
   }
   const documentKey = documentKeyForRequest(normalized.scopeKey, normalized.folderKey, input.idempotencyKey);
   if (input.idempotencyKey) {
-    const existing = await (dependencies.getDocument ?? (await import('@/lib/db/documents.node')).getDocumentById)(documentKey);
+    const existing = await (dependencies.getDocument ?? (await import('./actions')).getDocumentById)(documentKey);
     if (existing) {
       logger({ action: 'document.parse', status: 'completed', documentKey, scopeKey: input.scopeKey, folderKey: input.folderKey, durationMs: Math.round(performance.now() - started), idempotent: true });
       return { document: existing };
@@ -141,7 +141,7 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
   } catch (error) {
     let existing: Document | null;
     try {
-      existing = await (dependencies.getDocument ?? (await import('@/lib/db/documents.node')).getDocumentById)(documentKey);
+      existing = await (dependencies.getDocument ?? (await import('./actions')).getDocumentById)(documentKey);
     } catch (ownershipError) {
       throw new DocumentProcessingError('DOCUMENT_CLEANUP_FAILED', 'Document ownership could not be verified after insertion failed; the uploaded object was retained for safe reconciliation.', 'document.parse', {
         retryable: true,

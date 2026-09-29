@@ -63,14 +63,14 @@ export function createTicketHandlers(dependencies: TicketHandlerDependencies = {
         const request = await authorizedRequest(c, dependencies, ticketHttpInputSchema);
         if ('response' in request) return request.response;
         const input = ticketSubmitInputSchema.parse(request.body);
-        return c.json({ success: true, data: await runTool('ticket.create', '', input, { contentContext: request.context, ticketService: service, requestKey: idempotencyKey }) }, 201);
+        return c.json({ success: true, data: await runTool('ticket.create', '', input, { contentContext: request.context, requestKey: idempotencyKey }) }, 201);
       } catch (error) { return ticketError(c, error); }
     },
     list: async (c: Context) => {
       try {
         const request = await authorizedRequest(c, dependencies, ticketListHttpSchema);
         if ('response' in request) return request.response;
-        return c.json({ success: true, data: await runTool('ticket.list', '', ticketListInputSchema.parse(request.body), { contentContext: request.context, ticketService: service }) });
+        return c.json({ success: true, data: await runTool('ticket.list', '', ticketListInputSchema.parse(request.body), { contentContext: request.context }) });
       } catch (error) { return ticketError(c, error); }
     },
   };
@@ -87,7 +87,7 @@ export function createFeedbackHandlers(dependencies: TicketHandlerDependencies =
         const request = await authorizedRequest(c, dependencies, ticketHttpInputSchema);
         if ('response' in request) return request.response;
         const input = ticketSubmitInputSchema.parse({ ...request.body, kind: 'feedback' });
-        return c.json({ success: true, data: await runTool('ticket.create', '', input, { contentContext: request.context, ticketService: service, requestKey: idempotencyKey }) }, 201);
+        return c.json({ success: true, data: await runTool('ticket.create', '', input, { contentContext: request.context, requestKey: idempotencyKey }) }, 201);
       } catch (error) { return ticketError(c, error, 'invalid feedback request'); }
     },
   };

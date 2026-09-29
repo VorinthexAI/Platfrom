@@ -68,7 +68,6 @@ export function conversationReferenceContext(retrievals: readonly AppSearchRetri
       ordinal: ++ordinal,
       collectionSlug: group.collectionSlug,
       label: result.label,
-      ...(result.destinationCollectionSlug ? { destinationCollectionSlug: result.destinationCollectionSlug } : {}),
     }))),
   }));
 }

@@ -11,7 +11,6 @@ import { fonts, palette, spacing } from "@/theme/tokens";
 export type SupportComposeKind = "issue" | "feedback";
 
 export function SupportComposeSheets({ compose, onClose, onSubmit }: { compose?: SupportComposeKind; onClose: () => void; onSubmit: (input: { kind: SupportComposeKind; message: string; requestKey: string }) => void }) {
-  const teamKey = useAuthStore((state) => String(state.team?.key ?? ""));
   const scopeKey = useAuthStore((state) => String(state.scope?.key ?? ""));
   const [message, setMessage] = useState("");
   const request = useRef<{ fingerprint: string; key: string } | undefined>(undefined);
@@ -19,7 +18,7 @@ export function SupportComposeSheets({ compose, onClose, onSubmit }: { compose?:
 
   const submit = () => {
     const value = message.trim();
-    if (!compose || !value || !teamKey || !scopeKey) return;
+    if (!compose || !value || !scopeKey) return;
     const fingerprint = `${compose}:${value}`;
     const requestKey = request.current?.fingerprint === fingerprint ? request.current.key : randomUUID();
     request.current = undefined;
@@ -29,7 +28,7 @@ export function SupportComposeSheets({ compose, onClose, onSubmit }: { compose?:
 
   return <BottomSheet
     focusKey={`signal-compose-${compose ?? "closed"}`}
-    footer={<><Button disabled={!message.trim() || !teamKey || !scopeKey} onPress={submit} size="md" variant="primary">Send</Button><Button onPress={onClose} size="md" variant="secondary">Close</Button></>}
+    footer={<><Button disabled={!message.trim() || !scopeKey} onPress={submit} size="md" variant="primary">Send</Button><Button onPress={onClose} size="md" variant="secondary">Close</Button></>}
     height="full"
     onOpenChange={(open) => { if (!open) onClose(); }}
     open={Boolean(compose)}

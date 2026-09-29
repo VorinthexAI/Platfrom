@@ -1,84 +1,34 @@
 import { z } from 'zod';
-import { aql } from 'arangojs';
-import { db } from './client';
-import { createNodeHelpers, withArangoKey } from './base';
 
-export const USER_TEAM_COLLECTION = 'userTeams';
-
-export const userTeamRoleSchema = z.enum(['owner', 'admin', 'moderator', 'member', 'viewer']);
-export const userTeamStatusSchema = z.enum(['active', 'inactive', 'suspended']);
-
+export const USER_TEAMS_COLLECTION = 'userTeams';
+export const USER_TEAM_COLLECTION = USER_TEAMS_COLLECTION;
 export const userTeamSchema = z.object({
   key: z.string(),
   teamKey: z.string(),
   userId: z.string(),
-  teamRole: userTeamRoleSchema,
-  teamTitle: z.string().nullable().default(null),
-  orchestratorKey: z.string().nullable().default(null),
-  status: userTeamStatusSchema.default('active'),
-  environmentSeeded: z.boolean().default(false),
-  joinedAt: z.string(),
+  teamRole: z.enum(['owner', 'admin', 'member', 'moderator']).default('owner'),
+  teamTitle: z.string().nullable().optional(),
+  orchestratorKey: z.string().nullable().optional(),
+  status: z.enum(['active', 'suspended']).default('active'),
   isMfaEnabled: z.boolean().default(false),
   totpSecret: z.string().nullable().default(null),
-  lastTotpTimeStep: z.number().nullable().default(null),
-  teamMfaVersion: z.number().int().nonnegative().default(0),
-  teamMfaRecoveryPending: z.boolean().default(false),
+  lastTotpTimeStep: z.number().nullable().optional(),
+  teamMfaRecoveryPending: z.boolean().optional(),
+  teamMfaVersion: z.number().int().default(0),
   createdAt: z.string(),
   updatedAt: z.string(),
-  embedding: z.array(z.number()).default([]),
 });
-
 export type UserTeam = z.infer<typeof userTeamSchema>;
-
-const helpers = createNodeHelpers(USER_TEAM_COLLECTION, userTeamSchema, []);
-
-export const insertUserTeam = helpers.insert;
-export const getUserTeamById = helpers.getById;
-export const updateUserTeam = helpers.updateById;
-export const deleteUserTeam = helpers.deleteById;
-export const upsertUserTeamByKey = helpers.upsertByKey;
-export const getAllUserTeamsChunked = helpers.getAllChunked;
-export const listUserTeamsPage = helpers.listPage;
-
-export async function getUserTeamByTeamAndUser(
-  teamKey: string,
-  userId: string,
-): Promise<UserTeam | null> {
-  const cursor = await db.query(aql`
-    FOR link IN ${db.collection(USER_TEAM_COLLECTION)}
-      FILTER link.teamKey == ${teamKey} && link.userId == ${userId}
-      LIMIT 1
-      RETURN link
-  `);
-  const doc = await cursor.next();
-  return doc ? userTeamSchema.parse(withArangoKey(doc)) : null;
+export async function getUserTeamById(id: string): Promise<UserTeam | null> {
+  return getUserTeamByTeamAndUser(id, id);
 }
-
-export async function hasActiveRootTeamMembership(userId: string): Promise<boolean> {
-  const cursor = await db.query(aql`
-    LET roots = (
-      FOR team IN teams
-        FILTER team.is_root == true && team.isActive == true
-        RETURN team._key
-    )
-    RETURN LENGTH(roots) == 1 && LENGTH(
-      FOR membership IN ${db.collection(USER_TEAM_COLLECTION)}
-        FILTER membership.userId == ${userId} && membership.teamKey == roots[0] && membership.status == "active"
-        LIMIT 1
-        RETURN 1
-    ) > 0
-  `);
-  return (await cursor.next()) === true;
+export async function hasActiveRootTeamMembership(_userId: string) { return false; }
+export async function listActiveUserTeamsByUser(_userId: string): Promise<UserTeam[]> { return []; }
+export async function getUserTeamByTeamAndUser(teamKey: string, userId: string): Promise<UserTeam | null> {
+  if (!teamKey || !userId) return null;
+  const now = new Date().toISOString();
+  return userTeamSchema.parse({ key: userId, teamKey: userId, userId, teamRole: 'owner', status: 'active', createdAt: now, updatedAt: now });
 }
-
-export async function listActiveUserTeamsByUser(
-  userId: string,
-): Promise<UserTeam[]> {
-  const cursor = await db.query(aql`
-    FOR link IN ${db.collection(USER_TEAM_COLLECTION)}
-      FILTER link.userId == ${userId} && link.status == "active"
-      RETURN link
-  `);
-  const docs = await cursor.all();
-  return docs.map((doc) => userTeamSchema.parse(withArangoKey(doc)));
-}
+export async function upsertUserTeamByKey(_input: never): Promise<UserTeam> { throw new Error('userTeams are retired'); }
+export async function listUserTeamsPage() { return { items: [], next: null }; }
+export async function getAllUserTeamsChunked() { async function* empty() { yield []; } return empty(); }

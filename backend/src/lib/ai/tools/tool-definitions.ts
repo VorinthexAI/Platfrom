@@ -1,29 +1,3 @@
-import { documentAudioPlaybackClearToolDefinition } from './document-audio-playback-clear';
-import { documentAudioPlaybackUpdateToolDefinition } from './document-audio-playback-update';
-import { documentCreateToolDefinition } from './document-create';
-import { documentCopyToolDefinition } from './document-copy';
-import { documentCreateVersionToolDefinition } from './document-create-version';
-import { documentDeleteToolDefinition } from './document-delete';
-import { documentDeleteVersionToolDefinition } from './document-delete-version';
-import { documentDownloadToolDefinition } from './document-download';
-import { documentExportToolDefinition } from './document-export';
-import { documentFindToolDefinition } from './document-find';
-import { documentFindVersionToolDefinition } from './document-find-version';
-import { documentFindSummaryToolDefinition } from './document-find-summary';
-import { documentListToolDefinition } from './document-list';
-import { documentListAudioVersionsToolDefinition } from './document-list-audio-versions';
-import { documentListSummariesToolDefinition } from './document-list-summaries';
-import { documentListVersionsToolDefinition } from './document-list-versions';
-import { documentMoveToolDefinition } from './document-move';
-import { documentParseToolDefinition } from './document-parse';
-import { documentReadToolDefinition } from './document-read';
-import { documentRenameToolDefinition } from './document-rename';
-import { documentRestoreVersionToolDefinition } from './document-restore-version';
-import { documentRewriteToolDefinition } from './document-rewrite';
-import { documentSummarizeToolDefinition } from './document-summarize';
-import { documentTopicsToolDefinition } from './document-topics';
-import { documentUpdateToolDefinition } from './document-update';
-import { folderCopyToolDefinition } from './folder-copy';
 import { folderCreateToolDefinition } from './folder-create';
 import { folderDeleteToolDefinition } from './folder-delete';
 import { folderFindToolDefinition } from './folder-find';
@@ -31,47 +5,38 @@ import { folderListToolDefinition } from './folder-list';
 import { folderMoveToolDefinition } from './folder-move';
 import { folderRenameToolDefinition } from './folder-rename';
 import { folderUpdateToolDefinition } from './folder-update';
-import { imageCaptionTool } from './image-caption';
-import { imageCreateVisualIdentityTool } from './image-create-visual-identity';
-import { documentSearchAllToolDefinition } from './document-search-all';
-import { contentSearchToolDefinition } from './content-search';
-import { contentSearchHistoryListToolDefinition } from './content-search-history-list';
-import { contentSearchHistoryDeleteToolDefinition } from './content-search-history-delete';
-import { contentNeighborsToolDefinition } from './content-neighbors';
-import { documentSearchToolDefinition } from './document-search';
-import { WORKSPACE_TOOL_DEFINITIONS } from './workspace-tool-definitions';
-import { TRUSTED_EMAIL_TOOL_DEFINITIONS } from './email-ingestion-tool-definitions';
 import { TRUSTED_ACCOUNT_TOOL_DEFINITIONS } from './account-tool-definitions';
 import { CONVERSATION_TOOL_DEFINITIONS } from './conversation-tool-definitions';
 import { AGENT_TOOL_DEFINITIONS } from './agent-tool-definitions';
 import { billingSummaryReadToolDefinition } from './billing-summary-read';
 import { referralSummaryReadToolDefinition } from './referral-summary-read';
 import { agentGuideToolDefinition } from './agent-guide';
+import { WORKSPACE_TOOL_DEFINITIONS } from './workspace-tool-definitions';
+import { createPublicToolDefinition } from './tool-definition';
 
+export const fileListToolDefinition = createPublicToolDefinition('file.list');
+export const fileFindToolDefinition = createPublicToolDefinition('file.find');
+export const fileUpdateToolDefinition = createPublicToolDefinition('file.update');
+export const fileRenameToolDefinition = createPublicToolDefinition('file.rename');
+export const fileMoveToolDefinition = createPublicToolDefinition('file.move');
+export const fileDeleteToolDefinition = createPublicToolDefinition('file.delete');
+export const fileDownloadToolDefinition = createPublicToolDefinition('file.download');
 
 export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
-  imageCaptionTool,
-  imageCreateVisualIdentityTool,
   billingSummaryReadToolDefinition,
   referralSummaryReadToolDefinition,
   agentGuideToolDefinition,
-  contentNeighborsToolDefinition,
-  documentAudioPlaybackClearToolDefinition, documentAudioPlaybackUpdateToolDefinition, documentCreateToolDefinition, documentCopyToolDefinition, documentCreateVersionToolDefinition, documentDeleteToolDefinition, documentDeleteVersionToolDefinition, documentDownloadToolDefinition, documentExportToolDefinition, documentFindToolDefinition, documentFindSummaryToolDefinition, documentFindVersionToolDefinition, documentListToolDefinition, documentListAudioVersionsToolDefinition, documentListSummariesToolDefinition, documentListVersionsToolDefinition, documentMoveToolDefinition, documentParseToolDefinition, documentReadToolDefinition, documentRenameToolDefinition, documentRestoreVersionToolDefinition, documentRewriteToolDefinition, documentSummarizeToolDefinition, documentTopicsToolDefinition, documentUpdateToolDefinition,
-  folderCopyToolDefinition, folderCreateToolDefinition, folderDeleteToolDefinition, folderFindToolDefinition, folderListToolDefinition, folderMoveToolDefinition, folderRenameToolDefinition, folderUpdateToolDefinition,
-  documentSearchAllToolDefinition,
-  contentSearchToolDefinition, contentSearchHistoryListToolDefinition, contentSearchHistoryDeleteToolDefinition, documentSearchToolDefinition,
+  folderCreateToolDefinition, folderDeleteToolDefinition, folderFindToolDefinition, folderListToolDefinition, folderMoveToolDefinition, folderRenameToolDefinition, folderUpdateToolDefinition,
+  fileListToolDefinition, fileFindToolDefinition, fileUpdateToolDefinition, fileRenameToolDefinition, fileMoveToolDefinition, fileDeleteToolDefinition, fileDownloadToolDefinition,
   ...WORKSPACE_TOOL_DEFINITIONS,
   ...CONVERSATION_TOOL_DEFINITIONS,
   ...AGENT_TOOL_DEFINITIONS,
 ] as const);
 
-/** Canonical registry entries that only authenticated server workflows may dispatch. */
 export const TRUSTED_TOOL_DEFINITIONS = Object.freeze([
-  ...TRUSTED_EMAIL_TOOL_DEFINITIONS,
   ...TRUSTED_ACCOUNT_TOOL_DEFINITIONS,
 ] as const);
 
-/** Every canonical business tool, including trusted protocol-triggered entries. */
 export const UNIFIED_TOOL_DEFINITIONS = Object.freeze([
   ...PUBLIC_TOOL_DEFINITIONS,
   ...TRUSTED_TOOL_DEFINITIONS,

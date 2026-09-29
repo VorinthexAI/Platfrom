@@ -51,7 +51,7 @@ export function createAppNotificationService(dependencies: { repository?: AppNot
       const actorUserKey = principal.user.key;
       const requested = input.notifyAll ? undefined : input.userKeys;
       const targetsOthers = input.notifyAll || requested!.some((key) => key !== actorUserKey);
-      if (targetsOthers && rankAccessRole(principal.userTeam.teamRole === 'member' ? 'viewer' : principal.userTeam.teamRole) < rankAccessRole('moderator')) throw new AppNotificationAccessError('Moderator access is required to notify other users.');
+      if (targetsOthers) throw new AppNotificationAccessError('Moderator access is required to notify other users.');
       const recipientUserKeys = await repository.resolveRecipientUserKeys(context.teamKey, context.runtimeScopeKey, requested);
       if (requested && (recipientUserKeys.length !== requested.length || new Set(recipientUserKeys).size !== requested.length || requested.some((key) => !recipientUserKeys.includes(key)))) throw new AppNotificationAccessError('Every recipient must be an active user in the current team.');
       const embedding = currentEmbeddingSchema.parse(await (dependencies.embed ?? ((text) => embedText({ text, purpose: 'document' })))(`${input.title}\n\n${input.message}`));

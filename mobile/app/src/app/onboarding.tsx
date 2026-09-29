@@ -1,14 +1,11 @@
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 
-import { OnboardingCoreConversation } from "@/components/onboarding/OnboardingCoreConversation";
 import { OnboardingReward } from "@/components/onboarding/OnboardingReward";
-import { OnboardingProfileBadge } from "@/components/onboarding/OnboardingProfileBadge";
 import { PaywallSheet } from "@/components/PaywallSheet";
 import { fetchBillingSummary, hasNewcomerAccountGrant } from "@/lib/billing-client";
-import { getLocalOnboardingState, markOnboardingIntroShown, markOnboardingPreviewComplete } from "@/lib/onboarding-state";
-import { useAppsStore } from "@/state/apps";
+import { getLocalOnboardingState } from "@/lib/onboarding-state";
 import { useAuthStore } from "@/state/auth";
 import { useUiStore } from "@/state/ui";
 import { palette } from "@/theme/tokens";
@@ -19,40 +16,32 @@ export default function OnboardingRoute() {
   const authStatus = useAuthStore((state) => state.status);
   const [initialPage] = useState<"plans" | "referral">(() => useUiStore.getState().consumeOnboardingReferralEntry() ? "referral" : "plans");
   const [postDeletion] = useState(() => getLocalOnboardingState().postDeletion);
-  const [phase, setPhase] = useState<"conversation" | "paywall" | "reward" | "profile-badge">(initialPage === "referral" || authStatus === "authenticated" ? "paywall" : "conversation");
-  const apps = useAppsStore((state) => state.apps);
+  const [phase, setPhase] = useState<"paywall" | "reward">("paywall");
   const alreadyOnboarded = useRef(useAuthStore.getState().user?.isOnboarded === true);
   useEffect(() => {
-    if (phase === "conversation" && authStatus === "unauthenticated") void markOnboardingIntroShown().catch(() => undefined);
-  }, [authStatus, phase]);
+    if (authStatus === "unauthenticated") router.replace("/auth");
+  }, [authStatus, router]);
   useEffect(() => {
-    if (alreadyOnboarded.current) router.replace("/capability/archive");
+    if (alreadyOnboarded.current) router.replace("/home" as Href);
   }, [router]);
   const handleComplete = useCallback(() => {
     const completion = completeOnboarding();
     useUiStore.getState().requestAgentGreeting("onboarding");
-    router.replace("/capability/archive");
+    router.replace("/home" as Href);
     void completion.catch(() => { if (useAuthStore.getState().status === "authenticated") router.replace("/onboarding"); });
   }, [completeOnboarding, router]);
-  const startAuth = useCallback(async () => {
-    await markOnboardingPreviewComplete();
-    router.replace("/auth");
-  }, [router]);
 
-  return <View style={styles.root}>{phase === "profile-badge"
-      ? <OnboardingProfileBadge onFinished={handleComplete} />
-      : phase === "reward"
-      ? <OnboardingReward onFinished={() => setPhase("profile-badge")} />
-      : phase === "paywall"
-        ? <PaywallSheet initialPage={initialPage} mode="onboarding" onComplete={async () => {
-          if (postDeletion) {
-            setPhase("profile-badge");
-            return;
-          }
-          const summary = await fetchBillingSummary({ kind: "adjustment", limit: 200 });
-          setPhase(hasNewcomerAccountGrant(summary) ? "reward" : "profile-badge");
-        }} />
-        : <OnboardingCoreConversation apps={apps} onFinished={() => void startAuth()} />}
+  return <View style={styles.root}>{phase === "reward"
+    ? <OnboardingReward onFinished={handleComplete} />
+    : <PaywallSheet initialPage={initialPage} mode="onboarding" onComplete={async () => {
+      if (postDeletion) {
+        handleComplete();
+        return;
+      }
+      const summary = await fetchBillingSummary({ kind: "adjustment", limit: 200 });
+      if (hasNewcomerAccountGrant(summary)) setPhase("reward");
+      else handleComplete();
+    }} />}
   </View>;
 }
 

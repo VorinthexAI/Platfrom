@@ -32,7 +32,7 @@ async function initializeNewAccount(user: User): Promise<User> {
   const grant = await applyNewcomerGrant(user.key, eventKey);
   await recordAccountCreatedEvent(user, grant ?? { key: null, eventKey, deltaMicroSparks: 0 });
   await referralService.ensurePersonalCode(user.key);
-  if (!user.email.endsWith('@guest.vorinthex.com')) await sendWelcomeEmail(user.email).catch((error) => console.error('welcome email delivery failed', { userKey: user.key, error }));
+  if (!user.email.endsWith('@guest.vorinthex.com')) await sendWelcomeEmail(user.email).catch((error: unknown) => console.error('welcome email delivery failed', { userKey: user.key, error }));
   return await getUserById(user.key) ?? user;
 }
 

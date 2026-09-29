@@ -1,17 +1,6 @@
 import { z } from 'zod';
 
 export const SCOPES_COLLECTION = 'scopes';
-export const SCOPE_SCOPES_COLLECTION = 'scopeScopes';
-export const SCOPE_MEMBERS_COLLECTION = 'scopeMembers';
-export const MOTHER_SCOPE_KEY = 'cmrnlzf640000qc7k4p5zem5w';
-
-export const SCOPE_MEMBER_ROLES = ['owner', 'admin', 'moderator', 'viewer'] as const;
-export const scopeMemberRoleSchema = z.enum(SCOPE_MEMBER_ROLES);
-export type ScopeMemberRole = z.infer<typeof scopeMemberRoleSchema>;
-
-export const SCOPE_VISIBILITIES = ['public', 'private', 'hidden'] as const;
-export const scopeVisibilitySchema = z.enum(SCOPE_VISIBILITIES);
-export type ScopeVisibility = z.infer<typeof scopeVisibilitySchema>;
 
 export const scopeSlugSchema = z
   .string()
@@ -22,48 +11,15 @@ export const scopeSlugSchema = z
 
 export const scopeSchema = z.object({
   key: z.string().cuid(),
-  // Team keys may include preserved pre-CUID root identifiers.
-  teamKey: z.string().trim().min(1),
+  userKey: z.string().cuid(),
   slug: scopeSlugSchema,
   name: z.string().trim().min(1).max(160),
   summary: z.string().trim().min(1),
   description: z.string().trim().min(1).nullable(),
-  coverImageKey: z.string().cuid().nullable().optional(),
+  coverFileKey: z.string().cuid().nullable().optional(),
   position: z.number().int().positive(),
-  level: z.number().int().positive().default(1),
-  visibility: scopeVisibilitySchema.default('public'),
   embedding: z.array(z.number().finite()).default([]),
 });
 
 export type Scope = z.infer<typeof scopeSchema>;
 export const scopesEmbedKeys = z.enum(['summary']);
-
-export const scopeScopeSchema = z
-  .object({
-    key: z.string().cuid(),
-    parentKey: z.string().cuid(),
-    childKey: z.string().cuid(),
-    level: z.number().int().positive().default(1),
-  })
-  .superRefine((relation, ctx) => {
-    if (relation.parentKey === relation.childKey) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['childKey'],
-        message: 'A scope cannot be its own parent',
-      });
-    }
-  });
-
-export type ScopeScope = z.infer<typeof scopeScopeSchema>;
-
-export const scopeMemberSchema = z.object({
-  key: z.string().cuid(),
-  scopeKey: z.string().cuid(),
-  userTeamKey: z.string().cuid(),
-  role: scopeMemberRoleSchema,
-  status: z.enum(['active', 'suspended']).default('active'),
-  source: z.enum(['explicit', 'team']).default('explicit'),
-});
-
-export type ScopeMember = z.infer<typeof scopeMemberSchema>;

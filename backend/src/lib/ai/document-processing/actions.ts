@@ -1,12 +1,66 @@
 import { createHash } from 'node:crypto';
+import { z } from 'zod';
 import { reserveStorageKeyForUpload, type StorageUploadReservation } from '@/lib/db/storage-deletion-jobs.node';
 import { startStorageUploadHeartbeat } from '@/lib/storage-upload-reservation';
 import { basename, extname } from 'node:path';
 import mammoth from 'mammoth';
 import WordExtractor from 'word-extractor';
 import { EMBEDDING_DIMENSIONS, embedText, embedTexts } from '@/lib/embeddings';
-import { getDocumentById, insertPreparedDocument, documentSchema, type Document, type DocumentExtension } from '@/lib/db/documents.node';
+import { getFileById, insertFile, type FileExtension, type FileRecord } from '@/lib/db/files.node';
 import { getFolderById } from '@/lib/db/folders.node';
+import { documentExtensionSchema } from './schemas';
+
+export type DocumentExtension = z.infer<typeof documentExtensionSchema>;
+export type Document = {
+  key: string;
+  userKey?: string;
+  scopeKey: string;
+  folderKey?: string;
+  name: string;
+  extension?: DocumentExtension | FileExtension;
+  mimeType?: string;
+  storageKey?: string;
+  sizeBytes?: number;
+  content?: string;
+  extractedText?: string;
+  embedding: number[];
+  contentChunks?: string[];
+  chunkEmbeddings?: number[][];
+  processing?: FileRecord['processing'];
+  isFavorite: boolean;
+  createdAt: string;
+  updatedAt: string;
+  mutationPolicy?: string;
+  sourceStorageKeys?: string[];
+  semanticChunkCount?: number;
+  semanticContentHash?: string;
+  _semanticChunkingSkipped?: unknown;
+};
+export const documentSchema = { parse(value: unknown): Document { return value as Document; } };
+export async function getDocumentById(id: string): Promise<Document | null> {
+  return getFileById(id) as Promise<Document | null>;
+}
+export async function insertPreparedDocument(document: Document): Promise<Document> {
+  await insertFile({
+    key: document.key,
+    userKey: document.userKey ?? document.key,
+    scopeKey: document.scopeKey,
+    folderKey: document.folderKey,
+    name: document.name,
+    extension: (document.extension ?? 'txt') as FileExtension,
+    mimeType: document.mimeType ?? 'text/plain',
+    sizeBytes: document.sizeBytes ?? 1,
+    storageKey: document.storageKey ?? document.key,
+    extractedText: document.content ?? document.extractedText,
+    contentChunks: document.contentChunks,
+    chunkEmbeddings: document.chunkEmbeddings,
+    processing: document.processing ?? 'ready',
+    isFavorite: document.isFavorite,
+    createdAt: document.createdAt,
+    updatedAt: document.updatedAt,
+  });
+  return document;
+}
 import { newId } from '@/lib/ids';
 import { documentActionError, DocumentInputError, DocumentProcessingError } from './errors';
 import {
@@ -316,11 +370,12 @@ export interface DocumentInsertDependencies {
 export async function documentInsert(input: Document, options: DocumentInsertDependencies = {}): Promise<{ document: Document }> {
   return observed('document-insert', { documentKey: input.key, scopeKey: input.scopeKey, folderKey: input.folderKey, extension: input.extension, mimeType: input.mimeType, sizeBytes: input.sizeBytes }, options.logger ?? defaultLogger, async () => {
     try {
-      const expectedChunks = chunkDocumentContent(input.content);
-      if (input.contentChunks && (input.contentChunks.length !== expectedChunks.length || input.contentChunks.some((chunk, index) => chunk !== expectedChunks[index]))) throw new Error('Document chunks must be derived from canonical content.');
+      const content = input.content ?? input.extractedText ?? '';
+      const expectedChunks = chunkDocumentContent(content);
+      if (input.contentChunks && (input.contentChunks.length !== expectedChunks.length || input.contentChunks.some((chunk: string, index: number) => chunk !== expectedChunks[index]))) throw new Error('Document chunks must be derived from canonical content.');
       const contentChunks = input.contentChunks ?? expectedChunks;
       const chunkEmbeddings = input.chunkEmbeddings ?? (contentChunks.length === 1 ? [input.embedding] : undefined);
-      const document = documentSchema.parse({ ...input, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(input.content), _semanticChunkingSkipped: undefined });
+      const document = documentSchema.parse({ ...input, content, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(content), _semanticChunkingSkipped: undefined });
       if (document.embedding.length === 0) throw new Error('A document embedding is required.');
       if (!document.contentChunks || !document.chunkEmbeddings || document.contentChunks.length !== document.chunkEmbeddings.length) throw new Error('Aligned document chunks and embeddings are required.');
       if (document.folderKey) {

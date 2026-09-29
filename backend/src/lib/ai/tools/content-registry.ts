@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { contentToolContracts, validateCreationDateRange, type ContentToolName } from './content-schemas';
 import { contentZodToJsonSchema } from './content-json-schema';
-import { validateDocumentParseSource } from '@/lib/ai/document-processing/schemas';
 
 export const CONTENT_TOOL_NAMES = Object.freeze(Object.keys(contentToolContracts) as ContentToolName[]);
 export const contentToolNameSchema = z.enum(CONTENT_TOOL_NAMES as [ContentToolName, ...ContentToolName[]]);
@@ -14,16 +13,7 @@ export const contentToolOutputSchemas = Object.fromEntries(
   CONTENT_TOOL_NAMES.map((name) => [name, contentToolContracts[name].output]),
 ) as { [Name in ContentToolName]: (typeof contentToolContracts)[Name]['output'] };
 
-const PRIMARY_SCOPE_TOOLS = new Set<ContentToolName>([
-  'folder.list',
-  'document.parse',
-  'document.create',
-  'document.list',
-  'document.search',
-  'content.search',
-  'content.search-history.list',
-  'content.search-history.delete',
-]);
+const PRIMARY_SCOPE_TOOLS = new Set<ContentToolName>(['folder.list', 'folder.create', 'file.list']);
 
 export function hasPrimaryModelScope(name: ContentToolName) {
   return PRIMARY_SCOPE_TOOLS.has(name);
@@ -39,49 +29,23 @@ function modelInputSchema(name: ContentToolName): z.ZodTypeAny {
   if (name === 'folder.create') {
     const canonical = contentToolContracts[name].input;
     const folder = canonical.shape.folders.element.omit({ scopeKey: true });
-    return canonical.extend({ folders: z.array(folder).min(1).max(100) });
+    return canonical.extend({ folders: z.array(folder).min(1).max(100) }).omit({ scopeKey: true });
   }
-  if (name === 'document.search-all') return contentToolContracts[name].input.omit({ teamKey: true });
   if (hasPrimaryModelScope(name)) {
     const canonical: z.ZodTypeAny = contentToolContracts[name].input;
     const object = canonical instanceof z.ZodEffects ? canonical.innerType() : canonical;
     const model = (object as z.AnyZodObject).omit({ scopeKey: true });
-    if (name === 'document.parse') return model.superRefine(validateDocumentParseSource);
-    return ['folder.list', 'document.list', 'content.search'].includes(name)
-      ? model.superRefine((value, context) => validateCreationDateRange(value, context))
-      : model;
+    return name === 'folder.list' || name === 'file.list' ? model.superRefine((value, context) => validateCreationDateRange(value, context)) : model;
   }
   return contentToolContracts[name].input;
 }
 
-/** Strict model-visible inputs. Canonical HTTP contracts retain untrusted selectors. */
 export const contentToolModelInputSchemas = Object.fromEntries(
   CONTENT_TOOL_NAMES.map((name) => [name, modelInputSchema(name)]),
 ) as Record<ContentToolName, z.ZodTypeAny>;
 
 function providerInputSchema(name: ContentToolName) {
-  const schema = contentZodToJsonSchema(contentToolModelInputSchemas[name]);
-  if (name === 'document.parse') {
-    const properties = schema.properties as Record<string, unknown>;
-    const fileHandle = {
-      type: 'object',
-      description: 'Server-side file handle with name, type, size, and arrayBuffer(). Provider clients cannot send raw file bytes through JSON.',
-    };
-    properties.file = fileHandle;
-    properties.pages = { type: 'array', minItems: 1, maxItems: 12, items: fileHandle };
-    schema.oneOf = [{ required: ['file'], not: { required: ['pages'] } }, { required: ['pages'], not: { required: ['file'] } }];
-  }
-  if (name === 'document.update') {
-    const properties = schema.properties as Record<string, any>;
-    properties.updates.items.oneOf = [
-      { required: ['content'] },
-      { required: ['isFavorite'], not: { required: ['content'] } },
-    ];
-  }
-  if (name === 'document.read') {
-    schema.description = 'When both offsets are supplied, endOffset must be greater than startOffset.';
-  }
-  return schema;
+  return contentZodToJsonSchema(contentToolModelInputSchemas[name]);
 }
 
 export const CONTENT_TOOL_DEFINITIONS = Object.freeze(CONTENT_TOOL_NAMES.map((name) => Object.freeze({

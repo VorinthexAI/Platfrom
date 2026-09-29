@@ -44,7 +44,7 @@ export function createAccountDeletionService(dependencies: AccountDeletionServic
       const result = await repository.finalize(trustedUserKey);
       if (result.status === 'shared_access') throw new AccountDeletionError('ACCOUNT_SHARED_ACCESS', 'Account ownership changed during deletion; retry after removing shared access.');
       if (result.status === 'active_checkout') throw new AccountDeletionError('ACCOUNT_ACTIVE_CHECKOUT', 'A payment checkout became active before the deletion fence was established.');
-      if (result.status === 'deleted' && options.sendConfirmation !== false) await sendDeletedEmail(fence.recipient.email).catch((error) => console.error('account deletion email delivery failed', { userKey: trustedUserKey, error }));
+      if (result.status === 'deleted' && options.sendConfirmation !== false) await sendDeletedEmail(fence.recipient.email).catch((error: unknown) => console.error('account deletion email delivery failed', { userKey: trustedUserKey, error }));
       return { deleted: true as const };
     },
   });

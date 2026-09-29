@@ -1,134 +1,48 @@
-import type { BookService } from '@/lib/books/service';
-import type { EmailService } from '@/lib/email-inbox/service';
-import type { TravelService } from '@/lib/travel/service';
-import type { UserHiddenService } from '@/lib/user-hiddens/service';
-import type { CountrySearchService } from '@/lib/travel/country-search';
-import {
-  appSearchCapability,
-  appEnhanceCapability,
-  appTranslateCapability,
-  appSpeechCapability,
-  archiveCapabilities,
-  ascendCapabilities,
-  compassCapabilities,
-  hiddenListCapability,
-  platformCapabilities,
-  scopeMutationCapabilities,
-  signalCapabilities,
-  tagCapabilities,
-} from '@/lib/ai/personal-assistant/service-capabilities';
-import { galleryAssistantCapabilities } from '@/lib/ai/personal-assistant/gallery-capabilities';
-import type { AssistantCapability, AssistantCapabilityContext } from '@/lib/ai/personal-assistant/capabilities';
-import { ASSISTANT_RAW_RESULT } from '@/lib/ai/personal-assistant/capability-result';
-import { runContentTool, type ContentToolDependencies } from './content-runtime';
+import { z } from 'zod';
 import type { ToolContext } from './tool-context';
-import type { AppSearchService } from '@/lib/app-search/service';
-import type { AppTransformationService } from '@/lib/app-transformation/service';
-import type { AppSpeechService } from '@/lib/app-speech/service';
-import type { CommerceService } from '@/lib/commerce/service';
-import type { CostService } from '@/lib/costs/service';
-import type { ReferralService } from '@/lib/referrals/service';
+import { runContentTool, type ContentToolDependencies } from './content-runtime';
+import { scopeService } from '@/lib/ai/scopes/service';
+import { searchFiles } from '@/lib/app-search/service';
 
 export interface WorkspaceToolDependencies {
   context: ToolContext;
   requestKey?: string;
   content?: ContentToolDependencies;
   executeContent?: typeof runContentTool;
-  travel?: TravelService;
-  countries?: CountrySearchService;
-  email?: EmailService;
-  books?: BookService;
-  userHiddens?: UserHiddenService;
-  gallery?: AssistantCapabilityContext['gallery'];
-  images?: AssistantCapabilityContext['images'];
-  appSearch?: AppSearchService;
-  appTransformation?: AppTransformationService;
-  appSpeech?: AppSpeechService;
-  scopeTags?: AssistantCapabilityContext['scopeTags'];
-  accountProfile?: AssistantCapabilityContext['accountProfile'];
-  profileBadges?: AssistantCapabilityContext['profileBadges'];
-  tickets?: AssistantCapabilityContext['tickets'];
-  referrals?: Pick<ReferralService, 'readSummary' | 'redeem'>;
-  commerce?: CommerceService;
-  costs?: CostService;
-  scopes?: AssistantCapabilityContext['scopes'];
-  appNotifications?: AssistantCapabilityContext['appNotifications'];
-  userNotifications?: AssistantCapabilityContext['userNotifications'];
   signal?: AbortSignal;
   timeoutMs?: number;
 }
 
-function publicDefinition(capability: AssistantCapability) {
+const emptySchema = z.object({}).strict();
+const scopeCreateSchema = z.object({ name: z.string().trim().min(1).max(160), description: z.string().trim().min(1).max(10_000).optional() }).strict();
+const scopeKeySchema = z.object({ targetScopeKey: z.string().cuid() }).strict();
+const appSearchSchema = z.object({
+  query: z.string().trim().min(1).max(500).optional(),
+  operation: z.enum(['search', 'list', 'count']).default('search'),
+  collectionSlugs: z.array(z.enum(['folders', 'files'])).min(1).max(2).optional(),
+  folderKey: z.string().cuid().optional(),
+  limit: z.number().int().min(1).max(50).default(10),
+}).strict();
+
+function definition<Input extends z.ZodTypeAny>(name: string, description: string, inputSchema: Input, isReadOnly: boolean, execute: (input: z.output<Input>, dependencies: WorkspaceToolDependencies) => Promise<unknown>) {
   return {
-    name: capability.definition.name,
-    inputSchema: capability.inputSchema,
-    providerDefinition: capability.definition,
-    isReadOnly(rawInput: unknown) {
-      const input = capability.inputSchema.parse(rawInput);
-      const effect = typeof capability.executionEffect === 'function' ? capability.executionEffect(input) : capability.executionEffect;
-      if (effect) return effect === 'read';
-      const mutationWorkspace = typeof capability.mutationWorkspace === 'function' ? capability.mutationWorkspace(input) : capability.mutationWorkspace;
-      return !mutationWorkspace;
-    },
+    name,
+    inputSchema,
+    providerDefinition: { name, description, inputSchema: { type: 'object' } },
+    isReadOnly() { return isReadOnly; },
     async execute(rawInput: unknown, dependencies: WorkspaceToolDependencies) {
-      const context: AssistantCapabilityContext = {
-        domain: dependencies.context,
-        requestKey: dependencies.requestKey,
-        clientRequestKey: dependencies.requestKey ?? null,
-        contentDependencies: dependencies.content,
-        executeContent: dependencies.executeContent,
-        travel: dependencies.travel,
-        countries: dependencies.countries,
-        email: dependencies.email,
-        books: dependencies.books,
-        userHiddens: dependencies.userHiddens,
-        gallery: dependencies.gallery,
-        images: dependencies.images,
-        appSearch: dependencies.appSearch,
-        appTransformation: dependencies.appTransformation,
-        appSpeech: dependencies.appSpeech,
-        accountProfile: dependencies.accountProfile,
-        profileBadges: dependencies.profileBadges,
-        tickets: dependencies.tickets,
-        referrals: dependencies.referrals,
-        commerce: dependencies.commerce,
-        costs: dependencies.costs,
-        scopes: dependencies.scopes,
-        appNotifications: dependencies.appNotifications,
-        userNotifications: dependencies.userNotifications,
-        scopeTags: dependencies.scopeTags,
-        signal: dependencies.signal,
-        timeoutMs: dependencies.timeoutMs,
-      };
-      const result = await capability.execute(rawInput, context);
-      if (result.kind !== 'continue') throw new Error(`Public workspace tool ${capability.definition.name} returned a UI-only result.`);
-      return result[ASSISTANT_RAW_RESULT] ?? result.result;
+      return execute(inputSchema.parse(rawInput) as z.output<Input>, dependencies);
     },
   };
 }
 
-const WORKSPACE_CAPABILITIES = Object.freeze([
-  appSearchCapability,
-  appEnhanceCapability,
-  appTranslateCapability,
-  appSpeechCapability,
-  hiddenListCapability,
-  ...platformCapabilities,
-  ...scopeMutationCapabilities,
-  ...tagCapabilities,
-  ...archiveCapabilities,
-  ...galleryAssistantCapabilities,
-  ...compassCapabilities,
-  ...signalCapabilities,
-  ...ascendCapabilities,
+export const WORKSPACE_MUTATION_TOOL_NAMES = Object.freeze(['scope.create', 'scope.select', 'scope.update', 'scope.delete']);
+
+export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
+  definition('scope.list', 'List scopes owned by the current user.', emptySchema, true, async (_input, dependencies) => scopeService.list(dependencies.context)),
+  definition('scope.create', 'Create a scope.', scopeCreateSchema, false, async (input, dependencies) => scopeService.create(input, dependencies.context)),
+  definition('scope.select', 'Select the current scope.', scopeKeySchema, false, async (input, dependencies) => scopeService.select(input, dependencies.context)),
+  definition('scope.update', 'Update a scope.', scopeKeySchema.extend({ name: z.string().trim().min(1).max(160).optional(), description: z.string().trim().min(1).max(10_000).nullable().optional() }).strict(), false, async (input, dependencies) => scopeService.update(input, dependencies.context)),
+  definition('scope.delete', 'Delete a scope.', scopeKeySchema, false, async (input, dependencies) => scopeService.delete(input, dependencies.context)),
+  definition('app.search', 'Search folders and files in the current scope.', appSearchSchema, true, async (input, dependencies) => searchFiles(dependencies.context, input)),
 ]);
-
-// Core's generation adapter can mutate only its trusted current conversation.
-export const WORKSPACE_MUTATION_TOOL_NAMES = Object.freeze(WORKSPACE_CAPABILITIES.filter((capability) => (Boolean(capability.mutationWorkspace) || capability.executionEffect === 'write') && capability.definition.name !== 'app.generate-image').map((capability) => capability.definition.name));
-
-export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze(WORKSPACE_CAPABILITIES.filter(({ definition }) => !new Set([
-    'referral.summary.read',
-    'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy',
-    'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.summarize', 'document.topics', 'document.list-summaries', 'document.find-summary', 'document.audio.playback.update', 'document.audio.playback.clear', 'document.list-versions', 'document.restore-version', 'document.download',
-    'content.neighbors', 'content.search-history.delete',
-  ]).has(definition.name)).map(publicDefinition));

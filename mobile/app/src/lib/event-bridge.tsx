@@ -51,7 +51,7 @@ export function AuthenticatedEventBridge() {
   }), [queryClient, userKey]);
 
   useEffect(() => {
-    if (status !== "authenticated" || !userKey || !teamKey || !scopeKey) return;
+    if (status !== "authenticated" || !userKey || !scopeKey) return;
     const generation = ++streamGeneration.current;
     const isCurrent = () => isCurrentContextGeneration(generation, streamGeneration.current);
     let active = AppState.currentState === "active";
@@ -61,8 +61,8 @@ export function AuthenticatedEventBridge() {
 
     const root = ["gallery", teamKey, scopeKey] as const;
     const compassContext = { teamKey, scopeKey };
-    const contentContext = { userKey, teamKey, scopeKey };
-    const conversationContext = { userKey, teamKey, scopeKey };
+    const contentContext = { userKey, scopeKey };
+    const conversationContext = { userKey, scopeKey };
     const communicationContext = { userKey, teamKey, scopeKey };
     const invalidateBilling = () => {
       void queryClient.invalidateQueries({ queryKey: currentSubscriptionQueryKey(userKey), exact: true, refetchType: "active" });

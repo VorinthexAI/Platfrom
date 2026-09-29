@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@vorinthex/shared/ui/toast";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { useEffect, useRef } from "react";
 
 import { completeCheckoutReturn } from "@/lib/checkout-return";
@@ -29,7 +29,7 @@ export default function CheckoutCallbackRoute() {
       showToast({ title: "Checkout was not completed.", duration: 2_500 });
       if (isOnboarded) useUiStore.getState().openPaywall();
     }
-    router.replace(isOnboarded ? "/capability/archive" : "/onboarding");
+    router.replace((isOnboarded ? "/home" : "/onboarding") as Href);
   }, [isOnboarded, queryClient, result, router, showToast, status, userKey]);
 
   return null;

@@ -19,7 +19,6 @@ export interface PublicToolDependencies {
 
 const contentDefinitions = new Map(CONTENT_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
 
-/** Builds one public tool definition over the canonical Content runtime. */
 export function createPublicToolDefinition<Name extends ContentToolName>(name: Name) {
   const providerDefinition = contentDefinitions.get(name);
   if (!providerDefinition) throw new Error(`Unknown Content tool ${name}`);
@@ -32,12 +31,10 @@ export function createPublicToolDefinition<Name extends ContentToolName>(name: N
     async execute(rawInput: unknown, dependencies: PublicToolDependencies) {
       const input = inputSchema.parse(rawInput) as Record<string, unknown>;
       const canonicalInput = name === 'folder.create'
-        ? { ...input, folders: (input.folders as Record<string, unknown>[]).map((folder) => ({ scopeKey: dependencies.context.runtimeScopeKey, ...folder })) }
-        : name === 'document.search-all'
-          ? { teamKey: dependencies.context.teamKey, ...input }
-          : hasPrimaryModelScope(name)
-            ? { scopeKey: dependencies.context.runtimeScopeKey, ...input }
-            : input;
+        ? { ...input, scopeKey: dependencies.context.runtimeScopeKey, folders: (input.folders as Record<string, unknown>[]).map((folder) => ({ scopeKey: dependencies.context.runtimeScopeKey, ...folder })) }
+        : hasPrimaryModelScope(name)
+          ? { scopeKey: dependencies.context.runtimeScopeKey, ...input }
+          : input;
       const trustedInput = dependencies.requestKey && hasContentIdempotencyKey(name) ? { ...canonicalInput, idempotencyKey: dependencies.requestKey } : canonicalInput;
       return (dependencies.executeContent ?? runContentTool)(name, trustedInput as never, dependencies.context, dependencies.content);
     },

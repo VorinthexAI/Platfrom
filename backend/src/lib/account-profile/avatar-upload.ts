@@ -84,7 +84,7 @@ export class ProfileAvatarUploadError extends Error {
 
 export function normalizeProfileAvatarUploadError(error: unknown) {
   if (error instanceof ProfileAvatarUploadError) return error;
-  if (error instanceof GalleryImageInputError) return new ProfileAvatarUploadError(400, 'PROFILE_AVATAR_INVALID_IMAGE', error.message);
+  if (error instanceof GalleryImageInputError) return new ProfileAvatarUploadError(400, 'PROFILE_AVATAR_INVALID_IMAGE', error instanceof Error ? error.message : 'Invalid image');
   if (error instanceof ZodError || error instanceof SyntaxError) return new ProfileAvatarUploadError(400, 'PROFILE_AVATAR_INVALID_INPUT', 'Avatar upload input was invalid.');
   return new ProfileAvatarUploadError(500, 'PROFILE_AVATAR_FAILED', 'Avatar upload failed.');
 }

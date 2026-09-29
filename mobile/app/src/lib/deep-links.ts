@@ -1,9 +1,10 @@
 import * as Linking from "expo-linking";
 import type { Href } from "expo-router";
 
-export const MANAGED_INBOX_DEEP_LINK_HREF = "/capability/signal?inbox=internal&tab=unread";
+export const HOME_HREF = "/home" as Href;
+export const MANAGED_INBOX_DEEP_LINK_HREF = HOME_HREF;
 
-const DEEP_LINK_ROUTES = Object.freeze(["/capability/signal"]);
+const DEEP_LINK_ROUTES = Object.freeze(["/home"]);
 
 function pathFromUrl(url: string) {
   const parsed = Linking.parse(url);

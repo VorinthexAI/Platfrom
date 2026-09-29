@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import { useEffect } from "react";
 import { StyleSheet, View } from "react-native";
 
@@ -13,11 +13,11 @@ export default function OpenAppRoute() {
   useEffect(() => {
     if (status === "bootstrapping") return;
     if (status === "authenticated") {
-      router.replace(useAuthStore.getState().user?.isOnboarded ? "/capability/archive" : "/onboarding");
+      router.replace((useAuthStore.getState().user?.isOnboarded ? "/home" : "/onboarding") as Href);
       return;
     }
     let active = true;
-    void readLocalOnboardingState().then((onboarding) => { if (active && useAuthStore.getState().status === "unauthenticated") router.replace(onboarding.previewComplete ? "/auth" : "/onboarding"); });
+    void readLocalOnboardingState().then(() => { if (active && useAuthStore.getState().status === "unauthenticated") router.replace("/auth"); });
     return () => { active = false; };
   }, [router, status]);
 

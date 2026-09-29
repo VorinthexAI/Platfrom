@@ -178,7 +178,7 @@ async function resolvePresenceVisitor(distinctId: string | null): Promise<Visito
     try {
       return await insertVisitor({
         key: newId(),
-        teamKey: await getRootTeamKey(),
+        teamKey: distinctId,
         distinctId,
         alias,
         lastSeenAt: now,
@@ -222,7 +222,7 @@ export async function joinPresence(c: Context) {
       const record: SessionRecord = { t: 'user', v: user.key, k: nodeKey, a: alias, s: body.source, p: position };
       const inserted = await insertUserSessionUnlessDeleting({
         key: nodeKey,
-        teamKey: authContext.team.key,
+        teamKey: user.key,
         userId: user.key,
         alias,
         source: body.source,

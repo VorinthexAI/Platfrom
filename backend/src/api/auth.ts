@@ -192,16 +192,16 @@ async function membershipIdentity(
     email: user.email,
     emailHash: user.emailHash,
     name: user.name,
-    teamTitle: membership.teamTitle,
-    orchestratorKey: membership.orchestratorKey,
+    teamTitle: membership.teamTitle ?? null,
+    orchestratorKey: membership.orchestratorKey ?? null,
     teamIsRoot: team.is_root,
     teamIsPersonal: team.slug === `personal-${user.key}`,
     teamMfaEnabled: team.mfa_enabled,
     isMfaEnabled: membership.isMfaEnabled,
     totpSecret: membership.totpSecret,
-    lastTotpTimeStep: membership.lastTotpTimeStep,
+    lastTotpTimeStep: membership.lastTotpTimeStep ?? null,
     teamMfaVersion: membership.teamMfaVersion,
-    teamMfaRecoveryPending: membership.teamMfaRecoveryPending,
+    teamMfaRecoveryPending: membership.teamMfaRecoveryPending ?? false,
   };
 }
 
@@ -214,7 +214,6 @@ const membershipRoleRank: Record<UserTeam['teamRole'], number> = {
   admin: 3,
   moderator: 2,
   member: 2,
-  viewer: 1,
 };
 
 function strongestIdentity(identities: LoginIdentity[]): LoginIdentity | null {

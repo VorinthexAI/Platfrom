@@ -73,15 +73,12 @@ export default function RootLayout() {
     const root = segments[0] as string | undefined;
     const isPublic = root === "auth" || root === "public" || root === "referral" || root === "checkout" || root === undefined;
     if (status === "unauthenticated") {
-      if (root === "onboarding" && localOnboarding.introActive) return;
-      if (!localOnboarding.previewComplete) {
-        if (root === "auth" || root === undefined || (!isPublic && root !== "onboarding")) router.replace("/onboarding");
-      } else if (root === undefined || (!isPublic && root !== "auth")) router.replace("/auth" as Href);
+      if (root === undefined || (!isPublic && root !== "auth")) router.replace("/auth" as Href);
       return;
     }
     if (status === "authenticated" && (root === "auth" || root === "public")) {
       if (!isOnboarded) router.replace("/onboarding");
-      else router.replace("/capability/archive");
+      else router.replace("/home" as Href);
     }
     if (status === "authenticated" && !isOnboarded && !isPublic && root !== "onboarding") router.replace("/onboarding");
   }, [appsStatus, isOnboarded, localOnboarding, router, segments, status]);

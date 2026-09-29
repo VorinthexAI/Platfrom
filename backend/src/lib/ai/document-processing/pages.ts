@@ -5,7 +5,7 @@ import { documentKeyForRequest, documentCleanup, documentEmbed, documentInsert }
 import { MAX_DOCUMENT_SCAN_PAGE_BYTES, type DocumentParseInput } from './schemas';
 import { DocumentProcessingError } from './errors';
 import type { DocumentParseDependencies, DocumentParseResult } from './index';
-import { getDocumentById } from '@/lib/db/documents.node';
+import { getDocumentById } from './actions';
 import { getFolderById } from '@/lib/db/folders.node';
 import { reserveStorageKeyForUpload, renewStorageUploadReservation, acknowledgeStorageUploadReservation, releaseStorageUploadReservation, type StorageUploadReservation } from '@/lib/db/storage-deletion-jobs.node';
 import { startStorageUploadHeartbeat } from '@/lib/storage-upload-reservation';
@@ -70,7 +70,7 @@ export async function parseDocumentPages(input: DocumentParseInput & { pages: No
     return result;
   } catch (error) {
     // A post-commit failure must not delete the source pages owned by the saved document.
-    const committed = await getDocument(key).catch((cause) => { throw new DocumentProcessingError('DOCUMENT_CLEANUP_FAILED', 'Document ownership could not be verified; source pages were retained.', 'document.parse', { retryable: true, cause }); });
+    const committed = await getDocument(key).catch((cause: unknown) => { throw new DocumentProcessingError('DOCUMENT_CLEANUP_FAILED', 'Document ownership could not be verified; source pages were retained.', 'document.parse', { retryable: true, cause }); });
     if (committed) { for (const item of reservations) await acknowledge(item.value); return { document: committed }; }
     const cleanup = await Promise.allSettled(uploaded.map((key) => storage.delete(key)));
     if (cleanup.some((result) => result.status === 'rejected')) throw new DocumentProcessingError('DOCUMENT_CLEANUP_FAILED', 'Source page cleanup requires retry.', 'document.parse', { retryable: true, cause: error });

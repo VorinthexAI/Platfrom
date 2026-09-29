@@ -39,8 +39,8 @@ export type AgentGreetingTopicsDone = Extract<AgentGreetingTopicEvent, { type: "
 export type AgentGreetingEventTransport = (path: string, body: unknown, onEvent: (event: ServerSentEvent) => void, signal?: AbortSignal) => Promise<void>;
 
 function selectors(context: ConversationContext) {
-  const { teamKey, scopeKey } = conversationContextSchema.parse(context);
-  return { teamKey, scopeKey };
+  const { scopeKey } = conversationContextSchema.parse(context);
+  return { scopeKey };
 }
 
 function parseStreamEvent<T>(frame: ServerSentEvent, eventNames: readonly string[], schema: z.ZodType<T>): T {
@@ -56,7 +56,7 @@ function terminalError(event: { code: string; message: string }) {
 }
 
 export async function requestAgentGreetingWithTransport(transport: AgentGreetingEventTransport, context: ConversationContext, occasion: AgentGreetingOccasion, onDelta: (event: Extract<AgentGreetingEvent, { type: "delta" }>) => void, signal?: AbortSignal): Promise<AgentGreetingDone> {
-  const body = z.strictObject({ teamKey: z.string().min(1), scopeKey: z.string().min(1), occasion: z.enum(["onboarding", "returning"]) }).parse({ ...selectors(context), occasion });
+  const body = z.strictObject({ scopeKey: z.string().min(1), occasion: z.enum(["onboarding", "returning"]) }).parse({ ...selectors(context), occasion });
   let correlationKey: string | undefined;
   let messageKey: string | undefined;
   let terminal: Extract<AgentGreetingEvent, { type: "done" | "error" }> | undefined;
@@ -88,7 +88,7 @@ function sameTopic(first: GuideTopic, second: GuideTopic) {
 }
 
 export async function requestAgentGreetingTopicsWithTransport(transport: AgentGreetingEventTransport, context: ConversationContext, persistenceToken: string, onTopic: (event: Extract<AgentGreetingTopicEvent, { type: "topic" }>) => void, signal?: AbortSignal): Promise<AgentGreetingTopicsDone> {
-  const body = z.strictObject({ teamKey: z.string().min(1), scopeKey: z.string().min(1), persistenceToken: persistenceTokenSchema }).parse({ ...selectors(context), persistenceToken });
+  const body = z.strictObject({ scopeKey: z.string().min(1), persistenceToken: persistenceTokenSchema }).parse({ ...selectors(context), persistenceToken });
   let correlationKey: string | undefined;
   let terminal: Extract<AgentGreetingTopicEvent, { type: "done" | "error" }> | undefined;
   const topics: GuideTopic[] = [];

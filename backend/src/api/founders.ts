@@ -6,23 +6,11 @@ import {
   listAccessibleScopes,
   requireFoundersGateAccess,
   requireTeamAccess,
-  requireScopeAccess,
   type FoundersGateAccess,
 } from '@/lib/founders/access';
 import { getAuthIdentity } from './security';
-import { getOrchestratorById } from '@/lib/db/orchestrators.node';
-
-/**
- * Founders Gate: the founder-facing surface. Every handler independently
- * re-resolves the authenticated user and verifies root-team,
- * team, and scope access from canonical database state — the
- * frontend's route guard is presentation only. Client payloads may name an
- * team, a scope, and a message; user, agent, model, provider, role,
- * and permission resolution is exclusively server-side.
- */
 
 export const foundersTeamKeyParamSchema = z.string().trim().min(1).max(160);
-
 
 export type FounderContext = FoundersGateAccess & { identityType: 'user' | 'member' | 'superAdmin' };
 
@@ -42,7 +30,7 @@ export async function requireFounder(c: Context): Promise<{ founder: FounderCont
   if (!identity) return { error: c.json({ error: 'authentication required' }, 401) };
   try {
     const access = await requireFoundersGateAccess(identity.key);
-    if (!hasFounderAssurance(identity, access.rootMembership)) {
+    if (!hasFounderAssurance(identity)) {
       return { error: c.json({ error: 'founder MFA authentication required' }, 403) };
     }
     return { founder: { ...access, identityType: identity.identityType } };
@@ -62,54 +50,26 @@ export function forbidden(c: Context, error: unknown): Response {
   throw error;
 }
 
-/** GET /founders/me — identity and role data for the account surface. */
 export async function getFoundersAccount(c: Context) {
   const auth = await requireFounder(c);
   if ('error' in auth) return auth.error;
-  const { user, rootTeam, rootMembership, identityType } = auth.founder;
-  const orchestrator = rootMembership.orchestratorKey
-    ? await getOrchestratorById(rootMembership.orchestratorKey)
-    : null;
-  return c.json({
-    user: {
-      key: user.key,
-      name: user.name,
-      alias: user.alias,
-      email: user.email,
-      countryCode: user.countryCode,
-    },
-    rootTeam: {
-      key: rootTeam.key,
-      name: rootTeam.name,
-      alias: rootTeam.slug ?? null,
-    },
-    rootMembership: {
-      role: rootMembership.teamRole,
-      title: rootMembership.teamTitle,
-      orchestrator: orchestrator ? { key: orchestrator.key, slug: orchestrator.name.toLowerCase() } : null,
-    },
-    applicationRole: identityType,
-  });
+  return c.json({ applicationRole: auth.founder.identityType });
 }
 
-/** GET /founders/teams — teams the founder already belongs to. */
 export async function listFoundersTeams(c: Context) {
   const auth = await requireFounder(c);
   if ('error' in auth) return auth.error;
-  const teams = await listAccessibleTeams(auth.founder.user.key);
-  return c.json({ teams });
+  return c.json({ teams: await listAccessibleTeams() });
 }
 
-/** GET /founders/teams/:teamKey/scopes — accessible scopes inside one team. */
 export async function listFoundersTeamScopes(c: Context) {
   const auth = await requireFounder(c);
   if ('error' in auth) return auth.error;
   const parsedKey = foundersTeamKeyParamSchema.safeParse(c.req.param('teamKey'));
   if (!parsedKey.success) return c.json({ error: 'invalid team key' }, 400);
   try {
-    const { membership } = await requireTeamAccess(auth.founder.user.key, parsedKey.data);
-    const scopes = await listAccessibleScopes(membership);
-    return c.json({ scopes });
+    await requireTeamAccess();
+    return c.json({ scopes: await listAccessibleScopes() });
   } catch (error) {
     return forbidden(c, error);
   }

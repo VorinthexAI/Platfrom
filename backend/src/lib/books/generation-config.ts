@@ -1,2 +1,0 @@
-export const BOOK_GENERATION_LEASE_MS = 2 * 60_000;
-export const BOOK_GENERATION_RENEW_MS = 30_000;

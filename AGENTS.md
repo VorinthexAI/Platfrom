@@ -64,14 +64,25 @@ bun run --cwd backend dev
 
 This repo uses a newer Next.js version with breaking changes. Before changing Next.js-specific APIs, conventions, or file structure, read the relevant guide in `node_modules/next/dist/docs/` and heed deprecation notices.
 
+## Domain model
+
+Identity is `user → scopes → nested folders → files`. There is no teams
+collection and no Archive/Gallery/Signal/Compass/Ascend/HQ products. Files
+are `txt`, `md`, `docx`, `pdf`, images, `mp3`, and `mp4`. Core chats live
+per user+scope. `agent.query` reads `workspace | folders | files`.
+
+Uploads presign directly to `files/{userKey}/{fileKey}.{ext}`. Document-like
+files extract text on mobile (mammoth for docx); the API chunks and embeds.
+Media files are stored only.
+
 ## Unified Tools And Actions
 
-Every user-facing business capability for Archive, Gallery, Signal, Compass,
-and Ascend has exactly one product-neutral entry in the public unified backend
-tool registry. HTTP transports and Core may use separate transport or model
-adapters, but every entry point must converge on the same canonical domain
-service, operation, Content runtime, or provider-neutral action. Do not
-duplicate business behavior across handlers and tool wrappers.
+Every user-facing business capability has exactly one product-neutral entry in
+the public unified backend tool registry. HTTP transports and Core may use
+separate transport or model adapters, but every entry point must converge on
+the same canonical domain service, operation, Content runtime, or
+provider-neutral action. Do not duplicate business behavior across handlers
+and tool wrappers.
 
 Before adding or changing API behavior, read the current registries and their
 execution paths:
@@ -85,13 +96,9 @@ execution paths:
 - `backend/src/lib/ai/tools/tool-definitions.ts` and
   `backend/src/lib/ai/tools/workspace-tool-definitions.ts` assemble the public
   tool registry.
-- `backend/src/lib/ai/tools/content-schemas.ts` owns Archive Content Zod input
+- `backend/src/lib/ai/tools/content-schemas.ts` owns folder/file Zod input
   and output contracts; `content-registry.ts` derives provider definitions,
   and `content-runtime.ts` validates and executes them.
-- `backend/src/lib/ai/personal-assistant/capabilities.ts`,
-  `service-capabilities.ts`, and `gallery-capabilities.ts` own Core surface
-  allowlists, model-facing schemas, trusted-context injection, execution
-  adapters, and workspace mutation metadata.
 - Service or operation modules own canonical non-Content validation where
   applicable. HTTP-only transport schemas remain under `backend/src/api`.
 - `backend/src/lib/ai/actions/index.ts` and
@@ -150,18 +157,13 @@ For every new or changed API capability:
    declare workspace mutation metadata.
 6. Update matching TanStack Query keys so direct API and Core-driven changes
    converge.
-7. Add parity tests proving HTTP and tool/Core entry points reach the same
-   canonical service, operation, or runtime and preserve the same authorization
-   and business invariants. Transport schemas and response projections may
-   intentionally differ. Also add strict-input, registry uniqueness/count,
-   authorization, and service-level invariant tests.
-8. Delete superseded handlers, adapters, schemas, aliases, tests, and dead
+   7. Delete superseded handlers, adapters, schemas, aliases, tests, and dead
    business implementations in the same change. Do not retain a second path
    for compatibility without a concrete shipped consumer or persisted-data
    requirement.
 
 Tools and actions are different. Tools expose business capabilities such as
-`folder.create` or `email.draft.send`. Actions are reusable provider-neutral
+`folder.create` or `file.list`. Actions are reusable provider-neutral
 AI primitives such as generation, reasoning, embedding, speech, or image
 analysis. A model-backed tool may call an action, but ordinary database-backed
 tools call canonical services/repositories directly. Never create public
@@ -211,7 +213,7 @@ After SEO-affecting changes, verify `/llms.txt`, `/llms-full.txt`,
 ## Conventions
 
 - Keep changes scoped and match the surrounding code style.
-- Add or update tests for behavior changes. Do not add tests under `mobile/app`; mobile relies on typecheck (`bun run mobile:typecheck`), not a test suite.
+- Do not add backend tests unless explicitly asked. Do not add tests under `mobile/app`; mobile relies on typecheck (`bun run mobile:typecheck`).
 - Never use current or future product names as code identifiers or API route
   segments (including function, class, variable, module, and endpoint names).
   Name code after its domain behavior or capability instead; for example, do
@@ -222,10 +224,10 @@ After SEO-affecting changes, verify `/llms.txt`, `/llms-full.txt`,
 - Validate backend endpoint JSON payloads and query parameters with Zod strict object schemas; reject unknown fields instead of silently accepting them.
 - ArangoDB documents: application code and schemas ALWAYS use `key` as the public primary-key field — never read or write Arango's `_key` directly. The only place that translates between them is `toArangoDoc`/`withArangoKey` in `backend/src/lib/db/base.ts`; document schemas parse in Zod's default strip mode so `_key`/`_id`/`_rev` drop away on read.
 - Keep backend HTTP endpoints behind the env API key middleware and Redis-backed per-IP rate limiting unless a task explicitly changes that security model.
-- Every user-facing API capability for Archive, Gallery, Signal, Compass, or Ascend must follow the Unified Tools And Actions rules above.
-- Tool names always use product-neutral dot notation (`folder.create`, `email.draft.send`), never underscores or current/future product names.
+- Every user-facing API capability must follow the Unified Tools And Actions rules above.
+- Tool names always use product-neutral dot notation (`folder.create`, `file.list`), never underscores or current/future product names.
 - Database deletion is hard deletion: schemas must not define tombstone timestamps, and delete operations clean dependents transactionally. Archive or status fields may represent only an explicit non-deletion domain lifecycle.
-- AI action definitions, identities, exact model/provider bindings, and routing priorities live only in `backend/src/lib/ai/actions`. Provider adapters, environment configuration, model metadata, and external provider model IDs live only in `backend/src/lib/ai/providers`; provider configuration is never database-backed. Do not recreate provider, model, model-provider, organization-provider, organization-credential, persisted model-action, agent, skill, run, artifact, memory, capability-catalog, mind, or action-catalog collections. Runtime authorization derives from authenticated organization and scope membership.
+- AI action definitions, identities, exact model/provider bindings, and routing priorities live only in `backend/src/lib/ai/actions`. Provider adapters, environment configuration, model metadata, and external provider model IDs live only in `backend/src/lib/ai/providers`; provider configuration is never database-backed. Do not recreate provider, model, model-provider, organization-provider, organization-credential, persisted model-action, agent, skill, run, artifact, memory, capability-catalog, mind, or action-catalog collections. Runtime authorization derives from authenticated user and scope ownership.
 
 ## Notes For Agents
 

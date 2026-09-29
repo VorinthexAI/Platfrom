@@ -14,7 +14,7 @@ const storedConversationSchema = z.strictObject({
 const selections = new Map<string, Conversation>();
 
 function selectionKey(context: ConversationContext) {
-  return `${SELECTION_KEY_PREFIX}.${context.userKey}.${context.teamKey}.${context.scopeKey}`;
+  return `${SELECTION_KEY_PREFIX}.${context.userKey}.${context.scopeKey}`;
 }
 
 function forgetPersistedSelection(key: string) {

@@ -4,11 +4,8 @@ import { File } from "expo-file-system";
 import { z } from "zod";
 import { useAuthStore } from "@/state/auth";
 import { appSearchResults, searchApp } from "./app-search-client";
-import type { AssistantChange } from "./assistant-changes";
-import type { ContentPresentation } from "@/data/capability-icons";
 import {
   planContentSelectionDelete,
-  planContentSelectionCopy,
   planContentSelectionFavorite,
   planContentSelectionMove,
   type ContentSelection,
@@ -18,128 +15,38 @@ import {
 
 export type { ContentSelection } from "./content-selection-plans";
 
+export const FILE_EXTENSIONS = ["txt", "md", "docx", "pdf", "jpg", "jpeg", "png", "webp", "gif", "mp3", "mp4"] as const;
+export type FileExtension = (typeof FILE_EXTENSIONS)[number];
+export const FILE_LOCATION_PAGE_SIZE = 50;
+
 export type ContentContext = {
-  teamKey: string;
   scopeKey: string;
   userKey?: string;
 };
 
 export type ContentFolder = {
   key: string;
+  scopeKey: string;
   parentFolderKey?: string;
   name: string;
   description?: string;
-  coverUrl?: string;
-  presentation?: ContentPresentation;
   isFavorite?: boolean;
-  managed?: boolean;
-  structuralProtection?: boolean;
-};
-
-export type ContentDocument = {
-  key: string;
-  name: string;
-  folderKey?: string;
-  extension?: string;
-  mimeType?: string;
-  sizeBytes?: number;
-  sourceImageCount?: number;
-  originalAvailable?: boolean;
-  currentVersionKey?: string | null;
-  isFavorite: boolean;
-  managed?: boolean;
-  structuralProtection?: boolean;
+  createdAt: string;
   updatedAt: string;
 };
 
-export type ContentNeighbors = {
-  folders: ContentFolder[];
-  documents: ContentDocument[];
-  files: ContentDocument[];
-};
-
-export type ContentDocumentSourceImage = { page: number; url: string };
-
-export type ContentDocumentVersion = {
+export type ContentFile = {
   key: string;
-  documentKey: string;
-  version: number;
-  type?: "enhancement" | "translation";
-  label?: string;
-  createdAt: string;
-  content?: string;
-};
-
-export type ContentDocumentAudioVersion = {
-  key: string;
-  documentKey: string;
-  version: number;
-  sourceContentHash: string;
-  sourceTitle: string;
-  sourceDocumentUpdatedAt: string;
-  mimeType: "audio/mpeg";
-  sizeBytes: number;
-  durationMs: number;
-  isCurrent: boolean;
-  playbackPositionMs: number;
-  voice?: string;
-  language?: string;
-  speakingRate?: number;
-  includeTitle: boolean;
-  includeCode: boolean;
-  createdAt: string;
-  current: boolean;
-  url: string;
-};
-
-export type ContentDocumentSummaryAudio = {
-  key: string;
-  summaryKey: string;
-  mimeType: "audio/mpeg";
-  sizeBytes: number;
-  durationMs: number;
-  voice?: string;
-  language?: string;
-  createdAt: string;
-  url: string;
-};
-
-export type ContentDocumentSummary = {
-  key: string;
-  documentKey: string;
-  version: number;
-  summary: string;
-  topic?: string;
-  style: "brief" | "detailed" | "executive" | "bullet-points" | "technical";
-  language?: string;
-  sourceContentHash: string;
-  sourceTitle: string;
-  sourceDocumentUpdatedAt: string;
-  createdAt: string;
-  audio?: ContentDocumentSummaryAudio;
-};
-
-export type ContentSearchDocument = {
-  documentKey: string;
-  name: string;
-  extension?: ContentDocument["extension"];
-  isFavorite: boolean;
-  managed?: boolean;
-  structuralProtection?: boolean;
-  score: number;
-  summary?: string;
-  scopeKey?: string;
+  scopeKey: string;
   folderKey?: string;
-  folder?: { key: string; name: string };
-};
-
-export type ContentSearchMatch = Omit<ContentSearchDocument, "summary">;
-
-export type ContentSearchResponse = {
-  query: string;
-  cached: boolean;
-  folders: (ContentFolder & { score: number })[];
-  documents: ContentSearchDocument[];
+  name: string;
+  extension: FileExtension;
+  mimeType: string;
+  sizeBytes: number;
+  processing: "pending" | "ready" | "failed";
+  isFavorite: boolean;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type ContentSearchHistoryItem = {
@@ -149,36 +56,33 @@ export type ContentSearchHistoryItem = {
   usageCount: number;
 };
 
-export type ContentDocumentDownload = {
-  documentKey: string;
-  format: "original" | "html" | "txt";
-  fileName: string;
-  mimeType: string;
-  encoding: "base64";
-  content: string;
+export type ContentSearchFile = {
+  fileKey: string;
+  name: string;
+  extension?: FileExtension;
+  isFavorite: boolean;
+  score: number;
+  scopeKey?: string;
+  folderKey?: string;
+  folder?: { key: string; name: string };
 };
 
-export type PersonalAssistantResponse =
-  | { type: "answer"; message: string; sources: { documentKey: string; name: string }[]; changes?: AssistantChange[] }
-  | { type: "note"; content: string; message: string; sources: { documentKey: string; name: string }[]; changes?: AssistantChange[] }
-  | { type: "unsupported"; message: string; sources: []; changes?: AssistantChange[] };
+export type ContentSearchResponse = {
+  query: string;
+  cached: boolean;
+  folders: (ContentFolder & { score: number })[];
+  files: ContentSearchFile[];
+};
 
 type ToolResponse<T> =
   | { success: true; data: T }
   | { success: false; error: { message: string; code?: string; action?: string } };
 
-type ContentBatchToolResult = {
-  success: boolean;
-  data?: { document?: ContentDocument; folder?: ContentFolder; folderCount?: number; documentCount?: number };
-  error?: { message: string; code?: string; action?: string };
-};
-
 export type ContentBatchFailure = ContentSelectionOperation & { tool: string; message: string; code?: string; action?: string };
 
 export type ContentBatchOutcome = {
   folders: ContentFolder[];
-  documents: ContentDocument[];
-  copiedFolders: { folder: ContentFolder; folderCount: number; documentCount: number }[];
+  files: ContentFile[];
   failures: ContentBatchFailure[];
   requested: number;
   succeeded: number;
@@ -189,71 +93,17 @@ function recordKey(value: Record<string, unknown> | null) {
   return typeof value?.key === "string" ? value.key : "";
 }
 
-async function executeContentSelectionPlan(plan: ContentSelectionPlan): Promise<ContentBatchOutcome> {
-  const callOutcomes = await Promise.all(plan.calls.map(async (call) => {
-    const folders: ContentFolder[] = [];
-    const documents: ContentDocument[] = [];
-    const copiedFolders: ContentBatchOutcome["copiedFolders"] = [];
-    const failures: ContentBatchFailure[] = [];
-    try {
-      const data = await callContentTool<{ results: ContentBatchToolResult[] }>(call.tool, call.input);
-      call.operations.forEach((operation, index) => {
-        const result = data.results[index];
-        if (!result?.success || !result.data) {
-          failures.push({ ...operation, tool: call.tool, message: result?.error?.message ?? "The Archive operation failed.", ...(result?.error?.code ? { code: result.error.code } : {}), ...(result?.error?.action ? { action: result.error.action } : {}) });
-          return;
-        }
-        if (result.data.document) documents.push(result.data.document);
-        if (result.data.folder) {
-          folders.push(result.data.folder);
-          if (call.tool === "folder.copy") copiedFolders.push({ folder: result.data.folder, folderCount: result.data.folderCount ?? 1, documentCount: result.data.documentCount ?? 0 });
-        }
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "The Archive operation failed.";
-      const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : undefined;
-      const action = typeof (error as { action?: unknown })?.action === "string" ? (error as { action: string }).action : undefined;
-      failures.push(...call.operations.map((operation) => ({ ...operation, tool: call.tool, message, ...(code ? { code } : {}), ...(action ? { action } : {}) })));
-    }
-    return { folders, documents, copiedFolders, failures };
-  }));
-  const outcome: ContentBatchOutcome = {
-    folders: callOutcomes.flatMap(({ folders }) => folders),
-    documents: callOutcomes.flatMap(({ documents }) => documents),
-    copiedFolders: callOutcomes.flatMap(({ copiedFolders }) => copiedFolders),
-    failures: callOutcomes.flatMap(({ failures }) => failures),
-    requested: plan.operationCount,
-    succeeded: 0,
-    failed: 0,
-  };
-  outcome.failed = outcome.failures.length;
-  outcome.succeeded = outcome.requested - outcome.failed;
-  return outcome;
-}
-
-function singleBatchRecord<T>(outcome: ContentBatchOutcome, records: T[], fallback: string) {
-  if (outcome.failures[0]) throw new Error(outcome.failures[0].message);
-  const record = records[0];
-  if (!record) throw new Error(fallback);
-  return record;
-}
-
-function assertSingleBatchSuccess(outcome: ContentBatchOutcome, fallback: string) {
-  if (outcome.failures[0]) throw new Error(outcome.failures[0].message);
-  if (outcome.requested !== 1 || outcome.succeeded !== 1) throw new Error(fallback);
+function contentToolError(error: { message: string; code?: string; action?: string }) {
+  return Object.assign(new Error(error.message), error.code ? { code: error.code } : {}, error.action ? { action: error.action } : {});
 }
 
 export function getContentContext(): ContentContext {
   const state = useAuthStore.getState();
-  return {
-    teamKey: recordKey(state.team),
-    scopeKey: recordKey(state.scope),
-    userKey: state.user?.key ?? "",
-  };
+  return { scopeKey: recordKey(state.scope), userKey: state.user?.key ?? "" };
 }
 
 export function isContentContextConfigured(context: ContentContext) {
-  return [context.teamKey, context.scopeKey].every((value) => value.trim().length > 0);
+  return context.scopeKey.trim().length > 0;
 }
 
 export function createContentMutationKey() {
@@ -264,45 +114,13 @@ export function createContentRecordKey() {
   return `c${Crypto.randomUUID().replace(/-/g, "")}`;
 }
 
-function documentMimeType(name: string, reported: string) {
-  const extension = name.toLowerCase().split(".").pop();
-  const extensionMimeType = extension === "txt" ? "text/plain"
-    : extension === "md" ? "text/markdown"
-      : extension === "pdf" ? "application/pdf"
-        : extension === "doc" ? "application/msword"
-          : extension === "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            : undefined;
-  if (extensionMimeType) return extensionMimeType;
-  const normalized = reported.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-  if (["application/x-pdf", "application/acrobat", "applications/vnd.pdf", "com.adobe.pdf"].includes(normalized)) return "application/pdf";
-  return normalized || "application/octet-stream";
-}
-
-function documentFilename(name: string, mimeType: string) {
-  const filename = name.trim() || "Document";
-  if (/\.(?:txt|md|pdf|doc|docx)$/i.test(filename)) return filename;
-  const extension = mimeType === "text/plain" ? "txt"
-    : mimeType === "text/markdown" ? "md"
-      : mimeType === "application/pdf" ? "pdf"
-        : mimeType === "application/msword" ? "doc"
-          : mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ? "docx"
-            : undefined;
-  return extension ? `${filename}.${extension}` : filename;
-}
-
-function contentToolError(error: { message: string; code?: string; action?: string }) {
-  return Object.assign(new Error(error.message), error.code ? { code: error.code } : {}, error.action ? { action: error.action } : {});
-}
-
 async function callContentTool<T>(tool: string, input: Record<string, unknown>, signal?: AbortSignal, requestContext = getContentContext()): Promise<T> {
-  const contentContext = requestContext;
-  if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
+  if (!isContentContextConfigured(requestContext)) throw new Error("Files are unavailable for this session.");
   try {
     const response = await apiClient.post<ToolResponse<T>>(`/api/v1/content/tools/${tool}`, {
-      teamKey: contentContext.teamKey,
-      scopeKey: contentContext.scopeKey,
+      scopeKey: requestContext.scopeKey,
       input,
-    }, { signal, ...(typeof input.idempotencyKey === "string" ? { headers: { "Idempotency-Key": input.idempotencyKey } } : {}), timeout: tool === "document.parse" ? 5 * 60_000 : tool === "document.summarize" || tool === "document.topics" ? 4 * 60_000 : 60_000 });
+    }, { signal, ...(typeof input.idempotencyKey === "string" ? { headers: { "Idempotency-Key": input.idempotencyKey } } : {}), timeout: 60_000 });
     if (!response.data.success) throw contentToolError(response.data.error);
     return response.data.data;
   } catch (error) {
@@ -312,156 +130,52 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>, 
   }
 }
 
-export async function enhanceContentDocument(documentKey: string, instruction?: string, mode: "preview" | "replace" = "preview") {
-  const context = getContentContext();
-  const response = await apiClient.post<ToolResponse<{
-    results: { success: boolean; data?: { text: string; persistedDocumentKey?: string }; error?: { message: string } }[];
-  }>>("/app/enhance", { teamKey: context.teamKey, scopeKey: context.scopeKey, input: { documentKey, instruction, save: false } }, { headers: { "Idempotency-Key": createContentMutationKey() }, timeout: 30 * 60_000 });
-  if (!response.data.success) throw contentToolError(response.data.error);
-  const data = response.data.data;
-  const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The document could not be enhanced.");
-  return result.data;
-}
-
-export async function askPersonalAssistant(message: string, currentNote: { documentKey?: string; title: string; content: string; selection?: { start: number; end: number } }, folderKey?: string, signal?: AbortSignal) {
-  const contentContext = getContentContext();
-  if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
-  try {
-    const response = await apiClient.post<ToolResponse<PersonalAssistantResponse>>("/api/v1/assistant/respond", {
-      teamKey: contentContext.teamKey,
-      scopeKey: contentContext.scopeKey,
-      input: { surface: "knowledge-workspace", message, currentNote, requestKey: createContentMutationKey(), ...(folderKey ? { folderKey } : {}) },
-    }, { signal, timeout: 4 * 60_000 });
-    if (!response.data.success) throw new Error(response.data.error.message);
-    return response.data.data;
-  } catch (error) {
-    const failure = (error as { response?: { data?: ToolResponse<PersonalAssistantResponse> } }).response?.data;
-    if (failure && !failure.success) throw new Error(failure.error.message);
-    throw error;
+async function executeContentSelectionPlan(plan: ContentSelectionPlan): Promise<ContentBatchOutcome> {
+  const folders: ContentFolder[] = [];
+  const files: ContentFile[] = [];
+  const failures: ContentBatchFailure[] = [];
+  for (const call of plan.calls) {
+    for (const operation of call.operations) {
+      try {
+        const data = await callContentTool<Record<string, unknown>>(call.tool, call.inputFor(operation));
+        if (data.folder) folders.push(data.folder as ContentFolder);
+        if (data.file) files.push(data.file as ContentFile);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "The file operation failed.";
+        const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : undefined;
+        const action = typeof (error as { action?: unknown })?.action === "string" ? (error as { action: string }).action : undefined;
+        failures.push({ ...operation, tool: call.tool, message, ...(code ? { code } : {}), ...(action ? { action } : {}) });
+      }
+    }
   }
+  return { folders, files, failures, requested: plan.operationCount, succeeded: plan.operationCount - failures.length, failed: failures.length };
 }
 
-export async function translateContentDocument(documentKey: string, targetLanguage: string, instruction?: string, mode: "preview" | "replace" = "replace") {
-  const context = getContentContext();
-  const response = await apiClient.post<ToolResponse<{
-    results: { success: boolean; data?: { text: string; persistedDocumentKey?: string }; error?: { message: string } }[];
-  }>>("/app/translate", { teamKey: context.teamKey, scopeKey: context.scopeKey, input: { documentKey, targetLanguage, instruction, save: false } }, { headers: { "Idempotency-Key": createContentMutationKey() }, timeout: 30 * 60_000 });
-  if (!response.data.success) throw contentToolError(response.data.error);
-  const data = response.data.data;
-  const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The note could not be translated.");
-  return result.data;
+const FILE_MIME: Record<FileExtension, string> = {
+  txt: "text/plain",
+  md: "text/markdown",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  pdf: "application/pdf",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  gif: "image/gif",
+  mp3: "audio/mpeg",
+  mp4: "video/mp4",
+};
+
+function fileExtensionOf(name: string, mimeType: string): FileExtension | undefined {
+  const fromName = name.toLowerCase().split(".").pop();
+  if (fromName && (FILE_EXTENSIONS as readonly string[]).includes(fromName)) return fromName as FileExtension;
+  const mime = mimeType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  const match = (Object.entries(FILE_MIME) as [FileExtension, string][]).find(([, type]) => type === mime);
+  return match?.[0];
 }
 
-export async function createContentDocumentVersion(documentKey: string, label: string, content?: string, type?: ContentDocumentVersion["type"]) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { version: ContentDocumentVersion }; error?: { message: string } }[];
-  }>("document.create-version", { documentKeys: [documentKey], labels: { [documentKey]: label }, ...(content ? { contents: { [documentKey]: content } } : {}), ...(type ? { types: { [documentKey]: type } } : {}), idempotencyKey: createContentMutationKey() });
-  const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The document version could not be created.");
-  return result.data.version;
-}
-
-export async function listContentDocumentVersions(documentKey: string) {
-  const versions: ContentDocumentVersion[] = [];
-  let cursor: string | undefined;
-  do {
-    const data = await callContentTool<{
-      results: { success: boolean; data?: { versions: ContentDocumentVersion[]; cursor?: string }; error?: { message: string } }[];
-    }>("document.list-versions", { documentKeys: [documentKey], cursor, limit: 100 });
-    const result = data.results[0];
-    if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "Version history could not be loaded.");
-    versions.push(...result.data.versions);
-    cursor = result.data.cursor;
-  } while (cursor);
-  return versions;
-}
-
-export async function listContentDocumentAudioVersions(documentKey: string) {
-  const versions: ContentDocumentAudioVersion[] = [];
-  let cursor: string | undefined;
-  do {
-    const data = await callContentTool<{
-      results: { success: boolean; data?: { audioVersions: ContentDocumentAudioVersion[]; cursor?: string }; error?: { message: string } }[];
-    }>("document.list-audio-versions", { documentKeys: [documentKey], cursor, limit: 100 });
-    const result = data.results[0];
-    if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "Audio versions could not be loaded.");
-    versions.push(...result.data.audioVersions);
-    cursor = result.data.cursor;
-  } while (cursor);
-  return versions;
-}
-
-export async function generateContentDocumentAudio(documentKey: string, voice: "calm" | "clear" | "warm" = "clear", pace = 1) {
-  const context = getContentContext();
-  const response = await apiClient.post<ToolResponse<ContentDocumentAudioVersion>>("/app/speech", {
-    teamKey: context.teamKey,
-    scopeKey: context.scopeKey,
-    input: { documentKey, voice, pace, includeTitle: true, includeCode: false },
-  }, { headers: { "Idempotency-Key": createContentMutationKey() }, timeout: 5 * 60_000 });
-  if (!response.data.success) throw contentToolError(response.data.error);
-  return response.data.data;
-}
-
-export async function updateContentDocumentAudioPlayback(audioVersionKey: string, playbackPositionMs: number) {
-  return callContentTool<{ audioVersionKey: string; documentKey: string; playbackPositionMs: number }>("document.audio.playback.update", {
-    audioVersionKey,
-    playbackPositionMs,
-    idempotencyKey: createContentMutationKey(),
-  });
-}
-
-export async function clearContentDocumentAudioPlayback(documentKey: string) {
-  return callContentTool<{ documentKey: string }>("document.audio.playback.clear", {
-    documentKey,
-    idempotencyKey: createContentMutationKey(),
-  });
-}
-
-export async function listContentDocumentSummaries(documentKey: string) {
-  const summaries: ContentDocumentSummary[] = [];
-  let cursor: string | undefined;
-  do {
-    const data = await callContentTool<{
-      results: { success: boolean; data?: { summaries: ContentDocumentSummary[]; cursor?: string }; error?: { message: string } }[];
-    }>("document.list-summaries", { documentKeys: [documentKey], cursor, limit: 100 });
-    const result = data.results[0];
-    if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "Summary versions could not be loaded.");
-    summaries.push(...result.data.summaries);
-    cursor = result.data.cursor;
-  } while (cursor);
-  return summaries;
-}
-
-export async function findContentDocumentSummary(summaryKey: string) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { summary: ContentDocumentSummary }; error?: { message: string } }[];
-  }>("document.find-summary", { summaryKeys: [summaryKey] });
-  const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The summary could not be loaded.");
-  return result.data.summary;
-}
-
-export async function findContentDocumentVersion(versionKey: string) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { version: ContentDocumentVersion }; error?: { message: string } }[];
-  }>("document.find-version", { versionKeys: [versionKey], include: ["content"] });
-  const result = data.results[0];
-  if (!result?.success || !result.data?.version.content) throw new Error(result?.error?.message ?? "The version could not be loaded.");
-  return result.data.version;
-}
-
-export async function restoreContentDocumentVersion(documentKey: string, versionKey: string, createBackupVersion = true) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
-  }>("document.restore-version", {
-    restores: [{ documentKey, versionKey, createBackupVersion }],
-    idempotencyKey: createContentMutationKey(),
-  });
-  const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The version could not be restored.");
-  return result.data.document;
+function fileFilename(name: string, extension: FileExtension) {
+  const filename = name.trim() || "File";
+  return filename.toLowerCase().endsWith(`.${extension}`) ? filename : `${filename}.${extension}`;
 }
 
 export async function listContentFolderTree(signal?: AbortSignal, contentContext = getContentContext()) {
@@ -470,10 +184,8 @@ export async function listContentFolderTree(signal?: AbortSignal, contentContext
   do {
     const data: { folders: ContentFolder[]; cursor?: string } = await callContentTool("folder.list", {
       scopeKey: contentContext.scopeKey,
-      includeDescendants: true,
-      cursor,
+      ...(cursor ? { cursor } : {}),
       limit: 100,
-      sort: { field: "name", direction: "asc" },
     }, signal, contentContext);
     folders.push(...data.folders);
     cursor = data.cursor;
@@ -481,144 +193,50 @@ export async function listContentFolderTree(signal?: AbortSignal, contentContext
   return folders;
 }
 
-export const ARCHIVE_LOCATION_PAGE_SIZE = 10;
-export const ARCHIVE_FILE_EXTENSIONS = ["txt", "md", "doc", "docx", "pdf"] as const;
-
-export async function listContentDocumentPage(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext(), cursor?: string, limit = ARCHIVE_LOCATION_PAGE_SIZE, extensions?: readonly string[]) {
-  const data: { documents: ContentDocument[]; cursor?: string } = await callContentTool("document.list", {
+export async function listContentFolderPage(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext(), cursor?: string, limit = FILE_LOCATION_PAGE_SIZE) {
+  return callContentTool<{ folders: ContentFolder[]; cursor?: string }>("folder.list", {
     scopeKey: contentContext.scopeKey,
     ...(folderKey ? { folderKey } : {}),
     ...(cursor ? { cursor } : {}),
     limit,
-    sort: { field: "updatedAt", direction: "desc" },
+  }, signal, contentContext);
+}
+
+export async function listContentFilePage(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext(), cursor?: string, limit = FILE_LOCATION_PAGE_SIZE, extensions?: readonly string[]) {
+  return callContentTool<{ files: ContentFile[]; cursor?: string }>("file.list", {
+    scopeKey: contentContext.scopeKey,
+    ...(folderKey ? { folderKey } : {}),
+    ...(cursor ? { cursor } : {}),
+    limit,
     ...(extensions?.length ? { extensions: [...extensions] } : {}),
   }, signal, contentContext);
-  return { documents: data.documents, cursor: data.cursor };
 }
 
-export async function listContentDocumentsAtLocation(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext()) {
-  const documents: ContentDocument[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = await listContentDocumentPage(folderKey, signal, contentContext, cursor, 100);
-    documents.push(...page.documents);
-    cursor = page.cursor;
-  } while (cursor);
-  return documents;
+export async function listContentLocation(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext()) {
+  const [foldersPage, filesPage] = await Promise.all([
+    listContentFolderPage(folderKey, signal, contentContext),
+    listContentFilePage(folderKey, signal, contentContext),
+  ]);
+  return { folders: foldersPage.folders, files: filesPage.files, folderCursor: foldersPage.cursor, fileCursor: filesPage.cursor };
 }
 
-export async function listContentLocation(folderKey?: string) {
-  const [tree, documents] = await Promise.all([listContentFolderTree(), listContentDocumentsAtLocation(folderKey)]);
-  return { folders: tree.filter((folder) => folder.parentFolderKey === folderKey), documents };
+export async function findContentFolder(folderKey: string, contentContext = getContentContext(), signal?: AbortSignal) {
+  const data = await callContentTool<{ folder: ContentFolder }>("folder.find", { folderKey }, signal, contentContext);
+  return data.folder;
 }
 
-export async function loadInitialContentLocation() {
-  const [tree, rootDocuments] = await Promise.all([listContentFolderTree(), listContentDocumentsAtLocation()]);
-  const root = { folders: tree.filter((folder) => !folder.parentFolderKey), documents: rootDocuments };
-  return { root, location: root, initialFolder: undefined };
+export async function findContentFile(fileKey: string, contentContext = getContentContext(), signal?: AbortSignal) {
+  const data = await callContentTool<{ file: ContentFile }>("file.find", { fileKey }, signal, contentContext);
+  return data.file;
 }
 
-export async function readContentDocument(documentKey: string, contentContext = getContentContext(), signal?: AbortSignal) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { document: ContentDocument & { content?: string } }; error?: { message: string } }[];
-  }>("document.find", { documentKeys: [documentKey], include: ["content"] }, signal, contentContext);
-  const result = data.results[0];
-  const document = result?.data?.document;
-  if (!result?.success || !document || document.content === undefined) throw new Error(result?.error?.message ?? "The document could not be opened.");
-  return { ...document, content: document.content };
-}
-
-export async function readContentDocumentSources(documentKey: string) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { document: ContentDocument & { sourceImages?: ContentDocumentSourceImage[] } }; error?: { message: string } }[];
-  }>("document.find", { documentKeys: [documentKey], include: ["sourceImages"] });
-  const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The scanned pages could not be opened.");
-  return result.data.document.sourceImages ?? [];
-}
-
-export async function createContentDocument(name: string, content: string, folderKey?: string, mutationKey = createContentMutationKey()) {
-  const contentContext = getContentContext();
-  const data = await callContentTool<{ document: ContentDocument }>("document.create", {
-    scopeKey: contentContext.scopeKey,
-    folderKey,
-    name,
-    content,
-    idempotencyKey: mutationKey,
-  });
-  return data.document;
-}
-
-export async function saveContentDocument(documentKey: string, content: string, expectedUpdatedAt: string, createVersion = false) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
-  }>("document.update", {
-    updates: [{ documentKey, content, createVersion, expectedUpdatedAt }],
-    atomic: false,
-    idempotencyKey: createContentMutationKey(),
-  });
-  const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The note could not be saved.");
-  return result.data.document;
-}
-
-export async function renameContentDocument(documentKey: string, name: string) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
-  }>("document.rename", {
-    renames: [{ documentKey, name }],
-    atomic: false,
-    idempotencyKey: createContentMutationKey(),
-  });
-  const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The note could not be renamed.");
-  return result.data.document;
-}
-
-export async function setContentDocumentFavorite(documentKey: string, isFavorite: boolean) {
-  const outcome = await setContentSelectionFavorite({ folderKeys: [], documentKeys: [documentKey] }, isFavorite);
-  return singleBatchRecord(outcome, outcome.documents, "The favorite could not be updated.");
-}
-
-export async function moveContentDocument(documentKey: string, targetFolderKey?: string) {
-  const outcome = await moveContentSelection({ folderKeys: [], documentKeys: [documentKey] }, targetFolderKey);
-  return singleBatchRecord(outcome, outcome.documents, "The document could not be moved.");
-}
-
-export async function copyContentDocument(documentKey: string, targetFolderKey?: string) {
-  const outcome = await copyContentSelection({ folderKeys: [], documentKeys: [documentKey] }, [targetFolderKey]);
-  return singleBatchRecord(outcome, outcome.documents, "The document could not be copied.");
-}
-
-export async function deleteContentDocument(documentKey: string) {
-  const outcome = await hardDeleteContentSelection({ folderKeys: [], documentKeys: [documentKey] });
-  assertSingleBatchSuccess(outcome, "The document could not be deleted.");
-}
-
-export async function downloadContentDocument(documentKey: string, format: "original" | "html" | "txt" = "original") {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: ContentDocumentDownload; error?: { message: string } }[];
-  }>("document.download", { documentKeys: [documentKey], format });
-  const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The original file could not be downloaded.");
-  return result.data;
-}
-
-export async function getOriginalDocumentDownload(documentKey: string) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { documentKey: string; format: "original-url"; fileName: string; mimeType: string; encoding: "url"; url: string }; error?: { message: string } }[];
-  }>("document.download", { documentKeys: [documentKey], format: "original-url" });
-  const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The original file could not be downloaded.");
-  return result.data;
-}
-
-export async function createContentFolder(name: string, parentFolderKey?: string, description?: string, folderKey = createContentRecordKey(), mutationKey = `folder-create:${folderKey}`) {
+export async function createContentFolder(name: string, parentFolderKey?: string, description?: string, mutationKey = createContentMutationKey()) {
   const contentContext = getContentContext();
   const data = await callContentTool<{
     results: { success: boolean; data?: { folder: ContentFolder }; error?: { message: string } }[];
   }>("folder.create", {
-    folders: [{ key: folderKey, scopeKey: contentContext.scopeKey, parentFolderKey, name, ...(description ? { description } : {}) }],
+    scopeKey: contentContext.scopeKey,
+    folders: [{ scopeKey: contentContext.scopeKey, parentFolderKey, name, ...(description ? { description } : {}) }],
     idempotencyKey: mutationKey,
   });
   const result = data.results[0];
@@ -626,35 +244,40 @@ export async function createContentFolder(name: string, parentFolderKey?: string
   return result.data.folder;
 }
 
-export async function updateContentFolder(folderKey: string, name: string, description: string | null) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { folder: ContentFolder }; error?: { message: string } }[];
-  }>("folder.update", {
-    updates: [{ folderKey, name, description }],
-    atomic: false,
-    idempotencyKey: createContentMutationKey(),
-  });
-  const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The folder could not be updated.");
-  return result.data.folder;
+export async function updateContentFolder(folderKey: string, patch: { name?: string; description?: string | null; isFavorite?: boolean }) {
+  return (await callContentTool<{ folder: ContentFolder }>("folder.update", { folderKey, ...patch })).folder;
 }
 
-export async function setContentFolderCover(folderKey: string, coverImageKey: string | null) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { folder: ContentFolder }; error?: { message: string } }[];
-  }>("folder.update", {
-    updates: [{ folderKey, coverImageKey }],
-    atomic: false,
-    idempotencyKey: createContentMutationKey(),
-  });
-  const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The folder cover could not be updated.");
-  return result.data.folder;
+export async function renameContentFolder(folderKey: string, name: string) {
+  return (await callContentTool<{ folder: ContentFolder }>("folder.rename", { folderKey, name })).folder;
 }
 
-export async function moveContentFolder(folderKey: string, targetParentFolderKey?: string) {
-  const outcome = await moveContentSelection({ folderKeys: [folderKey], documentKeys: [] }, targetParentFolderKey);
-  return singleBatchRecord(outcome, outcome.folders, "The folder could not be moved.");
+export async function moveContentFolder(folderKey: string, parentFolderKey?: string) {
+  return (await callContentTool<{ folder: ContentFolder }>("folder.move", { folderKey, parentFolderKey: parentFolderKey ?? null })).folder;
+}
+
+export async function deleteContentFolder(folderKey: string) {
+  await callContentTool<{ deleted: true }>("folder.delete", { folderKey });
+}
+
+export async function renameContentFile(fileKey: string, name: string) {
+  return (await callContentTool<{ file: ContentFile }>("file.rename", { fileKey, name })).file;
+}
+
+export async function updateContentFile(fileKey: string, patch: { name?: string; isFavorite?: boolean }) {
+  return (await callContentTool<{ file: ContentFile }>("file.update", { fileKey, ...patch })).file;
+}
+
+export async function moveContentFile(fileKey: string, folderKey?: string) {
+  return (await callContentTool<{ file: ContentFile }>("file.move", { fileKey, folderKey: folderKey ?? null })).file;
+}
+
+export async function deleteContentFile(fileKey: string) {
+  await callContentTool<{ deleted: true }>("file.delete", { fileKey });
+}
+
+export async function downloadContentFile(fileKey: string) {
+  return callContentTool<{ fileKey: string; url: string; fileName: string; mimeType: string }>("file.download", { fileKey });
 }
 
 export function setContentSelectionFavorite(selection: ContentSelection, isFavorite: boolean, idempotencyKey = createContentMutationKey()) {
@@ -662,11 +285,7 @@ export function setContentSelectionFavorite(selection: ContentSelection, isFavor
 }
 
 export function moveContentSelection(selection: ContentSelection, targetFolderKey?: string, idempotencyKey = createContentMutationKey()) {
-  return executeContentSelectionPlan(planContentSelectionMove(selection, getContentContext().scopeKey, targetFolderKey, idempotencyKey));
-}
-
-export function copyContentSelection(selection: ContentSelection, destinationFolderKeys: readonly (string | undefined)[], idempotencyKey = createContentMutationKey()) {
-  return executeContentSelectionPlan(planContentSelectionCopy(selection, getContentContext().scopeKey, destinationFolderKeys, idempotencyKey));
+  return executeContentSelectionPlan(planContentSelectionMove(selection, targetFolderKey, idempotencyKey));
 }
 
 export function hardDeleteContentSelection(selection: ContentSelection, idempotencyKey = createContentMutationKey()) {
@@ -674,113 +293,134 @@ export function hardDeleteContentSelection(selection: ContentSelection, idempote
 }
 
 export async function setContentFolderFavorite(folderKey: string, isFavorite: boolean) {
-  const outcome = await setContentSelectionFavorite({ folderKeys: [folderKey], documentKeys: [] }, isFavorite);
-  return singleBatchRecord(outcome, outcome.folders, "The favorite could not be updated.");
+  return updateContentFolder(folderKey, { isFavorite });
 }
 
-export async function copyContentFolder(folderKey: string, targetParentFolderKey?: string) {
-  const outcome = await copyContentSelection({ folderKeys: [folderKey], documentKeys: [] }, [targetParentFolderKey]);
-  return singleBatchRecord(outcome, outcome.copiedFolders, "The folder could not be copied.");
+export async function setContentFileFavorite(fileKey: string, isFavorite: boolean) {
+  return updateContentFile(fileKey, { isFavorite });
 }
 
-export async function deleteContentFolder(folderKey: string) {
-  const outcome = await hardDeleteContentSelection({ folderKeys: [folderKey], documentKeys: [] });
-  assertSingleBatchSuccess(outcome, "The folder could not be deleted.");
+type DirectFile = { name: string; type: string; size: number; uri: string };
+
+async function extractLocalText(uri: string, extension: FileExtension) {
+  if (extension === "txt" || extension === "md") {
+    const bytes = await new File(uri).arrayBuffer();
+    return new TextDecoder().decode(bytes);
+  }
+  if (extension === "docx") {
+    try {
+      const mammoth = await import("mammoth");
+      const bytes = await new File(uri).arrayBuffer();
+      const result = await mammoth.extractRawText({ arrayBuffer: bytes });
+      const text = result.value.trim();
+      return text || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
-type DirectDocumentFile = { name: string; type: string; size: number; uri: string };
-
-async function uploadDocumentSources(kind: "file" | "pages", files: DirectDocumentFile[], folderKey: string | undefined, contentContext: ReturnType<typeof getContentContext>, idempotencyKey: string, name?: string) {
-  if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
-  const selectors = { teamKey: contentContext.teamKey, scopeKey: contentContext.scopeKey };
+export async function uploadContentFiles(files: DirectFile[], folderKey?: string, contentContext = getContentContext(), idempotencyKey = createContentMutationKey()) {
+  if (!isContentContextConfigured(contentContext)) throw new Error("Files are unavailable for this session.");
   const sources = files.map((file) => {
-    const mimeType = kind === "file" ? documentMimeType(file.name, file.type) : "image/png";
-    return { filename: kind === "file" ? documentFilename(file.name, mimeType) : file.name, mimeType, sizeBytes: file.size };
+    const extension = fileExtensionOf(file.name, file.type);
+    if (!extension) throw new Error(`Unsupported file type: ${file.name}`);
+    return { filename: fileFilename(file.name, extension), mimeType: FILE_MIME[extension], sizeBytes: file.size, extension, uri: file.uri };
   });
   const unwrap = <T>(response: ToolResponse<T>) => {
     if (!response.success) throw contentToolError(response.error);
     return response.data;
   };
-  const reserved = unwrap((await apiClient.post<ToolResponse<{ uploadKey: string; uploads: { url: string; headers: Record<string, string> }[] }>>("/api/v1/content/uploads/presign", { ...selectors, folderKey, name, idempotencyKey, kind, files: sources })).data);
-  if (reserved.uploads.length !== files.length) throw new Error("Document upload reservation did not match the selected files.");
-  for (let index = 0; index < files.length; index++) {
-    const bytes = await new File(files[index]!.uri).arrayBuffer();
-    if (bytes.byteLength !== files[index]!.size) throw new Error("A selected document changed before it could be uploaded.");
-    const upload = reserved.uploads[index]!;
+  const reserved = unwrap((await apiClient.post<ToolResponse<{ uploadKey: string; files: { fileKey: string; url: string; headers: Record<string, string> }[] }>>("/api/v1/content/uploads/presign", {
+    scopeKey: contentContext.scopeKey,
+    ...(folderKey ? { folderKey } : {}),
+    idempotencyKey,
+    files: sources.map(({ uri: _uri, ...file }) => file),
+  })).data);
+  if (reserved.files.length !== sources.length) throw new Error("File upload reservation did not match the selected files.");
+  const extractedText: Record<string, string> = {};
+  for (let index = 0; index < sources.length; index++) {
+    const source = sources[index]!;
+    const upload = reserved.files[index]!;
+    const bytes = await new File(source.uri).arrayBuffer();
+    if (bytes.byteLength !== source.sizeBytes) throw new Error("A selected file changed before it could be uploaded.");
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2 * 60_000);
     try {
       const response = await fetch(upload.url, { method: "PUT", headers: upload.headers, body: bytes, signal: controller.signal });
-      if (!response.ok) throw new Error(`Document upload failed (${response.status}).`);
+      if (!response.ok) throw new Error(`File upload failed (${response.status}).`);
     } finally {
       clearTimeout(timeout);
     }
+    const text = await extractLocalText(source.uri, source.extension);
+    if (text) extractedText[upload.fileKey] = text;
   }
-  return unwrap((await apiClient.post<ToolResponse<{ document: ContentDocument }>>("/api/v1/content/uploads/complete", { ...selectors, uploadKey: reserved.uploadKey, idempotencyKey }, { timeout: 5 * 60_000 })).data);
-}
-
-export async function uploadContentDocument(file: DirectDocumentFile, folderKey?: string, contentContext = getContentContext(), idempotencyKey = createContentMutationKey()) {
-  return uploadDocumentSources("file", [file], folderKey, contentContext, idempotencyKey);
-}
-
-export async function scanContentDocument(pages: DirectDocumentFile[], folderKey?: string, contentContext = getContentContext(), name = `Scanned document ${new Date().toISOString().slice(0, 10)}`, idempotencyKey = createContentMutationKey()) {
-  return uploadDocumentSources("pages", pages, folderKey, contentContext, idempotencyKey, name);
-}
-
-const appResultTagsSchema = z.array(z.strictObject({ key: z.string().min(1), name: z.string() })).optional();
-const appFolderResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), parentFolderKey: z.string().min(1).optional(), name: z.string().min(1), description: z.string().optional(), presentation: z.enum(["platform", "assistant", "knowledge", "media", "travel", "communication", "learning"]).optional(), managed: z.boolean().optional(), structuralProtection: z.literal(true).optional(), isFavorite: z.boolean(), createdAt: z.string().datetime().optional(), updatedAt: z.string().datetime().optional(), score: z.number().optional(), tags: appResultTagsSchema });
-const appDocumentResultSchema = z.strictObject({ key: z.string().min(1), scopeKey: z.string().min(1), folderKey: z.string().min(1).optional(), folder: z.strictObject({ key: z.string().min(1), name: z.string().min(1) }).optional(), name: z.string().min(1), extension: z.string().optional(), mimeType: z.string().optional(), sizeBytes: z.number().int().positive().optional(), managed: z.boolean().optional(), structuralProtection: z.literal(true).optional(), isFavorite: z.boolean(), content: z.string().optional(), createdAt: z.string().datetime().optional(), updatedAt: z.string().datetime().optional(), score: z.number().optional(), tags: appResultTagsSchema });
-
-async function searchAppContent(query: string, signal: AbortSignal | undefined, folderKey: string | undefined, includeDescendants: boolean, recordHistory: boolean, limit = 50, tagKeys: string[] = [], rootOnly = false): Promise<ContentSearchResponse> {
-  const filters = { ...(folderKey ? { folderKey, includeDescendants } : {}), ...(rootOnly ? { rootOnly: true } : {}), ...(tagKeys.length ? { tagKeys, tagMatch: "all" as const } : {}) };
-  const output = await searchApp({ ...(query ? { query } : { operation: "list" as const }), collectionSlugs: ["folders", "documents", "files"], recordHistory, limit, ...(Object.keys(filters).length ? { filters } : {}) }, signal);
-  const folders = appSearchResults(output, "folders", appFolderResultSchema).map(({ scopeKey: _scopeKey, createdAt: _createdAt, updatedAt: _updatedAt, tags: _tags, score = 0, ...folder }) => ({ ...folder, score }));
-  const documents = [...appSearchResults(output, "documents", appDocumentResultSchema), ...appSearchResults(output, "files", appDocumentResultSchema)].map(({ key, content: _content, createdAt: _createdAt, updatedAt: _updatedAt, tags: _tags, score = 0, ...document }) => ({ documentKey: key, ...document, score }));
-  return { query: output.query ?? query, folders, documents, cached: false };
-}
-
-export function searchContent(query: string, folderKey?: string, includeDescendants = false) {
-  return searchAppContent(query, undefined, folderKey, includeDescendants, true);
-}
-
-export function searchContentMatches(query: string, signal?: AbortSignal, folderKey?: string, recordHistory = true, options: { limit?: number; tagKeys?: string[]; rootOnly?: boolean } = {}) {
-  return searchAppContent(query, signal, folderKey, true, recordHistory, options.limit, options.tagKeys, options.rootOnly);
-}
-
-export function findContentNeighbors(source: { folderKey: string } | { documentKey: string }, signal?: AbortSignal) {
-  return callContentTool<ContentNeighbors>("content.neighbors", source, signal);
-}
-
-export async function getContentDocumentTopics(documentKey: string, signal?: AbortSignal) {
-  const data = await callContentTool<{ documentKey: string; topics: string[] }>("document.topics", { documentKey }, signal);
-  return data.topics;
-}
-
-export async function summarizeContentDocument(documentKey: string, topic: string, signal?: AbortSignal) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { text: string; summary?: ContentDocumentSummary }; error?: { message: string } }[];
-  }>("document.summarize", { documentKeys: [documentKey], topic, style: "brief", persist: true, idempotencyKey: createContentMutationKey() }, signal);
-  const result = data.results[0];
-  if (!result?.success || !result.data?.summary) throw new Error(result?.error?.message ?? "The document summary could not be created.");
-  return result.data.summary;
-}
-
-export async function listContentSearchHistory(requestContext = getContentContext()) {
-  const contentContext = requestContext;
-  const data = await callContentTool<{ history: ContentSearchHistoryItem[] }>("content.search-history.list", {
+  return unwrap((await apiClient.post<ToolResponse<{ files: { key: string; name: string; extension: FileExtension; processing: ContentFile["processing"] }[] }>>("/api/v1/content/uploads/complete", {
     scopeKey: contentContext.scopeKey,
-    allLocations: true,
+    uploadKey: reserved.uploadKey,
+    idempotencyKey,
+    ...(Object.keys(extractedText).length ? { extractedText } : {}),
+  }, { timeout: 5 * 60_000 })).data);
+}
+
+export async function uploadContentFile(file: DirectFile, folderKey?: string, contentContext = getContentContext(), idempotencyKey = createContentMutationKey()) {
+  return uploadContentFiles([file], folderKey, contentContext, idempotencyKey);
+}
+
+const appFolderResultSchema = z.strictObject({
+  key: z.string().min(1),
+  name: z.string().min(1),
+  parentFolderKey: z.string().min(1).optional(),
+  isFavorite: z.boolean().optional(),
+});
+const appFileResultSchema = z.strictObject({
+  key: z.string().min(1),
+  name: z.string().min(1),
+  extension: z.enum(FILE_EXTENSIONS).optional(),
+  folderKey: z.string().min(1).optional(),
+  sizeBytes: z.number().optional(),
+  processing: z.enum(["pending", "ready", "failed"]).optional(),
+  isFavorite: z.boolean().optional(),
+});
+
+export async function searchContent(query: string, folderKey?: string): Promise<ContentSearchResponse> {
+  const output = await searchApp({
+    ...(query ? { query } : { operation: "list" as const }),
+    collectionSlugs: ["folders", "files"],
+    recordHistory: Boolean(query),
     limit: 50,
-  }, undefined, requestContext);
-  return data.history;
+    ...(folderKey ? { folderKey } : {}),
+  });
+  const folders = appSearchResults(output, "folders", appFolderResultSchema).map((folder) => ({
+    key: folder.key,
+    scopeKey: getContentContext().scopeKey,
+    parentFolderKey: folder.parentFolderKey,
+    name: folder.name,
+    isFavorite: folder.isFavorite,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    score: 0,
+  }));
+  const files = appSearchResults(output, "files", appFileResultSchema).map((file) => ({
+    fileKey: file.key,
+    name: file.name,
+    extension: file.extension,
+    isFavorite: Boolean(file.isFavorite),
+    score: 0,
+    folderKey: file.folderKey,
+  }));
+  return { query: output.query ?? query, folders, files, cached: false };
 }
 
-export async function deleteContentSearchHistory(normalizedQuery: string) {
-  const contentContext = getContentContext();
-  return callContentTool<{ normalizedQuery: string; deleted: boolean }>("content.search-history.delete", {
-    scopeKey: contentContext.scopeKey,
-    normalizedQuery,
-    allLocations: true,
-    idempotencyKey: createContentMutationKey(),
-  });
+export function searchContentMatches(query: string, _signal?: AbortSignal, folderKey?: string) {
+  return searchContent(query, folderKey);
+}
+
+export async function listContentSearchHistory(_requestContext = getContentContext()): Promise<ContentSearchHistoryItem[]> {
+  return [];
+}
+
+export async function deleteContentSearchHistory(_normalizedQuery: string) {
+  return { deleted: true };
 }

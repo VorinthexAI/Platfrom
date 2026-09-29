@@ -69,7 +69,7 @@ export function ResourceTagsSheet({ context, targets, open, onApply, onClose }: 
     const request = ++requestRef.current;
     const timeout = setTimeout(() => loadAssignments(request), 0);
     return () => { clearTimeout(timeout); requestRef.current += 1; if (sessionRef.current === session) sessionRef.current += 1; };
-  }, [batchIdentity, context.teamKey, context.scopeKey, context.userKey, open, queryClient]);
+  }, [batchIdentity, context.scopeKey, context.userKey, open, queryClient]);
 
   useEffect(() => {
     if (!createOpen) return;

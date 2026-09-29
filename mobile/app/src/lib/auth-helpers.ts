@@ -126,7 +126,6 @@ function parseWorkspacePicker(value: unknown): WorkspacePickerState {
 export function hasCompleteAuthContext(context: AuthContext | null) {
   return Boolean(
     context?.user &&
-    stringValue(record(context.team), "key") &&
     stringValue(record(context.scope), "key"),
   );
 }

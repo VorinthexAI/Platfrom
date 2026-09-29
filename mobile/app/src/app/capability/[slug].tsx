@@ -1,31 +1,7 @@
-import { Redirect, useLocalSearchParams } from "expo-router";
+import { Redirect } from "expo-router";
 
-import { AscendWorkspace } from "@/components/capability/AscendWorkspace";
-import { GalleryWorkspace } from "@/components/capability/GalleryWorkspace";
-import { KnowledgeWorkspace } from "@/components/capability/KnowledgeWorkspace";
-import { EmailWorkspace } from "@/components/capability/EmailWorkspace";
-import { TeamWorkspace } from "@/components/capability/TeamWorkspace";
-import { TravelWorkspace } from "@/components/capability/TravelWorkspace";
-import { capabilitySlugSchema } from "@/data/registry";
-import { communicationTabSchema } from "@/lib/communication-client";
-import type { SupportComposeKind } from "@/components/SupportComposeSheets";
-import { useAuthStore } from "@/state/auth";
+import { HOME_HREF } from "@/lib/deep-links";
 
 export default function CapabilityRoute() {
-  const params = useLocalSearchParams<{ slug: string; action?: string; assetKey?: string; bookKey?: string; collectionKind?: string; compose?: SupportComposeKind; connectorKey?: string; countryCode?: string; documentKey?: string; documentTitle?: string; draftKey?: string; highlightKey?: string; memoryKey?: string; subjectKey?: string; imageKey?: string; inbox?: string; initialQuery?: string; placeKey?: string; tab?: string; thread?: string; toneKey?: string; email_connection_code?: string; email_connection_error?: string; returnTripKey?: string; returnTripName?: string; returnSignalConnectorKey?: string; returnSignalThreadKey?: string; returnSignalMessageKey?: string; signalReturn?: string; signalThreadKey?: string; signalMessageKey?: string; openSignalAttachments?: string; tripKey?: string; openTripAssets?: string }>();
-  const scopeKey = useAuthStore((state) => String(state.scope?.key ?? ""));
-  const rootTeamMember = useAuthStore((state) => state.rootTeamMember);
-  const parsed = capabilitySlugSchema.safeParse(params.slug);
-  if (!parsed.success) {
-    return <Redirect href="/capability/archive" />;
-  }
-  if (parsed.data === "hq") {
-    if (!rootTeamMember) return <Redirect href="/capability/archive" />;
-    return <TeamWorkspace />;
-  }
-  if (parsed.data === "archive") return <KnowledgeWorkspace initialAction={(["create", "create-folder", "create-document", "upload-files", "scan"] as const).find((action) => action === params.action)} initialCollectionKind={params.collectionKind} initialDocumentKey={params.documentKey} initialDocumentTitle={params.documentTitle} initialFolderKey={params.assetKey} initialSearchQuery={params.initialQuery} key={`${scopeKey}:${params.action ?? ""}:${params.assetKey ?? "root"}:${params.documentKey ?? ""}:${params.collectionKind ?? ""}:${params.initialQuery ?? ""}`} returnSignalConnectorKey={params.returnSignalConnectorKey} returnSignalMessageKey={params.returnSignalMessageKey} returnSignalThreadKey={params.returnSignalThreadKey} returnTripKey={params.returnTripKey} returnTripName={params.returnTripName} />;
-  if (parsed.data === "gallery") return <GalleryWorkspace initialAction={params.action === "create" || params.action === "create-collection" ? params.action : undefined} initialCollectionKey={params.assetKey} initialHighlightKey={params.highlightKey} initialMemoryKey={params.memoryKey} initialSubjectKey={params.subjectKey} initialImageKey={params.imageKey} initialSearchQuery={params.initialQuery} key={`${scopeKey}:${params.action ?? ""}:${params.assetKey ?? "root"}:${params.highlightKey ?? ""}:${params.memoryKey ?? ""}:${params.subjectKey ?? ""}:${params.imageKey ?? ""}:${params.initialQuery ?? ""}`} returnSignalConnectorKey={params.returnSignalConnectorKey} returnSignalMessageKey={params.returnSignalMessageKey} returnSignalThreadKey={params.returnSignalThreadKey} returnTripKey={params.returnTripKey} returnTripName={params.returnTripName} />;
-  if (parsed.data === "compass") return <TravelWorkspace initialAction={params.action === "create" || params.action === "find-place" || params.action === "create-trip" ? params.action : undefined} initialCollectionKind={params.collectionKind} initialCountryCode={params.countryCode} initialPlaceKey={params.placeKey} initialSearchQuery={params.initialQuery} initialTripKey={params.tripKey} key={`${scopeKey}:${params.action ?? ""}:${params.placeKey ?? ""}:${params.tripKey ?? ""}:${params.countryCode ?? ""}:${params.collectionKind ?? ""}:${params.initialQuery ?? ""}:${params.openTripAssets ?? ""}`} openTripAssets={params.openTripAssets === "1"} />;
-  if (parsed.data === "signal") return <EmailWorkspace initialCommunicationThreadKey={params.thread || undefined} initialCompose={params.compose === "issue" || params.compose === "feedback" ? params.compose : undefined} initialConnectorKey={params.connectorKey || undefined} initialDraftKey={params.draftKey || undefined} initialInbox={params.inbox || undefined} initialMessageKey={params.signalMessageKey || undefined} initialTab={communicationTabSchema.catch("unread").parse(params.tab || "unread")} initialThreadKey={params.signalThreadKey || undefined} initialToneKey={params.toneKey || undefined} navigatedFromRoot={params.signalReturn === "root"} openAttachments={params.openSignalAttachments === "1"} initialCollectionKind={params.collectionKind || undefined} initialSearchQuery={params.initialQuery || undefined} key={`${scopeKey}:${params.connectorKey || "root"}:${params.signalThreadKey || params.thread || ""}:${params.signalMessageKey || ""}:${params.draftKey || ""}:${params.toneKey || ""}:${params.collectionKind || ""}:${params.initialQuery || ""}:${params.compose || ""}:${params.inbox || ""}:${params.tab || ""}`} />;
-  return <AscendWorkspace initialAction={params.action === "create" || params.action === "create-custom" ? params.action : undefined} initialBookKey={params.bookKey} initialSearchQuery={params.initialQuery} key={`${scopeKey}:${params.action ?? ""}:${params.bookKey ?? "root"}:${params.initialQuery ?? ""}`} />;
+  return <Redirect href={HOME_HREF} />;
 }

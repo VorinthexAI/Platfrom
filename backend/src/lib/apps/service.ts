@@ -2,7 +2,6 @@ import { z } from 'zod';
 import { signedAppLogoUrl } from './logo-url';
 import { appDetailedDescriptionSchema, appSlugSchema, CANONICAL_APP_BY_ALIAS, CANONICAL_APPS, parseAppAliasKey } from './registry';
 import { createProductScopeRepository, requireProductScopes } from './repository';
-import { readManagedScopeDirectoryCatalog } from '@/lib/managed-scope-directory';
 
 export const enrichedAppSchema = z.object({
   key: z.string().cuid(),
@@ -27,27 +26,20 @@ export interface AppsService {
 export function createAppsService(
   repository: ReturnType<typeof createProductScopeRepository> = createProductScopeRepository(),
   signLogoUrl: (storageKey: string) => Promise<string> = signedAppLogoUrl,
-  readCatalog: typeof readManagedScopeDirectoryCatalog = readManagedScopeDirectoryCatalog,
 ): AppsService {
   const scopes = () => requireProductScopes(repository);
   const list = async () => {
-    const bySlug = await scopes();
-    const motherScopeKey = bySlug.get('vorinthex-ai')!.key;
-    const directoryByAlias = new Map((await readCatalog(motherScopeKey)).map((entry) => [entry.key, entry]));
-    return CANONICAL_APPS.map((presentation) => {
-      const directory = directoryByAlias.get(presentation.key);
-      if (!directory) throw new Error(`Managed scope directory is missing product ${presentation.slug}.`);
-      return enrichedAppSchema.parse({
-        key: presentation.key,
-        slug: presentation.slug,
-        name: presentation.name,
-        description: directory.description,
-        detailedDescription: directory.detailedDescription,
-        version: presentation.version,
-        createdAt: presentation.createdAt,
-        updatedAt: presentation.updatedAt,
-      });
-    }).sort((left, right) => left.slug.localeCompare(right.slug) || left.key.localeCompare(right.key));
+    await scopes();
+    return CANONICAL_APPS.map((presentation) => enrichedAppSchema.parse({
+      key: presentation.key,
+      slug: presentation.slug,
+      name: presentation.name,
+      description: presentation.description,
+      detailedDescription: presentation.detailedDescription,
+      version: presentation.version,
+      createdAt: presentation.createdAt,
+      updatedAt: presentation.updatedAt,
+    })).sort((left, right) => left.slug.localeCompare(right.slug) || left.key.localeCompare(right.key));
   };
   return {
     list,

@@ -17,7 +17,6 @@ export const resourceTagAssignmentsQueryRoot = ["resource-tag-assignments"] as c
 export const resourceTagAssignmentsQueryKey = (context: ContentContext, targets: readonly ResourceTagTarget[]) => [
   ...resourceTagAssignmentsQueryRoot,
   context.userKey,
-  context.teamKey,
   context.scopeKey,
   normalizeResourceTagTargets(targets).map(resourceTagTargetIdentity),
 ] as const;

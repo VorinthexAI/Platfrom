@@ -1,7 +1,6 @@
 import { randomUUID } from "expo-crypto";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
-import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { ScrollView, Share as NativeShare, StyleSheet, Text, useWindowDimensions, View } from "react-native";
@@ -9,7 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Avatar } from "@vorinthex/shared/ui/avatar";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
-import { BellIcon, CheckIcon, DeleteAccountIcon, FaqIcon, FeedbackIcon, FolderIcon, HelpIcon, IssueIcon, PlusIcon, PrivacyIcon, ReferralIcon, SettingsIcon, SignOutIcon, SparksIcon, SubscriptionCancelIcon, TermsIcon, WalletIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { CheckIcon, DeleteAccountIcon, FaqIcon, FeedbackIcon, FolderIcon, HelpIcon, IssueIcon, PlusIcon, PrivacyIcon, ReferralIcon, SettingsIcon, SignOutIcon, SparksIcon, SubscriptionCancelIcon, TermsIcon, WalletIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
@@ -19,15 +18,14 @@ import { PRIVACY_COPY, TERMS_COPY, type VaultCopy } from "@vorinthex/shared/lib/
 
 import { claimProfileBadge, generateProfileBadge, updateProfileName, uploadProfileAvatar } from "@/lib/profile-client";
 import { profileInitial } from "@/lib/auth-helpers";
-import { createScope, deleteScope, listScopes, prioritizeScope, scheduleScopeOperation, scopeListQueryKey, scopeOperationIsPending, selectScope, updateScopeCover, type ScopeSummary } from "@/lib/scope-client";
+import { createScope, deleteScope, listScopes, scheduleScopeOperation, scopeListQueryKey, scopeOperationIsPending, selectScope, type ScopeSummary } from "@/lib/scope-client";
 import { useAuthStore } from "@/state/auth";
 import { useAppsStore } from "@/state/apps";
 import { extractDomainErrorMessage, isSparkFundingError } from "@/lib/domain-error-observer";
 import { fonts, palette, radii, spacing } from "@/theme/tokens";
 import { AccountScreenShell } from "@/components/AccountScreenShell";
 import { WalletSheet, type WalletHelp } from "@/components/WalletSheet";
-import { normalizeCapturedPng } from "@/lib/captured-image";
-import { deleteGalleryImages, fetchGalleryUploadStatus, uploadGalleryImages, type GalleryContext } from "@/lib/gallery-client";
+
 import { currentSubscriptionQueryKey, setSubscriptionCancellation, wholeSparks } from "@/lib/billing-client";
 import { useBillingSummary, useCurrentSubscription } from "@/hooks/use-billing-summary";
 import { fetchReferralSummary, normalizeReferralCode, redeemReferralCode, referralCodeSchema, referralRedemptionErrorMessage, referralSummaryQueryKey, type ReferralRedeemResult } from "@/lib/referral-client";
@@ -61,8 +59,7 @@ const FAQ = [
   ["What happens to my Sparks and stored work if I cancel or run out of Sparks?", "Canceling stops renewal after the current period, and prepaid Sparks remain available. Unfunded storage creates no debt or backcharges, but stored data is permanently deleted after 90 consecutive unfunded days. Adding enough Sparks before deletion begins restores prospective charging."],
 ] as const;
 
-const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-const canManageScope = (scope?: ScopeSummary) => scope?.role === "owner" || scope?.role === "admin";
+const canManageScope = (scope?: ScopeSummary) => Boolean(scope && scope.slug !== "main");
 
 function displayName(name?: string, email?: string) {
   return name?.trim() || email?.split("@")[0] || "Profile";
@@ -70,9 +67,8 @@ function displayName(name?: string, email?: string) {
 
 function ScopeCard({ onLongPress, onPress, scope, size }: { onLongPress?: () => void; onPress: () => void; scope?: ScopeSummary; size: number }) {
   return <View style={[styles.scopeCard, scope?.isCurrent && styles.scopeCardSelected, { height: size, width: size }]}>
-    {scope?.coverUrl ? <Image contentFit="cover" source={scope.coverUrl} style={styles.scopeCover} /> : null}
-    <Button accessibilityHint={onLongPress ? "Long press for scope actions" : undefined} accessibilityLabel={scope ? `${scope.isCurrent ? "Current scope" : "Select scope"}: ${scope.name}` : "Create scope"} contentMode="raw" delayLongPress={350} onLongPress={onLongPress} onPress={onPress} shape="rounded" size="md" style={[styles.scopeCardButton, scope?.coverUrl && styles.scopeCardButtonCovered]} variant="ghost">
-      {scope ? <>{scope.coverUrl ? null : <FolderIcon size="lg" />}<Text ellipsizeMode="tail" numberOfLines={1} style={[styles.scopeCardLabel, scope.coverUrl && styles.scopeCardLabelCovered]}>{scope.name}</Text></> : <PlusIcon size="lg" />}
+    <Button accessibilityHint={onLongPress ? "Long press for scope actions" : undefined} accessibilityLabel={scope ? `${scope.isCurrent ? "Current scope" : "Select scope"}: ${scope.name}` : "Create scope"} contentMode="raw" delayLongPress={350} onLongPress={onLongPress} onPress={onPress} shape="rounded" size="md" style={styles.scopeCardButton} variant="ghost">
+      {scope ? <><FolderIcon size="lg" /><Text ellipsizeMode="tail" numberOfLines={1} style={styles.scopeCardLabel}>{scope.name}</Text></> : <PlusIcon size="lg" />}
     </Button>
     {scope?.isCurrent ? <View pointerEvents="none" style={styles.scopeSelectedBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}
   </View>;
@@ -106,7 +102,6 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const { showToast: showAccountResultToast } = useRawToast();
   const deletingAccount = useRef(false);
   const user = useAuthStore((state) => state.user);
-  const teamKey = useAuthStore((state) => String(state.team?.key ?? ""));
   const scopeKey = useAuthStore((state) => String(state.scope?.key ?? ""));
   const authReferralSummary = useAuthStore((state) => state.referralSummary);
   const optimisticProfile = useAuthStore((state) => state.optimisticProfile);
@@ -139,13 +134,13 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const scopeListMutation = useRef(0);
   const scopeManagementPending = useRef(false);
   const name = displayName(user?.name, user?.email);
-  const scopeQueryKey = scopeListQueryKey(String(user?.key ?? ""), teamKey);
+  const scopeQueryKey = scopeListQueryKey(String(user?.key ?? ""));
   const scopeCardSize = Math.floor((width - spacing.md * 2 - 20) / 3);
   const settingsCardSize = scopeCardSize;
   const billingSummaryQuery = useBillingSummary(user?.key);
   const subscriptionQuery = useCurrentSubscription(page === "settings" ? user?.key : undefined);
   const referralQuery = useQuery({ queryKey: referralSummaryQueryKey(String(user?.key ?? "")), queryFn: fetchReferralSummary, enabled: Boolean(user?.key && sheet === "referral"), initialData: authReferralSummary?.code.ownerUserKey === user?.key ? authReferralSummary : undefined });
-  const scopesQuery = useQuery({ queryKey: scopeQueryKey, queryFn: ({ signal }) => listScopes(teamKey, signal), enabled: Boolean(user?.key && teamKey), refetchOnMount: "always" });
+  const scopesQuery = useQuery({ queryKey: scopeQueryKey, queryFn: ({ signal }) => listScopes(signal), enabled: Boolean(user?.key), refetchOnMount: "always" });
   const scopes = scopesQuery.data ?? [];
   const sortedScopes = [...scopes].sort((left, right) => left.position - right.position);
   const selectedFaq = faqQuestionIndex === undefined ? undefined : FAQ[faqQuestionIndex];
@@ -175,8 +170,8 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
     cancelSubscription.mutate();
   };
   useEffect(() => {
-    if (sheet === "scope-create" && !scopeOperationIsPending()) void queryClient.invalidateQueries({ queryKey: scopeListQueryKey(String(user?.key ?? ""), teamKey) });
-  }, [teamKey, queryClient, sheet, user?.key]);
+    if (sheet === "scope-create" && !scopeOperationIsPending()) void queryClient.invalidateQueries({ queryKey: scopeListQueryKey(String(user?.key ?? "")) });
+  }, [queryClient, sheet, user?.key]);
   const initialReferralMode = initialState?.referralMode;
   const initialSheet = initialState?.sheet;
   useEffect(() => {
@@ -216,14 +211,14 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   };
 
   const generateBadge = async () => {
-    if (!teamKey || !scopeKey || !badgeCost || generatingBadge) return;
+    if (!scopeKey || !badgeCost || generatingBadge) return;
     setSheet(undefined);
     setGeneratingBadge(true);
     try {
-      const candidate = await generateProfileBadge(teamKey, scopeKey, randomUUID());
+      const candidate = await generateProfileBadge(scopeKey, scopeKey, randomUUID());
       const update = optimisticProfile({ avatarUrl: candidate.avatarUrl });
       try {
-        const profile = await claimProfileBadge(teamKey, scopeKey, candidate.candidateKey);
+        const profile = await claimProfileBadge(scopeKey, scopeKey, candidate.candidateKey);
         update.reconcile(profile.avatarUrl ? profile : { avatarUrl: candidate.avatarUrl });
       } catch (error) {
         update.rollback();
@@ -305,7 +300,7 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
     void queryClient.cancelQueries({ queryKey: scopeQueryKey }, { revert: false });
     queryClient.setQueryData(scopeQueryKey, optimisticList);
     resetScopeQueries();
-    const operation = scheduleScopeOperation(() => selectScope(teamKey, scope.key));
+    const operation = scheduleScopeOperation(() => selectScope(scope.key));
     void operation.promise.then(async (selected) => {
       if (!operation.isCurrent()) return;
       await queryClient.cancelQueries({ queryKey: scopeQueryKey });
@@ -327,21 +322,21 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
 
   const submitScope = () => {
     const name = scopeName.trim();
-    if (!name || !teamKey || scopeOperationIsPending()) return;
+    if (!name || scopeOperationIsPending()) return;
     const description = scopeDescription.trim();
     const requestKey = randomUUID();
     const previous = queryClient.getQueryData<ScopeSummary[]>(scopeQueryKey) ?? scopes;
     const optimisticKey = `optimistic:${requestKey}`;
-    const optimisticCreated: ScopeSummary = { key: optimisticKey, slug: "pending", name, summary: description || `${name} workspace`, description: description || null, coverImageKey: null, coverUrl: null, position: 1, level: 1, role: "owner", isCurrent: true };
+    const optimisticCreated: ScopeSummary = { key: optimisticKey, slug: "pending", name, summary: description || `${name} workspace`, description: description || null, coverFileKey: null, position: 1, isCurrent: true };
     void queryClient.cancelQueries({ queryKey: scopeQueryKey }, { revert: false });
     queryClient.setQueryData(scopeQueryKey, [optimisticCreated, ...previous.map((scope) => ({ ...scope, isCurrent: false }))]);
     const scopeUpdate = optimisticScope(optimisticCreated);
     setSheet(undefined);
     const operation = scheduleScopeOperation(async () => {
-      const created = await createScope(teamKey, { name, ...(description ? { description } : {}) }, requestKey);
+      const created = await createScope({ name, ...(description ? { description } : {}) }, requestKey);
       if (!operation.isCurrent()) return { created };
       try {
-        const selected = await selectScope(teamKey, created.key);
+        const selected = await selectScope(created.key);
         return { created, selected };
       } catch {
         return { created, selectionFailed: true as const };
@@ -391,70 +386,6 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
     chooseScope(scope);
   };
 
-  const prioritizeSelectedScope = () => {
-    if (!selectedScope || !canManageScope(selectedScope) || scopeManagementPending.current) return;
-    scopeManagementPending.current = true;
-    const target = selectedScope;
-    const previous = queryClient.getQueryData<ScopeSummary[]>(scopeQueryKey) ?? scopes;
-    const prioritized = [target, ...previous.filter(({ key }) => key !== target.key)].map((scope, index) => ({ ...scope, position: index + 1 }));
-    const mutation = ++scopeListMutation.current;
-    setSheet(undefined);
-    queryClient.setQueryData(scopeQueryKey, prioritized);
-    void prioritizeScope(teamKey, target.key).then((updated) => {
-      if (mutation !== scopeListMutation.current) return;
-      queryClient.setQueryData<ScopeSummary[]>(scopeQueryKey, (current = prioritized) => current.map((scope) => scope.key === updated.key ? { ...scope, ...updated, position: 1 } : scope));
-    }).catch((error) => {
-      if (mutation !== scopeListMutation.current) return;
-      queryClient.setQueryData(scopeQueryKey, previous);
-      showToast({ title: extractDomainErrorMessage(error) ?? "Scope could not be prioritized.", duration: 2_500 });
-    }).finally(() => { scopeManagementPending.current = false; });
-  };
-
-  const changeSelectedScopeCover = async () => {
-    if (!selectedScope || !canManageScope(selectedScope) || scopeManagementPending.current) return;
-    scopeManagementPending.current = true;
-    const target = selectedScope;
-    try {
-      setSheet(undefined);
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, aspect: [1, 1], quality: 1 });
-      if (result.canceled) return;
-      const asset = result.assets[0];
-      if (!asset?.uri || !asset.width || !asset.height) return;
-      const previous = queryClient.getQueryData<ScopeSummary[]>(scopeQueryKey) ?? scopes;
-      const mutation = ++scopeListMutation.current;
-      queryClient.setQueryData<ScopeSummary[]>(scopeQueryKey, (current = previous) => current.map((scope) => scope.key === target.key ? { ...scope, coverUrl: asset.uri } : scope));
-      const context: GalleryContext = { teamKey, scopeKey: target.key };
-      let uploadedImageKey: string | undefined;
-      let updateStarted = false;
-      try {
-        const normalized = await normalizeCapturedPng(asset, { maxSide: 2400, compress: 0.88 });
-        const uploadKey = randomUUID();
-        const upload = await uploadGalleryImages([{ clientKey: uploadKey, filename: `scope-cover-${uploadKey}.png`, uri: normalized.uri, sizeBytes: normalized.sizeBytes, processingMode: "cover" }], undefined, context);
-        const job = upload.jobs[0];
-        if (!job) throw new Error("The scope cover upload could not be started.");
-        uploadedImageKey = job.imageKey;
-        let status = job.status;
-        for (let attempt = 0; status !== "completed" && status !== "failed" && attempt < 40; attempt += 1) {
-          await wait(3_000);
-          status = (await fetchGalleryUploadStatus([job.key], 60_000, context)).jobs[0]?.status ?? status;
-        }
-        if (status !== "completed") throw new Error("The scope cover could not be processed.");
-        updateStarted = true;
-        const updated = await updateScopeCover(teamKey, target.key, job.imageKey);
-        if (mutation !== scopeListMutation.current) return;
-        queryClient.setQueryData<ScopeSummary[]>(scopeQueryKey, (current = previous) => current.map((scope) => scope.key === target.key ? updated : scope));
-        setSelectedScope(updated);
-      } catch (error) {
-        if (uploadedImageKey && !updateStarted) void deleteGalleryImages([uploadedImageKey], context).catch(() => undefined);
-        if (mutation !== scopeListMutation.current) return;
-        queryClient.setQueryData(scopeQueryKey, previous);
-        showToast({ title: extractDomainErrorMessage(error) ?? "Scope cover could not be changed.", duration: 2_500 });
-      }
-    } finally {
-      scopeManagementPending.current = false;
-    }
-  };
-
   const deleteSelectedScope = () => {
     if (!selectedScope || !canManageScope(selectedScope) || deletingScope || scopeManagementPending.current) return;
     const target = selectedScope;
@@ -472,8 +403,8 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
     setSheet(undefined);
     queryClient.setQueryData(scopeQueryKey, optimisticList);
     void (async () => {
-      const selected = target.isCurrent ? await selectScope(teamKey, fallback.key) : undefined;
-      await deleteScope(teamKey, target.key);
+      const selected = target.isCurrent ? await selectScope(fallback.key) : undefined;
+      await deleteScope(target.key);
       return selected;
     })().then((selected) => {
       if (mutation !== scopeListMutation.current) return;
@@ -495,7 +426,6 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   };
 
   const headerActions = page === "profile" ? <>
-    <Button accessibilityLabel="Open notifications in Signal" contentMode="raw" iconOnly onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "unread", inbox: "internal" } })} size="xs" variant="icon"><BellIcon size="sm" /></Button>
     <Button accessibilityLabel="Open settings" contentMode="raw" iconOnly onPress={() => router.push("/settings")} size="xs" variant="icon"><SettingsIcon size="sm" /></Button>
   </> : undefined;
 
@@ -551,8 +481,8 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
         </View>
       </View> : <View style={styles.settingsContent}>
         <View style={styles.settingsGrid}>
-          <SettingsActionCard icon={<IssueIcon size="lg" />} label="Report issue" onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "unread", inbox: "internal", compose: "issue" } })} size={settingsCardSize} />
-          <SettingsActionCard icon={<FeedbackIcon size="lg" />} label="Feedback" onPress={() => router.push({ pathname: "/capability/[slug]", params: { slug: "signal", tab: "unread", inbox: "internal", compose: "feedback" } })} size={settingsCardSize} />
+          <SettingsActionCard icon={<IssueIcon size="lg" />} label="Report issue" onPress={() => setSheet("faq")} size={settingsCardSize} />
+          <SettingsActionCard icon={<FeedbackIcon size="lg" />} label="Feedback" onPress={() => setSheet("faq")} size={settingsCardSize} />
           <SettingsActionCard icon={<FaqIcon size="lg" />} label="FAQ" onPress={() => { setFaqQuestionIndex(undefined); setSheet("faq"); }} size={settingsCardSize} />
           <SettingsActionCard icon={<TermsIcon size="lg" />} label="Terms" onPress={() => setSheet("terms")} size={settingsCardSize} />
           <SettingsActionCard icon={<PrivacyIcon size="lg" />} label="Privacy" onPress={() => setSheet("privacy")} size={settingsCardSize} />
@@ -602,8 +532,6 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
 
     <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "scope-actions" && canManageScope(selectedScope)} title="Scope actions">
       <BottomSheetMenu>
-        <BottomSheetItem onPress={prioritizeSelectedScope} style={styles.scopeActionItem}>Prioritize</BottomSheetItem>
-        <BottomSheetItem onPress={() => void changeSelectedScopeCover()} style={styles.scopeActionItem}>Change cover</BottomSheetItem>
         {canDeleteSelectedScope ? <BottomSheetItem onPress={() => setSheet("scope-delete")} style={styles.scopeActionItem}>Delete</BottomSheetItem> : null}
       </BottomSheetMenu>
     </BottomSheet>

@@ -5,47 +5,23 @@ import { conversationRetrievalSchema } from "@/lib/conversation-client";
 import { publishUserSearchHistoryAppend } from "@/lib/user-search-history-events";
 import { useAuthStore } from "@/state/auth";
 
-export const appSearchCollectionSlugSchema = z.enum(["folders", "documents", "files", "collections", "images", "inboxes", "email-tones", "email-messages", "email-drafts", "places", "trips", "countries", "books", "tags", "tag-assignments", "tickets", "notifications"]);
-export type AppSearchCollectionSlug = z.infer<typeof appSearchCollectionSlugSchema>;
+export const appSearchCollectionSlugSchema = z.string().min(1);
+export type AppSearchCollectionSlug = "folders" | "files" | string;
 
 export const appSearchInputSchema = z.strictObject({
-  operation: z.enum(["search", "list"]).optional(),
+  operation: z.enum(["search", "list", "count"]).optional(),
   query: z.string().trim().min(1).max(500).optional(),
-  collectionSlugs: z.array(appSearchCollectionSlugSchema).min(1).max(appSearchCollectionSlugSchema.options.length).refine((slugs) => new Set(slugs).size === slugs.length, "Collection slugs must be distinct."),
+  collectionSlugs: z.array(z.string().min(1)).min(1),
   recordHistory: z.boolean().default(true),
   limit: z.number().int().min(1).max(50).default(10),
-  filters: z.strictObject({
-    folderKey: z.string().min(1).optional(),
-    rootOnly: z.boolean().optional(),
-    includeDescendants: z.boolean().optional(),
-    collectionKey: z.string().min(1).optional(),
-    connectorKey: z.string().min(1).optional(),
-    readState: z.enum(["read", "unread"]).optional(),
-    emailFacets: z.array(z.enum(["urgent", "important", "purchases", "filtered", "favorite"])).min(1).max(5).optional(),
-    status: z.enum(["active", "error", "revoked", "generated", "edited", "sending", "sent", "discarded", "wishlist", "visited", "planned", "completed", "queued", "researching", "planning", "writing", "narrating", "finalizing", "failed", "ready", "cancelled"]).optional(),
-    isFavorite: z.boolean().optional(),
-    createdFrom: z.string().datetime({ offset: true }).transform((value) => new Date(value).toISOString()).optional(),
-    createdTo: z.string().datetime({ offset: true }).transform((value) => new Date(value).toISOString()).optional(),
-    tagNames: z.array(z.string().trim().min(1).max(120)).min(1).max(20).optional(),
-    tagKeys: z.array(z.string().min(1)).min(1).max(20).refine((keys) => new Set(keys).size === keys.length, "Tag keys must be distinct.").optional(),
-    tagMatch: z.enum(["any", "all"]).optional(),
-    targetTypes: z.array(z.enum(["folder", "document", "image-collection", "image", "image-highlight", "image-memory", "place", "trip", "email-inbox", "email-tone", "email-thread", "email-message", "email-draft", "book"])).min(1).max(14).optional(),
-  }).optional(),
-}).superRefine((input, context) => {
-  const operation = input.operation ?? (input.query ? "search" : "list");
-  if (operation === "search" && !input.query) context.addIssue({ code: "custom", path: ["query"], message: "Search requires a query." });
-  if (operation === "list" && input.query) context.addIssue({ code: "custom", path: ["query"], message: "List does not accept a query." });
-  if (input.filters?.tagMatch && !input.filters.tagKeys && !input.filters.tagNames) context.addIssue({ code: "custom", path: ["filters", "tagMatch"], message: "tagMatch requires tagKeys or tagNames." });
-  if (input.filters?.rootOnly && (input.filters.folderKey || input.filters.includeDescendants !== undefined || input.collectionSlugs.some((slug) => !["folders", "documents", "files"].includes(slug)))) context.addIssue({ code: "custom", path: ["filters", "rootOnly"], message: "rootOnly applies only to root folders, documents, and files." });
-  if ((input.filters?.createdFrom || input.filters?.createdTo) && input.collectionSlugs.includes("countries")) context.addIssue({ code: "custom", path: ["filters"], message: "Countries do not have a creation date." });
-  if (input.filters?.createdFrom && input.filters.createdTo && input.filters.createdFrom > input.filters.createdTo) context.addIssue({ code: "custom", path: ["filters", "createdTo"], message: "createdTo must not precede createdFrom." });
+  folderKey: z.string().min(1).optional(),
+  filters: z.record(z.string(), z.unknown()).optional(),
 });
 export type AppSearchInput = z.input<typeof appSearchInputSchema>;
 
 export const appSearchOutputSchema = z.strictObject({
-  operation: z.literal("list").optional(),
   query: z.string().optional(),
-  groups: z.array(z.strictObject({ collectionSlug: appSearchCollectionSlugSchema, results: z.array(z.unknown()) })),
+  groups: z.array(z.strictObject({ collectionSlug: z.string().min(1), results: z.array(z.unknown()), count: z.number().optional() })),
   retrieval: conversationRetrievalSchema.nullable().optional(),
 });
 export type AppSearchOutput = z.infer<typeof appSearchOutputSchema>;
@@ -58,10 +34,9 @@ export function appSearchQueryKey(contextIdentity: string, input: AppSearchInput
 
 function context() {
   const state = useAuthStore.getState();
-  const teamKey = String(state.team?.key ?? "");
   const scopeKey = String(state.scope?.key ?? "");
-  if (!teamKey || !scopeKey) throw new Error("Search is unavailable for this session.");
-  return { teamKey, scopeKey };
+  if (!scopeKey) throw new Error("Search is unavailable for this session.");
+  return { scopeKey };
 }
 
 function responseError(error: unknown) {
@@ -77,13 +52,14 @@ export async function searchApp(input: AppSearchInput, signal?: AbortSignal) {
   try {
     const parsed = appSearchInputSchema.parse(input);
     const state = useAuthStore.getState();
-    const response = await apiClient.post("/app/search", { ...context(), ...parsed }, { signal, timeout: 15_000 });
+    const { recordHistory, filters: _filters, ...body } = parsed;
+    const response = await apiClient.post("/app/search", { ...context(), ...body }, { signal, timeout: 15_000 });
     const envelope = z.discriminatedUnion("success", [
       z.strictObject({ success: z.literal(true), data: appSearchOutputSchema }),
       z.object({ success: z.literal(false), error: z.unknown() }),
     ]).parse(response.data);
     if (!envelope.success) throw new Error("App search failed.");
-    if (parsed.recordHistory) publishUserSearchHistoryAppend(String(state.user?.key ?? ""));
+    if (recordHistory && parsed.query) publishUserSearchHistoryAppend(String(state.user?.key ?? ""));
     return envelope.data;
   } catch (error) {
     throw responseError(error);

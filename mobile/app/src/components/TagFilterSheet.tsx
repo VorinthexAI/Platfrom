@@ -20,7 +20,7 @@ type TagFilterSheetProps = { context: ContentContext; onClose: () => void; open:
 export function TagFilterSheet({ context, onClose, open }: TagFilterSheetProps) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const { teamKey, scopeKey, userKey } = context;
+  const { scopeKey, userKey } = context;
   const contextKey = tagFilterContextKey(context);
   const selected = useUiStore((state) => state.selectedTagsByContext[contextKey] ?? EMPTY_SELECTED_TAGS);
   const setSelectedTags = useUiStore((state) => state.setSelectedTags);
@@ -41,7 +41,7 @@ export function TagFilterSheet({ context, onClose, open }: TagFilterSheetProps) 
       setDraftKeys(selected.map(({ key }) => key));
       setLoading(true);
       setError(undefined);
-      void refreshScopeTags(queryClient, { teamKey, scopeKey, userKey }).then((items) => {
+      void refreshScopeTags(queryClient, { scopeKey, userKey }).then((items) => {
         if (request === requestRef.current) setTags(items);
       }).catch((caught) => {
         if (request === requestRef.current) setError(caught instanceof Error ? caught.message : "Tags could not be loaded.");
@@ -50,7 +50,7 @@ export function TagFilterSheet({ context, onClose, open }: TagFilterSheetProps) 
       });
     }, 0);
     return () => { clearTimeout(timeout); requestRef.current += 1; };
-  }, [open, teamKey, queryClient, scopeKey, selected, userKey]);
+  }, [open, queryClient, scopeKey, selected, userKey]);
 
   useEffect(() => {
     if (!open) {

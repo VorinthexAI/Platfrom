@@ -174,7 +174,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (get().status !== "authenticated" || sessionIsEnding()) return;
     const operation = ++authOperation;
     const context = await loadContext();
-    if (!hasCompleteAuthContext(context)) throw new Error("Archive execution context is unavailable.");
+    if (!hasCompleteAuthContext(context)) throw new Error("Files execution context is unavailable.");
     if (operation === authOperation) {
       confirmedScope = context.scope;
       await writeAuthContext(context);

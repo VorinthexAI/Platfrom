@@ -23,7 +23,7 @@ export function createUserHiddenHandlers(options: {
     const context = await getContext(identity.key);
     if (!context) return c.json({ error: 'user context not found' }, 404);
     try {
-      return c.json(await operation(c, { userKey: identity.key, teamKey: context.team.key, teamMembershipKey: context.membership.key, service: options.service }));
+      return c.json(await operation(c, { userKey: identity.key, teamKey: identity.key, teamMembershipKey: identity.key, service: options.service }));
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ error: 'invalid hidden content input' }, 400);
       if (error instanceof UserHiddenSourceNotFoundError) return c.json({ error: 'source not found' }, 404);
