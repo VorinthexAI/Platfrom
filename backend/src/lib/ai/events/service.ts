@@ -4,7 +4,7 @@ import { isArangoUniqueConstraintError } from '@/lib/db/base';
 import { newId } from '@/lib/ids';
 import { createEventIdentifier, currentEventIdentifier, eventIdentifierSchema } from './event-identifier';
 import { currentDevice } from './device';
-import { createProductScopeRepository, requireProductScopes } from '@/lib/apps/repository';
+import { CANONICAL_APP_BY_ALIAS } from '@/lib/apps/registry';
 import { scopeSchema } from '@/lib/ai/scopes';
 
 const toolSlugSchema = z.string().trim().min(1).max(200);
@@ -39,7 +39,7 @@ interface ToolEventServiceDependencies {
 export function createToolEventService(dependencies: ToolEventServiceDependencies = {}) {
   const insert = dependencies.insert ?? insertEvent;
   const getById = dependencies.getById ?? getEventById;
-  const productScopeExists = dependencies.productScopeExists ?? (async (scopeKey: string) => [...(await requireProductScopes(createProductScopeRepository())).values()].some(({ key }) => key === scopeKey));
+  const productScopeExists = dependencies.productScopeExists ?? (async (scopeKey: string) => CANONICAL_APP_BY_ALIAS.has(scopeKey));
   const id = dependencies.id ?? newId;
   const now = dependencies.now ?? (() => new Date().toISOString());
   const createIdentifier = dependencies.createIdentifier ?? createEventIdentifier;
@@ -47,7 +47,7 @@ export function createToolEventService(dependencies: ToolEventServiceDependencie
   return {
     async record(rawInput: ToolEventInput, options: { key?: string } = {}) {
       const input = toolEventInputSchema.parse(rawInput);
-      if (!await productScopeExists(input.appScopeKey)) throw new Error(`Product scope ${input.appScopeKey} was not found in the root team catalog.`);
+      if (!await productScopeExists(input.appScopeKey)) throw new Error(`Agent ${input.appScopeKey} was not found in the catalog.`);
       const key = options.key ? z.string().cuid().parse(options.key) : id();
       try {
         const eventIdentifier = eventIdentifierSchema.parse(input.eventIdentifier ?? currentEventIdentifier() ?? createIdentifier());

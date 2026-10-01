@@ -10,27 +10,31 @@ import { fonts, palette, spacing } from "@/theme/tokens";
 
 export type SupportComposeKind = "issue" | "feedback";
 
-export function SupportComposeSheets({ compose, onClose, onSubmit }: { compose?: SupportComposeKind; onClose: () => void; onSubmit: (input: { kind: SupportComposeKind; message: string; requestKey: string }) => void }) {
+export function SupportComposeSheets({ compose, onClose, onSubmit }: { compose?: SupportComposeKind; onClose: () => void; onSubmit: (input: { kind: SupportComposeKind; message: string; requestKey: string }) => Promise<void> }) {
   const scopeKey = useAuthStore((state) => String(state.scope?.key ?? ""));
   const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const request = useRef<{ fingerprint: string; key: string } | undefined>(undefined);
   const label = compose === "issue" ? "Issue description" : "Suggestion";
 
-  const submit = () => {
+  const submit = async () => {
     const value = message.trim();
-    if (!compose || !value || !scopeKey) return;
+    if (!compose || !value || !scopeKey || submitting) return;
     const fingerprint = `${compose}:${value}`;
     const requestKey = request.current?.fingerprint === fingerprint ? request.current.key : randomUUID();
-    request.current = undefined;
-    setMessage("");
-    onSubmit({ kind: compose, message: value, requestKey });
+    request.current = { fingerprint, key: requestKey };
+    setSubmitting(true);
+    try { await onSubmit({ kind: compose, message: value, requestKey }); request.current = undefined; setMessage(""); onClose(); }
+    catch { /* The caller shows the failure. Keep the draft and request key for a retry. */ }
+    finally { setSubmitting(false); }
   };
 
   return <BottomSheet
-    focusKey={`signal-compose-${compose ?? "closed"}`}
-    footer={<><Button disabled={!message.trim() || !scopeKey} onPress={submit} size="md" variant="primary">Send</Button><Button onPress={onClose} size="md" variant="secondary">Close</Button></>}
+    focusKey={`support-compose-${compose ?? "closed"}`}
+    dismissible={!submitting}
+    footer={<><Button disabled={!message.trim() || !scopeKey || submitting} loading={submitting} onPress={() => void submit()} size="md" variant="primary">Send</Button><Button disabled={submitting} onPress={onClose} size="md" variant="secondary">Close</Button></>}
     height="full"
-    onOpenChange={(open) => { if (!open) onClose(); }}
+    onOpenChange={(open) => { if (!open && !submitting) onClose(); }}
     open={Boolean(compose)}
     title={compose === "issue" ? "Report an issue" : "Give us feedback"}
   >

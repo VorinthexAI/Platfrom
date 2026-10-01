@@ -1,10 +1,12 @@
 import { apiClient } from "./api-client";
 import * as Crypto from "expo-crypto";
 import { File } from "expo-file-system";
-import { z } from "zod";
 import { useAuthStore } from "@/state/auth";
-import { appSearchResults, searchApp } from "./app-search-client";
+import { mapWithConcurrency } from "./bounded-concurrency";
+import { createImageThumbnail, createVideoThumbnail, type LocalThumbnail } from "./content-thumbnails";
+
 import {
+  planContentSelectionCopy,
   planContentSelectionDelete,
   planContentSelectionFavorite,
   planContentSelectionMove,
@@ -30,7 +32,9 @@ export type ContentFolder = {
   parentFolderKey?: string;
   name: string;
   description?: string;
+  coverFileKey?: string;
   isFavorite?: boolean;
+  isHidden?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -43,8 +47,11 @@ export type ContentFile = {
   extension: FileExtension;
   mimeType: string;
   sizeBytes: number;
+  caption?: string;
+  hasThumbnail?: boolean;
   processing: "pending" | "ready" | "failed";
   isFavorite: boolean;
+  isHidden?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -61,6 +68,7 @@ export type ContentSearchFile = {
   name: string;
   extension?: FileExtension;
   isFavorite: boolean;
+  hasThumbnail?: boolean;
   score: number;
   scopeKey?: string;
   folderKey?: string;
@@ -178,37 +186,26 @@ function fileFilename(name: string, extension: FileExtension) {
   return filename.toLowerCase().endsWith(`.${extension}`) ? filename : `${filename}.${extension}`;
 }
 
-export async function listContentFolderTree(signal?: AbortSignal, contentContext = getContentContext()) {
-  const folders: ContentFolder[] = [];
-  let cursor: string | undefined;
-  do {
-    const data: { folders: ContentFolder[]; cursor?: string } = await callContentTool("folder.list", {
-      scopeKey: contentContext.scopeKey,
-      ...(cursor ? { cursor } : {}),
-      limit: 100,
-    }, signal, contentContext);
-    folders.push(...data.folders);
-    cursor = data.cursor;
-  } while (cursor);
-  return folders;
-}
-
-export async function listContentFolderPage(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext(), cursor?: string, limit = FILE_LOCATION_PAGE_SIZE) {
+export async function listContentFolderPage(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext(), cursor?: string, limit = FILE_LOCATION_PAGE_SIZE, filters?: { favoritesOnly?: boolean; includeHidden?: boolean }) {
   return callContentTool<{ folders: ContentFolder[]; cursor?: string }>("folder.list", {
     scopeKey: contentContext.scopeKey,
     ...(folderKey ? { folderKey } : {}),
     ...(cursor ? { cursor } : {}),
     limit,
+    ...(filters?.favoritesOnly ? { favoritesOnly: true } : {}),
+    ...(filters?.includeHidden ? { includeHidden: true } : {}),
   }, signal, contentContext);
 }
 
-export async function listContentFilePage(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext(), cursor?: string, limit = FILE_LOCATION_PAGE_SIZE, extensions?: readonly string[]) {
+export async function listContentFilePage(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext(), cursor?: string, limit = FILE_LOCATION_PAGE_SIZE, extensions?: readonly string[], filters?: { favoritesOnly?: boolean; includeHidden?: boolean }) {
   return callContentTool<{ files: ContentFile[]; cursor?: string }>("file.list", {
     scopeKey: contentContext.scopeKey,
     ...(folderKey ? { folderKey } : {}),
     ...(cursor ? { cursor } : {}),
     limit,
     ...(extensions?.length ? { extensions: [...extensions] } : {}),
+    ...(filters?.favoritesOnly ? { favoritesOnly: true } : {}),
+    ...(filters?.includeHidden ? { includeHidden: true } : {}),
   }, signal, contentContext);
 }
 
@@ -230,13 +227,13 @@ export async function findContentFile(fileKey: string, contentContext = getConte
   return data.file;
 }
 
-export async function createContentFolder(name: string, parentFolderKey?: string, description?: string, mutationKey = createContentMutationKey()) {
+export async function createContentFolder(name: string, parentFolderKey?: string, description?: string, mutationKey = createContentMutationKey(), folderKey?: string) {
   const contentContext = getContentContext();
   const data = await callContentTool<{
     results: { success: boolean; data?: { folder: ContentFolder }; error?: { message: string } }[];
   }>("folder.create", {
     scopeKey: contentContext.scopeKey,
-    folders: [{ scopeKey: contentContext.scopeKey, parentFolderKey, name, ...(description ? { description } : {}) }],
+    folders: [{ scopeKey: contentContext.scopeKey, ...(folderKey ? { key: folderKey } : {}), ...(parentFolderKey ? { parentFolderKey } : {}), name, ...(description ? { description } : {}) }],
     idempotencyKey: mutationKey,
   });
   const result = data.results[0];
@@ -244,7 +241,7 @@ export async function createContentFolder(name: string, parentFolderKey?: string
   return result.data.folder;
 }
 
-export async function updateContentFolder(folderKey: string, patch: { name?: string; description?: string | null; isFavorite?: boolean }) {
+export async function updateContentFolder(folderKey: string, patch: { name?: string; description?: string | null; isFavorite?: boolean; isHidden?: boolean; coverFileKey?: string | null }) {
   return (await callContentTool<{ folder: ContentFolder }>("folder.update", { folderKey, ...patch })).folder;
 }
 
@@ -264,7 +261,7 @@ export async function renameContentFile(fileKey: string, name: string) {
   return (await callContentTool<{ file: ContentFile }>("file.rename", { fileKey, name })).file;
 }
 
-export async function updateContentFile(fileKey: string, patch: { name?: string; isFavorite?: boolean }) {
+export async function updateContentFile(fileKey: string, patch: { name?: string; isFavorite?: boolean; isHidden?: boolean }) {
   return (await callContentTool<{ file: ContentFile }>("file.update", { fileKey, ...patch })).file;
 }
 
@@ -276,8 +273,8 @@ export async function deleteContentFile(fileKey: string) {
   await callContentTool<{ deleted: true }>("file.delete", { fileKey });
 }
 
-export async function downloadContentFile(fileKey: string) {
-  return callContentTool<{ fileKey: string; url: string; fileName: string; mimeType: string }>("file.download", { fileKey });
+export async function downloadContentFile(fileKey: string, contentContext = getContentContext()) {
+  return callContentTool<{ fileKey: string; url: string; thumbnailUrl?: string; fileName: string; mimeType: string }>("file.download", { fileKey }, undefined, contentContext);
 }
 
 export function setContentSelectionFavorite(selection: ContentSelection, isFavorite: boolean, idempotencyKey = createContentMutationKey()) {
@@ -286,6 +283,10 @@ export function setContentSelectionFavorite(selection: ContentSelection, isFavor
 
 export function moveContentSelection(selection: ContentSelection, targetFolderKey?: string, idempotencyKey = createContentMutationKey()) {
   return executeContentSelectionPlan(planContentSelectionMove(selection, targetFolderKey, idempotencyKey));
+}
+
+export function copyContentSelection(selection: ContentSelection, targetFolderKey?: string, idempotencyKey = createContentMutationKey()) {
+  return executeContentSelectionPlan(planContentSelectionCopy(selection, targetFolderKey, idempotencyKey));
 }
 
 export function hardDeleteContentSelection(selection: ContentSelection, idempotencyKey = createContentMutationKey()) {
@@ -318,25 +319,40 @@ async function extractLocalText(uri: string, extension: FileExtension) {
       return undefined;
     }
   }
+  if (extension === "pdf") {
+    const { extractText } = await import("react-native-pdf-text-extractor");
+    const text = await extractText(uri, { normalize: true });
+    return text.trim() || undefined;
+  }
   return undefined;
 }
 
-export async function uploadContentFiles(files: DirectFile[], folderKey?: string, contentContext = getContentContext(), idempotencyKey = createContentMutationKey()) {
+export async function uploadContentFiles(files: DirectFile[], folderKey?: string, contentContext = getContentContext(), idempotencyKey = createContentMutationKey(), onThumbnail?: (index: number, uri: string) => void) {
   if (!isContentContextConfigured(contentContext)) throw new Error("Files are unavailable for this session.");
   const sources = files.map((file) => {
     const extension = fileExtensionOf(file.name, file.type);
     if (!extension) throw new Error(`Unsupported file type: ${file.name}`);
     return { filename: fileFilename(file.name, extension), mimeType: FILE_MIME[extension], sizeBytes: file.size, extension, uri: file.uri };
   });
+  const thumbnails = await mapWithConcurrency(sources, 3, async (source, index): Promise<LocalThumbnail | undefined> => {
+    try {
+      const thumbnail = ["jpg", "jpeg", "png", "webp", "gif"].includes(source.extension) ? await createImageThumbnail(source.uri) : source.extension === "mp4" ? await createVideoThumbnail(source.uri) : undefined;
+      if (thumbnail) onThumbnail?.(index, thumbnail.uri);
+      return thumbnail;
+    } catch { /* A file remains uploadable when a local thumbnail cannot be decoded. */ }
+    return undefined;
+  });
+  try {
+  const localText = await Promise.all(sources.map((source) => extractLocalText(source.uri, source.extension)));
   const unwrap = <T>(response: ToolResponse<T>) => {
     if (!response.success) throw contentToolError(response.error);
     return response.data;
   };
-  const reserved = unwrap((await apiClient.post<ToolResponse<{ uploadKey: string; files: { fileKey: string; url: string; headers: Record<string, string> }[] }>>("/api/v1/content/uploads/presign", {
+  const reserved = unwrap((await apiClient.post<ToolResponse<{ uploadKey: string; files: { fileKey: string; url: string; headers: Record<string, string>; thumbnail?: { url: string; headers: Record<string, string> } }[] }>>("/api/v1/content/uploads/presign", {
     scopeKey: contentContext.scopeKey,
     ...(folderKey ? { folderKey } : {}),
     idempotencyKey,
-    files: sources.map(({ uri: _uri, ...file }) => file),
+    files: sources.map(({ uri: _uri, ...file }, index) => ({ ...file, ...(thumbnails[index] ? { thumbnail: { mimeType: "image/jpeg", sizeBytes: thumbnails[index]!.sizeBytes } } : {}) })),
   })).data);
   if (reserved.files.length !== sources.length) throw new Error("File upload reservation did not match the selected files.");
   const extractedText: Record<string, string> = {};
@@ -350,77 +366,76 @@ export async function uploadContentFiles(files: DirectFile[], folderKey?: string
     try {
       const response = await fetch(upload.url, { method: "PUT", headers: upload.headers, body: bytes, signal: controller.signal });
       if (!response.ok) throw new Error(`File upload failed (${response.status}).`);
+      const thumbnail = thumbnails[index];
+      if (thumbnail) {
+        if (!upload.thumbnail) throw new Error("The thumbnail reservation was not returned.");
+        const thumbnailBytes = await new File(thumbnail.uri).arrayBuffer();
+        if (thumbnailBytes.byteLength !== thumbnail.sizeBytes) throw new Error("The thumbnail changed before it could be uploaded.");
+        const saved = await fetch(upload.thumbnail.url, { method: "PUT", headers: upload.thumbnail.headers, body: thumbnailBytes, signal: controller.signal });
+        if (!saved.ok) throw new Error(`Thumbnail upload failed (${saved.status}).`);
+      }
     } finally {
       clearTimeout(timeout);
     }
-    const text = await extractLocalText(source.uri, source.extension);
+    const text = localText[index];
     if (text) extractedText[upload.fileKey] = text;
   }
-  return unwrap((await apiClient.post<ToolResponse<{ files: { key: string; name: string; extension: FileExtension; processing: ContentFile["processing"] }[] }>>("/api/v1/content/uploads/complete", {
+  return unwrap((await apiClient.post<ToolResponse<{ files: { key: string; name: string; extension: FileExtension; processing: ContentFile["processing"]; hasThumbnail: boolean }[] }>>("/api/v1/content/uploads/complete", {
     scopeKey: contentContext.scopeKey,
     uploadKey: reserved.uploadKey,
     idempotencyKey,
     ...(Object.keys(extractedText).length ? { extractedText } : {}),
   }, { timeout: 5 * 60_000 })).data);
+  } finally {
+    for (const thumbnail of thumbnails) if (thumbnail) { try { new File(thumbnail.uri).delete(); } catch { /* Temporary images can already be gone. */ } }
+  }
 }
 
 export async function uploadContentFile(file: DirectFile, folderKey?: string, contentContext = getContentContext(), idempotencyKey = createContentMutationKey()) {
   return uploadContentFiles([file], folderKey, contentContext, idempotencyKey);
 }
 
-const appFolderResultSchema = z.strictObject({
-  key: z.string().min(1),
-  name: z.string().min(1),
-  parentFolderKey: z.string().min(1).optional(),
-  isFavorite: z.boolean().optional(),
-});
-const appFileResultSchema = z.strictObject({
-  key: z.string().min(1),
-  name: z.string().min(1),
-  extension: z.enum(FILE_EXTENSIONS).optional(),
-  folderKey: z.string().min(1).optional(),
-  sizeBytes: z.number().optional(),
-  processing: z.enum(["pending", "ready", "failed"]).optional(),
-  isFavorite: z.boolean().optional(),
-});
-
-export async function searchContent(query: string, folderKey?: string): Promise<ContentSearchResponse> {
-  const output = await searchApp({
-    ...(query ? { query } : { operation: "list" as const }),
-    collectionSlugs: ["folders", "files"],
-    recordHistory: Boolean(query),
-    limit: 50,
-    ...(folderKey ? { folderKey } : {}),
-  });
-  const folders = appSearchResults(output, "folders", appFolderResultSchema).map((folder) => ({
-    key: folder.key,
+export async function searchContent(query: string, folderKey?: string, filters?: { favoritesOnly?: boolean; includeHidden?: boolean; tagKeys?: string[]; extensions?: FileExtension[] }): Promise<ContentSearchResponse> {
+  const output = await callContentTool<{ query: string; folders: (ContentFolder & { score: number })[]; files: (ContentFile & { score: number })[] }>("content.search", {
     scopeKey: getContentContext().scopeKey,
-    parentFolderKey: folder.parentFolderKey,
-    name: folder.name,
-    isFavorite: folder.isFavorite,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    score: 0,
-  }));
-  const files = appSearchResults(output, "files", appFileResultSchema).map((file) => ({
-    fileKey: file.key,
-    name: file.name,
-    extension: file.extension,
-    isFavorite: Boolean(file.isFavorite),
-    score: 0,
-    folderKey: file.folderKey,
-  }));
-  return { query: output.query ?? query, folders, files, cached: false };
+    query,
+    ...(folderKey ? { folderKey } : {}),
+    ...(filters?.favoritesOnly ? { favoritesOnly: true } : {}),
+    ...(filters?.includeHidden ? { includeHidden: true } : {}),
+    ...(filters?.tagKeys?.length ? { tagKeys: filters.tagKeys } : {}),
+    ...(filters?.extensions?.length ? { extensions: filters.extensions } : {}),
+    limit: 50,
+  });
+  return {
+    query: output.query,
+    cached: false,
+    folders: output.folders,
+    files: output.files.map((file) => ({
+      fileKey: file.key,
+      name: file.name,
+      extension: file.extension,
+      isFavorite: file.isFavorite,
+      hasThumbnail: file.hasThumbnail,
+      score: file.score,
+      folderKey: file.folderKey,
+    })),
+  };
 }
 
 export function searchContentMatches(query: string, _signal?: AbortSignal, folderKey?: string) {
   return searchContent(query, folderKey);
 }
 
-export async function listContentSearchHistory(_requestContext = getContentContext()): Promise<ContentSearchHistoryItem[]> {
-  return [];
+export async function recordContentSearchHistory(query: string, context = getContentContext()): Promise<ContentSearchHistoryItem> {
+  const data = await callContentTool<{ item: ContentSearchHistoryItem }>("content.search-history.record", { scopeKey: context.scopeKey, query }, undefined, context);
+  return data.item;
 }
 
-export async function deleteContentSearchHistory(_normalizedQuery: string) {
-  return { deleted: true };
+export async function listContentSearchHistory(_requestContext = getContentContext()): Promise<ContentSearchHistoryItem[]> {
+  const data = await callContentTool<{ items: ContentSearchHistoryItem[] }>("content.search-history.list", { scopeKey: _requestContext.scopeKey, limit: 50 }, undefined, _requestContext);
+  return data.items;
+}
+
+export async function deleteContentSearchHistory(normalizedQuery: string) {
+  return callContentTool<{ deleted: boolean }>("content.search-history.delete", { scopeKey: getContentContext().scopeKey, normalizedQuery });
 }

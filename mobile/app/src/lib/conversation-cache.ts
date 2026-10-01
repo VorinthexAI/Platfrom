@@ -2,9 +2,9 @@ import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 
 import type { Conversation, ConversationContext, ConversationMessage, ConversationMessagePage, ConversationPage } from "./conversation-client";
 
-export type ConversationListFilter = { query: string; favoriteOnly: boolean };
+export type ConversationListFilter = { query: string; favoriteOnly: boolean; hiddenOnly: boolean };
 const identity = (context: ConversationContext) => [context.userKey, context.scopeKey] as const;
-const normalizedFilter = (filter: ConversationListFilter) => ({ query: filter.query.trim().toLocaleLowerCase(), favoriteOnly: filter.favoriteOnly });
+const normalizedFilter = (filter: ConversationListFilter) => ({ query: filter.query.trim().toLocaleLowerCase(), favoriteOnly: filter.favoriteOnly, hiddenOnly: filter.hiddenOnly });
 
 export const conversationQueryKeys = {
   all: (context: ConversationContext) => ["conversations", ...identity(context)] as const,
@@ -15,13 +15,13 @@ export const conversationQueryKeys = {
 
 export function conversationListFilterFromKey(queryKey: QueryKey): ConversationListFilter | undefined {
   const value = queryKey.at(-1);
-  if (!value || typeof value !== "object" || !("query" in value) || !("favoriteOnly" in value) || typeof value.query !== "string" || typeof value.favoriteOnly !== "boolean") return undefined;
-  return { query: value.query, favoriteOnly: value.favoriteOnly };
+  if (!value || typeof value !== "object" || !("query" in value) || !("favoriteOnly" in value) || !("hiddenOnly" in value) || typeof value.query !== "string" || typeof value.favoriteOnly !== "boolean" || typeof value.hiddenOnly !== "boolean") return undefined;
+  return { query: value.query, favoriteOnly: value.favoriteOnly, hiddenOnly: value.hiddenOnly };
 }
 
 export function conversationMatchesFilter(conversation: Conversation, filter: ConversationListFilter) {
   const normalized = normalizedFilter(filter);
-  return (!normalized.favoriteOnly || conversation.isFavorite) && (!normalized.query || conversation.name.toLocaleLowerCase().includes(normalized.query));
+  return (!normalized.favoriteOnly || conversation.isFavorite) && (normalized.hiddenOnly ? conversation.isHidden : !conversation.isHidden) && (!normalized.query || conversation.name.toLocaleLowerCase().includes(normalized.query));
 }
 
 export function compareConversations(left: Conversation, right: Conversation) {

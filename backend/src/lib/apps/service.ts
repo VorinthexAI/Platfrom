@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { signedAppLogoUrl } from './logo-url';
 import { appDetailedDescriptionSchema, appSlugSchema, CANONICAL_APP_BY_ALIAS, CANONICAL_APPS, parseAppAliasKey } from './registry';
-import { createProductScopeRepository, requireProductScopes } from './repository';
 
 export const enrichedAppSchema = z.object({
   key: z.string().cuid(),
@@ -24,12 +23,9 @@ export interface AppsService {
 }
 
 export function createAppsService(
-  repository: ReturnType<typeof createProductScopeRepository> = createProductScopeRepository(),
   signLogoUrl: (storageKey: string) => Promise<string> = signedAppLogoUrl,
 ): AppsService {
-  const scopes = () => requireProductScopes(repository);
   const list = async () => {
-    await scopes();
     return CANONICAL_APPS.map((presentation) => enrichedAppSchema.parse({
       key: presentation.key,
       slug: presentation.slug,
@@ -45,8 +41,7 @@ export function createAppsService(
     list,
     async resolveAlias(rawAliasKey) {
       const aliasKey = parseAppAliasKey(rawAliasKey);
-      const presentation = CANONICAL_APP_BY_ALIAS.get(aliasKey)!;
-      return { aliasKey, scopeKey: (await scopes()).get(presentation.slug)!.key };
+      return { aliasKey, scopeKey: CANONICAL_APP_BY_ALIAS.get(aliasKey)!.key };
     },
     async listPublic() {
       return Promise.all((await list()).map(async (app) => {

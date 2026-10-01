@@ -30,8 +30,8 @@ export function TagFilterSheet({ context, onClose, open }: TagFilterSheetProps) 
   const [error, setError] = useState<string>();
   const [createOpen, setCreateOpen] = useState(false);
   const [tagName, setTagName] = useState("");
-  const [creating, setCreating] = useState(false);
   const requestRef = useRef(0);
+  const createSubmissionRef = useRef<string | undefined>(undefined);
   const createInputRef = useRef<ComponentRef<typeof TextInput>>(null);
 
   useEffect(() => {
@@ -66,27 +66,32 @@ export function TagFilterSheet({ context, onClose, open }: TagFilterSheetProps) 
   }, [createOpen, open]);
 
   const closeCreate = () => {
-    if (creating) return;
     setCreateOpen(false);
     setTagName("");
   };
 
-  const createTag = async () => {
+  const createTag = () => {
     const name = tagName.trim();
-    if (!name || creating) return;
-    setCreating(true);
+    if (!name || createSubmissionRef.current) return;
+    const key = createResourceTagKey();
+    createSubmissionRef.current = key;
+    const timestamp = new Date().toISOString();
+    const optimistic: ScopeTag = { key, name, createdAt: timestamp, updatedAt: timestamp };
+    closeCreate();
+    setTags((current) => [...current.filter((tag) => tag.key !== key), optimistic]);
+    queryClient.setQueryData<ScopeTag[]>(scopeTagsQueryKey(context), (current) => [...(current ?? []).filter((tag) => tag.key !== key), optimistic]);
     showToast({ title: "Tag created", duration: 2_000 });
-    try {
-      const created = await createScopeTag(context, { key: createResourceTagKey(), name });
-      setTags((current) => [...current.filter((tag) => tag.key !== created.key), created]);
-      queryClient.setQueryData<ScopeTag[]>(scopeTagsQueryKey(context), (current) => current ? [...current.filter((tag) => tag.key !== created.key), created] : [created]);
-      setCreateOpen(false);
-      setTagName("");
-    } catch (caught) {
+    void createScopeTag(context, { key, name }).then((created) => {
+      setTags((current) => current.map((tag) => tag.key === key ? created : tag));
+      queryClient.setQueryData<ScopeTag[]>(scopeTagsQueryKey(context), (current) => current?.map((tag) => tag.key === key ? created : tag));
+      void queryClient.invalidateQueries({ queryKey: ["file-search", scopeKey] });
+    }).catch((caught) => {
+      setTags((current) => current.filter((tag) => tag.key !== key));
+      queryClient.setQueryData<ScopeTag[]>(scopeTagsQueryKey(context), (current) => current?.filter((tag) => tag.key !== key));
+      const active = useUiStore.getState().selectedTagsByContext[contextKey] ?? EMPTY_SELECTED_TAGS;
+      if (active.some((tag) => tag.key === key)) setSelectedTags(contextKey, active.filter((tag) => tag.key !== key));
       showToast({ title: caught instanceof Error ? caught.message : "Tag could not be created.", duration: 3_000 });
-    } finally {
-      setCreating(false);
-    }
+    }).finally(() => { if (createSubmissionRef.current === key) createSubmissionRef.current = undefined; });
   };
 
   const toggle = (key: string) => setDraftKeys((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
@@ -108,7 +113,7 @@ export function TagFilterSheet({ context, onClose, open }: TagFilterSheetProps) 
         {!loading ? tags.map((tag) => <FilterPill fullWidth key={tag.key} label={tag.name} onPress={() => toggle(tag.key)} selected={draftKeys.includes(tag.key)} />) : null}
       </ScrollView>
     </BottomSheet>
-    <TagCreateSheet creating={creating} inputRef={createInputRef} name={tagName} onClose={closeCreate} onCreate={() => void createTag()} onNameChange={setTagName} open={open && createOpen} />
+     <TagCreateSheet inputRef={createInputRef} name={tagName} onClose={closeCreate} onCreate={createTag} onNameChange={setTagName} open={open && createOpen} />
   </>;
 }
 

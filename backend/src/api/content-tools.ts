@@ -22,7 +22,7 @@ export async function invokeContentTool(c: Context) {
     const body = await parseJson(c, bodySchema);
     let input = contentToolInputSchemas[tool].parse(body.input);
     const idempotencyKey = c.req.header('idempotency-key')?.trim();
-    if (isContentMutation(tool, input) && idempotencyKey && input && typeof input === 'object' && !Array.isArray(input)) input = { ...input, idempotencyKey } as typeof input;
+    if (isContentMutation(tool, input) && idempotencyKey && input && typeof input === 'object' && !Array.isArray(input)) input = { ...input, idempotencyKey } as unknown as typeof input;
     const output = await runAuthenticatedContentTool({ scopeKey: body.scopeKey, tool, input }, { authenticatedUserKey: identity.key, recordEvent: toolEventService.record, ...(idempotencyKey ? { requestKey: idempotencyKey } : {}) });
     return c.json({ success: true, data: output });
   } catch (error) {

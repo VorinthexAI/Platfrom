@@ -124,7 +124,8 @@
       "expo-asset",
       "expo-font",
       "expo-image",
-      "./plugins/with-android-build-paths"
+      "./plugins/with-android-build-paths",
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true,

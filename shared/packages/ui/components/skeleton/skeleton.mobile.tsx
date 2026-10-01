@@ -74,7 +74,7 @@ export function Skeleton({ children, onLayout, style, ...props }: SkeletonProps)
 
 const styles = StyleSheet.create({
   root: {
-    backgroundColor: colors.page,
+    backgroundColor: colors.hairlineBright,
     borderColor: "#262D36",
     borderRadius: 12,
     overflow: "hidden",

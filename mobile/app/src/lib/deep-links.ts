@@ -1,10 +1,10 @@
 import * as Linking from "expo-linking";
 import type { Href } from "expo-router";
+import { z } from "zod";
 
 export const HOME_HREF = "/home" as Href;
-export const MANAGED_INBOX_DEEP_LINK_HREF = HOME_HREF;
 
-const DEEP_LINK_ROUTES = Object.freeze(["/home"]);
+const DEEP_LINK_ROUTES = Object.freeze(["/home", "/file"]);
 
 function pathFromUrl(url: string) {
   const parsed = Linking.parse(url);
@@ -26,5 +26,10 @@ export function hrefFromDeepLinkUrl(url: string): Href | undefined {
   const path = pathFromUrl(url);
   if (!DEEP_LINK_ROUTES.includes(path)) return undefined;
   const query = queryFromUrl(url);
+  if (path === "/file") {
+    const params = new URLSearchParams(query);
+    if (!z.string().cuid().safeParse(params.get("fileKey")).success) return undefined;
+    if (params.has("scopeKey") && !z.string().cuid().safeParse(params.get("scopeKey")).success) return undefined;
+  }
   return (query ? `${path}?${query}` : path) as Href;
 }

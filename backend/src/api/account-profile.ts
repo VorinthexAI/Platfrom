@@ -70,19 +70,19 @@ export function createCompleteAccountAvatarHandler(dependencies: {
 
 export const completeAccountAvatar = createCompleteAccountAvatarHandler();
 
-const profileBadgeSelectorsSchema = z.object({ teamKey: z.string().trim().min(1), scopeKey: z.string().cuid() }).strict();
+const profileBadgeSelectorsSchema = z.object({ scopeKey: z.string().cuid() }).strict();
 export const profileBadgeGenerateHttpInputSchema = profileBadgeSelectorsSchema.extend(profileBadgeGenerateInputSchema.shape).strict();
 export const profileBadgeClaimHttpInputSchema = profileBadgeSelectorsSchema.extend(profileBadgeClaimInputSchema.shape).strict();
 
 export function createProfileBadgeHandlers(dependencies: {
   getIdentity?: typeof getAuthIdentity;
-  authorize?: (selectors: { teamKey: string; scopeKey: string }, options: ReturnType<typeof authenticatedTeamContext>) => Promise<{ context: ToolContext }>;
+  authorize?: (selectors: { scopeKey: string }, options: ReturnType<typeof authenticatedTeamContext>) => Promise<{ context: ToolContext }>;
   service?: ProfileBadgeService;
   recordEvent?: ToolEventRecorder;
   billing?: ToolBillingDependencies;
   signAvatar?: typeof signProfileAvatarUrl;
 } = {}) {
-  const authorized = async (c: Context, selectors: { teamKey: string; scopeKey: string }) => {
+  const authorized = async (c: Context, selectors: { scopeKey: string }) => {
     const identity = await (dependencies.getIdentity ?? getAuthIdentity)(c);
     if (!identity || identity.identityType !== 'user') return null;
     return (dependencies.authorize ?? authorizeContentExecution)(selectors, authenticatedTeamContext(identity));
@@ -96,8 +96,8 @@ export function createProfileBadgeHandlers(dependencies: {
     generate: async (c: Context) => {
       try {
         const requestKey = z.string().trim().min(1).max(200).parse(c.req.header('idempotency-key'));
-        const { teamKey, scopeKey, ...input } = await parseJson(c, profileBadgeGenerateHttpInputSchema);
-        const result = await authorized(c, { teamKey, scopeKey });
+        const { scopeKey, ...input } = await parseJson(c, profileBadgeGenerateHttpInputSchema);
+        const result = await authorized(c, { scopeKey });
         if (!result) return c.json({ success: false, error: 'user authentication required' }, 401);
         const service = dependencies.service ?? profileBadgeService;
         const candidate = await observeToolExecution('profile.badge.generate', result.context, () => service.generate(input, result.context, requestKey), { recorder: dependencies.recordEvent ?? toolEventService.record, idempotencyKey: requestKey, input, ...dependencies.billing });
@@ -106,8 +106,8 @@ export function createProfileBadgeHandlers(dependencies: {
     },
     claim: async (c: Context) => {
       try {
-        const { teamKey, scopeKey, ...input } = await parseJson(c, profileBadgeClaimHttpInputSchema);
-        const result = await authorized(c, { teamKey, scopeKey });
+        const { scopeKey, ...input } = await parseJson(c, profileBadgeClaimHttpInputSchema);
+        const result = await authorized(c, { scopeKey });
         if (!result || result.context.principal.kind !== 'member') return c.json({ success: false, error: 'user authentication required' }, 401);
         const userKey = result.context.principal.user.key;
         const service = dependencies.service ?? profileBadgeService;

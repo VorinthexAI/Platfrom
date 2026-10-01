@@ -12,7 +12,7 @@ export type ContentSelectionOperation = {
 };
 
 export type ContentSelectionPlanCall = {
-  tool: "folder.update" | "file.update" | "folder.move" | "file.move" | "folder.delete" | "file.delete";
+  tool: "folder.update" | "file.update" | "folder.move" | "file.move" | "folder.copy" | "file.copy" | "folder.delete" | "file.delete";
   inputFor: (operation: ContentSelectionOperation) => Record<string, unknown>;
   operations: ContentSelectionOperation[];
 };
@@ -66,6 +66,23 @@ export function planContentSelectionMove(selection: ContentSelection, targetFold
   });
   if (fileKeys.length) calls.push({
     tool: "file.move",
+    inputFor: (operation) => ({ fileKey: operation.key, folderKey: targetFolderKey ?? null }),
+    operations: fileKeys.map((key) => ({ kind: "file", key, destinationFolderKey: targetFolderKey })),
+  });
+  return plan(calls);
+}
+
+export function planContentSelectionCopy(selection: ContentSelection, targetFolderKey: string | undefined, _idempotencyKey: string): ContentSelectionPlan {
+  const { folderKeys, fileKeys } = normalizedSelection(selection);
+  assertBatchSize(folderKeys.length + fileKeys.length);
+  const calls: ContentSelectionPlanCall[] = [];
+  if (folderKeys.length) calls.push({
+    tool: "folder.copy",
+    inputFor: (operation) => ({ folderKey: operation.key, parentFolderKey: targetFolderKey ?? null }),
+    operations: folderKeys.map((key) => ({ kind: "folder", key, destinationFolderKey: targetFolderKey })),
+  });
+  if (fileKeys.length) calls.push({
+    tool: "file.copy",
     inputFor: (operation) => ({ fileKey: operation.key, folderKey: targetFolderKey ?? null }),
     operations: fileKeys.map((key) => ({ kind: "file", key, destinationFolderKey: targetFolderKey })),
   });

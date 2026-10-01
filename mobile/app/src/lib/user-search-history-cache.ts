@@ -21,6 +21,12 @@ export function promoteCachedUserSearchHistory(queryClient: QueryClient, context
   return promoted;
 }
 
+export function reconcileCachedUserSearchHistory(queryClient: QueryClient, context: ContentContext, item: ContentSearchHistoryItem) {
+  const key = userSearchHistoryQueryKey(context.userKey);
+  queryClient.setQueryData<ContentSearchHistoryItem[]>(key, (current) => current ? [item, ...current.filter(({ normalizedQuery }) => normalizedQuery !== item.normalizedQuery)] : current);
+  void queryClient.invalidateQueries({ queryKey: key, exact: true, refetchType: "none" });
+}
+
 export function removeCachedUserSearchHistory(queryClient: QueryClient, context: ContentContext, normalizedQuery: string) {
   const key = userSearchHistoryQueryKey(context.userKey);
   const previous = queryClient.getQueryData<ContentSearchHistoryItem[]>(key) ?? [];

@@ -8,12 +8,10 @@ import type { PublicToolDependencies } from './tool-definition';
 import { WORKSPACE_TOOL_DEFINITIONS, type WorkspaceToolDependencies } from './workspace-tool-definitions';
 import type { TrustedAccountToolDependencies, TrustedAccountToolName } from './account-tool-definitions';
 import { CONVERSATION_TOOL_DEFINITIONS } from './conversation-tool-definitions';
-import type { AgentRuntimeDependencies } from '@/lib/ai/agents';
-import { AGENT_TOOL_DEFINITIONS } from './agent-tool-definitions';
-import type { AgentToolDependencies } from './agent-tool-definitions';
+import type { AgentRuntimeDependencies } from '@/lib/ai/agents/runtime';
+import { CORE_TOOL_DEFINITIONS, type AgentToolDependencies } from '@/lib/ai/agents/core';
 import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
 import type { ToolEventRecorder } from '@/lib/ai/events/service';
-import type { GuideTopic } from '@/lib/conversations/schemas';
 
 export const TOOL_NAMES = UNIFIED_TOOL_DEFINITIONS.map(({ name }) => name) as [string, ...string[]];
 export const toolNameSchema = z.enum(TOOL_NAMES);
@@ -23,7 +21,7 @@ const publicToolDefinitionsByName = new Map(PUBLIC_TOOL_DEFINITIONS.map((definit
 const workspaceToolDefinitionsByName = new Map(WORKSPACE_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
 const trustedToolDefinitionsByName = new Map(TRUSTED_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
 const conversationToolDefinitionsByName = new Map(CONVERSATION_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
-const agentToolDefinitionsByName = new Map(AGENT_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
+const agentToolDefinitionsByName = new Map(CORE_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
 export type TrustedToolName = TrustedAccountToolName;
 export type TrustedToolDependencies = TrustedAccountToolDependencies;
 
@@ -49,14 +47,11 @@ export interface ToolDependencies extends RouterDependencies {
   currentUserMessageContent?: string;
   recentConversationContext?: string[];
   onEvidence?: (retrievals: import('@/lib/app-search/service').AppSearchRetrieval[]) => void;
-  currentReferenceImageKeys?: string[];
-  currentStagedImageArtifactKeys?: string[];
   agentDependencies?: AgentRuntimeDependencies;
   recordEvent?: ToolEventRecorder;
   appScopeKey?: string;
   billing?: ToolBillingDependencies;
   onGreetingDelta?: (text: string) => void | Promise<void>;
-  onGuideTopic?: (topic: GuideTopic) => void | Promise<void>;
   executeWorkspaceContent?: WorkspaceToolDependencies['executeContent'];
 }
 
@@ -64,15 +59,10 @@ export async function runTool(name: string, _skill: string, rawInput: unknown, d
   const toolName = modelToolNameSchema.parse(name);
   toolInputSchemas[toolName]!.parse(rawInput);
   return observeToolExecution(toolName, dependencies.contentContext, async () => {
-    if (toolName === 'app.generate-image') {
-      if (!dependencies.requestKey) throw new Error('app.generate-image requires a trusted request key.');
-      if (!dependencies.conversationService || !dependencies.currentConversationKey) throw new Error('app.generate-image requires a conversation.');
-      return dependencies.conversationService.enqueueImageTurn({ ...(rawInput as object), conversationKey: dependencies.currentConversationKey, requestKey: dependencies.requestKey }, dependencies.contentContext, dependencies.currentStagedImageArtifactKeys ?? []);
-    }
     const agentDefinition = agentToolDefinitionsByName.get(toolName);
     if (agentDefinition) return agentDefinition.execute(rawInput, { context: dependencies.contentContext, conversations: dependencies.conversationService, currentConversationKey: dependencies.currentConversationKey, requestKey: dependencies.requestKey, agentDependencies: dependencies.agentDependencies, currentUserMessageContent: dependencies.currentUserMessageContent, recentConversationContext: dependencies.recentConversationContext, onEvidence: dependencies.onEvidence, signal: dependencies.signal });
     const conversationDefinition = conversationToolDefinitionsByName.get(toolName);
-    if (conversationDefinition) return conversationDefinition.execute(rawInput, { context: dependencies.contentContext, conversations: dependencies.conversationService, requestKey: dependencies.requestKey, currentConversationKey: dependencies.currentConversationKey, currentReferenceImageKeys: dependencies.currentReferenceImageKeys });
+    if (conversationDefinition) return conversationDefinition.execute(rawInput, { context: dependencies.contentContext, conversations: dependencies.conversationService, requestKey: dependencies.requestKey, currentConversationKey: dependencies.currentConversationKey });
     const workspaceDefinition = workspaceToolDefinitionsByName.get(toolName);
     if (workspaceDefinition) return workspaceDefinition.execute(rawInput, { context: dependencies.contentContext, requestKey: dependencies.requestKey, executeContent: dependencies.executeWorkspaceContent, signal: dependencies.signal, timeoutMs: dependencies.timeoutMs });
     const definition = publicToolDefinitionsByName.get(toolName)!;
@@ -83,7 +73,6 @@ export async function runTool(name: string, _skill: string, rawInput: unknown, d
       signal: dependencies.signal,
       timeoutMs: dependencies.timeoutMs,
       onGreetingDelta: dependencies.onGreetingDelta,
-      onGuideTopic: dependencies.onGuideTopic,
       executeContent: dependencies.executeWorkspaceContent,
     });
   }, { recorder: dependencies.recordEvent, appScopeKey: dependencies.appScopeKey, idempotencyKey: dependencies.requestKey, input: rawInput, ...dependencies.billing });

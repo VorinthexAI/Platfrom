@@ -1,0 +1,17 @@
+export const CORE_PLACEHOLDER_PROMPTS = [
+  "Find a file I saved",
+  "Summarize what is in this folder",
+  "What images did I upload?",
+  "Which PDF mentions invoices?",
+  "How much storage do my videos use?",
+  "List everything in this folder",
+  "What is this document about?",
+  "Find my latest recording",
+  "Show my favorite files",
+  "Compare these two documents",
+  "What audio files are here?",
+  "Find notes about the trip",
+  "What did I save last week?",
+  "Open the newest PDF",
+  "Explain the files I tagged",
+] as const;

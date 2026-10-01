@@ -13,7 +13,6 @@ export const avatarUploadSchema = z.strictObject({
 export const profileBadgeCandidateSchema = z.strictObject({ candidateKey: z.string().min(1), avatarUrl: z.string().url(), expiresAt: z.string().datetime() });
 export type ProfileBadgeCandidate = z.infer<typeof profileBadgeCandidateSchema>;
 export const ticketSchema = z.strictObject({
-  teamKey: z.string().trim().min(1),
   scopeKey: z.string().trim().min(1),
   message: z.string().trim().min(1).max(8_000),
   kind: z.enum(["issue", "feedback"]).optional(),
@@ -81,15 +80,14 @@ export function uploadProfileAvatar(rawFile: z.input<typeof avatarUploadSchema>)
   });
 }
 
-export async function generateProfileBadge(teamKey: string, scopeKey: string, idempotencyKey: string) {
-  const response = await apiClient.post("/auth/me/profile/badge-candidates", { teamKey: z.string().min(1).parse(teamKey), scopeKey: z.string().min(1).parse(scopeKey) }, { headers: { "Idempotency-Key": z.string().min(1).max(200).parse(idempotencyKey) }, timeout: 4 * 60_000 });
+export async function generateProfileBadge(scopeKey: string, idempotencyKey: string) {
+  const response = await apiClient.post("/auth/me/profile/badge-candidates", { scopeKey: z.string().min(1).parse(scopeKey) }, { headers: { "Idempotency-Key": z.string().min(1).max(200).parse(idempotencyKey) }, timeout: 4 * 60_000 });
   return profileBadgeCandidateSchema.parse(responseData(response.data));
 }
 
-export function claimProfileBadge(teamKey: string, scopeKey: string, candidateKey: string) {
+export function claimProfileBadge(scopeKey: string, candidateKey: string) {
   return serializeMutation("avatar", async () => {
     const response = await apiClient.post("/auth/me/profile/badge-candidates/claim", {
-      teamKey: z.string().min(1).parse(teamKey),
       scopeKey: z.string().min(1).parse(scopeKey),
       candidateKey: z.string().min(1).parse(candidateKey),
     });

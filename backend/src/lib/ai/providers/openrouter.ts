@@ -1,8 +1,11 @@
 import { z } from 'zod';
-import { speechInputSchema, speechOutputSchema, type SpeechInput, type SpeechOutput } from '@/lib/ai/actions/speech';
+import { speechInputSchema, speechOutputSchema, type SpeechOutput } from '@/lib/ai/actions/speech';
+import { videoInputSchema, videoOutputSchema, type VideoOutput } from '@/lib/ai/actions/video';
 import { decisionInputSchema, decisionOutputSchema } from '@/lib/ai/actions/decide';
+import { mediaDescriptionInputSchema, mediaDescriptionOutputSchema, type MediaDescriptionInput, type MediaDescriptionOutput } from '@/lib/ai/actions/text';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { tokenUsage } from '@/lib/ai/shared/usage';
+import { redisConnection } from '@/lib/redis';
 import { normalizeProviderError, ProviderError, providerErrorCodeForStatus } from './errors';
 import {
   chatInputSchema,
@@ -171,6 +174,7 @@ function chatBody(chat: ChatInput, model: string, capabilities?: ProviderExecuti
     ...(chat.responseFormat ? { response_format: { type: 'json_schema', json_schema: { name: chat.responseFormat.name, strict: true, schema: chat.responseFormat.schema } } } : {}),
     ...(chat.options?.temperature !== undefined ? { temperature: chat.options.temperature } : {}),
     ...(chat.options?.maxTokens !== undefined ? { max_tokens: chat.options.maxTokens } : {}),
+    ...(model === 'openai/gpt-6-luna' ? { reasoning: { enabled: true } } : {}),
     ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}),
   };
 }
@@ -277,6 +281,46 @@ async function captionImages<TOutput>(fetcher: typeof fetch, config: z.output<ty
   return executeStructuredImage(fetcher, config, request, content, 'image_captions', schema, (raw) => imageCaptionOutputSchema.parse(raw) as TOutput & ImageCaptionOutput);
 }
 
+async function inlineSignedMedia(fetcher: typeof fetch, url: string, request: ProviderExecuteRequest, maxBytes: number) {
+  const response = await fetcher(url, { signal: resolveRequestSignal(request) });
+  if (!response.ok || !response.body) throw new ProviderError(PROVIDER_ID, 'invalid_input', `Private media could not be read (${response.status}).`);
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) throw new ProviderError(PROVIDER_ID, 'invalid_input', 'Media is too large for analysis.');
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  return Buffer.concat(chunks).toString('base64');
+}
+
+async function describeMedia<TOutput>(fetcher: typeof fetch, config: z.output<typeof openRouterProviderConfigSchema>, request: ProviderExecuteRequest): Promise<ProviderExecuteResponse<TOutput>> {
+  const value: MediaDescriptionInput = mediaDescriptionInputSchema.parse(request.input);
+  const media = value.media;
+  const prompt = media.kind === 'audio'
+    ? 'Listen to the entire supplied audio. Write a factual searchable caption describing audible subjects and events, and include distinctive spoken words or topics when present. Do not infer anything not audible.'
+    : media.kind === 'video'
+      ? 'Watch the supplied video. Write a factual searchable caption describing visible subjects, actions, settings, scene changes, and audible speech or sounds. Do not infer anything not present.'
+      : 'Write a rich factual searchable caption describing the visible subjects, actions, setting, composition, and readable text. Do not infer anything not visible.';
+  const content: unknown[] = [{ type: 'text', text: prompt + ' Respond with only JSON in the shape {"caption":"description"}.' }];
+  if (media.kind === 'image') {
+    const url = process.env.NODE_ENV === 'production' ? media.url : `data:${media.mimeType};base64,${await inlineSignedMedia(fetcher, media.url, request, 20 * 1024 * 1024)}`;
+    content.push({ type: 'image_url', image_url: { url } });
+  } else {
+    const data = await inlineSignedMedia(fetcher, media.url, request, 64 * 1024 * 1024);
+    content.push(media.kind === 'video'
+      ? { type: 'video_url', video_url: { url: `data:${media.mimeType};base64,${data}` } }
+      : { type: 'input_audio', input_audio: { data, format: 'mp3' } });
+  }
+  const schema = { type: 'object', additionalProperties: false, required: ['caption'], properties: { caption: { type: 'string' } } };
+  return executeStructuredImage(fetcher, config, request, content, 'media_description', schema, (raw) => mediaDescriptionOutputSchema.parse(raw) as TOutput & MediaDescriptionOutput);
+}
+
 async function describeVisualIdentity<TOutput>(fetcher: typeof fetch, config: z.output<typeof openRouterProviderConfigSchema>, request: ProviderExecuteRequest): Promise<ProviderExecuteResponse<TOutput>> {
   const value = visualIdentityDescriptionInputSchema.parse(request.input);
   const content: unknown[] = [{ type: 'text', text: 'The reference images show the same specific visual subject. Write one exhaustive factual recognition profile covering stable visible identifiers and distinguishing this exact subject from similar subjects. Exclude temporary context and unsupported guesses. Respond with only valid JSON in exactly this shape: {"description":"recognition profile"}. Do not include Markdown or explanatory text.' }];
@@ -285,7 +329,6 @@ async function describeVisualIdentity<TOutput>(fetcher: typeof fetch, config: z.
   return executeStructuredImage(fetcher, config, request, content, 'visual_identity', schema, (raw) => visualIdentityDescriptionOutputSchema.parse(raw) as TOutput & VisualIdentityDescriptionOutput);
 }
 
-const voiceIds: Record<SpeechInput['voice'], string> = { alloy: 'ara', coral: 'eve', nova: 'leo', sage: 'sal' };
 export function splitOpenRouterSpeechText(text: string): string[] {
   const chunks: string[] = [];
   let chunk = '';
@@ -329,15 +372,66 @@ export function extractOpenRouterMp3Frames(audio: Uint8Array) {
 }
 async function generateSpeech<TInput, TOutput>(fetcher: typeof fetch, config: z.output<typeof openRouterProviderConfigSchema>, request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
   const value = input(speechInputSchema, request.input, 'speech');
-  const chunks = splitOpenRouterSpeechText(value.text); const audio: Uint8Array[] = []; let durationSeconds = 0;
+  const chunks = [value.text]; const audio: Uint8Array[] = []; let durationSeconds = 0;
   for (const text of chunks) {
-    const result = await post(fetcher, config, '/audio/speech', { model: request.externalModelId, input: text, voice: voiceIds[value.voice], response_format: 'mp3' }, request, 'speech request');
+    const result = await post(fetcher, config, '/audio/speech', { model: request.externalModelId, input: text, voice: value.voice, response_format: 'mp3' }, request, 'speech request');
     if (!(result.headers.get('content-type') ?? '').toLowerCase().startsWith('audio/mpeg')) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter returned non-MP3 speech audio');
     const parsed = extractOpenRouterMp3Frames(new Uint8Array(await result.arrayBuffer()));
     audio.push(parsed.bytes); durationSeconds += parsed.durationSeconds;
   }
   const output: SpeechOutput = speechOutputSchema.parse({ base64: Buffer.concat(audio).toString('base64'), mimeType: 'audio/mpeg', durationSeconds: Math.max(1, Math.ceil(durationSeconds)) });
   return { output: output as TOutput, usage: tokenUsage(0, output.durationSeconds, output.durationSeconds), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: { chunks: chunks.length } };
+}
+
+const videoJobSchema = z.object({ id: z.string().min(1).max(255), status: z.enum(['pending', 'in_progress', 'completed', 'failed', 'cancelled', 'expired']), usage: z.object({ cost: z.number().nonnegative().optional() }).passthrough().optional() }).passthrough();
+async function generateVideo<TInput, TOutput>(fetcher: typeof fetch, config: z.output<typeof openRouterProviderConfigSchema>, request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
+  const value = input(videoInputSchema, request.input, 'video');
+  const redisKey = value.jobKey ? `video-provider-job:${value.jobKey}` : undefined;
+  let savedId = redisKey ? await redisConnection.get(redisKey) : null;
+  if (savedId === 'submitting') {
+    for (let attempt = 0; attempt < 30 && savedId === 'submitting'; attempt += 1) {
+      await Bun.sleep(1_000);
+      savedId = await redisConnection.get(redisKey!);
+    }
+    if (!savedId || savedId === 'submitting') throw new ProviderError(PROVIDER_ID, 'response_invalid', 'The video submission is still in progress.');
+  }
+  if (!savedId && redisKey) {
+    const claimed = await redisConnection.set(redisKey, 'submitting', 'EX', 900, 'NX');
+    if (!claimed) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'The video submission is already in progress.');
+  }
+  let job: z.infer<typeof videoJobSchema>;
+  if (savedId) {
+    job = { id: savedId, status: 'pending' };
+  } else {
+    try {
+      const submitted = await post(fetcher, config, '/videos', {
+        model: request.externalModelId, prompt: value.prompt, duration: value.durationSeconds, aspect_ratio: value.aspectRatio, resolution: '480p',
+        ...(value.startFrame ? { frame_images: [{ type: 'image_url', image_url: { url: value.startFrame }, frame_type: 'first_frame' }] } : {}),
+      }, request, 'video request');
+      job = response(videoJobSchema, await submitted.json().catch(() => undefined), 'video job');
+      if (redisKey) await redisConnection.set(redisKey, job.id, 'EX', 7 * 24 * 60 * 60);
+    } catch (error) {
+      if (redisKey) await redisConnection.del(redisKey);
+      throw error;
+    }
+  }
+  const endpoint = `${baseUrl(config.baseUrl)}/videos/${encodeURIComponent(job.id)}`;
+  for (let attempt = 0; attempt < 120 && (job.status === 'pending' || job.status === 'in_progress'); attempt += 1) {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, 5_000);
+      request.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(request.signal!.reason); }, { once: true });
+    });
+    const polled = await fetcher(endpoint, { headers: headers(config), signal: resolveRequestSignal(request) });
+    if (!polled.ok) throw await openRouterHttpError(polled, 'video status', config.apiKey);
+    job = response(videoJobSchema, await polled.json().catch(() => undefined), 'video status');
+  }
+  if (job.status !== 'completed') throw new ProviderError(PROVIDER_ID, 'response_invalid', `Video generation ended in ${job.status}.`);
+  const content = await fetcher(`${endpoint}/content`, { headers: headers(config), signal: resolveRequestSignal(request) });
+  if (!content.ok) throw await openRouterHttpError(content, 'video content', config.apiKey);
+  const bytes = new Uint8Array(await content.arrayBuffer());
+  if (bytes.length < 12 || String.fromCharCode(...bytes.slice(4, 8)) !== 'ftyp') throw new ProviderError(PROVIDER_ID, 'response_invalid', 'Video output is not an MP4.');
+  const output: VideoOutput = videoOutputSchema.parse({ bytes, mimeType: 'video/mp4', durationSeconds: value.durationSeconds });
+  return { output: output as TOutput, usage: tokenUsage(0, 0, 0), ...(job.usage?.cost !== undefined ? { costUsd: job.usage.cost } : {}), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: { jobId: job.id } };
 }
 
 async function* streamChat<TInput>(fetcher: typeof fetch, config: z.output<typeof openRouterProviderConfigSchema>, request: ProviderExecuteRequest<TInput>): AsyncIterable<ProviderStreamChunk> {
@@ -410,16 +504,20 @@ export function createOpenRouterProvider(config: OpenRouterProviderConfig, fetch
           const details = raw as { usage?: { input_tokens?: number; output_tokens?: number; cost?: number } };
           return { output: output as TOutput, usage: tokenUsage(details.usage?.input_tokens, details.usage?.output_tokens), ...(details.usage?.cost !== undefined ? { costUsd: details.usage.cost } : {}), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: raw };
         }
-        if (request.actionId === 'text') return await executeChat<TInput, TOutput>(fetcher, parsed, request);
+        if (request.actionId === 'text') {
+          if (typeof request.input === 'object' && request.input !== null && 'operation' in request.input && request.input.operation === 'describe-media') return await describeMedia<TOutput>(fetcher, parsed, request);
+          return await executeChat<TInput, TOutput>(fetcher, parsed, request);
+        }
         if (request.actionId === 'image') {
           const imageInput = imageActionInputSchema.parse(request.input);
           const { operation, ...operationInput } = imageInput;
           const operationRequest = { ...request, input: operationInput };
           if (operation === 'generate') return await generateImage<typeof operationInput, TOutput>(fetcher, parsed, operationRequest);
-          if (operation === 'caption') return await captionImages<TOutput>(fetcher, parsed, operationRequest);
-          return await describeVisualIdentity<TOutput>(fetcher, parsed, operationRequest);
+           if (operation === 'caption') return await captionImages<TOutput>(fetcher, parsed, operationRequest);
+           return await describeVisualIdentity<TOutput>(fetcher, parsed, operationRequest);
         }
         if (request.actionId === 'speech') return await generateSpeech<TInput, TOutput>(fetcher, parsed, request);
+        if (request.actionId === 'video') return await generateVideo<TInput, TOutput>(fetcher, parsed, request);
         if (request.actionId === 'embed') {
           const value = input(embeddingInputSchema, request.input, 'embedding');
           const texts = value.chunking?.enabled ? chunkText(value.text, value.chunking.maxCharacters ?? 8_000, value.chunking.overlapCharacters ?? 400) : [value.text];

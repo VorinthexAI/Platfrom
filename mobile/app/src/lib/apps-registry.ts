@@ -65,16 +65,40 @@ export function configureAppsBootstrapIdentityHeaders(provider: RequestIdentityH
   requestIdentityHeaders = provider;
 }
 
+export const agentsRegistryResponseSchema = z.strictObject({
+  agents: z.array(serverAppSchema),
+}).superRefine(({ agents }, context) => {
+  const keys = new Set<string>();
+  const slugs = new Set<string>();
+  for (const agent of agents) {
+    if (keys.has(agent.key)) context.addIssue({ code: "custom", message: `Duplicate agent key: ${agent.key}`, path: ["agents"] });
+    if (slugs.has(agent.slug)) context.addIssue({ code: "custom", message: `Duplicate agent slug: ${agent.slug}`, path: ["agents"] });
+    keys.add(agent.key);
+    slugs.add(agent.slug);
+  }
+  for (const slug of CANONICAL_APP_SLUGS) {
+    if (!slugs.has(slug)) context.addIssue({ code: "custom", message: `Missing canonical agent: ${slug}`, path: ["agents"] });
+  }
+});
+
+export function parseAgentsRegistry(input: unknown): ServerApp[] {
+  return agentsRegistryResponseSchema.parse(input).agents;
+}
+
 export async function fetchAppsRegistry(): Promise<ServerApp[]> {
+  return fetchAgentsRegistry();
+}
+
+export async function fetchAgentsRegistry(): Promise<ServerApp[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
-    const response = await fetch(`${API_BASE_URL.replace(/\/$/, "")}/api/v1/apps`, {
+    const response = await fetch(`${API_BASE_URL.replace(/\/$/, "")}/api/v1/agents`, {
       headers: await appsBootstrapHeaders(),
       signal: controller.signal,
     });
-    if (!response.ok) throw new Error(`App registry request failed with status ${response.status}.`);
-    return parseAppsRegistry(await response.json());
+    if (!response.ok) throw new Error(`Agent registry request failed with status ${response.status}.`);
+    return parseAgentsRegistry(await response.json());
   } finally {
     clearTimeout(timeout);
   }

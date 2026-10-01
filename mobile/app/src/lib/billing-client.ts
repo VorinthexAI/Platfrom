@@ -106,7 +106,6 @@ export async function scheduleSubscriptionProduct(productId: string): Promise<Cu
   return subscription;
 }
 
-export const IMAGE_GENERATE_MICRO_SPARKS = 10_000_000;
 
 export async function ensureSparkCapacity(requiredMicroSparks = 1) {
   try {

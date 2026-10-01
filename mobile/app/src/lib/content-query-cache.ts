@@ -10,7 +10,7 @@ import {
   type ContentFolder,
 } from "./content-client";
 
-export type ContentLocation = { folders: ContentFolder[]; files: ContentFile[]; folderCursor?: string; fileCursor?: string };
+export type ContentLocation = { folders: ContentFolder[]; files: ContentFile[]; folderCursor?: string; fileCursor?: string; folderDone?: boolean; fileDone?: boolean };
 
 const contextKey = (context: ContentContext) => [context.userKey ?? "", context.scopeKey] as const;
 
@@ -21,22 +21,60 @@ export const contentQueryKeys = {
   file: (context: ContentContext, fileKey: string) => [...contentQueryKeys.all(context), "files", fileKey] as const,
 };
 
-export function contentFolderChildren(tree: readonly ContentFolder[], parentFolderKey?: string) {
-  return tree.filter((folder) => folder.parentFolderKey === parentFolderKey)
-    .sort((left, right) => left.name.localeCompare(right.name));
+export const STORAGE_PAGE_SIZE = 25;
+
+export function hasMoreContentLocationPages(location?: ContentLocation) {
+  return Boolean(location && (location.folderDone === false || location.fileDone === false));
 }
 
-export function contentFolderStack(tree: readonly ContentFolder[], folderKey?: string) {
-  const byKey = new Map(tree.map((folder) => [folder.key, folder]));
-  const stack: ContentFolder[] = [];
-  const visited = new Set<string>();
-  let current = folderKey ? byKey.get(folderKey) : undefined;
-  while (current && !visited.has(current.key)) {
-    visited.add(current.key);
-    stack.unshift(current);
-    current = current.parentFolderKey ? byKey.get(current.parentFolderKey) : undefined;
-  }
-  return stack;
+export async function loadContentLocationPage(context: ContentContext, folderKey: string | undefined, filters: { favoritesOnly?: boolean; includeHidden?: boolean }, extensions: readonly string[], previous?: ContentLocation, signal?: AbortSignal): Promise<ContentLocation> {
+  const folderPage = previous?.folderDone ? undefined : await listContentFolderPage(folderKey, signal, context, previous?.folderCursor, STORAGE_PAGE_SIZE, filters);
+  const folders = folderPage?.folders ?? [];
+  const remaining = STORAGE_PAGE_SIZE - folders.length;
+  const filePage = remaining > 0 && previous?.fileDone !== true
+    ? await listContentFilePage(folderKey, signal, context, previous?.fileCursor, remaining, extensions, filters)
+    : undefined;
+  return {
+    folders: appendCursorItems(previous?.folders ?? [], folders, ({ key }) => key),
+    files: appendCursorItems(previous?.files ?? [], filePage?.files ?? [], ({ key }) => key),
+    folderCursor: folderPage?.cursor,
+    fileCursor: filePage ? filePage.cursor : previous?.fileCursor,
+    folderDone: folderPage ? !folderPage.cursor : previous?.folderDone ?? false,
+    fileDone: filePage ? !filePage.cursor : previous?.fileDone ?? false,
+  };
+}
+
+export function contentLocationQueryOptions(context: ContentContext, folderKey?: string, filters: { favoritesOnly?: boolean; includeHidden?: boolean } = {}, options: { allFiles?: boolean; paged?: boolean; extensions?: readonly string[] } = {}) {
+  return {
+    queryKey: [...contentQueryKeys.location(context, folderKey), ...(options.paged ? ["paged", options.extensions?.join(",") ?? ""] : []), Boolean(filters.favoritesOnly), Boolean(filters.includeHidden), ...(options.allFiles ? ["all-files"] : [])] as const,
+    queryFn: async ({ signal }: { signal: AbortSignal }): Promise<ContentLocation> => {
+      if (options.paged) return loadContentLocationPage(context, folderKey, filters, options.extensions ?? [], undefined, signal);
+      const [folders, filePage] = await Promise.all([
+        (async () => {
+          const results: ContentFolder[] = [];
+          let cursor: string | undefined;
+          do {
+            const page = await listContentFolderPage(folderKey, signal, context, cursor, 100, filters);
+            results.push(...page.folders);
+            cursor = page.cursor;
+          } while (cursor);
+          return results;
+        })(),
+        (async () => {
+          if (!options.allFiles) return listContentFilePage(folderKey, signal, context, undefined, FILE_LOCATION_PAGE_SIZE, undefined, filters);
+          const files: ContentFile[] = [];
+          let cursor: string | undefined;
+          do {
+            const page = await listContentFilePage(folderKey, signal, context, cursor, 100, undefined, filters);
+            files.push(...page.files);
+            cursor = page.cursor;
+          } while (cursor);
+          return { files };
+        })(),
+      ]);
+      return { folders, files: filePage.files, fileCursor: filePage.cursor };
+    },
+  };
 }
 
 export function getContentLocation(queryClient: QueryClient, context: ContentContext, folderKey?: string) {
@@ -81,10 +119,14 @@ export function addCachedContentFile(queryClient: QueryClient, context: ContentC
 }
 
 export function addCachedContentFolder(queryClient: QueryClient, context: ContentContext, parentFolderKey: string | undefined, folder: ContentFolder) {
-  queryClient.setQueryData<ContentLocation>(contentQueryKeys.location(context, parentFolderKey), (location) => location ? {
-    ...location,
-    folders: [...location.folders.filter((current) => current.key !== folder.key), folder].sort((left, right) => left.name.localeCompare(right.name)),
-  } : location);
+  for (const [key, location] of queryClient.getQueriesData<ContentLocation>({ queryKey: contentQueryKeys.location(context, parentFolderKey) })) {
+    if (!location) continue;
+    const favoritesOnly = typeof key.at(-2) === "boolean" && key.at(-2) === true;
+    queryClient.setQueryData<ContentLocation>(key, {
+      ...location,
+      folders: [...location.folders.filter((current) => current.key !== folder.key), ...(!favoritesOnly || folder.isFavorite ? [folder] : [])].sort((left, right) => left.name.localeCompare(right.name)),
+    });
+  }
 }
 
 export function replaceCachedContentFile(queryClient: QueryClient, context: ContentContext, updated: ContentFile) {

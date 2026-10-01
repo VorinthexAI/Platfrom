@@ -17,14 +17,14 @@ export type ScopeTagAssignmentQuery = { tagKeys?: string[]; tagMatch: ScopeTagMa
 export type ScopeTagTargetAssignmentState = { target: ScopeTagTarget; tagKeys: string[] };
 
 export const SCOPE_TAG_TARGETS = {
-  folder: 'folders', document: 'documents', 'image-collection': 'collections', image: 'images',
+  folder: 'folders', file: 'files', document: 'documents', 'image-collection': 'collections', image: 'images',
   'image-highlight': 'imageCollecitionHightlights', 'image-memory': 'imageCollectionMemories',
   place: 'places', trip: 'trips', 'email-inbox': 'emailInboxes', 'email-tone': 'emailTones',
   'email-thread': 'emailThreads', 'email-message': 'emailMessages', 'email-draft': 'emailDrafts', book: 'books',
 } as const satisfies Record<TagAssignment['sourceType'], string>;
 
 export const SCOPE_TAG_TARGET_ADAPTERS = {
-  folder: { collection: 'folders', label: 'name' }, document: { collection: 'documents', label: 'name' },
+  folder: { collection: 'folders', label: 'name' }, file: { collection: 'files', label: 'name' }, document: { collection: 'documents', label: 'name' },
   'image-collection': { collection: 'collections', label: 'name' }, image: { collection: 'images', label: 'caption or filename' },
   'image-highlight': { collection: 'imageCollecitionHightlights', label: 'collection name' }, 'image-memory': { collection: 'imageCollectionMemories', label: 'memory text or image caption' },
   place: { collection: 'places', label: 'name' }, trip: { collection: 'trips', label: 'name' },
@@ -34,7 +34,7 @@ export const SCOPE_TAG_TARGET_ADAPTERS = {
 } as const satisfies Record<TagAssignment['sourceType'], { collection: string; label: string }>;
 
 const SCOPE_TAG_TARGET_LABEL_EXPRESSIONS = {
-  folder: 'target.name', document: 'target.name', 'image-collection': 'target.name',
+  folder: 'target.name', file: 'target.name', document: 'target.name', 'image-collection': 'target.name',
   image: '(LENGTH(TRIM(target.caption || "")) > 0 ? target.caption : target.filename)',
   'image-highlight': 'directCollection.name',
   'image-memory': '(LENGTH(TRIM(target.text || "")) > 0 ? target.text : (LENGTH(TRIM(image.caption || "")) > 0 ? image.caption : image.filename))',

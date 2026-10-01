@@ -41,8 +41,10 @@ export type CoreComposerProps = {
   focusRequest?: number;
   focusOnOpenRequest?: boolean;
   expandedLeading?: ReactNode;
+  expandedLeadingAccessory?: ReactNode;
   expandedLeadingAccessibilityLabel?: string;
   expandedLeadingDisabled?: boolean;
+  expandedToolbar?: ReactNode;
   expandedFooter?: ReactNode;
   leading: ReactNode;
   leadingAccessibilityLabel?: string;
@@ -53,6 +55,7 @@ export type CoreComposerProps = {
   onChangeText: (value: string) => void;
   onFocusChange?: (focused: boolean) => void;
   onExpandedLeadingPress?: () => void;
+  onExpandedKeyboardVisibilityChange?: (visible: boolean) => void;
   onLeadingPress?: () => void;
   onSubmit: () => void;
   openEnabled?: boolean;
@@ -249,8 +252,10 @@ export function CoreComposer({
   focusRequest = 0,
   focusOnOpenRequest = true,
   expandedLeading,
+  expandedLeadingAccessory,
   expandedLeadingAccessibilityLabel,
   expandedLeadingDisabled,
+  expandedToolbar,
   expandedFooter,
   leading,
   leadingAccessibilityLabel,
@@ -261,6 +266,7 @@ export function CoreComposer({
   onChangeText,
   onFocusChange,
   onExpandedLeadingPress,
+  onExpandedKeyboardVisibilityChange,
   onLeadingPress,
   onSubmit,
   openEnabled = true,
@@ -286,11 +292,22 @@ export function CoreComposer({
   const handledFocusRequestRef = useRef(0);
   const handledOpenRequestRef = useRef(0);
   const onFocusChangeRef = useRef(onFocusChange);
+  const onExpandedKeyboardVisibilityChangeRef = useRef(onExpandedKeyboardVisibilityChange);
   const pageWasOpenRef = useRef(false);
   const valueRef = useRef(value);
   onFocusChangeRef.current = onFocusChange;
+  onExpandedKeyboardVisibilityChangeRef.current = onExpandedKeyboardVisibilityChange;
   valueRef.current = value;
   const showPrompt = value.length === 0;
+
+  useEffect(() => {
+    if (!pageOpen) return;
+    const hidden = Keyboard.addListener("keyboardDidHide", () => onExpandedKeyboardVisibilityChangeRef.current?.(false));
+    const shown = Keyboard.addListener("keyboardDidShow", () => {
+      if (inputRef.current?.isFocused()) onExpandedKeyboardVisibilityChangeRef.current?.(true);
+    });
+    return () => { hidden.remove(); shown.remove(); };
+  }, [pageOpen]);
 
   const finishClose = useCallback(() => {
     if (!closingRef.current) return;
@@ -408,30 +425,7 @@ export function CoreComposer({
   const composer = (expanded: boolean) => {
     const multiline = expanded && inputHeight > COLLAPSED_INPUT_HEIGHT;
     const inputValue = expanded ? value : (value.split(/\r?\n/)[0] ?? "");
-    const activeLeading = expanded && expandedLeading !== undefined ? expandedLeading : leading;
-    const activeLeadingPress = expanded ? onExpandedLeadingPress : onLeadingPress;
-    const activeLeadingLabel = expanded ? expandedLeadingAccessibilityLabel : leadingAccessibilityLabel;
-    const activeLeadingDisabled = expanded ? expandedLeadingDisabled : leadingDisabled;
-    return <>
-      {expanded && expandedAccessory ? <View style={styles.expandedAccessory}>{expandedAccessory}</View> : null}
-      <View style={expanded && expandedFooter ? styles.expandedComposer : undefined}>
-      <View style={[styles.composer, multiline && styles.composerOpen]}>
-    {activeLeadingPress ? (
-      <Button
-        accessibilityLabel={activeLeadingLabel ?? "Core actions"}
-        contentMode="raw"
-        disabled={activeLeadingDisabled}
-        onPress={activeLeadingPress}
-        size="sm"
-        style={multiline ? styles.leadingTop : undefined}
-        variant="icon"
-      >
-        {activeLeading}
-      </Button>
-    ) : (
-      <View style={[styles.leading, multiline && styles.leadingTop]}>{activeLeading}</View>
-    )}
-    <View style={[styles.inputArea, { height: expanded ? inputHeight : COLLAPSED_INPUT_HEIGHT }]}>
+    const input = <View style={[styles.inputArea, { height: expanded ? inputHeight : COLLAPSED_INPUT_HEIGHT }]}>
       {expanded && value.length > 0 ? <Text
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
@@ -469,7 +463,7 @@ export function CoreComposer({
           onChangeText(nextValue);
         }}
         onFocus={() => {
-          if (expanded) return;
+          if (expanded) { onExpandedKeyboardVisibilityChange?.(true); return; }
           if (intentionalFocus.current) {
             intentionalFocus.current = false;
             openPage();
@@ -478,32 +472,40 @@ export function CoreComposer({
           inputRef.current?.blur();
           Keyboard.dismiss();
         }}
+        onBlur={() => { if (expanded) onExpandedKeyboardVisibilityChange?.(false); }}
         onPressIn={() => { if (!expanded) intentionalFocus.current = true; }}
         onSubmitEditing={submit}
         placeholder=""
         ref={inputRef}
-        returnKeyType={expanded ? "default" : "send"}
+        returnKeyType={expanded ? "default" : "done"}
         scrollEnabled={expanded && inputLineCount > 6}
         showSoftInputOnFocus={expanded}
         style={[styles.input, !multiline && styles.inputSingleLine]}
         textAlignVertical={multiline ? "top" : "center"}
         value={inputValue}
       />
-    </View>
-    <Button
-      accessibilityLabel="Send to Core"
-      contentMode="raw"
-      disabled={disabled || !openEnabled || !value.trim()}
-      loading={loading}
-      onPress={submit}
-      size="sm"
-      style={multiline ? styles.sendBottom : undefined}
-      variant="primary"
-    >
-      {sendIcon}
-    </Button>
-      </View>
-      {expanded ? expandedFooter : null}
+    </View>;
+    const logo = onLeadingPress && !expanded ? (
+      <Button accessibilityLabel={leadingAccessibilityLabel ?? "Core"} contentMode="raw" disabled={leadingDisabled} onPress={onLeadingPress} size="sm" variant="icon">{leading}</Button>
+    ) : (
+      <View style={styles.leading}>{leading}</View>
+    );
+    const send = <Button accessibilityLabel="Send to Core" contentMode="raw" disabled={disabled || !openEnabled || !value.trim()} loading={loading} onPress={submit} size="sm" variant="primary">{sendIcon}</Button>;
+    const plus = expandedLeading !== undefined ? (
+      onExpandedLeadingPress ? (
+        <Button accessibilityLabel={expandedLeadingAccessibilityLabel ?? "Core actions"} contentMode="raw" disabled={expandedLeadingDisabled} onPress={onExpandedLeadingPress} size="sm" variant="icon">{expandedLeading}</Button>
+      ) : (
+        <View style={styles.leading}>{expandedLeading}</View>
+      )
+    ) : <View style={styles.leading} />;
+    return <>
+      {expanded && expandedAccessory ? <View style={styles.expandedAccessory}>{expandedAccessory}</View> : null}
+      <View style={expanded ? styles.expandedComposer : undefined}>
+        <View style={[styles.composer, expanded && styles.composerOpen]}>
+          <View style={styles.composerRow}>{logo}{input}</View>
+          {expanded ? <View style={styles.composerToolbar}>{plus}{expandedLeadingAccessory}<View style={styles.composerToolbarSpacer} />{expandedToolbar}{send}</View> : null}
+        </View>
+        {expanded ? expandedFooter : null}
       </View>
     </>;
   };
@@ -580,14 +582,12 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   composer: {
-    alignItems: "center",
     backgroundColor: colors.page,
     borderColor: colors.border,
     borderRadius: 999,
     borderWidth: 1,
     elevation: 10,
-    flexDirection: "row",
-    gap: 7,
+    gap: 4,
     minHeight: 58,
     padding: 7,
     shadowColor: colors.page,
@@ -599,14 +599,25 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     shadowOpacity: 0.7,
   },
+  composerRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 7,
+    minHeight: 44,
+  },
+  composerToolbar: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 7,
+    minHeight: 34,
+  },
+  composerToolbarSpacer: { flex: 1, minWidth: 8 },
   leading: {
     alignItems: "center",
     height: 34,
     justifyContent: "center",
     width: 34,
   },
-  leadingTop: { alignSelf: "flex-start" },
-  sendBottom: { alignSelf: "flex-end" },
   inputArea: {
     flex: 1,
     justifyContent: "center",

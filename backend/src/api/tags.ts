@@ -16,7 +16,7 @@ import { getAuthIdentity } from './security';
 import { authenticatedTeamContext, type AuthIdentity } from './auth';
 import { parseJson, parseQuery } from './validation';
 
-const selector = { teamKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid() };
+const selector = { scopeKey: z.string().cuid() };
 const listSchema = z.object({ ...selector, ...scopeTagListInputShape }).strict().refine(scopeTagListInputIsUnambiguous, { message: 'Choose target or targets, not both.', path: ['targets'] });
 const createSchema = z.object({ ...selector, ...scopeTagCreateServiceInputSchema.shape }).strict();
 const updateSchema = z.object({ ...selector, name: z.unknown().optional(), description: z.unknown().optional() }).strict().refine((value) => value.name !== undefined || value.description !== undefined, 'At least one field is required.');
@@ -36,7 +36,7 @@ const pathKeySchema = z.string().cuid();
 export interface TagHandlerDependencies {
   service?: ScopeTagService;
   getIdentity?: typeof getAuthIdentity;
-  authorize?: (input: { teamKey: string; scopeKey: string }, options: Omit<RunAuthenticatedContentToolOptions, 'execute'>) => Promise<{ context: ToolContext }>;
+  authorize?: (input: { scopeKey: string }, options: Omit<RunAuthenticatedContentToolOptions, 'execute'>) => Promise<{ context: ToolContext }>;
   authorizationOptions?: Omit<RunAuthenticatedContentToolOptions, 'authenticatedUserKey' | 'execute'>;
 }
 
@@ -60,17 +60,17 @@ export function createTagHandlers(dependencies: TagHandlerDependencies = {}) {
       return c.json({ success: false, error: { code: 'TAG_FAILED', message: 'Tag request failed.' } }, 500);
     }
   };
-  const authorized = async (body: { teamKey: string; scopeKey: string }, identity: AuthIdentity) => (dependencies.authorize ?? authorizeContentExecution)(body, { ...dependencies.authorizationOptions, ...authenticatedTeamContext(identity) });
+  const authorized = async (scopeKey: string, identity: AuthIdentity) => (dependencies.authorize ?? authorizeContentExecution)({ scopeKey }, { ...dependencies.authorizationOptions, ...authenticatedTeamContext(identity) });
 
   return {
-    list: run(async (c, identity) => { const { teamKey, scopeKey, ...input } = await parseJson(c, listSchema); const { context } = await authorized({ teamKey, scopeKey }, identity); return service.list(input, context); }),
-    create: run(async (c, identity) => { const { teamKey, scopeKey, ...input } = await parseJson(c, createSchema); const { context } = await authorized({ teamKey, scopeKey }, identity); return service.create(input, context); }, 201),
-    update: run(async (c, identity) => { const { teamKey, scopeKey, ...input } = await parseJson(c, updateSchema); const canonicalInput = scopeTagUpdateInputSchema.parse({ tagKey: pathKeySchema.parse(c.req.param('tagKey')), ...input }); const { context } = await authorized({ teamKey, scopeKey }, identity); return service.update(canonicalInput, context); }),
-    delete: run(async (c, identity) => { const body = await parseJson(c, deleteSchema); const { context } = await authorized(body, identity); return service.delete({ tagKey: pathKeySchema.parse(c.req.param('tagKey')) }, context); }),
+    list: run(async (c, identity) => { const { scopeKey, ...input } = await parseJson(c, listSchema); const { context } = await authorized(scopeKey, identity); return service.list(input, context); }),
+    create: run(async (c, identity) => { const { scopeKey, ...input } = await parseJson(c, createSchema); const { context } = await authorized(scopeKey, identity); return service.create(input, context); }, 201),
+    update: run(async (c, identity) => { const { scopeKey, ...input } = await parseJson(c, updateSchema); const canonicalInput = scopeTagUpdateInputSchema.parse({ tagKey: pathKeySchema.parse(c.req.param('tagKey')), ...input }); const { context } = await authorized(scopeKey, identity); return service.update(canonicalInput, context); }),
+    delete: run(async (c, identity) => { const body = await parseJson(c, deleteSchema); const { context } = await authorized(body.scopeKey, identity); return service.delete({ tagKey: pathKeySchema.parse(c.req.param('tagKey')) }, context); }),
     assignments: run(async (c, identity) => {
       const action = parseQuery(c, assignmentQuerySchema).action;
-      const { teamKey, scopeKey, targets, tagKeys } = await parseJson(c, assignmentSchema);
-      const { context } = await authorized({ teamKey, scopeKey }, identity);
+      const { scopeKey, targets, tagKeys } = await parseJson(c, assignmentSchema);
+      const { context } = await authorized(scopeKey, identity);
       const changes = targets.flatMap((target) => tagKeys.map((tagKey) => ({ tagKey, target, assigned: action === 'tag' })));
       return service.setAssignments({ changes }, context, { source: 'user' });
     }),

@@ -1,30 +1,53 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { newId } from '@/lib/ids';
-import { embedText } from '@/lib/embeddings';
 import { coreAgent, executeCoreAgent } from '@/lib/ai/agents/core';
 import { AgentStreamProtocolError, type AgentRuntimeDependencies } from '@/lib/ai/agents';
 import type { ExecuteActionOptions } from '@/lib/ai/router';
-import { runTool } from '@/lib/ai/tools';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
-import { agentGuideOutputSchema } from '@/lib/ai/tools/agent-guide';
+import { contextUserKey } from '@/lib/ai/tools/tool-context';
+import { getFileInScope, type FileExtension } from '@/lib/db/files.node';
+import { getFolderInScope } from '@/lib/db/folders.node';
 import { getDefaultUserSearchService, type UserSearchService } from '@/lib/user-searches/service';
 import { projectAppSearchRetrieval, type AppSearchRetrieval } from '@/lib/app-search/service';
 import { documentStorage, type DocumentObjectStorage } from '@/lib/ai/document-processing';
-import { managedImageGenerateInputSchema } from '@/lib/image-generation/service';
 import { projectToolResultRetrieval } from './tool-retrieval';
 import { getDefaultConversationRepository, type ConversationRepository } from './repository';
 import { prepareConversationAttachments, type ConversationAttachmentPersistenceDependencies } from './attachment-persistence';
 import { getDefaultConversationAttachmentArtifactRepository, type ConversationAttachmentArtifactRepository } from './attachment-artifacts';
 import {
   DEFAULT_CONVERSATION_NAME,
-  conversationCreateServiceInputSchema, conversationFavoriteInputSchema, conversationImageTurnInputSchema, conversationImageTurnResultSchema, conversationKeyInputSchema,
+  conversationContextSeedInputSchema, conversationCreateServiceInputSchema, conversationFavoriteInputSchema, conversationHiddenInputSchema, conversationIncognitoSendInputSchema, conversationKeyInputSchema, conversationRoleInputSchema,
   conversationListInputSchema, conversationMessageDeleteInputSchema, conversationMessageDeleteResultSchema, conversationMessageListInputSchema, conversationMessageSchema, conversationRenameInputSchema, conversationSafeMessageSchema,
   conversationSearchInputSchema, conversationSendInputSchema, decodeCursor, encodeCursor, projectConversationMessage,
   type Conversation, type ConversationMessage,
 } from './schemas';
-import { verifyOpeningGreetingToken, type OpeningGreetingSnapshot } from './opening-greeting';
+import { issueConversationContextSeedToken, verifyConversationContextSeedToken } from './context-seed';
 import type { ConversationArchiveState } from './archive-projection';
+import { verifyOpeningGreetingToken, type OpeningGreetingSnapshot } from './opening-greeting';
+
+async function taggedWorkspaceContext(context: ToolContext, fileKeys: string[], folderKeys: string[], budget: number) {
+  if (!fileKeys.length && !folderKeys.length) return { files: [], preface: '' };
+  const userKey = contextUserKey(context);
+  const descriptions: string[] = [];
+  for (const key of folderKeys) {
+    const folder = await getFolderInScope(context.runtimeScopeKey, key, userKey);
+    if (!folder) throw new ConversationError('NOT_FOUND', 'A tagged folder is no longer available.');
+    descriptions.push(`Folder: ${JSON.stringify(folder.name)}`);
+  }
+  const files: Array<{ key: string; name: string; extension: FileExtension }> = [];
+  for (const key of fileKeys) {
+    const file = await getFileInScope(context.runtimeScopeKey, key, userKey);
+    if (!file) throw new ConversationError('NOT_FOUND', 'A tagged file is no longer available.');
+    files.push({ key: file.key, name: file.name, extension: file.extension });
+    const media = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp3', 'mp4'].includes(file.extension);
+    const text = (media ? file.caption : file.extractedText)?.trim();
+    const filename = file.name.toLowerCase().endsWith(`.${file.extension}`) ? file.name : `${file.name}.${file.extension}`;
+    descriptions.push(`File: ${JSON.stringify(filename)}. ${text ? `${media ? 'Stored caption' : 'Extracted document text'}: ${JSON.stringify(text.slice(0, 2_000))}` : `No stored ${media ? 'caption' : 'document text'} is available.`}`);
+  }
+  const preface = `The user tagged these stored workspace items. Answer using the provided stored captions and extracted text; these are descriptions, not direct inspection of media bytes. Do not say you need to watch a video when its stored caption answers the question.\n${descriptions.join('\n')}\n\n`;
+  return { files, preface: preface.slice(0, budget) };
+}
 
 const conversationCursorSchema = z.object({ favorite: z.boolean(), updatedAt: z.string().datetime(), key: z.string().cuid() }).strict();
 const messageCursorSchema = z.object({ createdAt: z.string().datetime(), key: z.string().cuid() }).strict();
@@ -36,17 +59,25 @@ export type ConversationTurnEvent =
   | { type: 'done'; correlationKey: string; conversationKey: string; message: z.infer<typeof conversationSafeMessageSchema>; name?: string; replayed: boolean }
   | { type: 'error'; correlationKey: string; code: string; message: string };
 
+export type ConversationSeedEvent =
+  | { type: 'start'; correlationKey: string; assistantMessageKey: string }
+  | { type: 'delta'; correlationKey: string; assistantMessageKey: string; text: string }
+  | { type: 'done'; correlationKey: string; assistantMessageKey: string; message: string; persistenceToken: string };
+
 export interface ConversationService {
   create(raw: unknown, context: ToolContext): Promise<Conversation>;
   list(raw: unknown, context: ToolContext): Promise<{ items: Conversation[]; nextCursor: string | null }>;
   search(raw: unknown, context: ToolContext): Promise<{ items: Conversation[]; nextCursor: string | null }>;
   rename(raw: unknown, context: ToolContext): Promise<Conversation>;
   favorite(raw: unknown, context: ToolContext): Promise<Conversation>;
+  hide(raw: unknown, context: ToolContext): Promise<Conversation>;
+  setRole(raw: unknown, context: ToolContext): Promise<Conversation>;
+  seedContext(raw: unknown, context: ToolContext, onEvent: (event: ConversationSeedEvent) => void | Promise<void>): Promise<void>;
   delete(raw: unknown, context: ToolContext): Promise<{ deletedKey: string }>;
   deleteMessage(raw: unknown, context: ToolContext): Promise<{ deletedKeys: string[] }>;
   messages(raw: unknown, context: ToolContext): Promise<{ items: Array<z.infer<typeof conversationSafeMessageSchema>>; nextCursor: string | null }>;
   turn(raw: unknown, context: ToolContext, onEvent: (event: ConversationTurnEvent) => void | Promise<void>): Promise<void>;
-  enqueueImageTurn(raw: unknown, context: ToolContext, stagedImageArtifactKeys?: readonly string[]): Promise<z.infer<typeof conversationImageTurnResultSchema>>;
+  incognitoTurn(raw: unknown, context: ToolContext, onEvent: (event: ConversationTurnEvent) => void | Promise<void>): Promise<void>;
 }
 
 export class ConversationError extends Error {
@@ -79,34 +110,24 @@ function projectAgentContext(messages: ConversationMessage[]) {
       ? `A generated image was saved in Gallery. Visible description: ${item.imageSummaryText ?? 'Description unavailable.'}`
       : item.content;
     const attachmentContext = item.attachmentContext?.length ? `\n\nAttachments supplied with this historical user message, in original order: ${JSON.stringify(item.attachmentContext)}` : '';
-    const attachmentEnriched = content + attachmentContext;
+    const taggedContext = item.workspaceFiles?.length ? `\n\nFiles tagged with this historical user message: ${JSON.stringify(item.workspaceFiles.map(({ name, extension }) => `${name}.${extension}`))}` : '';
+    const attachmentEnriched = content + attachmentContext + taggedContext;
     const enriched = attachmentEnriched + retrievalContext;
     return { role: item.role.toLowerCase() as 'user' | 'assistant', content: Buffer.byteLength(enriched, 'utf8') <= MAX_CONTEXT_BYTES ? enriched : attachmentEnriched, createdAt: item.createdAt };
   });
 }
 
-function prioritizedAgentContext(currentConversationSummary: string | null, recentMessages: ConversationMessage[], recalledMessages: ConversationMessage[]) {
+function prioritizedAgentContext(currentConversationSummary: string | null, recentMessages: ConversationMessage[]) {
   const context = projectAgentContext(recentMessages);
   const base = { currentConversationSummary: currentConversationSummary ?? undefined, context };
   while (context.length && Buffer.byteLength(JSON.stringify({ ...base, recalledContext: [] }), 'utf8') > MAX_CONTEXT_BYTES) context.shift();
-  const recalledByRelevance = projectAgentContext(recalledMessages);
-  while (recalledByRelevance.length) {
-    const recalledContext = [...recalledByRelevance].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-    if (Buffer.byteLength(JSON.stringify({ ...base, recalledContext }), 'utf8') <= MAX_CONTEXT_BYTES) return { ...base, recalledContext };
-    recalledByRelevance.pop();
-  }
   return { ...base, recalledContext: [] };
-}
-
-function rethrowAbort(error: unknown, signal?: AbortSignal) {
-  if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
 }
 
 export interface ConversationServiceDependencies {
   repository?: ConversationRepository;
   id?: () => string;
   now?: () => string;
-  embed?: typeof embedText;
   agent?: AgentRuntimeDependencies;
   router?: ExecuteActionOptions;
   core?: typeof executeCoreAgent;
@@ -117,10 +138,7 @@ export interface ConversationServiceDependencies {
   attachmentPersistence?: Omit<ConversationAttachmentPersistenceDependencies, 'storage'>;
   enqueueAttachmentJob?: (input: unknown) => Promise<unknown>;
   scheduleAttachmentJobs?: (callback: () => void) => void;
-  enqueueImageJob?: (input: unknown) => Promise<unknown>;
   enqueueArchiveJob?: (input: unknown) => Promise<unknown>;
-  enqueueGuideTopicsJob?: (input: unknown) => Promise<unknown>;
-  runGuide?: typeof runTool;
   publishContentChanged?: (scopeKey: string) => Promise<unknown>;
   verifyOpeningGreeting?: typeof verifyOpeningGreetingToken;
 }
@@ -129,7 +147,6 @@ export function createConversationService(dependencies: ConversationServiceDepen
   const repository = dependencies.repository ?? getDefaultConversationRepository();
   const id = dependencies.id ?? newId;
   const now = dependencies.now ?? (() => new Date().toISOString());
-  const embed = dependencies.embed ?? embedText;
   const core = dependencies.core ?? executeCoreAgent;
   const agentDependencies: AgentRuntimeDependencies = { ...dependencies.agent, router: { ...dependencies.agent?.router, ...dependencies.router } };
   const userSearches = dependencies.userSearches ?? getDefaultUserSearchService();
@@ -137,7 +154,6 @@ export function createConversationService(dependencies: ConversationServiceDepen
   const attachmentStorage = dependencies.attachmentStorage ?? documentStorage;
   const prepareAttachments = dependencies.prepareAttachments ?? prepareConversationAttachments;
   const enqueueArchiveJob = dependencies.enqueueArchiveJob ?? ((job: unknown) => import('./archive-projection-queue').then(({ enqueueConversationArchiveProjection }) => enqueueConversationArchiveProjection(job)));
-  const enqueueGuideTopicsJob = dependencies.enqueueGuideTopicsJob ?? ((job: unknown) => import('./guide-topics-queue').then(({ enqueueConversationGuideTopics }) => enqueueConversationGuideTopics(job)));
   const publishContentChanged = dependencies.publishContentChanged ?? ((scopeKey: string) => import('@/api/events').then(({ publishScopeEvent }) => publishScopeEvent(scopeKey, 'content.changed')));
   const enqueueArchiveState = (state: ConversationArchiveState | null) => {
     if (!state) return;
@@ -156,7 +172,7 @@ export function createConversationService(dependencies: ConversationServiceDepen
 
   const page = async (context: ToolContext, raw: unknown, query?: string) => {
     const input = query === undefined ? conversationListInputSchema.parse(raw) : conversationSearchInputSchema.parse(raw);
-    const rows = await repository.list(owner(context), { ...(query === undefined ? {} : { query }), cursor: decodeCursor(input.cursor, conversationCursorSchema), limit: input.limit + 1, favoriteOnly: input.favoriteOnly });
+    const rows = await repository.list(owner(context), { ...(query === undefined ? {} : { query }), cursor: decodeCursor(input.cursor, conversationCursorSchema), limit: input.limit + 1, favoriteOnly: input.favoriteOnly, hiddenOnly: input.hiddenOnly });
     const hasMore = rows.length > input.limit; const items = rows.slice(0, input.limit); const last = items.at(-1);
     return { items, nextCursor: hasMore && last ? encodeCursor({ favorite: last.isFavorite, updatedAt: last.updatedAt, key: last.key }) : null };
   };
@@ -169,9 +185,13 @@ export function createConversationService(dependencies: ConversationServiceDepen
         opening = await (dependencies.verifyOpeningGreeting ?? verifyOpeningGreetingToken)(input.openingGreetingToken, new Date(at).getTime()) ?? undefined;
         if (!opening || opening.teamKey !== ownership.teamKey || opening.scopeKey !== ownership.scopeKey || opening.userKey !== ownership.userKey) throw new ConversationError('FORBIDDEN', 'The opening greeting is invalid or expired.');
       }
-      const openingMessage = opening ? conversationMessageSchema.parse({ key: opening.key, ...ownership, conversationKey: key, turnKey: `opening:${opening.key}`, requestHash: createHash('sha256').update(input.openingGreetingToken!).digest('hex'), type: 'TEXT', role: 'ASSISTANT', status: 'COMPLETED', content: opening.message, attachments: [], attachmentStatus: 'NONE', retrievals: [], guideTopics: opening.guideTopics, guideTopicMode: opening.guideTopicMode, createdAt: opening.createdAt, completedAt: opening.createdAt }) : undefined;
+      const seed = input.openingContextSeedToken ? await verifyConversationContextSeedToken(input.openingContextSeedToken, new Date(at).getTime()) : null;
+      if (input.openingContextSeedToken && (!seed || seed.teamKey !== ownership.teamKey || seed.scopeKey !== ownership.scopeKey || seed.userKey !== ownership.userKey)) throw new ConversationError('FORBIDDEN', 'The context seed is invalid or expired.');
+      const openingMessage = opening ? conversationMessageSchema.parse({ key: opening.key, ...ownership, conversationKey: key, turnKey: `opening:${opening.key}`, requestHash: createHash('sha256').update(input.openingGreetingToken!).digest('hex'), type: 'TEXT', role: 'ASSISTANT', status: 'COMPLETED', content: opening.message, attachments: [], attachmentStatus: 'NONE', retrievals: [], guideTopics: { status: 'NONE' }, createdAt: opening.createdAt, completedAt: opening.createdAt })
+        : seed ? conversationMessageSchema.parse({ key: seed.key, ...ownership, conversationKey: key, turnKey: `opening:${seed.key}`, requestHash: createHash('sha256').update(input.openingContextSeedToken!).digest('hex'), type: 'TEXT', role: 'ASSISTANT', status: 'COMPLETED', content: seed.message, attachments: [], retrievals: [], guideTopics: { status: 'NONE' }, createdAt: seed.createdAt, completedAt: seed.createdAt })
+        : undefined;
       const actorKey = context.principal.kind === 'member' ? context.principal.userTeam.key : '';
-      const created = await repository.create({ key, ...ownership, name: input.name ?? DEFAULT_CONVERSATION_NAME, isFavorite: false, createdAt: at, updatedAt: at }, actorKey, openingMessage);
+      const created = await repository.create({ key, ...ownership, name: input.name ?? DEFAULT_CONVERSATION_NAME, isFavorite: false, isHidden: false, roleKey: input.roleKey, createdAt: at, updatedAt: at }, actorKey, openingMessage);
       if (created.name !== DEFAULT_CONVERSATION_NAME) await requestArchiveProjection(ownership, created.key, at, actorKey);
       return created;
     },
@@ -179,18 +199,28 @@ export function createConversationService(dependencies: ConversationServiceDepen
     async search(raw: unknown, context: ToolContext) { const input = conversationSearchInputSchema.parse(raw), ownership = owner(context); const result = await page(context, input, input.query); if (input.recordHistory) await userSearches.record(ownership.userKey, input.query); return result; },
     async rename(raw: unknown, context: ToolContext) { const input = conversationRenameInputSchema.parse(raw), ownership = owner(context), at = now(); const value = await repository.update(ownership, input.conversationKey, { name: input.name, updatedAt: at }); if (!value) throw new ConversationError('NOT_FOUND', 'Conversation not found.'); const state = repository.readArchiveState ? await repository.readArchiveState(ownership, input.conversationKey) : null; if (state) enqueueArchiveState(state); else await requestArchiveProjection(ownership, input.conversationKey, at, context.principal.kind === 'member' ? context.principal.userTeam.key : ''); return value; },
     async favorite(raw: unknown, context: ToolContext) { const input = conversationFavoriteInputSchema.parse(raw); const value = await repository.update(owner(context), input.conversationKey, { isFavorite: input.isFavorite, updatedAt: now() }); if (!value) throw new ConversationError('NOT_FOUND', 'Conversation not found.'); return value; },
-    async delete(raw: unknown, context: ToolContext) { const input = conversationKeyInputSchema.parse(raw), ownership = owner(context); if (!await repository.delete(ownership, input.conversationKey)) throw new ConversationError('NOT_FOUND', 'Conversation not found.'); await publishContentChanged(ownership.scopeKey).catch(() => undefined); return { deletedKey: input.conversationKey }; },
+    async hide(raw: unknown, context: ToolContext) { const input = conversationHiddenInputSchema.parse(raw); const value = await repository.update(owner(context), input.conversationKey, { isHidden: input.isHidden, updatedAt: now() }); if (!value) throw new ConversationError('NOT_FOUND', 'Conversation not found.'); return value; },
+    async setRole(raw: unknown, context: ToolContext) { const input = conversationRoleInputSchema.parse(raw); const value = await repository.update(owner(context), input.conversationKey, { roleKey: input.roleKey, updatedAt: now() }); if (!value) throw new ConversationError('NOT_FOUND', 'Conversation not found.'); return value; },
+    async delete(raw: unknown, context: ToolContext) {
+      const input = conversationKeyInputSchema.parse(raw), ownership = owner(context);
+      if (!await repository.delete(ownership, input.conversationKey)) throw new ConversationError('NOT_FOUND', 'Conversation not found.');
+      await import('./archive-projection').then(({ createConversationArchiveProjectionRepository }) => createConversationArchiveProjectionRepository().deleteProjected({ ...ownership, conversationKey: input.conversationKey })).catch((error) => console.error('conversation file projection delete failed', { conversationKey: input.conversationKey, error }));
+      await publishContentChanged(ownership.scopeKey).catch(() => undefined);
+      return { deletedKey: input.conversationKey };
+    },
     async deleteMessage(raw: unknown, context: ToolContext) { const input = conversationMessageDeleteInputSchema.parse(raw), ownership = owner(context), at = now(); const deletedKeys = await repository.deleteMessageTurn(ownership, input.conversationKey, input.messageKey, at); if (!deletedKeys) throw new ConversationError('NOT_FOUND', 'Conversation message not found or cannot be deleted while its response is pending.'); await requestArchiveProjection(ownership, input.conversationKey, at, context.principal.kind === 'member' ? context.principal.userTeam.key : ''); return conversationMessageDeleteResultSchema.parse({ deletedKeys }); },
     async messages(raw: unknown, context: ToolContext) { const input = conversationMessageListInputSchema.parse(raw); const rows = await repository.listMessages(owner(context), input.conversationKey, decodeCursor(input.cursor, messageCursorSchema), input.limit + 1); if (!rows) throw new ConversationError('NOT_FOUND', 'Conversation not found.'); const hasMore = rows.length > input.limit; const items = hasMore ? rows.slice(1) : rows; const first = items[0]; return { items: items.map(projectConversationMessage), nextCursor: hasMore && first ? encodeCursor({ createdAt: first.createdAt, key: first.key }) : null }; },
     async turn(raw: unknown, context: ToolContext, onEvent: (event: ConversationTurnEvent) => void | Promise<void>) {
       const input = conversationSendInputSchema.parse(raw), ownership = owner(context), correlationKey = id(), at = now();
+      const conversation = await repository.read(ownership, input.conversationKey);
+      if (!conversation) throw new ConversationError('NOT_FOUND', 'Conversation not found.');
+      if (input.roleKey && conversation.roleKey !== input.roleKey) throw new ConversationError('CONFLICT', 'The selected chat role has changed.');
       const assistantAt = new Date(new Date(at).getTime() + 1).toISOString();
-      const requestHash = createHash('sha256').update(JSON.stringify({ conversationKey: input.conversationKey, message: input.message, attachmentKeys: input.attachmentKeys, referenceImageKeys: input.referenceImageKeys, guideTopicSelection: input.guideTopicSelection })).digest('hex');
+        const requestHash = createHash('sha256').update(JSON.stringify({ conversationKey: input.conversationKey, message: input.message, attachmentKeys: input.attachmentKeys, referenceImageKeys: input.referenceImageKeys, workspaceFileKeys: input.workspaceFileKeys, workspaceFolderKeys: input.workspaceFolderKeys })).digest('hex');
+       const tagged = await taggedWorkspaceContext(context, input.workspaceFileKeys, input.workspaceFolderKeys, Math.max(0, 20_000 - input.message.length));
       const actorKey = context.principal.kind === 'member' ? context.principal.userTeam.key : '';
-      const selectedGuideMode = input.guideTopicSelection ? await repository.validateGuideTopicSelection(ownership, input.conversationKey, input.guideTopicSelection, input.message) : null;
-      if (input.guideTopicSelection && !selectedGuideMode) throw new ConversationError('CONFLICT', 'The selected guide topic is stale or invalid.');
       const started = await repository.beginTurn(ownership, input.conversationKey,
-        { key: id(), ...ownership, conversationKey: input.conversationKey, turnKey: input.requestKey, requestHash, type: 'TEXT', role: 'USER', status: 'COMPLETED', content: input.message, attachments: [], attachmentStatus: input.attachmentKeys.length ? 'PENDING' : 'NONE', ...(input.attachmentKeys.length ? { pendingAttachmentKeys: input.attachmentKeys } : {}), retrievals: [], guideTopics: { status: 'NONE' }, ...(selectedGuideMode ? { selectedGuideMode } : {}), createdAt: at, completedAt: at },
+         { key: id(), ...ownership, conversationKey: input.conversationKey, turnKey: input.requestKey, requestHash, type: 'TEXT', role: 'USER', status: 'COMPLETED', content: input.message, workspaceFiles: tagged.files, attachments: [], attachmentStatus: input.attachmentKeys.length ? 'PENDING' : 'NONE', ...(input.attachmentKeys.length ? { pendingAttachmentKeys: input.attachmentKeys } : {}), retrievals: [], guideTopics: { status: 'NONE' }, createdAt: at, completedAt: at },
         { key: id(), ...ownership, conversationKey: input.conversationKey, turnKey: input.requestKey, requestHash, type: 'TEXT', role: 'ASSISTANT', status: 'PENDING', content: 'Pending', attachments: [], attachmentStatus: 'NONE', retrievals: [], guideTopics: { status: 'NONE' }, createdAt: assistantAt }, actorKey);
       if (!started) throw new ConversationError('NOT_FOUND', 'Conversation not found.');
       if (started.state === 'idempotency-conflict') throw new ConversationError('CONFLICT', 'The request key was already used for a different message.');
@@ -207,11 +237,9 @@ export function createConversationService(dependencies: ConversationServiceDepen
       let enqueueAttachmentPersistence = async () => {};
       try {
         let attachments: Awaited<ReturnType<typeof prepareConversationAttachments>> = [];
-        let stagedImageArtifactKeys: string[] = [];
         if (input.attachmentKeys.length) {
           const claimed = await attachmentArtifacts.readClaimed(ownership, started.user.key, input.attachmentKeys);
           if (claimed.length !== input.attachmentKeys.length) throw new ConversationError('CONFLICT', 'Claimed attachment manifests are unavailable.');
-          stagedImageArtifactKeys = claimed.filter(({ kind }) => kind === 'image').map(({ key }) => key);
           attachments = await prepareAttachments(claimed, context, { ...dependencies.attachmentPersistence, storage: { download: attachmentStorage.download.bind(attachmentStorage), delete: attachmentStorage.delete?.bind(attachmentStorage) ?? documentStorage.delete.bind(documentStorage) } });
           const enqueue = dependencies.enqueueAttachmentJob ?? ((job: unknown) => import('./attachment-persistence-queue').then(({ enqueueConversationAttachmentPersistence }) => enqueueConversationAttachmentPersistence(job)));
           enqueueAttachmentPersistence = async () => {
@@ -232,58 +260,39 @@ export function createConversationService(dependencies: ConversationServiceDepen
         if (!latest) throw new ConversationError('NOT_FOUND', 'Conversation not found.');
         const recent = latest.filter(({ key, createdAt }) => key !== started.user.key && createdAt < at).slice(-10);
         const firstUserTurn = started.first || !recent.some(({ role }) => role === 'USER');
-        const excludedKeys = [started.user.key, ...recent.map(({ key }) => key)];
-        let recalled: ConversationMessage[] = [];
-        try {
-          const embedding = await embed({ text: input.message, purpose: 'document', signal: agentDependencies.router?.signal, timeoutMs: agentDependencies.router?.timeoutMs });
-          const indexing = repository.setMessageEmbedding(ownership, input.conversationKey, started.user.key, embedding).catch((error) => {
-            rethrowAbort(error, agentDependencies.router?.signal);
-            console.error('conversation user message indexing failed open', { messageKey: started.user.key, error });
-          });
-          const recall = repository.semanticMessages(ownership, embedding, { before: at, excludedKeys, limit: 5 }).catch((error) => {
-            rethrowAbort(error, agentDependencies.router?.signal);
-            console.error('conversation semantic recall failed open', { messageKey: started.user.key, error });
-            return [];
-          });
-          const [, rows] = await Promise.all([indexing, recall]);
-          if (rows.length) {
-            const seenMessageKeys = new Set(excludedKeys);
-            recalled = rows.flatMap(({ message }) => {
-              if (message.createdAt >= at || seenMessageKeys.has(message.key)) return [];
-              seenMessageKeys.add(message.key);
-              return [message];
-            }).slice(0, 5);
-          }
-        } catch (error) {
-          rethrowAbort(error, agentDependencies.router?.signal);
-          console.error('conversation user message embedding failed open', { messageKey: started.user.key, error });
-        }
-        const agentContext = prioritizedAgentContext(currentConversationSummary, recent, recalled);
+        const contextSummaries = firstUserTurn && input.contextConversationKeys.length ? (await Promise.all(input.contextConversationKeys.map(async (conversationKey) => {
+          const conversation = await repository.read(ownership, conversationKey);
+          if (!conversation) return null;
+          const summary = await repository.readArchiveSummary?.(ownership, conversationKey).catch(() => null) ?? null;
+          return summary ? `Chat "${conversation.name}": ${summary}` : `Chat "${conversation.name}"`;
+        }))).filter((value): value is string => Boolean(value)) : [];
+         const agentContext = prioritizedAgentContext(currentConversationSummary, recent);
+         if (!input.workspaceFileKeys.length && !input.workspaceFolderKeys.length) {
+           const previousUser = [...recent].reverse().find((message) => message.role === 'USER');
+           if (previousUser?.workspaceFiles?.length) {
+             const prior = await taggedWorkspaceContext(context, previousUser.workspaceFiles.slice(0, 8).map(({ key }) => key), [], 8_000).catch(() => null);
+             const historical = agentContext.context.find((message) => message.role === 'user' && message.createdAt === previousUser.createdAt);
+             if (prior?.preface && historical && Buffer.byteLength(JSON.stringify(agentContext), 'utf8') + Buffer.byteLength(prior.preface, 'utf8') + 4 < MAX_CONTEXT_BYTES) historical.content = `${historical.content}\n\n${prior.preface}`;
+           }
+         }
+        if (contextSummaries.length) agentContext.context.unshift({ role: 'user', content: `Prior chats used as context:\n${contextSummaries.join('\n\n')}`.slice(0, 20_000), createdAt: at });
         const retrievals: AppSearchRetrieval[] = [];
-        let successfulGuide: { mode: 'recommend' | 'explain'; context: unknown } | undefined;
-        const selectedGuideMode = started.user.selectedGuideMode;
-        if (selectedGuideMode) {
-          const guideResult = await (dependencies.runGuide ?? runTool)('agent.guide', 'agents.core', { mode: selectedGuideMode }, { ...agentDependencies.tools?.dependencies, ...agentDependencies.router, contentContext: context, requestKey: `${input.requestKey}:selected-guide` });
-          const parsedGuide = agentGuideOutputSchema.parse(guideResult);
-          if (parsedGuide.mode === 'greet' || parsedGuide.mode === 'topics') throw new ConversationError('FAILED', 'Selected guide topic did not resolve to workspace guidance.');
-          successfulGuide = { mode: parsedGuide.mode, context: parsedGuide };
-        }
         let response: Awaited<ReturnType<typeof core>> | undefined;
         let agentError: unknown;
-        let successfulImageTurn: z.infer<typeof conversationImageTurnResultSchema> | undefined;
-        const maximumAttempts = attachments.some(({ kind }) => kind === 'image') ? 1 : 2;
+          const agentMessage = `${tagged.preface}${input.message}`;
+         const maximumAttempts = attachments.some(({ kind }) => kind === 'image') ? 1 : 2;
         for (let attempt = 0; attempt < maximumAttempts && !response; attempt += 1) {
           retrievals.length = 0;
           const deltas: string[] = [];
           let emitted = false;
           try {
             response = await core({
-              systemPrompt: `${input.referenceImageKeys.length || stagedImageArtifactKeys.length ? `${coreAgent.systemPrompt}\nThe user supplied image editing context. Use app.generate-image to transform it; its trusted references are supplied automatically. Do not answer an image-edit request with text.` : coreAgent.systemPrompt}${selectedGuideMode ? '\nThis request came from a server-validated guide topic. Answer concisely and directly from the preloaded canonical guidance.' : ''}`,
+              systemPrompt: coreAgent.systemPrompt,
+              roleKey: conversation.roleKey,
               ...agentContext,
-              message: input.message, currentDate: at, requestKey: input.requestKey, generateName: firstUserTurn, attachments,
-              preloadedTools: successfulGuide ? [{ slug: 'agent.guide' as const, arguments: { mode: successfulGuide.mode }, result: successfulGuide.context }] : [],
+              message: agentMessage, currentDate: at, requestKey: input.requestKey, generateName: firstUserTurn, attachments,
             }, {
-              toolContext: context, conversationService: service, currentConversationKey: input.conversationKey, currentUserMessageContent: input.message, currentReferenceImageKeys: input.referenceImageKeys, currentStagedImageArtifactKeys: stagedImageArtifactKeys,
+              toolContext: context, conversationService: service, currentConversationKey: input.conversationKey, currentUserMessageContent: agentMessage,
               onDelta: async (text) => {
                 deltas.push(text);
                 emitted = true;
@@ -291,15 +300,6 @@ export function createConversationService(dependencies: ConversationServiceDepen
               },
               onEvidence: (sources) => { retrievals.push(...sources.slice(0, Math.max(0, 4 - retrievals.length))); },
               onToolSucceeded: (slug, arguments_, result) => {
-                if (slug === 'agent.guide') {
-                  const parsed = agentGuideOutputSchema.safeParse(result);
-                  if (parsed.success && (parsed.data.mode === 'recommend' || parsed.data.mode === 'explain')) successfulGuide = { mode: parsed.data.mode, context: parsed.data };
-                }
-                if (slug === 'app.generate-image') {
-                  const parsed = conversationImageTurnResultSchema.safeParse(result);
-                  if (parsed.success) { successfulImageTurn = parsed.data; return true; }
-                  return;
-                }
                 if (slug === 'app.search') {
                   if (retrievals.length >= 4) return;
                   const retrieval = projectAppSearchRetrieval(arguments_, result);
@@ -317,34 +317,14 @@ export function createConversationService(dependencies: ConversationServiceDepen
             agentError = error;
             console.error('conversation agent attempt failed', { conversationKey: input.conversationKey, attempt: attempt + 1, error });
             if (emitted) response = { message: deltas.join(''), tools: [] };
-            else if (successfulImageTurn) response = { message: input.message, tools: [] };
           }
         }
         if (!response) throw agentError ?? new ConversationError('FAILED', 'Core did not return a response.');
-        if (successfulImageTurn) {
-          const completed = await repository.completeTurn(ownership, input.conversationKey, started.assistant.key, response.message, undefined, [], now(), response.name);
-          if (!completed) throw new ConversationError('CONFLICT', 'Conversation changed before image generation started.');
-          const imageAssistant = await repository.setImageStatusText(ownership, input.conversationKey, successfulImageTurn.assistant.key, response.message);
-          if (!imageAssistant) throw new ConversationError('CONFLICT', 'Image generation response changed before its status could be saved.');
-          const supersededKeys = await repository.deleteMessageTurn(ownership, input.conversationKey, started.assistant.key, now());
-          if (!supersededKeys) throw new ConversationError('CONFLICT', 'Superseded text turn could not be removed.');
-          const nameApplied = completed.nameApplied;
-          await onEvent({ type: 'done', correlationKey, conversationKey: input.conversationKey, message: projectConversationMessage(imageAssistant), ...(nameApplied && response.name ? { name: response.name } : {}), replayed: successfulImageTurn.replayed });
-          requestArchiveProjectionInBackground(ownership, input.conversationKey, now(), actorKey);
-          return;
-        }
-        const completed = await repository.completeTurn(ownership, input.conversationKey, started.assistant.key, response.message, undefined, retrievals, now(), response.name, successfulGuide);
+        const completed = await repository.completeTurn(ownership, input.conversationKey, started.assistant.key, response.message, undefined, retrievals, now(), response.name);
         if (!completed) throw new ConversationError('CONFLICT', 'Conversation changed before the answer completed.');
         const nameApplied = completed.nameApplied;
         await onEvent({ type: 'done', correlationKey, conversationKey: input.conversationKey, message: projectConversationMessage(completed.message), ...(nameApplied && response.name ? { name: response.name } : {}), replayed: false });
         requestArchiveProjectionInBackground(ownership, input.conversationKey, completed.message.completedAt!, actorKey);
-        if (completed.message.guideTopics?.status === 'PENDING' && completed.message.guideTopicGeneration) {
-          void enqueueGuideTopicsJob({ schemaVersion: 1, assistantMessageKey: completed.message.key, conversationKey: input.conversationKey, ...ownership, actorKey, generation: completed.message.guideTopicGeneration })
-            .catch((error) => console.error('conversation guide topic enqueue failed; durable recovery will retry', { assistantMessageKey: completed.message.key, generation: completed.message.guideTopicGeneration, error }));
-        }
-        void embed({ text: response.message, purpose: 'document', signal: agentDependencies.router?.signal, timeoutMs: agentDependencies.router?.timeoutMs })
-          .then(async (embedding) => { await repository.setMessageEmbedding(ownership, input.conversationKey, started.assistant.key, embedding); })
-          .catch(() => undefined);
       } catch (error) {
         const failedAt = now();
         await repository.failTurn(ownership, input.conversationKey, started.assistant.key, failedAt);
@@ -354,25 +334,100 @@ export function createConversationService(dependencies: ConversationServiceDepen
         void enqueueAttachmentPersistence().catch((error) => console.error('conversation attachment persistence scheduling failed; durable recovery will retry', { userMessageKey: started.user.key, error }));
       }
     },
-    async enqueueImageTurn(raw: unknown, context: ToolContext, rawStagedImageArtifactKeys: readonly string[] = []) {
-      const input = conversationImageTurnInputSchema.parse(raw), ownership = owner(context), at = now();
-      const stagedImageArtifactKeys = z.array(z.string().cuid()).max(8).refine((keys) => new Set(keys).size === keys.length, 'Staged image artifact keys must be unique.').parse(rawStagedImageArtifactKeys);
-      if (input.referenceImageKeys.length + stagedImageArtifactKeys.length > 8) throw new ConversationError('CONFLICT', 'Image generation accepts at most eight references.');
-      const assistantAt = new Date(new Date(at).getTime() + 1).toISOString();
-      const imageInput = { prompt: input.prompt, referenceImageKeys: input.referenceImageKeys, size: input.size, quality: input.quality, mode: input.mode };
-      const requestHash = createHash('sha256').update(JSON.stringify({ conversationKey: input.conversationKey, ...imageInput, userMessage: input.userMessage, stagedImageArtifactKeys })).digest('hex');
-      const started = await repository.beginImageTurn(ownership, input.conversationKey,
-        { key: id(), ...ownership, conversationKey: input.conversationKey, turnKey: input.requestKey, requestHash, type: 'IMAGE', role: 'USER', status: 'COMPLETED', content: input.userMessage ?? input.prompt, attachments: [], attachmentStatus: 'NONE', retrievals: [], guideTopics: { status: 'NONE' }, createdAt: at, completedAt: at },
-        { key: id(), ...ownership, conversationKey: input.conversationKey, turnKey: input.requestKey, requestHash, type: 'IMAGE', role: 'ASSISTANT', status: 'PENDING', content: JSON.stringify(imageInput), ...(stagedImageArtifactKeys.length ? { imageReferenceArtifactKeys: stagedImageArtifactKeys } : {}), attachments: [], attachmentStatus: 'NONE', retrievals: [], guideTopics: { status: 'NONE' }, createdAt: assistantAt });
-      if (!started) throw new ConversationError('NOT_FOUND', 'Conversation not found.');
-      if (started.state === 'idempotency-conflict') throw new ConversationError('CONFLICT', 'The request key was already used for a different message.');
-      if (started.state === 'created') await requestArchiveProjection(ownership, input.conversationKey, at, context.principal.kind === 'member' ? context.principal.userTeam.key : '');
-      if (started.assistant.status === 'PENDING') {
-        const enqueue = dependencies.enqueueImageJob ?? ((job: unknown) => import('./image-turn-queue').then(({ enqueueConversationImageTurn }) => enqueueConversationImageTurn(job)));
-        const durableInput = managedImageGenerateInputSchema.parse(JSON.parse(started.assistant.content));
-        await enqueue({ schemaVersion: 1, assistantMessageKey: started.assistant.key, conversationKey: input.conversationKey, ...ownership, actorKey: context.principal.kind === 'member' ? context.principal.userTeam.key : '', requestKey: started.assistant.key, input: durableInput, stagedImageArtifactKeys: started.assistant.imageReferenceArtifactKeys ?? [] }).catch((error) => console.error('conversation image enqueue failed; startup recovery will retry', { assistantMessageKey: started.assistant.key, error }));
+    async seedContext(raw: unknown, context: ToolContext, onEvent: (event: ConversationSeedEvent) => void | Promise<void>) {
+      const input = conversationContextSeedInputSchema.parse(raw), ownership = owner(context), correlationKey = id(), at = now();
+      const assistantMessageKey = id();
+      const briefs = (await Promise.all(input.conversationKeys.map(async (conversationKey) => {
+        const conversation = await repository.read(ownership, conversationKey);
+        if (!conversation) return null;
+        const summary = await repository.readArchiveSummary?.(ownership, conversationKey).catch(() => null) ?? null;
+        return { key: conversationKey, name: conversation.name, summary };
+      }))).filter((value): value is { key: string; name: string; summary: string | null } => Boolean(value));
+      if (!briefs.length) throw new ConversationError('NOT_FOUND', 'No readable chats were selected.');
+      await onEvent({ type: 'start', correlationKey, assistantMessageKey });
+      const source = briefs.map((brief) => brief.summary ? `Chat "${brief.name}":\n${brief.summary}` : `Chat "${brief.name}"`).join('\n\n');
+      const deltas: string[] = [];
+      let response: Awaited<ReturnType<typeof core>> | undefined;
+      let agentError: unknown;
+      try {
+        response = await core({
+          systemPrompt: coreAgent.systemPrompt,
+          taskInstructions: 'The user started a new chat using other chats as context. Speak as Core, never as the user. Write a short orientation of what those chats are about so the user can continue. A few compact paragraphs, detailed enough to be useful, not a transcript and not a heading.',
+          context: [],
+          recalledContext: [],
+          message: `Orient me on these chats:\n\n${source}`.slice(0, 20_000),
+          currentDate: at,
+          requestKey: correlationKey,
+          generateName: false,
+          attachments: [],
+          preloadedTools: [],
+        }, {
+          toolContext: context,
+          conversationService: service,
+          currentUserMessageContent: source,
+          onDelta: async (text) => {
+            deltas.push(text);
+            await onEvent({ type: 'delta', correlationKey, assistantMessageKey, text });
+          },
+        }, agentDependencies);
+      } catch (error) {
+        if (agentDependencies.router?.signal?.aborted) throw error;
+        if (error instanceof AgentStreamProtocolError) throw error;
+        agentError = error;
+        if (deltas.length) response = { message: deltas.join(''), tools: [] };
       }
-      return conversationImageTurnResultSchema.parse({ user: projectConversationMessage(started.user), assistant: projectConversationMessage(started.assistant), replayed: started.state === 'replay' });
+      if (!response?.message.trim()) throw agentError ?? new ConversationError('FAILED', 'Core did not return a response.');
+      const message = response.message.trim().slice(0, 4_000);
+      const persistenceToken = await issueConversationContextSeedToken({ key: assistantMessageKey, ...ownership, message, conversationKeys: briefs.map((brief) => brief.key), createdAt: at });
+      await onEvent({ type: 'done', correlationKey, assistantMessageKey, message, persistenceToken });
+    },
+    async incognitoTurn(raw: unknown, context: ToolContext, onEvent: (event: ConversationTurnEvent) => void | Promise<void>) {
+      const input = conversationIncognitoSendInputSchema.parse(raw), ownership = owner(context), correlationKey = id(), at = now();
+      const assistantAt = new Date(new Date(at).getTime() + 1).toISOString();
+      const conversationKey = id();
+      const requestHash = createHash('sha256').update(JSON.stringify({ incognito: true, message: input.message, requestKey: input.requestKey })).digest('hex');
+       const tagged = await taggedWorkspaceContext(context, input.workspaceFileKeys, input.workspaceFolderKeys, Math.max(0, 20_000 - input.message.length));
+       const user = conversationMessageSchema.parse({ key: id(), ...ownership, conversationKey, turnKey: input.requestKey, requestHash, type: 'TEXT', role: 'USER', status: 'COMPLETED', content: input.message, workspaceFiles: tagged.files, attachments: [], attachmentStatus: 'NONE', retrievals: [], guideTopics: { status: 'NONE' }, createdAt: at, completedAt: at });
+      const assistant = conversationMessageSchema.parse({ key: id(), ...ownership, conversationKey, turnKey: input.requestKey, requestHash, type: 'TEXT', role: 'ASSISTANT', status: 'PENDING', content: 'Pending', attachments: [], attachmentStatus: 'NONE', retrievals: [], guideTopics: { status: 'NONE' }, createdAt: assistantAt });
+      await onEvent({ type: 'start', correlationKey, conversationKey, userMessageKey: user.key, assistantMessageKey: assistant.key, userMessage: projectConversationMessage(user) });
+      const agentContext = {
+        context: input.history.map((item) => ({ role: item.role.toLowerCase() as 'user' | 'assistant', content: item.content, createdAt: at })),
+        recalledContext: [] as Array<{ role: 'user' | 'assistant'; content: string; createdAt: string }>,
+      };
+      const retrievals: AppSearchRetrieval[] = [];
+       const agentMessage = `${tagged.preface}${input.message}`;
+      const deltas: string[] = [];
+      let response: Awaited<ReturnType<typeof core>> | undefined;
+      let agentError: unknown;
+      try {
+        response = await core({
+          systemPrompt: coreAgent.systemPrompt,
+          roleKey: input.roleKey,
+          ...agentContext,
+          message: agentMessage, currentDate: at, requestKey: input.requestKey, generateName: false, attachments: [],
+          preloadedTools: [],
+        }, {
+          toolContext: context, conversationService: service, currentUserMessageContent: agentMessage,
+          onDelta: async (text) => {
+            deltas.push(text);
+            await onEvent({ type: 'delta', correlationKey, assistantMessageKey: assistant.key, text });
+          },
+          onEvidence: (sources) => { retrievals.push(...sources.slice(0, Math.max(0, 4 - retrievals.length))); },
+          onToolSucceeded: (slug, _arguments, result) => {
+            if (retrievals.length >= 4) return;
+            const retrieval = projectToolResultRetrieval(slug, result);
+            if (retrieval) retrievals.push(retrieval);
+          },
+        }, agentDependencies);
+      } catch (error) {
+        if (agentDependencies.router?.signal?.aborted) throw error;
+        if (error instanceof AgentStreamProtocolError) throw error;
+        agentError = error;
+        if (deltas.length) response = { message: deltas.join(''), tools: [] };
+      }
+      if (!response) throw agentError ?? new ConversationError('FAILED', 'Core did not return a response.');
+      const completed = conversationMessageSchema.parse({ ...assistant, status: 'COMPLETED', content: response.message, retrievals, completedAt: now(), guideTopics: { status: 'NONE' } });
+      await onEvent({ type: 'done', correlationKey, conversationKey, message: projectConversationMessage(completed), replayed: false });
     },
   };
   return service;

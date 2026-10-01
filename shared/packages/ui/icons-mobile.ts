@@ -2,6 +2,7 @@
 // Mirrors icons.ts but resolves each icon's .mobile implementation so
 // native apps can consume shared icons without pulling web components.
 export * from "./icons/archive/archive.mobile";
+export * from "./icons/audio-file/audio-file.mobile";
 export * from "./icons/arrow-left/arrow-left.mobile";
 export * from "./icons/arrow-right/arrow-right.mobile";
 export * from "./icons/ascend/ascend.mobile";
@@ -38,7 +39,9 @@ export * from "./icons/heart/heart.mobile";
 export * from "./icons/help/help.mobile";
 export * from "./icons/home/home.mobile";
 export * from "./icons/image/image.mobile";
+export * from "./icons/role/role.mobile";
 export * from "./icons/inbox/inbox.mobile";
+export * from "./icons/incognito/incognito.mobile";
 export * from "./icons/info/info.mobile";
 export * from "./icons/link/link.mobile";
 export * from "./icons/link-off/link-off.mobile";

@@ -6,13 +6,13 @@ import { getAuthIdentity } from './security';
 import { authenticatedTeamContext } from './auth';
 import { parseJson } from './validation';
 
-const selectedSchema = z.object({ teamKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(), requestKey: z.string().trim().min(1).max(200) }).strict();
+const selectedSchema = z.object({ scopeKey: z.string().cuid(), requestKey: z.string().trim().min(1).max(200) }).strict();
 const reserveSchema = selectedSchema.extend({ files: z.array(z.object({ clientKey: z.string().trim().min(1).max(120), filename: z.string().trim().min(1).max(255), mimeType: z.string().trim().min(1).max(160), sizeBytes: z.number().int().positive() }).strict()).min(1).max(10) }).strict();
 const completeSchema = selectedSchema.extend({ attachmentKeys: z.array(z.string().cuid()).min(1).max(12) }).strict();
 
 export interface TransientAttachmentHandlerDependencies {
   getIdentity?: typeof getAuthIdentity;
-  authorize?: (input: { teamKey: string; scopeKey: string }, options: { authenticatedUserKey: string }) => Promise<{ context: ToolContext }>;
+  authorize?: (input: { scopeKey: string }, options: { authenticatedUserKey: string }) => Promise<{ context: ToolContext }>;
   reserve?: typeof reserveTransientAttachments;
   complete?: typeof completeTransientAttachments;
 }
@@ -35,7 +35,7 @@ export function createTransientAttachmentHandlers(dependencies: TransientAttachm
       const identity = await (dependencies.getIdentity ?? getAuthIdentity)(c);
       if (!identity) return c.json({ success: false, error: 'authentication required' }, 401);
       if (identity.identityType !== 'user') return c.json({ success: false, error: 'user session required' }, 403);
-      const context = (await (dependencies.authorize ?? authorizeContentExecution)({ teamKey: body.teamKey, scopeKey: body.scopeKey }, authenticatedTeamContext(identity))).context;
+       const context = (await (dependencies.authorize ?? authorizeContentExecution)({ scopeKey: body.scopeKey }, authenticatedTeamContext(identity))).context;
       const conversationKey = z.string().cuid().parse(c.req.param('conversationKey'));
       if (operation === 'reserve') {
         const input = reserveSchema.parse(body);

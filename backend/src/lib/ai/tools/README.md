@@ -77,22 +77,11 @@ without a mirrored copy. Navigable result keys are projected only into the
 conversation's trusted evidence channel, not the model-facing query result.
 `agent.context` remains registered for legacy callers.
 
-`agent.guide` derives deterministic keys for the protected guides seeded into
-the authorized runtime scope and reads them through the canonical
-`document.read` Content operation. It never accepts document, scope, or storage
-selectors and never reads S3 directly. Recommend mode returns first-step guides;
-explain mode returns platform and app overview/purpose guides. Its `greet` mode
-generates a short non-persisting opening through the provider-neutral text action
-from one of two server-owned occasions; callers cannot supply the hidden prompt.
-Its trusted-only `topics` mode is absent from the provider schema. It generates
-three strict exploration topics through the same text action and is action-metered;
-ordinary guide reads remain free, while generated greetings and topics fall back
-to text-action metering. Conversation topic jobs reload
-their guide context from durable messages and use generation fencing before commit.
-The opening-greeting HTTP boundaries pass trusted observers through `runTool` so
-greeting prose uses real text-action deltas and each complete validated topic is
-emitted over SSE. Final tool output remains authoritative and fully validated;
-ordinary callers that do not provide observers retain buffered execution.
+`agent.greet` generates a brief opening through the provider-neutral text action
+using the authorized user's context. Its strict input accepts only a server-owned
+occasion. The greeting SSE boundary invokes the same tool, streams text deltas,
+and issues a short-lived token so an opening can be included when a chat begins.
+No guide topics or suggestions are generated.
 
 Generated travel references use the same canonical travel service from HTTP
 and Core. `trip.guide.generate/list` and the parameterized

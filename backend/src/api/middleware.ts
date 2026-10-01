@@ -16,6 +16,7 @@ import { appsService } from '@/lib/apps/service';
 import { EVENT_IDENTIFIER_HEADER, eventIdentifierSchema, runWithEventIdentifier } from '@/lib/ai/events/event-identifier';
 import { deviceSchema, DEVICE_IDENTIFIER_HEADER, runWithDevice } from '@/lib/ai/events/device';
 import { sparkTransactionKindSchema } from '@/lib/sparks/contracts';
+import { roleKeySchema } from '@/lib/ai/roles';
 
 export const ACCESS_COOKIE = 'vorinthex_access';
 export const REFRESH_COOKIE = 'vorinthex_refresh';
@@ -60,7 +61,7 @@ export const isPublicProductPath = (path: string, method = 'GET') => method === 
 
 export function createBindEventApp(resolveApp: (appKey: string) => Promise<{ aliasKey: string; scopeKey: string }> = (appKey) => appsService.resolveAlias(appKey)): MiddlewareHandler {
   return async (c, next) => {
-    const exempt = /^\/api\/v1\/(health|apps|products|costs)\/?$/.test(c.req.path) || isProviderWebhookPath(c.req.path);
+    const exempt = /^\/api\/v1\/(health|apps|agents|products|costs)\/?$/.test(c.req.path) || isProviderWebhookPath(c.req.path);
     const rawAppKey = c.req.header(TOOL_APP_KEY_HEADER);
     const appKey = rawAppKey === undefined ? APP_KEYS.CORE : rawAppKey.trim();
     if (exempt) return next();
@@ -206,11 +207,10 @@ function querySchemaForPath(path: string, method: string) {
   if (method === 'DELETE' && apiPath === '/auth/me/hiddens') return strictObject({ source: z.enum(['collection', 'document', 'image', 'folder']), sourceKey: z.string().cuid() });
   if (method === 'GET' && apiPath === '/subscriptions/current') return strictObject({ includeScheduled: z.literal('true').optional() });
   if (method === 'POST' && apiPath === '/subscriptions/current/schedule') return strictObject({ includeScheduled: z.literal('true').optional() });
-  if (method === 'GET' && apiPath === '/gallery/highlights') return strictObject({ teamKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
-  if (method === 'GET' && apiPath === '/gallery/memories') return strictObject({ teamKey: z.string(), scopeKey: z.string(), collectionKey: z.string() });
   if (method === 'GET' && apiPath === '/billing/summary') return strictObject({ limit: z.string().regex(/^\d+$/).optional(), beforeCreatedAt: z.string().datetime({ offset: true }).optional(), beforeKey: z.string().trim().min(1).max(200).optional(), kind: sparkTransactionKindSchema.optional() });
-  if (method === 'GET' && apiPath === '/images/generation-history') return strictObject({ teamKey: z.string().trim().min(1), scopeKey: z.string().cuid(), limit: z.string().regex(/^\d+$/).optional() });
   if (method === 'POST' && apiPath === '/tags/assignments') return strictObject({ action: z.enum(['tag', 'untag']) });
+  if (method === 'POST' && apiPath === '/conversations/turn/stream') return strictObject({ incognito: z.literal('true'), mode: z.enum(['chat']).optional(), reply: z.enum(['reason']).optional(), role: roleKeySchema.optional() });
+  if (method === 'POST' && /^\/conversations\/[^/]+\/turn\/stream$/.test(apiPath)) return strictObject({ mode: z.enum(['chat']).optional(), reply: z.enum(['reason']).optional(), role: roleKeySchema.optional() });
   if (/^\/content\/tools\/[^/]+$/.test(apiPath)) return strictObject({});
   if (apiPath === '/books' || apiPath === '/books/overview' || apiPath === '/books/topic-suggestions' || apiPath === '/books/goal-suggestions' || apiPath === '/books/preview' || /^\/books\/[^/]+(?:\/detail|\/(?:retry|cancel|favorite))?$/.test(apiPath) || /^\/books\/[^/]+\/chapters\/[^/]+\/progress$/.test(apiPath)) return strictObject({});
   return strictObject({});

@@ -9,11 +9,10 @@ import { EditIcon } from "../../icons/edit/edit.mobile";
 import { MoreHorizontalIcon } from "../../icons/more-horizontal/more-horizontal.mobile";
 import { colors, radii, spacing } from "../../tokens";
 import { Button } from "../button/button.mobile";
-import { Skeleton } from "../skeleton/skeleton.mobile";
 
 export type FileViewerProps = {
   error?: string;
-  loading?: boolean;
+  hideHeader?: boolean;
   onAi?: () => void;
   onBack: () => void;
   onEdit?: () => void;
@@ -26,21 +25,20 @@ export type FileViewerProps = {
   title: string;
 };
 
-export function FileViewer({ error, htmlUri, loading = false, onAi, onBack, onEdit, onHistory, onMenu, onRenderError, onTitlePress, pdfUri, title }: FileViewerProps) {
-  return <View style={styles.root}>
-    <View style={styles.header}>
+export function FileViewer({ error, hideHeader = false, htmlUri, onAi, onBack, onEdit, onHistory, onMenu, onRenderError, onTitlePress, pdfUri, title }: FileViewerProps) {
+  return <View style={[styles.root, hideHeader && styles.embedded]}>
+    {!hideHeader ? <View style={styles.header}>
       <Button accessibilityLabel="Back" contentMode="raw" onPress={onBack} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
       {onTitlePress ? <Pressable accessibilityLabel={`Edit ${title}`} accessibilityRole="button" android_ripple={{ color: "transparent" }} onPress={onTitlePress} style={styles.headerTitleHit}><Text numberOfLines={1} style={styles.headerTitleText}>{title}</Text></Pressable> : <Text numberOfLines={1} style={styles.headerTitle}>{title}</Text>}
       <Button accessibilityLabel={`Manage ${title}`} contentMode="raw" onPress={onMenu} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
-    </View>
-    {onEdit || onAi || onHistory ? <View style={styles.headerActions}>
+    </View> : null}
+    {!hideHeader && (onEdit || onAi || onHistory) ? <View style={styles.headerActions}>
       {onEdit ? <Button accessibilityLabel="Edit extracted text" contentMode="raw" onPress={onEdit} size="xs" variant="icon"><EditIcon size="sm" /></Button> : null}
       {onAi ? <Button accessibilityLabel="AI document actions" contentMode="raw" onPress={onAi} size="xs" variant="icon"><BrainIcon size="sm" /></Button> : null}
       {onHistory ? <Button accessibilityLabel="Document and audio versions" contentMode="raw" onPress={onHistory} size="xs" variant="icon"><ClockIcon size="sm" /></Button> : null}
     </View> : null}
     <View style={styles.documentArea}>
-      {loading ? <Skeleton accessibilityLabel={`Loading ${title}`} accessibilityRole="progressbar" style={styles.loadingSkeleton} />
-        : error ? <View style={styles.center}><Text accessibilityRole="alert" style={styles.error}>{error}</Text></View>
+      {error ? <View style={styles.center}><Text accessibilityRole="alert" style={styles.error}>{error}</Text></View>
           : pdfUri ? <Pdf enableDoubleTapZoom={false} enablePaging={false} fitPolicy={0} horizontal={false} maxScale={3} minScale={1} onError={(cause) => onRenderError?.(cause.message || "The PDF could not be rendered.")} source={{ uri: pdfUri, cache: false }} style={styles.pdf} trustAllCerts={false} />
             : htmlUri ? <WebView allowFileAccess allowFileAccessFromFileURLs={false} allowUniversalAccessFromFileURLs={false} javaScriptEnabled={false} onError={() => onRenderError?.("The document preview could not be rendered.")} originWhitelist={["file://*"]} source={{ uri: htmlUri }} style={styles.html} />
             : <View style={styles.center}><Text style={styles.error}>Original preview unavailable.</Text></View>}
@@ -50,13 +48,13 @@ export function FileViewer({ error, htmlUri, loading = false, onAi, onBack, onEd
 
 const styles = StyleSheet.create({
   root: { flex: 1, minWidth: 0, gap: spacing.md, paddingHorizontal: spacing.md, paddingTop: spacing.md, backgroundColor: colors.page },
+  embedded: { paddingTop: 0 },
   header: { minHeight: 48, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 },
   headerTitleHit: { flex: 1, minWidth: 0, justifyContent: "center" },
   headerTitle: { flex: 1, minWidth: 0, color: colors.text, fontFamily: "Geist_500Medium", fontSize: 24 },
   headerTitleText: { minWidth: 0, color: colors.text, fontFamily: "Geist_500Medium", fontSize: 24 },
   headerActions: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: spacing.xs },
   documentArea: { flex: 1, minWidth: 0, minHeight: 0, borderRadius: radii.xl, borderColor: colors.hairline, borderWidth: 1, overflow: "hidden", backgroundColor: colors.page },
-  loadingSkeleton: { flex: 1, backgroundColor: colors.hairlineBright, opacity: 0.72 },
   center: { flex: 1, padding: spacing.lg, alignItems: "center", justifyContent: "center" },
   error: { color: colors.muted, fontFamily: "Geist_400Regular", fontSize: 14, lineHeight: 21, textAlign: "center" },
   pdf: { flex: 1, width: "100%", backgroundColor: colors.page },

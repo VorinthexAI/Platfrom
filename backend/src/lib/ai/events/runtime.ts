@@ -41,6 +41,7 @@ interface CostContext {
   getBalance: typeof sparkService.getBalance;
   getDebt: typeof sparkService.getDebt;
   actionSequence: number;
+  actionChargeQueue: Promise<void>;
   actionPreflighted: boolean;
   actionCharges: Array<{ amount: number; executionIdentity: string; result: ApplySparkResult; accepted: boolean }>;
   actionLeaseTimer?: ReturnType<typeof setInterval>;
@@ -52,7 +53,7 @@ interface CostContext {
 interface EventRuntimeContext { appKey: string; appScopeKey?: string; recorder: ToolEventRecorder; usage?: MutableUsage; cost?: CostContext }
 
 const storage = new AsyncLocalStorage<EventRuntimeContext>();
-const USAGE_PRICED_ACTIONS = new Set(['text', 'image', 'speech']);
+const USAGE_PRICED_ACTIONS = new Set(['text', 'image', 'speech', 'video']);
 
 export class SparkRefundError extends Error {
   constructor(public readonly executionError: unknown, options: { cause: unknown }) {
@@ -101,11 +102,12 @@ export async function recordActionCost(actionSlug: string, _input?: unknown) {
   const priced = USAGE_PRICED_ACTIONS.has(actionSlug) || Boolean(active.lookupCost({ actionSlug }));
   if (priced && !active.idempotencyKey) throw new Error(`Priced action ${actionSlug} requires a stable request key.`);
   if (priced && !active.recorderAvailable) throw new Error(`Priced action ${actionSlug} requires an analytics recorder.`);
-  if (priced && !active.actionPreflighted) {
+  if (priced) {
     const balance = await active.getBalance(active.userKey);
     if (balance === null) throw new SparkRepositoryError('USER_NOT_FOUND', 'Spark account user was not found.');
     if ((await active.getDebt(active.userKey) ?? 0) > 0) throw new SparkRepositoryError('OUTSTANDING_DEBT', 'Spark spending is blocked until refund debt is resolved.');
-    if (balance <= 0) throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'Spark balance is insufficient for this execution.');
+    const quoted = ['image', 'speech', 'video'].includes(actionSlug) ? calculateActionCostMicroSparks(actionSlug, { inputTokens: 0, outputTokens: 0 }, _input) : 1;
+    if (balance < quoted) throw new SparkRepositoryError('INSUFFICIENT_BALANCE', 'Spark balance is insufficient for this execution.');
     active.actionPreflighted = true;
   }
 }
@@ -121,18 +123,22 @@ export async function recordActionUsage(actionSlug: string, input: unknown, usag
   if (amount === 0) return;
   const sequence = active.actionSequence++;
   const actionIdentity = await active.hash(JSON.stringify({ executionIdentity: active.executionIdentity, actionSlug, sequence }));
-  const result = await active.charge(active.userKey, {
-    kind: 'action', actionSlug, microSparks: amount,
-    idempotencyKey: `execution:${actionIdentity}`,
-    executionIdentity: actionIdentity,
-    requestHash: await active.hash(JSON.stringify({ toolSlug: active.toolSlug, actionSlug, sequence })),
-    eventKey: active.eventKey,
-    metadata: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens, amountMicroSparks: amount },
+  const charge = active.actionChargeQueue.then(async () => {
+    const result = await active.charge(active.userKey!, {
+      kind: 'action', actionSlug, microSparks: amount,
+      idempotencyKey: `execution:${actionIdentity}`,
+      executionIdentity: actionIdentity,
+      requestHash: await active.hash(JSON.stringify({ toolSlug: active.toolSlug, actionSlug, sequence })),
+      eventKey: active.eventKey,
+      metadata: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens, amountMicroSparks: amount },
+    });
+    if (result.status === 'conflict') throw new Error(`Spark action charge conflicted for ${actionSlug}.`);
+    if (result.status === 'pending') throw new SparkExecutionPendingError(result.transaction.key);
+    active.actionCharges.push({ amount, executionIdentity: actionIdentity, result, accepted: false });
+    startActionLeaseRenewal(active);
   });
-  if (result.status === 'conflict') throw new Error(`Spark action charge conflicted for ${actionSlug}.`);
-  if (result.status === 'pending') throw new SparkExecutionPendingError(result.transaction.key);
-  active.actionCharges.push({ amount, executionIdentity: actionIdentity, result, accepted: false });
-  startActionLeaseRenewal(active);
+  active.actionChargeQueue = charge.catch(() => undefined);
+  await charge;
 }
 
 /** Charges one fixed-price unit after canonical code has established a cache miss. */
@@ -235,7 +241,7 @@ export async function observeToolExecution<T>(
   const cost: CostContext = {
     toolSlug: slug, actionUsage: [], userKey, idempotencyKey, billingMode, lookupCost: lookup,
     recorderAvailable: Boolean(recorder), executionIdentity, hash, charge, complete, renew: options.renew ?? sparkService.renewExecution, getBalance, getDebt,
-    actionSequence: 0, actionPreflighted: false, actionCharges: [], actionLeaseRenewal: Promise.resolve(true), eventKey, fixedOutcomeAccepted: false,
+    actionSequence: 0, actionChargeQueue: Promise.resolve(), actionPreflighted: false, actionCharges: [], actionLeaseRenewal: Promise.resolve(true), eventKey, fixedOutcomeAccepted: false,
   };
   const ledgerKey = executionIdentity ? `execution:${executionIdentity}` : undefined;
   let sparkTransactionKey: string | null = null;
@@ -270,6 +276,7 @@ export async function observeToolExecution<T>(
       }
     }
     result = await storage.run({ appKey, appScopeKey, recorder: recorder ?? toolEventService.record, usage, cost }, execute);
+    await cost.actionChargeQueue;
     if (userKey && toolMicroSparks && precharge?.status === 'applied' && precharge.claimOwner) {
       if (leaseTimer) clearInterval(leaseTimer);
       if (!await leaseRenewal) throw new Error(`Spark execution lease renewal failed for ${slug}.`);
@@ -288,6 +295,7 @@ export async function observeToolExecution<T>(
   } catch (error) {
     if (leaseTimer) clearInterval(leaseTimer);
     if (cost.actionLeaseTimer) clearInterval(cost.actionLeaseTimer);
+    await cost.actionChargeQueue;
     executionError = error;
     if (userKey && precharge?.status === 'applied' && cost.fixedOutcomeAccepted && precharge.claimOwner) {
       if (!await leaseRenewal || !await complete(userKey, executionIdentity!, precharge.claimOwner)) executionError = new Error(`Spark execution lease was lost after durable acceptance for ${slug}.`, { cause: error });

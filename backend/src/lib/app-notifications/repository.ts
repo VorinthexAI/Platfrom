@@ -8,6 +8,7 @@ import { encryptPushToken, pushTokenHash } from './token-crypto';
 type QueryDatabase = Pick<typeof db, 'query'>;
 type RegistrationTransaction = <T>(operation: (transaction: QueryDatabase) => Promise<T>) => Promise<T>;
 export interface PendingPushDelivery { key: string; userKey: string; tokenCiphertext: string; projectId: string; title: string; message: string; notificationKey: string }
+export interface RegisteredPushSubscription { key: string; tokenCiphertext: string; projectId: string }
 export interface PendingReceipt { key: string; receiptId: string }
 export interface StorageRetentionWarningPersistenceInput {
   userKey: string;
@@ -54,6 +55,15 @@ export function createAppNotificationRepository(
       return { removed: (await cursor.next() ?? 0) > 0 };
     },
 
+    async registeredForUser(userKey: string): Promise<RegisteredPushSubscription[]> {
+      const cursor = await database.query<RegisteredPushSubscription>('FOR item IN pushSubscriptions FILTER item.userKey == @userKey RETURN { key: item._key, tokenCiphertext: item.tokenCiphertext, projectId: item.projectId }', { userKey });
+      return cursor.all();
+    },
+
+    async removeUnregistered(key: string) {
+      await database.query('FOR item IN pushSubscriptions FILTER item._key == @key REMOVE item IN pushSubscriptions RETURN 1', { key });
+    },
+
     async resolveRecipientUserKeys(teamKey: string, scopeKey: string, requested?: string[]) {
       const cursor = await database.query<string>(`
         FOR membership IN userTeams
@@ -82,7 +92,7 @@ export function createAppNotificationRepository(
       const recipients = recipientUserKeys.map((userKey) => ({ userKey, key: newId() }));
       const cursor = await database.query<{ deliveries: number }>(`
         LET subscriptions = (FOR item IN pushSubscriptions FILTER item.userKey IN @recipientUserKeys RETURN item)
-        INSERT { _key: @key, actorUserKey: @actorUserKey, teamKey: @teamKey, scopeKey: @scopeKey, idempotencyKey: @idempotencyKey, requestHash: @requestHash, title: @title, message: @message, recipientCount: LENGTH(@recipientUserKeys), deliveryCount: LENGTH(subscriptions), embedding: @embedding, embeddingState: "ready", embeddedAt: @now, embeddingProvider: @embeddingProvider, embeddingModel: @embeddingModel, embeddingDimensions: @embeddingDimensions, createdAt: @now } INTO appNotifications
+         INSERT { _key: @key, actorUserKey: @actorUserKey, teamKey: @teamKey, scopeKey: @scopeKey, idempotencyKey: @idempotencyKey, requestHash: @requestHash, title: @title, message: @message, recipientCount: LENGTH(@recipientUserKeys), deliveryCount: LENGTH(subscriptions), embedding: @embedding, embeddingState: "ready", embeddedAt: @now, embeddingProvider: @embeddingProvider, embeddingModel: @embeddingModel, embeddingDimensions: @embeddingDimensions, createdAt: @now } INTO appNotifications
         LET stored = (FOR recipient IN @recipients
           INSERT MERGE({ _key: recipient.key, userKey: recipient.userKey, teamKey: @teamKey, scopeKey: @scopeKey, title: @title, message: @message, readAt: null, sourceKey: @key, embedding: @embedding, createdAt: @now }, @destination) INTO userNotifications
           INSERT { _key: CONCAT(@key, "-", recipient.userKey), notificationKey: @key, userKey: recipient.userKey, teamKey: @teamKey, readAt: null, createdAt: @now, updatedAt: @now } INTO appNotificationRecipients RETURN 1)
@@ -127,7 +137,7 @@ export function createAppNotificationRepository(
           LET subscription = DOCUMENT(pushSubscriptions, delivery.subscriptionKey)
           LET notification = FIRST(FOR item IN userNotifications FILTER item.sourceKey == delivery.notificationKey && item.userKey == delivery.userKey LIMIT 1 RETURN item)
           FILTER subscription != null && notification != null
-          RETURN { key: delivery._key, userKey: delivery.userKey, tokenCiphertext: subscription.tokenCiphertext, projectId: subscription.projectId, title: notification.title, message: notification.message, notificationKey: delivery.notificationKey }
+           RETURN { key: delivery._key, userKey: delivery.userKey, tokenCiphertext: subscription.tokenCiphertext, projectId: subscription.projectId, title: notification.title, message: notification.message, notificationKey: delivery.notificationKey }
       `, { notificationKey });
       return await cursor.all();
     },

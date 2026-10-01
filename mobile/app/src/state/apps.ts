@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { fetchAppsRegistry, type ServerApp } from "@/lib/apps-registry";
+import { fetchAgentsRegistry, type ServerApp } from "@/lib/apps-registry";
 import { fetchSparkCosts, type CapabilitySparkCost, type SparkCharge } from "@/lib/cost-client";
 import { fetchPublicBootstrap, type MobileProduct } from "@/lib/product-client";
 import { useUiStore } from "./ui";
@@ -25,6 +25,7 @@ type AppsState = {
   refreshProducts: () => Promise<void>;
   enterCore: () => void;
   leaveCore: () => void;
+  selectAgent: (slug: string) => void;
 };
 
 let bootstrapPromise: Promise<void> | null = null;
@@ -75,13 +76,14 @@ export const useAppsStore = create<AppsState>((set, get) => ({
     if (bootstrapPromise) return bootstrapPromise;
     set({ bootstrapStatus: "bootstrapping", bootstrapError: null });
     void refreshProducts(set);
-    bootstrapPromise = fetchAppsRegistry()
+    bootstrapPromise = fetchAgentsRegistry()
       .then((apps) => {
-        const core = appForSlug(apps, "core");
-        set({ apps, bootstrapStatus: "ready", bootstrapError: null, ...selectedAppState(core, get().currentAppKey) });
+        const current = get().currentAppKey ? apps.find((app) => app.key === get().currentAppKey) : undefined;
+        const selected = current ?? appForSlug(apps, "core");
+        set({ apps, bootstrapStatus: "ready", bootstrapError: null, ...selectedAppState(selected, get().currentAppKey) });
       })
       .catch((error: unknown) => {
-        set({ apps: [], selectedApp: null, currentAppKey: null, bootstrapStatus: "failed", bootstrapError: error instanceof Error ? error.message : "App registry bootstrap failed." });
+        set({ apps: [], selectedApp: null, currentAppKey: null, bootstrapStatus: "failed", bootstrapError: error instanceof Error ? error.message : "Agent registry bootstrap failed." });
       })
       .finally(() => {
         bootstrapPromise = null;
@@ -91,6 +93,7 @@ export const useAppsStore = create<AppsState>((set, get) => ({
   refreshProducts: () => refreshProducts(set),
   enterCore: () => set((state) => selectedAppState(appForSlug(state.apps, "core"), state.currentAppKey)),
   leaveCore: () => set((state) => selectedAppState(appForSlug(state.apps, "core"), state.currentAppKey)),
+  selectAgent: (slug) => set((state) => selectedAppState(appForSlug(state.apps, slug), state.currentAppKey)),
 }));
 
 export async function ensureAppsReady(): Promise<string> {

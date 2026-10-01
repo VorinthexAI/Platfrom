@@ -14,8 +14,10 @@ export type CoreComposerProps = {
   focusRequest?: number;
   focusOnOpenRequest?: boolean;
   expandedLeading?: ReactNode;
+  expandedLeadingAccessory?: ReactNode;
   expandedLeadingAccessibilityLabel?: string;
   expandedLeadingDisabled?: boolean;
+  expandedToolbar?: ReactNode;
   expandedFooter?: ReactNode;
   leading: ReactNode;
   leadingAccessibilityLabel?: string;
@@ -26,6 +28,7 @@ export type CoreComposerProps = {
   onChangeText: (value: string) => void;
   onFocusChange?: (focused: boolean) => void;
   onExpandedLeadingPress?: () => void;
+  onExpandedKeyboardVisibilityChange?: (visible: boolean) => void;
   onLeadingPress?: () => void;
   onSubmit: () => void;
   openEnabled?: boolean;
@@ -43,6 +46,7 @@ export function CoreComposer({
   disabled,
   editable = true,
   expandedFooter,
+  expandedLeadingAccessory,
   leading,
   leadingAccessibilityLabel,
   leadingDisabled,
@@ -51,6 +55,7 @@ export function CoreComposer({
   message,
   onChangeText,
   onFocusChange,
+  onExpandedKeyboardVisibilityChange,
   onLeadingPress,
   onSubmit,
   openEnabled = true,
@@ -68,6 +73,7 @@ export function CoreComposer({
       {pageBackdrop}
       {message}
       <div>
+        {expandedLeadingAccessory}
         {onLeadingPress ? (
           <Button aria-label={leadingAccessibilityLabel ?? "Core actions"} disabled={leadingDisabled} onClick={onLeadingPress} size="sm" variant="icon">{leading}</Button>
         ) : leading}
@@ -75,9 +81,9 @@ export function CoreComposer({
           aria-label={accessibilityLabel}
           disabled={!editable || !openEnabled}
           maxLength={maxLength}
-          onBlur={() => onFocusChange?.(false)}
+          onBlur={() => { onFocusChange?.(false); onExpandedKeyboardVisibilityChange?.(false); }}
           onChange={(event) => onChangeText(event.target.value)}
-          onFocus={() => onFocusChange?.(true)}
+          onFocus={() => { onFocusChange?.(true); onExpandedKeyboardVisibilityChange?.(true); }}
           onKeyDown={(event) => { if (event.key === "Enter" && !disabled && openEnabled && value.trim()) onSubmit(); }}
           placeholder={prompts[0] ?? "Ask Core anything..."}
           value={value}

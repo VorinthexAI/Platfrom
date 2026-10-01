@@ -3,9 +3,10 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "@vorinthex/shared/ui/button";
-import { ChevronLeftIcon, SendIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { ChevronLeftIcon, CloseIcon, SendIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
+import { AgentSwitcher } from "@/components/AgentSwitcher";
 import { PersistentCoreComposer } from "@/components/PersistentCoreComposer";
 import { ProfileAvatar, SparksBalanceButton } from "@/components/ProfileAvatarButton";
 import { assistantIconSource } from "@/data/capability-icons";
@@ -35,7 +36,7 @@ export function AccountScreenShell({ children, rightAction, title }: { children:
       leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />}
       onChangeText={() => undefined}
       onSubmit={() => undefined}
-      pageIdentity={(closeCore) => <Button accessibilityLabel="Close Core" contentMode="raw" onPress={closeCore} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>}
+       pageIdentity={(closeCore) => <View style={styles.coreHeader}><AgentSwitcher /><Button accessibilityLabel="Close Core" contentMode="raw" onPress={closeCore} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View>}
       prompts={CORE_PROMPTS}
       sendIcon={<SendIcon size="sm" />}
       value=""
@@ -50,6 +51,7 @@ const styles = StyleSheet.create({
   pageHeader: { alignItems: "center", flexDirection: "row", gap: spacing.sm, minHeight: 48, marginTop: spacing.md },
   title: { color: palette.silver50, flex: 1, fontFamily: fonts.medium, fontSize: 24 },
   headerAction: { alignItems: "center", flexDirection: "row", gap: 4, justifyContent: "flex-end", minWidth: 32 },
+  coreHeader: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
   viewport: { flex: 1, minHeight: 0 },
   content: { flexGrow: 1 },
 });

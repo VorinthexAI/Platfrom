@@ -10,13 +10,11 @@ import { sparkErrorResponse } from './errors';
 import { authenticatedTeamContext } from './auth';
 
 export const ticketHttpInputSchema = z.object({
-  teamKey: z.string().cuid(),
   scopeKey: z.string().cuid(),
   message: ticketSubmitInputSchema.shape.message,
   kind: ticketSubmitInputSchema.shape.kind.optional(),
 }).strict();
 const ticketListHttpSchema = z.object({
-  teamKey: z.string().cuid(),
   scopeKey: z.string().cuid(),
   cursor: ticketListInputSchema.shape.cursor,
   limit: ticketListInputSchema.shape.limit,
@@ -25,7 +23,7 @@ const ticketListHttpSchema = z.object({
 
 export interface TicketHandlerDependencies {
   getIdentity?: typeof getAuthIdentity;
-  authorize?: (input: { teamKey: string; scopeKey: string }, options: Omit<RunAuthenticatedContentToolOptions, 'execute'>) => Promise<{ context: ToolContext }>;
+  authorize?: (input: { scopeKey: string }, options: Omit<RunAuthenticatedContentToolOptions, 'execute'>) => Promise<{ context: ToolContext }>;
   authorizationOptions?: Omit<RunAuthenticatedContentToolOptions, 'authenticatedUserKey' | 'execute'>;
   service?: TicketService;
 }
@@ -33,9 +31,9 @@ export interface TicketHandlerDependencies {
 async function authorizedRequest(c: Context, dependencies: TicketHandlerDependencies, schema: z.ZodTypeAny) {
   const identity = await (dependencies.getIdentity ?? getAuthIdentity)(c);
   if (!identity) return { response: c.json({ success: false, error: 'authentication required' }, 401) };
-  const input = await parseJson(c, schema) as { teamKey: string; scopeKey: string } & Record<string, unknown>;
-  const { teamKey, scopeKey, ...body } = input;
-  const { context } = await (dependencies.authorize ?? authorizeContentExecution)({ teamKey, scopeKey }, { ...dependencies.authorizationOptions, ...authenticatedTeamContext(identity) });
+  const input = await parseJson(c, schema) as { scopeKey: string } & Record<string, unknown>;
+  const { scopeKey, ...body } = input;
+  const { context } = await (dependencies.authorize ?? authorizeContentExecution)({ scopeKey }, { ...dependencies.authorizationOptions, ...authenticatedTeamContext(identity) });
   return { body, context };
 }
 

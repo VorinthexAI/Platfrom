@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ProviderExecutionCapabilities } from '@/lib/ai/providers';
+import { roleKeySchema } from '@/lib/ai/roles';
 import { CORE_CHAT_DOCUMENT_MIME_TYPES, CORE_CHAT_IMAGE_MIME_TYPES, CORE_CHAT_MAX_ATTACHMENTS, CORE_CHAT_MAX_FILE_BYTES, CORE_CHAT_MAX_FILE_BYTES_TOTAL, CORE_CHAT_MAX_IMAGE_BYTES, CORE_CHAT_MAX_IMAGE_BYTES_TOTAL, CORE_CHAT_MAX_IMAGES } from '@/lib/ai/actions/core-chat';
 
 const internalAgentAttachmentSchema = z.discriminatedUnion('kind', [
@@ -17,14 +18,10 @@ export const agentContextMessageSchema = z.object({
   createdAt: z.string().datetime(),
 }).strict();
 
-export const preloadedAgentToolSchema = z.object({
-  slug: z.literal('agent.guide'),
-  arguments: z.object({ mode: z.enum(['recommend', 'explain']) }).strict(),
-  result: boundedUnknownSchema,
-}).strict();
-
 export const internalAgentRequestSchema = z.object({
   systemPrompt: z.string().trim().min(1).max(20_000),
+  roleKey: roleKeySchema.default('general'),
+  taskInstructions: z.string().trim().min(1).max(1_200).optional(),
   currentConversationSummary: z.string().trim().min(1).max(4_000).optional(),
   context: z.array(agentContextMessageSchema).max(50).optional(),
   recalledContext: z.array(agentContextMessageSchema).max(20).optional(),
@@ -33,7 +30,6 @@ export const internalAgentRequestSchema = z.object({
   requestKey: z.string().trim().min(1).max(180),
   generateName: z.boolean().default(false),
   attachments: z.array(internalAgentAttachmentSchema).max(CORE_CHAT_MAX_ATTACHMENTS).default([]),
-  preloadedTools: z.array(preloadedAgentToolSchema).max(1).default([]),
 }).strict().superRefine((value, context) => {
   if (Buffer.byteLength(JSON.stringify({ currentConversationSummary: value.currentConversationSummary, context: value.context ?? [], recalledContext: value.recalledContext ?? [] }), 'utf8') > 250_000) {
     context.addIssue({ code: 'custom', path: ['recalledContext'], message: 'Serialized conversation context exceeds 250000 bytes.' });

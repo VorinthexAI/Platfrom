@@ -63,6 +63,7 @@ const storageReferenceAql = `
   LENGTH(FOR audio IN documentAudioVersions FILTER audio.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
   LENGTH(FOR audio IN documentSummaryAudio FILTER audio.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
   LENGTH(FOR image IN images FILTER image.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
+  LENGTH(FOR file IN files FILTER file.storageKey == @storageKey || file.thumbnailStorageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
   LENGTH(FOR artifact IN conversationAttachmentArtifacts FILTER artifact.stagedStorageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
   LENGTH(FOR upload IN galleryUploads FILTER upload.storageKey == @storageKey && upload.status != "failed" LIMIT 1 RETURN 1) > 0`;
 

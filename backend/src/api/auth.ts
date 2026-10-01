@@ -367,12 +367,16 @@ export async function verifyAccessToken(token: string): Promise<AuthIdentity | n
     if (parsed.sid) {
       const session = await getAuthSessionById(parsed.sid);
       if (!session || session.userId !== parsed.sub || session.revokedAt || !isRefreshTokenActive(session.expiresAt)) return null;
-      const selected = await getSelectedTeamMfaState(parsed.sub);
-      if (selected?.mfaEnabled && (
-        !selected.membershipMfaEnabled
-        || parsed.teamMembershipKey !== selected.teamMembershipKey
-        || parsed.teamMfaVersion !== selected.teamMfaVersion
-      )) return null;
+      // Personal user sessions have no team membership. Only founder-assured
+      // sessions need the separate team MFA state check.
+      if (parsed.founder) {
+        const selected = await getSelectedTeamMfaState(parsed.sub);
+        if (!selected || selected.mfaEnabled && (
+          !selected.membershipMfaEnabled
+          || parsed.teamMembershipKey !== selected.teamMembershipKey
+          || parsed.teamMfaVersion !== selected.teamMfaVersion
+        )) return null;
+      }
     }
     return {
       key: parsed.sub,

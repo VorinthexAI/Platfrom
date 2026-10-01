@@ -10,6 +10,7 @@ import { upsertAction } from './upsert';
 import { textAction } from './text';
 import { imageAction } from './image';
 import { speechAction } from './speech';
+import { videoAction } from './video';
 import { uploadAction } from './upload';
 import { queueAction } from './queue';
 
@@ -22,9 +23,10 @@ export { readAction } from './read';
 export { traverseAction } from './traverse';
 export { updateActionDefinition } from './update';
 export { upsertAction } from './upsert';
-export { textAction } from './text';
+export { textAction, mediaDescriptionInputSchema, mediaDescriptionOutputSchema, type MediaDescriptionInput, type MediaDescriptionOutput } from './text';
 export { imageAction } from './image';
 export { speechAction, speechInputSchema, speechOutputSchema, type SpeechInput, type SpeechOutput } from './speech';
+export { videoAction, videoInputSchema, videoOutputSchema, type VideoInput, type VideoOutput } from './video';
 export { uploadAction } from './upload';
 export { queueAction, executeQueueAction, type QueueActionInput } from './queue';
 export { ACTION_ROUTE_SUFFIXES, ACTION_SLUGS, actionIdSchema, isValidActionIdFormat } from './types';
@@ -33,7 +35,7 @@ export { coreChatContentSchema, coreChatMessageSchema, coreChatToolDefinitionSch
 
 /** Stable, provider- and domain-neutral runtime primitives. */
 export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
-  textAction, imageAction, speechAction, embedAction, decideAction, uploadAction, queueAction,
+  textAction, imageAction, speechAction, videoAction, embedAction, decideAction, uploadAction, queueAction,
   traverseAction, readAction, insertActionDefinition, upsertAction, updateActionDefinition, deleteActionDefinition,
 ];
 export const getActionDefinition = (id: ActionId): ActionDefinition | undefined => ACTION_DEFINITIONS.find((definition) => definition.id === id);

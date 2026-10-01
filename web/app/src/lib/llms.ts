@@ -63,6 +63,8 @@ ${PRODUCT_FACTS.name} is ${PRODUCT_FACTS.status.toLowerCase()}. ${PRODUCT_FACTS.
 
 ${PRODUCT_FACTS.workspaceContext}
 
+${PRODUCT_FACTS.mediaGeneration}
+
 ## Core apps
 
 ${PRODUCT_FACTS.capabilities.map(({ name, description, details }) => `- ${name}: ${description} ${details.join(" ")}`).join("\n")}

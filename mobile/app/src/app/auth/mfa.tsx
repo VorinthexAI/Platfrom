@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { postJson } from "@/lib/api-client";
-import { queryBelongsToTeamScope, selectTeam, takePendingTeamMfa } from "@/lib/team-client";
+import { queryBelongsToTeamScope, takePendingTeamMfa } from "@/lib/team-client";
 import { useAuthStore } from "@/state/auth";
 import { fonts, palette, spacing } from "@/theme/tokens";
 
@@ -73,11 +73,8 @@ export default function TeamMfaRoute() {
     const previousTeamKey = String(useAuthStore.getState().team?.key ?? "");
     const previousScopeKey = String(useAuthStore.getState().scope?.key ?? "");
     try {
-      const result = state.kind === "verify"
-        ? await postJson<{ challenge_token_hash: string; code: string }, { teamKey: string; scopeKey?: string }>("/auth/totp/verify", { challenge_token_hash: state.challenge!, code })
-        : await postJson<{ challenge_token_hash: string; codes: [string, string] }, { teamKey: string; scopeKey?: string }>("/auth/totp/setup/complete", { challenge_token_hash: state.setup.challenge, codes: [state.firstCode!, code] });
-      const selected = await selectTeam(result.teamKey, result.scopeKey);
-      if (selected.status !== "selected") throw new Error("Team assurance did not complete.");
+      if (state.kind === "verify") await postJson<{ challenge_token_hash: string; code: string }, unknown>("/auth/totp/verify", { challenge_token_hash: state.challenge!, code });
+      else await postJson<{ challenge_token_hash: string; codes: [string, string] }, unknown>("/auth/totp/setup/complete", { challenge_token_hash: state.setup.challenge, codes: [state.firstCode!, code] });
       await hydrate({ newSession: true });
       await queryClient.cancelQueries({ predicate: ({ queryKey }) => queryBelongsToTeamScope(queryKey, previousTeamKey, previousScopeKey) });
       queryClient.removeQueries({ predicate: ({ queryKey }) => queryBelongsToTeamScope(queryKey, previousTeamKey, previousScopeKey) });

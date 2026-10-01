@@ -111,23 +111,7 @@ export function publishScopeEvent(scopeKey: string, event: Exclude<AppEventSlug,
 
 export async function hasScopeEventAccess(userKey: string, scopeKey: string) {
   const cursor = await db.query(aql`
-    RETURN LENGTH(
-      FOR scope IN scopes
-        FILTER scope._key == ${scopeKey}
-        FOR membership IN userTeams
-          FILTER membership.userId == ${userKey} AND membership.status == "active"
-            AND membership.teamKey == scope.teamKey
-          LET scopeRole = FIRST(
-            FOR member IN scopeMembers
-              FILTER member.scopeKey == scope._key
-                AND member.userTeamKey == membership._key
-                AND member.status == "active"
-              LIMIT 1
-              RETURN member.role
-          )
-          FILTER membership.teamRole IN ["owner", "admin"] OR scopeRole != null
-          RETURN 1
-    ) > 0
+    RETURN LENGTH(FOR scope IN scopes FILTER scope._key == ${scopeKey} && scope.userKey == ${userKey} LIMIT 1 RETURN 1) > 0
   `);
   return Boolean(await cursor.next());
 }

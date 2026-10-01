@@ -10,7 +10,6 @@ import { createCoalescedRefresh } from "./async-refresh";
 import { billingSummaryQueryKey, currentSubscriptionQueryKey, walletHistoryQueryKey } from "./billing-client";
 import { compassQueryKeys } from "./compass-query-keys";
 import { conversationQueryKeys } from "./conversation-cache";
-import { communicationQueryKeys } from "./communication-client";
 import { contentQueryKeys } from "./content-query-cache";
 import { galleryRefreshPlan, isCurrentContextGeneration, type GalleryRefreshFamily } from "./gallery-convergence";
 import { referralSummaryQueryKey } from "./referral-client";
@@ -63,7 +62,6 @@ export function AuthenticatedEventBridge() {
     const compassContext = { teamKey, scopeKey };
     const contentContext = { userKey, scopeKey };
     const conversationContext = { userKey, scopeKey };
-    const communicationContext = { userKey, teamKey, scopeKey };
     const invalidateBilling = () => {
       void queryClient.invalidateQueries({ queryKey: currentSubscriptionQueryKey(userKey), exact: true, refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: billingSummaryQueryKey(userKey), exact: true, refetchType: "active" });
@@ -73,12 +71,14 @@ export function AuthenticatedEventBridge() {
     const invalidateCompassTrips = () => void queryClient.invalidateQueries({ queryKey: compassQueryKeys.trips(compassContext) });
     const invalidateAppSearch = () => void queryClient.invalidateQueries({ queryKey: appSearchQueryRoot, refetchType: "active" });
     const invalidateCompassPlaceReferences = () => void queryClient.invalidateQueries({ queryKey: compassQueryKeys.places(compassContext) });
-    const invalidateArchive = () => void queryClient.invalidateQueries({ queryKey: contentQueryKeys.all(contentContext), refetchType: "active" });
+    const invalidateArchive = () => {
+      void queryClient.invalidateQueries({ queryKey: contentQueryKeys.all(contentContext), refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["file-search", scopeKey], refetchType: "active" });
+    };
     const invalidateSignal = () => {
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.overviews(compassContext), refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.details(compassContext), refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: signalQueryKeys.replyContexts(compassContext), refetchType: "active" });
-      void queryClient.invalidateQueries({ queryKey: communicationQueryKeys.all(communicationContext), refetchType: "active" });
     };
     const invalidateBooks = createCoalescedRefresh(
       () => queryClient.invalidateQueries({ queryKey: ascendQueryKeys.all(compassContext), refetchType: "active" }),
@@ -128,7 +128,6 @@ export function AuthenticatedEventBridge() {
           publishAppEvent({ type: "inbox.changed" });
         }
         if (event.event === "communication.changed") {
-          void queryClient.invalidateQueries({ queryKey: communicationQueryKeys.all(communicationContext), refetchType: "active" });
           publishAppEvent({ type: "communication.changed" });
         }
         if (event.event === "conversation.changed") {

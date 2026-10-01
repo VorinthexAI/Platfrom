@@ -37,7 +37,6 @@ export const CANONICAL_APPS = [
 }>;
 
 export const APP_KEYS_BY_SLUG = Object.freeze(Object.fromEntries(CANONICAL_APPS.map(({ slug, key }) => [slug, key])) as Record<(typeof CANONICAL_APPS)[number]['slug'], string>);
-export const PRODUCT_SCOPE_SLUGS = Object.freeze(CANONICAL_APPS.map(({ slug }) => slug));
 export const CANONICAL_APP_BY_ALIAS = new Map(CANONICAL_APPS.map((app) => [app.key, app]));
 export const CANONICAL_APP_BY_SLUG = new Map(CANONICAL_APPS.map((app) => [app.slug, app]));
 

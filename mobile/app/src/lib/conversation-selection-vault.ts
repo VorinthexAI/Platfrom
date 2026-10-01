@@ -8,6 +8,8 @@ const storedConversationSchema = z.strictObject({
   key: z.string().min(1),
   name: z.string().min(1).max(200),
   isFavorite: z.boolean(),
+  isHidden: z.boolean().default(false),
+  roleKey: z.string().min(1).default("general"),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

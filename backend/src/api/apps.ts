@@ -13,3 +13,15 @@ export function createListApps(service: Pick<AppsService, 'listPublic'> = appsSe
 }
 
 export const listApps = createListApps();
+
+export const agentsResponseSchema = z.object({ agents: z.array(publicAppSchema) }).strict();
+
+export function createListAgents(service: Pick<AppsService, 'listPublic'> = appsService) {
+  return async (c: Context) => {
+    c.header('Cache-Control', 'no-store');
+    const agents = await service.listPublic();
+    return c.json(agentsResponseSchema.parse({ agents }));
+  };
+}
+
+export const listAgents = createListAgents();

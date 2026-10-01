@@ -19,7 +19,9 @@ export const deleteTag = helpers.deleteById;
 export const upsertTagByKey = helpers.upsertByKey;
 export const getAllTagsChunked = helpers.getAllChunked;
 export const listTagsPage = helpers.listPage;
-export async function listTagsByScope(scopeKey: string, userKey: string): Promise<Tag[]> {
+const tagListingSchema = tagSchema.pick({ key: true, name: true, description: true, createdAt: true, updatedAt: true });
+
+export async function listTagsByScope(scopeKey: string, userKey: string) {
   const cursor = await db.query(aql`FOR tag IN ${db.collection(TAGS_COLLECTION)} FILTER tag.scopeKey == ${scopeKey} && tag.userKey == ${userKey} SORT tag.normalizedName ASC, tag._key ASC RETURN tag`);
-  return (await cursor.all()).map((tag) => tagSchema.parse(withArangoKey(tag)));
+  return (await cursor.all()).map((tag) => tagListingSchema.parse(withArangoKey(tag)));
 }

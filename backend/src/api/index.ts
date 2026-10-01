@@ -14,7 +14,7 @@ import { closeAutomations, startAutomations } from '@/lib/automations';
 import { handlePolarWebhook, POLAR_WEBHOOK_V1_PATH } from './polar-webhook';
 import { polarConfiguration } from '@/lib/commerce/polar';
 import { closeAppNotificationQueue, recoverAppNotificationQueue, startAppNotificationWorker } from '@/lib/app-notifications/queue';
-import { closeConversationGuideTopicsQueue, recoverConversationGuideTopicsQueue, startConversationGuideTopicsWorker } from '@/lib/conversations/guide-topics-queue';
+import { closeConversationArchiveProjectionQueue, recoverConversationArchiveProjectionQueue, startConversationArchiveProjectionWorker } from '@/lib/conversations/archive-projection-queue';
 
 export const app = new Hono();
 const api = app.basePath('/api/v1');
@@ -87,15 +87,15 @@ if (import.meta.main) {
   console.log(`vorinthex app listening on ${port}`);
   const conversationImageWorker = startConversationImageTurnWorker();
   const conversationAttachmentWorker = startConversationAttachmentPersistenceWorker();
-  const conversationGuideTopicsWorker = startConversationGuideTopicsWorker();
+  const conversationArchiveWorker = startConversationArchiveProjectionWorker();
   const appNotificationWorker = startAppNotificationWorker();
   void recoverConversationImageTurnQueue().catch((error) => console.error('conversation image queue recovery failed', { error }));
   void recoverConversationAttachmentPersistenceQueue().catch((error) => console.error('conversation attachment persistence queue recovery failed', { error }));
-  void recoverConversationGuideTopicsQueue().catch((error) => console.error('conversation guide topics queue recovery failed', { error }));
+  void recoverConversationArchiveProjectionQueue().catch((error) => console.error('conversation archive projection queue recovery failed', { error }));
   void recoverAppNotificationQueue().catch((error) => console.error('app notification queue recovery failed', { error }));
   const conversationImageRecoveryTimer = setInterval(() => { void recoverConversationImageTurnQueue().catch((error) => console.error('conversation image queue recovery failed', { error })); }, 60_000);
   const conversationAttachmentRecoveryTimer = setInterval(() => { void recoverConversationAttachmentPersistenceQueue().catch((error) => console.error('conversation attachment persistence queue recovery failed', { error })); }, 60_000);
-  const conversationGuideTopicsRecoveryTimer = setInterval(() => { void recoverConversationGuideTopicsQueue().catch((error) => console.error('conversation guide topics queue recovery failed', { error })); }, 60_000);
+  const conversationArchiveRecoveryTimer = setInterval(() => { void recoverConversationArchiveProjectionQueue().catch((error) => console.error('conversation archive projection queue recovery failed', { error })); }, 60_000);
 
   let shuttingDown = false;
   const shutdown = async () => {
@@ -104,14 +104,14 @@ if (import.meta.main) {
     server.stop(false);
     clearInterval(conversationImageRecoveryTimer);
     clearInterval(conversationAttachmentRecoveryTimer);
-    clearInterval(conversationGuideTopicsRecoveryTimer);
+    clearInterval(conversationArchiveRecoveryTimer);
     await conversationImageWorker.close();
     await conversationAttachmentWorker.close();
-    await conversationGuideTopicsWorker.close();
+    await conversationArchiveWorker.close();
     await appNotificationWorker.close();
     await closeConversationImageTurnQueue();
     await closeConversationAttachmentPersistenceQueue();
-    await closeConversationGuideTopicsQueue();
+    await closeConversationArchiveProjectionQueue();
     await closeAppNotificationQueue();
     await closeAutomations();
     process.exit(0);

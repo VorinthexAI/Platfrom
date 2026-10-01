@@ -31,7 +31,7 @@ export interface AccountDeletionRepository {
 const BASE_ACCOUNT_DELETE_WRITE_COLLECTIONS = [
   'users', 'teams', 'userTeams', 'scopes', 'scopeMembers', 'authSessions', 'authChallenges', 'userSessions', 'userConnectors',
   'visitors', 'visitorSessions',
-  'userMentions', 'userReactions', 'userHiddens', 'userWorkspaceApps', 'userGenerations', 'userSearches', 'contentSearchQueries', 'contentIdempotency',
+  'userMentions', 'userReactions', 'userHiddens', 'userGenerations', 'userSearches', 'contentSearchQueries', 'contentIdempotency',
   'conversations', 'conversationMessages', 'conversationAttachmentArtifacts', 'tickets', 'userInboxThreads', 'userInboxMessages', 'userNotifications', 'events', 'tags', 'tagAssignments',
   'pushSubscriptions', 'appNotifications', 'appNotificationRecipients', 'pushDeliveries',
   'sparkTransactions', 'billingExecutions', 'referralCodes', 'referralAttributions', 'referralRewards',
@@ -39,7 +39,7 @@ const BASE_ACCOUNT_DELETE_WRITE_COLLECTIONS = [
   'storageObjects', 'storageChargingHours', 'storageChargingMeters', 'storageRetentionStates', 'galleryUploads', 'storageDeletionJobs',
 ] as const;
 
-const ACCOUNT_DELETE_WRITE_COLLECTIONS = [...BASE_ACCOUNT_DELETE_WRITE_COLLECTIONS, 'conversationArchiveStates'] as const;
+const ACCOUNT_DELETE_WRITE_COLLECTIONS = [...BASE_ACCOUNT_DELETE_WRITE_COLLECTIONS, 'conversationArchiveStates', 'folders', 'files'] as const;
 
 const DELETE_WRITE_COLLECTIONS = [...new Set([...ACCOUNT_DELETE_WRITE_COLLECTIONS, ...SCOPE_REMOVAL_WRITE_COLLECTIONS])];
 
@@ -118,7 +118,8 @@ export function createAccountDeletionRepository(
            ))
           LET storageKeys = UNIQUE(UNION(
             IS_STRING(user.profileStorageKey) ? [user.profileStorageKey] : [],
-            (FOR upload IN galleryUploads FILTER upload.actorKey IN teamMembershipKeys && IS_STRING(upload.storageKey) RETURN upload.storageKey),
+             (FOR upload IN galleryUploads FILTER upload.actorKey IN teamMembershipKeys && IS_STRING(upload.storageKey) RETURN upload.storageKey),
+             (FOR file IN files FILTER file.userKey == @userKey FOR key IN [file.storageKey, file.thumbnailStorageKey] FILTER IS_STRING(key) RETURN key),
              (FOR object IN storageObjects FILTER object.userKey == @userKey && IS_STRING(object.storageKey) RETURN object.storageKey),
              (FOR artifact IN conversationAttachmentArtifacts FILTER artifact.userKey == @userKey && IS_STRING(artifact.stagedStorageKey) RETURN artifact.stagedStorageKey)
           ))
@@ -137,7 +138,6 @@ export function createAccountDeletionRepository(
           LET cleanupMentions = (FOR item IN userMentions FILTER item.userKey == @userKey REMOVE item IN userMentions RETURN 1)
           LET cleanupReactions = (FOR item IN userReactions FILTER item.userKey == @userKey REMOVE item IN userReactions RETURN 1)
           LET cleanupHiddens = (FOR item IN userHiddens FILTER item.userKey == @userKey REMOVE item IN userHiddens RETURN 1)
-          LET cleanupWorkspaceApps = (FOR item IN userWorkspaceApps FILTER item.userKey == @userKey REMOVE item IN userWorkspaceApps RETURN 1)
           LET cleanupGenerations = (FOR item IN userGenerations FILTER item.userKey == @userKey REMOVE item IN userGenerations RETURN 1)
           LET cleanupSearches = (FOR item IN userSearches FILTER item.userKey == @userKey REMOVE item IN userSearches RETURN 1)
           LET cleanupSearchCache = (FOR item IN contentSearchQueries FILTER item.actorKey == @userKey REMOVE item IN contentSearchQueries RETURN 1)
@@ -145,8 +145,8 @@ export function createAccountDeletionRepository(
           LET cleanupConversationMessages = (FOR item IN conversationMessages FILTER item.userKey == @userKey REMOVE item IN conversationMessages RETURN 1)
            LET cleanupConversationAttachmentArtifacts = (FOR item IN conversationAttachmentArtifacts FILTER item.userKey == @userKey REMOVE item IN conversationAttachmentArtifacts RETURN 1)
            LET cleanupConversationArchiveStates = (FOR item IN conversationArchiveStates FILTER item.userKey == @userKey REMOVE item IN conversationArchiveStates RETURN 1)
-           LET cleanupConversationArchiveDocuments = (FOR item IN documents FILTER item.privateOwnerUserKey == @userKey && item.managedPurpose IN ["conversation-message", "conversation-summary"] REMOVE item IN documents RETURN 1)
-           LET cleanupConversationArchiveFolders = (FOR item IN folders FILTER item.privateOwnerUserKey == @userKey && item.managedPurpose IN ["conversation-root", "conversation", "conversation-summaries"] REMOVE item IN folders RETURN 1)
+            LET cleanupConversationArchiveDocuments = (FOR item IN files FILTER item.userKey == @userKey && item.managedPurpose IN ["conversation-transcript", "conversation-summary"] REMOVE item IN files RETURN 1)
+            LET cleanupConversationArchiveFolders = (FOR item IN folders FILTER item.userKey == @userKey && item.managedPurpose IN ["conversation-root", "conversation", "conversation-summaries"] REMOVE item IN folders RETURN 1)
            LET cleanupConversations = (FOR item IN conversations FILTER item.userKey == @userKey REMOVE item IN conversations RETURN 1)
             LET cleanupTickets = (FOR item IN tickets FILTER item.userKey == @userKey REMOVE item IN tickets RETURN 1)
             LET notificationKeys = (FOR item IN appNotifications FILTER item.actorUserKey == @userKey RETURN item._key)

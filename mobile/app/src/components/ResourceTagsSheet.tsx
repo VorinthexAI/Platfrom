@@ -10,20 +10,14 @@ import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 
 import { TagCreateSheet, TagSheetEmptyState } from "@/components/TagSheetShared";
 import { useErrorFeedback } from "@/hooks/use-error-feedback";
-import { appSearchQueryRoot } from "@/lib/app-search-client";
 import { actionToast } from "@/lib/action-toast";
 import type { ContentContext } from "@/lib/content-client";
+import { contentQueryKeys } from "@/lib/content-query-cache";
 import { appendResourceTag, createResourceTagKey, createScopeTag, groupResourceTagAssignmentRequests, normalizeResourceTagTargets, persistResourceTagAssignments, removeResourceTag, replaceResourceTag, resolvePendingResourceTagDraft, type ResourceTagAssignmentState, type ResourceTagTarget, type ScopeTag } from "@/lib/tag-client";
 import { applyResourceTagDraft, refreshResourceTagAssignments, refreshScopeTags, resourceTagAssignmentsQueryKey, resourceTagState, scopeTagsQueryKey, toggleResourceTagDraft, type ResourceTagDraft } from "@/lib/tag-query-cache";
-import { invalidateAssistantChanges } from "@/lib/workspace-query-cache";
 import { palette, spacing } from "@/theme/tokens";
 
 export type ResourceTagsSheetProps = { context: ContentContext; targets: readonly ResourceTagTarget[]; open: boolean; onApply?: () => void; onClose: () => void };
-
-const workspaceByTarget = {
-  folder: "archive", document: "archive", "image-collection": "gallery", image: "gallery", "image-highlight": "gallery", "image-memory": "gallery",
-  place: "compass", trip: "compass", "email-inbox": "signal", "email-tone": "signal", "email-thread": "signal", "email-message": "signal", "email-draft": "signal", book: "ascend",
-} as const;
 
 export function ResourceTagsSheet({ context, targets, open, onApply, onClose }: ResourceTagsSheetProps) {
   const queryClient = useQueryClient();
@@ -33,6 +27,7 @@ export function ResourceTagsSheet({ context, targets, open, onApply, onClose }: 
   const [draft, setDraft] = useState<ResourceTagDraft>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  const [retryRevision, setRetryRevision] = useState(0);
   useErrorFeedback([open ? error : undefined]);
   const [createOpen, setCreateOpen] = useState(false);
   const [tagName, setTagName] = useState("");
@@ -69,7 +64,7 @@ export function ResourceTagsSheet({ context, targets, open, onApply, onClose }: 
     const request = ++requestRef.current;
     const timeout = setTimeout(() => loadAssignments(request), 0);
     return () => { clearTimeout(timeout); requestRef.current += 1; if (sessionRef.current === session) sessionRef.current += 1; };
-  }, [batchIdentity, context.scopeKey, context.userKey, open, queryClient]);
+  }, [batchIdentity, context.scopeKey, context.userKey, open, queryClient, retryRevision]);
 
   useEffect(() => {
     if (!createOpen) return;
@@ -156,8 +151,10 @@ export function ResourceTagsSheet({ context, targets, open, onApply, onClose }: 
         return;
       }
       try { await refreshResourceTagAssignments(queryClient, context, normalizedTargets); } catch { /* Preserve the optimistic success when reconciliation is unavailable. */ }
-      const changes = [...new Set(normalizedTargets.map(({ type }) => workspaceByTarget[type]))].map((workspace) => ({ workspace }));
-      void Promise.all([invalidateAssistantChanges(queryClient, context, changes), queryClient.invalidateQueries({ queryKey: appSearchQueryRoot })]).catch(() => undefined);
+       void Promise.all([
+         queryClient.invalidateQueries({ queryKey: contentQueryKeys.locations(context), refetchType: "none" }),
+         queryClient.invalidateQueries({ queryKey: ["file-search", context.scopeKey] }),
+       ]).catch(() => undefined);
     })();
   };
 
@@ -165,7 +162,7 @@ export function ResourceTagsSheet({ context, targets, open, onApply, onClose }: 
 
   return <><BottomSheet description="Choose tags for the selected items. Tags shown with a dashed outline are currently on only some items." footer={<View style={styles.footer}><Button disabled={loading || Boolean(error) || !state} onPress={draftChanged ? apply : openCreate} size="md" variant="primary">{draftChanged ? "Apply" : "Create tag"}</Button><Button onPress={onClose} size="md" variant="secondary">Close</Button></View>} height="full" onOpenChange={(next) => { if (!next) onClose(); }} open={open} title="Tags">
     <ScrollView contentContainerStyle={[styles.list, !loading && state?.tags.length === 0 && styles.emptyContent]} showsVerticalScrollIndicator={false} style={styles.scroll}>
-      {error ? <Button onPress={() => loadAssignments(++requestRef.current)} size="md" variant="secondary">Retry tags</Button> : null}
+       {error ? <Button onPress={() => setRetryRevision((value) => value + 1)} size="md" variant="secondary">Retry tags</Button> : null}
       {loading ? <View accessibilityLabel="Loading tags" accessibilityRole="progressbar" style={styles.list}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={styles.skeleton} />)}</View> : null}
       {!loading && !error && state?.tags.length === 0 ? <TagSheetEmptyState onCreate={openCreate} /> : null}
       {!loading && state ? state.tags.map((tag) => { const tagState = resourceTagState(state, targets, tag.key, draft); return <FilterPill fullWidth key={tag.key} label={tag.name} mixed={tagState === "some"} onPress={() => setDraft((current) => toggleResourceTagDraft(current, state, targets, tag.key))} selected={tagState === "all"} />; }) : null}

@@ -17,6 +17,9 @@ export const folderSchema = z.object({
   coverFileKey: z.string().cuid().optional(),
   embedding: currentEmbeddingSchema.or(z.array(z.number().finite()).length(0)).default([]),
   isFavorite: z.boolean().default(false),
+  isHidden: z.boolean().default(false),
+  managedPurpose: z.enum(['conversation-root', 'conversation', 'conversation-summaries']).optional(),
+  managedOwnerKey: z.string().trim().min(1).max(160).optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -46,14 +49,28 @@ export async function listFoldersInParent(scopeKey: string, userKey: string, par
     FOR folder IN ${db.collection(FOLDERS_COLLECTION)}
       FILTER folder.scopeKey == ${scopeKey} && folder.userKey == ${userKey}
       FILTER ${parentFolderKey ?? null} == null ? !HAS(folder, 'parentFolderKey') : folder.parentFolderKey == ${parentFolderKey ?? null}
-      SORT folder.name ASC
+      SORT folder.name ASC, folder._key ASC
       LIMIT ${limit}
       RETURN folder
   `);
   return (await result.all()).map((row) => folderSchema.parse(withArangoKey(row as Record<string, unknown>)));
 }
 
-export async function updateFolderInScope(scopeKey: string, folderKey: string, userKey: string, patch: Partial<Pick<Folder, 'name' | 'description' | 'coverFileKey' | 'isFavorite' | 'parentFolderKey' | 'embedding'>>) {
+export async function listFoldersInParentPage(scopeKey: string, userKey: string, parentFolderKey: string | undefined, limit: number, after?: Pick<Folder, 'key' | 'name'>) {
+  const result = await db.query(aql`
+    FOR folder IN ${db.collection(FOLDERS_COLLECTION)}
+      FILTER folder.scopeKey == ${scopeKey} && folder.userKey == ${userKey}
+      FILTER ${parentFolderKey ?? null} == null ? !HAS(folder, 'parentFolderKey') : folder.parentFolderKey == ${parentFolderKey ?? null}
+      FILTER ${after?.key ?? null} == null || folder.name > ${after?.name ?? null} || (folder.name == ${after?.name ?? null} && folder._key > ${after?.key ?? null})
+      SORT folder.name ASC, folder._key ASC
+      LIMIT ${limit + 1}
+      RETURN folder
+  `);
+  const folders = (await result.all()).map((row) => folderSchema.parse(withArangoKey(row as Record<string, unknown>)));
+  return { folders: folders.slice(0, limit), cursor: folders.length > limit ? folders[limit - 1]!.key : undefined };
+}
+
+export async function updateFolderInScope(scopeKey: string, folderKey: string, userKey: string, patch: Partial<Pick<Folder, 'name' | 'description' | 'coverFileKey' | 'isFavorite' | 'isHidden' | 'parentFolderKey' | 'embedding'>>) {
   const current = await getFolderInScope(scopeKey, folderKey, userKey);
   if (!current) return null;
   return helpers.updateById(folderKey, { ...patch, updatedAt: new Date().toISOString() });
@@ -70,7 +87,7 @@ export async function deleteFolderInScope(scopeKey: string, folderKey: string, u
       LET removedFiles = (
         FOR file IN @@files
           FILTER file.scopeKey == @scopeKey && file.userKey == @userKey && (file.folderKey IN folderKeys)
-          LET queued = (UPSERT { storageKey: file.storageKey } INSERT { storageKey: file.storageKey, createdAt: @now, status: 'pending' } UPDATE {} IN storageDeletionJobs RETURN 1)
+           LET queued = (FOR key IN [file.storageKey, file.thumbnailStorageKey] FILTER IS_STRING(key) UPSERT { storageKey: key } INSERT { storageKey: key, createdAt: @now, status: 'pending' } UPDATE {} IN storageDeletionJobs RETURN 1)
           REMOVE file IN @@files
           RETURN 1
       )
@@ -84,7 +101,7 @@ export async function deleteFolderInScope(scopeKey: string, folderKey: string, u
         LET removedFiles = (
           FOR file IN @@files
             FILTER file.scopeKey == @scopeKey && file.userKey == @userKey && file.folderKey IN folderKeys
-            LET queued = (UPSERT { storageKey: file.storageKey } INSERT { storageKey: file.storageKey, createdAt: @now, status: 'pending' } UPDATE {} IN storageDeletionJobs RETURN 1)
+             LET queued = (FOR key IN [file.storageKey, file.thumbnailStorageKey] FILTER IS_STRING(key) UPSERT { storageKey: key } INSERT { storageKey: key, createdAt: @now, status: 'pending' } UPDATE {} IN storageDeletionJobs RETURN 1)
             REMOVE file IN @@files
             RETURN 1
         )

@@ -23,19 +23,15 @@ const imageMimeTypeSchema = z.enum(['image/jpeg', 'image/png', 'image/webp']);
 const documentMimeTypeSchema = z.enum(['text/plain', 'text/markdown', 'text/x-markdown', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
 const mimeTypeSchema = z.union([imageMimeTypeSchema, documentMimeTypeSchema]);
 const filenameSchema = z.string().trim().min(1).max(255).refine((value) => !/[\\/\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/.test(value), 'Filename is invalid.');
-const fileSchema = z.object({ clientKey: z.string().trim().min(1).max(120), filename: filenameSchema, mimeType: mimeTypeSchema, sizeBytes: z.number().int().positive().max(TRANSIENT_ATTACHMENT_MAX_BYTES) }).strict().superRefine((file, context) => {
+const fileSchema = z.object({ clientKey: z.string().trim().min(1).max(120), filename: filenameSchema, mimeType: documentMimeTypeSchema, sizeBytes: z.number().int().positive().max(TRANSIENT_ATTACHMENT_MAX_BYTES) }).strict().superRefine((file, context) => {
   const extension = file.filename.split('.').at(-1)?.toLowerCase();
-  const valid = extension === 'jpg' || extension === 'jpeg' ? file.mimeType === 'image/jpeg'
-    : extension === 'png' ? file.mimeType === 'image/png'
-      : extension === 'webp' ? file.mimeType === 'image/webp'
-        : extension === 'txt' ? file.mimeType === 'text/plain'
+  const valid = extension === 'txt' ? file.mimeType === 'text/plain'
           : extension === 'md' ? ['text/markdown', 'text/x-markdown', 'text/plain'].includes(file.mimeType)
             : extension === 'pdf' ? file.mimeType === 'application/pdf'
               : extension === 'doc' ? file.mimeType === 'application/msword'
                 : extension === 'docx' ? file.mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
                   : false;
   if (!valid) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Filename extension and MIME type must identify a supported attachment.', path: ['mimeType'] });
-  if (file.mimeType.startsWith('image/') && file.sizeBytes > TRANSIENT_IMAGE_MAX_BYTES) context.addIssue({ code: z.ZodIssueCode.too_big, type: 'number', maximum: TRANSIENT_IMAGE_MAX_BYTES, inclusive: true, message: 'Image exceeds the maximum allowed size.', path: ['sizeBytes'] });
 });
 
 export const transientAttachmentReserveInputSchema = z.object({

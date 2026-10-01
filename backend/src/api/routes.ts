@@ -43,12 +43,14 @@ import { documentUploadHandlers } from './document-uploads';
 import { bootstrapGuestAuth, deleteAuthAccount, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
 import { userHiddenHandlers } from './user-hiddens';
 import { acknowledgeFundingRequirementHandler, streamEvents } from './events';
-import { searchApp } from './app-search';
+import { generateMedia } from './media-generation';
+
 import { conversationHandlers } from './conversations';
+import { listRoles } from './roles';
 import { transientAttachmentHandlers } from './transient-attachments';
 import { completeAccountAvatar, presignAccountAvatar, profileBadgeHandlers, updateAccountProfile } from './account-profile';
 import { feedbackHandlers, ticketHandler, ticketHandlers } from './tickets';
-import { listApps } from './apps';
+import { listAgents, listApps } from './apps';
 import { recordAnalyticsEvent } from './event-ingestion';
 import { getBillingSummary } from './billing';
 import { getReferralSummary, redeemReferral } from './referrals';
@@ -57,7 +59,7 @@ import { commerceHandlers } from './commerce';
 import { scopeHandlers } from './scopes';
 import { appNotificationHandlers } from './app-notifications';
 import { listCosts } from './costs';
-import { generateAgentGreeting, generateAgentGreetingTopics } from './agent-guide';
+import { generateAgentGreeting } from './agent-greeting';
 
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -79,6 +81,7 @@ export const authTransportSchemas = Object.freeze({
 
 export function registerRoutes(app: Hono) {
   app.get('/apps', listApps);
+  app.get('/agents', listAgents);
 
   app.get('/products', commerceHandlers.listProducts);
   app.get('/costs', listCosts);
@@ -413,7 +416,7 @@ export function registerRoutes(app: Hono) {
   app.post('/tickets/list', ticketHandlers.list);
   app.post('/feedback', feedbackHandlers.create);
 
-  app.post('/app/search', searchApp);
+
   app.post('/app/notify', appNotificationHandlers.notify);
   app.post('/scopes/list', scopeHandlers.list);
   app.post('/scopes', scopeHandlers.create);
@@ -424,15 +427,21 @@ export function registerRoutes(app: Hono) {
   app.get('/events/stream', streamEvents);
   app.post('/events/funding-requirements/:messageKey/acknowledge', acknowledgeFundingRequirementHandler);
   app.post('/conversations', conversationHandlers.create);
+  app.get('/roles', listRoles);
   app.post('/conversations/list', conversationHandlers.list);
   app.post('/conversations/search', conversationHandlers.search);
   app.patch('/conversations/:conversationKey', conversationHandlers.rename);
   app.post('/conversations/:conversationKey/favorite', conversationHandlers.favorite);
+  app.post('/conversations/:conversationKey/hidden', conversationHandlers.hide);
+  app.post('/conversations/:conversationKey/role', conversationHandlers.setRole);
+  app.post('/conversations/context-seed/stream', conversationHandlers.seedContext);
   app.delete('/conversations/:conversationKey', conversationHandlers.delete);
   app.post('/conversations/:conversationKey/messages/list', conversationHandlers.messages);
   app.delete('/conversations/:conversationKey/messages/:messageKey', conversationHandlers.deleteMessage);
-  app.post('/conversations/:conversationKey/image-turns', conversationHandlers.imageTurn);
+  app.post('/conversations/turn/stream', conversationHandlers.incognitoTurn);
   app.post('/conversations/:conversationKey/turn/stream', conversationHandlers.turn);
+  app.post('/agent/generate/:mode', generateMedia);
+  app.post('/agent/greeting', generateAgentGreeting);
   app.post('/conversations/:conversationKey/attachments/uploads/presign', transientAttachmentHandlers.reserve);
   app.post('/conversations/:conversationKey/attachments/uploads/complete', transientAttachmentHandlers.complete);
 
@@ -466,8 +475,6 @@ export function registerRoutes(app: Hono) {
   app.post('/content/tools/:tool', invokeContentTool);
   app.post('/content/uploads/presign', documentUploadHandlers.reserve);
   app.post('/content/uploads/complete', documentUploadHandlers.complete);
-  app.post('/agent/greeting', generateAgentGreeting);
-  app.post('/agent/greeting/topics', generateAgentGreetingTopics);
   app.get('/founders/me', getFoundersAccount);
   app.get('/founders/teams', listFoundersTeams);
   app.get('/founders/teams/:teamKey/scopes', listFoundersTeamScopes);

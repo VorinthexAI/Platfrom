@@ -1,8 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
 import { Badge } from "@vorinthex/shared/ui/badge";
-import { Button, ButtonSizeProvider } from "@vorinthex/shared/ui/button";
-import { CloseIcon, HelpIcon, ReferralIcon, SparksIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { Button } from "@vorinthex/shared/ui/button";
+import { CloseIcon, ReferralIcon, SparksIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Tabs, TabsTrigger } from "@vorinthex/shared/ui/tabs";
 import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 import * as Crypto from "expo-crypto";
@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { NeuralBackdrop } from "@/components/NeuralBackdrop";
 import { OnboardingStepLayout } from "@/components/onboarding/OnboardingStepLayout";
-import { SparkCostsSheet } from "@/components/SparkCostsSheet";
+
 import { vorinthexMarkSource } from "@/data/capability-icons";
 import { useCurrentSubscription, useWholeSparkBalance } from "@/hooks/use-billing-summary";
 import { useDelayedAction } from "@/hooks/use-delayed-action";
@@ -55,7 +55,6 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
   const { height, width } = useWindowDimensions();
   const onboardingHeroHeight = Math.max(280, height * 0.4);
   const standardOpen = useUiStore((state) => state.paywallOpen);
-  const standardEntry = useUiStore((state) => state.paywallEntry);
   const onboardingReferralEntry = useUiStore((state) => state.onboardingReferralEntry);
   const closeStandard = useUiStore((state) => state.closePaywall);
   const open = mode === "onboarding" || standardOpen;
@@ -73,7 +72,6 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
   const [page, setPage] = useState<Page>(initialPage);
   const [offerTab, setOfferTab] = useState<OfferTab>("plans");
   const offers = mode === "standard" ? offerTab === "plans" ? subscriptions : topup ? [topup] : [] : subscriptions;
-  const [sparkCostsOpen, setSparkCostsOpen] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string>();
   const [checkoutState, setCheckoutState] = useState<CheckoutState>("idle");
   const checkoutInFlight = useRef(false);
@@ -81,7 +79,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
   const [completionError, setCompletionError] = useState<string>();
   const [sharing, setSharing] = useState(false);
   const [completing, setCompleting] = useState(false);
-  const costDetailsOpen = sparkCostsOpen || (mode === "standard" && standardOpen && standardEntry === "costs");
+
   const recordedOnboardingPages = useRef(new Set<Page>());
   const delayedClose = useDelayedAction(mode === "onboarding" && open && page === "plans", page);
   const preferred = offers.find(({ productId }) => productId === "nova.monthly.discounted") ?? offers[0];
@@ -98,25 +96,16 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
   useErrorFeedback(open ? [message, completionError, page === "referral" ? referral.error : undefined] : []);
 
   useEffect(() => {
-    if (!open) {
-      const reset = setTimeout(() => setSparkCostsOpen(false), 0);
-      return () => clearTimeout(reset);
-    }
+    if (!open) return;
     const reset = setTimeout(() => {
       setPage(initialPage);
       setOfferTab("plans");
-      setSparkCostsOpen(mode === "standard" && standardEntry === "costs");
       setCheckoutState("idle");
       setMessage(undefined);
       setCompletionError(undefined);
     }, 0);
     return () => clearTimeout(reset);
-  }, [initialPage, mode, open, standardEntry]);
-
-  const setCostDetailsOpen = (next: boolean) => {
-    setSparkCostsOpen(next);
-    if (!next && mode === "standard" && standardEntry === "costs") closeStandard();
-  };
+  }, [initialPage, mode, open]);
 
   useEffect(() => {
     if (mode !== "onboarding" || !open || !onboardingReferralEntry) return;
@@ -161,7 +150,6 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
       }
       if (completeCheckoutReturn(queryClient, userKey)) {
         setMessage(undefined);
-        setSparkCostsOpen(false);
         if (mode === "onboarding") {
           useUiStore.getState().consumeOnboardingReferralEntry();
           setPage("referral");
@@ -229,7 +217,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
 
   const renderPlanCard = (product: MobileProduct) => <PlanCard current={currentSubscriptionProductKey === product.key} currentUntil={Boolean(subscription?.pendingProductKey)} endsAt={currentPlanEndDate} key={product.key} onSelect={() => setSelectedKey(product.key)} product={product} selected={effectiveSelectedKey === product.key} startsAt={subscription?.pendingProductKey === product.key ? currentPlanEndDate : undefined} />;
   const content = page === "plans" ? <ScrollView contentContainerStyle={[styles.content, mode === "onboarding" && styles.onboardingContent]} showsVerticalScrollIndicator={false}>
-    {mode === "onboarding" ? <View style={styles.hero}><View style={styles.heroTitleRow}><Text style={styles.heroTitle}>One balance for everything you create and use</Text><ButtonSizeProvider overrideParent size="sm"><Button accessibilityLabel="How Sparks are billed" contentMode="raw" iconOnly onPress={() => setSparkCostsOpen(true)} size="sm" variant="icon"><HelpIcon size="sm" /></Button></ButtonSizeProvider></View><Text style={styles.heroCopy}>Sparks give you a simple way to use AI capabilities, store your work, and keep services connected across Vorinthex.</Text></View> : <View style={styles.balanceHero}><View style={styles.balanceHeading}><SparksIcon size="lg" /><Text accessibilityLabel={balance === undefined ? "Sparks balance unavailable. Showing 0 Sparks" : `${balance} Sparks`} style={styles.balance}>{formatWholeSparks(balance ?? 0)} <Text style={styles.balanceUnit}>Sparks</Text></Text></View><ButtonSizeProvider overrideParent size="sm"><Button accessibilityLabel="How Sparks are billed" contentMode="raw" iconOnly onPress={() => setSparkCostsOpen(true)} size="sm" variant="icon"><HelpIcon size="sm" /></Button></ButtonSizeProvider></View>}
+    {mode === "onboarding" ? <View style={styles.hero}><View style={styles.heroTitleRow}><Text style={styles.heroTitle}>One balance for everything you create and use</Text></View><Text style={styles.heroCopy}>Sparks give you a simple way to use AI capabilities, store your work, and keep services connected across Vorinthex.</Text></View> : <View style={styles.balanceHero}><View style={styles.balanceHeading}><SparksIcon size="lg" /><Text accessibilityLabel={balance === undefined ? "Sparks balance unavailable. Showing 0 Sparks" : `${balance} Sparks`} style={styles.balance}>{formatWholeSparks(balance ?? 0)} <Text style={styles.balanceUnit}>Sparks</Text></Text></View></View>}
     {mode === "standard" ? <><Tabs accessibilityLabel="Spark offers" accessibilityRole="tablist" onValueChange={(value) => setOfferTab(value as OfferTab)} style={styles.offerTabs} value={offerTab}><TabsTrigger style={styles.offerTab} value="plans">Plans</TabsTrigger><TabsTrigger style={styles.offerTab} value="topup">Top-up</TabsTrigger></Tabs><View style={styles.plans}>{offers.map(renderPlanCard)}</View></> : <View style={styles.plans}>{subscriptions.map(renderPlanCard)}</View>}
     {!offers.length ? <View style={styles.state}><Text style={styles.heroCopy}>{productsStatus === "loading" ? "Loading offers..." : "Offers are temporarily unavailable."}</Text>{productsStatus !== "loading" ? <Button onPress={() => void refreshProducts()} size="md" variant="secondary">Retry</Button> : null}</View> : null}
   </ScrollView> : <ScrollView contentContainerStyle={styles.referralContent} showsVerticalScrollIndicator={false}>
@@ -249,11 +237,11 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
     {delayedClose.visible ? <Animated.View style={[styles.close, { opacity: delayedClose.opacity, top: Math.max(insets.top, spacing.md) }]}><Button accessibilityLabel="Continue without a plan" contentMode="raw" iconOnly onPress={dismiss} size="md" variant="ghost"><CloseIcon size="sm" /></Button></Animated.View> : null}
     {content}
     <View style={styles.onboardingFooter}>{footer}{page === "plans" && !renewalAction ? <Text style={styles.taxNote}>Taxes are calculated at checkout.</Text> : null}</View>
-  </View><SparkCostsSheet onOpenChange={setCostDetailsOpen} open={costDetailsOpen} /></>;
+  </View></>;
 
   return <><BottomSheet description={page === "referral" ? "Invite friends and earn Sparks." : undefined} dismissible={!completing} footer={<>{footer}{page === "plans" && !renewalAction ? <Text style={styles.taxNote}>Taxes are calculated at checkout.</Text> : null}</>} height="full" onDismissRequest={dismiss} onOpenChange={(next) => { if (!next) dismiss(); }} open={open} pageKey={page} title={page === "plans" ? "Sparks" : "Invite a friend"}>
     {content}
-  </BottomSheet><SparkCostsSheet onOpenChange={setCostDetailsOpen} open={costDetailsOpen} /></>;
+  </BottomSheet></>;
 }
 
 const styles = StyleSheet.create({

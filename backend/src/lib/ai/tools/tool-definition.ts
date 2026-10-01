@@ -3,7 +3,6 @@ import { isContentMutation, runContentTool, type ContentToolDependencies } from 
 import type { ContentToolName } from './content-schemas';
 import type { ToolContext } from './tool-context';
 import type { ConversationService } from '@/lib/conversations/service';
-import type { GuideTopic } from '@/lib/conversations/schemas';
 
 export interface PublicToolDependencies {
   context: ToolContext;
@@ -14,7 +13,6 @@ export interface PublicToolDependencies {
   signal?: AbortSignal;
   timeoutMs?: number;
   onGreetingDelta?: (text: string) => void | Promise<void>;
-  onGuideTopic?: (topic: GuideTopic) => void | Promise<void>;
 }
 
 const contentDefinitions = new Map(CONTENT_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));

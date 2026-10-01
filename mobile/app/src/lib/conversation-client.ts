@@ -7,12 +7,12 @@ import { publishUserSearchHistoryAppend } from "./user-search-history-events";
 import type { ServerSentEvent } from "./sse";
 import { extractDomainErrorMessage, observeDomainError } from "./domain-error-observer";
 import { mapWithConcurrency } from "./bounded-concurrency";
+import { FILE_EXTENSIONS } from "./content-client";
 
 export const CONVERSATION_PAGE_SIZE = 25;
 export const CONVERSATION_MESSAGE_PAGE_SIZE = 10;
 export const CONVERSATION_NAME_MAX_LENGTH = 200;
 export const CONVERSATION_MESSAGE_MAX_LENGTH = 20_000;
-export const CONVERSATION_IMAGE_PROMPT_MAX_LENGTH = 8_000;
 export const CONVERSATION_ATTACHMENT_MAX_FILES = 12;
 export const CONVERSATION_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 
@@ -41,6 +41,8 @@ export const conversationSchema = z.strictObject({
   userKey: z.string().min(1),
   name: z.string().min(1).max(CONVERSATION_NAME_MAX_LENGTH),
   isFavorite: z.boolean(),
+  isHidden: z.boolean().default(false),
+  roleKey: z.string().min(1).default("general"),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 }).transform(({ teamKey: _teamKey, scopeKey: _scopeKey, userKey: _userKey, ...conversation }) => conversation);
@@ -95,11 +97,6 @@ export const guideTopicsSchema = z.discriminatedUnion("status", [
 ]);
 export type GuideTopic = z.infer<typeof guideTopicSchema>;
 export type GuideTopics = z.infer<typeof guideTopicsSchema>;
-export const guideTopicSelectionSchema = z.strictObject({
-  sourceAssistantMessageKey: z.string().trim().min(1).max(180),
-  topicKey: z.string().trim().min(1).max(180),
-});
-export type GuideTopicSelection = z.infer<typeof guideTopicSelectionSchema>;
 
 const serverConversationMessageSchema = z.strictObject({
   key: z.string().min(1),
@@ -113,6 +110,7 @@ const serverConversationMessageSchema = z.strictObject({
   imageKey: z.string().cuid().optional(),
   imageSummaryText: z.string().trim().min(1).max(20_000).optional(),
   attachments: z.array(conversationAttachmentReferenceSchema).max(CONVERSATION_ATTACHMENT_MAX_FILES).default([]),
+  workspaceFiles: z.array(z.strictObject({ key: z.string().cuid(), name: z.string().trim().min(1).max(255), extension: z.enum(FILE_EXTENSIONS) })).max(50).optional(),
   retrievals: z.array(conversationRetrievalSchema).max(4),
   guideTopics: guideTopicsSchema,
   createdAt: z.string().datetime(),
@@ -194,20 +192,21 @@ export async function uploadConversationAttachments(context: ConversationContext
   return { attachmentKeys: completed.attachments.map(({ attachmentKey }) => attachmentKey), attachments: completed.attachments };
 }
 
-export type ConversationListInput = { cursor?: string; query?: string; favoriteOnly?: boolean; recordHistory?: boolean; limit?: number };
+export type ConversationListInput = { cursor?: string; query?: string; favoriteOnly?: boolean; hiddenOnly?: boolean; recordHistory?: boolean; limit?: number };
 
 export async function listConversations(context: ConversationContext, input: ConversationListInput = {}, signal?: AbortSignal) {
   const parsed = z.strictObject({
     cursor: z.string().min(1).max(1_000).optional(),
     query: z.string().trim().min(1).max(500).optional(),
     favoriteOnly: z.boolean().default(false),
+    hiddenOnly: z.boolean().default(false),
     recordHistory: z.boolean().default(false),
     limit: z.number().int().min(1).max(100).default(CONVERSATION_PAGE_SIZE),
   }).parse(input);
   const path = parsed.query ? "/conversations/search" : "/conversations/list";
   const body = parsed.query
-    ? { ...selectors(context), query: parsed.query, favoriteOnly: parsed.favoriteOnly, recordHistory: parsed.recordHistory, ...(parsed.cursor ? { cursor: parsed.cursor } : {}), limit: parsed.limit }
-    : { ...selectors(context), favoriteOnly: parsed.favoriteOnly, ...(parsed.cursor ? { cursor: parsed.cursor } : {}), limit: parsed.limit };
+    ? { ...selectors(context), query: parsed.query, favoriteOnly: parsed.favoriteOnly, hiddenOnly: parsed.hiddenOnly, recordHistory: parsed.recordHistory, ...(parsed.cursor ? { cursor: parsed.cursor } : {}), limit: parsed.limit }
+    : { ...selectors(context), favoriteOnly: parsed.favoriteOnly, hiddenOnly: parsed.hiddenOnly, ...(parsed.cursor ? { cursor: parsed.cursor } : {}), limit: parsed.limit };
   const response = await apiClient.post(path, body, { signal });
   const page = unwrap(conversationEnvelope(conversationPageSchema).parse(response.data));
   if (parsed.query && parsed.recordHistory) publishUserSearchHistoryAppend(context.userKey);
@@ -221,16 +220,17 @@ export async function listConversationMessages(context: ConversationContext, con
   return unwrap(conversationEnvelope(conversationMessagePageSchema).parse(response.data));
 }
 
-export async function createConversation(context: ConversationContext, name = "New chat", signal?: AbortSignal, openingGreetingToken?: string) {
-  const body = z.strictObject({ scopeKey: z.string().min(1), name: z.string().trim().min(1).max(CONVERSATION_NAME_MAX_LENGTH).optional(), openingGreetingToken: z.string().trim().min(1).max(20_000).optional() }).parse({ ...selectors(context), name, openingGreetingToken });
+export async function createConversation(context: ConversationContext, name = "New chat", signal?: AbortSignal, openingGreetingToken?: string, openingContextSeedToken?: string, roleKey = "general") {
+  const body = z.strictObject({ scopeKey: z.string().min(1), name: z.string().trim().min(1).max(CONVERSATION_NAME_MAX_LENGTH).optional(), roleKey: z.string().min(1), openingGreetingToken: z.string().trim().min(1).max(20_000).optional(), openingContextSeedToken: z.string().trim().min(1).max(40_000).optional() }).parse({ ...selectors(context), name, roleKey, openingGreetingToken, openingContextSeedToken });
   return unwrap(conversationEnvelope(conversationSchema).parse((await apiClient.post("/conversations", body, { signal })).data));
 }
 
-export async function updateConversation(context: ConversationContext, conversationKey: string, patch: { name?: string; isFavorite?: boolean }, signal?: AbortSignal) {
+export async function updateConversation(context: ConversationContext, conversationKey: string, patch: { name?: string; isFavorite?: boolean; isHidden?: boolean; roleKey?: string }, signal?: AbortSignal) {
   const key = z.string().min(1).parse(conversationKey);
-  const body = z.strictObject({ scopeKey: z.string().min(1), name: z.string().trim().min(1).max(CONVERSATION_NAME_MAX_LENGTH).optional(), isFavorite: z.boolean().optional() })
-    .refine(({ name, isFavorite }) => name !== undefined || isFavorite !== undefined, "A conversation change is required.").parse({ ...selectors(context), ...patch });
-  const response = patch.name !== undefined ? await apiClient.patch(`/conversations/${encodeURIComponent(key)}`, body, { signal }) : await apiClient.post(`/conversations/${encodeURIComponent(key)}/favorite`, body, { signal });
+  const body = z.strictObject({ scopeKey: z.string().min(1), name: z.string().trim().min(1).max(CONVERSATION_NAME_MAX_LENGTH).optional(), isFavorite: z.boolean().optional(), isHidden: z.boolean().optional(), roleKey: z.string().min(1).optional() })
+    .refine(({ name, isFavorite, isHidden, roleKey }) => name !== undefined || isFavorite !== undefined || isHidden !== undefined || roleKey !== undefined, "A conversation change is required.").parse({ ...selectors(context), ...patch });
+  const path = patch.name !== undefined ? `/conversations/${encodeURIComponent(key)}` : patch.roleKey !== undefined ? `/conversations/${encodeURIComponent(key)}/role` : patch.isHidden !== undefined ? `/conversations/${encodeURIComponent(key)}/hidden` : `/conversations/${encodeURIComponent(key)}/favorite`;
+  const response = patch.name !== undefined ? await apiClient.patch(path, body, { signal }) : await apiClient.post(path, body, { signal });
   return unwrap(conversationEnvelope(conversationSchema).parse(response.data));
 }
 
@@ -244,25 +244,6 @@ export async function deleteConversationMessage(context: ConversationContext, co
   const keys = z.strictObject({ conversationKey: z.string().min(1), messageKey: z.string().min(1) }).parse({ conversationKey, messageKey });
   const response = await apiClient.delete(`/conversations/${encodeURIComponent(keys.conversationKey)}/messages/${encodeURIComponent(keys.messageKey)}`, { data: selectors(context), signal });
   return unwrap(conversationEnvelope(z.strictObject({ deletedKeys: z.array(z.string().min(1)).min(1).max(2) })).parse(response.data));
-}
-
-const conversationImageTurnResultSchema = z.strictObject({
-  user: serverConversationMessageSchema,
-  assistant: serverConversationMessageSchema,
-  replayed: z.boolean(),
-});
-
-export async function enqueueConversationImageTurn(context: ConversationContext, input: { conversationKey: string; prompt: string; requestKey: string; referenceImageKeys?: string[] }, signal?: AbortSignal) {
-  const parsed = z.strictObject({ conversationKey: z.string().min(1), prompt: z.string().trim().min(1).max(CONVERSATION_IMAGE_PROMPT_MAX_LENGTH), requestKey: z.string().trim().min(1).max(180), referenceImageKeys: z.array(z.string().min(1)).max(1).default([]) }).parse(input);
-  const { conversationKey, ...turn } = parsed;
-  const response = await apiClient.post(`/conversations/${encodeURIComponent(conversationKey)}/image-turns`, {
-    ...selectors(context),
-    ...turn,
-    size: "1024x1024",
-    quality: "medium",
-    mode: "default",
-  }, { signal });
-  return unwrap(conversationEnvelope(conversationImageTurnResultSchema).parse(response.data));
 }
 
 export const conversationTurnEventSchema = z.discriminatedUnion("type", [
@@ -281,19 +262,64 @@ export function parseConversationTurnEvent(event: ServerSentEvent) {
 
 export type ConversationEventTransport = (path: string, body: unknown, onEvent: (event: ServerSentEvent) => void, signal?: AbortSignal) => Promise<void>;
 
-export async function streamConversationTurnWithTransport(transport: ConversationEventTransport, context: ConversationContext, input: { conversationKey: string; message: string; requestKey: string; attachmentKeys?: string[]; referenceImageKeys?: string[]; guideTopicSelection?: GuideTopicSelection }, onEvent: (event: ConversationTurnEvent) => void, signal?: AbortSignal) {
-  const body = z.strictObject({ scopeKey: z.string().min(1), conversationKey: z.string().min(1), message: z.string().trim().min(1).max(CONVERSATION_MESSAGE_MAX_LENGTH), requestKey: z.string().min(1).max(180), attachmentKeys: z.array(z.string().min(1)).max(CONVERSATION_ATTACHMENT_MAX_FILES).default([]), referenceImageKeys: z.array(z.string().min(1)).max(1).default([]), guideTopicSelection: guideTopicSelectionSchema.optional() }).parse({ ...selectors(context), ...input });
-  const { conversationKey, ...request } = body;
+export type ConversationRole = { key: string; label: string; description: string };
+const rolesSchema = z.strictObject({ roles: z.array(z.strictObject({ key: z.string().min(1), label: z.string().min(1), description: z.string().min(1) })) });
+
+export async function listConversationRoles(signal?: AbortSignal): Promise<ConversationRole[]> {
+  const response = await apiClient.get("/roles", { signal });
+  return unwrap(conversationEnvelope(rolesSchema).parse(response.data)).roles;
+}
+
+function conversationTurnStreamPath(input: { conversationKey?: string; incognito?: boolean; replyMode?: "fast" | "reason"; roleKey?: string }) {
+  const params = new URLSearchParams();
+  if (input.incognito) params.set("incognito", "true");
+  if (input.replyMode === "reason") params.set("reply", "reason");
+  if (input.roleKey) params.set("role", input.roleKey);
+  const query = params.toString();
+  const path = input.incognito ? "/conversations/turn/stream" : `/conversations/${encodeURIComponent(input.conversationKey!)}/turn/stream`;
+  return query ? `${path}?${query}` : path;
+}
+
+export const conversationSeedEventSchema = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("start"), correlationKey: z.string().min(1), assistantMessageKey: z.string().min(1) }),
+  z.strictObject({ type: z.literal("delta"), correlationKey: z.string().min(1), assistantMessageKey: z.string().min(1), text: z.string().min(1) }),
+  z.strictObject({ type: z.literal("done"), correlationKey: z.string().min(1), assistantMessageKey: z.string().min(1), message: z.string().trim().min(1), persistenceToken: z.string().min(1) }),
+  z.strictObject({ type: z.literal("error"), correlationKey: z.string().min(1), message: z.string().min(1), code: z.string().min(1) }),
+]);
+export type ConversationSeedEvent = z.infer<typeof conversationSeedEventSchema>;
+
+export async function streamConversationContextSeed(context: ConversationContext, conversationKeys: string[], onEvent: (event: ConversationSeedEvent) => void, signal?: AbortSignal) {
+  const body = z.strictObject({ scopeKey: z.string().min(1), conversationKeys: z.array(z.string().min(1)).min(1).max(20) }).parse({ ...selectors(context), conversationKeys });
+  let terminal: Extract<ConversationSeedEvent, { type: "done" | "error" }> | undefined;
+  await apiTransport.postEventStream("/conversations/context-seed/stream", body, (frame) => {
+    if (terminal) throw new Error("Context seed stream emitted after its terminal event.");
+    const data: unknown = JSON.parse(frame.data);
+    const event = conversationSeedEventSchema.parse({ ...(typeof data === "object" && data !== null ? data : {}), type: frame.event });
+    if (event.type === "error" || event.type === "done") terminal = event;
+    onEvent(event);
+  }, signal);
+  if (!terminal) throw new Error("Context seed stream ended before a terminal event.");
+  if (terminal.type === "error") throw observeDomainError(Object.assign(new Error(terminal.message), { code: terminal.code }));
+}
+
+export async function streamConversationTurnWithTransport(transport: ConversationEventTransport, context: ConversationContext, input: { conversationKey?: string; incognito?: boolean; replyMode?: "fast" | "reason"; roleKey?: string; history?: Array<{ role: "USER" | "ASSISTANT"; content: string }>; contextConversationKeys?: string[]; message: string; requestKey: string; attachmentKeys?: string[]; workspaceFileKeys?: string[]; workspaceFolderKeys?: string[] }, onEvent: (event: ConversationTurnEvent) => void, signal?: AbortSignal) {
+  const incognito = Boolean(input.incognito);
+  const { roleKey: _roleKey, replyMode: _replyMode, incognito: _incognito, history: _history, ...ordinaryTurn } = input;
+  const body = incognito
+    ? z.strictObject({ scopeKey: z.string().min(1), message: z.string().trim().min(1).max(CONVERSATION_MESSAGE_MAX_LENGTH), requestKey: z.string().min(1).max(180), attachmentKeys: z.array(z.string().min(1)).max(0).default([]), workspaceFileKeys: z.array(z.string().min(1)).max(50).default([]), workspaceFolderKeys: z.array(z.string().min(1)).max(50).default([]), history: z.array(z.strictObject({ role: z.enum(["USER", "ASSISTANT"]), content: z.string().trim().min(1).max(CONVERSATION_MESSAGE_MAX_LENGTH) })).max(20).default([]) }).parse({ ...selectors(context), message: input.message, requestKey: input.requestKey, attachmentKeys: input.attachmentKeys ?? [], workspaceFileKeys: input.workspaceFileKeys ?? [], workspaceFolderKeys: input.workspaceFolderKeys ?? [], history: input.history ?? [] })
+    : z.strictObject({ scopeKey: z.string().min(1), conversationKey: z.string().min(1), message: z.string().trim().min(1).max(CONVERSATION_MESSAGE_MAX_LENGTH), requestKey: z.string().min(1).max(180), attachmentKeys: z.array(z.string().min(1)).max(CONVERSATION_ATTACHMENT_MAX_FILES).default([]), workspaceFileKeys: z.array(z.string().min(1)).max(50).default([]), workspaceFolderKeys: z.array(z.string().min(1)).max(50).default([]), contextConversationKeys: z.array(z.string().min(1)).max(20).default([]) }).parse({ ...selectors(context), ...ordinaryTurn });
+  const conversationKey = incognito ? undefined : z.string().min(1).parse("conversationKey" in body ? body.conversationKey : input.conversationKey);
+  const request = incognito ? body : (({ conversationKey: _conversationKey, ...rest }) => rest)(body as { conversationKey: string } & Record<string, unknown>);
   let started: Extract<ConversationTurnEvent, { type: "start" }> | undefined;
   let terminal: Extract<ConversationTurnEvent, { type: "done" | "error" }> | undefined;
-  await transport(`/conversations/${encodeURIComponent(conversationKey)}/turn/stream`, request, (frame) => {
+  await transport(conversationTurnStreamPath({ conversationKey, incognito, replyMode: input.replyMode, roleKey: input.roleKey }), request, (frame) => {
     if (terminal) throw new Error("Conversation stream emitted after its terminal event.");
     const event = parseConversationTurnEvent(frame);
     if (frame.id && frame.id !== event.correlationKey) throw new Error("Conversation stream event id did not match its correlation key.");
     if (event.type === "start") {
       if (started) throw new Error("Conversation stream emitted more than one start event.");
-      if (event.conversationKey !== conversationKey) throw new Error("Conversation stream started for a different conversation.");
-      if (event.userMessageKey !== event.userMessage.key || event.userMessage.conversationKey !== conversationKey || event.userMessage.role !== "user") throw new Error("Conversation stream started with an invalid user message.");
+      if (!incognito && event.conversationKey !== conversationKey) throw new Error("Conversation stream started for a different conversation.");
+      if (event.userMessageKey !== event.userMessage.key || (!incognito && event.userMessage.conversationKey !== conversationKey) || event.userMessage.role !== "user") throw new Error("Conversation stream started with an invalid user message.");
       started = event;
     } else if (event.type === "delta") {
       if (!started) throw new Error("Conversation stream emitted a delta before start.");
@@ -301,7 +327,7 @@ export async function streamConversationTurnWithTransport(transport: Conversatio
     } else if (event.type === "done") {
       if (!started) throw new Error("Conversation stream completed before start.");
       const imageTurn = event.message.kind === "image" && event.message.role === "assistant";
-      if (event.correlationKey !== started.correlationKey || event.conversationKey !== conversationKey || (!imageTurn && event.message.key !== started.assistantMessageKey) || event.message.conversationKey !== conversationKey) throw new Error("Conversation stream completion did not match the active turn.");
+      if (event.correlationKey !== started.correlationKey || (!incognito && event.conversationKey !== conversationKey) || (!imageTurn && event.message.key !== started.assistantMessageKey) || (!incognito && event.message.conversationKey !== conversationKey)) throw new Error("Conversation stream completion did not match the active turn.");
       if (event.message.status !== "COMPLETED" && !(imageTurn && event.message.status === "PENDING")) throw new Error("Conversation stream completed with a non-completed message.");
       terminal = event;
     } else {
@@ -318,6 +344,6 @@ export async function streamConversationTurnWithTransport(transport: Conversatio
   if (terminal.type === "error") throw observeDomainError(Object.assign(new Error(terminal.message), { code: terminal.code }));
 }
 
-export function streamConversationTurn(context: ConversationContext, input: { conversationKey: string; message: string; requestKey: string; attachmentKeys?: string[]; referenceImageKeys?: string[]; guideTopicSelection?: GuideTopicSelection }, onEvent: (event: ConversationTurnEvent) => void, signal?: AbortSignal) {
+export function streamConversationTurn(context: ConversationContext, input: { conversationKey?: string; incognito?: boolean; replyMode?: "fast" | "reason"; roleKey?: string; history?: Array<{ role: "USER" | "ASSISTANT"; content: string }>; contextConversationKeys?: string[]; message: string; requestKey: string; attachmentKeys?: string[]; workspaceFileKeys?: string[]; workspaceFolderKeys?: string[] }, onEvent: (event: ConversationTurnEvent) => void, signal?: AbortSignal) {
   return streamConversationTurnWithTransport(apiTransport.postEventStream, context, input, onEvent, signal);
 }

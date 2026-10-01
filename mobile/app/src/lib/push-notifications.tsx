@@ -6,14 +6,14 @@ import { useEffect, useEffectEvent } from "react";
 import { AppState, Platform } from "react-native";
 
 import { apiClient } from "./api-client";
-import { communicationQueryKeys } from "./communication-client";
-import { isPushPermissionAllowed, pushNotificationDataSchema, pushNotificationHref } from "./notification-policy";
+import { contentQueryKeys } from "./content-query-cache";
+import { isGeneratedFilePush, isPushPermissionAllowed, pushNotificationDataSchema, pushNotificationHref } from "./notification-policy";
 import { useAuthStore } from "@/state/auth";
 
 const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({ shouldPlaySound: false, shouldSetBadge: false, shouldShowBanner: false, shouldShowList: false }),
+  handleNotification: async (notification) => { const show = isGeneratedFilePush(notification.request.content.data); return { shouldPlaySound: show, shouldSetBadge: false, shouldShowBanner: show, shouldShowList: show }; },
 });
 
 type PushSyncState = {
@@ -85,14 +85,16 @@ export function PushNotificationBridge() {
   const queryClient = useQueryClient();
   const status = useAuthStore((state) => state.status);
   const userKey = useAuthStore((state) => String(state.user?.key ?? ""));
-  const teamKey = useAuthStore((state) => String(state.team?.key ?? ""));
   const scopeKey = useAuthStore((state) => String(state.scope?.key ?? ""));
   const sync = useEffectEvent((token?: Notifications.DevicePushToken) => { void syncPushSubscription(token).catch(() => undefined); });
-  const receive = useEffectEvent(() => { if (userKey && teamKey && scopeKey) void queryClient.invalidateQueries({ queryKey: communicationQueryKeys.all({ userKey, teamKey, scopeKey }) }); });
+  const receive = useEffectEvent((notification: Notifications.Notification) => {
+    if (!userKey || !scopeKey) return;
+    if (isGeneratedFilePush(notification.request.content.data)) { void queryClient.invalidateQueries({ queryKey: contentQueryKeys.locations({ userKey, scopeKey }) }); return; }
+  });
   const open = useEffectEvent((response: Notifications.NotificationResponse) => {
     const parsed = pushNotificationDataSchema.safeParse(response.notification.request.content.data);
     if (!parsed.success) return;
-    receive();
+    receive(response.notification);
     const href = pushNotificationHref(parsed.data);
     if (href && useAuthStore.getState().status === "authenticated") router.push(href);
   });

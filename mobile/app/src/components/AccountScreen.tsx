@@ -8,7 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Avatar } from "@vorinthex/shared/ui/avatar";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
-import { CheckIcon, DeleteAccountIcon, FaqIcon, FeedbackIcon, FolderIcon, HelpIcon, IssueIcon, PlusIcon, PrivacyIcon, ReferralIcon, SettingsIcon, SignOutIcon, SparksIcon, SubscriptionCancelIcon, TermsIcon, WalletIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { CheckIcon, DeleteAccountIcon, FaqIcon, FeedbackIcon, FolderIcon, HelpIcon, IssueIcon, PlusIcon, PrivacyIcon, ReferralIcon, SettingsIcon, SignOutIcon, SubscriptionCancelIcon, TermsIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
@@ -16,7 +16,8 @@ import { useToast as useRawToast } from "@vorinthex/shared/ui/toast";
 import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 import { PRIVACY_COPY, TERMS_COPY, type VaultCopy } from "@vorinthex/shared/lib/legal-copy";
 
-import { claimProfileBadge, generateProfileBadge, updateProfileName, uploadProfileAvatar } from "@/lib/profile-client";
+import { claimProfileBadge, createSupportTicket, generateProfileBadge, updateProfileName, uploadProfileAvatar } from "@/lib/profile-client";
+import { SupportComposeSheets } from "@/components/SupportComposeSheets";
 import { profileInitial } from "@/lib/auth-helpers";
 import { createScope, deleteScope, listScopes, scheduleScopeOperation, scopeListQueryKey, scopeOperationIsPending, selectScope, type ScopeSummary } from "@/lib/scope-client";
 import { useAuthStore } from "@/state/auth";
@@ -24,15 +25,14 @@ import { useAppsStore } from "@/state/apps";
 import { extractDomainErrorMessage, isSparkFundingError } from "@/lib/domain-error-observer";
 import { fonts, palette, radii, spacing } from "@/theme/tokens";
 import { AccountScreenShell } from "@/components/AccountScreenShell";
-import { WalletSheet, type WalletHelp } from "@/components/WalletSheet";
 
-import { currentSubscriptionQueryKey, setSubscriptionCancellation, wholeSparks } from "@/lib/billing-client";
+import { currentSubscriptionQueryKey, formatStorageSummary, setSubscriptionCancellation } from "@/lib/billing-client";
 import { useBillingSummary, useCurrentSubscription } from "@/hooks/use-billing-summary";
 import { fetchReferralSummary, normalizeReferralCode, redeemReferralCode, referralCodeSchema, referralRedemptionErrorMessage, referralSummaryQueryKey, type ReferralRedeemResult } from "@/lib/referral-client";
 import { subscriptionPresentation } from "@/lib/subscription-presentation";
-import { useUiStore } from "@/state/ui";
 
-type ProfileSheet = "avatar-actions" | "badge-generate" | "name" | "faq" | "privacy" | "terms" | "cancel-subscription" | "delete-account" | "referral" | "wallet" | "scope-help" | "scope-create" | "scope-actions" | "scope-delete";
+
+type ProfileSheet = "avatar-actions" | "badge-generate" | "name" | "faq" | "issue" | "feedback" | "privacy" | "terms" | "cancel-subscription" | "delete-account" | "referral" | "storage-help" | "scope-help" | "scope-create" | "scope-actions" | "scope-delete";
 type ReferralMode = "share" | "redeem";
 export type AccountScreenInitialState = { sheet: "referral"; referralMode: ReferralMode };
 
@@ -109,13 +109,8 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const hydrate = useAuthStore((state) => state.hydrate);
   const signOut = useAuthStore((state) => state.signOut);
   const deleteAccount = useAuthStore((state) => state.deleteAccount);
-  const openCostDetails = useUiStore((state) => state.openCostDetails);
-  const openPaywall = useUiStore((state) => state.openPaywall);
   const products = useAppsStore((state) => state.products);
-  const badgeCost = useAppsStore((state) => state.capabilityCosts["profile.badge.generate"]);
-  const refreshProducts = useAppsStore((state) => state.refreshProducts);
   const [sheet, setSheet] = useState<ProfileSheet | undefined>(initialState?.sheet);
-  const [walletHelp, setWalletHelp] = useState<WalletHelp>();
   const [nameDraft, setNameDraft] = useState("");
   const [scopeName, setScopeName] = useState("");
   const [scopeDescription, setScopeDescription] = useState("");
@@ -137,7 +132,8 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const scopeQueryKey = scopeListQueryKey(String(user?.key ?? ""));
   const scopeCardSize = Math.floor((width - spacing.md * 2 - 20) / 3);
   const settingsCardSize = scopeCardSize;
-  const billingSummaryQuery = useBillingSummary(user?.key);
+
+  const billingSummaryQuery = useBillingSummary(page === "profile" ? user?.key : undefined);
   const subscriptionQuery = useCurrentSubscription(page === "settings" ? user?.key : undefined);
   const referralQuery = useQuery({ queryKey: referralSummaryQueryKey(String(user?.key ?? "")), queryFn: fetchReferralSummary, enabled: Boolean(user?.key && sheet === "referral"), initialData: authReferralSummary?.code.ownerUserKey === user?.key ? authReferralSummary : undefined });
   const scopesQuery = useQuery({ queryKey: scopeQueryKey, queryFn: ({ signal }) => listScopes(signal), enabled: Boolean(user?.key), refetchOnMount: "always" });
@@ -211,14 +207,14 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   };
 
   const generateBadge = async () => {
-    if (!scopeKey || !badgeCost || generatingBadge) return;
+    if (!scopeKey || generatingBadge) return;
     setSheet(undefined);
     setGeneratingBadge(true);
     try {
-      const candidate = await generateProfileBadge(scopeKey, scopeKey, randomUUID());
+      const candidate = await generateProfileBadge(scopeKey, randomUUID());
       const update = optimisticProfile({ avatarUrl: candidate.avatarUrl });
       try {
-        const profile = await claimProfileBadge(scopeKey, scopeKey, candidate.candidateKey);
+        const profile = await claimProfileBadge(scopeKey, candidate.candidateKey);
         update.reconcile(profile.avatarUrl ? profile : { avatarUrl: candidate.avatarUrl });
       } catch (error) {
         update.rollback();
@@ -472,6 +468,10 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
           <Button accessibilityLabel="Edit name" contentMode="raw" onPress={openName} size="xl" style={styles.nameButton} variant="ghost"><Text numberOfLines={2} style={styles.name}>{name}</Text></Button>
           {user?.email ? <Text style={styles.email}>{user.email}</Text> : null}
         </View>
+        <View style={styles.storageSection}>
+          <View style={styles.scopeTitleRow}><Text style={styles.scopeTitle}>Storage</Text><Button accessibilityLabel="How is storage charged?" contentMode="raw" iconOnly onPress={() => setSheet("storage-help")} size="xs" variant="icon"><HelpIcon size="sm" /></Button></View>
+          {billingSummaryQuery.isPending ? <Skeleton style={styles.storageSkeleton} /> : billingSummaryQuery.isError ? <Text accessibilityRole="alert" style={styles.storageSummary}>Storage usage is unavailable.</Text> : <Text style={styles.storageSummary}>{formatStorageSummary(billingSummaryQuery.data.storage.bytes, billingSummaryQuery.data.storage.estimatedMonthlyMicroSparks)}</Text>}
+        </View>
         <View style={styles.scopeSection}>
           <View style={styles.scopeTitleRow}><Text style={styles.scopeTitle}>Scopes</Text><Button accessibilityLabel="What are scopes?" contentMode="raw" iconOnly onPress={() => setSheet("scope-help")} size="xs" variant="icon"><HelpIcon size="sm" /></Button></View>
           <View style={styles.scopeGrid}>
@@ -481,20 +481,22 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
         </View>
       </View> : <View style={styles.settingsContent}>
         <View style={styles.settingsGrid}>
-          <SettingsActionCard icon={<IssueIcon size="lg" />} label="Report issue" onPress={() => setSheet("faq")} size={settingsCardSize} />
-          <SettingsActionCard icon={<FeedbackIcon size="lg" />} label="Feedback" onPress={() => setSheet("faq")} size={settingsCardSize} />
+           <SettingsActionCard icon={<IssueIcon size="lg" />} label="Report issue" onPress={() => setSheet("issue")} size={settingsCardSize} />
+           <SettingsActionCard icon={<FeedbackIcon size="lg" />} label="Feedback" onPress={() => setSheet("feedback")} size={settingsCardSize} />
           <SettingsActionCard icon={<FaqIcon size="lg" />} label="FAQ" onPress={() => { setFaqQuestionIndex(undefined); setSheet("faq"); }} size={settingsCardSize} />
           <SettingsActionCard icon={<TermsIcon size="lg" />} label="Terms" onPress={() => setSheet("terms")} size={settingsCardSize} />
           <SettingsActionCard icon={<PrivacyIcon size="lg" />} label="Privacy" onPress={() => setSheet("privacy")} size={settingsCardSize} />
           <SettingsActionCard icon={<ReferralIcon size="lg" />} label="Referral" onPress={() => { setReferralMode("share"); setSheet("referral"); }} size={settingsCardSize} />
-          <SettingsActionCard icon={<WalletIcon size="lg" />} label="Wallet" onPress={() => setSheet("wallet")} size={settingsCardSize} />
-          <SettingsActionCard icon={<SparksIcon size="lg" />} label="Spark costs" onPress={openCostDetails} size={settingsCardSize} />
           {subscriptionView?.action === "cancel" ? <SettingsActionCard danger icon={<SubscriptionCancelIcon size="lg" variant="danger" />} label="Cancel subscription" onPress={() => { if (!cancelSubscription.isPending) setSheet("cancel-subscription"); }} size={settingsCardSize} /> : null}
           <SettingsActionCard danger icon={<DeleteAccountIcon size="lg" variant="danger" />} label="Delete account" onPress={() => setSheet("delete-account")} size={settingsCardSize} />
           <SettingsActionCard danger icon={<SignOutIcon size="lg" variant="danger" />} label="Log out" onPress={() => void logOut()} size={settingsCardSize} />
         </View>
       </View>}
     </AccountScreenShell>
+    <SupportComposeSheets compose={sheet === "issue" || sheet === "feedback" ? sheet : undefined} onClose={() => setSheet(undefined)} onSubmit={async ({ kind, message, requestKey }) => {
+      try { await createSupportTicket({ scopeKey, kind, message }, requestKey); showToast({ title: kind === "issue" ? "Issue sent" : "Feedback sent", duration: 2_500 }); }
+      catch (error) { showToast({ title: extractDomainErrorMessage(error) ?? "Message could not be sent.", duration: 3_000 }); throw error; }
+    }} />
 
     <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "avatar-actions"} title="Profile image actions">
       <BottomSheetMenu>
@@ -503,23 +505,18 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
       </BottomSheetMenu>
     </BottomSheet>
 
-    <BottomSheet description={badgeCost ? `Generate a custom profile badge for ${badgeCost.sparkCost} Sparks.` : "Generate a custom profile badge."} footer={<><Button disabled={!badgeCost} onPress={() => void generateBadge()} size="md" variant="primary">Generate badge</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "badge-generate"} title="Your profile badge">
+    <BottomSheet description="Generate a custom profile badge." footer={<><Button onPress={() => void generateBadge()} size="md" variant="primary">Generate badge</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "badge-generate"} title="Your profile badge">
       <View style={styles.badgeContent}>
         <View style={styles.badgePreview}><Avatar fallback={profileInitial(user)} size={148} style={styles.badgeAvatar} /></View>
-        {!badgeCost ? <Button onPress={() => void refreshProducts()} size="md" variant="ghost">Refresh costs</Button> : null}
       </View>
+    </BottomSheet>
+
+    <BottomSheet footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "storage-help"} title="Storage">
+      <Text style={styles.scopeHelp}>Storage reflects tracked files and media. Usage is measured continuously and charged in Sparks each hour. The monthly amount shown is an estimate at your current usage. If storage remains unfunded for 90 days, your tracked stored data becomes eligible for deletion.</Text>
     </BottomSheet>
 
     <BottomSheet footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "scope-help"} title="Scopes">
       <Text style={styles.scopeHelp}>Scopes are separate workspaces for different parts of your life. For example, you can create one for work and another for personal use, keeping their content, conversations, and tools organized independently.</Text>
-    </BottomSheet>
-
-    <BottomSheet footer={<><Button onPress={() => { setWalletHelp(undefined); setSheet(undefined); openPaywall(); }} size="md" variant="primary">Buy more</Button><Button onPress={() => { setWalletHelp(undefined); setSheet(undefined); }} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) { setWalletHelp(undefined); setSheet(undefined); } }} open={sheet === "wallet"} title="Wallet">
-      <WalletSheet onOpenHelp={setWalletHelp} userKey={user?.key} />
-    </BottomSheet>
-
-    <BottomSheet footer={<Button onPress={() => setWalletHelp(undefined)} size="md" variant="secondary">Close</Button>} onOpenChange={(open) => { if (!open) setWalletHelp(undefined); }} open={sheet === "wallet" && Boolean(walletHelp)} title={walletHelp === "ai" ? "AI usage" : walletHelp === "actions" ? "Action history" : "Storage"}>
-      <Text style={styles.scopeHelp}>{walletHelp === "ai" ? "This is Sparks spent on AI that does not have a set price, such as chatting in Core. Set-price actions appear under Action history." : walletHelp === "actions" ? "Action history shows Sparks spent on actions with a set price, such as creating an audio book or connecting email. Other AI spend is shown above as AI usage." : "Storage reflects tracked files and media across your apps. Usage is measured continuously and charged in Sparks each hour. The monthly amount shown is an estimate at your current usage. If storage remains unfunded for 90 days, your tracked stored data becomes eligible for deletion."}</Text>
     </BottomSheet>
 
     <BottomSheet description={TERMS_COPY.eyebrow} footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "terms"} title="Terms of service">
@@ -640,6 +637,9 @@ const styles = StyleSheet.create({
   referralSuccess: { borderColor: palette.hairline, borderRadius: radii.md, borderWidth: 1, gap: spacing.md, marginTop: spacing.sm, padding: spacing.md },
   referralSuccessTitle: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 16, textAlign: "center" },
   deleteError: { color: palette.danger, fontFamily: fonts.regular, fontSize: 13, lineHeight: 19 },
+  storageSection: { alignSelf: "stretch", gap: spacing.xs, marginTop: spacing.xl, width: "100%" },
+  storageSummary: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 14, lineHeight: 20 },
+  storageSkeleton: { height: 20, width: "72%" },
   scopeSection: { alignSelf: "stretch", gap: spacing.sm, marginTop: spacing.xl, width: "100%" },
   scopeActionItem: { justifyContent: "center" },
   scopeTitleRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", minHeight: 32 },

@@ -1,12 +1,16 @@
 import { z } from 'zod';
 import { appSearchRetrievalSchema } from '@/lib/app-search/service';
 import { CORE_CHAT_MAX_DOCUMENT_CONTEXT_BYTES } from '@/lib/ai/actions/core-chat';
+import { roleKeySchema } from '@/lib/ai/roles';
+import { fileExtensionSchema } from '@/lib/db/files.node';
 
 export const DEFAULT_CONVERSATION_NAME = 'New chat';
 
 export const conversationSchema = z.object({
   key: z.string().cuid(), teamKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(),
   userKey: z.string().cuid(), name: z.string().trim().min(1).max(200), isFavorite: z.boolean(),
+  isHidden: z.boolean().default(false),
+  roleKey: roleKeySchema.default('general'),
   createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 }).strict();
 export type Conversation = z.infer<typeof conversationSchema>;
@@ -56,6 +60,7 @@ export const conversationMessageBaseSchema = z.object({
   content: z.string().min(1).max(100_000), imageKey: z.string().cuid().optional(), embedding: z.array(z.number().finite()).optional(),
   embeddingProvider: z.string().trim().min(1).max(100).optional(), embeddingModel: z.string().trim().min(1).max(200).optional(), embeddingDimensions: z.number().int().positive().optional(),
   attachments: conversationAttachmentReferencesSchema.default([]),
+  workspaceFiles: z.array(z.object({ key: z.string().cuid(), name: z.string().trim().min(1).max(255), extension: fileExtensionSchema }).strict()).max(50).optional(),
   attachmentStatus: conversationAttachmentStatusSchema.optional(),
   pendingAttachmentKeys: z.array(z.string().cuid()).max(12).refine((keys) => new Set(keys).size === keys.length, 'Pending attachment keys must be unique.').optional(),
   attachmentContext: conversationAttachmentContextSchema.optional(),
@@ -84,6 +89,7 @@ function validateConversationMessage(message: z.infer<typeof conversationMessage
   if (message.status !== 'PENDING' && !message.completedAt) context.addIssue({ code: 'custom', path: ['completedAt'], message: 'Terminal messages require a completion time.' });
   if (message.type === 'TEXT' && message.imageKey) context.addIssue({ code: 'custom', path: ['imageKey'], message: 'Text messages cannot reference an image.' });
   if (message.attachments.length && (message.type !== 'TEXT' || message.role !== 'USER')) context.addIssue({ code: 'custom', path: ['attachments'], message: 'Attachments belong only to text user messages.' });
+  if (message.workspaceFiles?.length && (message.type !== 'TEXT' || message.role !== 'USER')) context.addIssue({ code: 'custom', path: ['workspaceFiles'], message: 'Tagged files belong only to text user messages.' });
   if (message.pendingAttachmentKeys?.length && (message.type !== 'TEXT' || message.role !== 'USER' || message.attachments.length)) context.addIssue({ code: 'custom', path: ['pendingAttachmentKeys'], message: 'Pending attachments belong only to text user messages without durable attachments.' });
   if (message.attachmentContext?.length && (message.type !== 'TEXT' || message.role !== 'USER')) context.addIssue({ code: 'custom', path: ['attachmentContext'], message: 'Attachment context belongs only to text user messages.' });
   if (message.imageReferenceArtifactKeys?.length && (message.type !== 'IMAGE' || message.role !== 'ASSISTANT')) context.addIssue({ code: 'custom', path: ['imageReferenceArtifactKeys'], message: 'Staged image references belong only to image responses.' });
@@ -113,34 +119,52 @@ function validateConversationMessage(message: z.infer<typeof conversationMessage
 export const conversationMessageSchema = conversationMessageBaseSchema.superRefine(validateConversationMessage).transform((message) => ({ ...message, attachmentStatus: resolvedAttachmentStatus(message) }));
 export type ConversationMessage = z.infer<typeof conversationMessageSchema>;
 
-export const conversationCreateInputSchema = z.object({ name: z.string().trim().min(1).max(200).optional() }).strict();
-export const conversationCreateServiceInputSchema = conversationCreateInputSchema.extend({ openingGreetingToken: z.string().trim().min(1).max(20_000).optional() }).strict();
-export const conversationListInputSchema = z.object({ cursor: z.string().min(1).max(1_000).optional(), limit: z.number().int().min(1).max(100).default(25), favoriteOnly: z.boolean().default(false) }).strict();
+export const conversationCreateInputSchema = z.object({ name: z.string().trim().min(1).max(200).optional(), roleKey: roleKeySchema.default('general') }).strict();
+export const conversationCreateServiceInputSchema = conversationCreateInputSchema.extend({
+  openingGreetingToken: z.string().trim().min(1).max(20_000).optional(),
+  openingContextSeedToken: z.string().trim().min(1).max(40_000).optional(),
+}).strict().refine((value) => !(value.openingGreetingToken && value.openingContextSeedToken), { message: 'Opening greeting and context seed cannot both be set.' });
+export const conversationListInputSchema = z.object({ cursor: z.string().min(1).max(1_000).optional(), limit: z.number().int().min(1).max(100).default(25), favoriteOnly: z.boolean().default(false), hiddenOnly: z.boolean().default(false) }).strict();
 export const conversationSearchInputSchema = conversationListInputSchema.extend({ query: z.string().trim().min(1).max(500), recordHistory: z.boolean().default(true) }).strict();
 export const conversationKeyInputSchema = z.object({ conversationKey: z.string().cuid() }).strict();
 export const conversationRenameInputSchema = conversationKeyInputSchema.extend({ name: z.string().trim().min(1).max(200).refine((name) => name !== DEFAULT_CONVERSATION_NAME, 'Choose a descriptive chat name.') }).strict();
 export const conversationFavoriteInputSchema = conversationKeyInputSchema.extend({ isFavorite: z.boolean() }).strict();
+export const conversationHiddenInputSchema = conversationKeyInputSchema.extend({ isHidden: z.boolean() }).strict();
+export const conversationRoleInputSchema = conversationKeyInputSchema.extend({ roleKey: roleKeySchema }).strict();
+export const conversationContextSeedInputSchema = z.object({
+  conversationKeys: z.array(z.string().cuid()).min(1).max(20).refine((keys) => new Set(keys).size === keys.length, 'Conversation keys must be unique.'),
+}).strict();
+export const conversationContextConversationKeysSchema = z.array(z.string().cuid()).max(20).refine((keys) => new Set(keys).size === keys.length, 'Conversation keys must be unique.').default([]);
 export const conversationMessageListInputSchema = conversationKeyInputSchema.extend({ cursor: z.string().min(1).max(1_000).optional(), limit: z.number().int().min(1).max(100).default(10) }).strict();
 export const conversationMessageDeleteInputSchema = conversationKeyInputSchema.extend({ messageKey: z.string().cuid() }).strict();
 export const conversationMessageDeleteResultSchema = z.object({ deletedKeys: z.array(z.string().cuid()).min(1).max(2) }).strict();
 export const conversationModelSendInputSchema = conversationKeyInputSchema.extend({ message: z.string().trim().min(1).max(20_000) }).strict();
 export const conversationSendInputSchema = conversationModelSendInputSchema.extend({
   requestKey: z.string().trim().min(1).max(180),
+  roleKey: roleKeySchema.optional(),
   attachmentKeys: z.array(z.string().cuid()).max(12).default([]),
-  referenceImageKeys: z.array(z.string().cuid()).max(1).default([]),
-  guideTopicSelection: guideTopicSelectionSchema.optional(),
-}).strict().refine(({ attachmentKeys }) => new Set(attachmentKeys).size === attachmentKeys.length, { path: ['attachmentKeys'], message: 'Attachment keys must be unique.' });
-export const conversationImageTurnShape = {
-  ...conversationKeyInputSchema.shape,
-  prompt: z.string().trim().min(1).max(8_000),
-  referenceImageKeys: z.array(z.string().cuid()).max(8).default([]),
-  size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
-  quality: z.enum(['low', 'medium', 'high']).default('medium'),
-  mode: z.enum(['default', 'fast']).default('default'),
-} as const;
-export const conversationImageTurnRequestKeySchema = z.string().trim().min(1).max(180);
-const uniqueImageReferences = ({ referenceImageKeys }: { referenceImageKeys: string[] }) => new Set(referenceImageKeys).size === referenceImageKeys.length;
-export const conversationImageTurnInputSchema = z.object({ ...conversationImageTurnShape, requestKey: conversationImageTurnRequestKeySchema, userMessage: conversationModelSendInputSchema.shape.message.optional() }).strict().refine(uniqueImageReferences, { path: ['referenceImageKeys'], message: 'Reference image keys must be unique.' });
+  referenceImageKeys: z.array(z.string().cuid()).max(0).default([]),
+  workspaceFileKeys: z.array(z.string().cuid()).max(50).default([]),
+  workspaceFolderKeys: z.array(z.string().cuid()).max(50).default([]),
+  contextConversationKeys: conversationContextConversationKeysSchema,
+}).strict().refine(({ attachmentKeys }) => new Set(attachmentKeys).size === attachmentKeys.length, { path: ['attachmentKeys'], message: 'Attachment keys must be unique.' })
+  .refine(({ workspaceFileKeys }) => new Set(workspaceFileKeys).size === workspaceFileKeys.length, { path: ['workspaceFileKeys'], message: 'Workspace file keys must be unique.' })
+  .refine(({ workspaceFolderKeys }) => new Set(workspaceFolderKeys).size === workspaceFolderKeys.length, { path: ['workspaceFolderKeys'], message: 'Workspace folder keys must be unique.' });
+export const conversationIncognitoHistorySchema = z.array(z.object({
+  role: z.enum(['USER', 'ASSISTANT']),
+  content: z.string().trim().min(1).max(20_000),
+}).strict()).max(20).default([]);
+export const conversationIncognitoSendInputSchema = z.object({
+  message: conversationModelSendInputSchema.shape.message,
+  requestKey: z.string().trim().min(1).max(180),
+  roleKey: roleKeySchema.default('general'),
+  attachmentKeys: z.array(z.string().cuid()).max(0).default([]),
+  referenceImageKeys: z.array(z.string().cuid()).max(0).default([]),
+  workspaceFileKeys: z.array(z.string().cuid()).max(50).default([]),
+  workspaceFolderKeys: z.array(z.string().cuid()).max(50).default([]),
+  history: conversationIncognitoHistorySchema,
+}).strict().refine(({ workspaceFileKeys }) => new Set(workspaceFileKeys).size === workspaceFileKeys.length, { path: ['workspaceFileKeys'], message: 'Workspace file keys must be unique.' })
+  .refine(({ workspaceFolderKeys }) => new Set(workspaceFolderKeys).size === workspaceFolderKeys.length, { path: ['workspaceFolderKeys'], message: 'Workspace folder keys must be unique.' });
 const conversationSafeMessageBaseSchema = conversationMessageBaseSchema.omit({ embedding: true, embeddingProvider: true, embeddingModel: true, embeddingDimensions: true, pendingAttachmentKeys: true, attachmentContext: true, imageReferenceArtifactKeys: true, imageStatusText: true, teamKey: true, scopeKey: true, userKey: true, requestHash: true, fundingRequiredCode: true, fundingRequiredAcknowledgedAt: true, guideMode: true, guideContext: true, selectedGuideMode: true, guideTopicMode: true, guideTopicGeneration: true, guideTopicFailureCode: true, guideTopicFundingRequiredCode: true });
 export const conversationSafeMessageSchema = conversationSafeMessageBaseSchema.superRefine((message, context) => {
   const attachmentStatus = message.attachmentStatus ?? (message.attachments.length ? 'COMPLETED' : 'NONE');
@@ -150,7 +174,6 @@ export const conversationSafeMessageSchema = conversationSafeMessageBaseSchema.s
   if (attachmentStatus === 'PARTIAL' && !message.attachments.length) context.addIssue({ code: 'custom', path: ['attachmentStatus'], message: 'PARTIAL attachment status requires successful durable attachments.' });
   if ((attachmentStatus === 'PENDING' || attachmentStatus === 'FAILED') && message.attachments.length) context.addIssue({ code: 'custom', path: ['attachmentStatus'], message: `${attachmentStatus} attachment status cannot expose durable attachments.` });
 }).transform((message) => ({ ...message, attachmentStatus: message.attachmentStatus ?? (message.attachments.length ? 'COMPLETED' as const : 'NONE' as const) }));
-export const conversationImageTurnResultSchema = z.object({ user: conversationSafeMessageSchema, assistant: conversationSafeMessageSchema, replayed: z.boolean() }).strict();
 export function projectConversationMessage(message: ConversationMessage) {
   const { embedding: _embedding, embeddingProvider: _embeddingProvider, embeddingModel: _embeddingModel, embeddingDimensions: _embeddingDimensions, pendingAttachmentKeys: _pendingAttachmentKeys, attachmentContext: _attachmentContext, imageReferenceArtifactKeys: _imageReferenceArtifactKeys, imageStatusText: _imageStatusText, teamKey: _teamKey, scopeKey: _scopeKey, userKey: _userKey, requestHash: _requestHash, fundingRequiredCode: _fundingRequiredCode, fundingRequiredAcknowledgedAt: _fundingRequiredAcknowledgedAt, guideMode: _guideMode, guideContext: _guideContext, selectedGuideMode: _selectedGuideMode, guideTopicMode: _guideTopicMode, guideTopicGeneration: _guideTopicGeneration, guideTopicFailureCode: _guideTopicFailureCode, guideTopicFundingRequiredCode: _guideTopicFundingRequiredCode, ...safe } = message;
   return conversationSafeMessageSchema.parse(message.type === 'IMAGE' && message.role === 'ASSISTANT' ? { ...safe, content: message.imageStatusText ?? 'Image generation is in progress.' } : safe);

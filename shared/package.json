@@ -85,6 +85,26 @@
       "react-native": "./packages/ui/components/search-history-pill/search-history-pill.mobile.tsx",
       "default": "./packages/ui/components/search-history-pill/search-history-pill.web.tsx"
     },
+    "./ui/search-results-grid": {
+      "react-native": "./packages/ui/components/search-results-grid/search-results-grid.mobile.tsx",
+      "default": "./packages/ui/components/search-results-grid/search-results-grid.web.tsx"
+    },
+    "./ui/role-option-card": {
+      "react-native": "./packages/ui/components/role-option-card/role-option-card.mobile.tsx",
+      "default": "./packages/ui/components/role-option-card/role-option-card.web.tsx"
+    },
+    "./ui/capability-tile": {
+      "react-native": "./packages/ui/components/capability-tile/capability-tile.mobile.tsx",
+      "default": "./packages/ui/components/capability-tile/capability-tile.web.tsx"
+    },
+    "./ui/folder-tile": {
+      "react-native": "./packages/ui/components/folder-tile/folder-tile.mobile.tsx",
+      "default": "./packages/ui/components/folder-tile/folder-tile.web.tsx"
+    },
+    "./ui/capability-tabs": {
+      "react-native": "./packages/ui/components/capability-tabs/capability-tabs.mobile.tsx",
+      "default": "./packages/ui/components/capability-tabs/capability-tabs.web.tsx"
+    },
     "./ui/action-pill": {
       "react-native": "./packages/ui/components/action-pill/action-pill.mobile.tsx",
       "default": "./packages/ui/components/action-pill/action-pill.web.tsx"

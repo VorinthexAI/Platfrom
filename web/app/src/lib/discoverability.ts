@@ -1,5 +1,5 @@
 export const CANONICAL_ORIGIN = "https://vorinthex.com" as const;
-export const CONTENT_LAST_REVIEWED = "2026-09-25" as const;
+export const CONTENT_LAST_REVIEWED = "2026-10-01" as const;
 export const CONTACT_EMAIL = "contact@vorinthex.com" as const;
 export const PRICING_HERO_HEADING = "One balance for everything you create and use" as const;
 export const PRICING_HERO_BODY =
@@ -131,7 +131,8 @@ export const PRODUCT_FACTS = {
   privacy:
     "Privacy and user control are central product principles for Core.",
   workspaceContext:
-    "Core can answer questions using relevant authorized content across saved documents, files, images, highlights, memories, previous chats, communication, travel guides, trips, and audio books, and can explain the signed-in user's Sparks balance and subscription. Answers distinguish incomplete evidence from confirmed absence.",
+    "Core can answer questions using relevant authorized content across saved documents, files, images, highlights, memories, previous chats, communication, travel guides, trips, and audio books, and can explain the signed-in user's Sparks balance and subscription. Answers distinguish incomplete evidence from confirmed absence. Core also offers separate chat, image, speech, and video modes; generated media is saved privately in the user's current scope.",
+  mediaGeneration: "Image generation or editing costs 15 Sparks per image and accepts up to eight reference images. Speech generation costs 1 Spark per 100 characters with a choice of five voices. Video generation costs 15 Sparks per second, supports 5–15 seconds at 480p and an optional starting image, and does not edit or extend existing video.",
   sparks:
     `${PRICING_HERO_HEADING}. ${PRICING_HERO_BODY} The current launch subscriptions are $19.99 monthly for 1,000 Sparks (discounted from the $24.99 regular monthly price) and $7.99 weekly for 200 Sparks. A one-time 200-Spark top-up is $9.99. Purchases are not yet available on the public website. Prepaid Sparks remain available after subscription cancellation, balances never go below zero, and storage is charged hourly from prepaid Sparks. Unfunded storage incurs no debt or backcharges, uploads can continue, and existing data remains available for export, deletion, and recovery. Adding enough Sparks before deletion begins restores prospective charging. Once deletion begins, it cannot be reversed. Stored data is permanently deleted after 90 consecutive unfunded days. Pricing is shown in USD and excludes VAT and other local taxes; Polar calculates and adds applicable tax at checkout.`,
   pricing: {
@@ -153,19 +154,19 @@ export const PUBLIC_DISCOVERABILITY_REGISTRY = {
     path: "/",
     title: "Vorinthex AI | Your Personal AI",
     description:
-      "Meet Vorinthex Core, a personal AI for iOS and Android that answers questions using authorized knowledge, memories, communication, learning, and account context.",
+      "Meet Vorinthex Core for iOS and Android: chat with your authorized knowledge or create images, speech, and short videos in separate modes.",
     summary:
-      "Vorinthex Core is a personal AI for iOS and Android that answers questions using relevant authorized knowledge, communication, learning, and account context.",
+      "Vorinthex Core is a personal AI for iOS and Android that answers questions using authorized context and generates private images, speech, and short videos in separate modes.",
     schemaPageType: "WebPage",
     status: "current",
     lastModified: CONTENT_LAST_REVIEWED,
-    capabilities: capabilityNames,
+    capabilities: [...capabilityNames, "Image, speech, and video generation"],
   },
   "/pricing": {
     path: "/pricing",
     title: "Sparks Pricing | Vorinthex AI",
     description: PRICING_HERO_BODY,
-    summary: `${PRICING_HERO_HEADING}. ${PRICING_HERO_BODY} Initial email sync costs 75 Sparks, audio book creation costs 75 Sparks, and an additional audio book chapter costs 25 Sparks.`,
+    summary: `${PRICING_HERO_HEADING}. ${PRICING_HERO_BODY} ${PRODUCT_FACTS.mediaGeneration}`,
     schemaPageType: "WebPage",
     status: "current",
     lastModified: CONTENT_LAST_REVIEWED,

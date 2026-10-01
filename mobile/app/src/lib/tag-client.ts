@@ -14,20 +14,13 @@ export const scopeTagSchema = z.strictObject({
 export type ScopeTag = z.infer<typeof scopeTagSchema>;
 
 export const resourceTagTargetSchema = z.strictObject({
-  type: z.enum(["folder", "document", "image-collection", "image", "image-highlight", "image-memory", "place", "trip", "email-inbox", "email-tone", "email-thread", "email-message", "email-draft", "book"]),
+  type: z.enum(["folder", "file"]),
   key: z.string().cuid(),
 });
 export type ResourceTagTarget = z.infer<typeof resourceTagTargetSchema>;
 
-const targetAssignmentSchema = z.strictObject({ target: resourceTagTargetSchema, tagKeys: z.array(z.string().cuid()) });
-const listOutputSchema = z.strictObject({ items: z.array(scopeTagSchema), nextCursor: z.string().nullable(), targetAssignments: z.array(targetAssignmentSchema).optional() });
-const envelopeSchema = z.discriminatedUnion("success", [
-  z.strictObject({ success: z.literal(true), data: listOutputSchema }),
-  z.object({ success: z.literal(false), error: z.unknown() }),
-]);
 const createRequestSchema = z.strictObject({ scopeKey: z.string().cuid(), key: z.string().cuid(), name: z.string().trim().min(1).max(120) });
 const failureSchema = z.strictObject({ success: z.literal(false), error: z.strictObject({ code: z.string().min(1), message: z.string().min(1) }) });
-const createEnvelopeSchema = z.discriminatedUnion("success", [z.strictObject({ success: z.literal(true), data: scopeTagSchema }), failureSchema]);
 
 function responseError(error: unknown) {
   const parsed = failureSchema.safeParse((error as { response?: { data?: unknown } }).response?.data);
@@ -44,34 +37,22 @@ export function createResourceTagKey() {
 
 export async function createScopeTag(context: ContentContext, input: { key: string; name: string }) {
   const payload = createRequestSchema.parse({ scopeKey: context.scopeKey, ...input });
-  const send = async () => {
-    const response = await apiClient.post("/tags", payload, { timeout: 15_000 });
-    const envelope = createEnvelopeSchema.parse(response.data);
-    if (!envelope.success) throw new Error(envelope.error.message);
-    return envelope.data;
-  };
   try {
-    return await send();
+    const response = await apiClient.post("/content/tools/tag.create", { scopeKey: context.scopeKey, input: payload }, { timeout: 15_000 });
+    const envelope = z.discriminatedUnion("success", [z.strictObject({ success: z.literal(true), data: z.strictObject({ tag: scopeTagSchema }) }), failureSchema]).parse(response.data);
+    if (!envelope.success) throw new Error(envelope.error.message);
+    return envelope.data.tag;
   } catch (error) {
-    if (["ECONNABORTED", "ETIMEDOUT"].includes((error as { code?: string }).code ?? "")) {
-      try { return await send(); } catch (retryError) { throw responseError(retryError); }
-    }
     throw responseError(error);
   }
 }
 
 export async function listScopeTags(context: ContentContext, signal?: AbortSignal) {
   try {
-    const items: ScopeTag[] = [];
-    let cursor: string | undefined;
-    do {
-      const response = await apiClient.post("/tags/list", { scopeKey: context.scopeKey, limit: 100, ...(cursor ? { cursor } : {}) }, { signal, timeout: 15_000 });
-      const envelope = envelopeSchema.parse(response.data);
-      if (!envelope.success) throw new Error("Tags could not be loaded.");
-      items.push(...envelope.data.items);
-      cursor = envelope.data.nextCursor ?? undefined;
-    } while (cursor);
-    return items;
+    const response = await apiClient.post("/content/tools/tag.list", { scopeKey: context.scopeKey, input: { scopeKey: context.scopeKey } }, { signal, timeout: 15_000 });
+    const envelope = z.discriminatedUnion("success", [z.strictObject({ success: z.literal(true), data: z.strictObject({ items: z.array(scopeTagSchema) }) }), failureSchema]).parse(response.data);
+    if (!envelope.success) throw new Error("Tags could not be loaded.");
+    return envelope.data.items;
   } catch (error) {
     throw responseError(error);
   }
@@ -105,22 +86,18 @@ export function removeResourceTag(state: ResourceTagAssignmentState, tagKey: str
 export async function listResourceTagAssignments(context: ContentContext, targets: readonly ResourceTagTarget[], signal?: AbortSignal): Promise<ResourceTagAssignmentState> {
   try {
     const normalizedTargets = normalizeResourceTagTargets(targets);
-    const items: ScopeTag[] = [];
-    const assignments = Object.fromEntries(normalizedTargets.map((target) => [resourceTagTargetIdentity(target), new Set<string>()]));
-    let cursor: string | undefined;
-    do {
-      const response = await apiClient.post("/tags/list", { scopeKey: context.scopeKey, targets: normalizedTargets, limit: 100, ...(cursor ? { cursor } : {}) }, { signal, timeout: 15_000 });
-      const envelope = envelopeSchema.parse(response.data);
-      if (!envelope.success) throw new Error("Tags could not be loaded.");
-      if (!envelope.data.targetAssignments) throw new Error("Tag assignments could not be loaded.");
-      items.push(...envelope.data.items);
-      for (const assignment of envelope.data.targetAssignments) {
-        const keys = assignments[resourceTagTargetIdentity(assignment.target)];
-        if (keys) for (const tagKey of assignment.tagKeys) keys.add(tagKey);
-      }
-      cursor = envelope.data.nextCursor ?? undefined;
-    } while (cursor);
-    return { tags: items, tagKeysByTarget: Object.fromEntries(Object.entries(assignments).map(([identity, keys]) => [identity, [...keys].sort()])) };
+    const [tags, response] = await Promise.all([
+      listScopeTags(context, signal),
+      apiClient.post("/content/tools/tag.assignment.list", { scopeKey: context.scopeKey, input: { scopeKey: context.scopeKey, targets: normalizedTargets } }, { signal, timeout: 15_000 }),
+    ]);
+    const envelope = z.discriminatedUnion("success", [
+      z.strictObject({ success: z.literal(true), data: z.strictObject({ items: z.array(z.strictObject({ target: resourceTagTargetSchema, tagKeys: z.array(z.string().cuid()) })) }) }),
+      failureSchema,
+    ]).parse(response.data);
+    if (!envelope.success) throw new Error(envelope.error.message);
+    const assignments = Object.fromEntries(normalizedTargets.map((target) => [resourceTagTargetIdentity(target), [] as string[]]));
+    for (const assignment of envelope.data.items) assignments[resourceTagTargetIdentity(assignment.target)] = assignment.tagKeys;
+    return { tags, tagKeysByTarget: assignments };
   } catch (error) {
     throw responseError(error);
   }
@@ -158,7 +135,7 @@ export function groupResourceTagAssignmentRequests(targets: readonly ResourceTag
 
 export async function persistResourceTagAssignments(context: ContentContext, requests: readonly ResourceTagAssignmentRequest[]) {
   try {
-    const results = await Promise.allSettled(requests.map(({ action, targets, tagKeys }) => apiClient.post(`/tags/assignments?action=${action}`, { scopeKey: context.scopeKey, targets, tagKeys }, { timeout: 15_000 })));
+    const results = await Promise.allSettled(requests.map(({ action, targets, tagKeys }) => apiClient.post("/content/tools/tag.assignment.set", { scopeKey: context.scopeKey, input: { scopeKey: context.scopeKey, targets, tagKeys, assigned: action === "tag" } }, { timeout: 15_000 })));
     const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (failure) throw failure.reason;
   } catch (error) {

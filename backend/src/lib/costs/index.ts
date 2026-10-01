@@ -5,8 +5,6 @@ export const REFERRAL_PROGRAM_VERSION = 'v1' as const;
 export const REFERRAL_SIGNUP_REWARD_MICRO_SPARKS = 50_000_000;
 export const REFERRAL_PAID_REWARD_MICRO_SPARKS = 100_000_000;
 export const STORAGE_SPARKS_PER_GB_MONTH = 30;
-export const INBOX_INITIAL_SYNC_SPARKS = 75;
-export const INBOX_NEW_EMAIL_SPARKS = 1;
 export const BYTES_PER_GB = 1_000_000_000;
 export const HOURS_PER_BILLING_MONTH = 730;
 
@@ -27,9 +25,6 @@ export type ToolCostPolicy = Readonly<{ mode: 'fixed' | 'outcome'; rule: FixedCo
 // A capability-level tool price wins over its underlying action price so one
 // invocation can never be charged at both levels.
 export const COST_RULE_PRECEDENCE = Object.freeze(['tool', 'action'] as const);
-const sparks = (value: number, name: string, description: string, quantity?: CostQuantity, showInPricing?: false): PublicFixedCostRule => Object.freeze({
-  type: 'fixed', microSparks: value * MICRO_SPARKS_PER_SPARK, name, description, ...(quantity ? { quantity } : {}), ...(showInPricing === false ? { showInPricing } : {}),
-});
 const purchaseGrant = (value: number): PurchaseGrantRule => Object.freeze({ microSparks: value * MICRO_SPARKS_PER_SPARK });
 
 export const PURCHASE_GRANT_RULES: Readonly<Record<string, PurchaseGrantRule>> = Object.freeze({
@@ -52,71 +47,20 @@ export function resolvePurchaseGrantMicroSparks(productId: string): number {
   return rule.microSparks;
 }
 
-export const TOOL_COST_RULES: Readonly<Record<string, PublicFixedCostRule>> = Object.freeze({
-  'book.create': sparks(75, 'Create an audio book', 'Generate and save a complete audio book.'),
-  'book.extend': sparks(25, 'Extend an audio book', 'Generate and save an additional audio book chapter.'),
-  'highlight.create': sparks(20, 'Create a highlight', 'Create a generated highlight from an image collection.'),
-  'image.create-memory': sparks(10, 'Create a memory', 'Create a generated memory for an image.'),
-  'visual-identity.create': sparks(15, 'Create a visual identity', 'Create a visual identity from selected images.'),
-  'email.tone.create': sparks(25, 'Create a Signal writing tone', 'Build a reusable writing tone from connected email examples.'),
-  'trip.create': sparks(15, 'Create a trip', 'Create and save a generated trip plan.'),
-  'place.guide.find': sparks(5, 'View place', 'Generate a place guide when it has not already been prepared.'),
-  'place.find-city': sparks(5, 'View city', 'Generate a city travel guide when it has not already been prepared.', undefined, false),
-  'profile.badge.generate': sparks(10, 'Generate a profile badge', 'Generate a custom profile badge for the authenticated user.', undefined, false),
-});
+export const TOOL_COST_RULES: Readonly<Record<string, PublicFixedCostRule>> = Object.freeze({});
 export const ACTION_COST_RULES: Readonly<Record<string, FixedCostRule>> = Object.freeze({});
 
 export const ACTION_PRICED_OPERATION_TOOL_SLUGS = Object.freeze([
-  'agent.context', 'agent.query', 'agents.core', 'app.enhance', 'app.search', 'app.speech', 'app.translate',
-  'book.goal.suggest', 'book.preview', 'book.topic.suggest',
-  'app.generate-image', 'conversation.message.send',
-  'document.parse', 'document.rewrite', 'document.summarize', 'document.topics',
-  'email.draft.compose', 'email.draft.create', 'email.message.summarize',
-
-  'image.caption', 'image.create-visual-identity', 'image.ideas.create',
-  'inbox.sort',
-  'place.find', 'place.reference.generate',
-  'trip.guide.generate',
-] as const);
-
-export const OUTCOME_PRICED_OPERATION_TOOL_SLUGS = Object.freeze([
-  'place.find-city', 'place.guide.find',
-] as const);
-
-// This list is intentionally exhaustive rather than a fallback. Adding a public
-// tool without choosing fixed, action, or free billing must fail registry tests.
-export const FREE_TOOL_SLUGS = Object.freeze([
-  'agent.guide', 'app.notify', 'billing.summary.read', 'catalog.list', 'notification.list', 'notification.mark-read', 'payment.checkout.create', 'pricing.read', 'referral.redeem', 'referral.summary.read', 'subscription.current.cancel', 'subscription.current.read', 'subscription.current.restore', 'subscription.current.schedule',
-  'book.chapter.progress', 'book.delete', 'book.detail', 'book.favorite', 'book.generation.cancel', 'book.generation.retry', 'book.list',
-  'collection.create', 'collection.delete', 'collection.duplicates.delete', 'collection.hide', 'collection.image.transfer', 'collection.list', 'collection.reveal', 'collection.update',
-  'content.hidden.list', 'content.neighbors', 'content.search', 'content.search-history.delete', 'content.search-history.list',
-  'conversation.create', 'conversation.delete', 'conversation.favorite', 'conversation.list', 'conversation.message.delete', 'conversation.message.list', 'conversation.rename', 'conversation.search',
-  'country.search',
-  'document.audio.playback.clear', 'document.audio.playback.update', 'document.copy', 'document.create', 'document.create-version', 'document.delete', 'document.delete-version', 'document.download', 'document.export', 'document.find', 'document.find-summary', 'document.find-version', 'document.hide', 'document.list', 'document.list-audio-versions', 'document.list-summaries', 'document.list-versions', 'document.move', 'document.read', 'document.rename', 'document.restore-version', 'document.reveal', 'document.search', 'document.search-all', 'document.update',
-  'email.draft.assign', 'email.draft.delete', 'email.draft.send', 'email.draft.update', 'email.message.summary.delete', 'email.message.summary.list', 'email.message.translation.delete', 'email.message.translation.list', 'email.overview', 'email.reply-context.create', 'email.reply-context.delete', 'email.reply-context.list', 'email.reply-context.update', 'email.similar.find', 'email.thread.favorite', 'email.thread.read', 'email.thread.read-state', 'email.thread.trash', 'email.tone.delete', 'email.tone.list', 'email.tone.search', 'email.tone.update', 'email.trash.clear',
-  'folder.copy', 'folder.create', 'folder.delete', 'folder.find', 'folder.hide', 'folder.list', 'folder.move', 'folder.rename', 'folder.reveal', 'folder.update',
-  'highlight.delete', 'highlight.list', 'highlight.read',
-  'image.delete', 'image.favorite', 'image.generation-history.delete', 'image.generation-history.list', 'image.hide', 'image.memory.delete', 'image.memory.list', 'image.memory.read', 'image.reveal', 'image.search', 'image.update',
-  'inbox.refresh', 'inbox.search', 'inbox.update',
-  'place.create', 'place.delete', 'place.find-children', 'place.list', 'place.open', 'place.reference.list', 'place.search', 'place.update',
-  'profile.badge.claim', 'profile.update', 'subject.delete', 'subject.image.list', 'subject.list',
-  'scope.create', 'scope.delete', 'scope.list', 'scope.prioritize', 'scope.select', 'scope.update',
-  'tag.assignment.set', 'tag.create', 'tag.delete', 'tag.list', 'tag.update', 'ticket.create', 'ticket.list',
-  'trip.attachment.set', 'trip.delete', 'trip.guide.list', 'trip.list', 'trip.search', 'trip.update',
+  'agent.query', 'agent.greet', 'agent.image', 'agent.speech', 'agent.video', 'agents.core', 'app.generate-image', 'conversation.message.send', 'file.upload.caption',
 ] as const);
 
 export const TOOL_COST_POLICIES: Readonly<Record<string, ToolCostPolicy>> = Object.freeze({
-  ...Object.fromEntries(FREE_TOOL_SLUGS.map((slug) => [slug, Object.freeze({ mode: 'free' as const })])),
   ...Object.fromEntries(ACTION_PRICED_OPERATION_TOOL_SLUGS.map((slug) => [slug, Object.freeze({ mode: 'action' as const })])),
-  ...Object.fromEntries(OUTCOME_PRICED_OPERATION_TOOL_SLUGS.map((slug) => [slug, Object.freeze({ mode: 'outcome' as const, rule: TOOL_COST_RULES[slug]!, paidOutcome: 'operation-completed' as const })])),
-  ...Object.fromEntries(Object.entries(TOOL_COST_RULES).filter(([slug]) => !OUTCOME_PRICED_OPERATION_TOOL_SLUGS.includes(slug as never)).map(([slug, rule]) => [slug, Object.freeze({ mode: 'fixed' as const, rule, paidOutcome: slug === 'book.create' || slug === 'book.extend' ? 'queue-accepted' as const : 'operation-completed' as const })])),
 });
 
 export function lookupToolCostPolicy(toolSlug: string, input?: unknown): ToolCostPolicy | null {
   const slug = assertDottedSlug(toolSlug);
   if (slug === 'ticket.create' && typeof input === 'object' && input !== null && (input as Record<string, unknown>).kind === 'feedback') return { mode: 'action' };
-  if (slug === 'agent.guide' && typeof input === 'object' && input !== null && (input as Record<string, unknown>).mode === 'topics') return { mode: 'action' };
-  if (slug === 'book.extend' && typeof input === 'object' && input !== null && (input as Record<string, unknown>).mode === 'preview') return { mode: 'action' };
   return TOOL_COST_POLICIES[slug] ?? null;
 }
 
@@ -255,12 +199,17 @@ export function calculateActionCostMicroSparks(actionSlug: string, usage: Readon
     numerator = inputTokens * 40n * BigInt(MICRO_SPARKS_PER_SPARK) + outputTokens * 400n * BigInt(MICRO_SPARKS_PER_SPARK);
     denominator = 1_000_000n;
   } else if (actionSlug === 'speech') {
-    numerator = outputTokens * 10_000n * BigInt(MICRO_SPARKS_PER_SPARK);
-    denominator = 1_000_000n;
+    const text = typeof input === 'object' && input !== null ? (input as Record<string, unknown>).text : undefined;
+    if (typeof text !== 'string' || !text.trim()) throw new TypeError('Speech billing requires submitted text.');
+    numerator = BigInt(Array.from(text.trim()).length) * 10_000n;
   } else if (actionSlug === 'image') {
     const count = typeof input === 'object' && input !== null ? (input as Record<string, unknown>).count : undefined;
     const images = Number.isSafeInteger(count) && (count as number) >= 0 ? BigInt(count as number) : BigInt(arrayLength(input, ['images', 'imageUrls', 'imageKeys']) ?? 1);
-    numerator = images * BigInt(operation === 'generate' ? 10 : 5) * BigInt(MICRO_SPARKS_PER_SPARK);
+    numerator = images * BigInt(operation === 'generate' ? 15 : 5) * BigInt(MICRO_SPARKS_PER_SPARK);
+  } else if (actionSlug === 'video') {
+    const duration = typeof input === 'object' && input !== null ? (input as Record<string, unknown>).durationSeconds : undefined;
+    if (!Number.isSafeInteger(duration) || (duration as number) < 5 || (duration as number) > 15) throw new TypeError('Video billing requires a duration from 5 to 15 seconds.');
+    numerator = BigInt(duration as number) * 15n * BigInt(MICRO_SPARKS_PER_SPARK);
   } else if (actionSlug === 'embed') {
     return 0;
   } else if (actionSlug === 'decide') {

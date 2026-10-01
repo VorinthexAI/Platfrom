@@ -13,7 +13,7 @@ export const contentToolOutputSchemas = Object.fromEntries(
   CONTENT_TOOL_NAMES.map((name) => [name, contentToolContracts[name].output]),
 ) as { [Name in ContentToolName]: (typeof contentToolContracts)[Name]['output'] };
 
-const PRIMARY_SCOPE_TOOLS = new Set<ContentToolName>(['folder.list', 'folder.create', 'file.list']);
+const PRIMARY_SCOPE_TOOLS = new Set<ContentToolName>(['folder.list', 'folder.create', 'file.list', 'content.search', 'content.search-history.record', 'content.search-history.list', 'content.search-history.delete', 'tag.list', 'tag.create', 'tag.assignment.list', 'tag.assignment.set']);
 
 export function hasPrimaryModelScope(name: ContentToolName) {
   return PRIMARY_SCOPE_TOOLS.has(name);
