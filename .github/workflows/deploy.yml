@@ -447,13 +447,6 @@ jobs:
       - name: Upload canonical system assets
         run: bun run --cwd backend assets:seed:ci
 
-  # NOTE (seed/backfill): ArangoDB lives on its own PRIVATE EC2 and is reached
-  # through an SSH tunnel. It could not be safely moved to `aws ecs run-task`
-  # because the runtime image only ships backend/src (not backend/scripts), so seed:secrets is
-  # unavailable inside the api image and also needs
-  # the git-crypt-encrypted .github/environments.json (secrets.prod.db_seeds) which
-  # is not baked into any image. Data seeding therefore keeps running from a
-  # full checkout over the tunnel after the active API has been swapped.
   backend-db:
     name: LATER / retired graph database data sync
     runs-on: ubuntu-latest
@@ -746,10 +739,10 @@ jobs:
           fi
 
   seed-db-secrets:
-    name: Upsert db.seeds.secrets.json to production
+    name: LATER / retired legacy team seed
     runs-on: ubuntu-latest
     needs: [changes, backend-migrate]
-    if: needs.changes.outputs.backend == 'true' && (github.event.pull_request.merged == true || inputs.deploy)
+    if: false # The legacy seed targets retired teams and cannot run against the user/scope schema.
     environment: production
     env:
       EC2_HOST: ${{ secrets.GRAPH_DB_EC2_HOST }}
