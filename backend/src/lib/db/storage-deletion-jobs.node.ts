@@ -52,20 +52,9 @@ export async function renewStorageDeletionClaim(key: string, storageKey: string,
 }
 
 const storageReferenceAql = `
-  STARTS_WITH(@storageKey, "system/initial-audiobook/") ||
   LENGTH(FOR user IN users FILTER user.profileStorageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
-  LENGTH(FOR book IN books FILTER book.coverStorageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
-  LENGTH(FOR chapter IN bookChapters FILTER chapter.audioStorageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
-  LENGTH(FOR attachment IN emailAttachments FILTER attachment.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
-  LENGTH(FOR media IN placeHeroMedia FILTER media.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
-  LENGTH(FOR document IN documents FILTER document.storageKey == @storageKey || (IS_ARRAY(document.sourceStorageKeys) && @storageKey IN document.sourceStorageKeys) || (IS_ARRAY(document.speechStorageKeys) && @storageKey IN document.speechStorageKeys) LIMIT 1 RETURN 1) > 0 ||
-  LENGTH(FOR version IN documentVersions FILTER version.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
-  LENGTH(FOR audio IN documentAudioVersions FILTER audio.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
-  LENGTH(FOR audio IN documentSummaryAudio FILTER audio.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
-  LENGTH(FOR image IN images FILTER image.storageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
   LENGTH(FOR file IN files FILTER file.storageKey == @storageKey || file.thumbnailStorageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
-  LENGTH(FOR artifact IN conversationAttachmentArtifacts FILTER artifact.stagedStorageKey == @storageKey LIMIT 1 RETURN 1) > 0 ||
-  LENGTH(FOR upload IN galleryUploads FILTER upload.storageKey == @storageKey && upload.status != "failed" LIMIT 1 RETURN 1) > 0`;
+  LENGTH(FOR artifact IN conversationAttachmentArtifacts FILTER artifact.stagedStorageKey == @storageKey LIMIT 1 RETURN 1) > 0`;
 
 /** Creates an owned durable upload lease without stealing another live owner. */
 export async function reserveStorageKeyForUpload(storageKey: string): Promise<StorageUploadReservation | null> {

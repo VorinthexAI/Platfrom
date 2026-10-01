@@ -7,7 +7,6 @@ import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { contentPersistence } from '@/lib/db/content-persistence.node';
 import { embedText } from '@/lib/embeddings';
 import { getDefaultGalleryRepository, type GalleryRepository } from '@/lib/gallery/repository';
-import { initialWorkspaceFolderKey } from '@/lib/initial-workspace-content-identifiers';
 import { conversationAttachmentReferenceSchema, type ConversationAttachmentReference } from './schemas';
 import { artifactSha256, conversationAttachmentArtifactSchema, type ConversationAttachmentArtifact } from './attachment-artifacts';
 
@@ -64,7 +63,7 @@ export async function persistConversationAttachment(record: ConversationAttachme
   const object = await storage.download(artifact!.stagedStorageKey);
   if (object.bytes.byteLength !== artifact!.sizeBytes || artifactSha256(object.bytes) !== artifact!.stagedSha256) throw new Error('A claimed conversation attachment is unavailable.');
   if (artifact!.kind === 'document') {
-    const parsed = await (dependencies.parse ?? parseDocument)({ file: { filename: artifact!.filename, mimeType: artifact!.mimeType, sizeBytes: artifact!.sizeBytes, bytes: object.bytes }, scopeKey: identity.scopeKey, folderKey: initialWorkspaceFolderKey(identity.scopeKey, 'assistant'), idempotencyKey: `conversation-attachment:${artifact!.key}` }, { ...dependencies.document, teamKey: identity.teamKey, signal: dependencies.signal, insert: (document) => contentPersistence.insertConversationAttachmentDocument(document, identity.actorKey) });
+    const parsed = await (dependencies.parse ?? parseDocument)({ file: { filename: artifact!.filename, mimeType: artifact!.mimeType, sizeBytes: artifact!.sizeBytes, bytes: object.bytes }, scopeKey: identity.scopeKey, idempotencyKey: `conversation-attachment:${artifact!.key}` }, { ...dependencies.document, teamKey: identity.teamKey, signal: dependencies.signal, insert: (document) => contentPersistence.insertConversationAttachmentDocument(document, identity.actorKey) });
     return conversationAttachmentReferenceSchema.parse({ key: parsed.document.key, kind: 'document', ...(artifact!.displayKey ? { displayKey: artifact!.displayKey } : {}), filename: artifact!.filename, mimeType: artifact!.mimeType, sizeBytes: artifact!.sizeBytes });
   }
   const gallery = dependencies.gallery ?? getDefaultGalleryRepository();

@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { seedAppLogoAssets, seedInitialAudiobookAssets } from '@/lib/apps/logo-assets';
+import { seedAppLogoAssets } from '@/lib/apps/logo-assets';
 import { s3, S3_BUCKET } from '@/lib/s3';
 
 export function assertAppLogoSeedEnvironment(mode: string | undefined, env: NodeJS.ProcessEnv = process.env) {
@@ -29,5 +29,4 @@ if (import.meta.main) {
     forceUpload: process.argv[2] === '--production-ci',
   };
   console.table(await seedAppLogoAssets(options));
-  console.table(await seedInitialAudiobookAssets(options));
 }
