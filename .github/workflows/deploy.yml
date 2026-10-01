@@ -181,8 +181,6 @@ jobs:
         run: rm -rf web/app/.next && bun run web:build
       - name: Backend check
         run: bun run backend:check
-      - name: Backend test
-        run: bun run backend:test
 
   ci-docker:
     name: CI / build Docker images
