@@ -13,6 +13,7 @@ environments/
 .temp
 backend/scripts/tmp-*.ts
 backend/.tmp-db-seeds.secrets.json
+backend/scripts/dev/assets/
 .tmp-backend-prod.env
 
 node_modules/

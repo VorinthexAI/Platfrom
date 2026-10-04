@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { speechInputSchema, speechOutputSchema, type SpeechOutput } from '@/lib/ai/actions/speech';
 import { videoInputSchema, videoOutputSchema, type VideoOutput } from '@/lib/ai/actions/video';
 import { decisionInputSchema, decisionOutputSchema } from '@/lib/ai/actions/decide';
+import { rerankInputSchema, rerankOutputSchema } from '@/lib/ai/actions/rerank';
 import { mediaDescriptionInputSchema, mediaDescriptionOutputSchema, type MediaDescriptionInput, type MediaDescriptionOutput } from '@/lib/ai/actions/text';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { tokenUsage } from '@/lib/ai/shared/usage';
@@ -503,6 +504,16 @@ export function createOpenRouterProvider(config: OpenRouterProviderConfig, fetch
           const output = response(decisionOutputSchema, raw, 'decision');
           const details = raw as { usage?: { input_tokens?: number; output_tokens?: number; cost?: number } };
           return { output: output as TOutput, usage: tokenUsage(details.usage?.input_tokens, details.usage?.output_tokens), ...(details.usage?.cost !== undefined ? { costUsd: details.usage.cost } : {}), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: raw };
+        }
+        if (request.actionId === 'rerank') {
+          const value = input(rerankInputSchema, request.input, 'rerank');
+          const result = await post(fetcher, parsed, '/rerank', { model: request.externalModelId, query: value.query, documents: value.documents, top_n: value.documents.length }, request, 'rerank');
+          const raw: unknown = await result.json();
+          const parsedResponse = response(z.object({ results: z.array(z.object({ index: z.number().int().nonnegative(), relevance_score: z.number().finite() }).passthrough()), usage: z.object({ total_tokens: z.number().int().positive(), cost: z.number().nonnegative().optional() }).passthrough() }).passthrough(), raw, 'rerank');
+          const indexes = parsedResponse.results.map(({ index }) => index);
+          if (indexes.length !== value.documents.length || new Set(indexes).size !== indexes.length || indexes.some((index) => index >= value.documents.length)) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter rerank returned incomplete or invalid document indexes');
+          const output = rerankOutputSchema.parse({ results: parsedResponse.results.map(({ index, relevance_score: relevanceScore }) => ({ index, relevanceScore })) });
+          return { output: output as TOutput, usage: tokenUsage(parsedResponse.usage?.total_tokens, 0, parsedResponse.usage?.total_tokens), ...(parsedResponse.usage?.cost !== undefined ? { costUsd: parsedResponse.usage.cost } : {}), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: raw };
         }
         if (request.actionId === 'text') {
           if (typeof request.input === 'object' && request.input !== null && 'operation' in request.input && request.input.operation === 'describe-media') return await describeMedia<TOutput>(fetcher, parsed, request);

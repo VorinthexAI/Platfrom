@@ -21,6 +21,12 @@ read plan; the selected service still performs all authorization and data reads.
 Its fallback user price is zero per input token and 10 Sparks per million output
 tokens, with no fixed tool-call fee.
 
+The `rerank` action scores up to 50 already-authorized file summaries against
+a question. Workspace retrieval owns vector/keyword/metadata candidate discovery,
+RRF fusion, authorization, and its fused order if reranking fails. Its route is
+`rerank.primary` bound to VoyageAI rerank-3-lite through OpenRouter. The
+provider-reported total token usage costs 20 Sparks per million tokens.
+
 ## Tools Versus Actions
 
 Use a tool when the caller requests a domain outcome: create a folder, find a

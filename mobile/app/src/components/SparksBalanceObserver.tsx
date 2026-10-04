@@ -19,7 +19,7 @@ export function SparksBalanceObserver({ isOffline }: { isOffline: boolean }) {
     const refresh = () => {
       if (!userKey) return;
       void Promise.all([
-        queryClient.invalidateQueries({ queryKey: billingSummaryQueryKey(userKey), exact: true, refetchType: "active" }),
+        queryClient.invalidateQueries({ queryKey: billingSummaryQueryKey(userKey), refetchType: "active" }),
         queryClient.invalidateQueries({ queryKey: currentSubscriptionQueryKey(userKey), exact: true, refetchType: "active" }),
       ]);
     };
@@ -40,7 +40,7 @@ export function SparksBalanceObserver({ isOffline }: { isOffline: boolean }) {
       lastAt = now;
       showToast({ title: copy.title, description: copy.description, duration: 3_000 });
       openPaywall();
-      if (userKey) void queryClient.invalidateQueries({ queryKey: billingSummaryQueryKey(userKey), exact: true, refetchType: "active" });
+       if (userKey) void queryClient.invalidateQueries({ queryKey: billingSummaryQueryKey(userKey), refetchType: "active" });
     });
   }, [openPaywall, queryClient, showToast, userKey]);
 

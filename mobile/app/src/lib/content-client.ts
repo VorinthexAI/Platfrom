@@ -49,6 +49,7 @@ export type ContentFile = {
   sizeBytes: number;
   caption?: string;
   hasThumbnail?: boolean;
+  hasExtractedText?: boolean;
   processing: "pending" | "ready" | "failed";
   isFavorite: boolean;
   isHidden?: boolean;
@@ -69,6 +70,7 @@ export type ContentSearchFile = {
   extension?: FileExtension;
   isFavorite: boolean;
   hasThumbnail?: boolean;
+  hasExtractedText?: boolean;
   score: number;
   scopeKey?: string;
   folderKey?: string;
@@ -207,6 +209,15 @@ export async function listContentFilePage(folderKey?: string, signal?: AbortSign
     ...(filters?.favoritesOnly ? { favoritesOnly: true } : {}),
     ...(filters?.includeHidden ? { includeHidden: true } : {}),
   }, signal, contentContext);
+}
+
+export async function listContentInventoryPage(context: ContentContext, input: { folderKey?: string; extensions?: readonly FileExtension[]; cursor?: string }, signal?: AbortSignal) {
+  return callContentTool<{ files: ContentFile[]; count: number; cursor?: string }>("file.list", {
+    scopeKey: context.scopeKey, includeDescendants: true, limit: 50,
+    ...(input.folderKey ? { folderKey: input.folderKey } : {}),
+    ...(input.extensions ? { extensions: [...input.extensions] } : {}),
+    ...(input.cursor ? { cursor: input.cursor } : {}),
+  }, signal, context);
 }
 
 export async function listContentLocation(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext()) {
@@ -416,6 +427,7 @@ export async function searchContent(query: string, folderKey?: string, filters?:
       extension: file.extension,
       isFavorite: file.isFavorite,
       hasThumbnail: file.hasThumbnail,
+      hasExtractedText: file.hasExtractedText,
       score: file.score,
       folderKey: file.folderKey,
     })),

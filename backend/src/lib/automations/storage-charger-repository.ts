@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db, withTransaction } from '@/lib/db/client';
 import { toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { newId } from '@/lib/ids';
+import { ScopeServiceError } from '@/lib/ai/scopes/service';
 import { calculateStorageCharge, closedStorageHours, storageByteUsageSchema, storageHourWindowSchema, type PreparedStorageCharge, type StorageHourWindow, type StorageUsageRepository } from './storage-charger';
 
 export const STORAGE_OBJECTS_COLLECTION = 'storageObjects';
@@ -35,7 +36,7 @@ const first = async (database: StorageChargingDatabase, query: string, bindVars?
 export function createStorageChargingRepository(
   database: StorageChargingDatabase = db as unknown as StorageChargingDatabase,
   transact: TransactionRunner = (operation) => withTransaction({ read: [STORAGE_OBJECTS_COLLECTION], write: [STORAGE_CHARGING_HOURS_COLLECTION, STORAGE_CHARGING_METERS_COLLECTION, STORAGE_RETENTION_STATES_COLLECTION] }, (transaction) => operation(transaction as unknown as StorageChargingDatabase)),
-): StorageUsageRepository & { getActiveStoredBytes(userKey: string): Promise<string>; listMissedClosedHours(now: Date): Promise<StorageHourWindow[]> } {
+): StorageUsageRepository & { getActiveStoredBytes(userKey: string): Promise<string>; getActiveStoredBytesForScope(userKey: string, scopeKey: string): Promise<string>; listMissedClosedHours(now: Date): Promise<StorageHourWindow[]> } {
   return {
     async getActiveStoredBytes(rawUserKey) {
       const userKey = storageObjectSchema.shape.userKey.parse(rawUserKey);
@@ -50,6 +51,24 @@ export function createStorageChargingRepository(
         add(await cursor.all());
       }
       return total.toString();
+    },
+    async getActiveStoredBytesForScope(rawUserKey, rawScopeKey) {
+      const userKey = storageObjectSchema.shape.userKey.parse(rawUserKey);
+      const scopeKey = z.string().cuid().parse(rawScopeKey);
+      const cursor = await database.query(`LET scope = DOCUMENT(scopes, @scopeKey)
+        FILTER scope != null && scope.userKey == @userKey
+        LET ownedKeys = UNIQUE(UNION(
+          (FOR file IN files FILTER file.userKey == @userKey && file.scopeKey == @scopeKey
+            FOR key IN [file.storageKey, file.thumbnailStorageKey] FILTER IS_STRING(key) RETURN key),
+          (FOR artifact IN conversationAttachmentArtifacts FILTER artifact.userKey == @userKey && artifact.scopeKey == @scopeKey && IS_STRING(artifact.stagedStorageKey) RETURN artifact.stagedStorageKey)
+        ))
+        RETURN (FOR object IN storageObjects
+          FILTER object.userKey == @userKey && object.deletedAt == null
+          FILTER object.storageKey IN ownedKeys || STARTS_WITH(object.storageKey, CONCAT('content/', @scopeKey, '/')) || STARTS_WITH(object.storageKey, CONCAT('pending/conversation-attachments/', @scopeKey, '/'))
+          RETURN object.sizeBytes)`, { userKey, scopeKey });
+      const matches = await cursor.all() as unknown[][];
+      if (!matches.length) throw new ScopeServiceError('NOT_FOUND', 'The selected scope is not available.');
+      return matches[0]!.reduce<bigint>((total, value) => total + BigInt(storageObjectSchema.shape.sizeBytes.parse(value)), 0n).toString();
     },
     async listUserByteUsage(rawWindow) {
       const window = storageHourWindowSchema.parse(rawWindow);

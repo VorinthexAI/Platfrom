@@ -106,26 +106,21 @@ export function createAppNotificationRepository(
     async createStorageRetentionWarning(input: StorageRetentionWarningPersistenceInput) {
       const key = newId();
       const userNotificationKey = newId();
-      const idempotencyKey = createHash('sha256').update(`storage-retention-warning\0${input.userKey}\0${input.expectedPaymentPastDueAt}\0${input.expectedWipeDueAt}\0${input.now}`).digest('hex');
-      const requestHash = createHash('sha256').update(JSON.stringify({ title: input.title, message: input.message, userKey: input.userKey, expectedPaymentPastDueAt: input.expectedPaymentPastDueAt, expectedWipeDueAt: input.expectedWipeDueAt })).digest('hex');
       const cursor = await database.query<{ key: string; deliveries: number }>(`
         LET state = FIRST(FOR item IN storageRetentionStates FILTER item.userKey == @userKey LIMIT 1 RETURN item)
         LET user = DOCUMENT(users, @userKey)
-        LET team = FIRST(FOR item IN teams FILTER item.personalOwnerUserId == @userKey && item.isActive == true LIMIT 1 RETURN item)
-        LET scope = team == null ? null : FIRST(FOR item IN scopes FILTER item.teamKey == team._key && item.slug == "main" LIMIT 1 RETURN item)
-        FILTER state != null && user != null && team != null && scope != null
+        LET scope = FIRST(FOR item IN scopes FILTER item.userKey == @userKey SORT item.createdAt ASC LIMIT 1 RETURN item)
+        FILTER state != null && user != null && scope != null
         FILTER state.paymentPastDueAt == @expectedPaymentPastDueAt && state.wipeDueAt == @expectedWipeDueAt
         FILTER state.fundedAt == null && state.wipeStartedAt == null && state.wipedAt == null && state.wipeDueAt > @now
         FILTER (IS_NUMBER(user.microSparkDebt) && user.microSparkDebt > 0) || (!IS_NUMBER(user.microSparkBalance) ? 0 : user.microSparkBalance) < state.minimumBalanceMicroSparks
         FILTER state.warningWipeDueAt != @expectedWipeDueAt || state.warningPaymentPastDueAt != @expectedPaymentPastDueAt || !IS_STRING(state.warningSentAt) || state.warningSentAt < @warningDayStart
         UPDATE state WITH { warningPaymentPastDueAt: @expectedPaymentPastDueAt, warningWipeDueAt: @expectedWipeDueAt, warningSentAt: @now } IN storageRetentionStates
         LET subscriptions = (FOR item IN pushSubscriptions FILTER item.userKey == @userKey RETURN item)
-        INSERT { _key: @key, actorUserKey: @userKey, teamKey: team._key, scopeKey: scope._key, idempotencyKey: @idempotencyKey, requestHash: @requestHash, title: @title, message: @message, recipientCount: 1, deliveryCount: LENGTH(subscriptions), embedding: @embedding, embeddingState: "ready", embeddedAt: @now, embeddingProvider: @embeddingProvider, embeddingModel: @embeddingModel, embeddingDimensions: @embeddingDimensions, createdAt: @now } INTO appNotifications
-        INSERT { _key: @userNotificationKey, userKey: @userKey, teamKey: team._key, scopeKey: scope._key, title: @title, message: @message, readAt: null, sourceKey: @key, embedding: @embedding, createdAt: @now } INTO userNotifications
-        INSERT { _key: CONCAT(@key, "-", @userKey), notificationKey: @key, userKey: @userKey, teamKey: team._key, readAt: null, createdAt: @now, updatedAt: @now } INTO appNotificationRecipients
+        INSERT { _key: @userNotificationKey, userKey: @userKey, teamKey: @userKey, scopeKey: scope._key, title: @title, message: @message, readAt: null, sourceKey: @key, embedding: @embedding, createdAt: @now } INTO userNotifications
         LET deliveries = (FOR subscription IN subscriptions INSERT { _key: CONCAT(@key, "-", subscription._key), notificationKey: @key, subscriptionKey: subscription._key, userKey: subscription.userKey, projectId: subscription.projectId, status: "queued", attempts: 0, createdAt: @now, updatedAt: @now } INTO pushDeliveries RETURN 1)
         RETURN { key: @key, deliveries: LENGTH(deliveries) }
-      `, { ...input, key, userNotificationKey, idempotencyKey, requestHash, ...embeddingMetadata() });
+      `, { ...input, key, userNotificationKey });
       const result = await cursor.next();
       return result ? { ...result, recipients: 1, replayed: false } : null;
     },

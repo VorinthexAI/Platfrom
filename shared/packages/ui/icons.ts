@@ -63,7 +63,6 @@ export * from './icons/globe-view';
 export * from './icons/table-view';
 export * from './icons/chat-bubble';
 export * from './icons/archive';
-export * from './icons/audio-file';
 export * from './icons/gallery';
 export * from './icons/gift';
 export * from './icons/signal';

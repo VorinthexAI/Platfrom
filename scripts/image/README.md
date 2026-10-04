@@ -4,6 +4,51 @@ Local Bun CLI for generating, reviewing, locking, versioning, exporting, and bac
 
 It also includes a deterministic HTML-to-PNG product screenshot renderer. See [`product-screenshots/README.md`](product-screenshots/README.md).
 
+For ten paid, screenshot-free portrait frame experiments, run
+`bun run scripts/generate-onboarding-frames.ts` from the repository root. The
+script uses the git-crypt-unlocked **production backend** OpenRouter key,
+generates with `openai/gpt-image-2.5-sunburst`, and saves ten 1080×1920 PNGs,
+their original provider images, a manifest, and a contact sheet under
+`scripts/image/outputs/onboarding-frames/`. A solid black 9:16 center is
+applied locally to reserve space for future screenshots. Reruns skip existing
+frames; `--force` explicitly makes another ten paid calls.
+
+To make an eleventh paid concept using the first real Storage screenshot as an
+OpenRouter image reference, run `bun run scripts/generate-onboarding-frames.ts
+--integrated`. It creates `11-ambient-silver.png`: a soft silver, textured
+portrait background with the original screenshot gently feathered and tilted
+into it. It does not change the screenshot bundled in the mobile app.
+
+For a separate twelfth comparison with a deeper, dimmer graphite background
+and a locally composited black iPhone-style frame, run `bun run
+scripts/generate-onboarding-frames.ts --iphone`. Use `--iphone --recompose`
+to adjust the deterministic device treatment without another paid model call.
+
+To apply image 12's saved dark backdrop and black device treatment to all eight
+onboarding screenshots, run `bun run scripts/generate-onboarding-frames.ts
+--all-screenshots`. The eight 1080×1920 PNGs and a contact sheet are written
+to `scripts/image/outputs/onboarding-frames/new/`. This step is entirely local
+and does not make any additional paid model calls or alter the source images.
+
+`bun run scripts/compose-onboarding-bottom-layer.ts` extracts a short graphite
+texture from image 12's saved backdrop. It bundles the reusable layer into the
+intro and creates 15 visual frame previews under
+`scripts/image/outputs/onboarding-frames/new/steps/`. On screenshot frames it
+covers only the baked-in Android navigation row, below the Core composer; on
+the other frames it supplies the same subtle bottom treatment. No provider
+call or alteration of the uploaded screenshots is required. Optimized versions
+of all 15 frames are bundled for the mobile intro under
+`mobile/app/assets/onboarding/frames/`.
+
+Run `bun run scripts/generate-onboarding-frames.ts --illustrations` to make
+seven paid, full-bleed 9:16 graphite-and-silver scenes for the intro steps that
+do not use screenshots. The generated PNGs, original model outputs, prompts,
+and contact sheet live under `scripts/image/outputs/onboarding-frames/illustrations/`;
+optimized copies are bundled in `mobile/app/assets/onboarding/illustrations/`.
+The image 12 backdrop is sent as a color and depth reference. Reruns reuse
+finished scenes; `--force --illustrations` deliberately regenerates all seven.
+To regenerate just one, pass `--force --illustrations --only=08-ask-in-your-own-words`.
+
 ## Setup
 
 ```bash

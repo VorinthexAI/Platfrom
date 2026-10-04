@@ -25,6 +25,9 @@
     "commerce:sync:ci": "bun run scripts/sync-commerce-products.ts",
     "assets:seed:local": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-app-logo-assets.ts --local",
     "assets:seed:ci": "bun run scripts/seed-app-logo-assets.ts --production-ci",
+    "dev:files:seed": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-workshop-year.ts",
+    "dev:chats:record": "bun run load-local-env && bun --env-file=.env.local run scripts/record-workshop-chats.ts",
+    "dev:files:wipe": "bun run load-local-env && bun --env-file=.env.local run scripts/wipe-dev-files.ts",
     "seed:secrets": "bun run scripts/seed-secrets.ts"
   },
   "dependencies": {
@@ -46,6 +49,7 @@
     "hono": "^4.12.18",
     "hono-rate-limiter": "0.5.4",
     "ioredis": "^5.4.0",
+    "jszip": "^3.10.1",
     "mammoth": "^1.12.0",
     "marked": "^16.4.1",
     "nodemailer": "^9.0.3",

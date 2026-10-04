@@ -13,6 +13,7 @@ import { getDefaultUserSearchService } from '@/lib/user-searches/service';
 import { contextUserKey, type ToolContext } from './tool-context';
 import { ContentError } from './content-errors';
 import { contentFolderSchema, contentFileSchema, contentTagSchema, contentToolContracts, type ContentToolName } from './content-schemas';
+import { listWorkspaceInventory } from '@/lib/ai/agents/workspace-inventory';
 
 export type ContentToolDependencies = Record<string, never>;
 
@@ -27,7 +28,7 @@ function publicFolder(folder: Folder) {
 }
 
 function publicFile(file: FileRecord) {
-  return contentFileSchema.parse({ key: file.key, scopeKey: file.scopeKey, folderKey: file.folderKey, name: file.name, extension: file.extension, mimeType: file.mimeType, sizeBytes: file.sizeBytes, caption: file.caption, hasThumbnail: Boolean(file.thumbnailStorageKey), processing: file.processing, isFavorite: file.isFavorite, isHidden: file.isHidden, createdAt: file.createdAt, updatedAt: file.updatedAt });
+  return contentFileSchema.parse({ key: file.key, scopeKey: file.scopeKey, folderKey: file.folderKey, name: file.name, extension: file.extension, mimeType: file.mimeType, sizeBytes: file.sizeBytes, caption: file.caption, hasThumbnail: Boolean(file.thumbnailStorageKey), hasExtractedText: file.processing === 'ready' && Boolean(file.extractedText?.trim()), processing: file.processing, isFavorite: file.isFavorite, isHidden: file.isHidden, createdAt: file.createdAt, updatedAt: file.updatedAt });
 }
 
 export const publicContentFile = publicFile;
@@ -137,18 +138,19 @@ async function matchingTagKeys(scopeKey: string, sourceType: 'folder' | 'file', 
   return required.every((key) => present.has(key));
 }
 
-export async function searchWorkspace(context: ToolContext, input: { query: string; folderKey?: string; favoritesOnly?: boolean; includeHidden?: boolean; tagKeys?: string[]; extensions?: string[]; limit?: number }, options: { entireScope?: boolean; includeUnranked?: boolean } = {}) {
+export async function searchWorkspace(context: ToolContext, input: { query: string; folderKey?: string; folderKeys?: string[]; excludeManaged?: boolean; favoritesOnly?: boolean; includeHidden?: boolean; tagKeys?: string[]; extensions?: string[]; limit?: number }, options: { entireScope?: boolean; includeUnranked?: boolean } = {}) {
   const userKey = contextUserKey(context);
   const scopeKey = context.runtimeScopeKey;
   const limit = input.limit ?? 50;
   if (input.folderKey) await requireFolder(context, input.folderKey);
   // Name matching must remain available when the embedding provider is unavailable.
   const embedding = await embedText({ text: input.query, purpose: 'query' }).catch(() => [] as number[]);
-  const folderFilter = input.folderKey ? 'FILTER row.parentFolderKey == @folderKey' : options.entireScope ? '' : 'FILTER !HAS(row, "parentFolderKey")';
-  const fileFolderFilter = input.folderKey ? 'FILTER row.folderKey == @folderKey' : options.entireScope ? '' : 'FILTER !HAS(row, "folderKey")';
-  const folderBinding = input.folderKey ? { folderKey: input.folderKey } : {};
+  const folderFilter = input.folderKeys ? 'FILTER row.parentFolderKey IN @folderKeys' : input.folderKey ? 'FILTER row.parentFolderKey == @folderKey' : options.entireScope ? '' : 'FILTER !HAS(row, "parentFolderKey")';
+  const fileFolderFilter = input.folderKeys ? 'FILTER row.folderKey IN @folderKeys' : input.folderKey ? 'FILTER row.folderKey == @folderKey' : options.entireScope ? '' : 'FILTER !HAS(row, "folderKey")';
+  const folderBinding = input.folderKeys ? { folderKeys: input.folderKeys } : input.folderKey ? { folderKey: input.folderKey } : {};
   const hiddenFilter = input.includeHidden ? '' : 'FILTER row.isHidden != true';
   const favoriteFilter = input.favoritesOnly ? 'FILTER row.isFavorite == true' : '';
+  const managedFileFilter = input.excludeManaged ? 'FILTER row.managedPurpose == null' : '';
   const foldersCursor = await db.query(`
     FOR row IN folders
       FILTER row.scopeKey == @scopeKey && row.userKey == @userKey
@@ -169,6 +171,7 @@ export async function searchWorkspace(context: ToolContext, input: { query: stri
       ${hiddenFilter}
       ${favoriteFilter}
       FILTER @extensions == null || row.extension IN @extensions
+      ${managedFileFilter}
       LET semantic = IS_ARRAY(row.embedding) && LENGTH(@embedding) > 0 && LENGTH(row.embedding) == LENGTH(@embedding) ? COSINE_SIMILARITY(row.embedding, @embedding) : null
       LET score = MAX([IS_NUMBER(semantic) ? semantic : 0, CONTAINS(LOWER(row.name), @needle) ? 0.4 : 0])
       FILTER score > 0 || @tagged || @includeUnranked
@@ -248,6 +251,25 @@ export async function runContentTool(name: ContentToolName, rawInput: unknown, c
   if (name === 'file.list') {
     const folderKey = input.folderKey as string | undefined;
     if (folderKey) await requireFolder(context, folderKey);
+    if (input.includeDescendants === true) {
+      if (input.limit !== undefined && input.limit !== 50) throw new ContentError('CONTENT_INVALID_INPUT', 'Nested inventory pages contain 50 files.', name);
+      if (input.favoritesOnly || input.includeHidden || input.createdFrom || input.createdTo) throw new ContentError('CONTENT_INVALID_INPUT', 'Nested inventory does not support these filters.', name);
+      const folderCursor = await db.query('FOR folder IN folders FILTER folder.userKey == @userKey && folder.scopeKey == @scopeKey && folder.isHidden != true RETURN KEEP(folder, "_key", "parentFolderKey")', { userKey, scopeKey });
+      const ownedFolders = (await folderCursor.all() as Record<string, unknown>[]).map((row) => withArangoKey(row) as { key: string; parentFolderKey?: string });
+      const folderKeys = new Set(ownedFolders.map(({ key }) => key));
+      const descendants = (key: string) => {
+        const keys = new Set([key]);
+        for (let changed = true; changed;) {
+          changed = false;
+          for (const folder of ownedFolders) if (folder.parentFolderKey && keys.has(folder.parentFolderKey) && !keys.has(folder.key)) { keys.add(folder.key); changed = true; }
+        }
+        return [...keys];
+      };
+      const inventory = await listWorkspaceInventory({ context, folderKey, extensions: input.extensions as FileRecord['extension'][] | undefined, cursor: input.cursor as string | undefined, folderExists: (key) => folderKeys.has(key), descendants, folderPath: () => [] });
+      if (inventory.status === 'partial' && inventory.count === undefined) throw new ContentError('CONTENT_INVALID_INPUT', inventory.reason ?? 'Inventory page unavailable.', name);
+      const files = (await Promise.all(inventory.files.map((file) => getFileInScope(scopeKey, file.key, userKey)))).filter((file): file is FileRecord => Boolean(file) && !file!.isHidden).map(publicFile);
+      return { files, count: inventory.count, ...(inventory.nextCursor ? { cursor: inventory.nextCursor } : {}) };
+    }
     const cursorKey = input.cursor as string | undefined;
     const after = cursorKey ? await requireFile(context, cursorKey) : undefined;
     if (after && after.folderKey !== folderKey) throw new ContentError('CONTENT_INVALID_INPUT', 'File cursor does not belong to this location.', name);

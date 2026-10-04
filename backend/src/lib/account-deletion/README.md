@@ -9,6 +9,14 @@ atomically removes all owned data. A provider or Redis failure leaves the fence
 in place so an authenticated retry can safely continue without allowing new
 charges or authenticated presence sessions.
 
+The final transaction follows the current `user → scopes → folders → files`
+model. It removes user-owned documents and dependent chat, tag, ticket,
+notification, auth, referral, and billing records, while
+queuing stored bytes through the fenced deletion outbox. It never requires
+retired team or scope-membership collections.
+The installation's consumed newcomer-grant claim remains with its user link
+removed, preventing repeat grants after account deletion on the same device.
+
 Session-bound access tokens are intentionally invalid after the final teardown
 removes their `authSessions` row. Therefore an HTTP response lost after commit
 cannot be replayed as an authenticated request and will receive a Bearer `401`

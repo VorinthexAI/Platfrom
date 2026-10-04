@@ -43,9 +43,9 @@ export default function SplashRoute() {
 
     let active = true;
     const timer = setTimeout(() => {
-      void readLocalOnboardingState().then(() => { if (!active) return; router.replace((useAuthStore.getState().status === "authenticated"
+      void readLocalOnboardingState().then((onboarding) => { if (!active) return; router.replace((useAuthStore.getState().status === "authenticated"
         ? !useAuthStore.getState().user?.isOnboarded ? "/onboarding" : "/home"
-        : "/auth") as Href); });
+        : onboarding.previewComplete ? "/auth" : "/intro") as Href); });
     }, durations.splashHold + 300);
     return () => { active = false; clearTimeout(timer); };
   }, [logoOpacity, logoScale, router, status, sweepX, taglineOpacity, wordmarkOpacity]);

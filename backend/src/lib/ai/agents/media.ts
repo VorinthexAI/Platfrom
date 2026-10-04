@@ -7,18 +7,19 @@ import { contextUserKey } from '@/lib/ai/tools/tool-context';
 import { documentStorage } from '@/lib/ai/document-processing/storage';
 import { fileStorageKey, fileThumbnailStorageKey, getFileInScope, insertFile } from '@/lib/db/files.node';
 import { getFolderInScope } from '@/lib/db/folders.node';
-import { imageOutputSchema, type ImageOutput } from '@/lib/ai/providers/types';
+import { imageAspectRatioSchema, imageOutputSchema, type ImageOutput } from '@/lib/ai/providers/types';
 import { speechOutputSchema, type SpeechOutput } from '@/lib/ai/actions/speech';
 import { videoOutputSchema, type VideoOutput } from '@/lib/ai/actions/video';
 import type { ExecuteActionOptions } from '@/lib/ai/router';
 import { processStoredMedia } from '@/lib/ai/document-processing/media-caption';
 import { publicContentFile } from '@/lib/ai/tools/content-runtime';
 import { sendGeneratedFilePush } from '@/lib/app-notifications/generated-file';
+import { ContentError } from '@/lib/ai/tools/content-errors';
 
 const imageKey = z.string().cuid();
-export const agentImageInputSchema = z.object({ prompt: z.string().trim().min(1).max(4_000), referenceImageKeys: z.array(imageKey).max(8).refine((keys) => new Set(keys).size === keys.length).default([]), folderKey: imageKey.optional() }).strict();
-export const agentSpeechInputSchema = z.object({ text: z.string().trim().min(1).max(15_000), voice: z.enum(['eve', 'ara', 'rex', 'sal', 'leo']), folderKey: imageKey.optional() }).strict();
-export const agentVideoInputSchema = z.object({ prompt: z.string().trim().min(1).max(4_000), startFrameFileKey: imageKey.optional(), durationSeconds: z.number().int().min(5).max(15), aspectRatio: z.enum(['21:9', '16:9', '4:3', '1:1', '3:4', '9:16']), folderKey: imageKey.optional() }).strict();
+export const agentImageInputSchema = z.object({ prompt: z.string().trim().min(1).max(4_000), referenceImageKeys: z.array(imageKey).max(8).refine((keys) => new Set(keys).size === keys.length).default([]), aspectRatio: imageAspectRatioSchema.optional(), folderKey: imageKey.optional() }).strict();
+export const agentSpeechInputSchema = z.object({ text: z.string().trim().max(15_000).default(''), fileKeys: z.array(imageKey).max(20).refine((keys) => new Set(keys).size === keys.length).default([]), voice: z.enum(['eve', 'ara', 'rex', 'sal', 'leo']), folderKey: imageKey.optional() }).strict().refine(({ text, fileKeys }) => Boolean(text || fileKeys.length), 'Provide text or at least one document.');
+export const agentVideoInputSchema = z.object({ prompt: z.string().trim().min(1).max(4_000), startFrameFileKey: imageKey.optional(), durationSeconds: z.number().int().min(1).max(15), aspectRatio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3']), folderKey: imageKey.optional() }).strict();
 
 async function authorizeOutputFolder(folderKey: string | undefined, context: ToolContext) {
   if (folderKey && !await getFolderInScope(context.runtimeScopeKey, folderKey, contextUserKey(context))) throw new Error('The destination folder is not available in this scope.');
@@ -75,7 +76,7 @@ export async function generateAgentImage(raw: unknown, context: ToolContext, opt
   const existing = await savedMedia(context, options.requestKey, input.folderKey);
   if (existing) { await announceCompletion(existing.key, 'image', context); return { files: [existing] }; }
   const refs = await Promise.all(input.referenceImageKeys.map((key) => imageReference(key, context)));
-  const response = await executeAction<unknown, ImageOutput>({ mode: 'auto', teamKey: context.teamKey, actionSlug: 'image' }, { operation: 'generate', prompt: input.prompt, count: 1, ...(refs.length ? { inputReferences: refs } : {}) }, { ...options, providers: ['image.primary'] });
+  const response = await executeAction<unknown, ImageOutput>({ mode: 'auto', teamKey: context.teamKey, actionSlug: 'image' }, { operation: 'generate', prompt: input.prompt, count: 1, ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}), ...(refs.length ? { inputReferences: refs } : {}) }, { ...options, providers: ['image.primary'] });
   const image = imageOutputSchema.parse(response.output).images[0]!;
   const extension = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp' } as const;
   const file = await saveMedia(context, options.requestKey, Buffer.from(image.base64, 'base64'), extension[image.mimeType], image.mimeType, input.prompt, input.folderKey);
@@ -88,9 +89,17 @@ export async function generateAgentSpeech(raw: unknown, context: ToolContext, op
   await authorizeOutputFolder(input.folderKey, context);
   const existing = await savedMedia(context, options.requestKey, input.folderKey);
   if (existing) { await announceCompletion(existing.key, 'speech', context); return { files: [existing] }; }
-  const response = await executeAction<unknown, SpeechOutput>({ mode: 'auto', teamKey: context.teamKey, actionSlug: 'speech' }, { text: input.text, voice: input.voice, format: 'mp3' }, { ...options, providers: ['speech.primary'] });
+  const documents = await Promise.all(input.fileKeys.map(async (key) => {
+    const file = await getFileInScope(context.runtimeScopeKey, key, contextUserKey(context));
+    if (!file || !['txt', 'md', 'docx', 'pdf'].includes(file.extension) || file.processing !== 'ready' || !file.extractedText?.trim()) throw new ContentError('CONTENT_INVALID_INPUT', 'Every selected document must be available with extracted text in this scope.', 'agent.speech');
+    return file;
+  }));
+  const text = [input.text, ...documents.map((file) => file.extractedText!.trim())].filter(Boolean).join('\n\n');
+  if (text.length > 15_000) throw new ContentError('CONTENT_INVALID_INPUT', 'The combined document text exceeds the 15,000-character speech limit.', 'agent.speech');
+  const response = await executeAction<unknown, SpeechOutput>({ mode: 'auto', teamKey: context.teamKey, actionSlug: 'speech' }, { text, voice: input.voice, format: 'mp3' }, { ...options, providers: ['speech.primary'] });
   const audio = speechOutputSchema.parse(response.output);
-  const file = await saveMedia(context, options.requestKey, Buffer.from(audio.base64, 'base64'), 'mp3', audio.mimeType, input.text, input.folderKey, input.text);
+  const title = documents.length ? documents.map((file) => file.name).join(', ') : input.text;
+  const file = await saveMedia(context, options.requestKey, Buffer.from(audio.base64, 'base64'), 'mp3', audio.mimeType, title, input.folderKey, text);
   await announceCompletion(file.key, 'speech', context);
   return { files: [file], durationSeconds: audio.durationSeconds };
 }

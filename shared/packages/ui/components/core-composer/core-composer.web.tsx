@@ -7,6 +7,7 @@ export type CoreComposerProps = {
   accessory?: ReactNode;
   accessibilityHint?: string;
   accessibilityLabel: string;
+  allowEmptySubmit?: boolean;
   disabled?: boolean;
   editable?: boolean;
   expandedAccessory?: ReactNode;
@@ -43,6 +44,7 @@ export type CoreComposerProps = {
 export function CoreComposer({
   accessory,
   accessibilityLabel,
+  allowEmptySubmit = false,
   disabled,
   editable = true,
   expandedFooter,
@@ -84,11 +86,11 @@ export function CoreComposer({
           onBlur={() => { onFocusChange?.(false); onExpandedKeyboardVisibilityChange?.(false); }}
           onChange={(event) => onChangeText(event.target.value)}
           onFocus={() => { onFocusChange?.(true); onExpandedKeyboardVisibilityChange?.(true); }}
-          onKeyDown={(event) => { if (event.key === "Enter" && !disabled && openEnabled && value.trim()) onSubmit(); }}
+          onKeyDown={(event) => { if (event.key === "Enter" && !disabled && openEnabled && (value.trim() || allowEmptySubmit)) onSubmit(); }}
           placeholder={prompts[0] ?? "Ask Core anything..."}
           value={value}
         />
-        <Button aria-label="Send to Core" disabled={disabled || !openEnabled || !value.trim()} loading={loading} onClick={onSubmit} size="sm" variant="primary">{sendIcon}</Button>
+        <Button aria-label="Send to Core" disabled={disabled || !openEnabled || (!value.trim() && !allowEmptySubmit)} loading={loading} onClick={onSubmit} size="sm" variant="primary">{sendIcon}</Button>
       </div>
       {expandedFooter}
     </div>

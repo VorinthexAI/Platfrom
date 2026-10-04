@@ -7,7 +7,7 @@ import { hasCompleteAuthContext, normalizeAuthContext, type AuthUser } from "@/l
 import { emptyWorkspacePicker, type WorkspacePickerState } from "@/data/registry";
 import { clearPendingReferralCode } from "@/lib/pending-referral-vault";
 import { tokenVault } from "@/lib/token-vault";
-import { markOnboardingComplete, markOnboardingPreviewComplete, markPostDeletionOnboarding, resetOnboardingSession } from "@/lib/onboarding-state";
+import { beginAccountDeletionIntro, cancelAccountDeletionIntro, markOnboardingComplete, markOnboardingPreviewComplete, markPostDeletionOnboarding, resetOnboardingSession } from "@/lib/onboarding-state";
 import { endSessionRequests, resumeSessionRequests, sessionEpoch, sessionIsEnding } from "@/lib/session-lifecycle";
 import type { ReferralSummary } from "@/lib/referral-client";
 import type { ScopeSummary } from "@/lib/scope-client";
@@ -271,6 +271,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (deletion) return deletion;
     const previous = get();
     if (previous.status !== "authenticated") return Promise.reject(new Error("Please sign in again before deleting your account."));
+    const previousIntro = beginAccountDeletionIntro();
     const operation = ++authOperation;
     endSessionRequests();
     set(signedOutState);
@@ -285,6 +286,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       } catch {
         if (operation === authOperation) {
           set(previous);
+          cancelAccountDeletionIntro(previousIntro);
           resumeSessionRequests();
         }
         throw new Error("Your account could not be deleted. Please try again.");

@@ -8,7 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Avatar } from "@vorinthex/shared/ui/avatar";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
-import { CheckIcon, DeleteAccountIcon, FaqIcon, FeedbackIcon, FolderIcon, HelpIcon, IssueIcon, PlusIcon, PrivacyIcon, ReferralIcon, SettingsIcon, SignOutIcon, SubscriptionCancelIcon, TermsIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { CheckIcon, DeleteAccountIcon, FeedbackIcon, FolderIcon, HelpIcon, IssueIcon, PlusIcon, PrivacyIcon, ReferralIcon, SettingsIcon, SignOutIcon, SubscriptionCancelIcon, TermsIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
@@ -32,32 +32,9 @@ import { fetchReferralSummary, normalizeReferralCode, redeemReferralCode, referr
 import { subscriptionPresentation } from "@/lib/subscription-presentation";
 
 
-type ProfileSheet = "avatar-actions" | "badge-generate" | "name" | "faq" | "issue" | "feedback" | "privacy" | "terms" | "cancel-subscription" | "delete-account" | "referral" | "storage-help" | "scope-help" | "scope-create" | "scope-actions" | "scope-delete";
+type ProfileSheet = "avatar-actions" | "badge-generate" | "name" | "issue" | "feedback" | "privacy" | "terms" | "cancel-subscription" | "delete-account" | "referral" | "storage-help" | "scope-help" | "scope-create" | "scope-actions" | "scope-delete";
 type ReferralMode = "share" | "redeem";
 export type AccountScreenInitialState = { sheet: "referral"; referralMode: ReferralMode };
-
-const FAQ = [
-  ["What is Vorinthex AI, and where should I start?", "Vorinthex AI is one connected workspace for knowledge, images, communication, travel, learning, and conversation. Start in Core with a question, or open the focused app that matches what you want to do."],
-  ["What can Core help me do?", "Core can answer general questions, discuss ideas, and search the workspace information available to your request. It can take you to matching items in their apps, while app-specific controls keep changes deliberate."],
-  ["How do Core, Archive, Gallery, Signal, Compass, and Ascend work together?", "Each app has a focused purpose but shares your account and authorized workspace context. Core can surface connected results, and the focused apps remain where you organize content and control actions."],
-  ["What should I save and organize in Archive?", "Use Archive for notes, documents, uploaded files, research, plans, references, project material, and ideas you may want to find again. Folders, tags, editing, and semantic search keep that knowledge useful."],
-  ["How can I find something without remembering its title or filename?", "Search with the subject, meaning, people, place, or details you remember. Semantic search can find relevant authorized documents, images, messages, places, trips, and audio books without requiring an exact title."],
-  ["Where are my Core chats saved?", "Core chats are organized automatically in Archive under Vorinthex AI / Core / Chats. Rolling summaries support continuity, and processed chat content can later be found by meaning within its private authorized scope."],
-  ["What can I organize and search for in Gallery?", "Gallery keeps uploaded pictures, generated images, collections, memories, and highlights together. You can use collections, covers, favorites, tags, visible content, and available place information to organize and rediscover images."],
-  ["How do Gallery collections, memories, and highlights work?", "Collections group related images around an idea, place, project, event, or story. Memories create a written reflection around an image, while highlights turn a selected or random set of collection images into a visual sequence."],
-  ["Can Core help me find images, documents, messages, trips, and books?", "Yes. Core can search authorized information across the connected apps and show matching results. Selecting a result opens the responsible app so you can review it and use that app's controls."],
-  ["How does Signal work with my connected email?", "Signal brings connected email together with communication from Vorinthex AI apps and support in one private inbox. You can synchronize conversations, search by meaning, review threads, and prepare replies."],
-  ["Will Signal ever send an email without my approval?", "No. You choose connected accounts, review generated drafts, and explicitly decide what is sent. Core may help you find communication, but Signal remains responsible for email actions and keeps their controls visible."],
-  ["Where can I open and organize attachments from Signal?", "Supported attachments can open in Archive or Gallery, depending on their type. This lets documents and images remain useful in their focused workspace instead of staying buried in an email thread."],
-  ["What can I explore, save, and plan in Compass?", "Compass lets you explore countries and cities, save places you want to visit, record places you have visited, and arrange destinations into trips. You can begin with curiosity and build a structured plan gradually."],
-  ["Can I connect Archive folders and Gallery collections to a trip?", "Yes. Compass can keep relevant Archive folders and Gallery collections attached to a trip, so research, documents, and images remain close to the journey they support."],
-  ["How does Ascend create a personalized audio book?", "You choose a topic, learning goal, current knowledge, tone, narrator, and pace. Ascend reviews the brief, then builds the cover, chapters, and narration in the background for reading and listening."],
-  ["Can Ascend use my Archive documents as source material?", "Yes. You can select Archive documents when you want an audio book grounded in material you already trust. Ascend keeps the resulting chapters, narration, cover, and listening progress together."],
-  ["How do scopes and permissions keep my information private?", "Scopes keep workspace context separated, and connected searches only use information authorized for the current request. You decide what to save, connect, edit, move, send, or delete in each app."],
-  ["What are Sparks, and what uses them?", "Sparks are your shared prepaid balance for AI capabilities, stored work, and connected services across Vorinthex AI. Some actions have a fixed Spark cost while other AI usage varies; current charge categories appear on the Sparks screen."],
-  ["How do weekly plans, monthly plans, and top-ups work?", "The weekly plan grants 200 Sparks each week for $7.99. The launch monthly plan grants 1,000 Sparks each month for $19.99. A $9.99 top-up adds 200 Sparks without changing your subscription; applicable taxes are added at checkout."],
-  ["What happens to my Sparks and stored work if I cancel or run out of Sparks?", "Canceling stops renewal after the current period, and prepaid Sparks remain available. Unfunded storage creates no debt or backcharges, but stored data is permanently deleted after 90 consecutive unfunded days. Adding enough Sparks before deletion begins restores prospective charging."],
-] as const;
 
 const canManageScope = (scope?: ScopeSummary) => Boolean(scope && scope.slug !== "main");
 
@@ -98,7 +75,7 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const router = useRouter();
   const { width } = useWindowDimensions();
   const queryClient = useQueryClient();
-  const { showToast } = useToast();
+  const { showToast, dismissToast } = useToast();
   const { showToast: showAccountResultToast } = useRawToast();
   const deletingAccount = useRef(false);
   const user = useAuthStore((state) => state.user);
@@ -114,7 +91,6 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const [nameDraft, setNameDraft] = useState("");
   const [scopeName, setScopeName] = useState("");
   const [scopeDescription, setScopeDescription] = useState("");
-  const [faqQuestionIndex, setFaqQuestionIndex] = useState<number>();
   const [generatingBadge, setGeneratingBadge] = useState(false);
   const [selectedScope, setSelectedScope] = useState<ScopeSummary>();
   const [deletingScope, setDeletingScope] = useState(false);
@@ -133,13 +109,12 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const scopeCardSize = Math.floor((width - spacing.md * 2 - 20) / 3);
   const settingsCardSize = scopeCardSize;
 
-  const billingSummaryQuery = useBillingSummary(page === "profile" ? user?.key : undefined);
+  const billingSummaryQuery = useBillingSummary(page === "profile" ? user?.key : undefined, page === "profile" ? scopeKey : undefined);
   const subscriptionQuery = useCurrentSubscription(page === "settings" ? user?.key : undefined);
   const referralQuery = useQuery({ queryKey: referralSummaryQueryKey(String(user?.key ?? "")), queryFn: fetchReferralSummary, enabled: Boolean(user?.key && sheet === "referral"), initialData: authReferralSummary?.code.ownerUserKey === user?.key ? authReferralSummary : undefined });
   const scopesQuery = useQuery({ queryKey: scopeQueryKey, queryFn: ({ signal }) => listScopes(signal), enabled: Boolean(user?.key), refetchOnMount: "always" });
   const scopes = scopesQuery.data ?? [];
   const sortedScopes = [...scopes].sort((left, right) => left.position - right.position);
-  const selectedFaq = faqQuestionIndex === undefined ? undefined : FAQ[faqQuestionIndex];
   const canDeleteSelectedScope = Boolean(selectedScope && scopes.some((scope) => scope.key !== selectedScope.key && !scope.key.startsWith("optimistic:")));
   const referralUnused = Boolean(referralQuery.data && referralQuery.data.attributionCount === 0);
   const normalizedReferralCode = normalizeReferralCode(referralCode);
@@ -250,7 +225,7 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
     const pending = deleteAccount();
     setSheet(undefined);
     queryClient.clear();
-    router.replace("/auth");
+    router.replace("/intro");
     void pending.then(() => {
       if (useAuthStore.getState().status === "unauthenticated") showAccountResultToast({ title: "Your account has been deleted.", duration: 3_000 });
     }).catch(() => {
@@ -282,8 +257,8 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const markCurrentKey = (items: ScopeSummary[], currentKey: string) => items.map((item) => ({ ...item, isCurrent: item.key === currentKey }));
 
   const resetScopeQueries = () => {
-    void queryClient.cancelQueries({ predicate: ({ queryKey }) => queryKey[0] !== "scope-list" });
-    queryClient.removeQueries({ predicate: ({ queryKey }) => queryKey[0] !== "scope-list" });
+    void queryClient.cancelQueries({ predicate: ({ queryKey }) => queryKey[0] !== "scope-list" && queryKey[0] !== "billing-summary" });
+    queryClient.removeQueries({ predicate: ({ queryKey }) => queryKey[0] !== "scope-list" && queryKey[0] !== "billing-summary" });
   };
 
   const chooseScope = (scope: ScopeSummary) => {
@@ -483,7 +458,6 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
         <View style={styles.settingsGrid}>
            <SettingsActionCard icon={<IssueIcon size="lg" />} label="Report issue" onPress={() => setSheet("issue")} size={settingsCardSize} />
            <SettingsActionCard icon={<FeedbackIcon size="lg" />} label="Feedback" onPress={() => setSheet("feedback")} size={settingsCardSize} />
-          <SettingsActionCard icon={<FaqIcon size="lg" />} label="FAQ" onPress={() => { setFaqQuestionIndex(undefined); setSheet("faq"); }} size={settingsCardSize} />
           <SettingsActionCard icon={<TermsIcon size="lg" />} label="Terms" onPress={() => setSheet("terms")} size={settingsCardSize} />
           <SettingsActionCard icon={<PrivacyIcon size="lg" />} label="Privacy" onPress={() => setSheet("privacy")} size={settingsCardSize} />
           <SettingsActionCard icon={<ReferralIcon size="lg" />} label="Referral" onPress={() => { setReferralMode("share"); setSheet("referral"); }} size={settingsCardSize} />
@@ -494,8 +468,17 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
       </View>}
     </AccountScreenShell>
     <SupportComposeSheets compose={sheet === "issue" || sheet === "feedback" ? sheet : undefined} onClose={() => setSheet(undefined)} onSubmit={async ({ kind, message, requestKey }) => {
-      try { await createSupportTicket({ scopeKey, kind, message }, requestKey); showToast({ title: kind === "issue" ? "Issue sent" : "Feedback sent", duration: 2_500 }); }
-      catch (error) { showToast({ title: extractDomainErrorMessage(error) ?? "Message could not be sent.", duration: 3_000 }); throw error; }
+      const toastId = showToast({ title: kind === "issue" ? "Issue reported" : "Feedback sent", duration: 2_500 });
+      try { await createSupportTicket({ scopeKey, kind, message }, requestKey); }
+      catch (error) {
+        if (toastId >= 0) dismissToast(toastId);
+        const response = typeof error === "object" && error !== null && "response" in error ? error.response : undefined;
+        const data = typeof response === "object" && response !== null && "data" in response ? response.data : undefined;
+        const detail = typeof data === "object" && data !== null && "error" in data ? data.error : undefined;
+        const code = typeof detail === "object" && detail !== null && "code" in detail ? detail.code : undefined;
+        const title = code === "TICKET_INVALID_CONTENT" ? kind === "issue" ? "Invalid issue" : "Invalid feedback" : extractDomainErrorMessage(error) ?? "Message could not be sent.";
+        showToast({ title, duration: 3_000 });
+      }
     }} />
 
     <BottomSheet hideHeading onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "avatar-actions"} title="Profile image actions">
@@ -568,14 +551,6 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
       </ScrollView>
     </BottomSheet>
 
-    <BottomSheet description="Quick answers about using Core and its connected apps, plus Sparks and plans." focusKey="profile-faq" footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) { setFaqQuestionIndex(undefined); setSheet(undefined); } }} open={sheet === "faq"} title="FAQ">
-      <ScrollView contentContainerStyle={styles.faqList}>{FAQ.map(([question], index) => <Button accessibilityLabel={`Read ${question}`} contentMode="raw" key={question} onPress={() => setFaqQuestionIndex(index)} shape="pill" size="md" style={styles.faqPill} variant="secondary"><Text numberOfLines={2} style={styles.faqQuestion}>{question}</Text></Button>)}</ScrollView>
-    </BottomSheet>
-
-    <BottomSheet focusKey="profile-faq-answer" footer={<Button onPress={() => setFaqQuestionIndex(undefined)} size="md" variant="secondary">Close</Button>} onOpenChange={(open) => { if (!open) setFaqQuestionIndex(undefined); }} open={sheet === "faq" && Boolean(selectedFaq)} title={selectedFaq?.[0] ?? "FAQ answer"}>
-      {selectedFaq ? <Text style={styles.faqAnswer}>{selectedFaq[1]}</Text> : null}
-    </BottomSheet>
-
     <BottomSheet focusKey="profile-name" footer={<><Button disabled={!nameDraft.trim()} onPress={saveName} size="md" variant="primary">Save</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "name"} title="Edit name">
       <View style={styles.form}><Text style={styles.inputLabel}>Name</Text><TextInput accessibilityLabel="Name" maxLength={200} onChangeText={setNameDraft} onSubmitEditing={saveName} placeholder="Name" returnKeyType="done" value={nameDraft} /></View>
     </BottomSheet>
@@ -606,10 +581,6 @@ const styles = StyleSheet.create({
   form: { gap: spacing.sm },
   inputLabel: { color: palette.silver300, fontFamily: fonts.medium, fontSize: 12, letterSpacing: 0.4, marginLeft: 2 },
   reportInput: { minHeight: 180 },
-  faqList: { gap: spacing.sm, paddingBottom: spacing.lg },
-  faqPill: { justifyContent: "flex-start", minHeight: 40, paddingHorizontal: spacing.md, width: "100%" },
-  faqQuestion: { color: palette.silver100, flexShrink: 1, fontFamily: fonts.regular, fontSize: 13, lineHeight: 17, textAlign: "left" },
-  faqAnswer: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, lineHeight: 23, paddingBottom: spacing.md },
   legalContent: { gap: spacing.md, paddingBottom: spacing.lg },
   legalSection: { gap: spacing.sm, paddingTop: spacing.sm },
   legalParagraph: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, lineHeight: 23 },

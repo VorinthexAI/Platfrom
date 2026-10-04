@@ -9,7 +9,7 @@ const chargeBaseSchema = z.object({
 export const staticSparkChargeSchema = chargeBaseSchema.extend({
   kind: z.literal('static'),
   sparkCost: z.string().regex(/^[1-9]\d*(?:\.\d{1,6})?$/),
-    unit: z.enum(['invocation', 'documents', 'images', 'new-email', 'second', '100-characters']),
+    unit: z.enum(['invocation', 'documents', 'images', 'new-email', 'second', '100-characters', 'million-tokens']),
 }).strict();
 
 export const storageSparkChargeSchema = chargeBaseSchema.extend({

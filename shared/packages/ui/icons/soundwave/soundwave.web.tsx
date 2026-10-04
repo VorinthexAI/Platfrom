@@ -1,14 +1,14 @@
 import type { SVGProps } from "react";
 
 export type SoundwaveIconVariant = "default" | "inherit" | "muted" | "accent" | "danger" | "inverse";
-export type SoundwaveIconSize = "sm" | "md" | "lg";
+export type SoundwaveIconSize = "sm" | "md" | "lg" | "hero";
 export type SoundwaveIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
   variant?: SoundwaveIconVariant;
   size?: SoundwaveIconSize;
   animated?: boolean;
 };
 
-const sizes: Record<SoundwaveIconSize, number> = { sm: 16, md: 20, lg: 24 };
+const sizes: Record<SoundwaveIconSize, number> = { sm: 16, md: 20, lg: 24, hero: 112 };
 const colors: Record<SoundwaveIconVariant, string> = {
   default: "var(--vui-color-text)", inherit: "currentColor", muted: "var(--vui-color-muted)",
   accent: "var(--vui-color-accent)", danger: "var(--vui-color-danger)", inverse: "var(--vui-color-page)",

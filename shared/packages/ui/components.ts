@@ -23,6 +23,8 @@ export * from './components/modal';
 export * from './components/drawer';
 export * from './components/bottom-sheet';
 export * from './components/core-composer';
+export * from './components/audio-playback';
+export * from './components/attachment-pill-strip';
 export * from './components/rich-text';
 export * from './components/toast';
 export * from './components/alert';

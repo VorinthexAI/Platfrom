@@ -3,6 +3,7 @@ import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { contextUserKey } from '@/lib/ai/tools/tool-context';
 import { db } from '@/lib/db/client';
 import { withArangoKey } from '@/lib/db/base';
+import { fileExtensionSchema } from '@/lib/db/files.node';
 
 export const appSearchCollectionSlugSchema = z.enum(['folders', 'files']);
 export type AppSearchCollectionSlug = z.infer<typeof appSearchCollectionSlugSchema>;
@@ -15,7 +16,7 @@ export const APP_SEARCH_COLLECTION_ADAPTERS = Object.freeze({
 
 export const appSearchRetrievalResultSchema = z.object({ key: z.string().cuid(), label: z.string().trim().min(1).max(200), destinationKey: z.string().cuid().optional() }).strict();
 export const appSearchRetrievalGroupSchema = z.object({ collectionSlug: appSearchRetrievalCollectionSlugSchema, results: z.array(appSearchRetrievalResultSchema).max(50) }).strict();
-export const appSearchRetrievalSchema = z.object({ source: z.enum(['results', 'query']), query: z.string().optional(), limit: z.number().int().min(1).max(50), groups: z.array(appSearchRetrievalGroupSchema).min(1).max(8) }).strict();
+export const appSearchRetrievalSchema = z.object({ source: z.enum(['results', 'query']), query: z.string().optional(), limit: z.number().int().min(1).max(50), groups: z.array(appSearchRetrievalGroupSchema).min(1).max(8), inventory: z.object({ folderKey: z.string().cuid().optional(), extensions: z.array(fileExtensionSchema).min(1).optional() }).strict().optional() }).strict();
 export type AppSearchRetrieval = z.infer<typeof appSearchRetrievalSchema>;
 
 export function projectAppSearchRetrieval(_input: unknown, _result: unknown): AppSearchRetrieval | null {

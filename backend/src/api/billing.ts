@@ -1,5 +1,7 @@
 import type { Context } from 'hono';
 import { sparkHistoryInputSchema, sparkTransactionKindSchema } from '@/lib/sparks/contracts';
+import { billingSummaryReadInputSchema } from '@/lib/ai/tools/billing-summary-read';
+import { ScopeServiceError } from '@/lib/ai/scopes/service';
 import { sparkService } from '@/lib/sparks/service';
 import { getAuthIdentity } from './security';
 import { parseQuery } from './validation';
@@ -10,6 +12,7 @@ const billingSummaryQuerySchema = z.object({
   beforeCreatedAt: z.string().datetime({ offset: true }).optional(),
   beforeKey: z.string().trim().min(1).max(200).optional(),
   kind: sparkTransactionKindSchema.optional(),
+  scopeKey: z.string().cuid().optional(),
 }).strict();
 
 interface BillingHandlerDependencies {
@@ -24,9 +27,14 @@ export function createBillingSummaryHandler(dependencies: BillingHandlerDependen
       c.header('WWW-Authenticate', 'Bearer');
       return c.json({ success: false, error: 'authenticated user required' }, 401);
     }
-    const query = sparkHistoryInputSchema.parse(parseQuery(c, billingSummaryQuerySchema));
-    const data = await (dependencies.getSummary ?? sparkService.getSummary)(identity.key, query);
-    return c.json({ success: true, data });
+    const { scopeKey, ...history } = billingSummaryReadInputSchema.parse(parseQuery(c, billingSummaryQuerySchema));
+    try {
+      const data = await (dependencies.getSummary ?? sparkService.getSummary)(identity.key, sparkHistoryInputSchema.parse(history), scopeKey);
+      return c.json({ success: true, data });
+    } catch (error) {
+      if (error instanceof ScopeServiceError) return c.json({ success: false, error: 'The selected scope is not available.' }, 404);
+      throw error;
+    }
   };
 }
 

@@ -2,7 +2,6 @@
 // Mirrors icons.ts but resolves each icon's .mobile implementation so
 // native apps can consume shared icons without pulling web components.
 export * from "./icons/archive/archive.mobile";
-export * from "./icons/audio-file/audio-file.mobile";
 export * from "./icons/arrow-left/arrow-left.mobile";
 export * from "./icons/arrow-right/arrow-right.mobile";
 export * from "./icons/ascend/ascend.mobile";

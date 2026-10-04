@@ -7,6 +7,20 @@ import type { GraphMigration } from './migrations/types';
 const MIGRATIONS_COLLECTION = 'schemaMigrations';
 const MIGRATION_CLAIM_MS = 6 * 60 * 60_000;
 const MIGRATION_HEARTBEAT_MS = 60_000;
+// The rebuild replaced these migrations with the user/scope schema. Existing
+// databases retain their immutable ledger rows (and their payment data).
+const retiredMigrationIds = new Set([
+  '0001-legacy-schema', '0002-spark-event-index', '0003-funding-requirement-index',
+  '0004-event-device', '0005-canonical-managed-archive-folders',
+  '0006-initial-audiobook', '0007-managed-audiobook-live-cover',
+  '0008-private-email-ownership', '0009-user-inbox',
+  '0010-conversation-message-recall-index', '0011-conversation-attachment-artifacts',
+  '0012-retire-navigation-visits', '0013-conversation-archive-projection',
+  '0014-repair-conversation-archive-projection',
+  '0015-remove-unnamed-conversation-projections', '0016-country-embeddings',
+  '0017-hidden-scope-visibility', '0018-canonical-seed',
+  '0019-user-notifications', '0020-workspace-search',
+]);
 const migrationIdSchema = z.string().regex(/^\d{4}-[a-z0-9]+(?:-[a-z0-9]+)*$/);
 const migrationChecksumSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const ledgerMigrationSchema = z.object({ id: migrationIdSchema, checksum: migrationChecksumSchema, status: z.enum(['applying', 'applied', 'failed']) }).strict();
@@ -31,7 +45,7 @@ export async function runGraphMigrations(database: MigrationDatabase, migrations
     return [parsed.id, parsed] as const;
   }));
   const registeredIds = new Set(migrations.map(({ id }) => id));
-  const unknownMigrations = [...ledger.keys()].filter((id) => !registeredIds.has(id));
+  const unknownMigrations = [...ledger.keys()].filter((id) => !registeredIds.has(id) && !retiredMigrationIds.has(id));
   if (unknownMigrations.length > 0) throw new Error(`Database contains migrations absent from this build: ${unknownMigrations.join(', ')}.`);
 
   for (const migration of migrations) {

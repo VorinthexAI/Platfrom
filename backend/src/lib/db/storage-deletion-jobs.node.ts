@@ -93,10 +93,10 @@ export async function acknowledgeStorageDeletionKey(storageKey: string): Promise
 
 /** Atomically fences the final reference decision and renews an unreferenced claim. */
 export async function resolveStorageDeletionClaim(key: string, storageKey: string, claimToken: string): Promise<'referenced' | 'unreferenced' | 'lost'> {
-  const bindVars = { key, storageKey, claimToken, decidedAt: new Date().toISOString() };
+  const bindVars = { key, storageKey, claimToken };
   const acknowledged = await db.query(`FOR job IN storageDeletionJobs FILTER job._key == @key && job.storageKey == @storageKey && job.status == "deleting" && job.claimToken == @claimToken LET referenced = ${storageReferenceAql} FILTER referenced REMOVE job IN storageDeletionJobs RETURN true`, bindVars);
   if (await acknowledged.next() === true) return 'referenced';
-  const renewed = await db.query(`FOR job IN storageDeletionJobs FILTER job._key == @key && job.storageKey == @storageKey && job.status == "deleting" && job.claimToken == @claimToken LET referenced = ${storageReferenceAql} FILTER !referenced UPDATE job WITH { claimedAt: @decidedAt } IN storageDeletionJobs RETURN true`, bindVars);
+  const renewed = await db.query(`FOR job IN storageDeletionJobs FILTER job._key == @key && job.storageKey == @storageKey && job.status == "deleting" && job.claimToken == @claimToken LET referenced = ${storageReferenceAql} FILTER !referenced UPDATE job WITH { claimedAt: @decidedAt } IN storageDeletionJobs RETURN true`, { ...bindVars, decidedAt: new Date().toISOString() });
   return await renewed.next() === true ? 'unreferenced' : 'lost';
 }
 

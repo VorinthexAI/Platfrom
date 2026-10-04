@@ -6,7 +6,7 @@ import { useVideoPlayer } from "expo-video";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@vorinthex/shared/ui/button";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
-import { AudioFileIcon, CheckIcon, FileIcon, PlayIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { CheckIcon, FileIcon, PlayIcon, SoundwaveIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { downloadContentFile, type ContentFile, type FileExtension } from "@/lib/content-client";
 import { saveThumbnail } from "@/lib/content-thumbnails";
 import { fonts, palette, radii } from "@/theme/tokens";
@@ -45,7 +45,7 @@ export function ContentFileCover({ file, localUri, thumbnailUri, coverKey = file
   }
   if (IMAGE_EXTENSIONS.has(file.extension)) return <View style={styles.mediaFill} />;
   if (file.extension === "mp4") return <PlayIcon size="lg" />;
-  if (file.extension === "mp3") return <AudioFileIcon size="lg" />;
+  if (file.extension === "mp3") return <SoundwaveIcon size="lg" />;
   return <FileIcon size="lg" />;
 }
 

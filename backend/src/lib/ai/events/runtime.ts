@@ -53,7 +53,7 @@ interface CostContext {
 interface EventRuntimeContext { appKey: string; appScopeKey?: string; recorder: ToolEventRecorder; usage?: MutableUsage; cost?: CostContext }
 
 const storage = new AsyncLocalStorage<EventRuntimeContext>();
-const USAGE_PRICED_ACTIONS = new Set(['text', 'image', 'speech', 'video']);
+const USAGE_PRICED_ACTIONS = new Set(['text', 'image', 'speech', 'video', 'rerank']);
 
 export class SparkRefundError extends Error {
   constructor(public readonly executionError: unknown, options: { cause: unknown }) {

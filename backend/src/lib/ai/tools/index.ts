@@ -11,7 +11,7 @@ import { CONVERSATION_TOOL_DEFINITIONS } from './conversation-tool-definitions';
 import type { AgentRuntimeDependencies } from '@/lib/ai/agents/runtime';
 import { CORE_TOOL_DEFINITIONS, type AgentToolDependencies } from '@/lib/ai/agents/core';
 import { observeToolExecution, type ToolBillingDependencies } from '@/lib/ai/events/runtime';
-import type { ToolEventRecorder } from '@/lib/ai/events/service';
+import { toolEventService, type ToolEventRecorder } from '@/lib/ai/events/service';
 
 export const TOOL_NAMES = UNIFIED_TOOL_DEFINITIONS.map(({ name }) => name) as [string, ...string[]];
 export const toolNameSchema = z.enum(TOOL_NAMES);
@@ -75,7 +75,7 @@ export async function runTool(name: string, _skill: string, rawInput: unknown, d
       onGreetingDelta: dependencies.onGreetingDelta,
       executeContent: dependencies.executeWorkspaceContent,
     });
-  }, { recorder: dependencies.recordEvent, appScopeKey: dependencies.appScopeKey, idempotencyKey: dependencies.requestKey, input: rawInput, ...dependencies.billing });
+  }, { recorder: dependencies.recordEvent ?? (toolName === 'agent.query' ? toolEventService.record : undefined), appScopeKey: dependencies.appScopeKey, idempotencyKey: dependencies.requestKey, input: rawInput, ...dependencies.billing });
 }
 
 export async function runTrustedTool(name: TrustedToolName, rawInput: unknown, dependencies: TrustedToolDependencies): Promise<unknown> {

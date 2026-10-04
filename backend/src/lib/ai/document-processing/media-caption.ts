@@ -11,6 +11,11 @@ export function isCaptionableMedia(extension: FileRecord['extension']) {
   return extension === 'jpg' || extension === 'jpeg' || extension === 'png' || extension === 'webp' || extension === 'gif' || extension === 'mp3' || extension === 'mp4';
 }
 
+function mediaEmbeddingText(file: FileRecord, caption: string) {
+  const filename = file.name.toLowerCase().endsWith(`.${file.extension}`) ? file.name : `${file.name}.${file.extension}`;
+  return `${filename}: ${caption}`;
+}
+
 export async function captionUploadedMedia(file: FileRecord, context: ToolContext) {
   return observeToolExecution('file.upload.caption', context, async () => {
     const kind = file.extension === 'mp3' ? 'audio' : file.extension === 'mp4' ? 'video' : 'image';
@@ -22,7 +27,7 @@ export async function captionUploadedMedia(file: FileRecord, context: ToolContex
       { providers: ['text.primary'], timeoutMs: 4 * 60_000, retry: { attempts: 2 } },
     );
     const { caption } = mediaDescriptionOutputSchema.parse(response.output);
-    const embedding = await embedText({ text: caption });
+    const embedding = await embedText({ text: mediaEmbeddingText(file, caption) });
     return storeFileMediaIndex(file.key, { caption, embedding });
   }, { recorder: toolEventService.record, idempotencyKey: `file-caption:${file.key}`, input: { fileKey: file.key } });
 }
@@ -31,7 +36,7 @@ export async function processStoredMedia(file: FileRecord, context: ToolContext,
   try {
     if (options.spokenText !== undefined) {
       if (file.extension !== 'mp3') throw new Error('Source speech text belongs only to generated audio.');
-      const embedding = await embedText({ text: options.spokenText });
+      const embedding = await embedText({ text: mediaEmbeddingText(file, options.spokenText) });
       await storeFileMediaIndex(file.key, { caption: options.spokenText, embedding });
     } else {
       await captionUploadedMedia(file, context);

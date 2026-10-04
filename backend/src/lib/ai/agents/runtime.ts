@@ -181,6 +181,7 @@ export async function runAgent(
     : undefined;
   let emittedCalls = 0;
   let contextRead = false;
+  let toolFreeRetry = false;
   let turn = 0;
 
   while (true) {
@@ -238,10 +239,18 @@ export async function runAgent(
       const name = await namePromise;
       return agentResponseSchema.parse({ message: rawText, ...(name ? { name } : {}), tools: statuses });
     }
+    if (contextRead && calls.some(({ toolCall }) => toolCall.name === 'agent.query')) {
+      // Some providers echo a previously used function even when no functions
+      // are offered. Do not execute a second workspace read or fail the turn.
+      if (toolFreeRetry) return agentResponseSchema.parse({ message: 'I could not complete the answer from the available workspace evidence. Please try again.', tools: statuses });
+      toolFreeRetry = true;
+      messages.splice(0, messages.length, ...userMessages(request), { role: 'user', content: [{ type: 'text', text: `Workspace evidence already retrieved for the preceding question: ${JSON.stringify(statuses)}. Answer from this evidence without calling a tool.` }] });
+      turn += 1;
+      continue;
+    }
     if (calls.length > MAX_TOOL_CALLS - emittedCalls) throw new Error(`The agent exceeded its ${MAX_TOOL_CALLS}-call limit.`);
 
     const preparedCalls = calls.map(({ toolCall: call }) => {
-      if (call.name === 'agent.query' && contextRead) throw new Error('The agent has already read its workspace context for this request.');
       if (!allowedNameSet.has(call.name)) throw new Error(`The agent requested an unauthorized tool: ${call.name}`);
       let invocation = agentToolInvocationSchema.parse({ slug: call.name, arguments: context.normalizeToolArguments?.(call.name, call.arguments) ?? call.arguments });
       let invalidArguments = false;
@@ -311,8 +320,21 @@ export async function runAgent(
       statuses.push(status);
       messages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: preparedCalls[index]!.call.id, result: status }] });
     });
-    if (turn === 0) messages.splice(0, currentRequestIndex);
-    messages.push(currentRequestMessage(request, false));
+    if (context.requireWorkspaceRead && preparedCalls.every(({ invocation }) => invocation.slug === 'agent.query') && outcomes.every(({ status }) => status.status === 'failed')) {
+      const swedish = /\b(?:hur|vad|vilka|filer|mappen|meny|hitta|jämför)\b/i.test(request.message);
+      return agentResponseSchema.parse({ message: swedish
+        ? 'Jag kunde inte verifiera informationen i din arbetsyta just nu. Försök igen så gör jag en ny sökning.'
+        : 'I could not verify the workspace information just now. Please try again so I can search again.', tools: statuses });
+    }
+    if (preparedCalls.some(({ invocation }) => invocation.slug === 'agent.query')) {
+      // Carry the one authorized read into a tool-free response as ordinary
+      // evidence. Keeping assistant function-call frames here prompts some
+      // providers to call the same function again despite no tools being sent.
+      messages.splice(0, messages.length, ...userMessages(request), { role: 'user', content: [{ type: 'text', text: `Workspace evidence from agent.query for the preceding request: ${JSON.stringify(outcomes.map(({ status }) => status))}. Answer the request using this evidence. No more workspace reads are available in this turn.` }] });
+    } else {
+      if (turn === 0) messages.splice(0, currentRequestIndex);
+      messages.push(currentRequestMessage(request, false));
+    }
     if (outcomes.some(({ finish }) => finish)) {
       emittedCalls = MAX_TOOL_CALLS;
       turn += 1;

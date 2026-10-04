@@ -2,7 +2,8 @@ import type { Context } from 'hono';
 import { z, ZodError } from 'zod';
 import { authorizeContentExecution, ContentError, runTool, type RunAuthenticatedContentToolOptions } from '@/lib/ai/tools';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
-import { getDefaultTicketService, ticketIdempotencyKeySchema, ticketListInputSchema, ticketSubmitInputSchema, TicketAccessError, TicketFeedbackRejectedError, TicketIdempotencyError, TicketNotFoundError, type TicketService } from '@/lib/tickets/service';
+import { getDefaultTicketService, ticketIdempotencyKeySchema, ticketListInputSchema, ticketSubmitInputSchema, TicketAccessError, TicketSubmissionRejectedError, TicketIdempotencyError, TicketNotFoundError, type TicketService } from '@/lib/tickets/service';
+import { toolEventService } from '@/lib/ai/events/service';
 import { InvalidTicketCursorError } from '@/lib/tickets/repository';
 import { getAuthIdentity } from './security';
 import { parseJson } from './validation';
@@ -40,7 +41,7 @@ async function authorizedRequest(c: Context, dependencies: TicketHandlerDependen
 function ticketError(c: Context, error: unknown, invalid = 'invalid ticket request') {
   const billing = sparkErrorResponse(c, error); if (billing) return billing;
   if (error instanceof TicketIdempotencyError) return c.json({ success: false, error: { code: error.code, message: error.message } }, 409);
-  if (error instanceof TicketFeedbackRejectedError) return c.json({ success: false, error: { code: error.code, message: error.message } }, 400);
+  if (error instanceof TicketSubmissionRejectedError) return c.json({ success: false, error: { code: error.code, message: error.message } }, 400);
   if (error instanceof TicketNotFoundError) return c.json({ success: false, error: { code: error.code, message: error.message } }, 404);
   if (error instanceof InvalidTicketCursorError) return c.json({ success: false, error: error.message }, 400);
   if (error instanceof TicketAccessError) return c.json({ success: false, error: { code: error.code, message: error.message } }, 403);
@@ -61,7 +62,7 @@ export function createTicketHandlers(dependencies: TicketHandlerDependencies = {
         const request = await authorizedRequest(c, dependencies, ticketHttpInputSchema);
         if ('response' in request) return request.response;
         const input = ticketSubmitInputSchema.parse(request.body);
-        return c.json({ success: true, data: await runTool('ticket.create', '', input, { contentContext: request.context, requestKey: idempotencyKey }) }, 201);
+        return c.json({ success: true, data: await runTool('ticket.create', '', input, { contentContext: request.context, requestKey: idempotencyKey, recordEvent: toolEventService.record }) }, 201);
       } catch (error) { return ticketError(c, error); }
     },
     list: async (c: Context) => {
@@ -85,7 +86,7 @@ export function createFeedbackHandlers(dependencies: TicketHandlerDependencies =
         const request = await authorizedRequest(c, dependencies, ticketHttpInputSchema);
         if ('response' in request) return request.response;
         const input = ticketSubmitInputSchema.parse({ ...request.body, kind: 'feedback' });
-        return c.json({ success: true, data: await runTool('ticket.create', '', input, { contentContext: request.context, requestKey: idempotencyKey }) }, 201);
+        return c.json({ success: true, data: await runTool('ticket.create', '', input, { contentContext: request.context, requestKey: idempotencyKey, recordEvent: toolEventService.record }) }, 201);
       } catch (error) { return ticketError(c, error, 'invalid feedback request'); }
     },
   };

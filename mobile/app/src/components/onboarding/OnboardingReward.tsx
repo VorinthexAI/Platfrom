@@ -11,7 +11,7 @@ export function OnboardingReward({ onFinished }: { onFinished: () => void }) {
   return <OnboardingStepLayout
     action={<Button onPress={onFinished} size="md" variant="primary">Next</Button>}
     closeLabel="Close reward introduction"
-    description="You have been granted 100 Sparks."
+    description="You have been granted 50 Sparks."
     icon={<SparksIcon size="lg" />}
     onClose={onFinished}
     title="Free sparks"

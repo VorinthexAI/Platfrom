@@ -4,11 +4,13 @@ import { useRouter } from "expo-router";
 import { Image } from "expo-image";
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Button } from "@vorinthex/shared/ui/button";
+import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
+import { AttachmentPillStrip } from "@vorinthex/shared/ui/attachment-pill-strip";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
 import { CapabilityTabs, type CapabilityMode } from "@vorinthex/shared/ui/capability-tabs";
 import { FolderTile } from "@vorinthex/shared/ui/folder-tile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
-import { CloseIcon, PlusIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { FileIcon, ImageIcon, PlusIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { ContentFileTile } from "@/components/ContentFileTile";
 import { FilesPickerSheet } from "@/components/FilesPickerSheet";
 import { ProfileHeaderRight } from "@/components/ProfileAvatarButton";
@@ -25,9 +27,14 @@ type Mode = "image" | "speech" | "video";
 type Props = ComponentProps<typeof CoreComposer> & { mode: Mode; openOnMount?: boolean };
 type PendingGeneration = { key: string; mode: Mode; folderKey?: string; startedAt: number; estimatedMs: number; file?: ContentFile; completedAt?: number };
 const voices = ["eve", "ara", "rex", "sal", "leo"] as const;
-const ratios = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] as const;
-const imageReferences = new Set(["jpg", "jpeg", "png", "webp"]);
+const videoRatios = ["16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3"] as const;
+const imageRatios = ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4", "21:9", "4:1", "1:4", "8:1", "1:8"] as const;
+const videoDurations = Array.from({ length: 15 }, (_, index) => index + 1);
+const imageReferenceExtensions = ["jpg", "jpeg", "png", "webp"] as const;
+const imageReferences = new Set<string>(imageReferenceExtensions);
 const imageFiles = new Set([...imageReferences, "gif"]);
+const documentReferences = ["txt", "md", "docx", "pdf"] as const;
+const documentExtensions = new Set<string>(documentReferences);
 
 export function MediaWorkspaceComposer({ mode, openOnMount, ...props }: Props) {
   const router = useRouter();
@@ -46,7 +53,9 @@ export function MediaWorkspaceComposer({ mode, openOnMount, ...props }: Props) {
   const [composerKeyboardVisible, setComposerKeyboardVisible] = useState(false);
   const [voice, setVoice] = useState<(typeof voices)[number]>("ara");
   const [duration, setDuration] = useState(5);
-  const [ratio, setRatio] = useState<(typeof ratios)[number]>("16:9");
+  const [videoRatio, setVideoRatio] = useState<(typeof videoRatios)[number]>("16:9");
+  const [imageRatio, setImageRatio] = useState<(typeof imageRatios)[number]>("1:1");
+  const [selectionSheet, setSelectionSheet] = useState<"duration" | "ratio">();
   const [references, setReferences] = useState<ContentFile[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const charging = useRef<string | undefined>(undefined);
@@ -86,17 +95,17 @@ export function MediaWorkspaceComposer({ mode, openOnMount, ...props }: Props) {
 
   const submit = () => {
     const text = input.trim();
-    if (!text || !scopeKey || charging.current) return;
+    if ((!text && (mode !== "speech" || !references.length)) || !scopeKey || charging.current) return;
     const folderKey = currentFolder?.key;
-    const selected = references.filter((file) => imageReferences.has(file.extension));
+    const selected = references.filter((file) => mode === "speech" ? documentExtensions.has(file.extension) : imageReferences.has(file.extension));
     const requestKey = pendingKey.current ?? createContentMutationKey();
     charging.current = requestKey;
     pendingKey.current = undefined;
     const revision = ++draftRevision.current;
-    const quote = mode === "image" ? 15 : mode === "video" ? duration * 15 : Array.from(text).length / 100;
-    const payload = mode === "image" ? { prompt: text, referenceImageKeys: selected.map((file) => file.key), ...(folderKey ? { folderKey } : {}) }
-      : mode === "video" ? { prompt: text, durationSeconds: duration, aspectRatio: ratio, ...(selected[0] ? { startFrameFileKey: selected[0].key } : {}), ...(folderKey ? { folderKey } : {}) }
-      : { text, voice, ...(folderKey ? { folderKey } : {}) };
+    const quote = mode === "image" ? 15 : mode === "video" ? duration * 15 : Math.max(1, Array.from(text).length / 100);
+    const payload = mode === "image" ? { prompt: text, aspectRatio: imageRatio, referenceImageKeys: selected.map((file) => file.key), ...(folderKey ? { folderKey } : {}) }
+      : mode === "video" ? { prompt: text, durationSeconds: duration, aspectRatio: videoRatio, ...(selected[0] ? { startFrameFileKey: selected[0].key } : {}), ...(folderKey ? { folderKey } : {}) }
+      : { text, fileKeys: selected.map((file) => file.key), voice, ...(folderKey ? { folderKey } : {}) };
     const job = { key: requestKey, mode, folderKey, startedAt: Date.now(), estimatedMs: mode === "image" ? 10_000 : mode === "video" ? 60_000 : Math.max(2_000, 850 + Array.from(text).length * 12) };
     queryClient.setQueryData<PendingGeneration[]>(pendingQueryKey, (current) => [...(current ?? []), job]);
     setInput("");
@@ -136,27 +145,34 @@ export function MediaWorkspaceComposer({ mode, openOnMount, ...props }: Props) {
 
   const toolbar = <View style={styles.toolbar}>
     {mode === "speech" ? <Button accessibilityLabel={`Voice: ${voice}`} onPress={() => { setVoice(voices[(voices.indexOf(voice) + 1) % voices.length]!); pendingKey.current = undefined; draftRevision.current += 1; }} size="xs" variant="secondary">{voice}</Button> : null}
-    {mode === "video" ? <><Button accessibilityLabel={`Duration: ${duration} seconds`} onPress={() => { setDuration((current) => current >= 15 ? 5 : current + 1); pendingKey.current = undefined; draftRevision.current += 1; }} size="xs" variant="secondary">{duration}s</Button><Button accessibilityLabel={`Aspect ratio: ${ratio}`} onPress={() => { setRatio(ratios[(ratios.indexOf(ratio) + 1) % ratios.length]!); pendingKey.current = undefined; draftRevision.current += 1; }} size="xs" variant="secondary">{ratio}</Button></> : null}
+    {mode === "video" ? <Button accessibilityLabel={`Duration: ${duration} seconds`} onPress={() => setSelectionSheet("duration")} size="xs" variant="secondary">{duration}s</Button> : null}
+    {mode === "image" || mode === "video" ? <Button accessibilityLabel={`Aspect ratio: ${mode === "image" ? imageRatio : videoRatio}`} onPress={() => setSelectionSheet("ratio")} size="xs" variant="secondary">{mode === "image" ? imageRatio : videoRatio}</Button> : null}
   </View>;
   const grid = <ScrollView contentContainerStyle={styles.grid} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.scroll}>
     {currentFolder ? <FolderTile accessibilityLabel="Back to parent folder" label="Up" onPress={() => { setFolderStack((stack) => stack.slice(0, -1)); pendingKey.current = undefined; draftRevision.current += 1; }} parent size={cardSize} /> : null}
     {locationQuery.isPending ? Array.from({ length: currentFolder ? 3 : 4 }, (_, index) => <Skeleton key={index} style={[styles.card, styles.loading, { width: cardSize, height: cardSize }]} />) : <>
       {(locationQuery.data?.folders ?? []).map((folder) => <FolderTile accessibilityLabel={`Open ${folder.name}`} key={folder.key} label={folder.name} onPress={() => { setFolderStack((stack) => [...stack, folder]); pendingKey.current = undefined; draftRevision.current += 1; }} size={cardSize} />)}
       {files.map((file) => <ContentFileTile accessibilityLabel={`Open ${file.name}`} file={file} key={file.key} onPress={() => router.push({ pathname: "/file", params: { fileKey: file.key, fileTitle: file.name } } as unknown as Parameters<typeof router.push>[0])} size={cardSize} />)}
-      {pending.map((job) => job.file ? <ContentFileTile accessibilityLabel={`Open ${job.file.name}`} file={locationQuery.data?.files.find((file) => file.key === job.file?.key) ?? job.file} key={job.key} onPress={() => router.push({ pathname: "/file", params: { fileKey: job.file!.key, fileTitle: job.file!.name } } as unknown as Parameters<typeof router.push>[0])} revealWhenReady size={cardSize} /> : <View accessibilityLabel={`Generating ${job.mode}: ${Math.min(95, Math.floor((clock - job.startedAt) / job.estimatedMs * 100))} percent`} accessibilityRole="progressbar" key={job.key} style={[styles.card, { width: cardSize, height: cardSize }]}><Skeleton style={StyleSheet.absoluteFill} /><Text style={styles.progress}>{Math.min(95, Math.floor((clock - job.startedAt) / job.estimatedMs * 100))}%</Text></View>)}
+      {pending.map((job) => job.file ? <ContentFileTile accessibilityLabel={`Open ${job.file.name}`} file={locationQuery.data?.files.find((file) => file.key === job.file?.key) ?? job.file} key={job.key} onPress={() => router.push({ pathname: "/file", params: { fileKey: job.file!.key, fileTitle: job.file!.name } } as unknown as Parameters<typeof router.push>[0])} revealWhenReady size={cardSize} /> : <View accessibilityLabel={`Generating ${job.mode}: ${Math.max(0, Math.min(95, Math.floor((clock - job.startedAt) / job.estimatedMs * 100)))} percent`} accessibilityRole="progressbar" key={job.key} style={[styles.card, { width: cardSize, height: cardSize }]}><Skeleton style={StyleSheet.absoluteFill} /><Text style={styles.progress}>{Math.max(0, Math.min(95, Math.floor((clock - job.startedAt) / job.estimatedMs * 100)))}%</Text></View>)}
     </>}
     {locationQuery.isError ? <Text style={styles.empty}>Files could not be loaded.</Text> : null}
   </ScrollView>;
-  const accessory = references.length ? <View style={styles.references}>{references.map((file) => <Button accessibilityLabel={`Remove ${file.name}`} key={file.key} onPress={() => { setReferences((items) => items.filter((item) => item.key !== file.key)); pendingKey.current = undefined; draftRevision.current += 1; }} size="xs" variant="secondary">{file.name} <CloseIcon size="xs" /></Button>)}</View> : undefined;
+  const accessory = references.length ? <AttachmentPillStrip items={references.map((file) => ({ key: file.key, name: file.name, icon: imageReferences.has(file.extension) ? <ImageIcon size="sm" variant="muted" /> : <FileIcon size="sm" variant="muted" />, onOpen: () => router.push({ pathname: "/file", params: { fileKey: file.key, fileTitle: file.name } } as unknown as Parameters<typeof router.push>[0]), onRemove: () => { setReferences((items) => items.filter((item) => item.key !== file.key)); pendingKey.current = undefined; draftRevision.current += 1; } }))} /> : undefined;
 
   return <>
-    <CoreComposer {...props} disabled={!scopeKey} editable expandedAccessory={accessory} expandedFooter={composerKeyboardVisible ? undefined : <CapabilityTabs onValueChange={(next: CapabilityMode) => router.setParams({ mode: next })} value={mode} />} expandedLeading={mode !== "speech" ? <PlusIcon size="sm" /> : undefined} expandedLeadingAccessory={<Text numberOfLines={1} style={styles.price}>{price}</Text>} expandedLeadingAccessibilityLabel="Select reference images" expandedToolbar={toolbar} expandedPrompts={[mode === "image" ? "Describe an image..." : mode === "speech" ? "Text to speak..." : "Describe a video..."]} focusOnOpenRequest={false} maxLength={mode === "speech" ? 15_000 : 4_000} message={grid} onChangeText={(text) => { setInput(text); pendingKey.current = undefined; draftRevision.current += 1; }} onExpandedKeyboardVisibilityChange={setComposerKeyboardVisible} onExpandedLeadingPress={mode !== "speech" ? () => setPickerOpen(true) : undefined} onSubmit={submit} openEnabled openRequest={openOnMount ? Math.max(props.openRequest ?? 0, 1) : props.openRequest} pageActions={undefined} pageIdentity={(close) => <View style={styles.identity}><View style={styles.identityMain}>{props.pageIdentity(close)}</View><ProfileHeaderRight /></View>} prompts={[mode === "image" ? "Describe an image..." : mode === "speech" ? "Text to speak..." : "Describe a video..."]} value={input} />
-    {mode !== "speech" ? <FilesPickerSheet acceptFile={(file) => imageReferences.has(file.extension)} context={context} onClose={() => setPickerOpen(false)} onDone={(selected) => { setReferences(selected); pendingKey.current = undefined; draftRevision.current += 1; }} open={pickerOpen} selectionLimit={mode === "image" ? 8 : 1} title={mode === "image" ? "Reference images" : "Starting image"} /> : null}
+    <CoreComposer {...props} allowEmptySubmit={mode === "speech" && references.length > 0} disabled={!scopeKey} editable expandedAccessory={accessory} expandedFooter={composerKeyboardVisible ? undefined : <CapabilityTabs onValueChange={(next: CapabilityMode) => router.setParams({ mode: next })} value={mode} />} expandedLeading={<PlusIcon size="sm" />} expandedLeadingAccessory={<Text numberOfLines={1} style={styles.price}>{price}</Text>} expandedLeadingAccessibilityLabel={mode === "speech" ? "Select documents to narrate" : "Select reference images"} expandedToolbar={toolbar} expandedPrompts={[mode === "image" ? "Describe an image..." : mode === "speech" ? "Text to speak..." : "Describe a video..."]} focusOnOpenRequest={false} maxLength={mode === "speech" ? 15_000 : 4_000} message={grid} onChangeText={(text) => { setInput(text); pendingKey.current = undefined; draftRevision.current += 1; }} onExpandedKeyboardVisibilityChange={setComposerKeyboardVisible} onExpandedLeadingPress={() => setPickerOpen(true)} onSubmit={submit} openEnabled openRequest={openOnMount ? Math.max(props.openRequest ?? 0, 1) : props.openRequest} pageActions={undefined} pageIdentity={(close) => <View style={styles.identity}><View style={styles.identityMain}>{props.pageIdentity(close)}</View><ProfileHeaderRight /></View>} prompts={[mode === "image" ? "Describe an image..." : mode === "speech" ? "Text to speak..." : "Describe a video..."]} value={input} />
+    <FilesPickerSheet acceptFile={(file) => mode === "speech" ? documentExtensions.has(file.extension) && file.hasExtractedText === true : imageReferences.has(file.extension)} allowedExtensions={mode === "speech" ? documentReferences : imageReferenceExtensions} context={context} onClose={() => setPickerOpen(false)} onDone={(selected) => { setReferences(selected); pendingKey.current = undefined; draftRevision.current += 1; }} open={pickerOpen} selectionLimit={mode === "speech" ? 20 : mode === "image" ? 8 : 1} title={mode === "speech" ? "Documents to narrate" : mode === "image" ? "Reference images" : "Starting image"} />
+    <BottomSheet footer={<Button onPress={() => setSelectionSheet(undefined)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setSelectionSheet(undefined); }} open={Boolean(selectionSheet)} title={selectionSheet === "duration" ? "Video duration" : "Aspect ratio"}>
+      <ScrollView contentContainerStyle={styles.selectionOptions} showsVerticalScrollIndicator={false}>
+        {selectionSheet === "duration" ? videoDurations.map((seconds) => <Button accessibilityLabel={`${seconds} seconds`} accessibilityState={{ selected: duration === seconds }} key={seconds} onPress={() => { setDuration(seconds); pendingKey.current = undefined; draftRevision.current += 1; setSelectionSheet(undefined); }} size="md" variant={duration === seconds ? "primary" : "secondary"}>{seconds}s</Button>) : (mode === "image" ? imageRatios : videoRatios).map((value) => <Button accessibilityLabel={`Aspect ratio ${value}`} accessibilityState={{ selected: (mode === "image" ? imageRatio : videoRatio) === value }} key={value} onPress={() => { if (mode === "image") setImageRatio(value as (typeof imageRatios)[number]); else setVideoRatio(value as (typeof videoRatios)[number]); pendingKey.current = undefined; draftRevision.current += 1; setSelectionSheet(undefined); }} size="md" variant={(mode === "image" ? imageRatio : videoRatio) === value ? "primary" : "secondary"}>{value}</Button>)}
+      </ScrollView>
+    </BottomSheet>
   </>;
 }
 
 const styles = StyleSheet.create({
   toolbar: { flexDirection: "row", gap: spacing.xs, alignItems: "center" },
+  selectionOptions: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, paddingVertical: spacing.md },
   price: { color: palette.silver300, fontFamily: fonts.medium, fontSize: 10, flexShrink: 1 },
   scroll: { flex: 1 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, paddingTop: spacing.md, paddingBottom: spacing.lg },
@@ -164,7 +180,6 @@ const styles = StyleSheet.create({
   loading: { backgroundColor: palette.hairlineBright },
   progress: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 14, textAlign: "center", textAlignVertical: "center", height: "100%" },
   empty: { color: palette.muted, fontSize: 13 },
-  references: { flexDirection: "row", gap: spacing.xs, flexWrap: "wrap" },
   identity: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", width: "100%" },
   identityMain: { flex: 1 },
 });

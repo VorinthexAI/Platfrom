@@ -7,8 +7,8 @@ export const NEWCOMER_GRANT_CLAIMS_COLLECTION = 'newcomerGrantClaims';
 
 export const newcomerGrantClaimSchema = z.object({
   key: z.string().regex(/^[a-f0-9]{64}$/),
-  userKey: z.string().trim().min(1).max(200),
-  grantVersion: z.literal('v2'),
+  userKey: z.string().trim().min(1).max(200).optional(),
+  grantVersion: z.enum(['v2', 'v3']),
   createdAt: z.string().datetime(),
 }).strict();
 
@@ -23,7 +23,7 @@ export async function newcomerGrantClaimKey(installationIdentifier: string) {
 export async function claimNewcomerGrant(installationIdentifier: string, userKey: string, createdAt = new Date().toISOString()): Promise<'claimed' | 'duplicate'> {
   const key = await newcomerGrantClaimKey(installationIdentifier);
   try {
-    await helpers.insert({ key, userKey, grantVersion: 'v2', createdAt });
+    await helpers.insert({ key, userKey, grantVersion: 'v3', createdAt });
     return 'claimed';
   } catch (error) {
     if (!isArangoUniqueConstraintError(error)) throw error;

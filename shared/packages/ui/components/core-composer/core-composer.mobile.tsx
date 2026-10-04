@@ -34,6 +34,7 @@ export type CoreComposerProps = {
   accessory?: ReactNode;
   accessibilityHint?: string;
   accessibilityLabel: string;
+  allowEmptySubmit?: boolean;
   disabled?: boolean;
   editable?: boolean;
   expandedAccessory?: ReactNode;
@@ -245,6 +246,7 @@ export function CoreComposer({
   accessory,
   accessibilityHint,
   accessibilityLabel,
+  allowEmptySubmit = false,
   disabled = false,
   editable = true,
   expandedAccessory,
@@ -416,7 +418,7 @@ export function CoreComposer({
   }, [value]);
 
   function submit() {
-    if (disabled || !editable || !openEnabled || !value.trim()) return;
+    if (disabled || !editable || !openEnabled || (!value.trim() && !allowEmptySubmit)) return;
     inputRef.current?.blur();
     Keyboard.dismiss();
     onSubmit();
@@ -490,7 +492,7 @@ export function CoreComposer({
     ) : (
       <View style={styles.leading}>{leading}</View>
     );
-    const send = <Button accessibilityLabel="Send to Core" contentMode="raw" disabled={disabled || !openEnabled || !value.trim()} loading={loading} onPress={submit} size="sm" variant="primary">{sendIcon}</Button>;
+    const send = <Button accessibilityLabel="Send to Core" contentMode="raw" disabled={disabled || !openEnabled || (!value.trim() && !allowEmptySubmit)} loading={loading} onPress={submit} size="sm" variant="primary">{sendIcon}</Button>;
     const plus = expandedLeading !== undefined ? (
       onExpandedLeadingPress ? (
         <Button accessibilityLabel={expandedLeadingAccessibilityLabel ?? "Core actions"} contentMode="raw" disabled={expandedLeadingDisabled} onPress={onExpandedLeadingPress} size="sm" variant="icon">{expandedLeading}</Button>

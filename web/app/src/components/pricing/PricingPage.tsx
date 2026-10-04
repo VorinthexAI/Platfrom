@@ -16,7 +16,7 @@ import {
   formatSparkCount,
   formatUsd,
 } from "@/lib/spark-pricing";
-import { PRICING_HERO_BODY, PRICING_HERO_HEADING } from "@/lib/discoverability";
+import { PRICING_HERO_BODY, PRICING_HERO_HEADING, PRODUCT_FACTS } from "@/lib/discoverability";
 import styles from "./PricingPage.module.css";
 
 export function PricingPage() {
@@ -110,7 +110,7 @@ export function PricingPage() {
         </section>
         <p className={styles.taxDisclaimer}>
           Prepaid Sparks remain available after subscription cancellation, and balances
-          never go below zero. Storage is charged hourly from prepaid Sparks. If the
+          never go below zero. {PRODUCT_FACTS.storagePricing} If the
           balance cannot cover storage, no debt or backcharges accrue and uploads can
           continue. Existing data remains available for export, deletion, and recovery.
           Adding Sparks restores prospective charging. Stored data is permanently

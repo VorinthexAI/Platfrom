@@ -19,6 +19,12 @@ expresses domain intent such as `folder.create`, `email.draft.send`, or
 - `account-tool-definitions.ts` owns authenticated permanent account deletion
   and workspace picker updates. They are registered for transport parity but
   intentionally excluded from every model/provider definition and Core surface.
+- `ticket-tool-definitions.ts`, `notification-tool-definitions.ts`, and
+  `commerce-tool-definitions.ts` adapt support, notification, and purchase
+  operations to their canonical services. HTTP and registered tools share
+  those service implementations.
+- `referral-summary-read.ts` and `referral-redeem.ts` expose the current user's
+  referral summary and redemption through the same referral service as HTTP.
 
 ## Required Layering
 
@@ -68,13 +74,34 @@ empty object; the server supplies the current user request, authorized
 evidence through existing canonical read services, without passing database
 keys to Core. Jev's `decide` action selects sources inside this single tool call.
 
-Core now uses `agent.query` for batched, current-scope workspace reads. Its
-strict requests support named resource discovery, list, count, sum, and read;
-it resolves named parents and recent references on the trusted server and
-executes the same canonical `app.search` or Gallery operations as other entry
-points. The ArangoSearch view indexes the original records automatically,
-without a mirrored copy. Navigable result keys are projected only into the
-conversation's trusted evidence channel, not the model-facing query result.
+Core now uses `agent.query` for current-scope workspace reads. It has three
+strict modes: `count` computes exact authorized file totals through nested
+folders, `list` returns an exact total plus up to 50 compact, navigable file
+entries with an opaque next-page cursor, and `retrieve` selects up to ten authorized file records after vector,
+filename keyword, and applicable metadata rankings are fused with RRF and up
+to 50 candidates are reranked. File text is bounded and marked partial when
+shortened. Trusted recent references resolve directly. An optional input includes the authorized retrievals
+from the latest ten messages, revalidated against current scope ownership.
+Navigable result keys are projected only into the conversation's trusted
+evidence channel, not the model-facing query result.
+
+Examples (the server injects user identity and the current scope):
+
+```json
+{"mode":"count","folder":{"name":"Chats"}}
+{"mode":"count","folder":{"name":"Work"},"field":"extension"}
+{"mode":"list","extensions":["mp4"]}
+{"mode":"list","nextPage":true}
+{"mode":"retrieve","query":"dinner menu at Granna"}
+{"mode":"retrieve","reference":{"recent":true},"includeRecentReferences":true}
+```
+
+`count` and `list` include files in every descendant folder; count distinguishes
+direct from nested files. List returns all matching files when there are at
+most 50, otherwise reports the exact total and a cursor for the next page.
+`retrieve` collects up to 100 hits per applicable ranking
+lane before loading the best ten bounded file records. Folder and recent-file selectors are reauthorized,
+and a missing or ambiguous folder never reports a complete zero count.
 `agent.context` remains registered for legacy callers.
 
 `agent.greet` generates a brief opening through the provider-neutral text action

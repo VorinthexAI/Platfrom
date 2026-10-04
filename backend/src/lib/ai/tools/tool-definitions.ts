@@ -11,8 +11,12 @@ import { CONVERSATION_TOOL_DEFINITIONS } from './conversation-tool-definitions';
 import { CORE_TOOL_DEFINITIONS } from '@/lib/ai/agents/core';
 import { billingSummaryReadToolDefinition } from './billing-summary-read';
 import { referralSummaryReadToolDefinition } from './referral-summary-read';
+import { referralRedeemToolDefinition } from './referral-redeem';
 import { WORKSPACE_TOOL_DEFINITIONS } from './workspace-tool-definitions';
 import { agentGreetToolDefinition } from './agent-greet';
+import { ticketCreateToolDefinition, ticketListToolDefinition } from './ticket-tool-definitions';
+import { appNotifyToolDefinition, notificationListToolDefinition, notificationMarkReadToolDefinition } from './notification-tool-definitions';
+import { COMMERCE_TOOL_DEFINITIONS } from './commerce-tool-definitions';
 import { createPublicToolDefinition } from './tool-definition';
 
 export const fileListToolDefinition = createPublicToolDefinition('file.list');
@@ -35,6 +39,10 @@ export const tagAssignmentSetToolDefinition = createPublicToolDefinition('tag.as
 export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   billingSummaryReadToolDefinition,
   referralSummaryReadToolDefinition,
+  referralRedeemToolDefinition,
+  ticketCreateToolDefinition, ticketListToolDefinition,
+  appNotifyToolDefinition, notificationListToolDefinition, notificationMarkReadToolDefinition,
+  ...COMMERCE_TOOL_DEFINITIONS,
   agentGreetToolDefinition,
   folderCreateToolDefinition, folderCopyToolDefinition, folderDeleteToolDefinition, folderFindToolDefinition, folderListToolDefinition, folderMoveToolDefinition, folderRenameToolDefinition, folderUpdateToolDefinition,
   fileListToolDefinition, fileFindToolDefinition, fileUpdateToolDefinition, fileRenameToolDefinition, fileMoveToolDefinition, fileCopyToolDefinition, fileDeleteToolDefinition, fileDownloadToolDefinition,

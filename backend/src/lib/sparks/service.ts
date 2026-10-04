@@ -1,4 +1,5 @@
 import { calculateByteHours, calculateFixedCost, HOURS_PER_BILLING_MONTH, lookupCostRule, storageCostMicroSparks, storageCostMicroSparksExact } from '@/lib/costs';
+import { z } from 'zod';
 import { getDefaultStorageChargingRepository } from '@/lib/automations/storage-charger-repository';
 import { sparkHistoryInputSchema, sparkMetadataSchema, type SparkHistoryInput, type SparkMetadata, type SparkTransaction, type SparkTransactionKind } from './contracts';
 import type { ApplySparkResult, SparkRepository } from './repository';
@@ -16,6 +17,7 @@ export interface SparkServiceDependencies {
   createKey?: () => string;
   now?: () => Date;
   getActiveStoredBytes?: (userKey: string) => Promise<string>;
+  getActiveStoredBytesForScope?: (userKey: string, scopeKey: string) => Promise<string>;
   publishBalance?: typeof publishUserEvent;
 }
 
@@ -24,7 +26,7 @@ function positiveSafeInteger(value: number): number {
   return value;
 }
 
-export function createSparkService({ repository, createKey = newId, now = () => new Date(), getActiveStoredBytes = async () => '0', publishBalance = async () => {} }: SparkServiceDependencies) {
+export function createSparkService({ repository, createKey = newId, now = () => new Date(), getActiveStoredBytes = async () => '0', getActiveStoredBytesForScope, publishBalance = async () => {} }: SparkServiceDependencies) {
   const publish = (userKey: string) => { void publishBalance(userKey, 'spark.balance.changed').catch(() => undefined); };
   const apply = async (
     trustedUserKey: string,
@@ -109,13 +111,14 @@ export function createSparkService({ repository, createKey = newId, now = () => 
     listHistory(trustedUserKey: string, input?: SparkHistoryInput): Promise<SparkTransaction[]> {
       return repository.listHistory(trustedUserKey, sparkHistoryInputSchema.parse(input ?? {}));
     },
-    async getSummary(trustedUserKey: string, input?: SparkHistoryInput) {
+    async getSummary(trustedUserKey: string, input?: SparkHistoryInput, scopeKey?: string) {
       const valid = sparkHistoryInputSchema.parse(input ?? {});
+      const requestedScopeKey = scopeKey === undefined ? undefined : z.string().cuid().parse(scopeKey);
       const [microSparkBalance, microSparkDebt, transactions, storageBytes, aiUsageMicroSparks] = await Promise.all([
         repository.getBalance(trustedUserKey),
         repository.getDebt?.(trustedUserKey) ?? Promise.resolve(0),
         repository.listHistory(trustedUserKey, valid),
-        getActiveStoredBytes(trustedUserKey),
+        requestedScopeKey ? getActiveStoredBytesForScope?.(trustedUserKey, requestedScopeKey) ?? Promise.reject(new Error('Scoped storage summaries are unavailable.')) : getActiveStoredBytes(trustedUserKey),
         repository.sumDebits?.(trustedUserKey, 'action') ?? Promise.resolve(0),
       ]);
       if (microSparkBalance === null) throw new SparkRepositoryError('USER_NOT_FOUND', 'Spark account user was not found.');
@@ -135,4 +138,4 @@ export function createSparkService({ repository, createKey = newId, now = () => 
 }
 
 const storageChargingRepository = getDefaultStorageChargingRepository();
-export const sparkService = createSparkService({ repository: createArangoSparkRepository(), getActiveStoredBytes: storageChargingRepository.getActiveStoredBytes, publishBalance: publishUserEvent });
+export const sparkService = createSparkService({ repository: createArangoSparkRepository(), getActiveStoredBytes: storageChargingRepository.getActiveStoredBytes, getActiveStoredBytesForScope: storageChargingRepository.getActiveStoredBytesForScope, publishBalance: publishUserEvent });

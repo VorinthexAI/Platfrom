@@ -20,10 +20,10 @@ import { claimNewcomerGrant, releaseNewcomerGrantClaim } from '@/lib/db/newcomer
 export function newcomerGrantInput(eventKey: string) {
   return {
     deltaMicroSparks: ACCOUNT_GRANT_MICRO_SPARKS,
-    idempotencyKey: 'account-grant:v2',
-    requestHash: 'account-grant:v2:100-sparks',
+    idempotencyKey: 'account-grant:v3',
+    requestHash: 'account-grant:v3:50-sparks',
     eventKey,
-    metadata: { category: 'newcomer-grant', grantVersion: 'v2' },
+    metadata: { category: 'newcomer-grant', grantVersion: 'v3' },
   } as const;
 }
 
@@ -66,7 +66,7 @@ async function recordAccountCreatedEvent(user: User, transaction: { key: string 
 }
 
 async function recoverNewcomerGrantEvent(user: User) {
-  const transaction = (await sparkService.listHistory(user.key, { limit: 200 })).find(({ idempotencyKey }) => idempotencyKey === 'account-grant:v2');
+  const transaction = (await sparkService.listHistory(user.key, { limit: 200 })).find(({ idempotencyKey }) => idempotencyKey === 'account-grant:v3' || idempotencyKey === 'account-grant:v2');
   if (transaction) await recordAccountCreatedEvent(user, transaction);
 }
 

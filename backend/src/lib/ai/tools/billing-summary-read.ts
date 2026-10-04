@@ -3,7 +3,12 @@ import { sparkHistoryInputSchema, sparkTransactionSchema } from '@/lib/sparks/co
 import { sparkService } from '@/lib/sparks/service';
 import type { PublicToolDependencies } from './tool-definition';
 
-export const billingSummaryReadInputSchema = sparkHistoryInputSchema;
+export const billingSummaryReadInputSchema = z.object({
+  ...sparkHistoryInputSchema.innerType().shape,
+  scopeKey: z.string().cuid().optional(),
+}).strict().superRefine((value, context) => {
+  if ((value.beforeCreatedAt === undefined) !== (value.beforeKey === undefined)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['beforeKey'], message: 'Both history cursor fields are required together.' });
+});
 export const billingSummaryReadOutputSchema = z.object({
   microSparkBalance: z.number().int().safe().nonnegative(),
   microSparkDebt: z.number().int().safe().nonnegative(),
@@ -23,7 +28,7 @@ export function createBillingSummaryReadTool(getSummary: typeof sparkService.get
     isReadOnly: () => true,
     providerDefinition: {
       name: 'billing.summary.read',
-      description: 'Read the authenticated user\'s current credit balance, tracked storage estimate, refund debt status, and recent immutable billing history.',
+      description: 'Read the authenticated user\'s credit balance, account-wide or authorized-scope storage estimate, refund debt status, and recent immutable billing history.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -32,6 +37,7 @@ export function createBillingSummaryReadTool(getSummary: typeof sparkService.get
           beforeCreatedAt: { type: 'string', format: 'date-time' },
           beforeKey: { type: 'string', minLength: 1, maxLength: 200 },
           kind: { type: 'string', enum: ['account-grant', 'referral-reward', 'purchase', 'tool', 'action', 'storage', 'recurring-service', 'refund', 'adjustment', 'expiration'] },
+          scopeKey: { type: 'string', description: 'Optional owned scope for the storage estimate; other billing fields remain account-wide.' },
         },
       },
     },
@@ -41,7 +47,8 @@ export function createBillingSummaryReadTool(getSummary: typeof sparkService.get
       if (principal.kind !== 'member' || principal.userTeam.status !== 'active' || principal.userTeam.userId !== principal.user.key || principal.userTeam.teamKey !== dependencies.context.teamKey) {
         throw new Error('billing.summary.read requires an active authenticated user membership.');
       }
-      return billingSummaryReadOutputSchema.parse(await getSummary(principal.user.key, input));
+      const { scopeKey, ...history } = input;
+      return billingSummaryReadOutputSchema.parse(await getSummary(principal.user.key, history, scopeKey));
     },
   } as const;
 }

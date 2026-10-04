@@ -12,6 +12,9 @@ function chargePrice(charge: SparkCharge) {
   if (charge.unit === "new-email") return `${charge.sparkCost} Spark per new email`;
   if (charge.unit === "documents") return `${charge.sparkCost} Sparks per document`;
   if (charge.unit === "images") return `${charge.sparkCost} Sparks per image`;
+  if (charge.unit === "second") return `${charge.sparkCost} Sparks per second`;
+  if (charge.unit === "100-characters") return `${charge.sparkCost} Spark per 100 characters`;
+  if (charge.unit === "million-tokens") return `${charge.sparkCost} Sparks per million tokens`;
   return `${charge.sparkCost} Sparks`;
 }
 

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 
 import { OnboardingReward } from "@/components/onboarding/OnboardingReward";
+import { OnboardingProfileBadge } from "@/components/onboarding/OnboardingProfileBadge";
 import { PaywallSheet } from "@/components/PaywallSheet";
 import { fetchBillingSummary, hasNewcomerAccountGrant } from "@/lib/billing-client";
 import { getLocalOnboardingState } from "@/lib/onboarding-state";
@@ -16,7 +17,7 @@ export default function OnboardingRoute() {
   const authStatus = useAuthStore((state) => state.status);
   const [initialPage] = useState<"plans" | "referral">(() => useUiStore.getState().consumeOnboardingReferralEntry() ? "referral" : "plans");
   const [postDeletion] = useState(() => getLocalOnboardingState().postDeletion);
-  const [phase, setPhase] = useState<"paywall" | "reward">("paywall");
+  const [phase, setPhase] = useState<"paywall" | "reward" | "profile-badge">("paywall");
   const alreadyOnboarded = useRef(useAuthStore.getState().user?.isOnboarded === true);
   useEffect(() => {
     if (authStatus === "unauthenticated") router.replace("/auth");
@@ -31,16 +32,18 @@ export default function OnboardingRoute() {
     void completion.catch(() => { if (useAuthStore.getState().status === "authenticated") router.replace("/onboarding"); });
   }, [completeOnboarding, router]);
 
-  return <View style={styles.root}>{phase === "reward"
-    ? <OnboardingReward onFinished={handleComplete} />
+  return <View style={styles.root}>{phase === "profile-badge"
+    ? <OnboardingProfileBadge onFinished={handleComplete} />
+    : phase === "reward"
+    ? <OnboardingReward onFinished={() => setPhase("profile-badge")} />
     : <PaywallSheet initialPage={initialPage} mode="onboarding" onComplete={async () => {
       if (postDeletion) {
-        handleComplete();
+        setPhase("profile-badge");
         return;
       }
       const summary = await fetchBillingSummary({ kind: "adjustment", limit: 200 });
       if (hasNewcomerAccountGrant(summary)) setPhase("reward");
-      else handleComplete();
+      else setPhase("profile-badge");
     }} />}
   </View>;
 }

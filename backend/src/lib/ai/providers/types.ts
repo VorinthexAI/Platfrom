@@ -159,12 +159,13 @@ const httpImageUrlSchema = z.string().url().refine((value) => {
 const inlineImageUrlSchema = z.string().max(28 * 1024 * 1024).regex(/^data:image\/(?:gif|jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/, 'Inline image URL is invalid');
 
 export const MAX_IMAGE_GENERATION_REFERENCES = 8;
+export const imageAspectRatioSchema = z.enum(['1:1', '1:4', '1:8', '2:3', '3:2', '3:4', '4:1', '4:3', '4:5', '5:4', '8:1', '9:16', '16:9', '21:9']);
 export const imageGenerateInputSchema = z
   .object({
     prompt: z.string().trim().min(1).max(32_000),
     size: z.enum(['1024x1024', '1024x1536', '1536x1024']).optional(),
     resolution: z.enum(['512', '1K', '2K', '4K']).optional(),
-    aspectRatio: z.enum(['1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16', '21:9']).optional(),
+    aspectRatio: imageAspectRatioSchema.optional(),
     outputFormat: z.enum(['png', 'jpeg', 'webp']).optional(),
     count: z.number().int().min(1).max(4).default(1),
     quality: z.enum(['low', 'medium', 'high']).optional(),

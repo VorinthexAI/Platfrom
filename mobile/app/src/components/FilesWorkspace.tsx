@@ -9,6 +9,7 @@ import { BackHandler, Platform, ScrollView, StyleSheet, Text, View, useWindowDim
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
+import { AudioPlayback } from "@vorinthex/shared/ui/audio-playback";
 import { Button } from "@vorinthex/shared/ui/button";
 import { FileViewer } from "@vorinthex/shared/ui/file-viewer";
 import { FolderTile } from "@vorinthex/shared/ui/folder-tile";
@@ -18,7 +19,7 @@ import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Switch } from "@vorinthex/shared/ui/switch";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
-import { ChevronLeftIcon, CloseIcon, FilterIcon, FolderIcon, MoreHorizontalIcon, PauseIcon, PlayIcon, PlusIcon, SearchIcon, SendIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { ChevronLeftIcon, CloseIcon, FilterIcon, FolderIcon, MoreHorizontalIcon, PlusIcon, SearchIcon, SendIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { AgentSwitcher } from "@/components/AgentSwitcher";
 import { ContentFileCardLabel as FileCardLabel, ContentFileCover as FileCover, ContentFileTile, displayContentFileName, IMAGE_EXTENSIONS } from "@/components/ContentFileTile";
 import { DestinationFolderSheet } from "@/components/DestinationFolderSheet";
@@ -33,6 +34,7 @@ import { CORE_PLACEHOLDER_PROMPTS } from "@/data/core-prompts";
 import { assistantIconSource } from "@/data/capability-icons";
 import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 import { useDebouncedContentSearchHistory } from "@/hooks/use-debounced-content-search-history";
+import { useConversationFiles } from "@/hooks/use-conversation-files";
 import {
   copyContentSelection,
   createContentFolder,
@@ -71,7 +73,8 @@ import {
   type ContentLocation,
 } from "@/lib/content-query-cache";
 import { actionToast } from "@/lib/action-toast";
-import { saveUrlDownload } from "@/lib/device-download";
+import type { ConversationFileView } from "@/lib/conversation-retrievals";
+import { saveTemporaryUrlFile, saveUrlDownload } from "@/lib/device-download";
 import { tagFilterContextKey } from "@/lib/tag-client";
 import { getUserSearchHistory, promoteCachedUserSearchHistory, removeCachedUserSearchHistory, userSearchHistoryQueryKey } from "@/lib/user-search-history-cache";
 import { useAuthStore } from "@/state/auth";
@@ -105,28 +108,25 @@ function groupItemsByDate(items: GridItem[]) {
   return [...groups].map(([label, items]) => ({ label, items }));
 }
 
-function AudioIsland({ uri }: { uri: string }) {
+function AudioIsland({ uri, title, onClose }: { uri: string; title: string; onClose: () => void }) {
   const player = useAudioPlayer(uri);
   const status = useAudioPlayerStatus(player);
   useEffect(() => { void setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: true, interruptionMode: "doNotMix", allowsRecording: false, shouldRouteThroughEarpiece: false }); }, []);
-  return <View style={styles.audioIsland}>
-      <Button accessibilityLabel={status.playing ? "Pause" : "Play"} contentMode="raw" onPress={() => { if (status.playing) player.pause(); else void player.play(); }} size="lg" variant="secondary">
-        {status.playing ? <PauseIcon size="md" /> : <PlayIcon size="md" />}
-      </Button>
-      <Text style={styles.audioTime}>{Math.floor(status.currentTime ?? 0)}s / {Math.floor(status.duration ?? 0) || "—"}s</Text>
-  </View>;
+  return <AudioPlayback duration={status.duration} error={status.error} onClose={onClose} onSeek={(seconds) => player.seekTo(seconds)} onToggle={() => { if (status.playing) player.pause(); else void player.play(); }} playing={status.playing} position={status.currentTime} title={title} />;
 }
 
-export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolderKey, initialSearchQuery, initialScopeKey, generationMode = "chat", fileOnly = false, onCloseFile }: { initialFileKey?: string; initialFileTitle?: string; initialFolderKey?: string; initialSearchQuery?: string; initialScopeKey?: string; generationMode?: "chat" | "image" | "speech" | "video"; fileOnly?: boolean; onCloseFile?: () => void } = {}) {
+export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolderKey, initialSearchQuery, initialScopeKey, initialFileView, onExitFileView, onBackFileView, generationMode = "chat", fileOnly = false, onCloseFile }: { initialFileKey?: string; initialFileTitle?: string; initialFolderKey?: string; initialSearchQuery?: string; initialScopeKey?: string; initialFileView?: ConversationFileView; onExitFileView?: () => void; onBackFileView?: () => void; generationMode?: "chat" | "image" | "speech" | "video"; fileOnly?: boolean; onCloseFile?: () => void } = {}) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const insets = useSafeAreaInsets();
+  const previewBottomInset = Platform.OS === "android" && fileOnly ? insets.bottom : 0;
   const { width } = useWindowDimensions();
   const cardSize = Math.floor((width - spacing.md * 2 - 24) / 4);
   const sessionScopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
   const scopeKey = fileOnly && initialScopeKey ? initialScopeKey : sessionScopeKey;
   const userKey = useAuthStore((state) => state.user?.key ?? "");
   const contentContext = useMemo(() => ({ scopeKey, userKey }), [scopeKey, userKey]);
+  const fileViewQuery = useConversationFiles(contentContext, initialFileView);
   const sessionUploadQueryKey = ["session-upload-display", userKey, scopeKey] as const;
   const sessionUploadsQuery = useQuery<SessionUploadMap>({ queryKey: sessionUploadQueryKey, queryFn: async () => EMPTY_SESSION_UPLOADS, enabled: false, initialData: EMPTY_SESSION_UPLOADS, gcTime: Infinity });
   const sessionUploads = sessionUploadsQuery.data;
@@ -150,12 +150,12 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
   const [loadMoreErrorKey, setLoadMoreErrorKey] = useState<string>();
   const loadingPages = useRef(new Set<string>());
   const [coreOpen, setCoreOpen] = useState(false);
-  const [coreRequest, setCoreRequest] = useState(1);
+  const [coreRequest, setCoreRequest] = useState(initialFileView ? 0 : 1);
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [pendingFolders, setPendingFolders] = useState<ContentFolder[]>([]);
   const [pendingTransfers, setPendingTransfers] = useState<PendingTransfer[]>([]);
   const [sessionFolderOrder, setSessionFolderOrder] = useState<Record<string, { createdAt: string; order: number; uiKey: string }>>({});
-  const [preview, setPreview] = useState<{ title: string; pdfUri?: string; imageUri?: string; text?: string; audioUri?: string; videoUri?: string }>();
+  const [preview, setPreview] = useState<{ title: string; fileKey?: string; pdfUri?: string; imageUri?: string; text?: string; audioUri?: string; videoUri?: string }>();
   const [previewFailed, setPreviewFailed] = useState(false);
   const [history, setHistory] = useState<ContentSearchHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -163,6 +163,15 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
   const [removingHistoryQuery, setRemovingHistoryQuery] = useState<string>();
   const initialHandled = useRef<string | undefined>(undefined);
   const previewRequest = useRef(0);
+  const activePdfUri = useRef<string | undefined>(undefined);
+  const pdfFallbackAttempted = useRef(false);
+  const previewPdfFile = useRef<File | undefined>(undefined);
+  const discardPreviewPdf = useCallback(() => {
+    const cached = previewPdfFile.current;
+    previewPdfFile.current = undefined;
+    try { if (cached?.exists) cached.delete(); } catch { /* The preview cache may already be gone. */ }
+  }, []);
+  useEffect(() => () => { previewRequest.current += 1; activePdfUri.current = undefined; discardPreviewPdf(); }, [discardPreviewPdf]);
   const bulkMutationLocked = useRef(false);
   const transferLocked = useRef(false);
   const pendingFolderCreates = useRef(new Map<string, Promise<ContentFolder>>());
@@ -188,7 +197,7 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
   const locationIdentity = JSON.stringify(locationOptions.queryKey);
   const locationQuery = useQuery({
     ...locationOptions,
-    enabled: configured && !fileOnly,
+    enabled: configured && !fileOnly && !initialFileView,
     refetchInterval: (query) => query.state.data && query.state.data.folders.length + query.state.data.files.length <= STORAGE_PAGE_SIZE && query.state.data.files.some((file) => file.processing === "pending") ? 2_000 : false,
   });
   useEffect(() => {
@@ -214,13 +223,13 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
   const outgoingFileKeys = new Set(outgoingTransfers.flatMap((transfer) => transfer.fileKeys));
   const incomingFolders = incomingTransfers.flatMap((transfer) => transfer.folders).filter((folder) => (!favoritesOnly || folder.isFavorite) && (showHidden || !folder.isHidden));
   const incomingFiles = incomingTransfers.flatMap((transfer) => transfer.files).filter((file) => extensions.includes(file.extension) && (!favoritesOnly || file.isFavorite) && (showHidden || !file.isHidden));
-  const folders = [...(locationQuery.data?.folders ?? []).filter((folder) => !outgoingFolderKeys.has(folder.key) && !visiblePendingFolders.some(({ key }) => key === folder.key) && !incomingFolders.some(({ key }) => key === folder.key)), ...visiblePendingFolders, ...incomingFolders].sort((left, right) => left.name.localeCompare(right.name));
-  const files = [...(locationQuery.data?.files ?? []).filter((file) => !outgoingFileKeys.has(file.key) && !incomingFiles.some(({ key }) => key === file.key)), ...incomingFiles].filter((file) => extensions.includes(file.extension));
+  const folders = initialFileView ? [] : [...(locationQuery.data?.folders ?? []).filter((folder) => !outgoingFolderKeys.has(folder.key) && !visiblePendingFolders.some(({ key }) => key === folder.key) && !incomingFolders.some(({ key }) => key === folder.key)), ...visiblePendingFolders, ...incomingFolders].sort((left, right) => left.name.localeCompare(right.name));
+  const files = (initialFileView ? fileViewQuery.files : [...(locationQuery.data?.files ?? []).filter((file) => !outgoingFileKeys.has(file.key) && !incomingFiles.some(({ key }) => key === file.key)), ...incomingFiles]).filter((file) => extensions.includes(file.extension));
   const searchResults = useMemo(() => [
     ...(searchQuery.data?.folders ?? []).map((folder) => ({ key: folder.key, kind: "folder" as const, label: folder.name, folder })),
     ...(searchQuery.data?.files ?? []).filter((file) => file.extension && extensions.includes(file.extension)).map((file) => ({ key: file.fileKey, kind: "file" as const, label: file.extension ? displayContentFileName({ name: file.name, extension: file.extension }) : file.name, file })),
   ].sort((left, right) => ("folder" in left ? left.folder.score : left.file.score) < ("folder" in right ? right.folder.score : right.file.score) ? 1 : -1), [searchQuery.data, extensions]);
-  const visibleUploads = pendingUploads.filter((file) => !searching && file.scopeKey === scopeKey && file.folderKey === currentFolder?.key && extensions.includes(file.extension) && !files.some((saved) => sessionUploads[saved.key]?.uiKey === file.key));
+  const visibleUploads = pendingUploads.filter((file) => !initialFileView && !searching && file.scopeKey === scopeKey && file.folderKey === currentFolder?.key && extensions.includes(file.extension) && !files.some((saved) => sessionUploads[saved.key]?.uiKey === file.key));
   const itemGroups = groupItemsByDate([
     ...visibleUploads.map((file) => ({ kind: "upload" as const, file, createdAt: file.createdAt, uiKey: file.key, order: file.order })),
     ...files.map((file) => ({ kind: "file" as const, file, createdAt: sessionUploads[file.key]?.createdAt ?? file.createdAt, uiKey: sessionUploads[file.key]?.uiKey ?? file.key, order: sessionUploads[file.key]?.order ?? Number.POSITIVE_INFINITY })),
@@ -244,11 +253,12 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
 
   const refresh = useCallback(async () => {
     setUserRefreshing(true);
-    try { await locationQuery.refetch(); }
+    try { if (initialFileView) await fileViewQuery.refresh(); else await locationQuery.refetch(); }
     finally { setUserRefreshing(false); }
-  }, [locationQuery]);
+  }, [fileViewQuery, initialFileView, locationQuery]);
 
   const loadMore = (retry = false) => {
+    if (initialFileView) { if (!searching) fileViewQuery.loadMore(); return; }
     const previous = queryClient.getQueryData<ContentLocation>(locationOptions.queryKey);
     if (searching || !configured || !previous || !hasMoreContentLocationPages(previous) || loadingPages.current.has(locationIdentity) || (!retry && loadMoreErrorKey === locationIdentity)) return;
     if (retry) setLoadMoreErrorKey(undefined);
@@ -269,12 +279,19 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
     const request = ++previewRequest.current;
     setPreviewFailed(false);
     const title = displayContentFileName(file);
-    const showPreview = (value: NonNullable<typeof preview>) => { if (previewRequest.current === request) setPreview(value); };
+    const showPreview = (value: NonNullable<typeof preview>) => {
+      if (previewRequest.current !== request) return false;
+      discardPreviewPdf();
+      activePdfUri.current = value.pdfUri;
+      pdfFallbackAttempted.current = false;
+      setPreview(value);
+      return true;
+    };
     try {
       const availableLocalUri = localUri && new File(localUri).exists ? localUri : undefined;
       if (availableLocalUri) {
         if (IMAGE_EXTENSIONS.has(file.extension)) { showPreview({ title, imageUri: availableLocalUri }); return; }
-        if (file.extension === "pdf") { showPreview({ title, pdfUri: availableLocalUri }); return; }
+        if (file.extension === "pdf") { showPreview({ title, fileKey: file.key, pdfUri: availableLocalUri }); return; }
         if (file.extension === "mp3") { showPreview({ title, audioUri: availableLocalUri }); return; }
         if (file.extension === "mp4") { showPreview({ title, videoUri: availableLocalUri }); return; }
       }
@@ -288,9 +305,9 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
         showPreview({ title, text: extracted.value.trim() || "No readable text is available." });
         return;
       }
-       const download = await downloadContentFile(file.key, contentContext);
+      const download = await downloadContentFile(file.key, contentContext);
       if (IMAGE_EXTENSIONS.has(file.extension)) { showPreview({ title, imageUri: download.url }); return; }
-      if (file.extension === "pdf") { showPreview({ title, pdfUri: download.url }); return; }
+      if (file.extension === "pdf") { showPreview({ title, fileKey: file.key, pdfUri: download.url }); return; }
       if (TEXT_EXTENSIONS.has(file.extension)) {
         const response = await fetch(download.url);
         showPreview({ title, text: await response.text() });
@@ -307,17 +324,36 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
       if (file.extension === "mp3") { showPreview({ title, audioUri: download.url }); return; }
       if (file.extension === "mp4") { showPreview({ title, videoUri: download.url }); return; }
     } catch {
-      if (previewRequest.current === request) { setPreview(undefined); setPreviewFailed(true); showToast({ title: "The file could not be opened.", duration: 2_500 }); }
+      if (previewRequest.current === request) { discardPreviewPdf(); activePdfUri.current = undefined; setPreview(undefined); setPreviewFailed(true); showToast({ title: "The file could not be opened.", duration: 2_500 }); }
     }
-  }, [contentContext, showToast]);
+  }, [contentContext, discardPreviewPdf, showToast]);
+
+  const recoverPdfPreview = useCallback(async (sourceUri: string, fileKey?: string) => {
+    if (activePdfUri.current !== sourceUri) return;
+    if (pdfFallbackAttempted.current || !fileKey) { setPreviewFailed(true); return; }
+    pdfFallbackAttempted.current = true;
+    const request = previewRequest.current;
+    try {
+      const signed = await downloadContentFile(fileKey, contentContext);
+      const cached = await saveTemporaryUrlFile(`${fileKey}.pdf`, signed.url);
+      if (request !== previewRequest.current || activePdfUri.current !== sourceUri) { cached.delete(); return; }
+      discardPreviewPdf();
+      previewPdfFile.current = cached;
+      activePdfUri.current = cached.uri;
+      setPreview((current) => current?.pdfUri === sourceUri ? { ...current, pdfUri: cached.uri } : current);
+    } catch {
+      if (request === previewRequest.current && activePdfUri.current === sourceUri) setPreviewFailed(true);
+    }
+  }, [contentContext, discardPreviewPdf]);
 
   const goBack = useCallback(() => {
     if (fileOnly) { onCloseFile?.(); return; }
     previewRequest.current += 1;
-    if (preview) { setPreview(undefined); return; }
+    if (preview) { discardPreviewPdf(); activePdfUri.current = undefined; setPreview(undefined); return; }
+    if (initialFileView) { onBackFileView?.(); return; }
     if (folderStack.length) { setFolderStack((stack) => stack.slice(0, -1)); return; }
     setCoreRequest((request) => request + 1);
-  }, [fileOnly, folderStack.length, onCloseFile, preview]);
+  }, [discardPreviewPdf, fileOnly, folderStack.length, initialFileView, onBackFileView, onCloseFile, preview]);
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -606,7 +642,7 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
       }
       if (action === "delete") clearSelection();
       void queryClient.invalidateQueries({ queryKey: contentQueryKeys.locations(contentContext), refetchType: "none" });
-      void locationQuery.refetch();
+      if (initialFileView) void fileViewQuery.refresh(); else void locationQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["file-search", scopeKey] });
       if (action === "delete" && protectedCount) showToast({ title: `${protectedCount} favorite ${protectedCount === 1 ? "item was" : "items were"} kept.`, duration: 2_500 });
     } catch {
@@ -616,30 +652,30 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
         setSelectedFileKeys(fileKeys);
       }
       void queryClient.invalidateQueries({ queryKey: contentQueryKeys.locations(contentContext), refetchType: "none" });
-      void locationQuery.refetch();
+      if (initialFileView) void fileViewQuery.refresh(); else void locationQuery.refetch();
       showToast({ title: action === "delete" ? "Items could not be deleted." : `${selectionCount === 1 ? noun[0] : noun[1]} could not be ${action === "hide" ? "hidden" : action === "reveal" ? "revealed" : `${action}d`}.`, duration: 2_500 });
     } finally {
       bulkMutationLocked.current = false;
     }
   };
 
-  const initialLoading = locationQuery.isPending && !visibleUploads.length && !visiblePendingFolders.length && !incomingFolders.length && !incomingFiles.length;
+  const initialLoading = initialFileView ? fileViewQuery.loading : locationQuery.isPending && !visibleUploads.length && !visiblePendingFolders.length && !incomingFolders.length && !incomingFiles.length;
   const loading = false;
-  const empty = !initialLoading && !folders.length && !files.length && !visibleUploads.length && !hasMoreContentLocationPages(locationQuery.data);
-  const matchingEmpty = empty && filtersActive;
-  const core = <CoreComposer accessibilityLabel="Ask Core about your files" expandedPrompts={[...CORE_PLACEHOLDER_PROMPTS]} generationMode={generationMode} leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />} onChangeText={() => undefined} onFocusChange={setCoreOpen} onSubmit={() => undefined} openOnMount={!initialFileKey} openRequest={coreRequest} pageIdentity={() => <AgentSwitcher />} prompts={CORE_PLACEHOLDER_PROMPTS} sendIcon={<SendIcon size="sm" />} value="" />;
+  const empty = !initialLoading && !(initialFileView && fileViewQuery.error) && !folders.length && !files.length && !visibleUploads.length && !(initialFileView ? fileViewQuery.hasMore : hasMoreContentLocationPages(locationQuery.data));
+  const matchingEmpty = empty && (filtersActive || Boolean(initialFileView));
+  const core = <CoreComposer accessibilityLabel="Ask Core about your files" expandedPrompts={[...CORE_PLACEHOLDER_PROMPTS]} generationMode={generationMode} leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />} onChangeText={() => undefined} onFocusChange={(focused) => { setCoreOpen(focused); if (focused && initialFileView) onExitFileView?.(); }} onSubmit={() => undefined} openOnMount={!initialFileKey && !initialFileView} openRequest={initialFileView ? 0 : coreRequest} pageIdentity={() => <AgentSwitcher />} prompts={CORE_PLACEHOLDER_PROMPTS} sendIcon={<SendIcon size="sm" />} value="" />;
 
-  const previewPane = preview ? <View style={styles.previewPane}>
+  const previewPane = preview ? <View style={[styles.previewPane, { paddingBottom: previewBottomInset }]}>
     <View style={[styles.titleRow, styles.previewTitleRow]}>
       <Button accessibilityLabel={fileOnly ? "Back to Core" : "Back"} contentMode="raw" onPress={goBack} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
       <Text numberOfLines={1} style={styles.title}>{preview.title}</Text>
     </View>
-    {preview.audioUri ? <AudioIsland uri={preview.audioUri} /> : preview.pdfUri ? <FileViewer hideHeader onBack={goBack} onMenu={() => undefined} pdfUri={preview.pdfUri} title={preview.title} /> : preview.imageUri ? <Image contentFit="contain" source={preview.imageUri} style={styles.previewImage} /> : preview.videoUri ? <VideoPreview uri={preview.videoUri} /> : <ScrollView contentContainerStyle={styles.previewText}><Text selectable style={styles.bodyText}>{preview.text}</Text></ScrollView>}
+    {preview.audioUri ? <AudioIsland onClose={goBack} title={preview.title} uri={preview.audioUri} /> : preview.pdfUri ? <FileViewer error={previewFailed ? "The PDF could not be rendered." : undefined} hideHeader onBack={goBack} onMenu={() => undefined} onRenderError={() => { void recoverPdfPreview(preview.pdfUri!, preview.fileKey); }} pdfUri={preview.pdfUri} title={preview.title} /> : preview.imageUri ? <Image contentFit="contain" source={preview.imageUri} style={styles.previewImage} /> : preview.videoUri ? <VideoPreview uri={preview.videoUri} /> : <ScrollView contentContainerStyle={styles.previewText}><Text selectable style={styles.bodyText}>{preview.text}</Text></ScrollView>}
   </View> : null;
 
   if (fileOnly) return <View style={styles.root}>
     <View style={[styles.header, { paddingTop: insets.top + 6 }]}><AgentSwitcher /><ProfileHeaderRight /></View>
-    {previewPane ?? <View style={styles.previewPane}><View style={[styles.titleRow, styles.previewTitleRow]}><Button accessibilityLabel="Back to Core" contentMode="raw" onPress={goBack} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button><Text numberOfLines={1} style={styles.title}>{initialFileTitle ?? "File"}</Text></View>{previewFailed ? <View style={styles.emptyFill}><Text style={styles.empty}>The file could not be opened.</Text></View> : null}</View>}
+    {previewPane ?? <View style={[styles.previewPane, { paddingBottom: previewBottomInset }]}><View style={[styles.titleRow, styles.previewTitleRow]}><Button accessibilityLabel="Back to Core" contentMode="raw" onPress={goBack} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button><Text numberOfLines={1} style={styles.title}>{initialFileTitle ?? "File"}</Text></View>{previewFailed ? <View style={styles.emptyFill}><Text style={styles.empty}>The file could not be opened.</Text></View> : null}</View>}
   </View>;
 
   const workspace = <>
@@ -650,17 +686,17 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
     {previewPane ??
     <ScrollView contentContainerStyle={[styles.scroll, empty && styles.scrollFill]} keyboardShouldPersistTaps="handled" onScroll={prefetchOnScroll} onScrollBeginDrag={() => loadMore(true)} refreshControl={<PullToRefresh enabled={configured} onRefresh={() => void refresh()} refreshing={userRefreshing} />} scrollEventThrottle={100} showsVerticalScrollIndicator={false} style={styles.scrollView}>
       <View style={styles.titleRow}>
-         <Button accessibilityLabel={currentFolder ? "Back to parent folder" : "Back to Core"} contentMode="raw" onPress={goBack} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
+          <Button accessibilityLabel={currentFolder ? "Back to parent folder" : "Back to Core"} contentMode="raw" onPress={goBack} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
         <Text numberOfLines={1} style={styles.title}>{currentFolder?.name ?? "Storage"}</Text>
         <Button accessibilityLabel="Create or upload" contentMode="raw" onPress={() => setSheet("create")} size="xs" variant="icon"><PlusIcon size="sm" /></Button>
       </View>
       <View style={styles.searchRow}>
         <View style={styles.search}>
           <SearchIcon size="sm" variant="muted" />
-           <TextInput accessibilityLabel="Search files" maxLength={500} onChangeText={setQuery} placeholder="Search anything..." style={styles.searchInput} value={query} />
+            <TextInput accessibilityLabel="Search files" maxLength={500} onChangeText={(value) => { if (initialFileView && value) onExitFileView?.(); setQuery(value); }} placeholder="Search anything..." style={styles.searchInput} value={query} />
           {query ? <Button accessibilityLabel="Clear search" contentMode="raw" iconOnly onPress={() => setQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}
         </View>
-        <Button accessibilityLabel="Filter files" contentMode="raw" onPress={() => setSheet("filter")} size="md" variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
+        <Button accessibilityLabel="Filter files" contentMode="raw" onPress={() => { if (initialFileView) onExitFileView?.(); setSheet("filter"); }} size="md" variant="icon"><FilterIcon size="sm" variant={filtersActive ? "accent" : "default"} /></Button>
       </View>
       <TagFilterLane context={contentContext} />
       {bulkActive ? <Tabs style={styles.bulkBar}>
@@ -668,6 +704,7 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
         <Button accessibilityLabel="Selected file actions" contentMode="raw" onPress={() => setSheet("bulk")} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
       </Tabs> : null}
        {!searching && initialLoading ? <View accessibilityLabel="Loading files" style={styles.grid}>{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} style={[styles.card, styles.gridSkeleton, { width: cardSize, height: cardSize }]} />)}</View> : null}
+       {initialFileView && fileViewQuery.error ? <View style={styles.emptyFill}><Text style={styles.empty}>Files could not be loaded.</Text><Button onPress={() => void fileViewQuery.refresh()} size="md" variant="secondary">Retry</Button></View> : null}
        {searching ? query.trim() !== settledQuery || searchQuery.isPending ? <View style={styles.grid}>{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} style={[styles.card, styles.gridSkeleton, { width: cardSize, height: cardSize }]} />)}</View> : searchQuery.isError ? <View style={styles.emptyFill}><Text style={styles.empty}>Search could not be completed.</Text><Button onPress={() => void searchQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : searchResults.length ? <SearchResultsGrid horizontalInset={spacing.md} items={searchResults} onOpen={(item) => { setQuery(""); if ("folder" in item) setFolderStack((stack) => [...stack, item.folder]); else if (item.file.extension) void openFile({ key: item.key, name: item.file.name, extension: item.file.extension }, sessionUploads[item.key]?.uri); else void findContentFile(item.key, contentContext).then((file) => openFile(file, sessionUploads[file.key]?.uri)).catch(() => showToast({ title: "The file could not be opened.", duration: 2_500 })); }} renderCover={(item) => "file" in item ? <FileCover file={{ key: item.file.fileKey, extension: item.file.extension ?? "txt" }} localUri={sessionUploads[item.key]?.uri} /> : <FolderIcon size="lg" />} renderLabel={(item) => "folder" in item ? <Text ellipsizeMode="tail" numberOfLines={1} style={styles.cardLabel}>{item.label}</Text> : <FileCardLabel extension={item.file.extension ?? "txt"} name={item.label} />} /> : <View style={styles.emptyFill}><Text style={styles.empty}>No matching files.</Text></View> : loading ? <View style={styles.grid}>{Array.from({ length: 8 }, (_, index) => <Skeleton key={index} style={[styles.card, styles.gridSkeleton, { width: cardSize, height: cardSize }]} />)}</View> : matchingEmpty ? <View style={styles.emptyFill}><Text style={styles.empty}>No matching files.</Text></View> : empty ? <View style={styles.emptyFill}><Text style={styles.empty}>No files yet.</Text><Button accessibilityLabel="Create or upload" contentMode="raw" onPress={() => setSheet("create")} size="lg" variant="icon"><PlusIcon size="lg" /></Button></View> : <View style={styles.fileSections}>
         {itemGroups.map((group) => <View key={group.label} style={styles.dateGroup}>
          <Text style={styles.dateHeading}>{group.label}</Text>
@@ -699,14 +736,16 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
           })}
           </View>
          </View>)}
-        {!searching && loadingMoreKey === locationIdentity ? <View accessibilityLabel="Loading more files" style={styles.grid}>{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} style={[styles.card, styles.gridSkeleton, { width: cardSize, height: cardSize }]} />)}</View> : null}
-      </View>}
+         {!searching && (initialFileView ? fileViewQuery.loadingMore : loadingMoreKey === locationIdentity) ? <View accessibilityLabel="Loading more files" style={styles.grid}>{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} style={[styles.card, styles.gridSkeleton, { width: cardSize, height: cardSize }]} />)}</View> : null}
+         {initialFileView && fileViewQuery.moreError ? <Button onPress={() => fileViewQuery.loadMore()} size="md" variant="secondary">Retry more files</Button> : null}
+       </View>}
     </ScrollView>}
   </>;
 
   return <View style={styles.root}>
     {workspace}
     {core}
+    {initialFileView && !coreOpen && !preview ? <View pointerEvents="box-none" style={[styles.fileViewIsland, { bottom: insets.bottom + 92 }]}><Button onPress={() => onExitFileView?.()} size="md" variant="secondary">View all files</Button></View> : null}
     <BottomSheet hideHeading onOpenChange={(open) => { if (!open && sheet === "create") setSheet(undefined); }} open={sheet === "create"} title="">
       <BottomSheetMenu>
           <BottomSheetItem onPress={() => { setNameDraft(""); setDescriptionDraft(""); setSheet("rename"); }} style={styles.sheetAction} textStyle={styles.sheetActionText} variant="secondary">Create folder</BottomSheetItem>
@@ -769,6 +808,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.page },
   header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.md, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomColor: palette.hairline, borderBottomWidth: 1 },
   previewPane: { flex: 1 },
+  fileViewIsland: { position: "absolute", alignSelf: "center" },
   scrollView: { flex: 1 },
   scroll: { flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md, gap: spacing.md },
   scrollFill: { flexGrow: 1 },
@@ -801,6 +841,4 @@ const styles = StyleSheet.create({
   bulkBar: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 5, backgroundColor: palette.panel },
   bulkSelection: { flexDirection: "row", alignItems: "center", gap: 8 },
   bulkLabel: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12 },
-  audioIsland: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.md },
-  audioTime: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 13 },
 });

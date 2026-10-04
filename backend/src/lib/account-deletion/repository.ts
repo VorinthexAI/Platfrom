@@ -1,23 +1,18 @@
 import { db, withTransaction } from '@/lib/db/client';
-import { createScopeRepository, SCOPE_REMOVAL_WRITE_COLLECTIONS } from '@/lib/ai/scopes/repository';
 
 export interface AccountDeletionPlan {
-  userKey: string;
   email: string;
-  teamKeys: string[];
   scopeKeys: string[];
+  visitorKeys: string[];
   presenceSessionKeys: string[];
-  blocked: boolean;
   activeCheckout: boolean;
   recoverableCheckout: boolean;
 }
 
 export type AccountDeletionFenceResult =
   | { status: 'fenced'; presenceSessionKeys: string[]; recipient: { email: string } }
-  | { status: 'not_found' | 'shared_access' | 'active_checkout' | 'checkout_recovery_required' };
-export type AccountDeletionResult =
-  | { status: 'deleted' }
-  | { status: 'not_found' | 'shared_access' | 'active_checkout' };
+  | { status: 'not_found' | 'active_checkout' | 'checkout_recovery_required' };
+export type AccountDeletionResult = { status: 'deleted' | 'not_found' | 'active_checkout' };
 
 type Cursor = { next(): Promise<unknown> };
 export interface AccountDeletionDatabase { query(query: string, bindVars?: Record<string, unknown>): Promise<Cursor> }
@@ -28,51 +23,75 @@ export interface AccountDeletionRepository {
   finalize(userKey: string): Promise<AccountDeletionResult>;
 }
 
-const BASE_ACCOUNT_DELETE_WRITE_COLLECTIONS = [
-  'users', 'teams', 'userTeams', 'scopes', 'scopeMembers', 'authSessions', 'authChallenges', 'userSessions', 'userConnectors',
-  'visitors', 'visitorSessions',
-  'userMentions', 'userReactions', 'userHiddens', 'userGenerations', 'userSearches', 'contentSearchQueries', 'contentIdempotency',
-  'conversations', 'conversationMessages', 'conversationAttachmentArtifacts', 'tickets', 'userInboxThreads', 'userInboxMessages', 'userNotifications', 'events', 'tags', 'tagAssignments',
-  'pushSubscriptions', 'appNotifications', 'appNotificationRecipients', 'pushDeliveries',
-  'sparkTransactions', 'billingExecutions', 'referralCodes', 'referralAttributions', 'referralRewards',
-  'checkoutHandoffs', 'paymentCheckouts', 'paymentOrders', 'subscriptions', 'bookRefundIntents',
-  'storageObjects', 'storageChargingHours', 'storageChargingMeters', 'storageRetentionStates', 'galleryUploads', 'storageDeletionJobs',
+// Only collections that exist in the current user -> scopes -> folders -> files
+// model belong here. Global product, webhook, and migration ledgers are retained.
+export const ACCOUNT_DELETE_WRITE_COLLECTIONS = [
+  'users', 'scopes', 'folders', 'files', 'authSessions', 'authChallenges', 'userSessions', 'visitors', 'visitorSessions',
+  'userSearches', 'contentIdempotency', 'conversations', 'conversationMessages', 'conversationAttachmentArtifacts', 'conversationArchiveStates',
+  'tickets', 'ticketVotes', 'userNotifications', 'events', 'tags', 'tagAssignments', 'pushSubscriptions', 'pushDeliveries',
+  'sparkTransactions', 'billingExecutions', 'newcomerGrantClaims', 'referralCodes', 'referralAttributions', 'referralRewards',
+  'checkoutHandoffs', 'paymentCheckouts', 'paymentOrders', 'subscriptions', 'storageObjects', 'storageChargingHours',
+  'storageChargingMeters', 'storageRetentionStates', 'storageDeletionJobs',
 ] as const;
 
-const ACCOUNT_DELETE_WRITE_COLLECTIONS = [...BASE_ACCOUNT_DELETE_WRITE_COLLECTIONS, 'conversationArchiveStates', 'folders', 'files'] as const;
-
-const DELETE_WRITE_COLLECTIONS = [...new Set([...ACCOUNT_DELETE_WRITE_COLLECTIONS, ...SCOPE_REMOVAL_WRITE_COLLECTIONS])];
+const FENCE_COLLECTIONS = {
+  read: ['scopes', 'visitors', 'visitorSessions', 'userSessions', 'paymentCheckouts'],
+  write: ['users'],
+};
 
 const INSPECT_QUERY = `
   LET user = DOCUMENT(users, @userKey)
   FILTER user != null
-  LET memberships = (FOR membership IN userTeams FILTER membership.userId == @userKey RETURN membership)
-  LET personalTeams = (FOR team IN teams FILTER team.personalOwnerUserId == @userKey RETURN team)
-  LET teamKeys = UNIQUE(personalTeams[*]._key)
-  LET scopeKeys = (FOR scope IN scopes FILTER scope.teamKey IN teamKeys RETURN scope._key)
+  LET scopeKeys = (FOR scope IN scopes FILTER scope.userKey == @userKey RETURN scope._key)
   LET visitorKeys = (FOR visitor IN visitors FILTER visitor.userId == @userKey || visitor.emailHash == user.emailHash RETURN visitor._key)
   LET presenceSessionKeys = UNIQUE(UNION(
     (FOR item IN userSessions FILTER item.userId == @userKey RETURN item.sessionKey),
     (FOR item IN visitorSessions FILTER item.visitorId IN visitorKeys RETURN item.sessionKey)
   ))
-  LET foreignActiveMembership = LENGTH(FOR membership IN memberships FILTER membership.status == "active" && membership.teamKey NOT IN teamKeys LIMIT 1 RETURN 1) > 0
-  LET otherTeamMember = LENGTH(FOR membership IN userTeams FILTER membership.teamKey IN teamKeys && membership.userId != @userKey && membership.status == "active" LIMIT 1 RETURN 1) > 0
-  LET otherScopeMember = LENGTH(
-    FOR member IN scopeMembers
-      FILTER member.scopeKey IN scopeKeys && member.status == "active"
-      LET membership = DOCUMENT(userTeams, member.userTeamKey)
-      FILTER membership != null && membership.status == "active" && membership.userId != @userKey
-      LIMIT 1 RETURN 1
-  ) > 0
   LET activeCheckout = LENGTH(FOR checkout IN paymentCheckouts FILTER checkout.userKey == @userKey && (checkout.status == "open" || (checkout.status == "pending" && checkout.updatedAt >= @pendingCutoff)) LIMIT 1 RETURN 1) > 0
   LET recoverableCheckout = LENGTH(FOR checkout IN paymentCheckouts FILTER checkout.userKey == @userKey && checkout.status == "pending" && checkout.updatedAt < @pendingCutoff LIMIT 1 RETURN 1) > 0
-  RETURN { userKey: user._key, email: user.email, teamKeys, scopeKeys, presenceSessionKeys, blocked: foreignActiveMembership || otherTeamMember || otherScopeMember, activeCheckout, recoverableCheckout }
+  RETURN { email: user.email, scopeKeys, visitorKeys, presenceSessionKeys, activeCheckout, recoverableCheckout }
 `;
 
-const FENCE_COLLECTIONS = {
-  read: ['teams', 'userTeams', 'scopes', 'scopeMembers', 'visitors', 'visitorSessions', 'paymentCheckouts'],
-  write: ['users', 'userSessions'],
-};
+// Predicates are fixed by the repository, never supplied by a caller. Keep each
+// collection's removal in the same exclusive transaction as the user removal.
+const DELETE_OWNED = [
+  ['ticketVotes', 'item.userKey == @userKey || item.ticketKey IN @ticketKeys || item.scopeKey IN @scopeKeys'],
+  ['tickets', 'item.userKey == @userKey'],
+  ['tagAssignments', 'item.scopeKey IN @scopeKeys || item.tagKey IN @tagKeys'],
+  ['tags', 'item.userKey == @userKey'],
+  ['pushDeliveries', 'item.userKey == @userKey'],
+  ['pushSubscriptions', 'item.userKey == @userKey'],
+  ['userNotifications', 'item.userKey == @userKey'],
+  ['conversationMessages', 'item.userKey == @userKey'],
+  ['conversationAttachmentArtifacts', 'item.userKey == @userKey'],
+  ['conversationArchiveStates', 'item.userKey == @userKey'],
+  ['conversations', 'item.userKey == @userKey'],
+  ['files', 'item.userKey == @userKey'],
+  ['folders', 'item.userKey == @userKey'],
+  ['scopes', 'item.userKey == @userKey'],
+  ['storageObjects', 'item.userKey == @userKey'],
+  ['storageChargingHours', 'item.userKey == @userKey'],
+  ['storageChargingMeters', 'item.userKey == @userKey'],
+  ['storageRetentionStates', 'item.userKey == @userKey'],
+  ['contentIdempotency', 'item.actorKey == @userKey || item.userKey == @userKey'],
+  ['userSearches', 'item.userKey == @userKey'],
+  ['events', 'item.userId == @userKey || item.scopeKey IN @scopeKeys'],
+  ['billingExecutions', 'item.userKey == @userKey'],
+  ['sparkTransactions', 'item.userKey == @userKey'],
+  ['referralRewards', 'item.referrerUserKey == @userKey || item.referredUserKey == @userKey'],
+  ['referralAttributions', 'item.referrerUserKey == @userKey || item.referredUserKey == @userKey'],
+  ['referralCodes', 'item.ownerUserKey == @userKey'],
+  ['checkoutHandoffs', 'item.userKey == @userKey'],
+  ['paymentCheckouts', 'item.userKey == @userKey'],
+  ['paymentOrders', 'item.userKey == @userKey'],
+  ['subscriptions', 'item.userKey == @userKey'],
+  ['authSessions', 'item.userId == @userKey'],
+  ['authChallenges', 'item.identityKey == @userKey || item.userId == @userKey'],
+  ['userSessions', 'item.userId == @userKey'],
+  ['visitorSessions', 'item.visitorId IN @visitorKeys'],
+  ['visitors', 'item._key IN @visitorKeys'],
+] as const;
 
 export function createAccountDeletionRepository(
   database: AccountDeletionDatabase = db as unknown as AccountDeletionDatabase,
@@ -84,7 +103,6 @@ export function createAccountDeletionRepository(
         const cursor = await transaction.query(INSPECT_QUERY, { userKey, pendingCutoff });
         const plan = (await cursor.next() as AccountDeletionPlan | null) ?? null;
         if (!plan) return { status: 'not_found' as const };
-        if (plan.blocked) return { status: 'shared_access' as const };
         if (plan.activeCheckout) return { status: 'active_checkout' as const };
         if (plan.recoverableCheckout) return { status: 'checkout_recovery_required' as const };
         const fenced = await transaction.query('LET user = DOCUMENT(users, @userKey) FILTER user != null UPDATE user WITH { deletionRequestedAt: user.deletionRequestedAt || @requestedAt, updatedAt: @requestedAt } IN users RETURN NEW._key', { userKey, requestedAt });
@@ -93,93 +111,37 @@ export function createAccountDeletionRepository(
       });
     },
     async finalize(userKey) {
-      return transact(DELETE_WRITE_COLLECTIONS, async (transaction) => {
-        const planCursor = await transaction.query(INSPECT_QUERY, { userKey, pendingCutoff: new Date().toISOString() });
-        const plan = (await planCursor.next() as AccountDeletionPlan | null) ?? null;
+      return transact([...ACCOUNT_DELETE_WRITE_COLLECTIONS], async (transaction) => {
+        const cursor = await transaction.query(INSPECT_QUERY, { userKey, pendingCutoff: new Date().toISOString() });
+        const plan = (await cursor.next() as AccountDeletionPlan | null) ?? null;
         if (!plan) return { status: 'not_found' as const };
-        if (plan.blocked) return { status: 'shared_access' as const };
         if (plan.activeCheckout || plan.recoverableCheckout) return { status: 'active_checkout' as const };
         const fenceCursor = await transaction.query('LET user = DOCUMENT(users, @userKey) RETURN user != null && IS_STRING(user.deletionRequestedAt)', { userKey });
         if (await fenceCursor.next() !== true) throw new Error('Account deletion requires a durable deletion fence.');
 
-        const scopeRepository = createScopeRepository(transaction as never, async () => []);
-        for (const scopeKey of plan.scopeKeys) await scopeRepository.removeScope(scopeKey, userKey);
-
-        const cursor = await transaction.query(`
-           LET user = DOCUMENT(users, @userKey)
-           FILTER user != null
-           LET memberships = (FOR membership IN userTeams FILTER membership.userId == @userKey RETURN membership)
-           LET ownedTeamMemberships = (FOR membership IN userTeams FILTER membership.teamKey IN @teamKeys RETURN membership)
-           LET teamMembershipKeys = UNIQUE(UNION(memberships[*]._key, ownedTeamMemberships[*]._key))
-           LET visitorKeys = (FOR visitor IN visitors FILTER visitor.userId == @userKey || visitor.emailHash == user.emailHash RETURN visitor._key)
-           LET presenceSessionKeys = UNIQUE(UNION(
-             (FOR item IN userSessions FILTER item.userId == @userKey RETURN item.sessionKey),
-             (FOR item IN visitorSessions FILTER item.visitorId IN visitorKeys RETURN item.sessionKey)
-           ))
-          LET storageKeys = UNIQUE(UNION(
+        const storage = await transaction.query(`LET user = DOCUMENT(users, @userKey)
+          RETURN UNIQUE(UNION(
             IS_STRING(user.profileStorageKey) ? [user.profileStorageKey] : [],
-             (FOR upload IN galleryUploads FILTER upload.actorKey IN teamMembershipKeys && IS_STRING(upload.storageKey) RETURN upload.storageKey),
-             (FOR file IN files FILTER file.userKey == @userKey FOR key IN [file.storageKey, file.thumbnailStorageKey] FILTER IS_STRING(key) RETURN key),
-             (FOR object IN storageObjects FILTER object.userKey == @userKey && IS_STRING(object.storageKey) RETURN object.storageKey),
-             (FOR artifact IN conversationAttachmentArtifacts FILTER artifact.userKey == @userKey && IS_STRING(artifact.stagedStorageKey) RETURN artifact.stagedStorageKey)
-          ))
-          LET queuedStorage = (FOR storageKey IN storageKeys UPSERT { storageKey } INSERT { storageKey, createdAt: @now, status: "pending" } UPDATE {} IN storageDeletionJobs RETURN 1)
-          LET cleanupStorageObjects = (FOR item IN storageObjects FILTER item.userKey == @userKey REMOVE item IN storageObjects RETURN 1)
-          LET cleanupStorageHours = (FOR item IN storageChargingHours FILTER item.userKey == @userKey REMOVE item IN storageChargingHours RETURN 1)
-          LET cleanupStorageMeters = (FOR item IN storageChargingMeters FILTER item.userKey == @userKey REMOVE item IN storageChargingMeters RETURN 1)
-          LET cleanupStorageRetention = (FOR item IN storageRetentionStates FILTER item.userKey == @userKey REMOVE item IN storageRetentionStates RETURN 1)
-          LET cleanupGalleryUploads = (FOR item IN galleryUploads FILTER item.actorKey IN teamMembershipKeys REMOVE item IN galleryUploads RETURN 1)
-           LET cleanupAuthSessions = (FOR item IN authSessions FILTER item.userId == @userKey REMOVE item IN authSessions RETURN 1)
-           LET cleanupAuthChallenges = (FOR item IN authChallenges FILTER item.identityKey == @userKey || item.userId == @userKey REMOVE item IN authChallenges RETURN 1)
-           LET cleanupUserConnectors = (FOR item IN userConnectors FILTER item.userKey == @userKey REMOVE item IN userConnectors RETURN 1)
-            LET cleanupPresenceSessions = (FOR item IN userSessions FILTER item.userId == @userKey REMOVE item IN userSessions RETURN 1)
-           LET cleanupVisitorSessions = (FOR item IN visitorSessions FILTER item.visitorId IN visitorKeys REMOVE item IN visitorSessions RETURN 1)
-           LET cleanupVisitors = (FOR item IN visitors FILTER item._key IN visitorKeys REMOVE item IN visitors RETURN 1)
-          LET cleanupMentions = (FOR item IN userMentions FILTER item.userKey == @userKey REMOVE item IN userMentions RETURN 1)
-          LET cleanupReactions = (FOR item IN userReactions FILTER item.userKey == @userKey REMOVE item IN userReactions RETURN 1)
-          LET cleanupHiddens = (FOR item IN userHiddens FILTER item.userKey == @userKey REMOVE item IN userHiddens RETURN 1)
-          LET cleanupGenerations = (FOR item IN userGenerations FILTER item.userKey == @userKey REMOVE item IN userGenerations RETURN 1)
-          LET cleanupSearches = (FOR item IN userSearches FILTER item.userKey == @userKey REMOVE item IN userSearches RETURN 1)
-          LET cleanupSearchCache = (FOR item IN contentSearchQueries FILTER item.actorKey == @userKey REMOVE item IN contentSearchQueries RETURN 1)
-          LET cleanupIdempotency = (FOR item IN contentIdempotency FILTER item.actorKey == @userKey REMOVE item IN contentIdempotency RETURN 1)
-          LET cleanupConversationMessages = (FOR item IN conversationMessages FILTER item.userKey == @userKey REMOVE item IN conversationMessages RETURN 1)
-           LET cleanupConversationAttachmentArtifacts = (FOR item IN conversationAttachmentArtifacts FILTER item.userKey == @userKey REMOVE item IN conversationAttachmentArtifacts RETURN 1)
-           LET cleanupConversationArchiveStates = (FOR item IN conversationArchiveStates FILTER item.userKey == @userKey REMOVE item IN conversationArchiveStates RETURN 1)
-            LET cleanupConversationArchiveDocuments = (FOR item IN files FILTER item.userKey == @userKey && item.managedPurpose IN ["conversation-transcript", "conversation-summary"] REMOVE item IN files RETURN 1)
-            LET cleanupConversationArchiveFolders = (FOR item IN folders FILTER item.userKey == @userKey && item.managedPurpose IN ["conversation-root", "conversation", "conversation-summaries"] REMOVE item IN folders RETURN 1)
-           LET cleanupConversations = (FOR item IN conversations FILTER item.userKey == @userKey REMOVE item IN conversations RETURN 1)
-            LET cleanupTickets = (FOR item IN tickets FILTER item.userKey == @userKey REMOVE item IN tickets RETURN 1)
-            LET notificationKeys = (FOR item IN appNotifications FILTER item.actorUserKey == @userKey RETURN item._key)
-            LET notificationThreadKeys = (FOR item IN userInboxThreads FILTER item.notificationKey IN notificationKeys RETURN item._key)
-            LET cleanupInboxMessages = (FOR item IN userInboxMessages FILTER item.userKey == @userKey || item.threadKey IN notificationThreadKeys REMOVE item IN userInboxMessages RETURN 1)
-            LET cleanupInboxThreads = (FOR item IN userInboxThreads FILTER item.userKey == @userKey || item._key IN notificationThreadKeys REMOVE item IN userInboxThreads RETURN 1)
-            LET cleanupUserNotifications = (FOR item IN userNotifications FILTER item.userKey == @userKey || item.sourceKey IN notificationKeys REMOVE item IN userNotifications RETURN 1)
-            LET cleanupEvents = (FOR item IN events FILTER item.userId == @userKey REMOVE item IN events RETURN 1)
-            LET cleanupPushDeliveries = (FOR item IN pushDeliveries FILTER item.userKey == @userKey || item.notificationKey IN notificationKeys REMOVE item IN pushDeliveries RETURN 1)
-           LET cleanupNotificationRecipients = (FOR item IN appNotificationRecipients FILTER item.userKey == @userKey || item.notificationKey IN notificationKeys REMOVE item IN appNotificationRecipients RETURN 1)
-           LET cleanupNotifications = (FOR item IN appNotifications FILTER item._key IN notificationKeys REMOVE item IN appNotifications RETURN 1)
-          LET cleanupPushSubscriptions = (FOR item IN pushSubscriptions FILTER item.userKey == @userKey REMOVE item IN pushSubscriptions RETURN 1)
-          LET tagKeys = (FOR item IN tags FILTER item.userKey == @userKey RETURN item._key)
-          LET cleanupTagAssignments = (FOR item IN tagAssignments FILTER item.tagKey IN tagKeys REMOVE item IN tagAssignments RETURN 1)
-          LET cleanupTags = (FOR item IN tags FILTER item.userKey == @userKey REMOVE item IN tags RETURN 1)
-          LET cleanupBillingExecutions = (FOR item IN billingExecutions FILTER item.userKey == @userKey REMOVE item IN billingExecutions RETURN 1)
-          LET cleanupSparkTransactions = (FOR item IN sparkTransactions FILTER item.userKey == @userKey REMOVE item IN sparkTransactions RETURN 1)
-          LET cleanupReferralRewards = (FOR item IN referralRewards FILTER item.referrerUserKey == @userKey || item.referredUserKey == @userKey REMOVE item IN referralRewards RETURN 1)
-          LET cleanupReferralAttributions = (FOR item IN referralAttributions FILTER item.referrerUserKey == @userKey || item.referredUserKey == @userKey REMOVE item IN referralAttributions RETURN 1)
-          LET cleanupReferralCodes = (FOR item IN referralCodes FILTER item.ownerUserKey == @userKey REMOVE item IN referralCodes RETURN 1)
-          LET cleanupCheckoutHandoffs = (FOR item IN checkoutHandoffs FILTER item.userKey == @userKey REMOVE item IN checkoutHandoffs RETURN 1)
-          LET cleanupPaymentCheckouts = (FOR item IN paymentCheckouts FILTER item.userKey == @userKey REMOVE item IN paymentCheckouts RETURN 1)
-          LET cleanupPaymentOrders = (FOR item IN paymentOrders FILTER item.userKey == @userKey REMOVE item IN paymentOrders RETURN 1)
-          LET cleanupSubscriptions = (FOR item IN subscriptions FILTER item.userKey == @userKey REMOVE item IN subscriptions RETURN 1)
-          LET cleanupBookRefunds = (FOR item IN bookRefundIntents FILTER item.userKey == @userKey REMOVE item IN bookRefundIntents RETURN 1)
-          LET cleanupScopeMembers = (FOR item IN scopeMembers FILTER item.userTeamKey IN teamMembershipKeys REMOVE item IN scopeMembers RETURN 1)
-           LET cleanupMemberships = (FOR item IN userTeams FILTER item._key IN teamMembershipKeys REMOVE item IN userTeams RETURN 1)
-          LET cleanupTeams = (FOR item IN teams FILTER item._key IN @teamKeys REMOVE item IN teams RETURN 1)
-           REMOVE user IN users
-           RETURN presenceSessionKeys
-        `, { userKey, teamKeys: plan.teamKeys, now: new Date().toISOString() });
-        const presenceSessionKeys = await cursor.next();
-        if (!Array.isArray(presenceSessionKeys)) throw new Error('Account deletion transaction did not remove the user.');
+            (FOR file IN files FILTER file.userKey == @userKey FOR key IN [file.storageKey, file.thumbnailStorageKey] FILTER IS_STRING(key) RETURN key),
+            (FOR object IN storageObjects FILTER object.userKey == @userKey && IS_STRING(object.storageKey) RETURN object.storageKey),
+            (FOR artifact IN conversationAttachmentArtifacts FILTER artifact.userKey == @userKey && IS_STRING(artifact.stagedStorageKey) RETURN artifact.stagedStorageKey)
+          ))`, { userKey });
+        const storageKeys = await storage.next() as string[];
+        await transaction.query('FOR storageKey IN @storageKeys UPSERT { storageKey } INSERT { storageKey, createdAt: @now, status: "pending" } UPDATE {} IN storageDeletionJobs', { storageKeys, now: new Date().toISOString() });
+
+        const ticketCursor = await transaction.query('RETURN (FOR ticket IN tickets FILTER ticket.userKey == @userKey RETURN ticket._key)', { userKey });
+        const tagCursor = await transaction.query('RETURN (FOR tag IN tags FILTER tag.userKey == @userKey RETURN tag._key)', { userKey });
+        // Keep the installation's spent-grant marker, but remove every link to
+        // the deleted user so a new account on this device cannot claim again.
+        await transaction.query('FOR claim IN newcomerGrantClaims FILTER claim.userKey == @userKey UPDATE claim WITH { userKey: null } IN newcomerGrantClaims OPTIONS { keepNull: false }', { userKey });
+        const values = { userKey, scopeKeys: plan.scopeKeys, visitorKeys: plan.visitorKeys, ticketKeys: await ticketCursor.next(), tagKeys: await tagCursor.next() };
+        for (const [collection, predicate] of DELETE_OWNED) {
+          const bind: Record<string, unknown> = { '@collection': collection };
+          for (const [key, value] of Object.entries(values)) if (predicate.includes(`@${key}`)) bind[key] = value;
+          await transaction.query(`FOR item IN @@collection FILTER ${predicate} REMOVE item IN @@collection`, bind);
+        }
+        const removed = await transaction.query('LET user = DOCUMENT(users, @userKey) FILTER user != null REMOVE user IN users RETURN OLD._key', { userKey });
+        if (await removed.next() !== userKey) throw new Error('Account deletion transaction did not remove the user.');
         return { status: 'deleted' as const };
       });
     },

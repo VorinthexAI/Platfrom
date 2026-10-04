@@ -1,10 +1,11 @@
 export const MICRO_SPARKS_PER_SPARK = 1_000_000;
-export const ACCOUNT_GRANT_SPARKS = 100;
+export const ACCOUNT_GRANT_SPARKS = 50;
 export const ACCOUNT_GRANT_MICRO_SPARKS = ACCOUNT_GRANT_SPARKS * MICRO_SPARKS_PER_SPARK;
 export const REFERRAL_PROGRAM_VERSION = 'v1' as const;
 export const REFERRAL_SIGNUP_REWARD_MICRO_SPARKS = 50_000_000;
 export const REFERRAL_PAID_REWARD_MICRO_SPARKS = 100_000_000;
-export const STORAGE_SPARKS_PER_GB_MONTH = 30;
+export const STORAGE_SPARKS_PER_GB_MONTH = 15;
+export const RERANK_SPARKS_PER_MILLION_TOKENS = 20;
 export const BYTES_PER_GB = 1_000_000_000;
 export const HOURS_PER_BILLING_MONTH = 730;
 
@@ -60,7 +61,7 @@ export const TOOL_COST_POLICIES: Readonly<Record<string, ToolCostPolicy>> = Obje
 
 export function lookupToolCostPolicy(toolSlug: string, input?: unknown): ToolCostPolicy | null {
   const slug = assertDottedSlug(toolSlug);
-  if (slug === 'ticket.create' && typeof input === 'object' && input !== null && (input as Record<string, unknown>).kind === 'feedback') return { mode: 'action' };
+  if (slug === 'ticket.create') return { mode: 'action' };
   return TOOL_COST_POLICIES[slug] ?? null;
 }
 
@@ -212,6 +213,9 @@ export function calculateActionCostMicroSparks(actionSlug: string, usage: Readon
     numerator = BigInt(duration as number) * 15n * BigInt(MICRO_SPARKS_PER_SPARK);
   } else if (actionSlug === 'embed') {
     return 0;
+  } else if (actionSlug === 'rerank') {
+    // 20 Sparks per million processed tokens = 20 microSparks per token.
+    numerator = (inputTokens + outputTokens) * BigInt(RERANK_SPARKS_PER_MILLION_TOKENS);
   } else if (actionSlug === 'decide') {
     // 10 Sparks per million output tokens = 10 microSparks per output token.
     // Jev's input tokens are deliberately free to the user.

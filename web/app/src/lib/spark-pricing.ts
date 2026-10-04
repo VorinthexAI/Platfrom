@@ -1,5 +1,6 @@
 export const SPARK_PRICING_CURRENCY = "USD" as const;
-export const NEWCOMER_FREE_SPARKS = 100;
+export const NEWCOMER_FREE_SPARKS = 50;
+export const STORAGE_SPARKS_PER_GB_MONTH = 15;
 
 export const SPARK_SUBSCRIPTIONS = [
   {

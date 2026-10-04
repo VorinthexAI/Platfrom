@@ -27,7 +27,7 @@ export function readLocalOnboardingState(): Promise<LocalOnboardingState> {
       SecureStore.getItemAsync(COMPLETE_KEY), SecureStore.getItemAsync(POST_DELETION_KEY),
       SecureStore.getItemAsync(INTRO_SEEN_KEY), SecureStore.getItemAsync(LEGACY_INTRO_SEEN_KEY), SecureStore.getItemAsync(LEGACY_PREVIEW_COMPLETE_KEY),
     ]);
-    const previewComplete = [complete, postDeletion, seen, legacySeen, legacyComplete].includes("true");
+    const previewComplete = postDeletion === "true" ? seen === "true" : [complete, seen, legacySeen, legacyComplete].includes("true");
     if (previewComplete && seen !== "true") await SecureStore.setItemAsync(INTRO_SEEN_KEY, "true");
     if (started === revision) publish({ complete: complete === "true", postDeletion: postDeletion === "true", previewComplete, introActive: false });
     return state;
@@ -42,8 +42,8 @@ export async function markOnboardingIntroShown() {
 }
 
 export async function markOnboardingPreviewComplete() {
-  publish(withPreviewComplete(state));
   await SecureStore.setItemAsync(INTRO_SEEN_KEY, "true");
+  publish(withPreviewComplete(state));
 }
 
 export async function markOnboardingComplete() {
@@ -58,10 +58,26 @@ export async function markOnboardingComplete() {
 export async function markPostDeletionOnboarding() {
   publish(withPostDeletion(state));
   await SecureStore.setItemAsync(POST_DELETION_KEY, "true");
+  await Promise.all([
+    SecureStore.deleteItemAsync(COMPLETE_KEY),
+    SecureStore.deleteItemAsync(INTRO_SEEN_KEY),
+    SecureStore.deleteItemAsync(LEGACY_INTRO_SEEN_KEY),
+    SecureStore.deleteItemAsync(LEGACY_PREVIEW_COMPLETE_KEY),
+  ]);
 }
 
 export function resetOnboardingSession() {
   publish({ ...state, introActive: false });
+}
+
+export function beginAccountDeletionIntro(): LocalOnboardingState {
+  const previous = state;
+  publish({ ...state, previewComplete: false, introActive: false, deletionPending: true });
+  return previous;
+}
+
+export function cancelAccountDeletionIntro(previous: LocalOnboardingState) {
+  publish({ ...previous, deletionPending: false });
 }
 
 export function getLocalOnboardingState() {

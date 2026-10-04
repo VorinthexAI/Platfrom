@@ -64,7 +64,7 @@ export function AuthenticatedEventBridge() {
     const conversationContext = { userKey, scopeKey };
     const invalidateBilling = () => {
       void queryClient.invalidateQueries({ queryKey: currentSubscriptionQueryKey(userKey), exact: true, refetchType: "active" });
-      void queryClient.invalidateQueries({ queryKey: billingSummaryQueryKey(userKey), exact: true, refetchType: "active" });
+       void queryClient.invalidateQueries({ queryKey: billingSummaryQueryKey(userKey), refetchType: "active" });
       void queryClient.invalidateQueries({ queryKey: walletHistoryQueryKey(userKey), exact: true, refetchType: "active" });
     };
     const invalidateReferral = () => void queryClient.invalidateQueries({ queryKey: referralSummaryQueryKey(userKey), exact: true, refetchType: "active" });

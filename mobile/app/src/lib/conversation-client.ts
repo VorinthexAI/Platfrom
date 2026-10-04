@@ -64,6 +64,7 @@ export const conversationRetrievalSchema = z.strictObject({
   filters: conversationRetrievalFiltersSchema.optional(),
   searchCollectionSlugs: z.array(conversationRetrievalCollectionSlugSchema).min(1).max(10).optional(),
   source: z.enum(["search", "results"]).optional(),
+  inventory: z.strictObject({ folderKey: z.string().cuid().optional(), extensions: z.array(z.enum(FILE_EXTENSIONS)).min(1).optional() }).optional(),
   groups: z.array(z.strictObject({
     collectionSlug: conversationRetrievalCollectionSlugSchema,
     results: z.array(z.strictObject({ key: z.string().trim().min(1).max(255), label: z.string().trim().min(1).max(200), destinationKey: z.string().trim().min(1).max(255).optional(), destinationCollectionSlug: conversationRetrievalCollectionSlugSchema.optional() })).min(1).max(50),

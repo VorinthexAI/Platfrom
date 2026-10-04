@@ -1,5 +1,6 @@
 import { deleteActionDefinition } from './delete';
 import { embedAction } from './embed';
+import { rerankAction } from './rerank';
 import { decideAction } from './decide';
 import { insertActionDefinition } from './insert';
 import { readAction } from './read';
@@ -17,6 +18,7 @@ import { queueAction } from './queue';
 export type { ActionDefinition, ActionId, ActionModelBinding, ActionModelPolicy, ActionRouteId, ActionRouteSuffix } from './types';
 export { deleteActionDefinition } from './delete';
 export { embedAction } from './embed';
+export { rerankAction, rerankInputSchema, rerankOutputSchema, type RerankInput, type RerankOutput } from './rerank';
 export { decideAction, decisionInputSchema, decisionOutputSchema } from './decide';
 export { insertActionDefinition } from './insert';
 export { readAction } from './read';
@@ -35,7 +37,7 @@ export { coreChatContentSchema, coreChatMessageSchema, coreChatToolDefinitionSch
 
 /** Stable, provider- and domain-neutral runtime primitives. */
 export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
-  textAction, imageAction, speechAction, videoAction, embedAction, decideAction, uploadAction, queueAction,
+  textAction, imageAction, speechAction, videoAction, embedAction, rerankAction, decideAction, uploadAction, queueAction,
   traverseAction, readAction, insertActionDefinition, upsertAction, updateActionDefinition, deleteActionDefinition,
 ];
 export const getActionDefinition = (id: ActionId): ActionDefinition | undefined => ACTION_DEFINITIONS.find((definition) => definition.id === id);

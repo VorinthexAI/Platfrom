@@ -15,25 +15,27 @@ agent candidate set to prevent recursive orchestration.
 Model selections and native calls are untrusted and rechecked before each
 dispatch.
 
-Core uses `agent.query` for one batched read when the current request needs
-private data in Archive, Gallery, Signal, Compass, or Ascend. The current-scope
-ArangoSearch view indexes approved fields on original records and stays in sync
-with database writes. Named resources are discovered in the view, then
-reauthorized and hydrated through canonical services. Collection/image and
-inbox/thread relationships use the owning services. Exact counts and sums
-come from canonical operations, not bounded search hits. The trusted server
-stores selected parent references with the conversation for follow-up turns;
-authorized search/list/get results also emit navigable references through the
-trusted `onEvidence` channel. Completed conversation messages persist up to
-four retrieval groups; the mobile Core pill sheet opens their destination
-screens. Core never receives raw resource keys. `workspace-context.ts` still serves
-legacy `agent.context` callers, but is not in Core's allowlist.
+Core uses `agent.query` for one authorized workspace read. It chooses `count`
+for exact file counts through all nested folders, `list` for an exact total and
+up to 50 compact files per inventory page, or `retrieve` for independent
+vector and filename keyword lanes plus metadata when file type or folder
+filters apply. RRF fuses the ranks into at most 50 authorized
+candidates. The provider-neutral `rerank` action chooses the best ten records;
+rerank failures fall back to RRF order. Text in the ten records is bounded and
+marked partial if shortened. List cursors are random Redis-backed tokens,
+validated against the authorized user, scope, and filters. A later turn can
+continue the saved conversation cursor without exposing file keys. The
+trusted server can revalidate references from the latest ten chat messages;
+model input and output never include user, scope, or raw storage keys. Selected
+results emit navigable references through `onEvidence`. Unresolved folders are
+partial results, never complete zero counts. `workspace-context.ts` still
+serves legacy `agent.context` callers, but is not in Core's allowlist.
+Core selects modes and filters from the tool descriptions, rather than
+application-maintained language term lists. Retrieve mode can request a minimum
+number of distinct sources for comparisons; insufficient evidence is partial.
 
-`fresh-read.ts` checks whether a phrase shared by the latest question and
-recent conversation resolves to authorized indexed data. When it does, the
-first Core provider call requires `agent.query`, instead of allowing an answer
-from potentially stale history. This is an indexed data check, not a list of
-language-specific keywords, and it does not add a model/tool round trip.
+`fresh-read.ts` checks shared phrases against authorized indexed data on
+ambiguous follow-ups before requiring a fresh read of potentially stale prose.
 
 Tools execute only through canonical `runTool` adapters with trusted
 `ToolContext` and hashed per-call request keys. Equal call fingerprints share
@@ -53,10 +55,10 @@ model.
 
 ## Focused evaluation
 
-`workspace-query.test.ts` exercises batched canonical reads, named parent
-resolution, exact aggregates, follow-up references, and a deterministic Core
-turn transcript in `workspace-query-transcript.txt`. `core.test.ts` verifies
-that Core answers directly or calls its read capability once before answering.
+Use the two strict `agent.query` modes to verify exact nested counts, ten-file
+retrieval from the fused and reranked pool, and follow-ups using the latest ten
+authorized message references. Core calls its read capability at most once per
+answer and reports partial evidence when a folder or file is unresolved.
 
 For a paid end-to-end check with the real model and local ArangoDB, run
 `bun run --cwd backend test:e2e:core-query-live`. This loads the unlocked dev

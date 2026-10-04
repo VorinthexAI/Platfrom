@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Keyboard, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { Keyboard, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
@@ -29,7 +29,7 @@ import { useDebouncedContentSearchHistory } from "@/hooks/use-debounced-content-
 import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 import { palette, radii, spacing } from "@/theme/tokens";
 
-export function FilesPickerSheet({ context, onClose, onDone, open, title = "Tag files", acceptFile, selectionLimit }: { context: ContentContext; onClose: () => void; onDone: (files: ContentFile[], folders: ContentFolder[]) => void; open: boolean; title?: string; acceptFile?: (file: ContentFile) => boolean; selectionLimit?: number }) {
+export function FilesPickerSheet({ context, onClose, onDone, open, title = "Tag files", acceptFile, allowedExtensions, selectionLimit }: { context: ContentContext; onClose: () => void; onDone: (files: ContentFile[], folders: ContentFolder[]) => void; open: boolean; title?: string; acceptFile?: (file: ContentFile) => boolean; allowedExtensions?: readonly FileExtension[]; selectionLimit?: number }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { width } = useWindowDimensions();
@@ -66,8 +66,8 @@ export function FilesPickerSheet({ context, onClose, onDone, open, title = "Tag 
     if (types.images) values.push("jpg", "jpeg", "png", "webp", "gif");
     if (types.videos) values.push("mp4");
     if (types.audio) values.push("mp3");
-    return values;
-  }, [types]);
+    return allowedExtensions ? values.filter((extension) => allowedExtensions.includes(extension)) : values;
+  }, [allowedExtensions, types]);
   const searchQuery = useQuery({
     queryKey: ["file-search", context.scopeKey, currentFolder?.key ?? null, settledQuery, favoritesOnly, showHidden, selectedTags.map((tag) => tag.key).join(","), extensions.join(",")],
     queryFn: () => searchContent(settledQuery || selectedTags.map((tag) => tag.name).join(" "), currentFolder?.key, { favoritesOnly, includeHidden: showHidden, tagKeys: selectedTags.map((tag) => tag.key), extensions }),
@@ -83,6 +83,7 @@ export function FilesPickerSheet({ context, onClose, onDone, open, title = "Tag 
     extension: file.extension ?? "txt",
     mimeType: "application/octet-stream",
     sizeBytes: 1,
+    hasExtractedText: file.hasExtractedText,
     processing: "ready" as const,
     isFavorite: file.isFavorite,
     createdAt: "",
@@ -130,25 +131,27 @@ export function FilesPickerSheet({ context, onClose, onDone, open, title = "Tag 
     }
   };
 
-  return <BottomSheet description={`Tap ${title === "Tag files" ? "files to tag" : "images to select"}.`} footer={<><Button disabled={!selectedFiles.length} onPress={() => { onDone(selectedFiles, []); closePicker(); }} size="md" variant="primary">Done</Button><Button onPress={closePicker} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(next) => { if (!next) closePicker(); }} open={open} title={title}>
+  return <BottomSheet description={`Tap ${title === "Tag files" ? "files to tag" : title === "Documents to narrate" ? "documents to narrate" : "images to select"}.`} footer={<><Button disabled={!selectedFiles.length} onPress={() => { onDone(selectedFiles, []); closePicker(); }} size="md" variant="primary">Done</Button><Button onPress={closePicker} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(next) => { if (!next) closePicker(); }} open={open} title={title}>
     <View style={styles.searchRow}>
       {currentFolder ? <Button accessibilityLabel="Back" contentMode="raw" onPress={() => setFolderStack((stack) => stack.slice(0, -1))} size="xs" style={styles.roundBack} variant="secondary"><ChevronLeftIcon size="sm" /></Button> : null}
        <View style={styles.search}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search files" autoFocusInBottomSheet={false} maxLength={500} onChangeText={setQuery} placeholder="Search anything..." style={styles.searchInput} value={query} />{query ? <Button accessibilityLabel="Clear search" contentMode="raw" iconOnly onPress={() => setQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button> : null}</View>
        <Button accessibilityLabel="Filter files" contentMode="raw" onPress={() => setSheet("filter")} size="md" variant="icon"><FilterIcon size="sm" variant={favoritesOnly || showHidden || selectedTags.length || !types.documents || !types.images || !types.videos || !types.audio ? "accent" : "default"} /></Button>
     </View>
     <TagFilterLane context={context} />
-    {loading ? <View style={styles.grid}>{Array.from({ length: searching ? 4 : 8 }, (_, index) => <Skeleton key={index} style={[styles.card, styles.gridSkeleton, { width: cardSize, height: cardSize }]} />)}</View> : <View style={styles.grid}>
-       {folders.map((folder) => <FolderTile accessibilityLabel={`Open ${folder.name}`} key={folder.key} label={folder.name} onPress={() => { setQuery(""); setFolderStack((stack) => [...stack, folder]); }} size={cardSize} />)}
-      {files.map((file) => {
-        const selected = selectedFileKeys.has(file.key);
-        return <ContentFileTile accessibilityLabel={`${selected ? "Deselect" : "Select"} ${file.name}`} file={file} key={file.key} onPress={() => setSelectedFiles((current) => current.some(({ key }) => key === file.key) ? current.filter(({ key }) => key !== file.key) : selectionLimit && current.length >= selectionLimit ? current : [...current, file])} selected={selected} size={cardSize} />;
-      })}
-    </View>}
+    <ScrollView contentContainerStyle={styles.grid} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.results}>
+      {loading ? Array.from({ length: searching ? 4 : 8 }, (_, index) => <Skeleton key={index} style={[styles.card, styles.gridSkeleton, { width: cardSize, height: cardSize }]} />) : <>
+        {folders.map((folder) => <FolderTile accessibilityLabel={`Open ${folder.name}`} key={folder.key} label={folder.name} onPress={() => { setQuery(""); setFolderStack((stack) => [...stack, folder]); }} size={cardSize} />)}
+        {files.map((file) => {
+          const selected = selectedFileKeys.has(file.key);
+          return <ContentFileTile accessibilityLabel={`${selected ? "Deselect" : "Select"} ${file.name}`} file={file} key={file.key} onPress={() => setSelectedFiles((current) => current.some(({ key }) => key === file.key) ? current.filter(({ key }) => key !== file.key) : selectionLimit && current.length >= selectionLimit ? current : [...current, file])} selected={selected} size={cardSize} />;
+        })}
+      </>}
+    </ScrollView>
     <BottomSheet hideHeading onOpenChange={(next) => { if (!next) setSheet(undefined); }} open={sheet === "filter"} title="">
       <View style={styles.filterContent}>
         <View style={styles.filterRow}><Switch accessibilityLabel="Favorites" checked={favoritesOnly} onCheckedChange={(checked) => { setFavoritesOnly(checked); setSheet(undefined); }} /><Text style={styles.filterLabel}>Favorites</Text></View>
         <View style={styles.filterRow}><Switch accessibilityLabel="Show hidden" checked={showHidden} onCheckedChange={(checked) => { setShowHidden(checked); setSheet(undefined); }} /><Text style={styles.filterLabel}>Show hidden</Text></View>
-        {(["documents", "images", "videos", "audio"] as const).map((key) => <View key={key} style={styles.filterRow}><Switch accessibilityLabel={key} checked={types[key]} onCheckedChange={(checked) => { setTypes((current) => ({ ...current, [key]: checked })); setSheet(undefined); }} /><Text style={styles.filterLabel}>{key[0]!.toUpperCase() + key.slice(1)}</Text></View>)}
+        {(["documents", "images", "videos", "audio"] as const).filter((key) => !allowedExtensions || ({ documents: ["txt", "md", "docx", "pdf"], images: ["jpg", "jpeg", "png", "webp", "gif"], videos: ["mp4"], audio: ["mp3"] }[key] as FileExtension[]).some((extension) => allowedExtensions.includes(extension))).map((key) => <View key={key} style={styles.filterRow}><Switch accessibilityLabel={key} checked={types[key]} onCheckedChange={(checked) => { setTypes((current) => ({ ...current, [key]: checked })); setSheet(undefined); }} /><Text style={styles.filterLabel}>{key[0]!.toUpperCase() + key.slice(1)}</Text></View>)}
         <Button onPress={() => setSheet("tags")} size="md" variant="secondary">Tags</Button>
         <Button onPress={openSearchHistory} size="md" variant="secondary">Search history</Button>
       </View>
@@ -159,11 +162,12 @@ export function FilesPickerSheet({ context, onClose, onDone, open, title = "Tag 
 }
 
 const styles = StyleSheet.create({
+  results: { flex: 1, minHeight: 0 },
   searchRow: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8 },
   roundBack: { width: 36, height: 36, minHeight: 36, borderRadius: 999 },
   search: { minHeight: 44, flex: 1, flexDirection: "row", alignItems: "center", gap: 7, paddingLeft: 12, paddingRight: 8, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1 },
   searchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 13 },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingTop: spacing.sm },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingTop: spacing.sm, paddingBottom: spacing.md },
   card: { borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised, overflow: "hidden" },
   gridSkeleton: { backgroundColor: palette.hairlineBright },
   filterContent: { gap: spacing.sm },

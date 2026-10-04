@@ -69,9 +69,11 @@ export type BillingSummaryQuery = {
   beforeCreatedAt?: string;
   beforeKey?: string;
   kind?: z.infer<typeof sparkTransactionSchema>["kind"];
+  scopeKey?: string;
 };
 
 export const billingSummaryQueryKey = (userKey: string) => ["billing-summary", userKey] as const;
+export const scopedBillingSummaryQueryKey = (userKey: string, scopeKey: string) => [...billingSummaryQueryKey(userKey), scopeKey] as const;
 export const walletHistoryQueryKey = (userKey: string) => ["billing-wallet-history", userKey] as const;
 export const currentSubscriptionQueryKey = (userKey: string) => ["billing-subscription", userKey] as const;
 
@@ -81,6 +83,7 @@ export async function fetchBillingSummary(query: BillingSummaryQuery = {}, signa
     beforeCreatedAt: query.beforeCreatedAt,
     beforeKey: query.beforeKey,
     kind: query.kind,
+    scopeKey: query.scopeKey,
   }).filter(([, value]) => value !== undefined));
   const response = await apiClient.get("/billing/summary", { params, signal });
   return billingSummaryEnvelopeSchema.parse(response.data).data;
@@ -118,7 +121,7 @@ export async function ensureSparkCapacity(requiredMicroSparks = 1) {
 }
 
 export function hasNewcomerAccountGrant(summary: BillingSummary) {
-  return summary.transactions.some((transaction) => transaction.kind === "adjustment" && transaction.idempotencyKey === "account-grant:v2" && transaction.deltaMicroSparks === 100_000_000);
+  return summary.transactions.some((transaction) => transaction.kind === "adjustment" && (transaction.idempotencyKey === "account-grant:v3" && transaction.deltaMicroSparks === 50_000_000 || transaction.idempotencyKey === "account-grant:v2" && transaction.deltaMicroSparks === 100_000_000));
 }
 
 export function wholeSparks(microSparkBalance: number) {

@@ -1,0 +1,1931 @@
+{
+  "version": 1,
+  "chats": [
+    {
+      "slug": "the-idea",
+      "title": "Why This Place",
+      "turns": [
+        {
+          "user": "What first made me want to open the Canal Street workshop?",
+          "assistant": "Hello! I’m Core.\n\nThe idea for the Canal Street workshop began after you and Iman fixed a lamp together at the library. That experience sparked a simple, guiding question: what if neighbors could figure things out together?\n\nFrom there, you envisioned a neighborhood space where people could mend, make, and learn without the need for expensive equipment or prior experience.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "opening-announcement",
+                  "extension": "docx",
+                  "label": "opening-announcement"
+                },
+                {
+                  "name": "spoken-project-vision",
+                  "extension": "mp3",
+                  "label": "spoken-project-vision"
+                },
+                {
+                  "name": "poster-copy",
+                  "extension": "md",
+                  "label": "poster-copy"
+                },
+                {
+                  "name": "why-a-workshop",
+                  "extension": "md",
+                  "label": "why-a-workshop"
+                },
+                {
+                  "name": "spoken-opening-announcement",
+                  "extension": "mp3",
+                  "label": "spoken-opening-announcement"
+                },
+                {
+                  "name": "community-noticeboard",
+                  "extension": "jpeg",
+                  "label": "community-noticeboard"
+                },
+                {
+                  "name": "decision-log",
+                  "extension": "md",
+                  "label": "decision-log"
+                },
+                {
+                  "name": "room-first-visit",
+                  "extension": "md",
+                  "label": "room-first-visit"
+                },
+                {
+                  "name": "weekly-opening-plan",
+                  "extension": "pdf",
+                  "label": "weekly-opening-plan"
+                },
+                {
+                  "name": "voice-note-first-visit",
+                  "extension": "mp3",
+                  "label": "voice-note-first-visit"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "In general, what makes a neighborhood workshop feel welcoming rather than intimidating?",
+          "assistant": "A welcoming workshop is often defined less by the tools on the walls and more by the culture of the people inside. While physical accessibility is important, the \"welcoming\" factor usually comes down to reducing the anxiety of the unknown and making people feel seen as individuals rather than just participants.\n\nHere are some of the core principles that help transform a space from intimidating to inclusive:\n\n### 1. Reducing the \"Anxiety of the Unknown\"\nFor many, the hardest part is simply walking through the door. You can lower this barrier by:\n*   **Clear Communication:** Provide information ahead of time about what to expect—how long a session lasts, what the format is, and what level of participation is expected.\n*   **Orientation:** When people arrive, explain the basics: where the restrooms are, how the space is organized, and what the \"vibe\" is.\n*   **Low-Stakes Check-ins:** Start gatherings with a simple, genuine check-in. This signals that you value people as whole humans, not just as people there to complete a task.\n\n### 2. Prioritizing Human Connection\nA space feels intimidating when it feels like a hierarchy or an \"insider\" club. You can counter this by:\n*   **Active Greeting:** The gap between a welcoming space and an unwelcoming one is often whether someone looks up, makes eye contact, and says \"hello\" when a person walks in.\n*   **Avoiding Jargon:** Be mindful of inside language or technical terms that might make a beginner feel like they don't belong.\n*   **Facilitation as Protection:** A good facilitator \"protects\" the room by ensuring everyone is heard, interrupting dominant voices gently, and validating quiet or shy participants.\n\n### 3. Inclusive Design and Atmosphere\nPhysical space should reflect the diversity of the community it serves:\n*   **Universal Design:** Use adjustable workstations, clear pathways, and ergonomic tools that can be used by people of different ages and physical abilities.\n*   **Diverse Representation:** Ensure the space feels like it belongs to everyone. This can be done through inclusive signage, offering materials in multiple languages, and ensuring the tools available reflect a wide range of interests (e.g., including art and sewing alongside traditional \"shop\" tools).\n*   **Organization as Inspiration:** A clean, organized space is inherently more inviting. When tools have a dedicated home, it reduces clutter and makes the space feel manageable rather than chaotic or dangerous.\n\n### 4. Actions Over Symbols\nWhile posters and flags can signal values, they are only \"decoration\" if they aren't backed by behavior. The real work of making a space welcoming happens in the small, accumulated moments: how you introduce people, how you handle mistakes, and how you ensure that everyone—regardless of their background or skill level—feels that their presence is important.",
+          "retrievals": []
+        },
+        {
+          "user": "How might I explain the idea to someone who has never visited a makerspace?",
+          "assistant": "To explain the Canal Street workshop to someone who hasn't visited a makerspace, it helps to move away from technical terms and focus on the **social and practical purpose** of the space. You can frame it as a \"neighborhood living room for projects.\"\n\nBased on your project vision and planning notes, here are a few ways to describe it:\n\n### 1. The \"Community Problem-Solving\" Approach\n\"It’s a neighborhood space where we can mend, make, and learn together. It started with a simple idea: instead of buying expensive tools or struggling to fix things alone, we can share resources and figure things out as a community. It’s less about being an expert and more about bringing your curiosity.\"\n\n### 2. The \"Low-Barrier\" Approach\n\"Think of it as a place to work on projects—like fixing a lamp or learning a new skill—without the barriers of cost or needing to be a 'maker.' We have shared tables, tools, and a friendly environment where mistakes are just part of the process. You don't need any experience to walk through the door.\"\n\n### 3. The \"Shared Table\" Approach\n\"It’s a local workshop at 18 Canal Street designed to be accessible to everyone. We have movable benches and a large shared table where neighbors gather to work on their own things or help each other out. It’s really just a place to connect with people while you work with your hands.\"\n\n### Key points to emphasize:\n*   **No experience required:** This is the most important part to lower the intimidation factor.\n*   **Focus on connection:** Emphasize that the goal is to \"figure things out together\" rather than achieving technical perfection.\n*   **Accessibility:** Mention that it’s a space designed for the neighborhood, with features like a step-free entrance and lower work surfaces to ensure everyone feels welcome.\n\nYou might also mention the origin story—that it all started with a lamp you and Iman fixed at the library—as it perfectly illustrates that the workshop is about the *act* of learning together rather than the equipment itself.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "spoken-project-vision",
+                  "extension": "mp3",
+                  "label": "spoken-project-vision"
+                },
+                {
+                  "name": "poster-copy",
+                  "extension": "md",
+                  "label": "poster-copy"
+                },
+                {
+                  "name": "community-noticeboard",
+                  "extension": "jpeg",
+                  "label": "community-noticeboard"
+                },
+                {
+                  "name": "spoken-opening-announcement",
+                  "extension": "mp3",
+                  "label": "spoken-opening-announcement"
+                },
+                {
+                  "name": "voice-note-first-visit",
+                  "extension": "mp3",
+                  "label": "voice-note-first-visit"
+                },
+                {
+                  "name": "room-first-visit",
+                  "extension": "md",
+                  "label": "room-first-visit"
+                },
+                {
+                  "name": "opening-announcement",
+                  "extension": "docx",
+                  "label": "opening-announcement"
+                },
+                {
+                  "name": "why-a-workshop",
+                  "extension": "md",
+                  "label": "why-a-workshop"
+                },
+                {
+                  "name": "poster-final-concept",
+                  "extension": "jpeg",
+                  "label": "poster-final-concept"
+                },
+                {
+                  "name": "opening-day",
+                  "extension": "mp4",
+                  "label": "opening-day"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "What did my first notes assume about the opening hours and equipment?",
+          "assistant": "Your initial notes from January 2026 were quite ambitious compared to the final plan. At that stage, your assumptions included:\n\n*   **Opening Hours:** You initially envisioned the workshop being open **six days a week**. This was later scaled back to Wednesday evenings and Saturday mornings after you determined that the six-day schedule was not affordable under your revised budget.\n*   **Equipment:** You initially planned to install **eight fixed benches** and purchase a **laser cutter**. \n\nThese early ideas were documented as part of your initial vision before you had spoken to neighbors or fully assessed the Canal Street space. As you moved through the planning process, you shifted to a more sustainable model that prioritized flexibility and accessibility, eventually settling on four movable benches, one communal table, and an adjustable-height station, while deferring the purchase of a laser cutter.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "poster-copy",
+                  "extension": "md",
+                  "label": "poster-copy"
+                },
+                {
+                  "name": "opening-announcement",
+                  "extension": "docx",
+                  "label": "opening-announcement"
+                },
+                {
+                  "name": "why-a-workshop",
+                  "extension": "md",
+                  "label": "why-a-workshop"
+                },
+                {
+                  "name": "weekly-opening-plan",
+                  "extension": "pdf",
+                  "label": "weekly-opening-plan"
+                },
+                {
+                  "name": "spoken-project-vision",
+                  "extension": "mp3",
+                  "label": "spoken-project-vision"
+                },
+                {
+                  "name": "spoken-opening-announcement",
+                  "extension": "mp3",
+                  "label": "spoken-opening-announcement"
+                },
+                {
+                  "name": "room-first-visit",
+                  "extension": "md",
+                  "label": "room-first-visit"
+                },
+                {
+                  "name": "six-month-vision",
+                  "extension": "md",
+                  "label": "six-month-vision"
+                },
+                {
+                  "name": "decision-log",
+                  "extension": "md",
+                  "label": "decision-log"
+                },
+                {
+                  "name": "equipment-list",
+                  "extension": "md",
+                  "label": "equipment-list"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "Which part of the original ambition is worth keeping even if we start smaller?",
+          "assistant": "Even though you had to scale back the physical infrastructure—moving from eight benches to four and setting aside the laser cutter—the core of your original ambition remains intact. Based on your notes, the elements that were most important to preserve are:\n\n*   **The \"Library-like\" Welcoming Culture:** You prioritized keeping the space feeling like a \"neighborhood living room\" rather than a sterile workshop. This includes the \"quiet shelf of instructions\" anyone can borrow and the focus on a warm, lived-in atmosphere rather than an architectural rendering.\n*   **The Focus on Repair and Connection:** The fundamental goal—creating a space where people can mend, make, and learn without needing to buy specialist equipment—is the heartbeat of the project. The shift to a smaller scale actually helped reinforce this by focusing on \"repair rather than replacement\" and communal problem-solving.\n*   **Accessibility and Inclusivity:** You maintained the commitment to making the space accessible to everyone, regardless of experience. This is evidenced by the inclusion of a step-free street entrance and a lower work surface, ensuring that the space is physically welcoming to all neighbors.\n*   **Adaptability:** By choosing \"Layout B\" with movable benches, you kept the ambition of a flexible space that can change based on what the community actually needs, rather than locking yourself into a rigid, pre-planned setup.\n\nIn short, you traded the \"hardware\" (the laser cutter and the number of benches) to protect the \"software\" (the welcoming, collaborative, and accessible nature of the workshop). As your notes suggest, the goal was always to build a welcoming room first, and the smaller scale has allowed you to focus on that human connection rather than the technical overhead.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "why-a-workshop",
+                  "extension": "md",
+                  "label": "why-a-workshop"
+                },
+                {
+                  "name": "opening-announcement",
+                  "extension": "docx",
+                  "label": "opening-announcement"
+                },
+                {
+                  "name": "spoken-project-vision",
+                  "extension": "mp3",
+                  "label": "spoken-project-vision"
+                },
+                {
+                  "name": "lessons-so-far",
+                  "extension": "md",
+                  "label": "lessons-so-far"
+                },
+                {
+                  "name": "voice-note-electrician",
+                  "extension": "mp3",
+                  "label": "voice-note-electrician"
+                },
+                {
+                  "name": "poster-copy",
+                  "extension": "md",
+                  "label": "poster-copy"
+                },
+                {
+                  "name": "inspiration-notes",
+                  "extension": "md",
+                  "label": "inspiration-notes"
+                },
+                {
+                  "name": "meeting-notes-march",
+                  "extension": "md",
+                  "label": "meeting-notes-march"
+                },
+                {
+                  "name": "potential-activities",
+                  "extension": "md",
+                  "label": "potential-activities"
+                },
+                {
+                  "name": "decision-log",
+                  "extension": "md",
+                  "label": "decision-log"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "Help me put the purpose of the first phase into one warm paragraph.",
+          "assistant": "The first phase of the Canal Street workshop is all about opening our doors to create a neighborhood living room where the focus is on connection rather than perfection. By starting with a flexible, accessible space and a simple, welcoming atmosphere, we want to prove that you don’t need to be an expert or own expensive tools to mend, make, and learn. Our goal is to replace the intimidation of the unknown with the comfort of a shared table, where neighbors can gather to solve problems together, share what they know, and discover that the most important tool in the room is the community itself.",
+          "retrievals": []
+        }
+      ]
+    },
+    {
+      "slug": "listening",
+      "title": "Listening to Neighbors",
+      "turns": [
+        {
+          "user": "What did Iman say people actually need from a repair evening?",
+          "assistant": "Hi, I'm Core. According to the records, Iman emphasizes that people come to repair evenings with questions rather than expertise. To support this, she believes they need:\n\n*   **A welcoming environment:** It is essential that visitors feel comfortable asking basic questions and do not feel pressured to have their own tools or prior experience.\n*   **A communal layout:** She prioritizes one large shared table over rows of individual workstations to encourage interaction.\n*   **Physical accessibility:** She specifically requests a clear path through the room (specifically between the street door and the sink) and a low bench where people can sit comfortably to learn.\n\nUltimately, Iman’s goal is to ensure that visitors feel welcome enough that they want to return.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "voice-note-iman",
+                  "extension": "mp3",
+                  "label": "voice-note-iman"
+                },
+                {
+                  "name": "conversation-with-iman",
+                  "extension": "docx",
+                  "label": "conversation-with-iman"
+                },
+                {
+                  "name": "spoken-event-invitation",
+                  "extension": "mp3",
+                  "label": "spoken-event-invitation"
+                },
+                {
+                  "name": "first-event-plan",
+                  "extension": "md",
+                  "label": "first-event-plan"
+                },
+                {
+                  "name": "layout-option-b",
+                  "extension": "md",
+                  "label": "layout-option-b"
+                },
+                {
+                  "name": "spoken-six-month-vision",
+                  "extension": "mp3",
+                  "label": "spoken-six-month-vision"
+                },
+                {
+                  "name": "potential-activities",
+                  "extension": "md",
+                  "label": "potential-activities"
+                },
+                {
+                  "name": "why-a-workshop",
+                  "extension": "md",
+                  "label": "why-a-workshop"
+                },
+                {
+                  "name": "six-month-vision",
+                  "extension": "md",
+                  "label": "six-month-vision"
+                },
+                {
+                  "name": "opening-announcement",
+                  "extension": "docx",
+                  "label": "opening-announcement"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "What tends to make a beginner nervous about joining a hands-on group?",
+          "assistant": "Based on the provided records, beginners often feel nervous about joining a hands-on group because they fear being judged for their lack of skill or experience.\n\nTo mitigate this, the workshop organizers specifically aim to:\n\n*   **Avoid exclusionary language:** Iman explicitly requested that communications avoid any phrasing that implies visitors need to have their own tools or prior experience.\n*   **Emphasize a learning environment:** The *workshop-guidelines* explicitly state that the space is for \"learning together, not for judging someone's skill.\"\n*   **Lower the barrier to entry:** The project vision and event invitations emphasize that \"curiosity is enough\" and that the space is designed for those who do not have expensive equipment or previous experience.\n\nBy focusing on a shared, welcoming environment rather than individual workstations, the organizers hope to ensure that participants feel comfortable asking basic questions without the pressure of needing to be an expert.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "workshop-guidelines",
+                  "extension": "md",
+                  "label": "workshop-guidelines"
+                },
+                {
+                  "name": "spoken-opening-announcement",
+                  "extension": "mp3",
+                  "label": "spoken-opening-announcement"
+                },
+                {
+                  "name": "spoken-project-vision",
+                  "extension": "mp3",
+                  "label": "spoken-project-vision"
+                },
+                {
+                  "name": "opening-day",
+                  "extension": "mp4",
+                  "label": "opening-day"
+                },
+                {
+                  "name": "community-table",
+                  "extension": "jpeg",
+                  "label": "community-table"
+                },
+                {
+                  "name": "poster-final-concept",
+                  "extension": "jpeg",
+                  "label": "poster-final-concept"
+                },
+                {
+                  "name": "spoken-event-invitation",
+                  "extension": "mp3",
+                  "label": "spoken-event-invitation"
+                },
+                {
+                  "name": "conversation-with-iman",
+                  "extension": "docx",
+                  "label": "conversation-with-iman"
+                },
+                {
+                  "name": "spoken-six-month-vision",
+                  "extension": "mp3",
+                  "label": "spoken-six-month-vision"
+                },
+                {
+                  "name": "voice-note-iman",
+                  "extension": "mp3",
+                  "label": "voice-note-iman"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "What did the neighborhood survey say people want to learn and when they can come?",
+          "assistant": "According to the neighborhood survey of 23 respondents, the community expressed interest in the following topics:\n\n*   **Simple household repairs:** 14 respondents\n*   **Beginner sewing:** 9 respondents\n*   **Woodworking:** 7 respondents\n\n(Note: Several respondents selected more than one topic.)\n\nRegarding scheduling, the majority of respondents preferred **Wednesday evenings** or **Saturday mornings**. \n\nThe survey also highlighted specific accessibility needs, with three people requesting step-free access and seating at a lower height. These findings were collected by Mara Vale as informal field notes and are not considered a representative market study.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "neighborhood-survey",
+                  "extension": "pdf",
+                  "label": "neighborhood-survey"
+                },
+                {
+                  "name": "why-a-workshop",
+                  "extension": "md",
+                  "label": "why-a-workshop"
+                },
+                {
+                  "name": "spoken-six-month-vision",
+                  "extension": "mp3",
+                  "label": "spoken-six-month-vision"
+                },
+                {
+                  "name": "six-month-vision",
+                  "extension": "md",
+                  "label": "six-month-vision"
+                },
+                {
+                  "name": "opening-announcement",
+                  "extension": "docx",
+                  "label": "opening-announcement"
+                },
+                {
+                  "name": "poster-copy",
+                  "extension": "md",
+                  "label": "poster-copy"
+                },
+                {
+                  "name": "spoken-opening-announcement",
+                  "extension": "mp3",
+                  "label": "spoken-opening-announcement"
+                },
+                {
+                  "name": "potential-activities",
+                  "extension": "md",
+                  "label": "potential-activities"
+                },
+                {
+                  "name": "voice-note-iman",
+                  "extension": "mp3",
+                  "label": "voice-note-iman"
+                },
+                {
+                  "name": "lessons-so-far",
+                  "extension": "md",
+                  "label": "lessons-so-far"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "How can we invite beginners without promising to fix every object?",
+          "assistant": "To invite beginners without creating the expectation that every item will be successfully repaired, the project documentation suggests focusing on the **process of learning** rather than the outcome of the repair.\n\nBased on the available records, you can manage these expectations by:\n\n*   **Reframing the goal:** Use language that emphasizes \"learning together\" and \"curiosity\" rather than \"fixing.\" For example, the *spoken-event-invitation* and *poster-copy* invite people to \"bring one small thing you would like help repairing\" or to \"mend, make, and learn together,\" which shifts the focus to the collaborative experience.\n*   **Defining the space as a learning environment:** The *workshop-guidelines* explicitly state that the space is \"for learning together, not for judging someone's skill.\" This helps set the tone that the primary value is the knowledge gained, not necessarily the restoration of the object.\n*   **Using inclusive, low-pressure language:** By explicitly stating that \"no experience or tools are needed\" and that \"curiosity is enough,\" you lower the barrier to entry. This encourages people to participate for the sake of the experience, making them less likely to feel disappointed if an item cannot be fixed.\n*   **Setting realistic boundaries:** In internal planning, such as the *first-event-plan*, the organizers note the importance of avoiding promises regarding repairs that require specialist skills (like electrical certification). While you don't need to list these limitations in public invitations, keeping the focus on \"beginner-friendly sessions\" and \"learning\" naturally manages the scope of what is expected during a session.\n\nUltimately, the organizers measure success by whether neighbors feel welcome enough to return, rather than by the number of items successfully repaired.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "first-event-plan",
+                  "extension": "md",
+                  "label": "first-event-plan"
+                },
+                {
+                  "name": "conversation-with-iman",
+                  "extension": "docx",
+                  "label": "conversation-with-iman"
+                },
+                {
+                  "name": "spoken-event-invitation",
+                  "extension": "mp3",
+                  "label": "spoken-event-invitation"
+                },
+                {
+                  "name": "spoken-opening-announcement",
+                  "extension": "mp3",
+                  "label": "spoken-opening-announcement"
+                },
+                {
+                  "name": "workshop-guidelines",
+                  "extension": "md",
+                  "label": "workshop-guidelines"
+                },
+                {
+                  "name": "potential-activities",
+                  "extension": "md",
+                  "label": "potential-activities"
+                },
+                {
+                  "name": "voice-note-iman",
+                  "extension": "mp3",
+                  "label": "voice-note-iman"
+                },
+                {
+                  "name": "six-month-vision",
+                  "extension": "md",
+                  "label": "six-month-vision"
+                },
+                {
+                  "name": "opening-announcement",
+                  "extension": "docx",
+                  "label": "opening-announcement"
+                },
+                {
+                  "name": "poster-copy",
+                  "extension": "md",
+                  "label": "poster-copy"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "Which accessibility needs came up in our notes?",
+          "assistant": "The accessibility needs identified in the project notes focus on both physical layout and clear communication to ensure the space is welcoming and usable for everyone.\n\n### Physical Accessibility\n*   **Clear Routes:** The central route through the room must be kept clear, with at least 1.2 meters of space to ensure easy movement.\n*   **Entrance and Sink Access:** The accessible street entrance must remain unobstructed. Additionally, the path to the rear sink must be kept clear, which requires moving the tool cart away from the doorway when the sink is in use.\n*   **Seating and Surfaces:** There is a requirement for at least one adjustable-height work surface. Furthermore, three survey respondents specifically requested step-free access and lower-height seating.\n*   **Furniture Flexibility:** The layout must prioritize movable furniture (such as the four movable benches in \"Layout B\") over fixed installations to maintain necessary clearances and accommodate different needs.\n\n### Communication and Navigation\n*   **Visual Clarity:** Good contrast on shelf labels is noted as being more important for accessibility than decorative lettering.\n*   **Inclusive Language:** To ensure the space is accessible to beginners, the organizers avoid language that implies a need for prior experience or personal tools, focusing instead on a welcoming, communal atmosphere.\n\nThese notes emphasize that accessibility should be confirmed on-site rather than treated as a static certification, and the current \"Layout B\" was specifically chosen because it successfully meets these requirements, whereas the original \"Layout A\" did not.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "accessibility-notes",
+                  "extension": "md",
+                  "label": "accessibility-notes"
+                },
+                {
+                  "name": "neighborhood-survey",
+                  "extension": "pdf",
+                  "label": "neighborhood-survey"
+                },
+                {
+                  "name": "final-layout-rationale",
+                  "extension": "md",
+                  "label": "final-layout-rationale"
+                },
+                {
+                  "name": "voice-note-iman",
+                  "extension": "mp3",
+                  "label": "voice-note-iman"
+                },
+                {
+                  "name": "voice-note-after-trial",
+                  "extension": "mp3",
+                  "label": "voice-note-after-trial"
+                },
+                {
+                  "name": "layout-option-a",
+                  "extension": "md",
+                  "label": "layout-option-a"
+                },
+                {
+                  "name": "opening-announcement",
+                  "extension": "docx",
+                  "label": "opening-announcement"
+                },
+                {
+                  "name": "room-first-visit",
+                  "extension": "md",
+                  "label": "room-first-visit"
+                },
+                {
+                  "name": "conversation-with-iman",
+                  "extension": "docx",
+                  "label": "conversation-with-iman"
+                },
+                {
+                  "name": "inspiration-notes",
+                  "extension": "md",
+                  "label": "inspiration-notes"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "What would be a good open-ended question to ask people at the trial?",
+          "assistant": "To align with the goal of fostering a welcoming, learning-focused environment, a good open-ended question should shift the focus away from the \"success\" of the repair and toward the participant's experience and curiosity.\n\nBased on the project's emphasis on retention and shared learning, here are a few options you could use during the trial:\n\n*   **\"What part of this process did you find most interesting or surprising today?\"** (This encourages them to talk about the learning experience rather than just the outcome of the repair.)\n*   **\"What would you like to explore or try your hand at next time?\"** (This helps you understand their interests for future sessions and signals that you want them to return.)\n*   **\"How did it feel to work on your item here today?\"** (This directly addresses the \"welcoming\" aspect of the environment and helps you gauge if they felt comfortable asking questions.)\n*   **\"Is there anything we could change about the space or the way we work together to make it feel more comfortable for you?\"** (This invites feedback on the physical layout and atmosphere, which are high priorities for Iman.)\n\nThese questions avoid the binary \"did you fix it?\" and instead invite the participant to share their perspective on the community and the learning process, which is how you are measuring the success of the project.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "conversation-with-iman",
+                  "extension": "docx",
+                  "label": "conversation-with-iman"
+                },
+                {
+                  "name": "decision-log",
+                  "extension": "md",
+                  "label": "decision-log"
+                },
+                {
+                  "name": "spoken-event-invitation",
+                  "extension": "mp3",
+                  "label": "spoken-event-invitation"
+                },
+                {
+                  "name": "workshop-guidelines",
+                  "extension": "md",
+                  "label": "workshop-guidelines"
+                },
+                {
+                  "name": "voice-note-iman",
+                  "extension": "mp3",
+                  "label": "voice-note-iman"
+                },
+                {
+                  "name": "first-event-plan",
+                  "extension": "md",
+                  "label": "first-event-plan"
+                },
+                {
+                  "name": "weekly-opening-plan",
+                  "extension": "pdf",
+                  "label": "weekly-opening-plan"
+                },
+                {
+                  "name": "six-month-vision",
+                  "extension": "md",
+                  "label": "six-month-vision"
+                },
+                {
+                  "name": "opening-day",
+                  "extension": "mp4",
+                  "label": "opening-day"
+                },
+                {
+                  "name": "spoken-opening-announcement",
+                  "extension": "mp3",
+                  "label": "spoken-opening-announcement"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "the-room",
+      "title": "Making the Room Work",
+      "turns": [
+        {
+          "user": "What did we notice on our first visit to the Canal Street room?",
+          "assistant": "On your first visit to the Canal Street room on 12 January, you and Lee noted the following:\n\n*   **Physical Layout:** The room is an empty ground-floor space measuring roughly 8 by 11 meters. It features two front windows, a rear sink, a single accessible street entrance, and a narrow alcove near the meter.\n*   **Lighting:** While the ceiling is high, you observed that the north corner of the room is quite dim.\n*   **Initial Impressions:** You found the front windows to be a highlight of the space.\n*   **Planning:** You initially imagined installing eight fixed benches, though Lee suggested measuring the \"central route\" through the room before committing to that number. He also recommended placing any noisy work near the sink, away from the entrance.\n\nAt the time of this visit, no lease had been signed, though the landlord had quoted 1,450 per month and offered a three-month trial.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "room-first-visit",
+                  "extension": "md",
+                  "label": "room-first-visit"
+                },
+                {
+                  "name": "voice-note-first-visit",
+                  "extension": "mp3",
+                  "label": "voice-note-first-visit"
+                },
+                {
+                  "name": "opening-announcement",
+                  "extension": "docx",
+                  "label": "opening-announcement"
+                },
+                {
+                  "name": "poster-copy",
+                  "extension": "md",
+                  "label": "poster-copy"
+                },
+                {
+                  "name": "spoken-opening-announcement",
+                  "extension": "mp3",
+                  "label": "spoken-opening-announcement"
+                },
+                {
+                  "name": "why-a-workshop",
+                  "extension": "md",
+                  "label": "why-a-workshop"
+                },
+                {
+                  "name": "room-measurements",
+                  "extension": "txt",
+                  "label": "room-measurements"
+                },
+                {
+                  "name": "spoken-project-vision",
+                  "extension": "mp3",
+                  "label": "spoken-project-vision"
+                },
+                {
+                  "name": "decision-log",
+                  "extension": "md",
+                  "label": "decision-log"
+                },
+                {
+                  "name": "community-noticeboard",
+                  "extension": "jpeg",
+                  "label": "community-noticeboard"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "What generally helps a small shared space stay flexible?",
+          "assistant": "To keep a small shared space flexible and adaptable, the most effective approach is to focus on **versatility, mobility, and intentional zoning** rather than permanent structures.\n\nBased on design principles for multipurpose environments, here is what generally helps a space stay flexible:\n\n### 1. Prioritize Mobile and Modular Furniture\nThe ability to reconfigure a room quickly is the hallmark of a flexible space.\n*   **Lightweight and Wheeled Pieces:** Use furniture with casters (wheels) or pieces light enough to be moved by one person. This allows you to shift from a collaborative setup to an open floor plan in minutes.\n*   **Modular Systems:** Choose modular desks, shelving, or sectional seating that can be rearranged or combined to fit different group sizes or activities.\n*   **Multi-Purpose Pieces:** Invest in furniture that serves more than one role, such as storage ottomans that provide extra seating, or console tables that can double as desks or work surfaces.\n\n### 2. Use \"Zones\" Instead of Walls\nAvoid permanent partitions, which lock a space into a single layout. Instead, define areas through visual and functional boundaries:\n*   **Visual Dividers:** Use area rugs, open shelving units, or curtains to create distinct \"zones\" (e.g., a quiet focus area vs. a collaborative hub) without blocking the flow of the room.\n*   **Furniture Placement:** Use larger pieces like a dining or work table as a structural anchor to naturally divide the room.\n*   **Consistent Design:** Maintain a cohesive color palette throughout the entire space. This allows different zones to feel connected and intentional rather than cluttered or improvised.\n\n### 3. Smart Storage and Clutter Control\nClutter is the primary enemy of flexibility. To transition smoothly between activities, storage must be both accessible and discreet.\n*   **Closed Storage:** Use cabinets, lidded bins, or baskets to hide supplies and \"chaos\" when a space needs to change its function.\n*   **Vertical Storage:** In small rooms, utilize wall-mounted shelving or door-hanging organizers to keep floor space clear.\n\n### 4. Adaptive Lighting and Technology\n*   **Layered Lighting:** Use a mix of lighting types—such as dimmable overhead lights, floor lamps, and task lighting—to shift the mood from \"productivity\" to \"relaxation\" instantly.\n*   **Thoughtful Tech:** Minimize visual clutter by using wireless solutions where possible. Consider hidden charging stations or cable management systems to keep surfaces clear and ready for any task.\n\n### 5. Design for Comfort and Flow\n*   **Leave Open Space:** Resist the urge to fill every corner. Leaving \"breathing room\" makes a small space feel larger and easier to adapt.\n*   **Consider the \"Route\":** As you noted during your first visit to the Canal Street room, it is helpful to consider the \"central route\" or flow of traffic through the space. Ensuring there is a clear, unobstructed path between zones helps the room feel functional regardless of how the furniture is arranged.\n\nBy focusing on these principles, you can ensure that your space remains a \"hard-working\" environment that evolves with your needs rather than being constrained by its initial setup.",
+          "retrievals": []
+        },
+        {
+          "user": "Why did we choose Layout B instead of the eight-bench plan?",
+          "assistant": "Layout B was chosen over the original eight-bench plan primarily because the eight-bench arrangement (Layout A) failed to provide enough space for a clear central route, which was identified as a critical accessibility requirement during a February walkthrough.\n\nThe decision to shift to Layout B was driven by several key factors:\n\n*   **Improved Flow and Accessibility:** The eight fixed benches made the room feel cramped and obstructed the path between the street entrance and the rear sink. Layout B, which uses only four movable benches, ensures the central route remains open and accessible.\n*   **Community Needs:** Iman advocated for Layout B because it includes a communal table, which better supports group activities and repair evenings. Feedback from the 30 April trial confirmed that visitors preferred gathering around this shared table.\n*   **Adaptability:** The move to four wheeled benches allows the room to be reconfigured easily for different types of sessions, making the space more versatile than one filled with fixed furniture.\n*   **Practical Constraints:** \n    *   **Budget and Construction:** Lee noted that building four movable benches was more cost-effective.\n    *   **Equipment Changes:** The electrician’s March visit determined that the laser cutter could not be included in phase one, which removed the need for the extra space and specific placement that the original plan had attempted to accommodate.\n    *   **Lighting:** The original eight-bench plan would have blocked the north corner, which was already identified as a dim area of the room.\n\nUltimately, while the eight-bench idea was an exciting starting point, it was determined that Layout B was the more functional, adaptable, and neighbor-friendly choice for the space.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "final-layout-rationale",
+                  "extension": "md",
+                  "label": "final-layout-rationale"
+                },
+                {
+                  "name": "lessons-so-far",
+                  "extension": "md",
+                  "label": "lessons-so-far"
+                },
+                {
+                  "name": "spoken-layout-rationale",
+                  "extension": "mp3",
+                  "label": "spoken-layout-rationale"
+                },
+                {
+                  "name": "voice-note-layout-choice",
+                  "extension": "mp3",
+                  "label": "voice-note-layout-choice"
+                },
+                {
+                  "name": "decision-log",
+                  "extension": "md",
+                  "label": "decision-log"
+                },
+                {
+                  "name": "meeting-notes-march",
+                  "extension": "md",
+                  "label": "meeting-notes-march"
+                },
+                {
+                  "name": "accessibility-notes",
+                  "extension": "md",
+                  "label": "accessibility-notes"
+                },
+                {
+                  "name": "voice-note-first-visit",
+                  "extension": "mp3",
+                  "label": "voice-note-first-visit"
+                },
+                {
+                  "name": "conversation-with-lee",
+                  "extension": "md",
+                  "label": "conversation-with-lee"
+                },
+                {
+                  "name": "layout-option-b",
+                  "extension": "md",
+                  "label": "layout-option-b"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "How could we explain that choice without sounding defensive?",
+          "assistant": "To explain the shift from the eight-bench plan to Layout B without sounding defensive, the key is to **frame the change as a success of your planning process** rather than a correction of a mistake.\n\nBy focusing on what you *learned* rather than what you *lost*, you turn the decision into a sign of competence and responsiveness. Here are a few ways to frame that conversation, depending on who you are talking to:\n\n### 1. The \"Evolutionary\" Approach (Best for stakeholders or partners)\nThis approach highlights that the space is working exactly as intended because it is adapting to real-world use.\n\n*   **What to say:** \"We started with a high-density plan, but as we spent time in the room, we realized that prioritizing a clear flow of movement made the space much more usable. We shifted to Layout B because it allows us to host group activities and repair sessions more effectively, which has been a huge win for the community.\"\n\n### 2. The \"User-Centered\" Approach (Best for visitors or community members)\nThis approach shifts the focus away from your initial plan and onto the experience of the people using the room.\n\n*   **What to say:** \"We wanted to make sure the room felt welcoming and easy to navigate for everyone. After testing the space, we found that having a central communal table—rather than fixed benches—made it much easier for people to work together and talk to each other. It’s been great to see how much more social the room feels now.\"\n\n### 3. The \"Practical/Functional\" Approach (Best for technical or project-focused discussions)\nThis approach frames the decision as a logical response to the physical constraints of the room.\n\n*   **What to say:** \"We learned early on that the room’s layout really benefits from keeping the central route open. By moving to a modular setup with four benches, we’ve gained a lot of flexibility. It allows us to reconfigure the space for different types of projects on the fly, which has made the room much more versatile than our original fixed-bench concept.\"\n\n### Key Principles to Keep in Mind:\n*   **Use \"We\" and \"Learned\":** Phrases like \"We realized,\" \"We learned,\" or \"We found\" show that you are actively engaged with the space. It frames the change as a result of your diligence.\n*   **Focus on the Benefit:** Always end the explanation by highlighting what the new layout *does* (e.g., \"It makes the room more social,\" \"It improves accessibility,\" \"It allows for more variety\").\n*   **Don't Over-Explain:** You don't need to list every reason (the electrician, the budget, the dim corner). Just pick the most compelling benefit—usually the improved community experience—and stick to that.\n*   **Own the Process:** If someone asks, \"Why didn't you do the eight benches?\" you can simply say, \"That was our starting point, but the space told us it needed something different.\" This sounds confident and shows you are listening to the environment.",
+          "retrievals": []
+        },
+        {
+          "user": "What did the electrician find, and how did that affect the layout?",
+          "assistant": "During the 3 March visit, the electrician discovered that the outlets on the north wall shared an older circuit that could not support a laser cutter without a significant, costly electrical upgrade.\n\nThis finding directly influenced the layout in three ways:\n\n*   **Scope Reduction:** Because the laser cutter required an upgrade that was not feasible for the first phase, it was removed from the plan. This eliminated the need for the specific, dedicated space that the original eight-bench layout had been designed to accommodate.\n*   **Budget Reallocation:** The exclusion of the laser cutter allowed you to pivot the budget toward necessary electrical repairs (such as replacing the socket by the rear sink) and the construction of the new, more flexible furniture.\n*   **Layout Simplification:** With the laser cutter gone, you were no longer constrained by the need to fit eight fixed stations into the room. This provided the freedom to adopt **Layout B**, which prioritized a clear central route and a communal table, ultimately creating a more versatile and welcoming environment for community activities.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "final-layout-rationale",
+                  "extension": "md",
+                  "label": "final-layout-rationale"
+                },
+                {
+                  "name": "decision-log",
+                  "extension": "md",
+                  "label": "decision-log"
+                },
+                {
+                  "name": "electrician-visit",
+                  "extension": "md",
+                  "label": "electrician-visit"
+                },
+                {
+                  "name": "project-timeline",
+                  "extension": "md",
+                  "label": "project-timeline"
+                },
+                {
+                  "name": "initial-budget",
+                  "extension": "md",
+                  "label": "initial-budget"
+                },
+                {
+                  "name": "voice-note-electrician",
+                  "extension": "mp3",
+                  "label": "voice-note-electrician"
+                },
+                {
+                  "name": "meeting-notes-march",
+                  "extension": "md",
+                  "label": "meeting-notes-march"
+                },
+                {
+                  "name": "layout-option-b",
+                  "extension": "md",
+                  "label": "layout-option-b"
+                },
+                {
+                  "name": "meeting-notes-april",
+                  "extension": "docx",
+                  "label": "meeting-notes-april"
+                },
+                {
+                  "name": "lighting-notes",
+                  "extension": "md",
+                  "label": "lighting-notes"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "What practical detail should we check again before opening?",
+          "assistant": "Before opening, you should **verify the room's measurements**.\n\nAccording to your notes in `room-measurements.txt`, the dimensions of the space (8.1 m x 10.8 m) were taken with a hand tape and were explicitly marked as needing verification before the furniture was built. While you have since moved forward with the four-bench layout, confirming these measurements remains a key practical detail to ensure the final setup—particularly the \"central route\" you prioritized—functions exactly as intended in the actual space.\n\nAdditionally, based on your `supplier-quotes.md` file, you should confirm the availability of your furniture and supplies, as those figures were noted as planning estimates rather than confirmed purchase orders.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "voice-note-first-visit",
+                  "extension": "mp3",
+                  "label": "voice-note-first-visit"
+                },
+                {
+                  "name": "room-measurements",
+                  "extension": "txt",
+                  "label": "room-measurements"
+                },
+                {
+                  "name": "opening-announcement",
+                  "extension": "docx",
+                  "label": "opening-announcement"
+                },
+                {
+                  "name": "room-first-visit",
+                  "extension": "md",
+                  "label": "room-first-visit"
+                },
+                {
+                  "name": "decision-log",
+                  "extension": "md",
+                  "label": "decision-log"
+                },
+                {
+                  "name": "why-a-workshop",
+                  "extension": "md",
+                  "label": "why-a-workshop"
+                },
+                {
+                  "name": "first-event-plan",
+                  "extension": "md",
+                  "label": "first-event-plan"
+                },
+                {
+                  "name": "poster-copy",
+                  "extension": "md",
+                  "label": "poster-copy"
+                },
+                {
+                  "name": "project-timeline",
+                  "extension": "md",
+                  "label": "project-timeline"
+                },
+                {
+                  "name": "supplier-quotes",
+                  "extension": "pdf",
+                  "label": "supplier-quotes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "the-budget",
+      "title": "Starting Smaller",
+      "turns": [
+        {
+          "user": "Between my initial-budget.md and revised-budget.md, which is the current working budget?",
+          "assistant": "The current working budget is **revised-budget.md**.\n\nThe **initial-budget.md** file is considered invalid. According to your records, Mara Vale marked it as such following an electrician's visit on 3 March 2026, which revealed that the electrical infrastructure could not support the laser cutter included in that initial draft.\n\nThe **revised-budget.md** reflects the updated plan, which excludes the laser cutter, adjusts the equipment list (moving to four movable benches instead of eight), and incorporates the necessary electrical and sink socket repairs. This version was formally adopted on 7 March 2026 and is the document currently guiding the project's finances.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "initial-budget",
+                  "extension": "md",
+                  "label": "initial-budget"
+                },
+                {
+                  "name": "electrician-visit",
+                  "extension": "md",
+                  "label": "electrician-visit"
+                },
+                {
+                  "name": "revised-budget",
+                  "extension": "md",
+                  "label": "revised-budget"
+                },
+                {
+                  "name": "spoken-layout-rationale",
+                  "extension": "mp3",
+                  "label": "spoken-layout-rationale"
+                },
+                {
+                  "name": "decision-log",
+                  "extension": "md",
+                  "label": "decision-log"
+                },
+                {
+                  "name": "meeting-notes-april",
+                  "extension": "docx",
+                  "label": "meeting-notes-april"
+                },
+                {
+                  "name": "equipment-list",
+                  "extension": "md",
+                  "label": "equipment-list"
+                },
+                {
+                  "name": "weekly-opening-plan",
+                  "extension": "pdf",
+                  "label": "weekly-opening-plan"
+                },
+                {
+                  "name": "project-timeline",
+                  "extension": "md",
+                  "label": "project-timeline"
+                },
+                {
+                  "name": "why-a-workshop",
+                  "extension": "md",
+                  "label": "why-a-workshop"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "Why is it wise to leave room for unexpected costs in a small project?",
+          "assistant": "Leaving room for unexpected costs—often called a **contingency budget**—is considered a hallmark of sound project management rather than a sign of poor planning. Even in small projects, it is wise for several key reasons:\n\n### 1. It Protects Your Core Objectives\nWhen you don't have a financial buffer, an unexpected expense can force you to make difficult trade-offs, such as reducing the project's scope, compromising on quality, or delaying the timeline to secure more funding. A contingency fund allows you to absorb these shocks without derailing the project’s primary goals.\n\n### 2. It Acknowledges Inevitable Uncertainty\nNo matter how thorough your initial planning is, projects almost always encounter surprises. Common examples include:\n*   **Hidden Conditions:** Especially in renovations, you may discover structural issues or outdated utilities (like the electrical infrastructure issues you encountered) only after work begins.\n*   **Market Fluctuations:** Prices for materials can change, or supply chain issues may cause unexpected delays and cost increases.\n*   **Equipment Failures:** Essential tools or machinery may break down or require more maintenance than anticipated.\n\n### 3. It Prevents \"Scope Creep\" and Financial Strain\nWithout a dedicated reserve, unexpected costs often compete with money already allocated to other priorities. This can lead to a \"domino effect\" where one small, unplanned repair forces you to cut corners elsewhere, potentially leading to higher costs in the long run (e.g., delaying a necessary repair can cause further damage that is more expensive to fix later).\n\n### 4. It Improves Decision-Making\nHaving a contingency fund provides the flexibility to respond to changes calmly. Instead of reacting to a surprise expense as a crisis, you can treat it as a managed part of the project lifecycle. This helps maintain team morale and keeps the project moving forward efficiently.\n\n### How Much Should You Set Aside?\nWhile the exact amount depends on the project's complexity and risk profile, standard practices suggest:\n*   **Simple Projects:** Often require a contingency of around **10%** of the total budget.\n*   **Complex or High-Risk Projects:** May require **20% to 30%** to account for greater uncertainty.\n\nBy building this buffer into your budget from the start, you ensure that your project remains financially stable and resilient, even when things do not go exactly according to plan.",
+          "retrievals": []
+        },
+        {
+          "user": "According to revised-budget.md, what are the up-front fit-out cost and monthly rent? Are they separate?",
+          "assistant": "According to **revised-budget.md**, the costs are as follows:\n\n*   **Up-front fit-out cost:** 5,090\n*   **Monthly rent:** 1,450\n\n**Are they separate?**\nYes, they are separate. The document explicitly states that the up-front fit-out figure of 5,090 is calculated \"including contingency\" but \"excluding rent.\"",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "revised-budget",
+                  "extension": "md",
+                  "label": "revised-budget"
+                },
+                {
+                  "name": "initial-budget",
+                  "extension": "md",
+                  "label": "initial-budget"
+                },
+                {
+                  "name": "room-first-visit",
+                  "extension": "md",
+                  "label": "room-first-visit"
+                },
+                {
+                  "name": "decision-log",
+                  "extension": "md",
+                  "label": "decision-log"
+                },
+                {
+                  "name": "electrician-visit",
+                  "extension": "md",
+                  "label": "electrician-visit"
+                },
+                {
+                  "name": "spoken-layout-rationale",
+                  "extension": "mp3",
+                  "label": "spoken-layout-rationale"
+                },
+                {
+                  "name": "equipment-list",
+                  "extension": "md",
+                  "label": "equipment-list"
+                },
+                {
+                  "name": "meeting-notes-april",
+                  "extension": "docx",
+                  "label": "meeting-notes-april"
+                },
+                {
+                  "name": "supplier-quotes",
+                  "extension": "pdf",
+                  "label": "supplier-quotes"
+                },
+                {
+                  "name": "lighting-notes",
+                  "extension": "md",
+                  "label": "lighting-notes"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "What purchases did we decide to defer?",
+          "assistant": "According to the project records, the following items were deferred to keep the project within the revised budget and accommodate the existing electrical infrastructure:\n\n*   **Laser cutter:** This was removed from the first phase after the electrician determined the current electrical system could not support it.\n*   **Large dust extractor:** Deferred alongside the laser cutter.\n*   **Permanent rows of benches:** The plan was adjusted to use four movable benches instead of the eight originally proposed, which also helps maintain a clear central route in the workshop.\n\nThese decisions were finalized as part of the shift to \"Layout B\" and the adoption of the revised budget on 7 March 2026.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "equipment-list",
+                  "extension": "md",
+                  "label": "equipment-list"
+                },
+                {
+                  "name": "revised-budget",
+                  "extension": "md",
+                  "label": "revised-budget"
+                },
+                {
+                  "name": "initial-budget",
+                  "extension": "md",
+                  "label": "initial-budget"
+                },
+                {
+                  "name": "electrician-visit",
+                  "extension": "md",
+                  "label": "electrician-visit"
+                },
+                {
+                  "name": "decision-log",
+                  "extension": "md",
+                  "label": "decision-log"
+                },
+                {
+                  "name": "spoken-layout-rationale",
+                  "extension": "mp3",
+                  "label": "spoken-layout-rationale"
+                },
+                {
+                  "name": "meeting-notes-april",
+                  "extension": "docx",
+                  "label": "meeting-notes-april"
+                },
+                {
+                  "name": "weekly-opening-plan",
+                  "extension": "pdf",
+                  "label": "weekly-opening-plan"
+                },
+                {
+                  "name": "supplier-quotes",
+                  "extension": "pdf",
+                  "label": "supplier-quotes"
+                },
+                {
+                  "name": "why-a-workshop",
+                  "extension": "md",
+                  "label": "why-a-workshop"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "How would you talk about these trade-offs to someone excited by the first plan?",
+          "assistant": "When explaining these changes to someone who was excited by the initial, more ambitious plan, it is helpful to frame the shift as a move toward **sustainability and accessibility** rather than a reduction in quality.\n\nYou might approach the conversation by highlighting these three points:\n\n### 1. Prioritizing Safety and Infrastructure\nExplain that the initial plan was a great starting point, but the professional assessment by the electrician revealed that the building’s current electrical infrastructure couldn't safely support high-draw equipment like a laser cutter. By deferring that purchase, you are ensuring the workshop is safe and compliant from day one, rather than risking electrical failures that could shut the space down.\n\n### 2. Designing for Flexibility (Layout B)\nYou can explain that the move from eight fixed benches to four movable ones was a deliberate design choice to make the space more welcoming. \n*   **The \"Why\":** Fixed benches created narrow, restrictive routes through the room. \n*   **The Benefit:** Movable benches allow the space to be reconfigured for different types of sessions—whether it's a communal repair night or a workshop—and they make room for a communal table, which encourages the social, collaborative atmosphere that is the heart of the project.\n\n### 3. Building a Foundation for Growth\nFrame the current phase as a \"proof of concept.\" The goal is to see what the community actually needs and uses before committing to expensive, specialized equipment. \n*   **The Vision:** By starting with a lean, functional setup, you are investing in the *people* and the *community* first. \n*   **The Future:** The laser cutter isn't gone forever; it is simply being held for a future phase where the electrical capacity is upgraded and the demand from the community justifies the investment.\n\n**The core message:** \"We’ve shifted from a 'full-capacity' model to a 'community-first' model. This allows us to open our doors sooner, keep the space safe and adaptable, and ensure that when we do add more advanced equipment, it’s because our neighbors have told us exactly what they need.\"",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "electrician-visit",
+                  "extension": "md",
+                  "label": "electrician-visit"
+                },
+                {
+                  "name": "revised-budget",
+                  "extension": "md",
+                  "label": "revised-budget"
+                },
+                {
+                  "name": "initial-budget",
+                  "extension": "md",
+                  "label": "initial-budget"
+                },
+                {
+                  "name": "equipment-list",
+                  "extension": "md",
+                  "label": "equipment-list"
+                },
+                {
+                  "name": "decision-log",
+                  "extension": "md",
+                  "label": "decision-log"
+                },
+                {
+                  "name": "final-layout-rationale",
+                  "extension": "md",
+                  "label": "final-layout-rationale"
+                },
+                {
+                  "name": "why-a-workshop",
+                  "extension": "md",
+                  "label": "why-a-workshop"
+                },
+                {
+                  "name": "six-month-vision",
+                  "extension": "md",
+                  "label": "six-month-vision"
+                },
+                {
+                  "name": "voice-note-electrician",
+                  "extension": "mp3",
+                  "label": "voice-note-electrician"
+                },
+                {
+                  "name": "spoken-layout-rationale",
+                  "extension": "mp3",
+                  "label": "spoken-layout-rationale"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "What should we check after the trial before spending more?",
+          "assistant": "According to your project records, Mara Vale is responsible for reviewing the project's status after the trial period. Before committing to further spending on equipment or expansion, the following areas are identified for review:\n\n*   **Community Demand and Usage:** The primary goal is to document what visitors actually come to learn and do. Success is measured by whether neighbors return to the space, rather than by how much equipment is installed.\n*   **Operational Feedback:** Based on the 30 April trial, specific practical adjustments were noted—such as the need for larger tool labels and better management of the sink area—which should be evaluated to ensure the current setup is functioning well.\n*   **Attendance and Access:** The project timeline specifies that attendance, accessibility, and costs must be reviewed in May (following the trial) before any expansion is considered.\n*   **Justification for Major Equipment:** For items like the laser cutter, the decision to purchase is strictly contingent on two factors: ensuring the necessary electrical upgrades are completed and confirming that the community's demand justifies the investment.\n\nIn short, the focus is on validating that the current \"Layout B\" and the existing toolset meet the actual needs of the neighbors before moving toward more specialized or expensive additions.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "revised-budget",
+                  "extension": "md",
+                  "label": "revised-budget"
+                },
+                {
+                  "name": "six-month-vision",
+                  "extension": "md",
+                  "label": "six-month-vision"
+                },
+                {
+                  "name": "project-timeline",
+                  "extension": "md",
+                  "label": "project-timeline"
+                },
+                {
+                  "name": "equipment-list",
+                  "extension": "md",
+                  "label": "equipment-list"
+                },
+                {
+                  "name": "spoken-six-month-vision",
+                  "extension": "mp3",
+                  "label": "spoken-six-month-vision"
+                },
+                {
+                  "name": "voice-note-after-trial",
+                  "extension": "mp3",
+                  "label": "voice-note-after-trial"
+                },
+                {
+                  "name": "initial-budget",
+                  "extension": "md",
+                  "label": "initial-budget"
+                },
+                {
+                  "name": "lessons-so-far",
+                  "extension": "md",
+                  "label": "lessons-so-far"
+                },
+                {
+                  "name": "final-layout-rationale",
+                  "extension": "md",
+                  "label": "final-layout-rationale"
+                },
+                {
+                  "name": "first-event-plan",
+                  "extension": "md",
+                  "label": "first-event-plan"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "the-opening",
+      "title": "Getting Ready to Open",
+      "turns": [
+        {
+          "user": "Is the public workshop opening still planned for 2 April?",
+          "assistant": "No, the public workshop opening is not planned for 2 April.\n\nWhile 2 April was an early, penciled-in date, it was officially moved to **Saturday, 16 May**. According to the April meeting notes and project timeline, the date was shifted to accommodate necessary electrical work and a private trial session. You should disregard any earlier drafts or posters that mention the 2 April date.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "poster-copy",
+                  "extension": "md",
+                  "label": "poster-copy"
+                },
+                {
+                  "name": "opening-announcement",
+                  "extension": "docx",
+                  "label": "opening-announcement"
+                },
+                {
+                  "name": "meeting-notes-april",
+                  "extension": "docx",
+                  "label": "meeting-notes-april"
+                },
+                {
+                  "name": "spoken-opening-announcement",
+                  "extension": "mp3",
+                  "label": "spoken-opening-announcement"
+                },
+                {
+                  "name": "weekly-opening-plan",
+                  "extension": "pdf",
+                  "label": "weekly-opening-plan"
+                },
+                {
+                  "name": "project-timeline",
+                  "extension": "md",
+                  "label": "project-timeline"
+                },
+                {
+                  "name": "first-event-plan",
+                  "extension": "md",
+                  "label": "first-event-plan"
+                },
+                {
+                  "name": "lessons-so-far",
+                  "extension": "md",
+                  "label": "lessons-so-far"
+                },
+                {
+                  "name": "meeting-notes-march",
+                  "extension": "md",
+                  "label": "meeting-notes-march"
+                },
+                {
+                  "name": "opening-day",
+                  "extension": "mp4",
+                  "label": "opening-day"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "In general, what makes a community invitation feel personal?",
+          "assistant": "A community invitation feels personal when it shifts from being a generic announcement to a direct conversation. While the specific tactics depend on your community’s culture, the most effective invitations usually share a few core qualities:\n\n### 1. Recognition of the Individual\nA personal invitation acknowledges that the recipient is a specific person, not just a name on a list.\n*   **Contextual Relevance:** Instead of saying \"We are hosting an event,\" it explains *why* that specific person would find value in it. For example: \"I know you’ve been working on [Project X], and I thought you might find the discussion on [Topic Y] particularly useful.\"\n*   **Use of Name:** Using a person's name is the baseline, but referencing a past interaction or a shared interest takes it further.\n\n### 2. A Sense of \"Why You\"\nPeople are more likely to engage when they feel they have a unique role to play.\n*   **The \"Need\" Factor:** People like to feel useful. If you can articulate why their presence matters—whether it’s their expertise, their perspective, or simply their energy—it transforms the invitation from a request for attendance into a request for contribution.\n*   **Avoiding the \"Mass Blast\":** If an invitation looks like it was sent to 500 people simultaneously, it loses its personal touch. Even if you are inviting a large group, using tools that allow for individual salutations or personalized notes helps maintain that one-to-one feel.\n\n### 3. Warmth and Human Voice\nFormal, corporate, or overly automated language creates distance.\n*   **Conversational Tone:** Write as if you are speaking to a friend or a colleague. Avoid jargon and overly rigid structures.\n*   **The \"Sender\" Matters:** An invitation from a person (e.g., \"I’m hosting...\") feels significantly more personal than an invitation from an entity (e.g., \"The Committee invites you...\"). If possible, have the invitation come from someone the recipient recognizes or respects.\n\n### 4. Low Pressure, High Intent\nA personal invitation respects the recipient's time and autonomy.\n*   **Clear Value, No Guilt:** Clearly state what the event is and what they can expect to get out of it, but leave the door open for them to decline without feeling like they’ve let you down.\n*   **The \"Soft\" Ask:** Sometimes, a personal invitation is just a heads-up: \"We’re doing this, and I’d love to see you there if you’re around.\" This feels much more inviting than a formal RSVP demand.\n\n### 5. Shared Context\nThe most personal invitations often bridge the gap between the event and the community’s shared history.\n*   **Referencing Shared Goals:** Connecting the invitation to a recent success, a common challenge, or a future vision that the community is working toward makes the event feel like a natural next step in a journey you are taking together.\n\n**In short:** A personal invitation is less about the *event* and more about the *relationship*. If the recipient feels that you have thought about them specifically—and that you genuinely want them there for their own sake—the invitation will feel personal.",
+          "retrievals": []
+        },
+        {
+          "user": "When are the private trial and the public opening now?",
+          "assistant": "Based on the project records, the dates for the two events are as follows:\n\n*   **Private Trial:** This \"bring-one-thing\" trial session took place on **30 April**.\n*   **Public Opening:** The official public opening was scheduled for **Saturday, 16 May**.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "meeting-notes-april",
+                  "extension": "docx",
+                  "label": "meeting-notes-april"
+                },
+                {
+                  "name": "first-event-plan",
+                  "extension": "md",
+                  "label": "first-event-plan"
+                },
+                {
+                  "name": "project-timeline",
+                  "extension": "md",
+                  "label": "project-timeline"
+                },
+                {
+                  "name": "weekly-opening-plan",
+                  "extension": "pdf",
+                  "label": "weekly-opening-plan"
+                },
+                {
+                  "name": "lessons-so-far",
+                  "extension": "md",
+                  "label": "lessons-so-far"
+                },
+                {
+                  "name": "meeting-notes-march",
+                  "extension": "md",
+                  "label": "meeting-notes-march"
+                },
+                {
+                  "name": "poster-copy",
+                  "extension": "md",
+                  "label": "poster-copy"
+                },
+                {
+                  "name": "opening-announcement",
+                  "extension": "docx",
+                  "label": "opening-announcement"
+                },
+                {
+                  "name": "spoken-event-invitation",
+                  "extension": "mp3",
+                  "label": "spoken-event-invitation"
+                },
+                {
+                  "name": "conversation-with-iman",
+                  "extension": "docx",
+                  "label": "conversation-with-iman"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "Could you write a short, friendly invitation using the confirmed details?",
+          "assistant": "Here is a draft for a friendly, personal invitation you could use. Since personal invitations work best when they feel like a direct conversation, I have left a placeholder for you to add a specific connection to the person you are inviting.\n\n***\n\n**Subject: A new space for making and mending at 18 Canal Street**\n\nHi [Name],\n\nI hope you’re doing well! I’m reaching out because [mention a specific reason, e.g., \"I know you’ve been interested in local community projects\" or \"I remember you mentioning you were looking for a place to work on your latest project\"].\n\nAfter months of planning and some great feedback from our neighbors during a trial session in April, we are finally ready to open our doors. We’ve created a small, accessible neighborhood workshop at 18 Canal Street, and I’d love for you to see it.\n\nWe’re focusing on beginner-friendly repair sessions and shared work space—no tools or experience are needed, just a bit of curiosity. We’ll be officially opening on **Saturday, 16 May, from 10:00 to 14:00**.\n\nIt would be wonderful to have you there to help us kick things off. There’s no pressure to commit to anything, but if you’re around that morning, please do drop by to say hello and take a look at the new benches.\n\nBest,\n\n[Your Name]",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "poster-copy",
+                  "extension": "md",
+                  "label": "poster-copy"
+                },
+                {
+                  "name": "first-event-plan",
+                  "extension": "md",
+                  "label": "first-event-plan"
+                },
+                {
+                  "name": "meeting-notes-april",
+                  "extension": "docx",
+                  "label": "meeting-notes-april"
+                },
+                {
+                  "name": "weekly-opening-plan",
+                  "extension": "pdf",
+                  "label": "weekly-opening-plan"
+                },
+                {
+                  "name": "opening-announcement",
+                  "extension": "docx",
+                  "label": "opening-announcement"
+                },
+                {
+                  "name": "spoken-opening-announcement",
+                  "extension": "mp3",
+                  "label": "spoken-opening-announcement"
+                },
+                {
+                  "name": "project-timeline",
+                  "extension": "md",
+                  "label": "project-timeline"
+                },
+                {
+                  "name": "lessons-so-far",
+                  "extension": "md",
+                  "label": "lessons-so-far"
+                },
+                {
+                  "name": "meeting-notes-march",
+                  "extension": "md",
+                  "label": "meeting-notes-march"
+                },
+                {
+                  "name": "spoken-event-invitation",
+                  "extension": "mp3",
+                  "label": "spoken-event-invitation"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "What should someone new know before coming along?",
+          "assistant": "If you are planning to visit the workshop, here is what you should know to help you feel prepared and comfortable:\n\n### What to Expect\n*   **A Welcoming Environment:** The space is designed for learning together rather than judging skill levels. It is a collaborative environment where you can mend, make, and learn.\n*   **Accessibility:** There is a step-free street entrance and an adjustable-height table available. Please feel free to use the adjustable table if you need it—you do not need to explain why.\n*   **No Experience Needed:** You do not need to bring your own tools or have any prior experience. Just bring your curiosity.\n\n### Guidelines for Visitors\n*   **Ask for Help:** If you are unsure how to use a tool, please ask before using it.\n*   **Safety and Organization:** Keep the central path clear so everyone can move around safely. If you use a tool, please return it to its marked drawer when you are finished.\n*   **Labeling:** If you bring an item in for repair, please make sure it is labeled.\n*   **Children:** Children are welcome, but they should work with an accompanying adult.\n\nThe workshop is located at **18 Canal Street**. The public opening is on **Saturday, 16 May, from 10:00 to 14:00**.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "workshop-guidelines",
+                  "extension": "md",
+                  "label": "workshop-guidelines"
+                },
+                {
+                  "name": "spoken-opening-announcement",
+                  "extension": "mp3",
+                  "label": "spoken-opening-announcement"
+                },
+                {
+                  "name": "poster-copy",
+                  "extension": "md",
+                  "label": "poster-copy"
+                },
+                {
+                  "name": "first-event-plan",
+                  "extension": "md",
+                  "label": "first-event-plan"
+                },
+                {
+                  "name": "conversation-with-iman",
+                  "extension": "docx",
+                  "label": "conversation-with-iman"
+                },
+                {
+                  "name": "opening-announcement",
+                  "extension": "docx",
+                  "label": "opening-announcement"
+                },
+                {
+                  "name": "lessons-so-far",
+                  "extension": "md",
+                  "label": "lessons-so-far"
+                },
+                {
+                  "name": "opening-day",
+                  "extension": "mp4",
+                  "label": "opening-day"
+                },
+                {
+                  "name": "six-month-vision",
+                  "extension": "md",
+                  "label": "six-month-vision"
+                },
+                {
+                  "name": "spoken-project-vision",
+                  "extension": "mp3",
+                  "label": "spoken-project-vision"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "Does my final poster copy agree with that invitation?",
+          "assistant": "Yes, your final poster copy and the invitation draft are in full agreement.\n\nBoth documents reflect the confirmed details:\n*   **Date:** Saturday, 16 May.\n*   **Time:** 10:00–14:00.\n*   **Location:** 18 Canal Street.\n*   **Core Message:** Both emphasize that the space is for mending, making, and learning, and both explicitly state that no experience or tools are needed.\n\nThe poster copy specifically notes the \"step-free street entrance and a lower work surface,\" which aligns with the accessibility information provided in the invitation and the general guidance for new visitors. You are clear to use both as they are consistent with the project's final plans.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "poster-copy",
+                  "extension": "md",
+                  "label": "poster-copy"
+                },
+                {
+                  "name": "spoken-opening-announcement",
+                  "extension": "mp3",
+                  "label": "spoken-opening-announcement"
+                },
+                {
+                  "name": "opening-announcement",
+                  "extension": "docx",
+                  "label": "opening-announcement"
+                },
+                {
+                  "name": "opening-day",
+                  "extension": "mp4",
+                  "label": "opening-day"
+                },
+                {
+                  "name": "spoken-project-vision",
+                  "extension": "mp3",
+                  "label": "spoken-project-vision"
+                },
+                {
+                  "name": "meeting-notes-april",
+                  "extension": "docx",
+                  "label": "meeting-notes-april"
+                },
+                {
+                  "name": "weekly-opening-plan",
+                  "extension": "pdf",
+                  "label": "weekly-opening-plan"
+                },
+                {
+                  "name": "poster-final-concept",
+                  "extension": "jpeg",
+                  "label": "poster-final-concept"
+                },
+                {
+                  "name": "materials-and-colors",
+                  "extension": "md",
+                  "label": "materials-and-colors"
+                },
+                {
+                  "name": "poster-early-concept",
+                  "extension": "jpeg",
+                  "label": "poster-early-concept"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "after-the-trial",
+      "title": "After the First Trial",
+      "turns": [
+        {
+          "user": "What happened at our bring-one-thing trial?",
+          "assistant": "The \"bring-one-thing\" trial took place on April 30, 2026, as a private event held before the workshop's official public opening. \n\nEleven of the twelve invited neighbors attended the session. The event was run by Iman, Lee, and Mara, and focused on helping visitors repair small items in a welcoming, informal environment.\n\nKey takeaways from the trial included:\n* **Layout and Equipment:** The communal table was the primary gathering spot, though two visitors utilized the lower work surface. The movable benches were successful and made cleanup easier, confirming the effectiveness of the \"Layout B\" configuration over the original eight-bench plan.\n* **Operational Improvements:** The team identified a need for larger print on tool labels and noted that the sink area became crowded. As a result, Mara planned to move one tool cart before the public opening on May 16.\n* **Atmosphere:** The event was considered a success, with notes indicating that it finally made the workshop feel like a \"real place.\" \n\nThe trial served as a practical test of the space, allowing the team to gather feedback and refine the setup before the official launch.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "first-event-plan",
+                  "extension": "md",
+                  "label": "first-event-plan"
+                },
+                {
+                  "name": "spoken-event-invitation",
+                  "extension": "mp3",
+                  "label": "spoken-event-invitation"
+                },
+                {
+                  "name": "meeting-notes-april",
+                  "extension": "docx",
+                  "label": "meeting-notes-april"
+                },
+                {
+                  "name": "potential-activities",
+                  "extension": "md",
+                  "label": "potential-activities"
+                },
+                {
+                  "name": "conversation-with-iman",
+                  "extension": "docx",
+                  "label": "conversation-with-iman"
+                },
+                {
+                  "name": "equipment-list",
+                  "extension": "md",
+                  "label": "equipment-list"
+                },
+                {
+                  "name": "voice-note-after-trial",
+                  "extension": "mp3",
+                  "label": "voice-note-after-trial"
+                },
+                {
+                  "name": "lessons-so-far",
+                  "extension": "md",
+                  "label": "lessons-so-far"
+                },
+                {
+                  "name": "meeting-notes-march",
+                  "extension": "md",
+                  "label": "meeting-notes-march"
+                },
+                {
+                  "name": "revised-budget",
+                  "extension": "md",
+                  "label": "revised-budget"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "What could I ask visitors next time to learn what worked for them?",
+          "assistant": "To learn what worked for your visitors and improve future sessions, you can focus your questions on the atmosphere, the accessibility of the space, and the support they received. Since your goal is to foster a welcoming environment where neighbors feel comfortable learning together, consider asking:\n\n**On the environment and layout:**\n* \"Did you feel comfortable moving around the space and finding what you needed?\" (This helps verify if the \"Layout B\" configuration and tool labeling are intuitive).\n* \"Was there any point where you felt crowded or unsure where to go?\" (This addresses the sink area congestion noted during the trial).\n* \"Did the shared table setup make it easier to talk to others and ask questions?\"\n\n**On the experience and support:**\n* \"Did you feel supported in your repair, and was the level of guidance helpful?\" (This aligns with Iman’s priority of making people feel welcome to ask basic questions).\n* \"Was there anything that made you feel like you needed more experience or specific tools than you had?\" (This helps you continue to avoid the \"expert-only\" barrier).\n* \"What is one thing you learned tonight that you didn't know when you walked in?\"\n\n**On future engagement:**\n* \"What would you like to work on or learn about next time you visit?\" (This supports your \"six-month vision\" of documenting what neighbors actually want to do before committing to new equipment).\n\nSince your success metric is whether neighbors return, you might also ask a simple, open-ended question like, **\"What would make you want to come back to the workshop?\"** This often surfaces specific pain points or desires that structured questions might miss.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "lessons-so-far",
+                  "extension": "md",
+                  "label": "lessons-so-far"
+                },
+                {
+                  "name": "first-event-plan",
+                  "extension": "md",
+                  "label": "first-event-plan"
+                },
+                {
+                  "name": "conversation-with-iman",
+                  "extension": "docx",
+                  "label": "conversation-with-iman"
+                },
+                {
+                  "name": "spoken-event-invitation",
+                  "extension": "mp3",
+                  "label": "spoken-event-invitation"
+                },
+                {
+                  "name": "six-month-vision",
+                  "extension": "md",
+                  "label": "six-month-vision"
+                },
+                {
+                  "name": "workshop-guidelines",
+                  "extension": "md",
+                  "label": "workshop-guidelines"
+                },
+                {
+                  "name": "potential-activities",
+                  "extension": "md",
+                  "label": "potential-activities"
+                },
+                {
+                  "name": "voice-note-after-trial",
+                  "extension": "mp3",
+                  "label": "voice-note-after-trial"
+                },
+                {
+                  "name": "meeting-notes-april",
+                  "extension": "docx",
+                  "label": "meeting-notes-april"
+                },
+                {
+                  "name": "spoken-project-vision",
+                  "extension": "mp3",
+                  "label": "spoken-project-vision"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "What did we learn about the benches, labels, and sink area?",
+          "assistant": "The April 30, 2026, trial provided clear feedback on the workshop's physical setup, confirming that the \"Layout B\" configuration was the right choice. Here is what was learned regarding the specific areas you asked about:\n\n*   **Benches:** The four movable benches were a success. They made cleanup easier and proved to be a more effective, adaptable solution than the original plan for eight fixed benches.\n*   **Tool Labels:** The trial revealed that the current labels were insufficient; the team noted a specific need for larger print to make them more readable for visitors.\n*   **Sink Area:** This area became crowded during the session. To address this, Mara planned to relocate a tool cart that had been positioned near the sink/doorway area to ensure better traffic flow and accessibility before the public opening on May 16.\n\nOverall, these adjustments were part of the effort to ensure the space felt welcoming and functional for neighbors.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "lessons-so-far",
+                  "extension": "md",
+                  "label": "lessons-so-far"
+                },
+                {
+                  "name": "voice-note-after-trial",
+                  "extension": "mp3",
+                  "label": "voice-note-after-trial"
+                },
+                {
+                  "name": "final-layout-rationale",
+                  "extension": "md",
+                  "label": "final-layout-rationale"
+                },
+                {
+                  "name": "accessibility-notes",
+                  "extension": "md",
+                  "label": "accessibility-notes"
+                },
+                {
+                  "name": "conversation-with-iman",
+                  "extension": "docx",
+                  "label": "conversation-with-iman"
+                },
+                {
+                  "name": "first-event-plan",
+                  "extension": "md",
+                  "label": "first-event-plan"
+                },
+                {
+                  "name": "equipment-list",
+                  "extension": "md",
+                  "label": "equipment-list"
+                },
+                {
+                  "name": "layout-option-b",
+                  "extension": "md",
+                  "label": "layout-option-b"
+                },
+                {
+                  "name": "room-first-visit",
+                  "extension": "md",
+                  "label": "room-first-visit"
+                },
+                {
+                  "name": "meeting-notes-april",
+                  "extension": "docx",
+                  "label": "meeting-notes-april"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "What do the stored captions for community-table and community-repair say about people working together at the workshop?",
+          "assistant": "The captions for `community-table` and `community-repair` highlight a collaborative, supportive environment where people learn by doing together.\n\n*   **`community-table`**: This caption depicts a diverse group of five adults gathered around a workbench, emphasizing a shared learning experience. It shows one person actively using a tool (wire strippers) while another—described as an older woman—provides assistance. This illustrates the workshop's goal of neighbors helping neighbors, where the focus is on the process of repair rather than individual expertise.\n*   **`community-repair`**: This caption focuses on the hands-on nature of the work, showing a person manipulating wires inside a lamp base. The mention of another person being \"partially visible in the blurred distance\" reinforces the idea that while individuals may be focused on their own specific tasks, they are doing so within a shared, communal space.\n\nTogether, these images reflect the core vision of the workshop: a place where people can \"mend, make, and learn\" by figuring things out collectively, supported by a space designed for interaction rather than isolation.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "community-table",
+                  "extension": "jpeg",
+                  "label": "community-table"
+                },
+                {
+                  "name": "community-repair",
+                  "extension": "jpeg",
+                  "label": "community-repair"
+                },
+                {
+                  "name": "opening-day",
+                  "extension": "mp4",
+                  "label": "opening-day"
+                },
+                {
+                  "name": "spoken-project-vision",
+                  "extension": "mp3",
+                  "label": "spoken-project-vision"
+                },
+                {
+                  "name": "community-evening",
+                  "extension": "jpeg",
+                  "label": "community-evening"
+                },
+                {
+                  "name": "workshop-guidelines",
+                  "extension": "md",
+                  "label": "workshop-guidelines"
+                },
+                {
+                  "name": "spoken-opening-announcement",
+                  "extension": "mp3",
+                  "label": "spoken-opening-announcement"
+                },
+                {
+                  "name": "voice-note-iman",
+                  "extension": "mp3",
+                  "label": "voice-note-iman"
+                },
+                {
+                  "name": "voice-note-after-trial",
+                  "extension": "mp3",
+                  "label": "voice-note-after-trial"
+                },
+                {
+                  "name": "poster-illustrated-concept",
+                  "extension": "jpeg",
+                  "label": "poster-illustrated-concept"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "How should I think about success over the next three months?",
+          "assistant": "To think about success over the next three months, you should shift your focus away from \"filling the space\" and toward **community engagement and learning.**\n\nAccording to your project documentation, the primary measure of success is **whether neighbors return**, rather than whether every shelf is full or the workshop is equipped with high-end machinery. \n\nHere is how you can frame your goals for the coming months:\n\n*   **Prioritize Observation over Expansion:** Use this time to document what visitors actually come to learn and do. Your \"six-month vision\" explicitly states that you should wait to add new equipment (like the laser cutter) until you have clear evidence of demand and the necessary electrical infrastructure to support it.\n*   **Focus on the \"Mend, Make, and Learn\" Culture:** Continue hosting regular repair evenings and guest maker sessions. The goal is to ensure neighbors feel welcome and supported in their projects, rather than intimidated by a professional-grade environment.\n*   **Iterate on Operations:** Use the feedback from your trial—such as the need for larger labels and better traffic flow—to refine the space. Your goal is to make the workshop feel like a \"real place\" where people feel comfortable enough to return.\n*   **Revisit Your Strategy:** After three months of operation, you are scheduled to review your hours and overall progress. This is the time to look at attendance, accessibility, and costs to determine the next phase of the workshop.\n\nIn short, success is defined by the **quality of the experience** and the **willingness of your neighbors to come back**, not by how quickly you can scale up the equipment or the number of sessions you host.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "six-month-vision",
+                  "extension": "md",
+                  "label": "six-month-vision"
+                },
+                {
+                  "name": "project-timeline",
+                  "extension": "md",
+                  "label": "project-timeline"
+                },
+                {
+                  "name": "potential-activities",
+                  "extension": "md",
+                  "label": "potential-activities"
+                },
+                {
+                  "name": "spoken-six-month-vision",
+                  "extension": "mp3",
+                  "label": "spoken-six-month-vision"
+                },
+                {
+                  "name": "revised-budget",
+                  "extension": "md",
+                  "label": "revised-budget"
+                },
+                {
+                  "name": "opening-announcement",
+                  "extension": "docx",
+                  "label": "opening-announcement"
+                },
+                {
+                  "name": "why-a-workshop",
+                  "extension": "md",
+                  "label": "why-a-workshop"
+                },
+                {
+                  "name": "weekly-opening-plan",
+                  "extension": "pdf",
+                  "label": "weekly-opening-plan"
+                },
+                {
+                  "name": "meeting-notes-march",
+                  "extension": "md",
+                  "label": "meeting-notes-march"
+                },
+                {
+                  "name": "equipment-list",
+                  "extension": "md",
+                  "label": "equipment-list"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "user": "What does the six-month vision say we should focus on next?",
+          "assistant": "The six-month vision emphasizes a \"listen and learn\" approach rather than rushing to expand. According to the project records, your focus over the next few months should be on the following:\n\n*   **Documenting Demand:** Before adding any new equipment, you are tasked with observing and documenting what visitors actually come to learn and do. This data will determine if future additions—like a laser cutter—are truly justified by both demand and the necessary electrical infrastructure.\n*   **Hosting Consistent Sessions:** Continue holding regular repair evenings and inviting guest makers to keep the space active and welcoming.\n*   **Publishing Resources:** Start creating and publishing short, accessible instructions for the projects being worked on.\n*   **Operational Review:** After three months of operation, you are scheduled to revisit your hours, attendance, and costs. This review will help you decide on the next phase of the workshop.\n\nUltimately, the vision reiterates that **success is measured by whether neighbors return**, not by how many benches you have or how full the shelves are. The goal is to ensure the space feels welcoming and \"lived-in\" rather than over-engineered.",
+          "retrievals": [
+            {
+              "source": "results",
+              "limit": 10,
+              "results": [
+                {
+                  "name": "spoken-six-month-vision",
+                  "extension": "mp3",
+                  "label": "spoken-six-month-vision"
+                },
+                {
+                  "name": "six-month-vision",
+                  "extension": "md",
+                  "label": "six-month-vision"
+                },
+                {
+                  "name": "project-timeline",
+                  "extension": "md",
+                  "label": "project-timeline"
+                },
+                {
+                  "name": "potential-activities",
+                  "extension": "md",
+                  "label": "potential-activities"
+                },
+                {
+                  "name": "spoken-project-vision",
+                  "extension": "mp3",
+                  "label": "spoken-project-vision"
+                },
+                {
+                  "name": "voice-note-electrician",
+                  "extension": "mp3",
+                  "label": "voice-note-electrician"
+                },
+                {
+                  "name": "voice-note-first-visit",
+                  "extension": "mp3",
+                  "label": "voice-note-first-visit"
+                },
+                {
+                  "name": "opening-announcement",
+                  "extension": "docx",
+                  "label": "opening-announcement"
+                },
+                {
+                  "name": "poster-photo-concept",
+                  "extension": "jpeg",
+                  "label": "poster-photo-concept"
+                },
+                {
+                  "name": "inspiration-notes",
+                  "extension": "md",
+                  "label": "inspiration-notes"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

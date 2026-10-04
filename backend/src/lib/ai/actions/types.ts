@@ -4,7 +4,7 @@ import type { ModelId } from '@/lib/ai/providers/registry';
 import type { ProviderSlug } from '@/lib/ai/providers/types';
 
 export const ACTION_SLUGS = [
-  'text', 'image', 'speech', 'video', 'embed', 'decide', 'upload', 'queue',
+  'text', 'image', 'speech', 'video', 'embed', 'rerank', 'decide', 'upload', 'queue',
   'traverse', 'read', 'insert', 'upsert', 'update', 'delete',
 ] as const;
 export type ActionId = (typeof ACTION_SLUGS)[number];
