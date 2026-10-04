@@ -452,7 +452,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [changes, backend-secrets, backend-migrate]
-    if: false # Catalog sync and embedding backfills are not deployment work.
+    if: false # Retired semantic backfill; catalog sync now runs after active migrations.
     environment: production
     env:
       EC2_HOST: ${{ secrets.GRAPH_DB_EC2_HOST }}
@@ -561,18 +561,6 @@ jobs:
           echo "ARANGO_ROOT_PASSWORD=$arango_password" >> "$GITHUB_ENV"
           echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
           echo "OPENROUTER_API_KEY=$openrouter_api_key" >> "$GITHUB_ENV"
-      - name: Sync Polar product catalog
-        env:
-          ARANGO_URL: http://127.0.0.1:8529
-          ARANGO_USERNAME: root
-        run: |
-          creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
-          polar_env=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/POLAR_ENV")) | .v' | head -n1)
-          polar_token=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/POLAR_ACCESS_TOKEN")) | .v' | head -n1)
-          case "$polar_env" in sandbox|production) ;; *) echo "::error::POLAR_ENV must be sandbox or production."; exit 1 ;; esac
-          test -n "$polar_token" || { echo "::error::POLAR_ACCESS_TOKEN is required for a production deployment."; exit 1; }
-          echo "::add-mask::$polar_token"
-          POLAR_ENV="$polar_env" POLAR_ACCESS_TOKEN="$polar_token" bun run --cwd backend commerce:sync:ci
       - name: Backfill semantic embeddings
         env:
           ARANGO_URL: http://127.0.0.1:8529
@@ -592,8 +580,8 @@ jobs:
     name: Migrate graph database
     runs-on: ubuntu-latest
     # Images may be published first, but neither active runtime may roll until
-    # this required migration succeeds. Keeping this independent of deployment
-    # jobs also avoids a migration <-> activation dependency cycle.
+    # required migrations and Polar catalog sync succeed. Keeping this
+    # independent of deployment jobs avoids a migration <-> activation cycle.
     needs: [changes, backend-image, backend-secrets, backend-system-assets]
     if: >-
       always()
@@ -728,6 +716,20 @@ jobs:
           ARANGO_URL: http://127.0.0.1:8529
           ARANGO_USERNAME: root
         run: bun run --cwd backend db:migrate:ci
+      - name: Sync Polar product catalog
+        working-directory: .
+        env:
+          ARANGO_URL: http://127.0.0.1:8529
+          ARANGO_USERNAME: root
+        run: |
+          set -euo pipefail
+          creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
+          polar_env=$(echo "$creds" | jq -er '.[] | select(.n | endswith("/POLAR_ENV")) | .v')
+          polar_token=$(echo "$creds" | jq -er '.[] | select(.n | endswith("/POLAR_ACCESS_TOKEN")) | .v')
+          case "$polar_env" in sandbox|production) ;; *) echo "::error::POLAR_ENV must be sandbox or production."; exit 1 ;; esac
+          test -n "$polar_token" || { echo "::error::POLAR_ACCESS_TOKEN is required for checkout."; exit 1; }
+          echo "::add-mask::$polar_token"
+          POLAR_ENV="$polar_env" POLAR_ACCESS_TOKEN="$polar_token" bun run --cwd backend commerce:sync:ci
       - name: Close SSH ingress for this runner
         if: always()
         run: |

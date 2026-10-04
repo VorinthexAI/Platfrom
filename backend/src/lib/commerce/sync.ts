@@ -34,4 +34,11 @@ export async function synchronizeCommerceProducts(repository: CommerceRepository
     };
     if (Object.keys(update).length > 0) await provider.updateProduct(matched.id, update);
   }
+
+  const activeProducts = await repository.listProducts(true);
+  const unlinked = activeProducts.filter((product) => !product.providerProductId);
+  if (!activeProducts.length || unlinked.length) {
+    throw new Error(`Polar catalog sync incomplete: ${unlinked.length} of ${activeProducts.length} active products are missing provider IDs.`);
+  }
+  console.log(`Polar catalog ready: ${activeProducts.length} active products linked for checkout.`);
 }
