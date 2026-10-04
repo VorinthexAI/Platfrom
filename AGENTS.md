@@ -68,7 +68,7 @@ This repo uses a newer Next.js version with breaking changes. Before changing Ne
 
 Identity is `user → scopes → nested folders → files`. There is no teams
 collection and no Archive/Gallery/Signal/Compass/Ascend/HQ products. Files
-are `txt`, `md`, `docx`, `pdf`, images, `mp3`, and `mp4`. Core chats live
+are `txt`, `md`, `docx`, `pdf`, images, `mp3`, `mp4`, and `mov`. Core chats live
 per user+scope. `agent.query` reads `workspace | folders | files`.
 
 Uploads presign directly to `files/{userKey}/{fileKey}.{ext}`. Document-like

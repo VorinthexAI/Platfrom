@@ -74,10 +74,11 @@ async function folderIsInside(scopeKey: string, userKey: string, folderKey: stri
 async function copyFileRecord(file: FileRecord, folderKey: string | undefined, userKey: string) {
   const key = newId();
   const storageKey = fileStorageKey(userKey, key, file.extension);
-  const thumbnailStorageKey = file.thumbnailStorageKey ? fileThumbnailStorageKey(userKey, key) : undefined;
+  const thumbnailMimeType = file.thumbnailStorageKey?.endsWith('.png') ? 'image/png' : 'image/jpeg';
+  const thumbnailStorageKey = file.thumbnailStorageKey ? fileThumbnailStorageKey(userKey, key, thumbnailMimeType) : undefined;
   await documentStorage.copy({ sourceKey: file.storageKey, destinationKey: storageKey, mimeType: file.mimeType, billingUserKey: userKey });
   try {
-    if (file.thumbnailStorageKey && thumbnailStorageKey) await documentStorage.copy({ sourceKey: file.thumbnailStorageKey, destinationKey: thumbnailStorageKey, mimeType: 'image/jpeg', billingUserKey: userKey });
+    if (file.thumbnailStorageKey && thumbnailStorageKey) await documentStorage.copy({ sourceKey: file.thumbnailStorageKey, destinationKey: thumbnailStorageKey, mimeType: thumbnailMimeType, billingUserKey: userKey });
     const now = new Date().toISOString();
     return await insertFile({
     key,

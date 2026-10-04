@@ -6,7 +6,7 @@ export const mediaDescriptionInputSchema = z.object({
   operation: z.literal('describe-media'),
   media: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('image'), url: signedMediaUrlSchema, mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp', 'image/gif']) }).strict(),
-    z.object({ kind: z.literal('video'), url: signedMediaUrlSchema, mimeType: z.literal('video/mp4') }).strict(),
+    z.object({ kind: z.literal('video'), url: signedMediaUrlSchema, mimeType: z.enum(['video/mp4', 'video/mov']) }).strict(),
     z.object({ kind: z.literal('audio'), url: signedMediaUrlSchema, mimeType: z.literal('audio/mpeg') }).strict(),
   ]),
 }).strict();

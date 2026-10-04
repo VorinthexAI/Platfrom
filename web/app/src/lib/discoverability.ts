@@ -1,6 +1,8 @@
+import { LEGAL_CONTACT_EMAIL, LEGAL_EFFECTIVE_DATE_ISO } from "@vorinthex/shared/lib/legal-copy";
+
 export const CANONICAL_ORIGIN = "https://vorinthex.com" as const;
-export const CONTENT_LAST_REVIEWED = "2026-10-03" as const;
-export const CONTACT_EMAIL = "contact@vorinthex.com" as const;
+export const CONTENT_LAST_REVIEWED = "2026-10-04" as const;
+export const CONTACT_EMAIL = LEGAL_CONTACT_EMAIL;
 export const PRICING_HERO_HEADING = "One balance for everything you create and use" as const;
 export const PRICING_HERO_BODY =
   "Sparks give you a simple way to use AI capabilities, store your work, and keep services connected across Vorinthex." as const;
@@ -23,7 +25,7 @@ export interface PublicRouteEntry {
   summary: string;
   schemaPageType: SchemaPageType;
   status: "current";
-  lastModified: typeof CONTENT_LAST_REVIEWED;
+  lastModified: typeof CONTENT_LAST_REVIEWED | typeof LEGAL_EFFECTIVE_DATE_ISO;
   capabilities: readonly string[];
   faq?: readonly { question: string; answer: string }[];
 }
@@ -130,10 +132,11 @@ export const PRODUCT_FACTS = {
   platforms: ["iOS", "Android"],
   availability: "Download Core for your platform.",
   privacy:
-    "Privacy and user control are central product principles for Core.",
+    "Core stores your files and chats in your scopes and may use authorized content to answer questions. AI feature requests may be processed by external model providers; the Privacy Policy explains data use and deletion.",
   workspaceContext:
     "Core can answer questions using relevant authorized content across saved documents, files, images, highlights, memories, previous chats, communication, travel guides, trips, and audio books, and can explain the signed-in user's Sparks balance and subscription. Answers distinguish incomplete evidence from confirmed absence. Core also offers separate chat, image, speech, and video modes; generated media is saved privately in the user's current scope.",
   mediaGeneration: "Image generation or editing costs 15 Sparks per image, accepts up to eight reference images, and offers a choice of aspect ratios. Speech generation costs 1 Spark per 100 characters with a choice of five voices and can narrate the extracted text of selected documents, up to 15,000 characters combined. Video generation costs 15 Sparks per second, supports 1–15 seconds at 480p with a five-second default and an optional starting image, and does not edit or extend existing video.",
+  fileFormats: "Storage converts selected JPG, PNG, WebP, GIF, and iPhone HEIC/HEIF images to PNG before upload, preserving transparency. MP3 audio and MP4 or MOV videos are stored without transcoding; video captions analyze the video itself.",
   storagePricing: STORAGE_PRICING_FACT,
   sparks:
     `${PRICING_HERO_HEADING}. ${PRICING_HERO_BODY} The current launch subscriptions are $19.99 monthly for 1,000 Sparks (discounted from the $24.99 regular monthly price) and $7.99 weekly for 200 Sparks. A one-time 200-Spark top-up is $9.99. Purchases are not yet available on the public website. Prepaid Sparks remain available after subscription cancellation, balances never go below zero. ${STORAGE_PRICING_FACT} Workspace reranking during Core search costs 20 Sparks per million processed tokens. Unfunded storage incurs no debt or backcharges, uploads can continue, and existing data remains available for export, deletion, and recovery. Adding enough Sparks before deletion begins restores prospective charging. Once deletion begins, it cannot be reversed. Stored data is permanently deleted after 90 consecutive unfunded days. Pricing is shown in USD and excludes VAT and other local taxes; Polar calculates and adds applicable tax at checkout.`,
@@ -162,7 +165,7 @@ export const PUBLIC_DISCOVERABILITY_REGISTRY = {
     schemaPageType: "WebPage",
     status: "current",
     lastModified: CONTENT_LAST_REVIEWED,
-    capabilities: [...capabilityNames, "Image, speech, and video generation"],
+    capabilities: [...capabilityNames, "Image, speech, and video generation", "HEIC/HEIF photo import and MOV video storage"],
   },
   "/pricing": {
     path: "/pricing",
@@ -200,24 +203,24 @@ export const PUBLIC_DISCOVERABILITY_REGISTRY = {
     path: "/privacy",
     title: "Privacy Policy | Vorinthex AI",
     description:
-      "Read how Vorinthex AI handles personal data, including United States hosting, international transfers, privacy requests, retention, safeguards, and deletion.",
+      "Learn how Vorinthex AI handles account information, saved content, AI requests, payments, data deletion, and international processing.",
     summary:
-      "Vorinthex AI's privacy policy describes United States hosting, international data transfers, safeguards, rights, retention, and deletion.",
+      "The Privacy Policy explains how Vorinthex AI handles account data and content, works with service providers, and supports data deletion and privacy requests.",
     schemaPageType: "WebPage",
     status: "current",
-    lastModified: CONTENT_LAST_REVIEWED,
+    lastModified: LEGAL_EFFECTIVE_DATE_ISO,
     capabilities: [],
   },
   "/terms": {
     path: "/terms",
-    title: "Terms | Vorinthex AI",
+    title: "Terms of Service | Vorinthex AI",
     description:
-      "Read the terms governing Vorinthex AI services, prepaid Sparks, subscriptions, storage charging, AI-assisted features, and intellectual property.",
+      "Read the Terms of Service for Vorinthex AI accounts, Core, prepaid Sparks, subscriptions, storage, and account deletion.",
     summary:
-      "These terms govern Vorinthex AI services, including prepaid Spark balances and hourly storage charging without debt or backcharges.",
+      "The Terms of Service cover account content, AI outputs, prepaid Sparks, subscriptions, unfunded storage, and account closure.",
     schemaPageType: "WebPage",
     status: "current",
-    lastModified: CONTENT_LAST_REVIEWED,
+    lastModified: LEGAL_EFFECTIVE_DATE_ISO,
     capabilities: [],
   },
 } as const satisfies Record<PublicRoutePath, PublicRouteEntry>;

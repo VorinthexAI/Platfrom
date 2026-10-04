@@ -19,7 +19,7 @@ export function displayContentFileName(file: Pick<ContentFile, "name" | "extensi
 }
 
 export function ContentFileCardLabel({ name, extension }: { name: string; extension: FileExtension }) {
-  if (IMAGE_EXTENSIONS.has(extension) || extension === "mp4") return null;
+  if (IMAGE_EXTENSIONS.has(extension) || extension === "mp4" || extension === "mov") return null;
   return <Text ellipsizeMode="tail" numberOfLines={1} style={styles.cardLabel}>{name}</Text>;
 }
 
@@ -29,22 +29,22 @@ export function ContentFileCover({ file, localUri, thumbnailUri, coverKey = file
   const query = useQuery({
     queryKey: ["file-cover", file.key],
     queryFn: () => downloadContentFile(file.key),
-    enabled: (Boolean(file.hasThumbnail) || !coverUri) && (IMAGE_EXTENSIONS.has(file.extension) || file.extension === "mp4"),
+    enabled: (Boolean(file.hasThumbnail) || !coverUri) && (IMAGE_EXTENSIONS.has(file.extension) || file.extension === "mp4" || file.extension === "mov"),
     staleTime: 60_000,
   });
   useEffect(() => { if (query.isError) onReady?.(); }, [onReady, query.isError]);
-  if (file.extension === "mp4" && thumbnailUri) return <View style={styles.mediaFill}><Image contentFit="cover" onError={onReady} onLoad={onReady} source={thumbnailUri} style={styles.cardMedia} /><View style={styles.videoPlay}><PlayIcon size="lg" /></View></View>;
+  if ((file.extension === "mp4" || file.extension === "mov") && thumbnailUri) return <View style={styles.mediaFill}><Image contentFit="cover" onError={onReady} onLoad={onReady} source={thumbnailUri} style={styles.cardMedia} /><View style={styles.videoPlay}><PlayIcon size="lg" /></View></View>;
   if (IMAGE_EXTENSIONS.has(file.extension) && thumbnailUri) return <Image contentFit="cover" onError={onReady} onLoad={onReady} source={thumbnailUri} style={styles.mediaFill} />;
-  if (file.extension === "mp4" && query.data?.thumbnailUrl) return <View style={styles.mediaFill}><Image contentFit="cover" onError={onReady} onLoad={onReady} source={query.data.thumbnailUrl} style={styles.cardMedia} /><View style={styles.videoPlay}><PlayIcon size="lg" /></View></View>;
+  if ((file.extension === "mp4" || file.extension === "mov") && query.data?.thumbnailUrl) return <View style={styles.mediaFill}><Image contentFit="cover" onError={onReady} onLoad={onReady} source={query.data.thumbnailUrl} style={styles.cardMedia} /><View style={styles.videoPlay}><PlayIcon size="lg" /></View></View>;
   if (IMAGE_EXTENSIONS.has(file.extension) && query.data?.thumbnailUrl) return <Image contentFit="cover" onError={onReady} onLoad={onReady} source={query.data.thumbnailUrl} style={styles.mediaFill} />;
-  if (file.extension === "mp4" && coverUri) return <VideoCover cacheKey={coverKey} onError={() => { setFailedLocalUri(coverUri); onReady?.(); }} onReady={onReady} uri={coverUri} />;
+  if ((file.extension === "mp4" || file.extension === "mov") && coverUri) return <VideoCover cacheKey={coverKey} onError={() => { setFailedLocalUri(coverUri); onReady?.(); }} onReady={onReady} uri={coverUri} />;
   if (IMAGE_EXTENSIONS.has(file.extension) && coverUri) return <Image contentFit="cover" onError={() => { setFailedLocalUri(coverUri); onReady?.(); }} onLoad={onReady} source={coverUri} style={styles.mediaFill} />;
-  if (file.extension === "mp4" && query.data?.url) return <VideoCover cacheKey={coverKey} onReady={onReady} uri={query.data.url} />;
+  if ((file.extension === "mp4" || file.extension === "mov") && query.data?.url) return <VideoCover cacheKey={coverKey} onReady={onReady} uri={query.data.url} />;
   if (IMAGE_EXTENSIONS.has(file.extension) && query.data?.url) {
     return <Image contentFit="cover" onError={onReady} onLoad={onReady} source={file.hasThumbnail ? query.data.thumbnailUrl ?? query.data.url : query.data.url} style={styles.mediaFill} />;
   }
   if (IMAGE_EXTENSIONS.has(file.extension)) return <View style={styles.mediaFill} />;
-  if (file.extension === "mp4") return <PlayIcon size="lg" />;
+  if (file.extension === "mp4" || file.extension === "mov") return <PlayIcon size="lg" />;
   if (file.extension === "mp3") return <SoundwaveIcon size="lg" />;
   return <FileIcon size="lg" />;
 }
@@ -93,7 +93,7 @@ export function ContentFileTile({ file, size, selected = false, busy = false, ac
   onPress: () => void;
   revealWhenReady?: boolean;
 }) {
-  const media = IMAGE_EXTENSIONS.has(file.extension) || file.extension === "mp4";
+  const media = IMAGE_EXTENSIONS.has(file.extension) || file.extension === "mp4" || file.extension === "mov";
   const [coverReady, setCoverReady] = useState(!revealWhenReady || !media);
   const markCoverReady = useCallback(() => setCoverReady(true), []);
   useEffect(() => {

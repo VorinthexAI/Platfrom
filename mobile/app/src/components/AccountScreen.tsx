@@ -14,7 +14,7 @@ import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast as useRawToast } from "@vorinthex/shared/ui/toast";
 import { useSessionToast as useToast } from "@/hooks/use-session-toast";
-import { PRIVACY_COPY, TERMS_COPY, type VaultCopy } from "@vorinthex/shared/lib/legal-copy";
+import { PRIVACY_COPY, TERMS_COPY, type LegalCopy } from "@vorinthex/shared/lib/legal-copy";
 
 import { claimProfileBadge, createSupportTicket, generateProfileBadge, updateProfileName, uploadProfileAvatar } from "@/lib/profile-client";
 import { SupportComposeSheets } from "@/components/SupportComposeSheets";
@@ -60,11 +60,11 @@ function SettingsActionCard({ danger = false, icon, label, onPress, size }: { da
   </View>;
 }
 
-function LegalSheetContent({ copy }: { copy: VaultCopy }) {
+function LegalSheetContent({ copy }: { copy: LegalCopy }) {
   return <ScrollView contentContainerStyle={styles.legalContent} showsVerticalScrollIndicator={false}>
     {copy.paragraphs.map((paragraph, index) => <Text key={`intro-${index}`} style={styles.legalParagraph}>{paragraph}</Text>)}
     {copy.sections?.map((section) => <View key={section.title} style={styles.legalSection}>
-      <Text style={styles.legalParagraph}>{section.title}</Text>
+      <Text accessibilityRole="header" style={styles.legalHeading}>{section.title}</Text>
       {section.paragraphs.map((paragraph, index) => <Text key={`${section.title}-${index}`} style={styles.legalParagraph}>{paragraph}</Text>)}
     </View>)}
     <Text style={styles.legalFootnote}>{copy.footnote}</Text>
@@ -502,11 +502,11 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
       <Text style={styles.scopeHelp}>Scopes are separate workspaces for different parts of your life. For example, you can create one for work and another for personal use, keeping their content, conversations, and tools organized independently.</Text>
     </BottomSheet>
 
-    <BottomSheet description={TERMS_COPY.eyebrow} footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "terms"} title="Terms of service">
+    <BottomSheet description={TERMS_COPY.eyebrow} footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "terms"} title={TERMS_COPY.title}>
       <LegalSheetContent copy={TERMS_COPY} />
     </BottomSheet>
 
-    <BottomSheet description={PRIVACY_COPY.eyebrow} footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "privacy"} title="Privacy policy">
+    <BottomSheet description={PRIVACY_COPY.eyebrow} footer={<Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button>} height="full" onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "privacy"} title={PRIVACY_COPY.title}>
       <LegalSheetContent copy={PRIVACY_COPY} />
     </BottomSheet>
 
@@ -583,6 +583,7 @@ const styles = StyleSheet.create({
   reportInput: { minHeight: 180 },
   legalContent: { gap: spacing.md, paddingBottom: spacing.lg },
   legalSection: { gap: spacing.sm, paddingTop: spacing.sm },
+  legalHeading: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 16, lineHeight: 23 },
   legalParagraph: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, lineHeight: 23 },
   legalFootnote: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 13, lineHeight: 20, paddingTop: spacing.sm },
   referralContent: { flexGrow: 1, gap: spacing.xl, paddingBottom: spacing.lg },

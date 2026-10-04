@@ -11,6 +11,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import sharp from 'sharp';
+import { INTRO_SCREENSHOT_STEPS } from '../mobile/app/src/data/intro-screenshot-steps';
 
 const ROOT = resolve(import.meta.dir, '..');
 const OUTPUT_DIR = join(ROOT, 'scripts', 'image', 'outputs', 'onboarding-frames');
@@ -21,7 +22,6 @@ const PANEL = { left: 126, top: 224, width: 828, height: 1472 } as const; // exa
 const INTEGRATED_ID = '11-ambient-silver';
 const IPHONE_ID = '12-deep-graphite-iphone';
 const FIRST_SCREENSHOT = join(ROOT, 'mobile', 'app', 'assets', 'onboarding', 'storage-root.jpg');
-const SCREENSHOTS = ['storage-root', 'nested-folder', 'core-answer', 'view-files', 'generated-work', 'bulk-selection', 'copy-destination', 'chat-context'] as const;
 const ILLUSTRATION_DIR = join(OUTPUT_DIR, 'illustrations');
 const ILLUSTRATION_ASSET_DIR = join(ROOT, 'mobile', 'app', 'assets', 'onboarding', 'illustrations');
 const illustrations = [
@@ -233,11 +233,11 @@ async function composeAllScreenshots(): Promise<void> {
   const folder = join(OUTPUT_DIR, 'new');
   await mkdir(folder, { recursive: true });
   const entries = [];
-  for (const [index, name] of SCREENSHOTS.entries()) {
+  for (const { id, source: name } of INTRO_SCREENSHOT_STEPS) {
     const screenshot = Buffer.from(await readFile(join(ROOT, 'mobile', 'app', 'assets', 'onboarding', `${name}.jpg`)));
     const info = await sharp(screenshot).metadata();
     if (info.format !== 'jpeg' || info.width !== 1080 || info.height !== 2340) throw new Error(`Unexpected screenshot size or format: ${name}`);
-    const output = `${String(index + 1).padStart(2, '0')}-${name}.png`;
+    const output = `${id}-${name}.png`;
     await sharp(background).composite([{ input: await deviceOverlay(screenshot) }]).png().toFile(join(folder, output));
     entries.push({ screenshot: `${name}.jpg`, file: output });
     console.log(`Created new/${output}`);

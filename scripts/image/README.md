@@ -4,6 +4,10 @@ Local Bun CLI for generating, reviewing, locking, versioning, exporting, and bac
 
 It also includes a deterministic HTML-to-PNG product screenshot renderer. See [`product-screenshots/README.md`](product-screenshots/README.md).
 
+The eight real onboarding captures can be rendered into Apple and Google
+listing images with editable short subtitles and the original intro titles.
+See [`onboarding-store-screenshots/README.md`](onboarding-store-screenshots/README.md).
+
 For ten paid, screenshot-free portrait frame experiments, run
 `bun run scripts/generate-onboarding-frames.ts` from the repository root. The
 script uses the git-crypt-unlocked **production backend** OpenRouter key,

@@ -1,0 +1,13 @@
+:root { --width: 1080px; --height: 1920px; --scale: 1; }
+* { box-sizing: border-box; }
+html, body { width: var(--width); height: var(--height); margin: 0; overflow: hidden; background: #030507; }
+body { font-family: Geist, Arial, sans-serif; }
+.canvas { position: relative; width: 100%; height: 100%; overflow: hidden; isolation: isolate; color: #f5f7f8; background: #030507; }
+.atmosphere { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+.artwork { position: absolute; left: 50%; top: calc(345px * var(--scale)); width: 86%; height: auto; transform: translateX(-50%); }
+.shade { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(to bottom, rgba(3,5,7,.3) 0%, rgba(3,5,7,.3) 16%, transparent 36%); }
+.copy { position: absolute; top: calc(85px * var(--scale)); left: calc(86px * var(--scale)); right: calc(86px * var(--scale)); }
+.title { margin: 0; font-size: calc(72px * var(--scale)); font-weight: 300; line-height: 1.08; letter-spacing: -.035em; text-wrap: balance; }
+.subtitle { max-width: calc(860px * var(--scale)); margin: calc(18px * var(--scale)) 0 0; color: #c5cdd1; font-size: calc(31px * var(--scale)); font-weight: 400; line-height: 1.35; text-wrap: pretty; }
+html[data-store="apple"] .artwork { top: calc(410px * var(--scale)); width: 96%; }
+html[data-store="apple"] .shade { background: linear-gradient(to bottom, rgba(3,5,7,.3) 0%, rgba(3,5,7,.3) 13%, transparent 30%); }

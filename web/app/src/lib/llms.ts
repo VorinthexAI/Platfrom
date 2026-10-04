@@ -65,6 +65,8 @@ ${PRODUCT_FACTS.workspaceContext}
 
 ${PRODUCT_FACTS.mediaGeneration}
 
+${PRODUCT_FACTS.fileFormats}
+
 ## Core apps
 
 ${PRODUCT_FACTS.capabilities.map(({ name, description, details }) => `- ${name}: ${description} ${details.join(" ")}`).join("\n")}

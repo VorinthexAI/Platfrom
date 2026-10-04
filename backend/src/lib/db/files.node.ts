@@ -5,7 +5,7 @@ import { db, withTransaction } from './client';
 import { currentEmbeddingSchema } from '@/lib/embeddings';
 
 export const FILES_COLLECTION = 'files';
-export const fileExtensionSchema = z.enum(['txt', 'md', 'docx', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'gif', 'mp3', 'mp4']);
+export const fileExtensionSchema = z.enum(['txt', 'md', 'docx', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'gif', 'mp3', 'mp4', 'mov']);
 export const fileProcessingSchema = z.enum(['pending', 'ready', 'failed']);
 
 export const fileSchema = z.object({
@@ -110,8 +110,8 @@ export function fileStorageKey(userKey: string, fileKey: string, extension: File
   return `files/${userKey}/${fileKey}.${extension}`;
 }
 
-export function fileThumbnailStorageKey(userKey: string, fileKey: string) {
-  return `files/${userKey}/${fileKey}.thumbnail.jpg`;
+export function fileThumbnailStorageKey(userKey: string, fileKey: string, mimeType: 'image/jpeg' | 'image/png' = 'image/jpeg') {
+  return `files/${userKey}/${fileKey}.thumbnail.${mimeType === 'image/png' ? 'png' : 'jpg'}`;
 }
 
 export function toArangoFile(file: FileRecord) {

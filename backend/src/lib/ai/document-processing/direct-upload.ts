@@ -16,8 +16,11 @@ import { documentStorage } from './storage';
 
 const key = z.string().cuid();
 const TEXT_EXTENSIONS = new Set(['txt', 'md', 'docx', 'pdf']);
-const thumbnail = z.object({ mimeType: z.literal('image/jpeg'), sizeBytes: z.number().int().positive().max(2 * 1024 * 1024) }).strict();
-const file = z.object({ filename: z.string().trim().min(1).max(255), mimeType: z.string().trim().min(1).max(255), sizeBytes: z.number().int().positive(), extension: fileExtensionSchema, thumbnail: thumbnail.optional() }).strict().refine((value) => !value.thumbnail || isCaptionableMedia(value.extension) && value.extension !== 'mp3', 'Only image and video files may have thumbnails.');
+const thumbnail = z.object({ mimeType: z.enum(['image/jpeg', 'image/png']), sizeBytes: z.number().int().positive().max(2 * 1024 * 1024) }).strict();
+const file = z.object({ filename: z.string().trim().min(1).max(255), mimeType: z.string().trim().min(1).max(255), sizeBytes: z.number().int().positive(), extension: fileExtensionSchema, thumbnail: thumbnail.optional() }).strict()
+  .refine((value) => value.extension !== 'mov' || value.mimeType === 'video/quicktime', 'MOV files require the QuickTime video MIME type.')
+  .refine((value) => value.extension !== 'mov' || value.thumbnail?.mimeType === 'image/png', 'MOV files require a PNG preview image.')
+  .refine((value) => !value.thumbnail || (isCaptionableMedia(value.extension) && value.extension !== 'mp3'), 'Only image and video files may have thumbnails.');
 export const documentUploadReserveSchema = z.object({ scopeKey: key, folderKey: key.optional(), idempotencyKey: z.string().trim().min(1).max(200), files: z.array(file).min(1).max(20) }).strict();
 export const documentUploadCompleteSchema = z.object({ scopeKey: key, uploadKey: key, idempotencyKey: z.string().trim().min(1).max(200), extractedText: z.record(z.string(), z.string()).optional() }).strict();
 
@@ -46,8 +49,8 @@ export async function reserveDocumentUpload(raw: unknown, context: ToolContext) 
   const record = { ...input, uploadKey, userKey, files, status: 'reserved', expiresAt: new Date(now.getTime() + 15 * 60_000).toISOString() };
   if (await redisConnection.set(recordKey(uploadKey), JSON.stringify(record), 'EX', RESERVATION_TTL, 'NX') !== 'OK') throw new DocumentUploadError(409, 'DOCUMENT_UPLOAD_CHANGED', 'Upload reservation collision.');
   const urls = await Promise.all(files.map((item) => signUrl(publicS3, new PutObjectCommand({ Bucket: S3_BUCKET, Key: fileStorageKey(userKey, item.key, item.extension), ContentType: item.mimeType }), { expiresIn: URL_TTL })));
-  const thumbnailUrls = await Promise.all(files.map((item) => item.thumbnail ? signUrl(publicS3, new PutObjectCommand({ Bucket: S3_BUCKET, Key: fileThumbnailStorageKey(userKey, item.key), ContentType: 'image/jpeg' }), { expiresIn: URL_TTL }) : undefined));
-  return { uploadKey, files: files.map((item, index) => ({ fileKey: item.key, url: urls[index]!, headers: { 'Content-Type': item.mimeType }, ...(thumbnailUrls[index] ? { thumbnail: { url: thumbnailUrls[index], headers: { 'Content-Type': 'image/jpeg' } } } : {}) })) };
+  const thumbnailUrls = await Promise.all(files.map((item) => item.thumbnail ? signUrl(publicS3, new PutObjectCommand({ Bucket: S3_BUCKET, Key: fileThumbnailStorageKey(userKey, item.key, item.thumbnail.mimeType), ContentType: item.thumbnail.mimeType }), { expiresIn: URL_TTL }) : undefined));
+  return { uploadKey, files: files.map((item, index) => ({ fileKey: item.key, url: urls[index]!, headers: { 'Content-Type': item.mimeType }, ...(thumbnailUrls[index] && item.thumbnail ? { thumbnail: { url: thumbnailUrls[index], headers: { 'Content-Type': item.thumbnail.mimeType } } } : {}) })) };
 }
 
 export async function completeDocumentUpload(raw: unknown, context: ToolContext) {
@@ -64,13 +67,13 @@ export async function completeDocumentUpload(raw: unknown, context: ToolContext)
     const storageKey = fileStorageKey(userKey, item.key, item.extension);
     const head = await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: storageKey })).catch(() => null);
     if (!head || head.ContentLength !== item.sizeBytes) throw new DocumentUploadError(409, 'DOCUMENT_UPLOAD_MISMATCH', 'Uploaded object is missing or unreadable.');
-    const thumbnailStorageKey = item.thumbnail ? fileThumbnailStorageKey(userKey, item.key) : undefined;
+    const thumbnailStorageKey = item.thumbnail ? fileThumbnailStorageKey(userKey, item.key, item.thumbnail.mimeType) : undefined;
     if (item.thumbnail && thumbnailStorageKey) {
       const thumb = await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: thumbnailStorageKey })).catch(() => null);
-      if (!thumb || thumb.ContentLength !== item.thumbnail.sizeBytes || thumb.ContentType?.toLowerCase() !== 'image/jpeg') throw new DocumentUploadError(409, 'DOCUMENT_UPLOAD_MISMATCH', 'Thumbnail is missing or unreadable.');
+      if (!thumb || thumb.ContentLength !== item.thumbnail.sizeBytes || thumb.ContentType?.toLowerCase() !== item.thumbnail.mimeType) throw new DocumentUploadError(409, 'DOCUMENT_UPLOAD_MISMATCH', 'Thumbnail is missing or unreadable.');
       const thumbnailBytes = (await documentStorage.download(thumbnailStorageKey)).bytes;
       const metadata = await sharp(thumbnailBytes).metadata().catch(() => null);
-      if (!metadata || metadata.format !== 'jpeg' || metadata.width !== 512 || !metadata.height || metadata.height > 8192) throw new DocumentUploadError(409, 'DOCUMENT_UPLOAD_MISMATCH', 'Thumbnail dimensions or format are invalid.');
+      if (!metadata || metadata.format !== (item.thumbnail.mimeType === 'image/png' ? 'png' : 'jpeg') || metadata.width !== 512 || !metadata.height || metadata.height > 8192) throw new DocumentUploadError(409, 'DOCUMENT_UPLOAD_MISMATCH', 'Thumbnail dimensions or format are invalid.');
     }
     const file = await insertFile({
       key: item.key, userKey, scopeKey: record.scopeKey, folderKey: record.folderKey, name: item.filename.replace(/\.[^.]+$/, ''),

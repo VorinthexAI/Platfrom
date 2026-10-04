@@ -5,6 +5,9 @@
 .page h1 { margin: 0 0 18px; font-family: var(--font-display); font-size: clamp(42px, 7vw, 72px); font-weight: 400; letter-spacing: .08em; text-transform: uppercase; }
 .page p { margin-top: 18px; color: #a3a5a3; font-size: 15px; line-height: 1.85; }
 .page .subtitle { margin: 0 0 46px; color: #8d9294; }
+.page section { margin-top: 36px; }
+.page h2 { margin: 0; color: #e4e7e7; font-size: 20px; font-weight: 500; line-height: 1.4; }
+.page section p:first-of-type { margin-top: 12px; }
 .page .footnote { margin: 48px 0 28px; padding-top: 24px; border-top: 1px solid rgba(255,255,255,.1); color: #d5d5d1; }
 
 @media (max-width: 640px) {

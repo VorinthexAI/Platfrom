@@ -17,6 +17,7 @@
     "logo:rgba": "bun src/logo-rgba.ts",
     "screenshots:render": "tsx src/product-screenshots.ts",
     "screenshots:smoke": "tsx src/product-screenshots.ts --preset all",
+    "screenshots:store": "tsx src/onboarding-store-screenshots.ts",
     "browser:install": "playwright install chromium",
     "frame:generate": "bun src/generate-device-frame.ts",
     "typecheck": "tsc --noEmit"

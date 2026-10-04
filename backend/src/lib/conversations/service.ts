@@ -40,7 +40,7 @@ async function taggedWorkspaceContext(context: ToolContext, fileKeys: string[], 
     const file = await getFileInScope(context.runtimeScopeKey, key, userKey);
     if (!file) throw new ConversationError('NOT_FOUND', 'A tagged file is no longer available.');
     files.push({ key: file.key, name: file.name, extension: file.extension });
-    const media = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp3', 'mp4'].includes(file.extension);
+    const media = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp3', 'mp4', 'mov'].includes(file.extension);
     const text = (media ? file.caption : file.extractedText)?.trim();
     const filename = file.name.toLowerCase().endsWith(`.${file.extension}`) ? file.name : `${file.name}.${file.extension}`;
     descriptions.push(`File: ${JSON.stringify(filename)}. ${text ? `${media ? 'Stored caption' : 'Extracted document text'}: ${JSON.stringify(text.slice(0, 2_000))}` : `No stored ${media ? 'caption' : 'document text'} is available.`}`);

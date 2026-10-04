@@ -28,6 +28,7 @@
     "dev:files:seed": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-workshop-year.ts",
     "dev:chats:record": "bun run load-local-env && bun --env-file=.env.local run scripts/record-workshop-chats.ts",
     "dev:files:wipe": "bun run load-local-env && bun --env-file=.env.local run scripts/wipe-dev-files.ts",
+    "dev:iphone:verify": "bun run load-local-env && bun --env-file=.env.local run scripts/dev/verify-iphone-uploads.ts",
     "seed:secrets": "bun run scripts/seed-secrets.ts"
   },
   "dependencies": {

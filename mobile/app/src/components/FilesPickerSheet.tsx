@@ -64,7 +64,7 @@ export function FilesPickerSheet({ context, onClose, onDone, open, title = "Tag 
     const values: FileExtension[] = [];
     if (types.documents) values.push("txt", "md", "docx", "pdf");
     if (types.images) values.push("jpg", "jpeg", "png", "webp", "gif");
-    if (types.videos) values.push("mp4");
+    if (types.videos) values.push("mp4", "mov");
     if (types.audio) values.push("mp3");
     return allowedExtensions ? values.filter((extension) => allowedExtensions.includes(extension)) : values;
   }, [allowedExtensions, types]);
@@ -151,7 +151,7 @@ export function FilesPickerSheet({ context, onClose, onDone, open, title = "Tag 
       <View style={styles.filterContent}>
         <View style={styles.filterRow}><Switch accessibilityLabel="Favorites" checked={favoritesOnly} onCheckedChange={(checked) => { setFavoritesOnly(checked); setSheet(undefined); }} /><Text style={styles.filterLabel}>Favorites</Text></View>
         <View style={styles.filterRow}><Switch accessibilityLabel="Show hidden" checked={showHidden} onCheckedChange={(checked) => { setShowHidden(checked); setSheet(undefined); }} /><Text style={styles.filterLabel}>Show hidden</Text></View>
-        {(["documents", "images", "videos", "audio"] as const).filter((key) => !allowedExtensions || ({ documents: ["txt", "md", "docx", "pdf"], images: ["jpg", "jpeg", "png", "webp", "gif"], videos: ["mp4"], audio: ["mp3"] }[key] as FileExtension[]).some((extension) => allowedExtensions.includes(extension))).map((key) => <View key={key} style={styles.filterRow}><Switch accessibilityLabel={key} checked={types[key]} onCheckedChange={(checked) => { setTypes((current) => ({ ...current, [key]: checked })); setSheet(undefined); }} /><Text style={styles.filterLabel}>{key[0]!.toUpperCase() + key.slice(1)}</Text></View>)}
+        {(["documents", "images", "videos", "audio"] as const).filter((key) => !allowedExtensions || ({ documents: ["txt", "md", "docx", "pdf"], images: ["jpg", "jpeg", "png", "webp", "gif"], videos: ["mp4", "mov"], audio: ["mp3"] }[key] as FileExtension[]).some((extension) => allowedExtensions.includes(extension))).map((key) => <View key={key} style={styles.filterRow}><Switch accessibilityLabel={key} checked={types[key]} onCheckedChange={(checked) => { setTypes((current) => ({ ...current, [key]: checked })); setSheet(undefined); }} /><Text style={styles.filterLabel}>{key[0]!.toUpperCase() + key.slice(1)}</Text></View>)}
         <Button onPress={() => setSheet("tags")} size="md" variant="secondary">Tags</Button>
         <Button onPress={openSearchHistory} size="md" variant="secondary">Search history</Button>
       </View>

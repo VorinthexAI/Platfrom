@@ -12,3 +12,9 @@ re-run; nothing is generated automatically.
 
 Files upload in alphabetical order — prefix with `01-`, `02-`, … to
 control the order in the store listing.
+
+The eight `01.png`–`08.png` phone images can be regenerated from the onboarding
+screenshots and editable store subtitles with
+`bun run --cwd scripts/image screenshots:store --publish` at the repository root.
+See `scripts/image/onboarding-store-screenshots/README.md` for the copy and
+preview contact sheets.

@@ -1,5 +1,6 @@
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
+import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { Image } from "expo-image";
 import { File } from "expo-file-system";
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
@@ -77,6 +78,7 @@ import type { ConversationFileView } from "@/lib/conversation-retrievals";
 import { saveTemporaryUrlFile, saveUrlDownload } from "@/lib/device-download";
 import { tagFilterContextKey } from "@/lib/tag-client";
 import { getUserSearchHistory, promoteCachedUserSearchHistory, removeCachedUserSearchHistory, userSearchHistoryQueryKey } from "@/lib/user-search-history-cache";
+import { convertedPngFilename, iphoneMediaFilename, iphoneMediaFormat } from "@/lib/iphone-upload-formats";
 import { useAuthStore } from "@/state/auth";
 import { EMPTY_SELECTED_TAGS, useUiStore } from "@/state/ui";
 import { fonts, palette, radii, spacing } from "@/theme/tokens";
@@ -188,7 +190,7 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
     const values: FileExtension[] = [];
     if (types.documents) values.push("txt", "md", "docx", "pdf");
     if (types.images) values.push("jpg", "jpeg", "png", "webp", "gif");
-    if (types.videos) values.push("mp4");
+    if (types.videos) values.push("mp4", "mov");
     if (types.audio) values.push("mp3");
     return values;
   }, [types]);
@@ -293,7 +295,7 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
         if (IMAGE_EXTENSIONS.has(file.extension)) { showPreview({ title, imageUri: availableLocalUri }); return; }
         if (file.extension === "pdf") { showPreview({ title, fileKey: file.key, pdfUri: availableLocalUri }); return; }
         if (file.extension === "mp3") { showPreview({ title, audioUri: availableLocalUri }); return; }
-        if (file.extension === "mp4") { showPreview({ title, videoUri: availableLocalUri }); return; }
+         if (file.extension === "mp4" || file.extension === "mov") { showPreview({ title, videoUri: availableLocalUri }); return; }
       }
       if (availableLocalUri && TEXT_EXTENSIONS.has(file.extension)) {
         showPreview({ title, text: new TextDecoder().decode(await new File(availableLocalUri).arrayBuffer()) });
@@ -322,7 +324,7 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
         return;
       }
       if (file.extension === "mp3") { showPreview({ title, audioUri: download.url }); return; }
-      if (file.extension === "mp4") { showPreview({ title, videoUri: download.url }); return; }
+       if (file.extension === "mp4" || file.extension === "mov") { showPreview({ title, videoUri: download.url }); return; }
     } catch {
       if (previewRequest.current === request) { discardPreviewPdf(); activePdfUri.current = undefined; setPreview(undefined); setPreviewFailed(true); showToast({ title: "The file could not be opened.", duration: 2_500 }); }
     }
@@ -379,10 +381,10 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
   }, [configured, contentContext, initialFileKey, initialFileTitle, initialFolderKey, initialSearchQuery, openFile, showToast]);
 
   const pickAndUpload = async (kind: "media" | "other") => {
-    let assets: { name: string; mimeType?: string | null; size?: number; uri: string }[];
+    let assets: { name: string; mimeType?: string | null; mediaType?: string | null; size?: number; uri: string }[];
     try {
       assets = kind === "media"
-        ? await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images", "videos"], allowsMultipleSelection: true, selectionLimit: 20, quality: 1 }).then((result) => result.canceled ? [] : result.assets.map((asset, index) => ({ name: asset.fileName ?? `media-${index + 1}.${asset.type === "video" ? "mp4" : "jpg"}`, mimeType: asset.mimeType, size: asset.fileSize, uri: asset.uri })))
+        ? await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images", "videos"], allowsMultipleSelection: true, selectionLimit: 20, quality: 1 }).then((result) => result.canceled ? [] : result.assets.map((asset, index) => ({ name: iphoneMediaFilename(asset.fileName, asset.mimeType, asset.type, index), mimeType: asset.mimeType, mediaType: asset.type, size: asset.fileSize, uri: asset.uri })))
         : await DocumentPicker.getDocumentAsync({ multiple: true, copyToCacheDirectory: true, type: ["text/plain", "text/markdown", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "audio/mpeg"] }).then((result) => result.canceled ? [] : result.assets);
     } catch {
       showToast({ title: "The file picker could not be opened.", duration: 2_500 });
@@ -390,14 +392,28 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
     }
     if (!assets.length) return;
     if (assets.length > 20) showToast({ title: "You can upload up to 20 files at a time. Only the first 20 were selected.", duration: 2_500 });
-    const accepted = assets.slice(0, 20).flatMap((asset) => {
+    let prepared: typeof assets;
+    try {
+      prepared = await Promise.all(assets.slice(0, 20).map(async (asset) => {
+        if (kind !== "media" || iphoneMediaFormat(asset.name, asset.mimeType, asset.mediaType) !== "convert-png") return asset;
+        const rendered = await ImageManipulator.manipulate(asset.uri).renderAsync();
+        const converted = await rendered.saveAsync({ format: SaveFormat.PNG });
+        const size = new File(converted.uri).size;
+        if (!size) throw new Error("The converted iPhone photo is empty.");
+        return { name: convertedPngFilename(asset.name), mimeType: "image/png", size, uri: converted.uri };
+      }));
+    } catch {
+      showToast({ title: "An image could not be prepared for upload.", duration: 2_500 });
+      return;
+    }
+    const accepted = prepared.flatMap((asset) => {
       const name = asset.name ?? "file";
       const extension = name.toLowerCase().split(".").pop();
       if (!extension || !(FILE_EXTENSIONS as readonly string[]).includes(extension)) return [];
-      if (kind === "media" ? !(IMAGE_EXTENSIONS.has(extension as FileExtension) || extension === "mp4") : IMAGE_EXTENSIONS.has(extension as FileExtension) || extension === "mp4") return [];
-      return [{ name, extension: extension as FileExtension, type: asset.mimeType ?? "", size: asset.size ?? new File(asset.uri).size, uri: asset.uri }];
+      if (kind === "media" ? !(IMAGE_EXTENSIONS.has(extension as FileExtension) || extension === "mp4" || extension === "mov") : IMAGE_EXTENSIONS.has(extension as FileExtension) || extension === "mp4" || extension === "mov") return [];
+      return [{ name, extension: extension as FileExtension, type: extension === "mov" ? "video/quicktime" : asset.mimeType ?? "", size: asset.size ?? new File(asset.uri).size, uri: asset.uri }];
     });
-    if (accepted.length < Math.min(assets.length, 20)) showToast({ title: kind === "media" ? "Only JPG, PNG, WEBP, GIF, and MP4 media can be uploaded." : "Only TXT, MD, DOCX, PDF, and MP3 files can be uploaded.", duration: 2_500 });
+    if (accepted.length < Math.min(assets.length, 20)) showToast({ title: kind === "media" ? "Images are saved as PNG. MP4 and MOV videos can be uploaded." : "Only TXT, MD, DOCX, PDF, and MP3 files can be uploaded.", duration: 2_500 });
     if (!accepted.length) return;
     const folderKey = currentFolder?.key;
     const createdAt = new Date().toISOString();
@@ -418,9 +434,9 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
       setPendingUploads((current) => current.filter((file) => !optimistic.some(({ key }) => key === file.key)));
       await invalidateContentLocations(queryClient, contentContext, [folderKey]);
       void queryClient.invalidateQueries({ queryKey: ["file-search", scopeKey], refetchType: "none" });
-    } catch {
+    } catch (error) {
       setPendingUploads((current) => current.filter((file) => !optimistic.some(({ key }) => key === file.key)));
-      showToast({ title: "Files could not be uploaded.", duration: 2_500 });
+      showToast({ title: error instanceof Error && error.message.startsWith("A preview image could not") ? error.message : "Files could not be uploaded.", duration: 2_500 });
     }
   };
 
@@ -455,7 +471,7 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
       files: sourceFiles.map((item) => ({ ...item!, key: action === "copy" ? createContentRecordKey() : item!.key, folderKey: targetFolderKey, createdAt: now, updatedAt: now, ...(action === "copy" ? { isFavorite: false, isHidden: false } : {}) })),
     };
     if (action === "copy") transfer.files.forEach((item, index) => {
-      if (item.extension !== "mp4") return;
+       if (item.extension !== "mp4" && item.extension !== "mov") return;
       const sourceKey = transfer.fileKeys[index]!;
       const thumbnail = queryClient.getQueryData<string>(["video-thumbnail", sessionUploads[sourceKey]?.uiKey ?? sourceKey]);
       if (thumbnail) queryClient.setQueryData(["video-thumbnail", item.key], thumbnail);

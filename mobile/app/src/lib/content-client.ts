@@ -1,6 +1,6 @@
 import { apiClient } from "./api-client";
 import * as Crypto from "expo-crypto";
-import { File } from "expo-file-system";
+import { File, UploadType } from "expo-file-system";
 import { useAuthStore } from "@/state/auth";
 import { mapWithConcurrency } from "./bounded-concurrency";
 import { createImageThumbnail, createVideoThumbnail, type LocalThumbnail } from "./content-thumbnails";
@@ -17,7 +17,7 @@ import {
 
 export type { ContentSelection } from "./content-selection-plans";
 
-export const FILE_EXTENSIONS = ["txt", "md", "docx", "pdf", "jpg", "jpeg", "png", "webp", "gif", "mp3", "mp4"] as const;
+export const FILE_EXTENSIONS = ["txt", "md", "docx", "pdf", "jpg", "jpeg", "png", "webp", "gif", "mp3", "mp4", "mov"] as const;
 export type FileExtension = (typeof FILE_EXTENSIONS)[number];
 export const FILE_LOCATION_PAGE_SIZE = 50;
 
@@ -173,6 +173,7 @@ const FILE_MIME: Record<FileExtension, string> = {
   gif: "image/gif",
   mp3: "audio/mpeg",
   mp4: "video/mp4",
+  mov: "video/quicktime",
 };
 
 function fileExtensionOf(name: string, mimeType: string): FileExtension | undefined {
@@ -347,13 +348,14 @@ export async function uploadContentFiles(files: DirectFile[], folderKey?: string
   });
   const thumbnails = await mapWithConcurrency(sources, 3, async (source, index): Promise<LocalThumbnail | undefined> => {
     try {
-      const thumbnail = ["jpg", "jpeg", "png", "webp", "gif"].includes(source.extension) ? await createImageThumbnail(source.uri) : source.extension === "mp4" ? await createVideoThumbnail(source.uri) : undefined;
+      const thumbnail = ["jpg", "jpeg", "png", "webp", "gif"].includes(source.extension) ? await createImageThumbnail(source.uri) : source.extension === "mp4" || source.extension === "mov" ? await createVideoThumbnail(source.uri) : undefined;
       if (thumbnail) onThumbnail?.(index, thumbnail.uri);
       return thumbnail;
     } catch { /* A file remains uploadable when a local thumbnail cannot be decoded. */ }
     return undefined;
   });
   try {
+  if (sources.some((source, index) => (["jpg", "jpeg", "png", "webp", "gif", "mp4", "mov"] as FileExtension[]).includes(source.extension) && !thumbnails[index])) throw new Error("A preview image could not be prepared for this media file.");
   const localText = await Promise.all(sources.map((source) => extractLocalText(source.uri, source.extension)));
   const unwrap = <T>(response: ToolResponse<T>) => {
     if (!response.success) throw contentToolError(response.error);
@@ -363,20 +365,26 @@ export async function uploadContentFiles(files: DirectFile[], folderKey?: string
     scopeKey: contentContext.scopeKey,
     ...(folderKey ? { folderKey } : {}),
     idempotencyKey,
-    files: sources.map(({ uri: _uri, ...file }, index) => ({ ...file, ...(thumbnails[index] ? { thumbnail: { mimeType: "image/jpeg", sizeBytes: thumbnails[index]!.sizeBytes } } : {}) })),
+    files: sources.map(({ uri: _uri, ...file }, index) => ({ ...file, ...(thumbnails[index] ? { thumbnail: { mimeType: thumbnails[index]!.mimeType, sizeBytes: thumbnails[index]!.sizeBytes } } : {}) })),
   })).data);
   if (reserved.files.length !== sources.length) throw new Error("File upload reservation did not match the selected files.");
   const extractedText: Record<string, string> = {};
   for (let index = 0; index < sources.length; index++) {
     const source = sources[index]!;
     const upload = reserved.files[index]!;
-    const bytes = await new File(source.uri).arrayBuffer();
-    if (bytes.byteLength !== source.sizeBytes) throw new Error("A selected file changed before it could be uploaded.");
+    const sourceFile = new File(source.uri);
+    if (sourceFile.size !== source.sizeBytes) throw new Error("A selected file changed before it could be uploaded.");
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2 * 60_000);
+    const video = source.extension === "mp4" || source.extension === "mov";
+    const timeout = setTimeout(() => controller.abort(), video ? 10 * 60_000 : 2 * 60_000);
     try {
-      const response = await fetch(upload.url, { method: "PUT", headers: upload.headers, body: bytes, signal: controller.signal });
-      if (!response.ok) throw new Error(`File upload failed (${response.status}).`);
+      if (video) {
+        const response = await sourceFile.upload(upload.url, { httpMethod: "PUT", uploadType: UploadType.BINARY_CONTENT, headers: upload.headers, signal: controller.signal });
+        if (response.status < 200 || response.status >= 300) throw new Error(`File upload failed (${response.status}).`);
+      } else {
+        const response = await fetch(upload.url, { method: "PUT", headers: upload.headers, body: await sourceFile.arrayBuffer(), signal: controller.signal });
+        if (!response.ok) throw new Error(`File upload failed (${response.status}).`);
+      }
       const thumbnail = thumbnails[index];
       if (thumbnail) {
         if (!upload.thumbnail) throw new Error("The thumbnail reservation was not returned.");

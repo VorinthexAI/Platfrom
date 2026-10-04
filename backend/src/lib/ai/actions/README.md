@@ -27,6 +27,11 @@ RRF fusion, authorization, and its fused order if reranking fails. Its route is
 `rerank.primary` bound to VoyageAI rerank-3-lite through OpenRouter. The
 provider-reported total token usage costs 20 Sparks per million tokens.
 
+The `text` action's media-description input accepts MP4 and QuickTime MOV
+videos. Uploaded MOV files retain their original bytes and `video/quicktime`
+storage type; the OpenRouter video input uses `video/mov` and analyzes the full
+video, just as the MP4 path does. Local PNG thumbnails are stored separately.
+
 ## Tools Versus Actions
 
 Use a tool when the caller requests a domain outcome: create a folder, find a

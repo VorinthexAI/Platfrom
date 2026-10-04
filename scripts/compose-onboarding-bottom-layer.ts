@@ -3,6 +3,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import sharp from 'sharp';
+import { INTRO_SCREENSHOT_STEPS } from '../mobile/app/src/data/intro-screenshot-steps';
 
 const ROOT = resolve(import.meta.dir, '..');
 const FRAMES = join(ROOT, 'scripts', 'image', 'outputs', 'onboarding-frames');
@@ -14,17 +15,6 @@ const WIDTH = 1080;
 const HEIGHT = 1920;
 const BAND_HEIGHT = 135; // original 1080×2340 screenshot: only its Android navigation row
 const DISPLAY = { left: 170, top: 158, width: 740, height: 1604 } as const;
-
-const screenshotSteps = [
-  { step: 4, file: '01-storage-root.png' },
-  { step: 5, file: '02-nested-folder.png' },
-  { step: 7, file: '03-core-answer.png' },
-  { step: 9, file: '04-view-files.png' },
-  { step: 10, file: '05-generated-work.png' },
-  { step: 11, file: '06-bulk-selection.png' },
-  { step: 12, file: '07-copy-destination.png' },
-  { step: 14, file: '08-chat-context.png' },
-] as const;
 
 const illustrationSteps = [
   { step: 1, file: '01-lost-item.png' },
@@ -75,9 +65,9 @@ async function main() {
   const navTop = DISPLAY.top + DISPLAY.height - (await sharp(insideDevice).metadata()).height!;
 
   for (let step = 1; step <= 15; step += 1) {
-    const screenshot = screenshotSteps.find((item) => item.step === step);
+    const screenshot = INTRO_SCREENSHOT_STEPS.find((item) => item.step === step);
     const illustration = illustrationSteps.find((item) => item.step === step);
-    const base = screenshot ? join(OUTPUT, screenshot.file) : illustration ? join(FRAMES, 'illustrations', illustration.file) : background;
+    const base = screenshot ? join(OUTPUT, `${screenshot.id}-${screenshot.source}.png`) : illustration ? join(FRAMES, 'illustrations', illustration.file) : background;
     const image = typeof base === 'string' ? await readFile(base) : base;
     const overlay = screenshot ? { input: insideDevice, left: DISPLAY.left, top: navTop } : { input: band, left: 0, top: HEIGHT - BAND_HEIGHT };
     const target = join(STEPS, `${String(step).padStart(2, '0')}.png`);

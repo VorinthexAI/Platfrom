@@ -15,7 +15,7 @@ export const agentQueryInputSchema = z.object({
   mode: z.enum(['count', 'list', 'retrieve']).describe('count: exact number of files, never facts inside a file; list: complete inventory with exact total and pages of up to 50 file names, including "find all"; retrieve: semantic question about file content or whether a particular file exists, with up to ten evidence files.'),
   field: z.enum(['files', 'extension', 'processing', 'isFavorite']).optional().describe('Count mode only: optional breakdown of file totals.'),
   folder: folderSchema.optional().describe('Use only when the user selects a specific named folder, or an unambiguous recently listed folder.'),
-  extensions: z.array(fileExtensionSchema).min(1).max(fileExtensionSchema.options.length).optional().describe('Filter to the requested file type: e.g. MP4 for videos, MP3 for audio, and image extensions for photos. Keep the same filters on each inventory page.'),
+  extensions: z.array(fileExtensionSchema).min(1).max(fileExtensionSchema.options.length).optional().describe('Filter to the requested file type: e.g. MP4 or MOV for videos, MP3 for audio, and image extensions for photos. Keep the same filters on each inventory page.'),
   includeRecentReferences: z.boolean().optional(),
   query: z.string().trim().min(1).max(500).optional().describe('Retrieve mode: semantic question or description. Do not use for an exhaustive inventory.'),
   reference: fileReferenceSchema.optional().describe('Retrieve mode: an unambiguous file already returned in a recent conversation turn; for new names use query.'),

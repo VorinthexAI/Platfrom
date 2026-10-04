@@ -34,3 +34,18 @@ the user's other chats.
 dev user, deletes all their non-main scopes, and leaves their main scope empty.
 It queues stored objects through the backend's fenced storage-deletion outbox.
 It does not delete the account. Both commands reject non-local infrastructure.
+
+## iPhone upload format smoke
+
+Run `bun run --cwd backend dev:iphone:verify` while LocalStack is running.
+The script checks that selected image formats target PNG (including HEIC/HEIF),
+that MOV retains `video/quicktime`, and that PNG previews for images and videos
+reservations validate. It generates an alpha-channel PNG and a real tiny
+HEVC-in-MOV sample with the local `ffmpeg-static` executable (or `FFMPEG_PATH`
+if supplied), decodes a PNG video preview frame, transfers both originals and
+thumbnails through local signed S3 PUTs, verifies MIME/size/round-trip bytes,
+and deletes its objects. A mocked OpenRouter response verifies the MOV caption
+adapter sends the original HEVC video bytes as `video/mov`, like MP4 captioning,
+not just its preview. Add `--live` to run one paid caption through the configured
+text action after the mocked check. No database write occurs. Native iPhone
+conversion, thumbnail generation, and playback still need an iPhone build to check.

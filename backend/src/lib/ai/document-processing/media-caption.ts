@@ -8,7 +8,16 @@ import { signedMediaDownloadUrl } from '@/lib/media-delivery';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 
 export function isCaptionableMedia(extension: FileRecord['extension']) {
-  return extension === 'jpg' || extension === 'jpeg' || extension === 'png' || extension === 'webp' || extension === 'gif' || extension === 'mp3' || extension === 'mp4';
+  return extension === 'jpg' || extension === 'jpeg' || extension === 'png' || extension === 'webp' || extension === 'gif' || extension === 'mp3' || extension === 'mp4' || extension === 'mov';
+}
+
+export function mediaCaptionSource(file: Pick<FileRecord, 'extension' | 'storageKey' | 'mimeType'>) {
+  return {
+    kind: file.extension === 'mp3' ? 'audio' as const : file.extension === 'mp4' || file.extension === 'mov' ? 'video' as const : 'image' as const,
+    // OpenRouter advertises video/mov; the stored S3 object retains video/quicktime.
+    mimeType: file.extension === 'mov' ? 'video/mov' as const : file.mimeType,
+    storageKey: file.storageKey,
+  };
 }
 
 function mediaEmbeddingText(file: FileRecord, caption: string) {
@@ -18,9 +27,9 @@ function mediaEmbeddingText(file: FileRecord, caption: string) {
 
 export async function captionUploadedMedia(file: FileRecord, context: ToolContext) {
   return observeToolExecution('file.upload.caption', context, async () => {
-    const kind = file.extension === 'mp3' ? 'audio' : file.extension === 'mp4' ? 'video' : 'image';
-    const url = await signedMediaDownloadUrl(file.storageKey, 5 * 60);
-    const input = mediaDescriptionInputSchema.parse({ operation: 'describe-media', media: { kind, mimeType: file.mimeType, url } });
+    const source = mediaCaptionSource(file);
+    const url = await signedMediaDownloadUrl(source.storageKey, 5 * 60);
+    const input = mediaDescriptionInputSchema.parse({ operation: 'describe-media', media: { kind: source.kind, mimeType: source.mimeType, url } });
     const response = await executeAction<typeof input, MediaDescriptionOutput>(
       { mode: 'auto', teamKey: context.teamKey, actionSlug: 'text' },
       input,

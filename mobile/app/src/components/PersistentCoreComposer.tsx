@@ -109,7 +109,7 @@ function displayAttachmentFilename(filename: string) {
 }
 function TaggedFileIcon({ file }: { file: ContentFile }) {
   if (IMAGE_EXTENSIONS.has(file.extension)) return <ImageIcon size="sm" variant="muted" />;
-  if (file.extension === "mp4") return <PlayIcon size="sm" variant="muted" />;
+  if (file.extension === "mp4" || file.extension === "mov") return <PlayIcon size="sm" variant="muted" />;
   if (file.extension === "mp3") return <SoundwaveIcon size="sm" variant="muted" />;
   return <FileIcon size="sm" variant="muted" />;
 }
