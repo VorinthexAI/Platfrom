@@ -19,7 +19,7 @@ import { ContentError } from '@/lib/ai/tools/content-errors';
 const imageKey = z.string().cuid();
 export const agentImageInputSchema = z.object({ prompt: z.string().trim().min(1).max(4_000), referenceImageKeys: z.array(imageKey).max(8).refine((keys) => new Set(keys).size === keys.length).default([]), aspectRatio: imageAspectRatioSchema.optional(), folderKey: imageKey.optional() }).strict();
 export const agentSpeechInputSchema = z.object({ text: z.string().trim().max(15_000).default(''), fileKeys: z.array(imageKey).max(20).refine((keys) => new Set(keys).size === keys.length).default([]), voice: z.enum(['eve', 'ara', 'rex', 'sal', 'leo']), folderKey: imageKey.optional() }).strict().refine(({ text, fileKeys }) => Boolean(text || fileKeys.length), 'Provide text or at least one document.');
-export const agentVideoInputSchema = z.object({ prompt: z.string().trim().min(1).max(4_000), startFrameFileKey: imageKey.optional(), durationSeconds: z.number().int().min(1).max(15), aspectRatio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3']), folderKey: imageKey.optional() }).strict();
+export const agentVideoInputSchema = z.object({ prompt: z.string().trim().min(1).max(4_000), startFrameFileKey: imageKey.optional(), durationSeconds: z.number().int().min(5).max(15), aspectRatio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3']), folderKey: imageKey.optional() }).strict();
 
 async function authorizeOutputFolder(folderKey: string | undefined, context: ToolContext) {
   if (folderKey && !await getFolderInScope(context.runtimeScopeKey, folderKey, contextUserKey(context))) throw new Error('The destination folder is not available in this scope.');

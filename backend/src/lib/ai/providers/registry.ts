@@ -20,7 +20,7 @@ export const MODEL_REGISTRY = [
   { id: 'openai.gpt-6-luna', name: 'GPT-6 Luna', description: 'OpenAI GPT-6 Luna reasoning text model.' },
   { id: 'google.gemini-3.1-flash-lite-image', name: 'Nano Banana 2 Lite', description: 'Fast image generation, editing, and multimodal analysis model.' },
   { id: 'xai.grok-voice-tts-1.0', name: 'Grok Voice TTS 1.0', description: 'Speech generation model with native MP3 output.' },
-  { id: 'xai.grok-imagine-video-1.5', name: 'Grok Imagine Video 1.5', description: '480p text and first-frame video generation from 1 to 15 seconds.' },
+  { id: 'xai.grok-imagine-video-1.5', name: 'Grok Imagine Video 1.5', description: '480p text and first-frame video generation from 5 to 15 seconds.' },
   { id: 'openai.text-embedding-3-small', name: 'OpenAI Text Embedding 3 Small', description: 'Text embedding model.' },
   { id: 'voyageai.rerank-3-lite', name: 'VoyageAI Rerank 3 Lite', description: 'Question-aware document reranking model.' },
   { id: 'typesafe.jev-1.13', name: 'TypeSafe Jev 1.13', description: 'Low-latency structured decision model.' },

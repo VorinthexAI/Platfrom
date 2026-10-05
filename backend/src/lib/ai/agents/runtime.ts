@@ -32,6 +32,7 @@ export interface AgentRuntimeDependencies {
   };
   onRoutingMetric?: (metric: AgentRoutingMetric) => void;
   freshReadRequired?: (message: string, context: ToolContext, history: readonly string[]) => Promise<boolean>;
+  fileReadIntent?: (message: string, history: readonly string[], context: ToolContext, signal?: AbortSignal) => Promise<boolean>;
 }
 
 export type AgentRoutingMetric = {
@@ -226,7 +227,7 @@ export async function runAgent(
         if (outputMode === 'tools') throw new AgentStreamProtocolError('The agent emitted visible text after selecting a tool.');
         outputMode = 'text';
         rawText += chunk.text;
-        await emit(chunk.text);
+        if (!context.requireWorkspaceRead || contextRead) await emit(chunk.text);
       }
     } finally {
       clearTimeout(initialResponseTimer);
@@ -234,6 +235,9 @@ export async function runAgent(
     if (!done) throw new Error('The agent stream ended before completion.');
     if (finalTurn && calls.length) throw new Error('The agent called a tool during the tool-free final response.');
     if (!calls.length) {
+      if (context.requireWorkspaceRead && !contextRead) {
+        return agentResponseSchema.parse({ message: 'I could not read the workspace evidence for that request. Please try again.', tools: statuses });
+      }
       if (!rawText.trim()) throw new Error('The agent returned neither visible text nor a tool call.');
       observe({ stage, outcome: 'answered', candidateCount: toolDefinitions?.length ?? 0, selectedToolCount: 0, confidence: 'medium', durationMs: performance.now() - startedAt });
       const name = await namePromise;

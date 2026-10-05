@@ -12,7 +12,7 @@ const fileReferenceSchema = z.object({
 }).strict().refine((value) => Boolean(value.name) !== Boolean(value.recent), 'Choose a file name or a recent file reference.');
 
 export const agentQueryInputSchema = z.object({
-  mode: z.enum(['count', 'list', 'retrieve']).describe('count: exact number of files, never facts inside a file; list: complete inventory with exact total and pages of up to 50 file names, including "find all"; retrieve: semantic question about file content or whether a particular file exists, with up to ten evidence files.'),
+  mode: z.enum(['count', 'list', 'retrieve']).describe('count: exact number of files, never facts inside a file; list: inventory of which files exist, without contents; retrieve: read facts inside files, including stored image captions and media descriptions, or find a particular file.'),
   field: z.enum(['files', 'extension', 'processing', 'isFavorite']).optional().describe('Count mode only: optional breakdown of file totals.'),
   folder: folderSchema.optional().describe('Use only when the user selects a specific named folder, or an unambiguous recently listed folder.'),
   extensions: z.array(fileExtensionSchema).min(1).max(fileExtensionSchema.options.length).optional().describe('Filter to the requested file type: e.g. MP4 or MOV for videos, MP3 for audio, and image extensions for photos. Keep the same filters on each inventory page.'),
@@ -35,7 +35,20 @@ export const agentQueryInputSchema = z.object({
 export type AgentQueryInput = z.input<typeof agentQueryInputSchema>;
 
 /** Repair malformed model argument shapes without inferring intent from message vocabulary. */
-export function normalizeAgentQueryArguments(raw: unknown, message: string) {
+export function normalizeAgentQueryArguments(raw: unknown, message: string, requireFileRead = false) {
+  if (requireFileRead) {
+    const proposed = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+    const query = typeof proposed.query === 'string' && proposed.query.trim() && proposed.query.length <= 500 ? proposed.query : message.slice(0, 500).trim();
+    const input = {
+      mode: 'retrieve',
+      ...(proposed.folder ? { folder: proposed.folder } : {}),
+      ...(proposed.extensions ? { extensions: proposed.extensions } : {}),
+      ...(proposed.includeRecentReferences ? { includeRecentReferences: true } : {}),
+      ...(proposed.reference ? { reference: proposed.reference } : { query }),
+      ...(proposed.minSources ? { minSources: proposed.minSources } : {}),
+    };
+    return normalizeAgentQueryArguments(input, message);
+  }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
   const input = raw as Record<string, unknown>;
   if (input.mode === 'list') {

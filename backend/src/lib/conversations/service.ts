@@ -360,7 +360,6 @@ export function createConversationService(dependencies: ConversationServiceDepen
           requestKey: correlationKey,
           generateName: false,
           attachments: [],
-          preloadedTools: [],
         }, {
           toolContext: context,
           conversationService: service,
@@ -405,7 +404,6 @@ export function createConversationService(dependencies: ConversationServiceDepen
           roleKey: input.roleKey,
           ...agentContext,
           message: agentMessage, currentDate: at, requestKey: input.requestKey, generateName: false, attachments: [],
-          preloadedTools: [],
         }, {
           toolContext: context, conversationService: service, currentUserMessageContent: agentMessage,
           onDelta: async (text) => {

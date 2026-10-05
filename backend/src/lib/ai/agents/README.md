@@ -31,7 +31,11 @@ results emit navigable references through `onEvidence`. Unresolved folders are
 partial results, never complete zero counts. `workspace-context.ts` still
 serves legacy `agent.context` callers, but is not in Core's allowlist.
 Core selects modes and filters from the tool descriptions, rather than
-application-maintained language term lists. Retrieve mode can request a minimum
+application-maintained language term lists. A provider-neutral intent decision
+identifies requests for facts inside stored files; these require a workspace
+read and normalize `agent.query` to retrieve before its single read is spent.
+Inventory and count requests retain their original modes. If a required read
+does not happen, Core does not present an unverified answer. Retrieve mode can request a minimum
 number of distinct sources for comparisons; insufficient evidence is partial.
 
 `fresh-read.ts` checks shared phrases against authorized indexed data on

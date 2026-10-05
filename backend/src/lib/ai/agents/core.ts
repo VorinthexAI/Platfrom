@@ -10,6 +10,7 @@ import type { AppSearchRetrieval } from '@/lib/app-search/service';
 import { agentQueryInputSchema, normalizeAgentQueryArguments } from './workspace-query-schema';
 import type { AgentRuntimeDependencies, AgentExecutionContext } from './runtime';
 import { agentImageInputSchema, agentSpeechInputSchema, agentVideoInputSchema, generateAgentImage, generateAgentSpeech, generateAgentVideo } from './media';
+import { requiresFileContentRead } from './workspace-read-intent';
 
 export { coreAgentToolInputSchema, agentQueryInputSchema };
 
@@ -21,7 +22,7 @@ For exact figures or dates, check that the specific figure and its meaning appea
 
 export function composeCoreSystemPrompt(roleKey: RoleKey, taskInstructions?: string) {
   const role = getRole(roleKey);
-  return [CORE_SYSTEM_PROMPT, `Role: ${role.label}. ${role.instructions}`, taskInstructions].filter(Boolean).join('\n\n');
+  return [CORE_SYSTEM_PROMPT, 'For questions about what a stored file contains, use agent.query retrieve, not list. Stored images are understood through their caption field; audio and video can also have captions. If the retrieved file has no caption or readable text, say its contents are unavailable rather than guessing from its filename.', `Role: ${role.label}. ${role.instructions}`, taskInstructions].filter(Boolean).join('\n\n');
 }
 
 const CONTENT_MUTATION_TOOL_NAMES = Object.freeze([
@@ -54,18 +55,19 @@ export async function executeCoreAgent(rawRequest: unknown, context: AgentExecut
   if (requestsPlatformInternals(request.message)) {
     return runAgent(
       { ...coreAgent, excludedTools: [...coreAgent.excludedTools, 'agent.query'], capabilities: undefined },
-      { ...request, systemPrompt: composeCoreSystemPrompt('general'), context: [], recalledContext: [], currentConversationSummary: undefined, attachments: [], preloadedTools: [], generateName: false },
+      { ...request, systemPrompt: composeCoreSystemPrompt('general'), context: [], recalledContext: [], currentConversationSummary: undefined, attachments: [], generateName: false },
       context,
       dependencies,
     );
   }
   const executionAgent = { ...coreAgent, ...(request.attachments.length ? { capabilities: undefined } : {}) };
   const history = (request.context ?? []).map(({ content }) => content);
-  const requireWorkspaceRead = !request.attachments.length && await (dependencies?.freshReadRequired ?? (dependencies?.stream ? async () => false : (await import('./fresh-read')).requiresFreshWorkspaceRead))(request.message, context.toolContext, history);
+  const requireFileRead = !request.attachments.length && await (dependencies?.fileReadIntent ?? (dependencies?.stream ? async () => false : requiresFileContentRead))(request.message, history, context.toolContext, dependencies?.router?.signal);
+  const requireWorkspaceRead = requireFileRead || !request.attachments.length && await (dependencies?.freshReadRequired ?? (dependencies?.stream ? async () => false : (await import('./fresh-read')).requiresFreshWorkspaceRead))(request.message, context.toolContext, history);
   return runAgent(executionAgent, { ...request, systemPrompt: composeCoreSystemPrompt(request.roleKey, request.taskInstructions) }, {
     ...context, currentUserMessageContent: request.message, requireWorkspaceRead,
     normalizeToolArguments: (name, arguments_) => name === 'agent.query'
-      ? normalizeAgentQueryArguments(arguments_, request.message)
+      ? normalizeAgentQueryArguments(arguments_, request.message, requireFileRead)
       : context.normalizeToolArguments?.(name, arguments_) ?? arguments_,
   }, dependencies);
 }
@@ -76,7 +78,7 @@ export const CORE_TOOL_DEFINITIONS = Object.freeze([{
   isReadOnly: (): boolean => true,
   providerDefinition: {
     name: 'agent.query',
-    description: 'Choose count for exact file totals, list for exhaustive file inventories with an exact count and up to 50 compact entries per page, or retrieve for content questions and the ten best authorized files after RRF and reranking. If list returns nextCursor, only one page was shown; on the next user turn use list with nextPage: true to continue the conversation. Choose file-type filters from the user request. For comparisons use retrieve with minSources: 2. Use folder.name only for an authorized named folder; reference.recent only for a clear previous file. Never supply user, scope, or raw file keys.',
+    description: 'Choose count for exact file totals, list for inventories of which files exist (without contents), or retrieve whenever the answer needs facts inside a file. Retrieve includes stored image captions and other readable file evidence for up to ten authorized files. If list returns nextCursor, use list with nextPage: true on the next turn. Choose file-type filters from the user request; compare sources with minSources: 2. Use folder.name only for an authorized named folder and reference.recent only for a clear previous file. Never supply user, scope, or raw file keys.',
     inputSchema: contentZodToJsonSchema(agentQueryInputSchema),
   },
   async execute(raw: unknown, dependencies: AgentToolDependencies) {
