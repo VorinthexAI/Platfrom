@@ -152,6 +152,7 @@ resource "aws_iam_role_policy" "early_app_archive_processing" {
           "${module.storage.s3_bucket_arn}/profiles/*",
           "${module.storage.s3_bucket_arn}/compass/*",
           "${module.storage.s3_bucket_arn}/email/*",
+          "${module.storage.s3_bucket_arn}/files/*",
           "${module.storage.s3_bucket_arn}/pending/compass/*",
           "${module.storage.s3_bucket_arn}/pending/conversation-attachments/*",
           "${module.storage.s3_bucket_arn}/pending/gallery/*",

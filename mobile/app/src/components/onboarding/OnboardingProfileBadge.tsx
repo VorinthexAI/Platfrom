@@ -58,7 +58,7 @@ export function OnboardingProfileBadge({ onFinished }: { onFinished: () => void 
   };
 
   return <OnboardingStepLayout
-    action={<><Button disabled={!scopeKey || generating || claiming} loading={generating || claiming} onPress={() => void (candidate ? claim() : generate())} size="md" variant="primary">{candidate ? "Claim badge" : "Generate badge"}</Button><Button disabled={generating || claiming} onPress={skip} size="md" variant="secondary">Skip</Button></>}
+    action={<><Button disabled={!scopeKey || generating || claiming} onPress={() => void (candidate ? claim() : generate())} size="md" variant="primary">{candidate ? "Claim badge" : "Generate badge"}</Button><Button disabled={generating || claiming} onPress={skip} size="md" variant="secondary">Skip</Button></>}
     closeDisabled={generating || claiming}
     closeLabel="Skip profile badge"
     description="Create a personal badge for your profile."
