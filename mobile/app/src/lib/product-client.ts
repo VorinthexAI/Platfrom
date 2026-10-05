@@ -44,9 +44,15 @@ export const productsResponseSchema = z.strictObject({
   }
 });
 
-const healthResponseSchema = z.strictObject({ ok: z.literal(true) });
+export const healthResponseSchema = z.strictObject({
+  ok: z.literal(true),
+  appVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+  playStoreUrl: z.url().refine((url) => url.startsWith("https://")),
+  appStoreUrl: z.url().refine((url) => url.startsWith("https://")),
+});
 
 export type MobileProduct = z.infer<typeof productSchema>;
+export type HealthResponse = z.infer<typeof healthResponseSchema>;
 
 export async function fetchPublic(path: string): Promise<unknown> {
   const controller = new AbortController();
@@ -71,10 +77,8 @@ export async function fetchProducts(): Promise<MobileProduct[]> {
   return parseProducts(await fetchPublic("products"));
 }
 
-export async function fetchPublicBootstrap(): Promise<MobileProduct[]> {
-  const [health, products] = await Promise.all([fetchPublic("health"), fetchProducts()]);
-  healthResponseSchema.parse(health);
-  return products;
+export async function fetchHealth(): Promise<HealthResponse> {
+  return healthResponseSchema.parse(await fetchPublic("health?appUpdate=1"));
 }
 
 export function effectivePriceCents(product: MobileProduct) {

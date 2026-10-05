@@ -6,21 +6,21 @@ import { useState } from "react";
 import { Linking, Platform, StyleSheet, Text, View } from "react-native";
 
 import { appStoreUrl, shouldPromptForAppUpdate } from "@/lib/app-update";
-import { useAppsStore } from "@/state/apps";
+import type { HealthResponse } from "@/lib/product-client";
 import { fonts, palette, spacing } from "@/theme/tokens";
 
-export function AppAvailabilitySheets({ isOffline }: { isOffline: boolean }) {
-  const registryVersion = useAppsStore((state) => state.apps.find(({ slug }) => slug === "vorinthex-ai")?.version);
+export function AppAvailabilitySheets({ isOffline, health }: { isOffline: boolean; health: HealthResponse | null }) {
+  const availableVersion = health?.appVersion;
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
   const installedVersion = Constants.expoConfig?.version;
-  const updateOpen = !isOffline && shouldPromptForAppUpdate(installedVersion, registryVersion, dismissedVersion);
+  const updateOpen = !isOffline && shouldPromptForAppUpdate(installedVersion, availableVersion, dismissedVersion);
 
   const closeUpdate = () => {
-    if (registryVersion) setDismissedVersion(registryVersion);
+    if (availableVersion) setDismissedVersion(availableVersion);
   };
 
   const openStore = () => {
-    void Linking.openURL(appStoreUrl(Platform.OS)).catch(() => undefined);
+    if (health) void Linking.openURL(appStoreUrl(Platform.OS, health)).catch(() => undefined);
   };
 
   return <>
@@ -46,7 +46,7 @@ export function AppAvailabilitySheets({ isOffline }: { isOffline: boolean }) {
       open={updateOpen}
       title="Update available"
     >
-      <Text style={styles.updateDescription}>Version {registryVersion} is available. Update Vorinthex AI for the latest improvements.</Text>
+      <Text style={styles.updateDescription}>Version {availableVersion} is available. Update Vorinthex AI for the latest improvements.</Text>
     </BottomSheet>
   </>;
 }

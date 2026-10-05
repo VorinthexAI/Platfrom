@@ -18,6 +18,7 @@ import { BookPlaybackProvider } from "@/lib/book-playback";
 import { useAppsStore } from "@/state/apps";
 import { useInternetConnection } from "@/hooks/use-internet-connection";
 import { AppAvailabilitySheets } from "@/components/AppAvailabilitySheets";
+import { fetchHealth, type HealthResponse } from "@/lib/product-client";
 import { SparksBalanceObserver } from "@/components/SparksBalanceObserver";
 import { PaywallSheet } from "@/components/PaywallSheet";
 import { readLocalOnboardingState, subscribeLocalOnboardingState, type LocalOnboardingState } from "@/lib/onboarding-state";
@@ -36,6 +37,8 @@ export default function RootLayout() {
   const isOnboarded = useAuthStore((state) => state.user?.isOnboarded === true);
   const bootstrap = useAuthStore((state) => state.bootstrap);
   const [localOnboarding, setLocalOnboarding] = useState<LocalOnboardingState>();
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [healthChecked, setHealthChecked] = useState(false);
   const appsStatus = useAppsStore((state) => state.bootstrapStatus);
   const bootstrapApps = useAppsStore((state) => state.bootstrap);
   const router = useRouter();
@@ -53,6 +56,16 @@ export default function RootLayout() {
   }, [bootstrapApps, connectionResolved, isOffline]);
 
   useEffect(() => {
+    if (!connectionResolved || isOffline) return;
+    let active = true;
+    void fetchHealth()
+      .then((result) => { if (active) setHealth(result); })
+      .catch(() => { if (active) setHealth(null); })
+      .finally(() => { if (active) setHealthChecked(true); });
+    return () => { active = false; };
+  }, [connectionResolved, isOffline]);
+
+  useEffect(() => {
     if (appsStatus === "ready") void bootstrap();
   }, [appsStatus, bootstrap]);
 
@@ -63,10 +76,10 @@ export default function RootLayout() {
   }, [appsStatus, bootstrapApps, isOffline]);
 
   useEffect(() => {
-    if (localOnboarding && (fontsLoaded || fontError) && (isOffline || (status !== "bootstrapping" && appsStatus === "ready"))) {
+    if (localOnboarding && (fontsLoaded || fontError) && (isOffline || (healthChecked && status !== "bootstrapping" && appsStatus === "ready"))) {
       SplashScreen.hideAsync().catch(() => {});
     }
-  }, [appsStatus, fontError, fontsLoaded, isOffline, localOnboarding, status]);
+  }, [appsStatus, fontError, fontsLoaded, healthChecked, isOffline, localOnboarding, status]);
 
   useEffect(() => {
     if (status === "bootstrapping" || appsStatus !== "ready" || !localOnboarding) return;
@@ -85,7 +98,7 @@ export default function RootLayout() {
     if (status === "authenticated" && !isOnboarded && !isPublic && root !== "onboarding") router.replace("/onboarding");
   }, [appsStatus, isOnboarded, localOnboarding, router, segments, status]);
 
-  if ((!fontsLoaded && !fontError) || !connectionResolved || !localOnboarding || (!isOffline && (status === "bootstrapping" || appsStatus !== "ready"))) {
+  if ((!fontsLoaded && !fontError) || !connectionResolved || !localOnboarding || (!isOffline && (!healthChecked || status === "bootstrapping" || appsStatus !== "ready"))) {
     return null;
   }
 
@@ -104,7 +117,7 @@ export default function RootLayout() {
                     animation: "slide_from_right",
                   }}
                 />
-                <AppAvailabilitySheets isOffline={isOffline} />
+                <AppAvailabilitySheets health={health} isOffline={isOffline} />
                 <SparksBalanceObserver isOffline={isOffline} />
                 <PaywallSheet />
               </BookPlaybackProvider>

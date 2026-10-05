@@ -169,6 +169,7 @@ export function clearSessionCookies(c: Context) {
 
 function querySchemaForPath(path: string, method: string) {
   const apiPath = path.replace(/^\/api\/v1(?=\/|$)/, '');
+  if (apiPath === '/health') return strictObject({ appUpdate: z.literal('1').optional() });
   if (apiPath === '/nodes') {
     return strictObject({
       node: z.string().optional(),

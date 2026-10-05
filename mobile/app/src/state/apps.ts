@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 import { fetchAgentsRegistry, type ServerApp } from "@/lib/apps-registry";
 import { fetchSparkCosts, type CapabilitySparkCost, type SparkCharge } from "@/lib/cost-client";
-import { fetchPublicBootstrap, type MobileProduct } from "@/lib/product-client";
+import { fetchProducts, type MobileProduct } from "@/lib/product-client";
 import { useUiStore } from "./ui";
 
 export type AppBootstrapStatus = "idle" | "bootstrapping" | "ready" | "failed";
@@ -34,7 +34,7 @@ let productsPromise: Promise<void> | null = null;
 function refreshProducts(set: (patch: Partial<AppsState>) => void) {
   if (productsPromise) return productsPromise;
   set({ productsStatus: "loading", productsError: null, sparkCostsStatus: "loading", sparkCostsError: null });
-  productsPromise = Promise.allSettled([fetchPublicBootstrap(), fetchSparkCosts()])
+  productsPromise = Promise.allSettled([fetchProducts(), fetchSparkCosts()])
     .then(([productsResult, costsResult]) => {
       set(productsResult.status === "fulfilled"
         ? { products: productsResult.value, productsStatus: "ready", productsError: null }

@@ -2,6 +2,7 @@ import { serve } from 'bun';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { websocket } from 'hono/bun';
+import { z } from 'zod';
 import { errorHandler } from './errors';
 import { autoRefreshAuthTokens, bindDevice, bindEventApp, bindEventIdentifier, ipRateLimit, requestLogger, requireEnvApiKey, validateQueryParams } from './middleware';
 import { EVENT_IDENTIFIER_HEADER } from '@/lib/ai/events/event-identifier';
@@ -19,6 +20,16 @@ import { closeConversationArchiveProjectionQueue, recoverConversationArchiveProj
 export const app = new Hono();
 const api = app.basePath('/api/v1');
 const DEFAULT_PROD_CORS_ORIGINS = ['https://vorinthex.com'];
+const storeUrl = z.string().url().startsWith('https://');
+const appUpdate = z.object({
+  appVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+  playStoreUrl: storeUrl,
+  appStoreUrl: storeUrl,
+}).parse({
+  appVersion: process.env.appVersion ?? '1.0.0',
+  playStoreUrl: process.env.playStoreUrl ?? 'https://play.google.com/store/apps/details?id=app.vorinthex.com',
+  appStoreUrl: process.env.appStoreUrl ?? 'https://apps.apple.com/us/search?term=Vorinthex%20AI',
+});
 
 app.use('*', cors({
   origin: (origin) => {
@@ -63,7 +74,7 @@ app.use('*', bindEventApp);
 app.use('*', autoRefreshAuthTokens);
 app.use('*', validateQueryParams);
 app.onError(errorHandler);
-api.get('/health', (c) => c.json({ ok: true }));
+api.get('/health', (c) => c.json(c.req.query('appUpdate') === '1' ? { ok: true, ...appUpdate } : { ok: true }));
 registerRoutes(api);
 app.post(RESEND_WEBHOOK_V1_PATH, handleResendWebhook);
 app.post(`${RESEND_WEBHOOK_V1_PATH}/`, handleResendWebhook);
