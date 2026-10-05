@@ -23,12 +23,12 @@ const DEFAULT_PROD_CORS_ORIGINS = ['https://vorinthex.com'];
 const storeUrl = z.string().url().startsWith('https://');
 const appUpdate = z.object({
   appVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
-  playStoreUrl: storeUrl,
-  appStoreUrl: storeUrl,
+  playStoreUrl: storeUrl.nullable(),
+  appStoreUrl: storeUrl.nullable(),
 }).parse({
-  appVersion: process.env.appVersion ?? '1.0.0',
-  playStoreUrl: process.env.playStoreUrl ?? 'https://play.google.com/store/apps/details?id=app.vorinthex.com',
-  appStoreUrl: process.env.appStoreUrl ?? 'https://apps.apple.com/us/search?term=Vorinthex%20AI',
+  appVersion: process.env.APP_VERSION ?? '1.0.0',
+  playStoreUrl: process.env.PLAY_STORE_URL?.trim() || null,
+  appStoreUrl: process.env.APP_STORE_URL?.trim() || null,
 });
 
 app.use('*', cors({

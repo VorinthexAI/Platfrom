@@ -11,6 +11,6 @@ export function shouldPromptForAppUpdate(installedVersion: string | undefined, a
   return false;
 }
 
-export function appStoreUrl(platform: string, health: HealthResponse): string {
+export function appStoreUrl(platform: string, health: HealthResponse): string | null {
   return platform === "android" ? health.playStoreUrl : health.appStoreUrl;
 }

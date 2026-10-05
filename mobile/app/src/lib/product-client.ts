@@ -47,8 +47,8 @@ export const productsResponseSchema = z.strictObject({
 export const healthResponseSchema = z.strictObject({
   ok: z.literal(true),
   appVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
-  playStoreUrl: z.url().refine((url) => url.startsWith("https://")),
-  appStoreUrl: z.url().refine((url) => url.startsWith("https://")),
+  playStoreUrl: z.url().refine((url) => url.startsWith("https://")).nullable(),
+  appStoreUrl: z.url().refine((url) => url.startsWith("https://")).nullable(),
 });
 
 export type MobileProduct = z.infer<typeof productSchema>;

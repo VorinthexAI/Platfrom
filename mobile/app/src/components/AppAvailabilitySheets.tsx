@@ -20,7 +20,9 @@ export function AppAvailabilitySheets({ isOffline, health }: { isOffline: boolea
   };
 
   const openStore = () => {
-    if (health) void Linking.openURL(appStoreUrl(Platform.OS, health)).catch(() => undefined);
+    if (!health) return;
+    const url = appStoreUrl(Platform.OS, health);
+    if (url) void Linking.openURL(url).catch(() => undefined);
   };
 
   return <>
@@ -41,13 +43,12 @@ export function AppAvailabilitySheets({ isOffline, health }: { isOffline: boolea
     </BottomSheet>
 
     <BottomSheet
+      description="A new version of the app is available."
       footer={<><Button icon={<DownloadIcon size="sm" />} onPress={openStore} size="md" variant="primary">Update</Button><Button onPress={closeUpdate} size="md" variant="secondary">Close</Button></>}
       onOpenChange={(open) => { if (!open) closeUpdate(); }}
       open={updateOpen}
-      title="Update available"
-    >
-      <Text style={styles.updateDescription}>Version {availableVersion} is available. Update Vorinthex AI for the latest improvements.</Text>
-    </BottomSheet>
+      title="Update app"
+    />
   </>;
 }
 
@@ -85,11 +86,5 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     textAlign: "center",
-  },
-  updateDescription: {
-    color: palette.muted,
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    lineHeight: 19,
   },
 });
