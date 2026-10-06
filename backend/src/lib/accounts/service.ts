@@ -21,7 +21,7 @@ export function newcomerGrantInput(eventKey: string) {
   return {
     deltaMicroSparks: ACCOUNT_GRANT_MICRO_SPARKS,
     idempotencyKey: 'account-grant:v3',
-    requestHash: 'account-grant:v3:50-sparks',
+    requestHash: 'account-grant:v3:500-sparks',
     eventKey,
     metadata: { category: 'newcomer-grant', grantVersion: 'v3' },
   } as const;
