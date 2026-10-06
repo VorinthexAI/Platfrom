@@ -21,7 +21,7 @@ import { Switch } from "@vorinthex/shared/ui/switch";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 import { useWholeSparkBalance } from "@/hooks/use-billing-summary";
-import { ChatBubbleIcon, CloseIcon, FileIcon, FilterIcon, ImageIcon, IncognitoIcon, MoreHorizontalIcon, PlayIcon, PlusIcon, RoleIcon, SearchIcon, SoundwaveIcon, type RoleIconRole } from "@vorinthex/shared/ui/icons-mobile";
+import { ChatBubbleIcon, CloseIcon, FileIcon, FilterIcon, FolderIcon, ImageIcon, IncognitoIcon, MoreHorizontalIcon, PlayIcon, PlusIcon, RoleIcon, SearchIcon, SoundwaveIcon, UploadIcon, type RoleIconRole } from "@vorinthex/shared/ui/icons-mobile";
 
 import { ContentFileTile, IMAGE_EXTENSIONS } from "@/components/ContentFileTile";
 import { FilesPickerSheet } from "@/components/FilesPickerSheet";
@@ -137,7 +137,7 @@ function isExpectedCancellation(error: unknown) {
   return error.name === "AbortError" || error.name === "CanceledError" || error.name === "CancelledError" || code === "ERR_CANCELED";
 }
 
-const MessageRow = memo(function MessageRow({ message, onChooseMode, onOpenActions, onOpenAttachment, onOpenTaggedFile, onOpenRetrievals }: { message: DisplayMessage; onChooseMode: (mode: CapabilityMode) => void; onOpenActions: (message: OptimisticMessage) => void; onOpenAttachment: (attachment: ConversationAttachmentReference) => void; onOpenTaggedFile: (file: NonNullable<ConversationMessage["workspaceFiles"]>[number]) => void; onOpenRetrievals: (message: OptimisticMessage) => void }) {
+const MessageRow = memo(function MessageRow({ message, onStorageAction, onOpenActions, onOpenAttachment, onOpenTaggedFile, onOpenRetrievals }: { message: DisplayMessage; onStorageAction?: (action: StorageAction) => void; onOpenActions: (message: OptimisticMessage) => void; onOpenAttachment: (attachment: ConversationAttachmentReference) => void; onOpenTaggedFile: (file: NonNullable<ConversationMessage["workspaceFiles"]>[number]) => void; onOpenRetrievals: (message: OptimisticMessage) => void }) {
   const { width } = useWindowDimensions();
   const taggedCardSize = Math.floor((width - 20 * 2 - 2 - 8 * 3) / 4 * 0.75);
   const user = message.role === "user";
@@ -154,7 +154,7 @@ const MessageRow = memo(function MessageRow({ message, onChooseMode, onOpenActio
     <MessageAttachments message={message} onOpen={onOpenAttachment} />
     {user && message.workspaceFiles?.length ? <ScrollView accessibilityLabel="Tagged files" contentContainerStyle={styles.taggedFileCards} horizontal showsHorizontalScrollIndicator={false} style={styles.taggedFileScroll}>{message.workspaceFiles.map((file) => <ContentFileTile accessibilityLabel={`Open ${file.name}`} file={file} key={file.key} onPress={() => onOpenTaggedFile(file)} size={taggedCardSize} />)}</ScrollView> : null}
     {fileView ? <ActionPill compact onPress={() => onOpenRetrievals(message)} pressLabel="View files"><Text numberOfLines={1} style={styles.retrievalSummary}>View files</Text></ActionPill> : null}
-    {message.persistenceKind === "greeting" && message.status === "COMPLETED" ? <WelcomeChoices onChat={() => onChooseMode("chat")} onMode={onChooseMode} /> : null}
+    {message.persistenceKind === "greeting" && message.status === "COMPLETED" && onStorageAction ? <WelcomeChoices onAction={onStorageAction} /> : null}
     </View>
   </View>;
 });
@@ -182,22 +182,23 @@ const messageKey = ({ key, renderKey, role, turnKey }: OptimisticMessage & { ren
 const conversationKey = ({ key }: Conversation) => key;
 const MessageSeparator = () => <View style={styles.messageSeparator} />;
 
-export function PersistentCoreComposer({ generationMode = "chat", ...props }: CoreComposerProps & { openOnMount?: boolean; generationMode?: "chat" | "image" | "speech" | "video" }) {
-  return generationMode === "chat" ? <ChatCoreComposer {...props} /> : <MediaWorkspaceComposer {...props} mode={generationMode} />;
+type StorageAction = "open" | "create" | "upload";
+
+export function PersistentCoreComposer({ generationMode = "chat", onStorageAction, ...props }: CoreComposerProps & { openOnMount?: boolean; generationMode?: "chat" | "image" | "speech" | "video"; onStorageAction?: (action: StorageAction) => void }) {
+  return generationMode === "chat" ? <ChatCoreComposer {...props} onStorageAction={onStorageAction} /> : <MediaWorkspaceComposer {...props} mode={generationMode} />;
 }
 
-function WelcomeChoices({ onChat, onMode }: { onChat: () => void; onMode: (mode: "image" | "video" | "speech") => void }) {
+function WelcomeChoices({ onAction }: { onAction: (action: StorageAction) => void }) {
   const { width } = useWindowDimensions();
-  const size = Math.floor((width - 20 * 2 - 2 - 8 * 3) / 4 * 0.75);
+  const size = Math.floor((width - 20 * 2 - 2 - 8 * 2) / 3 * 0.75);
   return <View accessibilityLabel="Choose what to do" style={styles.welcomeChoices}>
-      <CapabilityTile icon={<ChatBubbleIcon size="lg" />} label="Chat" onPress={onChat} size={size} />
-      <CapabilityTile icon={<ImageIcon size="lg" />} label="Image" onPress={() => onMode("image")} size={size} />
-      <CapabilityTile icon={<PlayIcon size="lg" />} label="Video" onPress={() => onMode("video")} size={size} />
-      <CapabilityTile icon={<SoundwaveIcon size="lg" />} label="Speech" onPress={() => onMode("speech")} size={size} />
+      <CapabilityTile icon={<FileIcon size="lg" />} label="Open Storage" onPress={() => onAction("open")} size={size} />
+      <CapabilityTile icon={<FolderIcon size="lg" />} label="Create Folder" onPress={() => onAction("create")} size={size} />
+      <CapabilityTile icon={<UploadIcon size="lg" />} label="Upload Files" onPress={() => onAction("upload")} size={size} />
   </View>;
 }
 
-function ChatCoreComposer({ openOnMount, ...props }: CoreComposerProps & { openOnMount?: boolean }) {
+function ChatCoreComposer({ openOnMount, onStorageAction, ...props }: CoreComposerProps & { openOnMount?: boolean; onStorageAction?: (action: StorageAction) => void }) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const { showToast } = useToast();
@@ -570,8 +571,9 @@ function ChatCoreComposer({ openOnMount, ...props }: CoreComposerProps & { openO
     if (!turnScrollRequest) return;
     scheduleScrollToEnd(false);
   }, [scheduleScrollToEnd, turnScrollRequest]);
-  const chooseMode = useCallback((mode: CapabilityMode) => { if (mode === "chat") setComposerFocusRequest((current) => current + 1); else router.setParams({ mode }); }, [router]);
-  const renderMessage = useCallback<ListRenderItem<DisplayMessage>>(({ item }) => <MessageRow message={item} onChooseMode={chooseMode} onOpenActions={openMessageActions} onOpenAttachment={openMessageAttachment} onOpenTaggedFile={openTaggedFile} onOpenRetrievals={openMessageRetrievals} />, [chooseMode, openMessageActions, openMessageAttachment, openTaggedFile, openMessageRetrievals]);
+  const closeCorePage = useRef<() => void>(() => undefined);
+  const chooseStorage = useCallback((action: StorageAction) => { closeCorePage.current(); onStorageAction?.(action); }, [onStorageAction]);
+  const renderMessage = useCallback<ListRenderItem<DisplayMessage>>(({ item }) => <MessageRow message={item} onStorageAction={onStorageAction ? chooseStorage : undefined} onOpenActions={openMessageActions} onOpenAttachment={openMessageAttachment} onOpenTaggedFile={openTaggedFile} onOpenRetrievals={openMessageRetrievals} />, [chooseStorage, onStorageAction, openMessageActions, openMessageAttachment, openTaggedFile, openMessageRetrievals]);
   useEffect(() => {
     if (!latestMessageKey) return;
     if (!followLatest.current && !nearBottom.current) return;
@@ -1092,7 +1094,7 @@ function ChatCoreComposer({ openOnMount, ...props }: CoreComposerProps & { openO
   const chatSearch = (picking: boolean) => <View style={styles.searchActions}><View style={styles.search}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search chats" autoFocusInBottomSheet={false} maxLength={500} onChangeText={changeQuery} placeholder="Search..." style={styles.searchInput} value={query} />{query ? <ButtonSizeProvider overrideParent size="xs"><Button accessibilityLabel="Clear chat search" contentMode="raw" iconOnly onPress={() => changeQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button></ButtonSizeProvider> : null}</View><Button accessibilityLabel="Filter chats" contentMode="raw" onPress={() => openSheet("filter")} size="md" variant="icon"><FilterIcon size="sm" variant={favoriteOnly || hiddenOnly ? "accent" : "default"} /></Button></View>;
 
   return <>
-    <CoreComposer {...props} accessibilityHint={coreFunded ? props.accessibilityHint : "Add Sparks to use Core"} disabled={!configured || composerBusy || !coreFunded} editable={configured && !turning && !sheet && coreFunded} expandedAccessory={attachmentPills} expandedFooter={modeTabs} expandedLeading={<PlusIcon size="sm" />} expandedLeadingAccessibilityLabel="Tag files" expandedLeadingDisabled={!configured || composerBusy || !coreFunded} expandedToolbar={roleToolbar} expandedPrompts={props.expandedPrompts ?? CORE_PLACEHOLDER_PROMPTS} focusOnOpenRequest={false} focusRequest={composerFocusRequest} loading={composerBusy} maxLength={CONVERSATION_MESSAGE_MAX_LENGTH} message={conversation} onChangeText={(value) => { draftRevision.current += 1; composerValueRef.current = value; setInput(value); }} onExpandedKeyboardVisibilityChange={setComposerKeyboardVisible} onExpandedLeadingPress={() => setPickerOpen(true)} onFocusChange={handleCoreFocusChange} onSubmit={() => void submit()} openEnabled={coreFunded} openRequest={coreFunded ? Math.max(coreOpenRequest, greetingRequest?.occasion === "onboarding" ? greetingRequest.id : 0) : 0} pageActions={pageActions} pageBackdrop={<ConversationWatermark />} pageIdentity={(closePage) => <View style={styles.coreIdentity}><View style={styles.coreIdentityApp}>{props.pageIdentity(closePage)}</View><ProfileHeaderRight /></View>} value={input} />
+    <CoreComposer {...props} accessibilityHint={coreFunded ? props.accessibilityHint : "Add Sparks to use Core"} disabled={!configured || composerBusy || !coreFunded} editable={configured && !turning && !sheet && coreFunded} expandedAccessory={attachmentPills} expandedFooter={modeTabs} expandedLeading={<PlusIcon size="sm" />} expandedLeadingAccessibilityLabel="Tag files" expandedLeadingDisabled={!configured || composerBusy || !coreFunded} expandedToolbar={roleToolbar} expandedPrompts={props.expandedPrompts ?? CORE_PLACEHOLDER_PROMPTS} focusOnOpenRequest={false} focusRequest={composerFocusRequest} loading={composerBusy} maxLength={CONVERSATION_MESSAGE_MAX_LENGTH} message={conversation} onChangeText={(value) => { draftRevision.current += 1; composerValueRef.current = value; setInput(value); }} onExpandedKeyboardVisibilityChange={setComposerKeyboardVisible} onExpandedLeadingPress={() => setPickerOpen(true)} onFocusChange={handleCoreFocusChange} onSubmit={() => void submit()} openEnabled={coreFunded} openRequest={coreFunded ? Math.max(coreOpenRequest, greetingRequest?.occasion === "onboarding" ? greetingRequest.id : 0) : 0} pageActions={pageActions} pageBackdrop={<ConversationWatermark />} pageIdentity={(closePage) => { closeCorePage.current = closePage; return <View style={styles.coreIdentity}><View style={styles.coreIdentityApp}>{props.pageIdentity(closePage)}</View><ProfileHeaderRight /></View>; }} value={input} />
     <BottomSheet description="Choose how Core approaches this chat." footer={<><Button disabled={!rolesQuery.data?.some((role) => role.key === roleDraft)} onPress={applyRole} size="md" variant="primary">Done</Button><Button onPress={() => openSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open && sheet === "role") openSheet(undefined); }} open={sheet === "role"} title="Choose a role">
       {rolesQuery.isError ? <View style={styles.centerError}><Text style={styles.error}>Roles could not be loaded.</Text><Button onPress={() => void rolesQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : <ScrollView showsVerticalScrollIndicator={false}><View accessibilityLabel={rolesQuery.isPending ? "Loading roles" : undefined} accessibilityRole={rolesQuery.isPending ? "progressbar" : undefined} onLayout={({ nativeEvent }) => setRoleGridWidth(nativeEvent.layout.width)} style={styles.roleGrid}>{roleCardWidth ? rolesQuery.isPending ? Array.from({ length: 12 }, (_, index) => <Skeleton key={index} style={{ width: roleCardWidth, height: 94 }} />) : rolesQuery.data?.map((role) => <RoleOptionCard description={role.description} icon={<RoleIcon role={role.key as RoleIconRole} size="md" />} key={role.key} label={role.label} onPress={() => setRoleDraft(role.key)} selected={roleDraft === role.key} width={roleCardWidth} />) : null}</View></ScrollView>}
     </BottomSheet>

@@ -17,11 +17,11 @@ function buildPricingText(): string {
   const { newcomerAllocation, referrals, subscriptions, topUp, webPurchasesAvailable } =
     PRODUCT_FACTS.pricing;
 
-  return `Prices are shown in USD and exclude VAT and other local taxes. Polar calculates and adds applicable tax at checkout.
+  return `Website prices are shown in USD. In-app prices and applicable taxes depend on your app store and region.
 
 - Newcomer allocation: ${formatSparkCount(newcomerAllocation)} Sparks.
 - Active subscription options:
-${subscriptions.map((plan) => `  - ${plan.name}: ${formatUsd(plan.price)} per ${plan.cadence} for ${formatSparkCount(plan.sparks)} Sparks per billing ${plan.cadence}${"referencePrice" in plan ? `; currently discounted from the regular ${formatUsd(plan.referencePrice)} monthly price` : ""}.`).join("\n")}
+${subscriptions.map((plan) => `  - ${plan.name}: ${formatUsd(plan.price)} per ${plan.cadence} for ${formatSparkCount(plan.sparks)} Sparks per billing ${plan.cadence}.`).join("\n")}
 - One-time top-up: ${formatSparkCount(topUp.sparks)} Sparks for ${formatUsd(topUp.price)}.
 - Referral rewards for the referrer: ${formatSparkCount(referrals.signup)} Sparks when a new user signs up with the referrer's code, then ${formatSparkCount(referrals.firstSubscriptionPurchase)} Sparks when that referred user first purchases a subscription. Each stage is awarded once per referred user.
 - Public website purchases available: ${webPurchasesAvailable ? "yes" : "no; coming soon"}.`;

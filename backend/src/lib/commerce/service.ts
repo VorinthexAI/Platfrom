@@ -1,397 +1,125 @@
-import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { publishUserEvent } from '@/api/events';
 import { newId } from '@/lib/ids';
 import { resolvePurchaseGrantMicroSparks } from '@/lib/costs';
 import { referralService } from '@/lib/referrals/service';
 import { getUserById } from '@/lib/db/users.node';
-import { sendSubscriptionCancellationEmail, sendSubscriptionPurchaseEmail, sendSubscriptionRenewalEmail, sendTopUpPurchaseEmail } from '@/lib/email/lifecycle';
-import { checkoutCreateInputSchema, checkoutCreateResultSchema, productIdSchema, publicProductSchema, subscriptionSchema, subscriptionStatusSchema } from './contracts';
-import { currentSubscriptionResponseSchema, scheduledSubscriptionResponseSchema } from './public-subscription';
+import { sendSubscriptionPurchaseEmail, sendSubscriptionRenewalEmail, sendTopUpPurchaseEmail } from '@/lib/email/lifecycle';
+import { productIdSchema, publicProductSchema, subscriptionSchema } from './contracts';
+import { currentSubscriptionResponseSchema } from './public-subscription';
 import { createArangoCommerceRepository, type CommerceRepository } from './repository';
-import { createPolarProvider, PolarProviderError, type PolarProvider } from './polar';
 
 export class CommerceError extends Error {
-  constructor(public readonly code: 'PRODUCT_NOT_FOUND' | 'PRODUCT_INACTIVE' | 'PRODUCT_NOT_SYNCED' | 'CHECKOUT_CONFLICT' | 'CHECKOUT_PENDING' | 'SUBSCRIPTION_EXISTS' | 'SUBSCRIPTION_NOT_FOUND' | 'SUBSCRIPTION_NOT_SWITCHABLE' | 'ACCOUNT_NOT_FOUND' | 'INVALID_REFERENCE', message: string) { super(message); this.name = 'CommerceError'; }
+  constructor(public readonly code: 'INVALID_REFERENCE' | 'PRODUCT_NOT_FOUND', message: string) { super(message); this.name = 'CommerceError'; }
 }
 
-export const subscriptionScheduleInputSchema = z.object({ productId: productIdSchema }).strict();
-
-const timestamp = z.string().datetime({ offset: true });
-const webhookDataSchema = z.object({
+const eventSchema = z.object({
   id: z.string().trim().min(1),
-  status: z.string().optional(),
-  modified_at: timestamp.nullable().optional(),
+  type: z.string().trim().min(1),
+  app_user_id: z.string().cuid().optional(),
   product_id: z.string().trim().min(1).optional(),
-  subscription_id: z.string().trim().min(1).nullable().optional(),
-  total_amount: z.number().int().nonnegative().optional(),
-  subtotal_amount: z.number().int().nonnegative().optional(),
-  discount_amount: z.number().int().nonnegative().optional(),
-  net_amount: z.number().int().nonnegative().optional(),
-  refunded_amount: z.number().int().nonnegative().optional(),
-  refunded_tax_amount: z.number().int().nonnegative().optional(),
-  currency: z.string().optional(),
-  created_at: timestamp.optional(),
-  current_period_start: timestamp.nullable().optional(),
-  current_period_end: timestamp.nullable().optional(),
-  cancel_at_period_end: z.boolean().optional(),
-  customer: z.object({ external_id: z.string().trim().min(1).nullable().optional() }).passthrough().optional(),
-  product: z.object({ id: z.string().trim().min(1), metadata: z.record(z.unknown()).optional() }).passthrough().nullable().optional(),
-  metadata: z.record(z.unknown()).optional(),
-  billing_reason: z.string().trim().min(1).optional(),
+  new_product_id: z.string().trim().min(1).optional(),
+  transaction_id: z.string().trim().min(1).optional(),
+  original_transaction_id: z.string().trim().min(1).optional(),
+  purchased_at_ms: z.number().int().nonnegative().optional(),
+  expiration_at_ms: z.number().int().nonnegative().nullable().optional(),
+  event_timestamp_ms: z.number().int().nonnegative(),
+  price: z.number().finite().nullable().optional(),
+  cancel_reason: z.string().optional(),
+  environment: z.enum(['SANDBOX', 'PRODUCTION']).optional(),
+  store: z.string().optional(),
 }).passthrough();
-export const polarWebhookEventSchema = z.object({ type: z.string().trim().min(1), timestamp: timestamp.optional(), data: webhookDataSchema }).passthrough();
 
-export const authoritativePaidOrderFactsSchema = z.object({
-  providerOrderId: z.string().trim().min(1).max(200),
-  userKey: z.string().cuid(),
-  productId: productIdSchema,
-  providerSubscriptionId: z.string().trim().min(1).max(200).nullable(),
-  billingReason: z.enum(['purchase', 'subscription_create', 'subscription_cycle', 'subscription_update', 'meter', 'subscription_meter_cycle']),
-  amountCents: z.number().int().safe().nonnegative(),
-  baseAmountCents: z.number().int().safe().positive(),
-  netAmountCents: z.number().int().safe().positive(),
-  discountAmountCents: z.number().int().safe().nonnegative(),
-  currency: z.string().trim().min(1),
-  paidAt: timestamp,
-  providerProductId: z.string().trim().min(1).max(200).optional(),
-}).strict();
+export const purchaseEventSchema = z.object({ api_version: z.string(), event: eventSchema }).strict();
+type PurchaseEvent = z.infer<typeof eventSchema>;
 
-export const authoritativeRefundFactsSchema = z.object({
-  providerOrderId: z.string().trim().min(1).max(200),
-  refundedAmountCents: z.number().int().safe().nonnegative(),
-  refundedAt: timestamp,
-}).strict();
-
-export const authoritativeSubscriptionFactsSchema = z.object({
-  providerSubscriptionId: z.string().trim().min(1).max(200),
-  userKey: z.string().cuid(),
-  productId: productIdSchema,
-  providerProductId: z.string().trim().min(1).max(200).optional(),
-  status: subscriptionStatusSchema,
-  cancelAtPeriodEnd: z.boolean(),
-  currentPeriodStart: timestamp.nullable(),
-  currentPeriodEnd: timestamp.nullable(),
-  providerModifiedAt: timestamp,
-  occurredAt: timestamp,
-}).strict();
-
-export interface CommerceServiceDependencies {
-  repository: CommerceRepository;
-  provider?: PolarProvider;
-  createProvider?: () => PolarProvider;
-  applyFirstPaidReward?: typeof referralService.applyFirstPaidReward;
-  reverseFirstPaidReward?: typeof referralService.reverseFirstPaidReward;
-  publishBalance?: typeof publishUserEvent;
-  getEmailRecipient?: (userKey: string) => Promise<{ email: string; name?: string | null } | null>;
-  sendTopUpPurchaseEmail?: typeof sendTopUpPurchaseEmail;
-  sendSubscriptionPurchaseEmail?: typeof sendSubscriptionPurchaseEmail;
-  sendSubscriptionRenewalEmail?: typeof sendSubscriptionRenewalEmail;
-  sendSubscriptionCancellationEmail?: typeof sendSubscriptionCancellationEmail;
-  createKey?: () => string;
-  now?: () => Date;
-}
-
-const CHECKOUT_SUCCESS_URL = 'https://vorinthex.com/checkout/success';
-const CHECKOUT_RETURN_URL = 'https://vorinthex.com/checkout/error';
-
-export function createCommerceService({ repository, provider, createProvider = createPolarProvider, applyFirstPaidReward = referralService.applyFirstPaidReward, reverseFirstPaidReward = referralService.reverseFirstPaidReward, publishBalance = async () => {}, getEmailRecipient = getUserById, sendTopUpPurchaseEmail: sendTopUp = sendTopUpPurchaseEmail, sendSubscriptionPurchaseEmail: sendSubscriptionPurchase = sendSubscriptionPurchaseEmail, sendSubscriptionRenewalEmail: sendSubscriptionRenewal = sendSubscriptionRenewalEmail, sendSubscriptionCancellationEmail: sendSubscriptionCancellation = sendSubscriptionCancellationEmail, createKey = newId, now = () => new Date() }: CommerceServiceDependencies) {
-  const polar = () => provider ?? createProvider();
-  async function emailRecipient(userKey: string) {
-    const recipient = await getEmailRecipient(userKey);
-    return recipient && !recipient.email.endsWith('@guest.vorinthex.com') ? { email: recipient.email, name: recipient.name } : null;
-  }
-  async function productReference(data: z.infer<typeof webhookDataSchema>, userKey?: string, subscriptionId?: string) {
-    const providerIds = [data.product_id, data.product?.id].filter((value): value is string => Boolean(value));
-    const metadataIds = [data.metadata?.productId, data.product?.metadata?.productId].filter((value): value is string => typeof value === 'string');
-    if (new Set(providerIds).size > 1) throw new CommerceError('INVALID_REFERENCE', 'Webhook contains conflicting product references.');
-    const byProvider = providerIds[0] ? await repository.getProductByProviderId(providerIds[0]) : null;
-    const metadataId = productIdSchema.safeParse(metadataIds[0]);
-    const byMetadata = metadataId.success ? await repository.getProductByProductId(metadataId.data) : null;
-    if (providerIds[0] && !byProvider) throw new CommerceError('INVALID_REFERENCE', 'Webhook references an unknown provider product.');
-    if (metadataIds[0] && (!metadataId.success || !byMetadata)) throw new CommerceError('INVALID_REFERENCE', 'Webhook references invalid product metadata.');
-    if (!byProvider && !byMetadata) throw new CommerceError('INVALID_REFERENCE', 'Webhook references an unknown product.');
-    const metadataMismatch = new Set(metadataIds).size > 1 || Boolean(byProvider && byMetadata && byProvider.key !== byMetadata.key);
-    if (metadataMismatch) {
-      // Polar retains checkout metadata after a scheduled plan change. The
-      // signed provider product and its own metadata identify the new plan;
-      // the subscription may still carry the old productId for later webhooks.
-      const current = userKey && subscriptionId ? await repository.getCurrentSubscription(userKey) : null;
-      const scheduledTransition = byProvider?.type === 'subscription' && byMetadata?.type === 'subscription' && current !== null && subscriptionId !== undefined
-        && current.providerSubscriptionId === subscriptionId
-        && (current.productKey === byProvider.key || current.productKey === byMetadata.key)
-        && (!data.product?.metadata?.productId || data.product.metadata.productId === byProvider.productId);
-      if (!scheduledTransition) throw new CommerceError('INVALID_REFERENCE', 'Webhook contains conflicting product references.');
-    }
-    return byProvider ?? byMetadata!;
-  }
-  function userReference(data: z.infer<typeof webhookDataSchema>) {
-    const references = [data.customer?.external_id, data.metadata?.userKey].filter((value): value is string => typeof value === 'string');
-    if (new Set(references).size > 1) throw new CommerceError('INVALID_REFERENCE', 'Webhook contains conflicting user identities.');
-    const value = references[0];
-    if (!value && data.customer?.external_id === null) return null;
-    const parsed = z.string().cuid().safeParse(value);
-    if (!parsed.success) throw new CommerceError('INVALID_REFERENCE', 'Webhook references an unknown user identity.');
-    return parsed.data;
-  }
-  async function applyPaidOrderFacts(rawFacts: unknown) {
-    const facts = authoritativePaidOrderFactsSchema.parse(rawFacts);
-    const product = await repository.getProductByProductId(facts.productId);
-    if (!product) throw new CommerceError('INVALID_REFERENCE', 'Paid order references an unknown product.');
-    if (!await repository.userExists(facts.userKey)) return { status: 'ignored_deleted_user' as const };
-    if (facts.providerProductId !== undefined && product.providerProductId !== facts.providerProductId) throw new CommerceError('INVALID_REFERENCE', 'Paid order provider product does not match its product metadata.');
-    const grantMicroSparks = resolvePurchaseGrantMicroSparks(product.productId);
-    if (product.sparkGrantMicroSparks !== grantMicroSparks) throw new CommerceError('INVALID_REFERENCE', 'Persisted product grant does not match the canonical costs rule.');
-    if (product.type === 'one_time') {
-      if (facts.billingReason !== 'purchase' || facts.providerSubscriptionId !== null) throw new CommerceError('INVALID_REFERENCE', 'One-time orders require a purchase billing reason without a subscription.');
-    } else if (!['subscription_create', 'subscription_cycle'].includes(facts.billingReason) || facts.providerSubscriptionId === null) {
-      throw new CommerceError('INVALID_REFERENCE', 'Subscription orders require a create or cycle billing reason and a subscription.');
-    }
-    const effectivePrice = product.discountedPriceCents ?? product.priceCents;
-    if (facts.currency.toUpperCase() !== 'USD' || facts.baseAmountCents !== effectivePrice || facts.discountAmountCents !== 0 || facts.netAmountCents < effectivePrice || facts.amountCents < facts.netAmountCents) {
-      throw new CommerceError('INVALID_REFERENCE', 'Paid order does not match the immutable catalog price.');
-    }
-    const result = await repository.fulfillPaidOrder({ ...facts, productKey: product.key, productId: product.productId, currency: 'USD', grantMicroSparks, occurredAt: facts.paidAt });
-    await publishBalance(facts.userKey, 'spark.balance.changed').catch(() => undefined);
-    if (product.type === 'subscription' && result.order.status !== 'refunded') await applyFirstPaidReward(facts.userKey, result.order.key);
-    if (result.status === 'applied') {
-      await (async () => {
-        const recipient = await emailRecipient(facts.userKey);
-        if (!recipient) return;
-        const input = { ...recipient, amountCents: facts.amountCents, billingPeriod: product.billingPeriod, grantMicroSparks };
-        if (facts.billingReason === 'purchase') await sendTopUp(input);
-        else if (facts.billingReason === 'subscription_create') await sendSubscriptionPurchase(input);
-        else await sendSubscriptionRenewal(input);
-      })().catch((error) => console.error('commerce confirmation email delivery failed', { userKey: facts.userKey, billingReason: facts.billingReason, error }));
-    }
-    return result;
-  }
-  async function applySubscriptionFacts(rawFacts: unknown) {
-    const facts = authoritativeSubscriptionFactsSchema.parse(rawFacts);
-    const product = await repository.getProductByProductId(facts.productId);
-    if (!product || product.type !== 'subscription') throw new CommerceError('INVALID_REFERENCE', 'Subscription facts reference an invalid product.');
-    if (!await repository.userExists(facts.userKey)) return { status: 'ignored_deleted_user' as const };
-    if (facts.providerProductId !== undefined && product.providerProductId !== facts.providerProductId) throw new CommerceError('INVALID_REFERENCE', 'Subscription provider product does not match its product metadata.');
-    const existing = await repository.getCurrentSubscription(facts.userKey);
-    return repository.upsertSubscription(subscriptionSchema.parse({
-      key: existing?.providerSubscriptionId === facts.providerSubscriptionId ? existing.key : createKey(),
-      userKey: facts.userKey,
-      productKey: product.key,
-      providerSubscriptionId: facts.providerSubscriptionId,
-      status: facts.status,
-      cancelAtPeriodEnd: facts.cancelAtPeriodEnd,
-      currentPeriodStart: facts.currentPeriodStart,
-      currentPeriodEnd: facts.currentPeriodEnd,
-      providerModifiedAt: facts.providerModifiedAt,
-      createdAt: existing?.providerSubscriptionId === facts.providerSubscriptionId ? existing.createdAt : facts.occurredAt,
-      updatedAt: facts.providerModifiedAt,
+export function createCommerceService({ repository = createArangoCommerceRepository(), publishBalance = publishUserEvent, now = () => new Date() }: { repository?: CommerceRepository; publishBalance?: typeof publishUserEvent; now?: () => Date } = {}) {
+  const productForEvent = async (event: PurchaseEvent) => {
+    if (!event.product_id) throw new CommerceError('INVALID_REFERENCE', 'Purchase event is missing a product.');
+    const productId = event.product_id.split(':')[0];
+    const parsed = productIdSchema.safeParse(productId);
+    if (!parsed.success) throw new CommerceError('INVALID_REFERENCE', 'Purchase event references an unknown product.');
+    const product = await repository.getProductByProductId(parsed.data);
+    if (!product || !product.active) throw new CommerceError('PRODUCT_NOT_FOUND', 'Purchase product is unavailable.');
+    return product;
+  };
+  const subscriptionId = (event: PurchaseEvent) => `rc:${event.store ?? 'store'}:${event.original_transaction_id ?? event.transaction_id}`;
+  const projectSubscription = async (event: PurchaseEvent, status: 'active' | 'past_due' | 'canceled', cancelAtPeriodEnd: boolean) => {
+    const userKey = event.app_user_id;
+    if (!userKey || !await repository.userExists(userKey)) return;
+    const product = await productForEvent(event);
+    if (product.type !== 'subscription' || !(event.original_transaction_id ?? event.transaction_id)) return;
+    const existing = await repository.getCurrentSubscription(userKey);
+    const at = new Date(event.event_timestamp_ms).toISOString();
+    const providerSubscriptionId = subscriptionId(event);
+    await repository.upsertSubscription(subscriptionSchema.parse({
+      key: existing?.providerSubscriptionId === providerSubscriptionId ? existing.key : newId(),
+      userKey, productKey: product.key, providerSubscriptionId, status, cancelAtPeriodEnd,
+      currentPeriodStart: event.purchased_at_ms ? new Date(event.purchased_at_ms).toISOString() : null,
+      currentPeriodEnd: event.expiration_at_ms ? new Date(event.expiration_at_ms).toISOString() : null,
+      providerModifiedAt: at, createdAt: existing?.providerSubscriptionId === providerSubscriptionId ? existing.createdAt : at, updatedAt: at,
     }));
-  }
-  async function applyRefundFacts(rawFacts: unknown) {
-    const facts = authoritativeRefundFactsSchema.parse(rawFacts);
-    const result = await repository.applyOrderRefund(facts.providerOrderId, facts.refundedAmountCents, facts.refundedAt);
-    if (!result) throw new CommerceError('INVALID_REFERENCE', 'Refund references an unknown paid order.');
-    if (result.order.status === 'refunded') await reverseFirstPaidReward(result.order.key, facts.refundedAt);
-    await publishBalance(result.order.userKey, 'spark.balance.changed').catch(() => undefined);
-    return result;
-  }
+  };
   return Object.freeze({
-    async listProducts() {
-      return z.array(publicProductSchema).parse((await repository.listProducts(true)).map(({ providerProductId: _providerProductId, ...product }) => product));
-    },
-    async getCheckoutProduct(rawProductId: unknown) {
-      const productId = productIdSchema.parse(rawProductId);
-      const product = await repository.getProductByProductId(productId);
-      if (!product) throw new CommerceError('PRODUCT_NOT_FOUND', 'Product was not found.');
-      if (!product.active) throw new CommerceError('PRODUCT_INACTIVE', 'Product is not active.');
-      if (!product.providerProductId) throw new CommerceError('PRODUCT_NOT_SYNCED', 'Product is unavailable for checkout.');
-      const { providerProductId: _providerProductId, ...safe } = product;
-      return publicProductSchema.parse(safe);
-    },
-    async createCheckout(rawInput: unknown, trustedUserKey: string, idempotencyKey: string, customerIpAddress?: string) {
-      const input = checkoutCreateInputSchema.parse(rawInput);
-      const product = await repository.getProductByProductId(input.productId);
-      if (!product) throw new CommerceError('PRODUCT_NOT_FOUND', 'Product was not found.');
-      if (!product.active) throw new CommerceError('PRODUCT_INACTIVE', 'Product is not active.');
-      if (!product.providerProductId) throw new CommerceError('PRODUCT_NOT_SYNCED', 'Product is unavailable for checkout.');
-      const at = now().toISOString();
-      const requestHash = createHash('sha256').update(`${trustedUserKey}\u0000${input.productId}`).digest('hex');
-      const claimed = await repository.claimCheckout({ key: createKey(), userKey: trustedUserKey, productKey: product.key, idempotencyKey, requestHash, status: 'pending', providerCheckoutId: null, checkoutUrl: null, failureCode: null, createdAt: at, updatedAt: at });
-      if (claimed.status === 'conflict') throw new CommerceError('CHECKOUT_CONFLICT', 'The idempotency key was used for a different checkout.');
-      if (claimed.status === 'pending') throw new CommerceError('CHECKOUT_PENDING', 'Checkout creation is already in progress.');
-      if (claimed.status === 'subscription_exists') throw new CommerceError('SUBSCRIPTION_EXISTS', 'A subscription or subscription checkout is already active.');
-      if (claimed.status === 'account_missing') throw new CommerceError('ACCOUNT_NOT_FOUND', 'The account is no longer available for checkout.');
-      if (claimed.status === 'replayed') return checkoutCreateResultSchema.parse({ key: claimed.checkout.key, status: claimed.checkout.status, url: claimed.checkout.checkoutUrl });
-      try {
-        const providerIdempotencyKey = `checkout:${createHash('sha256').update(`${trustedUserKey}\u0000${idempotencyKey}`).digest('hex')}`;
-        const customer = await emailRecipient(trustedUserKey);
-        if (customer) {
-          const existing = await polar().findCustomerByEmail(customer.email);
-          if (existing?.external_id && existing.external_id !== trustedUserKey) {
-            const oldUserKey = z.string().cuid().safeParse(existing.external_id);
-            if (!oldUserKey.success || await repository.userExists(oldUserKey.data)) throw new CommerceError('INVALID_REFERENCE', 'This email is linked to a different account.');
-            await polar().deleteCustomerByExternalId(oldUserKey.data);
-          } else if (existing && existing.external_id === null) {
-            throw new CommerceError('INVALID_REFERENCE', 'This email is linked to a customer without an account identity.');
-          }
-        }
-        const checkout = await polar().createCheckout({ providerProductId: product.providerProductId, userKey: trustedUserKey, productId: product.productId, idempotencyKey: providerIdempotencyKey, successUrl: CHECKOUT_SUCCESS_URL, returnUrl: CHECKOUT_RETURN_URL, customerIpAddress,
-          ...(customer ? { customerEmail: customer.email, ...(customer.name?.trim() ? { customerName: customer.name.trim().slice(0, 256) } : {}) } : {}),
-        });
-        const saved = await repository.completeCheckout(claimed.checkout.key, checkout.id, checkout.url, now().toISOString());
-        return checkoutCreateResultSchema.parse({ key: saved.key, status: saved.status, url: saved.checkoutUrl });
-      } catch (error) {
-        if ((error instanceof CommerceError && error.code === 'INVALID_REFERENCE') || (error instanceof PolarProviderError && !error.retryable)) await repository.failCheckout(claimed.checkout.key, error.code, now().toISOString());
-        throw error;
-      }
-    },
-    async getCurrentSubscription(trustedUserKey: string, options?: { includeScheduled?: boolean }) {
-      const subscription = await repository.getCurrentSubscription(trustedUserKey);
-      if (!subscription) return null;
-      const { providerSubscriptionId: _providerSubscriptionId, providerModifiedAt: _providerModifiedAt, ...safe } = subscription;
-      if (!options?.includeScheduled) return currentSubscriptionResponseSchema.parse(safe);
-      let pendingProductKey: string | null = null;
-      if (subscription.status === 'active' || subscription.status === 'trialing') {
-        try {
-          const remote = await polar().getSubscription?.(subscription.providerSubscriptionId);
-          if (remote?.id === subscription.providerSubscriptionId && remote.pending_update?.product_id) {
-            const product = await repository.getProductByProviderId(remote.pending_update.product_id);
-            if (product?.type === 'subscription' && product.key !== subscription.productKey) pendingProductKey = product.key;
-          }
-        } catch (error) {
-          console.warn('scheduled subscription lookup failed', { userKey: trustedUserKey, error });
-        }
-      }
-      return scheduledSubscriptionResponseSchema.parse({ ...safe, pendingProductKey });
-    },
-    async setCancellation(trustedUserKey: string, cancelAtPeriodEnd: boolean) {
-      const current = await repository.getCurrentSubscription(trustedUserKey);
-      if (!current) throw new CommerceError('SUBSCRIPTION_NOT_FOUND', 'Current subscription was not found.');
-      if (current.cancelAtPeriodEnd === cancelAtPeriodEnd) {
-        const { providerSubscriptionId: _providerSubscriptionId, providerModifiedAt: _providerModifiedAt, ...safe } = current;
-        return currentSubscriptionResponseSchema.parse(safe);
-      }
-      const response = await polar().updateSubscription(current.providerSubscriptionId, cancelAtPeriodEnd);
-      const projectedAt = now().toISOString();
-      const projection = await repository.upsertSubscription({ ...current, status: response.status, cancelAtPeriodEnd: response.cancel_at_period_end, currentPeriodStart: response.current_period_start ?? current.currentPeriodStart, currentPeriodEnd: response.current_period_end ?? current.currentPeriodEnd, providerModifiedAt: response.modified_at ?? current.providerModifiedAt, updatedAt: projectedAt });
-      const saved = projection.subscription;
-      if (projection.status === 'applied' && !current.cancelAtPeriodEnd && saved.cancelAtPeriodEnd) {
-        await (async () => {
-          const recipient = await emailRecipient(trustedUserKey);
-          if (recipient) await sendSubscriptionCancellation({ ...recipient, currentPeriodEnd: saved.currentPeriodEnd });
-        })().catch((error) => console.error('subscription cancellation email delivery failed', { userKey: trustedUserKey, error }));
-      }
-      const { providerSubscriptionId: _providerSubscriptionId, providerModifiedAt: _providerModifiedAt, ...safe } = saved;
+    async listProducts() { return z.array(publicProductSchema).parse(await repository.listProducts(true)); },
+    async getCurrentSubscription(userKey: string) {
+      const current = await repository.getCurrentSubscription(userKey);
+      if (!current) return null;
+      const { providerSubscriptionId: _providerSubscriptionId, providerModifiedAt: _providerModifiedAt, ...safe } = current;
       return currentSubscriptionResponseSchema.parse(safe);
     },
-    async scheduleSubscriptionProduct(trustedUserKey: string, rawInput: unknown) {
-      const { productId } = subscriptionScheduleInputSchema.parse(rawInput);
-      const current = await repository.getCurrentSubscription(trustedUserKey);
-      if (!current) throw new CommerceError('SUBSCRIPTION_NOT_FOUND', 'Current subscription was not found.');
-      if (current.status !== 'active' && current.status !== 'trialing') throw new CommerceError('SUBSCRIPTION_NOT_SWITCHABLE', 'Only an active subscription can change plans.');
-      const product = await repository.getProductByProductId(productId);
-      if (!product || product.type !== 'subscription') throw new CommerceError('PRODUCT_NOT_FOUND', 'The selected plan was not found.');
-      if (!product.active) throw new CommerceError('PRODUCT_INACTIVE', 'The selected plan is unavailable.');
-      if (!product.providerProductId) throw new CommerceError('PRODUCT_NOT_SYNCED', 'The selected plan is unavailable at checkout.');
-      if (product.key === current.productKey) throw new CommerceError('SUBSCRIPTION_EXISTS', 'This is already the current plan. Restore its renewal instead.');
-
-      const provider = polar();
-      const project = async (response: Awaited<ReturnType<PolarProvider['updateSubscription']>>) => {
-        const saved = await repository.upsertSubscription({ ...current, status: response.status, cancelAtPeriodEnd: response.cancel_at_period_end, currentPeriodStart: response.current_period_start ?? current.currentPeriodStart, currentPeriodEnd: response.current_period_end ?? current.currentPeriodEnd, providerModifiedAt: response.modified_at ?? current.providerModifiedAt, updatedAt: now().toISOString() });
-        const { providerSubscriptionId: _providerSubscriptionId, providerModifiedAt: _providerModifiedAt, ...safe } = saved.subscription;
-        return currentSubscriptionResponseSchema.parse(safe);
-      };
-      const restoreCancellation = async () => {
-        try { await project(await provider.updateSubscription(current.providerSubscriptionId, true)); }
-        catch (recoveryError) { console.error('subscription plan-change cancellation recovery failed', { userKey: trustedUserKey, recoveryError }); }
-      };
-      if (current.cancelAtPeriodEnd) {
-        const restored = await provider.updateSubscription(current.providerSubscriptionId, false);
-        try { await project(restored); }
-        catch (error) { await restoreCancellation(); throw error; }
-      }
-      let scheduled: Awaited<ReturnType<PolarProvider['scheduleSubscriptionProduct']>>;
-      try {
-        scheduled = await provider.scheduleSubscriptionProduct(current.providerSubscriptionId, product.providerProductId);
-      } catch (error) {
-        if (current.cancelAtPeriodEnd) await restoreCancellation();
-        throw error;
-      }
-      const updated = await project(scheduled);
-      if (!updated) throw new Error('Scheduled plan returned no subscription.');
-      return scheduledSubscriptionResponseSchema.parse({ ...updated, pendingProductKey: product.key });
-    },
-    async revokeUserSubscriptions(trustedUserKey: string) {
-      const subscriptions = await repository.listSubscriptionsByUser(trustedUserKey);
-      const revocable = subscriptions.filter((subscription) => !['canceled', 'unpaid', 'incomplete_expired'].includes(subscription.status));
-      let provider: PolarProvider;
-      try {
-        provider = polar();
-      } catch (error) {
-        if (error instanceof PolarProviderError && error.code === 'NOT_CONFIGURED' && revocable.length === 0) return { revoked: 0 };
-        throw error;
-      }
-      const providerSubscriptions = provider.listSubscriptions ? await provider.listSubscriptions() : [];
-      const providerIds = new Set(revocable.map((subscription) => subscription.providerSubscriptionId));
-      for (const subscription of providerSubscriptions) {
-        if (subscription.customer.external_id === trustedUserKey && !['canceled', 'unpaid', 'incomplete_expired'].includes(subscription.status)) providerIds.add(subscription.id);
-      }
-      for (const providerSubscriptionId of providerIds) await provider.revokeSubscription(providerSubscriptionId);
-      // Polar retains customers and their immutable external IDs after local deletion.
-      // Anonymizing the old customer releases the email for a new account's checkout.
-      await provider.deleteCustomerByExternalId(trustedUserKey);
-      return { revoked: providerIds.size };
-    },
-    async recoverUserPendingCheckouts(trustedUserKey: string, pendingCutoff: string) {
-      const pending = await repository.listRecoverablePendingCheckouts(trustedUserKey, pendingCutoff);
-      for (const { checkout, productId } of pending) {
-        await this.createCheckout({ productId }, trustedUserKey, checkout.idempotencyKey);
-      }
-      return { recovered: pending.length };
-    },
-    applyPaidOrderFacts,
-    applyRefundFacts,
-    applySubscriptionFacts,
-    async processWebhook(rawEvent: unknown) {
-      const event = polarWebhookEventSchema.parse(rawEvent);
-      const occurredAt = event.timestamp ?? event.data.created_at ?? now().toISOString();
-      if (event.type === 'checkout.updated' && event.data.status === 'succeeded') {
-        const checkout = await repository.markCheckoutCompleted(event.data.id, occurredAt);
-        if (!checkout) throw new CommerceError('INVALID_REFERENCE', 'Checkout event references an unknown checkout.');
-        return { processed: true, checkout: 'completed' };
-      }
-      if ((event.type === 'checkout.expired' || event.type === 'checkout.updated') && ['expired', 'failed'].includes(event.data.status ?? (event.type === 'checkout.expired' ? 'expired' : ''))) {
-        const checkout = await repository.markCheckoutFailed(event.data.id, event.data.status ?? 'expired', occurredAt);
-        if (!checkout) throw new CommerceError('INVALID_REFERENCE', 'Checkout event references an unknown checkout.');
-        return { processed: true, checkout: 'failed' };
-      }
-      if (['order.created', 'order.paid', 'order.updated'].includes(event.type) && (event.type === 'order.paid' || event.data.status === 'paid')) {
-        const userKey = userReference(event.data);
-        if (!userKey) return { ignored: true };
-        const product = await productReference(event.data, userKey, event.data.subscription_id ?? undefined);
-        const result = await applyPaidOrderFacts({ providerOrderId: event.data.id, userKey, productId: product.productId, providerProductId: event.data.product_id ?? event.data.product?.id, providerSubscriptionId: event.data.subscription_id ?? null, billingReason: event.data.billing_reason, amountCents: event.data.total_amount, baseAmountCents: event.data.subtotal_amount, netAmountCents: event.data.net_amount, discountAmountCents: event.data.discount_amount, currency: event.data.currency, paidAt: occurredAt });
+    async processPurchaseEvent(raw: unknown) {
+      const { event } = purchaseEventSchema.parse(raw);
+      if (event.type === 'TEST') return { ignored: true };
+      if (!event.app_user_id || !await repository.userExists(event.app_user_id)) return { ignored: true };
+      if (event.environment === 'SANDBOX' && process.env.NODE_ENV === 'production') return { ignored: true };
+      if (event.type === 'INITIAL_PURCHASE' || event.type === 'RENEWAL' || event.type === 'NON_RENEWING_PURCHASE') {
+        const product = await productForEvent(event);
+        if (!event.transaction_id || !event.purchased_at_ms) throw new CommerceError('INVALID_REFERENCE', 'Purchase event is missing its transaction.');
+        if ((event.type === 'NON_RENEWING_PURCHASE') !== (product.type === 'one_time')) throw new CommerceError('INVALID_REFERENCE', 'Purchase type does not match the product.');
+        // Free trials do not grant prepaid Sparks until a paid transaction arrives.
+        if (event.price === 0) { if (product.type === 'subscription') await projectSubscription(event, 'active', false); return { ignored: true }; }
+        const amountCents = event.price == null ? product.priceCents : Math.round(event.price * 100);
+        if (amountCents <= 0) throw new CommerceError('INVALID_REFERENCE', 'Purchase has no paid amount.');
+        const result = await repository.fulfillPaidOrder({
+          providerOrderId: `rc:${event.store ?? 'store'}:${event.transaction_id}`, userKey: event.app_user_id, productKey: product.key, productId: product.productId,
+          providerSubscriptionId: product.type === 'subscription' ? subscriptionId(event) : null,
+          amountCents, baseAmountCents: amountCents, netAmountCents: amountCents, currency: 'USD',
+          grantMicroSparks: resolvePurchaseGrantMicroSparks(product.productId),
+          paidAt: new Date(event.purchased_at_ms).toISOString(), occurredAt: new Date(event.event_timestamp_ms).toISOString(),
+        });
+        if (product.type === 'subscription') {
+          await projectSubscription(event, 'active', false);
+          if (result.order.status !== 'refunded') await referralService.applyFirstPaidReward(event.app_user_id, result.order.key);
+        }
+        if (result.status === 'applied') {
+          await publishBalance(event.app_user_id, 'spark.balance.changed').catch(() => undefined);
+          const recipient = await getUserById(event.app_user_id).catch(() => null);
+          if (recipient?.email && !recipient.email.endsWith('@guest.vorinthex.com')) {
+            const input = { email: recipient.email, name: recipient.name, amountCents, billingPeriod: product.billingPeriod, grantMicroSparks: product.sparkGrantMicroSparks };
+            void (product.type === 'one_time' ? sendTopUpPurchaseEmail(input) : event.type === 'RENEWAL' ? sendSubscriptionRenewalEmail(input) : sendSubscriptionPurchaseEmail(input)).catch((error) => console.error('purchase email delivery failed', { error }));
+          }
+        }
         return { processed: true, fulfillment: result.status };
       }
-      if (['order.refunded', 'order.updated'].includes(event.type) && ['refunded', 'partially_refunded'].includes(event.data.status ?? '')) {
-        if (event.data.refunded_amount === undefined) throw new CommerceError('INVALID_REFERENCE', 'Refund is missing its cumulative net amount.');
-        const result = await applyRefundFacts({ providerOrderId: event.data.id, refundedAmountCents: event.data.refunded_amount, refundedAt: event.data.modified_at ?? occurredAt });
-        return { processed: true, refund: result.status, status: result.order.status };
+      if (event.type === 'CANCELLATION' && event.cancel_reason === 'CUSTOMER_SUPPORT' && event.transaction_id) {
+        const orderId = `rc:${event.store ?? 'store'}:${event.transaction_id}`;
+        const paid = await repository.getOrderByProviderId(orderId);
+        if (!paid) throw new CommerceError('INVALID_REFERENCE', 'Refund arrived before its paid purchase.');
+        const refunded = await repository.applyOrderRefund(orderId, paid.netAmountCents, now().toISOString());
+        if (refunded?.status === 'applied') {
+          await referralService.reverseFirstPaidReward(refunded.order.key, now().toISOString());
+          await publishBalance(event.app_user_id, 'spark.balance.changed').catch(() => undefined);
+        }
       }
-      if (event.type.startsWith('subscription.')) {
-        const userKey = userReference(event.data);
-        if (!userKey) return { ignored: true };
-        const product = await productReference(event.data, userKey, event.data.id);
-        const status = subscriptionStatusSchema.safeParse(event.data.status);
-        if (!status.success) return { ignored: true };
-        const providerModifiedAt = event.data.modified_at ?? occurredAt;
-        const result = await applySubscriptionFacts({ providerSubscriptionId: event.data.id, userKey, productId: product.productId, providerProductId: event.data.product_id ?? event.data.product?.id, status: status.data, cancelAtPeriodEnd: event.data.cancel_at_period_end ?? status.data === 'canceled', currentPeriodStart: event.data.current_period_start ?? null, currentPeriodEnd: event.data.current_period_end ?? null, providerModifiedAt, occurredAt });
-        if (result.status === 'ignored_deleted_user') return { ignored: true };
-        return { processed: true, subscription: result.subscription.status, projection: result.status };
+      if (['CANCELLATION', 'UNCANCELLATION', 'EXPIRATION', 'BILLING_ISSUE', 'PRODUCT_CHANGE', 'SUBSCRIPTION_EXTENDED'].includes(event.type)) {
+        await projectSubscription(event, event.type === 'EXPIRATION' ? 'canceled' : event.type === 'BILLING_ISSUE' ? 'past_due' : 'active', event.type === 'CANCELLATION');
+        return { processed: true };
       }
       return { ignored: true };
     },
   });
 }
 
-export const commerceService = createCommerceService({ repository: createArangoCommerceRepository(), publishBalance: publishUserEvent });
+export const commerceService = createCommerceService();
 export type CommerceService = ReturnType<typeof createCommerceService>;

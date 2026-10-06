@@ -7,7 +7,7 @@ import { referralCodeTransportSchema } from './auth-referral-code';
 import { timingSafeEqual } from '@/lib/crypto';
 import { isResendWebhookPath } from './resend';
 import { isGmailWebhookPath } from './email-webhook';
-import { isPolarWebhookPath } from './polar-webhook';
+import { isPurchaseWebhookPath } from './purchase-webhook';
 import { strictObject } from './validation';
 import { refreshAccessToken, refreshTokenMatchesIdentity, verifyAccessToken, type AuthIdentity, type SessionTokens } from './auth';
 import { runWithEventApp, TOOL_APP_KEY_HEADER } from '@/lib/ai/events/runtime';
@@ -56,7 +56,7 @@ const PUBLIC_AUTH_PATHS = new Set([
   '/api/v1/auth/totp/setup/complete',
   '/api/v1/auth/totp/verify',
 ]);
-const isProviderWebhookPath = (path: string) => isResendWebhookPath(path) || isGmailWebhookPath(path) || isPolarWebhookPath(path);
+const isProviderWebhookPath = (path: string) => isResendWebhookPath(path) || isGmailWebhookPath(path) || isPurchaseWebhookPath(path);
 export const isPublicProductPath = (path: string, method = 'GET') => method === 'GET' && ['/api/v1/products', '/api/v1/costs'].includes(path.replace(/\/+$/, ''));
 
 export function createBindEventApp(resolveApp: (appKey: string) => Promise<{ aliasKey: string; scopeKey: string }> = (appKey) => appsService.resolveAlias(appKey)): MiddlewareHandler {
@@ -206,8 +206,7 @@ function querySchemaForPath(path: string, method: string) {
     return strictObject({ limit: z.string().regex(/^\d+$/).optional() });
   }
   if (method === 'DELETE' && apiPath === '/auth/me/hiddens') return strictObject({ source: z.enum(['collection', 'document', 'image', 'folder']), sourceKey: z.string().cuid() });
-  if (method === 'GET' && apiPath === '/subscriptions/current') return strictObject({ includeScheduled: z.literal('true').optional() });
-  if (method === 'POST' && apiPath === '/subscriptions/current/schedule') return strictObject({ includeScheduled: z.literal('true').optional() });
+  if (method === 'GET' && apiPath === '/subscriptions/current') return strictObject({});
   if (method === 'GET' && apiPath === '/billing/summary') return strictObject({ limit: z.string().regex(/^\d+$/).optional(), beforeCreatedAt: z.string().datetime({ offset: true }).optional(), beforeKey: z.string().trim().min(1).max(200).optional(), kind: sparkTransactionKindSchema.optional(), scopeKey: z.string().cuid().optional() });
   if (method === 'POST' && apiPath === '/tags/assignments') return strictObject({ action: z.enum(['tag', 'untag']) });
   if (method === 'POST' && apiPath === '/conversations/turn/stream') return strictObject({ incognito: z.literal('true'), mode: z.enum(['chat']).optional(), reply: z.enum(['reason']).optional(), role: roleKeySchema.optional() });

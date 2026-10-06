@@ -21,8 +21,6 @@
     "db:migrate": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-app-logo-assets.ts --local && bun --env-file=.env.local src/db/migration-runner.ts",
     "db:migrate:dev": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-app-logo-assets.ts --local && bun --env-file=.env.local src/db/migration-runner.ts",
     "db:migrate:ci": "bun run src/db/migration-runner.ts",
-    "commerce:sync": "bun run load-local-env && bun --env-file=.env.local run scripts/sync-commerce-products.ts",
-    "commerce:sync:ci": "bun run scripts/sync-commerce-products.ts",
     "assets:seed:local": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-app-logo-assets.ts --local",
     "assets:seed:ci": "bun run scripts/seed-app-logo-assets.ts --production-ci",
     "dev:files:seed": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-workshop-year.ts",

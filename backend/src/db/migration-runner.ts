@@ -20,6 +20,7 @@ const retiredMigrationIds = new Set([
   '0015-remove-unnamed-conversation-projections', '0016-country-embeddings',
   '0017-hidden-scope-visibility', '0018-canonical-seed',
   '0019-user-notifications', '0020-workspace-search',
+  '0004-commerce-catalog',
 ]);
 const migrationIdSchema = z.string().regex(/^\d{4}-[a-z0-9]+(?:-[a-z0-9]+)*$/);
 const migrationChecksumSchema = z.string().regex(/^[a-f0-9]{64}$/);

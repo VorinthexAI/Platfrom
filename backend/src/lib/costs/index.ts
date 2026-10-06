@@ -31,7 +31,6 @@ const purchaseGrant = (value: number): PurchaseGrantRule => Object.freeze({ micr
 export const PURCHASE_GRANT_RULES: Readonly<Record<string, PurchaseGrantRule>> = Object.freeze({
   'nova.weekly': purchaseGrant(200),
   'nova.monthly': purchaseGrant(1_000),
-  'nova.monthly.discounted': purchaseGrant(1_000),
   'topup.small': purchaseGrant(200),
 });
 

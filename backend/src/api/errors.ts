@@ -4,8 +4,6 @@ import { ZodError } from 'zod';
 import { SparkRepositoryError } from '@/lib/sparks/repository';
 import { SparkExecutionPendingError } from '@/lib/ai/events/runtime';
 import { CommerceError } from '@/lib/commerce/service';
-import { PolarProviderError } from '@/lib/commerce/polar';
-import { AccountDeletionError } from '@/lib/account-deletion/service';
 
 export function errorResponse(code: string, message: string, details: unknown = null) {
   return { success: false as const, error: { code, message, details } };
@@ -32,13 +30,9 @@ export async function errorHandler(error: Error, c: Context) {
     return c.json(errorResponse('VALIDATION_ERROR', 'validation.invalidRequest', error.flatten()), 400);
   }
   if (error instanceof CommerceError) {
-    const status = error.code === 'PRODUCT_NOT_FOUND' || error.code === 'SUBSCRIPTION_NOT_FOUND' || error.code === 'ACCOUNT_NOT_FOUND' ? 404
-      : error.code === 'PRODUCT_INACTIVE' || error.code === 'CHECKOUT_CONFLICT' || error.code === 'CHECKOUT_PENDING' || error.code === 'SUBSCRIPTION_EXISTS' || error.code === 'SUBSCRIPTION_NOT_SWITCHABLE' ? 409
-      : error.code === 'PRODUCT_NOT_SYNCED' ? 503 : 422;
+    const status = error.code === 'PRODUCT_NOT_FOUND' ? 404 : 422;
     return c.json(errorResponse(error.code, error.message), status);
   }
-  if (error instanceof PolarProviderError) return c.json(errorResponse(`POLAR_${error.code}`, error.message), error.code === 'NOT_CONFIGURED' ? 503 : 502);
-  if (error instanceof AccountDeletionError) return c.json(errorResponse(error.code, error.message), 409);
 
   if (error instanceof HTTPException) {
     console.warn('http exception', { error, status: error.status });

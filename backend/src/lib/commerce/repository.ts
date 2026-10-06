@@ -3,7 +3,7 @@ import { db, withDatabaseTransaction } from '@/lib/db/client';
 import { newId } from '@/lib/ids';
 import { toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { sparkTransactionSchema } from '@/lib/sparks/contracts';
-import { paymentCheckoutSchema, paymentOrderSchema, productSchema, subscriptionSchema, type PaymentCheckout, type PaymentOrder, type Product, type Subscription } from './contracts';
+import { paymentOrderSchema, productSchema, subscriptionSchema, type PaymentOrder, type Product, type Subscription } from './contracts';
 
 interface Cursor { next(): Promise<unknown>; all(): Promise<unknown[]> }
 export interface CommerceDatabase { query(query: string, bindVars?: Record<string, unknown>): Promise<Cursor> }
@@ -30,19 +30,12 @@ export interface CommerceRepository {
   userExists(userKey: string): Promise<boolean>;
   listProducts(activeOnly?: boolean): Promise<Product[]>;
   getProductByProductId(productId: string): Promise<Product | null>;
-  getProductByProviderId(providerProductId: string): Promise<Product | null>;
-  updateProductProviderId(productKey: string, providerProductId: string | null, updatedAt: string): Promise<void>;
-  claimCheckout(input: PaymentCheckout): Promise<{ status: 'claimed' | 'replayed' | 'pending' | 'conflict' | 'subscription_exists' | 'account_missing'; checkout: PaymentCheckout }>;
-  completeCheckout(key: string, providerCheckoutId: string, checkoutUrl: string, updatedAt: string): Promise<PaymentCheckout>;
-  markCheckoutCompleted(providerCheckoutId: string, updatedAt: string): Promise<PaymentCheckout | null>;
-  markCheckoutFailed(providerCheckoutId: string, failureCode: string, updatedAt: string): Promise<PaymentCheckout | null>;
-  failCheckout(key: string, failureCode: string, updatedAt: string): Promise<void>;
-  listRecoverablePendingCheckouts(userKey: string, pendingCutoff: string): Promise<Array<{ checkout: PaymentCheckout; productId: string }>>;
   getCurrentSubscription(userKey: string): Promise<Subscription | null>;
   listSubscriptionsByUser(userKey: string): Promise<Subscription[]>;
   upsertSubscription(input: Subscription): Promise<{ status: 'applied' | 'stale'; subscription: Subscription }>;
   fulfillPaidOrder(input: PaidOrderFulfillment): Promise<{ status: 'applied' | 'duplicate'; order: PaymentOrder }>;
   applyOrderRefund(providerOrderId: string, refundedAmountCents: number, refundedAt: string): Promise<{ status: 'applied' | 'duplicate' | 'stale'; order: PaymentOrder } | null>;
+  getOrderByProviderId(providerOrderId: string): Promise<PaymentOrder | null>;
 }
 
 export function createArangoCommerceRepository(database: CommerceDatabase = db as unknown as CommerceDatabase, transact: CommerceTransactionRunner = (collections, operation) => withDatabaseTransaction(database as never, collections, operation as never)): CommerceRepository {
@@ -59,61 +52,6 @@ export function createArangoCommerceRepository(database: CommerceDatabase = db a
       const cursor = await database.query('FOR product IN products FILTER product.productId == @productId LIMIT 1 RETURN product', { productId });
       const value = await cursor.next();
       return value ? parse(productSchema, value) : null;
-    },
-    async getProductByProviderId(providerProductId) {
-      const cursor = await database.query('FOR product IN products FILTER product.providerProductId == @providerProductId LIMIT 1 RETURN product', { providerProductId });
-      const value = await cursor.next();
-      return value ? parse(productSchema, value) : null;
-    },
-    async updateProductProviderId(productKey, providerProductId, updatedAt) {
-      await database.query('UPDATE @productKey WITH { providerProductId: @providerProductId, updatedAt: @updatedAt } IN products', { productKey, providerProductId, updatedAt });
-    },
-    async claimCheckout(input) {
-      const valid = paymentCheckoutSchema.parse(input);
-      return transact({ read: ['products', 'subscriptions', 'users'], write: ['paymentCheckouts'] }, async (transaction) => {
-        const userCursor = await transaction.query('LET user = DOCUMENT(users, @userKey) RETURN user != null && user.deletionRequestedAt == null', { userKey: valid.userKey });
-        if (await userCursor.next() !== true) return { status: 'account_missing' as const, checkout: valid };
-        const cursor = await transaction.query('FOR checkout IN paymentCheckouts FILTER checkout.userKey == @userKey && checkout.idempotencyKey == @idempotencyKey LIMIT 1 RETURN checkout', { userKey: valid.userKey, idempotencyKey: valid.idempotencyKey });
-        const existingValue = await cursor.next();
-        if (existingValue) {
-          const existing = parse(paymentCheckoutSchema, existingValue);
-          if (existing.requestHash !== valid.requestHash) return { status: 'conflict' as const, checkout: existing };
-          if (existing.status === 'open' || existing.status === 'completed') return { status: 'replayed' as const, checkout: existing };
-          if (existing.status === 'pending' && existing.updatedAt >= new Date(new Date(valid.updatedAt).getTime() - 5 * 60_000).toISOString()) return { status: 'pending' as const, checkout: existing };
-          const blocker = await transaction.query('LET product = DOCUMENT(products, @productKey) LET activeSubscription = product != null && product.type == "subscription" ? LENGTH(FOR subscription IN subscriptions FILTER subscription.userKey == @userKey && subscription.status NOT IN ["canceled", "unpaid", "incomplete_expired"] LIMIT 1 RETURN 1) > 0 : false LET openCheckout = product != null && product.type == "subscription" ? LENGTH(FOR checkout IN paymentCheckouts FILTER checkout.userKey == @userKey && checkout._key != @excludedCheckoutKey && checkout.status IN ["pending", "open"] LET checkoutProduct = DOCUMENT(products, checkout.productKey) FILTER checkoutProduct != null && checkoutProduct.type == "subscription" LIMIT 1 RETURN 1) > 0 : false RETURN activeSubscription || openCheckout', { userKey: valid.userKey, productKey: valid.productKey, excludedCheckoutKey: existing.key });
-          if (await blocker.next()) return { status: 'subscription_exists' as const, checkout: existing };
-          await transaction.query('REPLACE @key WITH @checkout IN paymentCheckouts', { key: existing.key, checkout: toArangoDoc({ ...valid, key: existing.key }) });
-          return { status: 'claimed' as const, checkout: { ...valid, key: existing.key } };
-        }
-        const blocker = await transaction.query('LET product = DOCUMENT(products, @productKey) LET activeSubscription = product != null && product.type == "subscription" ? LENGTH(FOR subscription IN subscriptions FILTER subscription.userKey == @userKey && subscription.status NOT IN ["canceled", "unpaid", "incomplete_expired"] LIMIT 1 RETURN 1) > 0 : false LET openCheckout = product != null && product.type == "subscription" ? LENGTH(FOR checkout IN paymentCheckouts FILTER checkout.userKey == @userKey && checkout.status IN ["pending", "open"] LET checkoutProduct = DOCUMENT(products, checkout.productKey) FILTER checkoutProduct != null && checkoutProduct.type == "subscription" LIMIT 1 RETURN 1) > 0 : false RETURN activeSubscription || openCheckout', { userKey: valid.userKey, productKey: valid.productKey });
-        if (await blocker.next()) return { status: 'subscription_exists' as const, checkout: valid };
-        await transaction.query('INSERT @checkout INTO paymentCheckouts', { checkout: toArangoDoc(valid) });
-        return { status: 'claimed' as const, checkout: valid };
-      });
-    },
-    async completeCheckout(key, providerCheckoutId, checkoutUrl, updatedAt) {
-      const cursor = await database.query('UPDATE @key WITH { status: "open", providerCheckoutId: @providerCheckoutId, checkoutUrl: @checkoutUrl, failureCode: null, updatedAt: @updatedAt } IN paymentCheckouts RETURN NEW', { key, providerCheckoutId, checkoutUrl, updatedAt });
-      return parse(paymentCheckoutSchema, await cursor.next());
-    },
-    async markCheckoutCompleted(providerCheckoutId, updatedAt) {
-      const cursor = await database.query('FOR checkout IN paymentCheckouts FILTER checkout.providerCheckoutId == @providerCheckoutId UPDATE checkout WITH { status: "completed", updatedAt: @updatedAt } IN paymentCheckouts RETURN NEW', { providerCheckoutId, updatedAt });
-      const value = await cursor.next();
-      return value ? parse(paymentCheckoutSchema, value) : null;
-    },
-    async markCheckoutFailed(providerCheckoutId, failureCode, updatedAt) {
-      const cursor = await database.query('FOR checkout IN paymentCheckouts FILTER checkout.providerCheckoutId == @providerCheckoutId UPDATE checkout WITH { status: "failed", failureCode: @failureCode, updatedAt: @updatedAt } IN paymentCheckouts RETURN NEW', { providerCheckoutId, failureCode, updatedAt });
-      const value = await cursor.next();
-      return value ? parse(paymentCheckoutSchema, value) : null;
-    },
-    async failCheckout(key, failureCode, updatedAt) {
-      await database.query('UPDATE @key WITH { status: "failed", failureCode: @failureCode, updatedAt: @updatedAt } IN paymentCheckouts', { key, failureCode, updatedAt });
-    },
-    async listRecoverablePendingCheckouts(userKey, pendingCutoff) {
-      const cursor = await database.query('FOR checkout IN paymentCheckouts FILTER checkout.userKey == @userKey && checkout.status == "pending" && checkout.updatedAt < @pendingCutoff LET product = DOCUMENT(products, checkout.productKey) FILTER product != null RETURN { checkout, productId: product.productId }', { userKey, pendingCutoff });
-      return (await cursor.all()).map((value) => {
-        const item = value as { checkout: Record<string, unknown>; productId: string };
-        return { checkout: parse(paymentCheckoutSchema, item.checkout), productId: item.productId };
-      });
     },
     async getCurrentSubscription(userKey) {
       const cursor = await database.query('FOR subscription IN subscriptions FILTER subscription.userKey == @userKey SORT subscription.createdAt DESC, subscription._key DESC LIMIT 1 RETURN subscription', { userKey });
@@ -217,6 +155,11 @@ export function createArangoCommerceRepository(database: CommerceDatabase = db a
         `, { userKey: order.userKey, remaining, ledger: ledger ? toArangoDoc(ledger) : null, orderKey: order.key, refundedAmountCents, netAmountCents: order.netAmountCents, targetClawback, priorRefundDebt: order.refundDebtMicroSparks, priorRefundTransactionKeys: order.refundSparkTransactionKeys, refundedAt });
         return { status: 'applied' as const, order: parse(paymentOrderSchema, await cursor.next()) };
       });
+    },
+    async getOrderByProviderId(providerOrderId) {
+      const cursor = await database.query('FOR order IN paymentOrders FILTER order.providerOrderId == @providerOrderId LIMIT 1 RETURN order', { providerOrderId });
+      const value = await cursor.next();
+      return value ? parse(paymentOrderSchema, value) : null;
     },
   };
   return Object.freeze(repository);

@@ -60,9 +60,7 @@ describe("public discoverability registry", () => {
     expect(sitemap().map(({ url }) => url).sort()).toEqual(
       PUBLIC_ROUTES.map(({ path }) => canonicalUrl(path)).sort(),
     );
-    expect(sitemap().every(({ lastModified }) => lastModified === CONTENT_LAST_REVIEWED)).toBe(
-      true,
-    );
+    expect(sitemap().every(({ url, lastModified }) => lastModified === PUBLIC_ROUTES.find(({ path }) => canonicalUrl(path) === url)?.lastModified)).toBe(true);
   });
 
   test("keeps the install manifest aligned with product facts", () => {
@@ -156,12 +154,12 @@ describe("generated answer-engine content", () => {
       expect(output).toContain(PRICING_HERO_HEADING);
       expect(output).toContain(PRICING_HERO_BODY);
       expect(output).not.toMatch(/usage-based|pay only for what you use/i);
-      expect(output).toContain("excludes VAT and other local taxes");
+      expect(output).toContain("In-app prices and applicable taxes depend on your app store and region");
       expect(output).toContain("Prepaid Sparks remain available after subscription cancellation");
       expect(output).toContain("balances never go below zero");
       expect(output).toContain("permanently deleted after 90 consecutive unfunded days");
       expect(output).toContain(canonicalUrl("/terms"));
-      expect(output).not.toMatch(/Moon|Comet|On-Demand|unlimited|most popular|app store|google play/i);
+      expect(output).not.toMatch(/Moon|Comet|On-Demand|unlimited|most popular/i);
       expect(output).toContain(formatSparkCount(NEWCOMER_FREE_SPARKS));
 
       for (const plan of SPARK_SUBSCRIPTIONS) {
@@ -170,7 +168,6 @@ describe("generated answer-engine content", () => {
         expect(output).toContain(formatUsd(plan.price));
       }
 
-      expect(output).toContain(formatUsd(SPARK_SUBSCRIPTIONS[0].referencePrice));
       expect(output).toContain(formatSparkCount(SPARK_TOP_UP.sparks));
       expect(output).toContain(formatUsd(SPARK_TOP_UP.price));
       expect(output).toContain(`${formatSparkCount(REFERRAL_REWARDS.signup)} Sparks when a new user signs up`);
@@ -183,7 +180,7 @@ describe("generated answer-engine content", () => {
   test("publishes only active catalog choices and no sales schema", () => {
     expect(PRODUCT_FACTS.pricing.subscriptions).toHaveLength(2);
     expect(PRODUCT_FACTS.pricing.subscriptions.map(({ name }) => name)).toEqual(["Monthly", "Weekly"]);
-    expect(PRODUCT_FACTS.pricing.subscriptions[0]).toMatchObject({ price: 19.99, referencePrice: 24.99, sparks: 1_000 });
+    expect(PRODUCT_FACTS.pricing.subscriptions[0]).toMatchObject({ price: 19.99, sparks: 1_000 });
     expect(PRODUCT_FACTS.pricing.subscriptions[1]).toMatchObject({ price: 7.99, sparks: 200 });
     expect(PRODUCT_FACTS.pricing.topUp).toEqual({ price: 9.99, sparks: 200 });
     expect(PRODUCT_FACTS.pricing.referrals).toEqual({ signup: 50, firstSubscriptionPurchase: 100, recipient: "referrer", frequency: "one-time per referred user at each stage" });

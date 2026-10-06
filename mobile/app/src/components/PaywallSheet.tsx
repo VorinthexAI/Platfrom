@@ -5,9 +5,7 @@ import { Button } from "@vorinthex/shared/ui/button";
 import { CloseIcon, ReferralIcon, SparksIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Tabs, TabsTrigger } from "@vorinthex/shared/ui/tabs";
 import { useSessionToast as useToast } from "@/hooks/use-session-toast";
-import * as Crypto from "expo-crypto";
 import { LinearGradient } from "expo-linear-gradient";
-import * as WebBrowser from "expo-web-browser";
 import { useEffect, useRef, useState } from "react";
 import { Animated, ScrollView, Share as NativeShare, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,11 +17,11 @@ import { OnboardingStepLayout } from "@/components/onboarding/OnboardingStepLayo
 import { vorinthexMarkSource } from "@/data/capability-icons";
 import { useCurrentSubscription, useWholeSparkBalance } from "@/hooks/use-billing-summary";
 import { useDelayedAction } from "@/hooks/use-delayed-action";
-import { currentSubscriptionQueryKey, formatWholeSparks, scheduleSubscriptionProduct, setSubscriptionCancellation } from "@/lib/billing-client";
-import { completeCheckoutReturn } from "@/lib/checkout-return";
+import { formatWholeSparks } from "@/lib/billing-client";
+import { refreshAuthoritativeBilling } from "@/lib/billing-refresh";
 import { useErrorFeedback } from "@/hooks/use-error-feedback";
-import { CHECKOUT_SUCCESS_URL, checkoutCallbackFromUrl, checkoutErrorMessage, createCheckout } from "@/lib/checkout-client";
-import { activeSubscriptionOffers, activeTopup, effectivePriceCents, formatProductPrice, productSparkAmount, type MobileProduct } from "@/lib/product-client";
+import { availablePackages, packageForProduct, purchasePackage, purchasesAvailable, restorePurchases } from "@/lib/native-purchases";
+import { activeSubscriptionOffers, activeTopup, formatProductPrice, productSparkAmount, type MobileProduct } from "@/lib/product-client";
 import { fetchReferralSummary, referralSummaryQueryKey } from "@/lib/referral-client";
 import { recordOnboardingEvent } from "@/lib/onboarding-events";
 import { useAppsStore } from "@/state/apps";
@@ -36,15 +34,15 @@ type Page = "plans" | "referral";
 type OfferTab = "plans" | "topup";
 type CheckoutState = "idle" | "opening";
 
-function PlanCard({ current, currentUntil, endsAt, onSelect, product, selected, startsAt }: { current: boolean; currentUntil: boolean; endsAt?: string; onSelect: () => void; product: MobileProduct; selected: boolean; startsAt?: string }) {
+function PlanCard({ current, onSelect, product, selected, storePrice }: { current: boolean; onSelect: () => void; product: MobileProduct; selected: boolean; storePrice: string }) {
   const period = product.billingPeriod === "month" ? "month" : product.billingPeriod === "week" ? "week" : null;
   const sparkAmount = productSparkAmount(product);
   const bestValue = product.billingPeriod === "month";
-  const status = current ? currentUntil && endsAt ? `Current until ${endsAt}` : endsAt ? `Ends ${endsAt}` : "Current plan" : startsAt ? `Starts ${startsAt}` : undefined;
+  const status = current ? "Current plan" : undefined;
   return <View style={styles.planWrap}>
-    <Button accessibilityLabel={`${formatProductPrice(effectivePriceCents(product), product.currency)}${period ? ` per ${period}` : " one time"}, ${sparkAmount} Sparks${status ? `, ${status}` : ""}`} accessibilityState={{ selected }} contentMode="raw" onPress={onSelect} shape="rounded" size="md" style={[styles.plan, selected && styles.planSelected]} variant="outline">
+    <Button accessibilityLabel={`${storePrice}${period ? ` per ${period}` : " one time"}, ${sparkAmount} Sparks${status ? `, ${status}` : ""}`} accessibilityState={{ selected }} contentMode="raw" onPress={onSelect} shape="rounded" size="md" style={[styles.plan, selected && styles.planSelected]} variant="outline">
       <View style={styles.planValue}><Text style={styles.planGrant}>{sparkAmount.toLocaleString("en-US")} Sparks</Text><Text style={styles.planName}>{product.billingPeriod === "month" ? "Monthly plan" : product.billingPeriod === "week" ? "Weekly plan" : "One-time top-up"}</Text></View>
-      <View style={styles.priceRow}>{product.discountedPriceCents !== null ? <Text accessibilityLabel={`Reference price ${formatProductPrice(product.priceCents, product.currency)}`} style={styles.referencePrice}>{formatProductPrice(product.priceCents, product.currency)}</Text> : null}<Text style={styles.price}>{formatProductPrice(effectivePriceCents(product), product.currency)}</Text>{period ? <Text style={styles.period}>/{period}</Text> : null}</View>
+      <View style={styles.priceRow}><Text style={styles.price}>{storePrice}</Text>{period ? <Text style={styles.period}>/{period}</Text> : null}</View>
     </Button>
     {status ? <Badge accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.currentPlanBadge}><Text style={styles.currentPlanBadgeText}>{status}</Text></Badge> : bestValue ? <Badge accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.bestValueBadge}><Text style={styles.bestValueBadgeText}>Best value</Text></Badge> : null}
   </View>;
@@ -82,16 +80,14 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
 
   const recordedOnboardingPages = useRef(new Set<Page>());
   const delayedClose = useDelayedAction(mode === "onboarding" && open && page === "plans", page);
-  const preferred = offers.find(({ productId }) => productId === "nova.monthly.discounted") ?? offers[0];
+  const preferred = offers.find(({ productId }) => productId === "nova.monthly") ?? offers[0];
   const effectiveSelectedKey = offers.some(({ key }) => key === selectedKey) ? selectedKey : preferred?.key;
   const selected = offers.find(({ key }) => key === effectiveSelectedKey);
   const subscription = subscriptionQuery.data;
   const currentSubscriptionProductKey = subscription && ["active", "trialing", "past_due"].includes(subscription.status) ? subscription.productKey : undefined;
-  const currentPlanEndDate = (subscription?.cancelAtPeriodEnd || subscription?.pendingProductKey) && subscription?.currentPeriodEnd ? new Date(subscription.currentPeriodEnd).toLocaleDateString() : undefined;
-  const activePlan = subscription && ["active", "trialing"].includes(subscription.status);
   const selectedCurrentPlan = Boolean(selected && selected.key === currentSubscriptionProductKey);
-  const selectedScheduledPlan = Boolean(selected && selected.key !== currentSubscriptionProductKey && selected.key === subscription?.pendingProductKey);
-  const renewalAction = Boolean(selected?.type === "subscription" && activePlan);
+  const offerings = useQuery({ queryKey: ["store-offerings", userKey], queryFn: () => availablePackages(userKey!), enabled: Boolean(open && userKey && purchasesAvailable()), staleTime: 60_000 });
+  const selectedPackage = selected ? packageForProduct(offerings.data ?? [], selected.productId) : undefined;
   const referral = useQuery({ queryKey: referralSummaryQueryKey(userKey ?? "unauthenticated"), queryFn: fetchReferralSummary, enabled: Boolean(userKey && open && (mode === "onboarding" || page === "referral")), initialData: authReferralSummary?.code.ownerUserKey === userKey ? authReferralSummary : undefined });
   useErrorFeedback(open ? [message, completionError, page === "referral" ? referral.error : undefined] : []);
 
@@ -122,33 +118,14 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
 
   async function checkout() {
     if (!selected || !userKey || checkoutInFlight.current || checkoutState === "opening") return;
-    if (selectedScheduledPlan || selectedCurrentPlan && (!renewalAction || !subscription?.cancelAtPeriodEnd)) return;
+    if (!selectedPackage || selectedCurrentPlan) return;
     checkoutInFlight.current = true;
     setCheckoutState("opening");
     setMessage(undefined);
     try {
-      if (renewalAction) {
-        const updated = selectedCurrentPlan ? await setSubscriptionCancellation(false) : await scheduleSubscriptionProduct(selected.productId);
-        queryClient.setQueryData(currentSubscriptionQueryKey(userKey), updated);
-        void queryClient.invalidateQueries({ queryKey: currentSubscriptionQueryKey(userKey), exact: true, refetchType: "active" });
-        showToast({ title: selectedCurrentPlan ? "Renewal resumed." : `${selected.billingPeriod === "month" ? "Monthly" : "Weekly"} plan scheduled for your next renewal.`, duration: 2_500 });
-        if (mode === "standard") closeStandard();
-        else setPage("referral");
-        return;
-      }
-      const checkoutSession = await createCheckout(selected.productId, Crypto.randomUUID());
-      const result = await WebBrowser.openAuthSessionAsync(checkoutSession.url, CHECKOUT_SUCCESS_URL);
-      if (result.type === "cancel" || result.type === "dismiss") {
-        setCheckoutState("idle");
-        return;
-      }
-      const callback = result.type === "success" ? checkoutCallbackFromUrl(result.url) : undefined;
-      if (callback !== "success") {
-        setCheckoutState("idle");
-        setMessage("Checkout was not completed. You can safely try again.");
-        return;
-      }
-      if (completeCheckoutReturn(queryClient, userKey)) {
+      await purchasePackage(userKey, selectedPackage);
+      if (userKey) {
+        void refreshAuthoritativeBilling(queryClient, userKey);
         setMessage(undefined);
         if (mode === "onboarding") {
           useUiStore.getState().consumeOnboardingReferralEntry();
@@ -158,7 +135,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
       setCheckoutState("idle");
     } catch (error) {
       setCheckoutState("idle");
-      setMessage(renewalAction ? selectedCurrentPlan ? "Renewal could not be resumed. Please try again." : "The plan change could not be scheduled. Please try again." : checkoutErrorMessage(error));
+      if (!(error && typeof error === "object" && "userCancelled" in error && error.userCancelled)) setMessage("The purchase could not be completed. Please try again.");
     } finally {
       checkoutInFlight.current = false;
     }
@@ -200,7 +177,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
     }
   }
 
-  const footer = page === "plans" ? <><Button disabled={!selected || checkoutState === "opening" || selectedScheduledPlan || selectedCurrentPlan && (!renewalAction || !subscription?.cancelAtPeriodEnd)} onPress={() => void checkout()} pressFeedback="none" size="md" variant="primary">{selectedScheduledPlan ? "Scheduled" : selectedCurrentPlan ? subscription?.cancelAtPeriodEnd && renewalAction ? "Resume renewal" : "Current plan" : renewalAction ? "Switch at renewal" : "Continue to checkout"}</Button>{mode === "standard" ? <Button onPress={closeStandard} size="md" variant="secondary">Close</Button> : null}</> : <Button disabled={!referral.data || sharing} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button>;
+  const footer = page === "plans" ? <><Button disabled={!selectedPackage || checkoutState === "opening" || selectedCurrentPlan} onPress={() => void checkout()} pressFeedback="none" size="md" variant="primary">{selectedCurrentPlan ? "Current plan" : "Purchase in app"}</Button>{mode === "standard" ? <Button disabled={!purchasesAvailable()} onPress={() => { if (userKey) void restorePurchases(userKey).then(() => { void refreshAuthoritativeBilling(queryClient, userKey); showToast({ title: "Purchases restored", duration: 2_500 }); }).catch(() => setMessage("Purchases could not be restored.")); }} size="md" variant="secondary">Restore purchases</Button> : null}{mode === "standard" ? <Button onPress={closeStandard} size="md" variant="secondary">Close</Button> : null}</> : <Button disabled={!referral.data || sharing} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button>;
 
   if (mode === "onboarding" && page === "referral") return <OnboardingStepLayout
     action={<><Button disabled={!referral.data || sharing || completing} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button><Button disabled={completing} onPress={() => void finish()} size="md" variant="secondary">Skip</Button>{completionError ? <Button loading={completing} onPress={() => void finish()} size="md" variant="secondary">Retry</Button> : null}</>}
@@ -215,11 +192,11 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
     {referral.isLoading ? <Text style={styles.heroCopy}>Loading your referral code...</Text> : referral.isError ? <Button onPress={() => void referral.refetch()} size="md" variant="secondary">Retry</Button> : referral.data ? <View style={styles.codeBlock}><Text style={styles.sectionLabel}>YOUR CODE</Text><Text selectable style={styles.code}>{referral.data.code.code}</Text></View> : null}
   </OnboardingStepLayout>;
 
-  const renderPlanCard = (product: MobileProduct) => <PlanCard current={currentSubscriptionProductKey === product.key} currentUntil={Boolean(subscription?.pendingProductKey)} endsAt={currentPlanEndDate} key={product.key} onSelect={() => setSelectedKey(product.key)} product={product} selected={effectiveSelectedKey === product.key} startsAt={subscription?.pendingProductKey === product.key ? currentPlanEndDate : undefined} />;
+  const renderPlanCard = (product: MobileProduct) => <PlanCard current={currentSubscriptionProductKey === product.key} key={product.key} onSelect={() => setSelectedKey(product.key)} product={product} selected={effectiveSelectedKey === product.key} storePrice={packageForProduct(offerings.data ?? [], product.productId)?.product.priceString ?? formatProductPrice(product.priceCents, product.currency)} />;
   const content = page === "plans" ? <ScrollView contentContainerStyle={[styles.content, mode === "onboarding" && styles.onboardingContent]} showsVerticalScrollIndicator={false}>
     {mode === "onboarding" ? <View style={styles.hero}><View style={styles.heroTitleRow}><Text style={styles.heroTitle}>One balance for everything you create and use</Text></View><Text style={styles.heroCopy}>Sparks give you a simple way to use AI capabilities, store your work, and keep services connected across Vorinthex.</Text></View> : <View style={styles.balanceHero}><View style={styles.balanceHeading}><SparksIcon size="lg" /><Text accessibilityLabel={balance === undefined ? "Sparks balance unavailable. Showing 0 Sparks" : `${balance} Sparks`} style={styles.balance}>{formatWholeSparks(balance ?? 0)} <Text style={styles.balanceUnit}>Sparks</Text></Text></View></View>}
     {mode === "standard" ? <><Tabs accessibilityLabel="Spark offers" accessibilityRole="tablist" onValueChange={(value) => setOfferTab(value as OfferTab)} style={styles.offerTabs} value={offerTab}><TabsTrigger style={styles.offerTab} value="plans">Plans</TabsTrigger><TabsTrigger style={styles.offerTab} value="topup">Top-up</TabsTrigger></Tabs><View style={styles.plans}>{offers.map(renderPlanCard)}</View></> : <View style={styles.plans}>{subscriptions.map(renderPlanCard)}</View>}
-    {!offers.length ? <View style={styles.state}><Text style={styles.heroCopy}>{productsStatus === "loading" ? "Loading offers..." : "Offers are temporarily unavailable."}</Text>{productsStatus !== "loading" ? <Button onPress={() => void refreshProducts()} size="md" variant="secondary">Retry</Button> : null}</View> : null}
+    {!offers.length ? <View style={styles.state}><Text style={styles.heroCopy}>{productsStatus === "loading" ? "Loading offers..." : "Offers are temporarily unavailable."}</Text>{productsStatus !== "loading" ? <Button onPress={() => { void refreshProducts(); if (purchasesAvailable()) void offerings.refetch(); }} size="md" variant="secondary">Retry</Button> : null}</View> : null}
   </ScrollView> : <ScrollView contentContainerStyle={styles.referralContent} showsVerticalScrollIndicator={false}>
     <View style={styles.referralHero}><Text style={styles.heroTitle}>Invite a friend</Text><Text style={styles.heroCopy}>Invite a friend with your code and earn Sparks as they get started.</Text></View>
     <View style={styles.rewardSteps}><Text style={styles.sectionLabel}>HOW IT WORKS</Text><Text style={styles.rewardStep}>Earn 50 Sparks when your friend signs up.</Text><Text style={styles.rewardStep}>Earn 100 more when they start their first subscription.</Text></View>
@@ -236,10 +213,10 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
     </View> : null}
     {delayedClose.visible ? <Animated.View style={[styles.close, { opacity: delayedClose.opacity, top: Math.max(insets.top, spacing.md) }]}><Button accessibilityLabel="Continue without a plan" contentMode="raw" iconOnly onPress={dismiss} size="md" variant="ghost"><CloseIcon size="sm" /></Button></Animated.View> : null}
     {content}
-    <View style={styles.onboardingFooter}>{footer}{page === "plans" && !renewalAction ? <Text style={styles.taxNote}>Taxes are calculated at checkout.</Text> : null}</View>
+    <View style={styles.onboardingFooter}>{footer}</View>
   </View></>;
 
-  return <><BottomSheet description={page === "referral" ? "Invite friends and earn Sparks." : undefined} dismissible={!completing} footer={<>{footer}{page === "plans" && !renewalAction ? <Text style={styles.taxNote}>Taxes are calculated at checkout.</Text> : null}</>} height="full" onDismissRequest={dismiss} onOpenChange={(next) => { if (!next) dismiss(); }} open={open} pageKey={page} title={page === "plans" ? "Sparks" : "Invite a friend"}>
+  return <><BottomSheet description={page === "referral" ? "Invite friends and earn Sparks." : undefined} dismissible={!completing} footer={footer} height="full" onDismissRequest={dismiss} onOpenChange={(next) => { if (!next) dismiss(); }} open={open} pageKey={page} title={page === "plans" ? "Sparks" : "Invite a friend"}>
     {content}
   </BottomSheet></>;
 }
@@ -275,11 +252,9 @@ const styles = StyleSheet.create({
   planName: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 11 },
   planGrant: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 17 },
   priceRow: { alignItems: "baseline", flexDirection: "row", flexShrink: 0, justifyContent: "flex-end", marginLeft: spacing.sm },
-  referencePrice: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 15, marginRight: spacing.xs, textDecorationLine: "line-through" },
   price: { color: palette.chromeWhite, fontFamily: fonts.medium, fontSize: 25 },
   period: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 12 },
   sectionLabel: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 10, letterSpacing: 2 },
-  taxNote: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 11, lineHeight: 17, textAlign: "center" },
   referralContent: { gap: spacing.lg, paddingBottom: spacing.lg },
   referralHero: { gap: spacing.sm },
   rewardSteps: { alignItems: "center", gap: spacing.sm },

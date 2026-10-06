@@ -6,7 +6,6 @@ export const SPARK_SUBSCRIPTIONS = [
   {
     name: "Monthly",
     price: 19.99,
-    referencePrice: 24.99,
     sparks: 1_000,
     cadence: "month",
     badge: "Best Value",

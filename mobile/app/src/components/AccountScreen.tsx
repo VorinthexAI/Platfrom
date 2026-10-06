@@ -4,7 +4,7 @@ import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { ScrollView, Share as NativeShare, StyleSheet, Text, useWindowDimensions, View } from "react-native";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Avatar } from "@vorinthex/shared/ui/avatar";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
@@ -26,13 +26,14 @@ import { extractDomainErrorMessage, isSparkFundingError } from "@/lib/domain-err
 import { fonts, palette, radii, spacing } from "@/theme/tokens";
 import { AccountScreenShell } from "@/components/AccountScreenShell";
 
-import { currentSubscriptionQueryKey, formatStorageSummary, setSubscriptionCancellation } from "@/lib/billing-client";
+import { formatStorageSummary } from "@/lib/billing-client";
+import { manageSubscriptions } from "@/lib/native-purchases";
 import { useBillingSummary, useCurrentSubscription } from "@/hooks/use-billing-summary";
 import { fetchReferralSummary, normalizeReferralCode, redeemReferralCode, referralCodeSchema, referralRedemptionErrorMessage, referralSummaryQueryKey, type ReferralRedeemResult } from "@/lib/referral-client";
 import { subscriptionPresentation } from "@/lib/subscription-presentation";
 
 
-type ProfileSheet = "avatar-actions" | "badge-generate" | "name" | "issue" | "feedback" | "privacy" | "terms" | "cancel-subscription" | "delete-account" | "referral" | "storage-help" | "scope-help" | "scope-create" | "scope-actions" | "scope-delete";
+type ProfileSheet = "avatar-actions" | "badge-generate" | "name" | "issue" | "feedback" | "privacy" | "terms" | "delete-account" | "referral" | "storage-help" | "scope-help" | "scope-create" | "scope-actions" | "scope-delete";
 type ReferralMode = "share" | "redeem";
 export type AccountScreenInitialState = { sheet: "referral"; referralMode: ReferralMode };
 
@@ -122,23 +123,8 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const subscription = subscriptionQuery.data;
   const subscriptionProduct = subscription ? products.find(({ key }) => key === subscription.productKey) : undefined;
   const subscriptionView = subscription ? subscriptionPresentation(subscription, subscriptionProduct) : undefined;
-  const cancellationPeriodEnd = subscription?.currentPeriodEnd ? new Date(subscription.currentPeriodEnd).toLocaleDateString() : undefined;
-  const cancelSubscription = useMutation({
-    mutationFn: () => setSubscriptionCancellation(true),
-    onSuccess: (updated) => {
-      if (user?.key) {
-        const queryKey = currentSubscriptionQueryKey(user.key);
-        queryClient.setQueryData(queryKey, updated);
-        void queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "active" });
-      }
-    },
-    onError: () => showToast({ title: "Subscription could not be canceled. Please try again.", duration: 2_500 }),
-  });
-  const confirmSubscriptionCancellation = () => {
-    if (cancelSubscription.isPending) return;
-    setSheet(undefined);
-    showToast({ title: "Subscription cancelled", duration: 2_500 });
-    cancelSubscription.mutate();
+  const openSubscriptionSettings = () => {
+    if (user?.key) void manageSubscriptions(user.key).catch(() => showToast({ title: "Subscription settings could not be opened.", duration: 2_500 }));
   };
   useEffect(() => {
     if (sheet === "scope-create" && !scopeOperationIsPending()) void queryClient.invalidateQueries({ queryKey: scopeListQueryKey(String(user?.key ?? "")) });
@@ -461,7 +447,7 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
           <SettingsActionCard icon={<TermsIcon size="lg" />} label="Terms" onPress={() => setSheet("terms")} size={settingsCardSize} />
           <SettingsActionCard icon={<PrivacyIcon size="lg" />} label="Privacy" onPress={() => setSheet("privacy")} size={settingsCardSize} />
           <SettingsActionCard icon={<ReferralIcon size="lg" />} label="Referral" onPress={() => { setReferralMode("share"); setSheet("referral"); }} size={settingsCardSize} />
-          {subscriptionView?.action === "cancel" ? <SettingsActionCard danger icon={<SubscriptionCancelIcon size="lg" variant="danger" />} label="Cancel subscription" onPress={() => { if (!cancelSubscription.isPending) setSheet("cancel-subscription"); }} size={settingsCardSize} /> : null}
+          {subscriptionView?.action === "manage" ? <SettingsActionCard icon={<SubscriptionCancelIcon size="lg" />} label="Manage subscription" onPress={openSubscriptionSettings} size={settingsCardSize} /> : null}
           <SettingsActionCard danger icon={<DeleteAccountIcon size="lg" variant="danger" />} label="Delete account" onPress={() => setSheet("delete-account")} size={settingsCardSize} />
           <SettingsActionCard danger icon={<SignOutIcon size="lg" variant="danger" />} label="Log out" onPress={() => void logOut()} size={settingsCardSize} />
         </View>
@@ -529,11 +515,8 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
       </View>
     </BottomSheet>
 
-    <BottomSheet focusKey="profile-cancel-subscription" footer={<><Button onPress={confirmSubscriptionCancellation} size="md" variant="primary">Cancel subscription</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "cancel-subscription"} title="Cancel subscription?">
-      <Text style={styles.scopeHelp}>{cancellationPeriodEnd ? `Your subscription remains active until ${cancellationPeriodEnd}, then it will not renew.` : "Your subscription remains active through the current billing period, then it will not renew."}</Text>
-    </BottomSheet>
 
-    <BottomSheet focusKey="profile-delete-account" footer={<><Button onPress={permanentlyDeleteAccount} size="md" variant="primary">Delete</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "delete-account"} title="Delete account?" />
+    <BottomSheet focusKey="profile-delete-account" footer={<>{subscriptionView?.action === "manage" ? <Button onPress={openSubscriptionSettings} size="md" variant="secondary">Manage store subscription</Button> : null}<Button onPress={permanentlyDeleteAccount} size="md" variant="primary">Delete</Button><Button onPress={() => setSheet(undefined)} size="md" variant="secondary">Close</Button></>} onOpenChange={(open) => { if (!open) setSheet(undefined); }} open={sheet === "delete-account"} title="Delete account?">{subscriptionView?.action === "manage" ? <Text style={styles.scopeHelp}>Deleting your account does not cancel your app store subscription. Manage or cancel it in the store before deleting your account.</Text> : null}</BottomSheet>
 
     <BottomSheet description={referralMode === "share" ? "Invite a friend with your code and earn Sparks as they get started." : "Apply the referral code from the person who invited you."} dismissible={!redeemingReferral} focusKey="profile-referral" footer={<>{referralMode === "share" ? referralUnused ? <Button disabled={sharingReferral} loading={sharingReferral} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button> : null : <Button disabled={!referralCodeValid || redeemingReferral || Boolean(referralRedemption)} loading={redeemingReferral} onPress={() => void submitReferralCode()} size="md" variant="primary">{referralRedemption ? "Code applied" : "Use code"}</Button>}<Button disabled={redeemingReferral} onPress={closeReferralSheet} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open && !redeemingReferral) closeReferralSheet(); }} open={sheet === "referral"} title="Referral">
       <ScrollView contentContainerStyle={styles.referralContent} showsVerticalScrollIndicator={false}>

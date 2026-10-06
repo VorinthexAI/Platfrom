@@ -1,7 +1,7 @@
 import { LEGAL_CONTACT_EMAIL, LEGAL_EFFECTIVE_DATE_ISO } from "@vorinthex/shared/lib/legal-copy";
 
 export const CANONICAL_ORIGIN = "https://vorinthex.com" as const;
-export const CONTENT_LAST_REVIEWED = "2026-10-04" as const;
+export const CONTENT_LAST_REVIEWED = "2026-10-06" as const;
 export const CONTACT_EMAIL = LEGAL_CONTACT_EMAIL;
 export const PRICING_HERO_HEADING = "One balance for everything you create and use" as const;
 export const PRICING_HERO_BODY =
@@ -139,7 +139,7 @@ export const PRODUCT_FACTS = {
   fileFormats: "Storage converts selected JPG, PNG, WebP, GIF, and iPhone HEIC/HEIF images to PNG before upload, preserving transparency. MP3 audio and MP4 or MOV videos are stored without transcoding; video captions analyze the video itself.",
   storagePricing: STORAGE_PRICING_FACT,
   sparks:
-    `${PRICING_HERO_HEADING}. ${PRICING_HERO_BODY} The current launch subscriptions are $19.99 monthly for 1,000 Sparks (discounted from the $24.99 regular monthly price) and $7.99 weekly for 200 Sparks. A one-time 200-Spark top-up is $9.99. Purchases are not yet available on the public website. Prepaid Sparks remain available after subscription cancellation, balances never go below zero. ${STORAGE_PRICING_FACT} Workspace reranking during Core search costs 20 Sparks per million processed tokens. Unfunded storage incurs no debt or backcharges, uploads can continue, and existing data remains available for export, deletion, and recovery. Adding enough Sparks before deletion begins restores prospective charging. Once deletion begins, it cannot be reversed. Stored data is permanently deleted after 90 consecutive unfunded days. Pricing is shown in USD and excludes VAT and other local taxes; Polar calculates and adds applicable tax at checkout.`,
+    `${PRICING_HERO_HEADING}. ${PRICING_HERO_BODY} The current subscriptions are $19.99 monthly for 1,000 Sparks and $7.99 weekly for 200 Sparks. A one-time 200-Spark top-up is $9.99. Purchases are available in the iOS and Android apps, not on the public website. Prepaid Sparks remain available after subscription cancellation, balances never go below zero. ${STORAGE_PRICING_FACT} Workspace reranking during Core search costs 20 Sparks per million processed tokens. Unfunded storage incurs no debt or backcharges, uploads can continue, and existing data remains available for export, deletion, and recovery. Adding enough Sparks before deletion begins restores prospective charging. Once deletion begins, it cannot be reversed. Stored data is permanently deleted after 90 consecutive unfunded days. Website prices are shown in USD; in-app prices and taxes depend on your store and region.`,
   pricing: {
     currency: SPARK_PRICING_CURRENCY,
     newcomerAllocation: NEWCOMER_FREE_SPARKS,

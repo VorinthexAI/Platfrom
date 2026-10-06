@@ -30,19 +30,6 @@ export function getSecurityHeaders(blockIndexing = false) {
   return headers;
 }
 
-export function getCheckoutHeaders() {
-  return [
-    { key: "Cache-Control", value: "no-store, max-age=0" },
-    { key: "Pragma", value: "no-cache" },
-    { key: "Referrer-Policy", value: "no-referrer" },
-    { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive, nosnippet, nocache" },
-    {
-      key: "Content-Security-Policy",
-      value: "default-src 'self'; base-uri 'none'; connect-src 'self'; font-src 'self' data:; frame-ancestors 'none'; form-action 'none'; img-src 'self' data:; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
-    },
-  ];
-}
-
 export function getPrivateAuthHeaders() {
   return [
     { key: "Cache-Control", value: "private, no-store, max-age=0" },
@@ -80,10 +67,6 @@ const nextConfig: NextConfig = {
         headers: getSecurityHeaders(
           process.env.NEXT_PUBLIC_BLOCK_INDEXING === "true",
         ),
-      },
-      {
-        source: "/checkout/:path*",
-        headers: getCheckoutHeaders(),
       },
       {
         source: "/admin/:path*",

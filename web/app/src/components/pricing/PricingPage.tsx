@@ -53,11 +53,6 @@ export function PricingPage() {
                   {plan.cadence === "month" ? <CalendarIcon size="md" /> : <ClockIcon size="md" />}
                 </div>
                 <h3>{plan.name}</h3>
-                {"referencePrice" in plan && (
-                  <p className={styles.referencePrice}>
-                    Currently discounted from regular <s>{formatUsd(plan.referencePrice)}</s>
-                  </p>
-                )}
                 <p className={styles.planPrice}>
                   <strong>{formatUsd(plan.price)}</strong>
                   <span>/ {plan.cadence}</span>
@@ -114,9 +109,8 @@ export function PricingPage() {
           balance cannot cover storage, no debt or backcharges accrue and uploads can
           continue. Existing data remains available for export, deletion, and recovery.
           Adding Sparks restores prospective charging. Stored data is permanently
-          deleted after 90 consecutive unfunded days. Prices are shown in
-          USD and exclude VAT and other local taxes. Polar calculates and adds
-          applicable tax at checkout.
+          deleted after 90 consecutive unfunded days. Website prices are shown in
+          USD; in-app prices and applicable taxes depend on your app store and region.
         </p>
       </main>
 

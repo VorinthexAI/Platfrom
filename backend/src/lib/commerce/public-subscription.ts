@@ -1,8 +1,7 @@
 import { z } from 'zod';
 import { subscriptionSchema } from './contracts';
 
-// contracts.ts is included in the checksum of the applied 0018 seed migration.
-// Evolve the public response independently of those immutable migration inputs.
+// Keep the public response independent of provider identifiers and ledger metadata.
 export const currentSubscriptionResponseSchema = subscriptionSchema.omit({
   providerSubscriptionId: true,
   providerModifiedAt: true,

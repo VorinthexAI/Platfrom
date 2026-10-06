@@ -35,14 +35,13 @@ test("renders only active launch pricing and accurate referral rewards", () => {
   expect(html).toContain(PRICING_HERO_BODY);
   expect(html).not.toMatch(/usage-based|pay only for what you use/i);
   expect(html).toContain(formatSparkCount(NEWCOMER_FREE_SPARKS));
-  expect(html).toContain("exclude VAT and other local taxes");
+  expect(html).toContain("in-app prices and applicable taxes depend on your app store and region");
   expect(html).toContain("Prepaid Sparks remain available after subscription cancellation");
   expect(html).toContain("balances never go below zero");
   expect(html).toContain("no debt or backcharges accrue");
   expect(html).toContain("permanently deleted after 90 consecutive unfunded days");
   expect(html).not.toMatch(/notice/i);
   expect(html).toContain("Best Value");
-  expect(html).toContain("Currently discounted from regular");
   expect(html).toContain("Subscriptions coming soon");
   expect(html).toContain("Top-ups coming soon");
   expect(html).not.toMatch(/Moon|Comet|On-Demand|unlimited/i);
@@ -52,7 +51,6 @@ test("renders only active launch pricing and accurate referral rewards", () => {
     expect(html).toContain(formatSparkCount(plan.sparks));
     expect(html).toContain(formatUsd(plan.price));
   }
-  expect(html).toContain(formatUsd(SPARK_SUBSCRIPTIONS[0].referencePrice));
   expect(html).toContain(formatSparkCount(SPARK_TOP_UP.sparks));
   expect(html).toContain(formatUsd(SPARK_TOP_UP.price));
   expect(html).toContain(`+${formatSparkCount(REFERRAL_REWARDS.signup)} Sparks`);

@@ -12,8 +12,7 @@ import { registerRoutes } from './routes';
 import { closeConversationImageTurnQueue, recoverConversationImageTurnQueue, startConversationImageTurnWorker } from '@/lib/conversations/image-turn-queue';
 import { closeConversationAttachmentPersistenceQueue, recoverConversationAttachmentPersistenceQueue, startConversationAttachmentPersistenceWorker } from '@/lib/conversations/attachment-persistence-queue';
 import { closeAutomations, startAutomations } from '@/lib/automations';
-import { handlePolarWebhook, POLAR_WEBHOOK_V1_PATH } from './polar-webhook';
-import { polarConfiguration } from '@/lib/commerce/polar';
+import { handlePurchaseWebhook, PURCHASE_WEBHOOK_PATH } from './purchase-webhook';
 import { closeAppNotificationQueue, recoverAppNotificationQueue, startAppNotificationWorker } from '@/lib/app-notifications/queue';
 import { closeConversationArchiveProjectionQueue, recoverConversationArchiveProjectionQueue, startConversationArchiveProjectionWorker } from '@/lib/conversations/archive-projection-queue';
 
@@ -78,14 +77,10 @@ api.get('/health', (c) => c.json(c.req.query('appUpdate') === '1' ? { ok: true, 
 registerRoutes(api);
 app.post(RESEND_WEBHOOK_V1_PATH, handleResendWebhook);
 app.post(`${RESEND_WEBHOOK_V1_PATH}/`, handleResendWebhook);
-app.post(POLAR_WEBHOOK_V1_PATH, handlePolarWebhook);
-app.post(`${POLAR_WEBHOOK_V1_PATH}/`, handlePolarWebhook);
+app.post(PURCHASE_WEBHOOK_PATH, handlePurchaseWebhook);
+app.post(`${PURCHASE_WEBHOOK_PATH}/`, handlePurchaseWebhook);
 
 if (import.meta.main) {
-  if (process.env.NODE_ENV === 'production') {
-    polarConfiguration();
-    if (!process.env.POLAR_WEBHOOK_SECRET?.trim()) throw new Error('POLAR_WEBHOOK_SECRET is required in production.');
-  }
   await startAutomations();
   const port = Number(process.env.PORT ?? 3001);
   const server = serve({

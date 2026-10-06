@@ -62,7 +62,7 @@ const helpers = createNodeHelpers(USERS_COLLECTION, userSchema, usersEmbedKeys.o
 export const insertUser = helpers.insert;
 export const getUserById = helpers.getById;
 export const updateUser = helpers.updateById;
-const USER_DELETE_COLLECTIONS = ['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages', 'conversationArchiveStates', 'folders', 'files', 'userInboxThreads', 'userInboxMessages', 'userNotifications', 'tickets', 'events', 'sparkTransactions', 'referralCodes', 'referralAttributions', 'referralRewards', 'checkoutHandoffs', 'paymentCheckouts', 'paymentOrders', 'subscriptions', 'storageDeletionJobs', 'tags', 'tagAssignments'] as const;
+const USER_DELETE_COLLECTIONS = ['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages', 'conversationArchiveStates', 'folders', 'files', 'userInboxThreads', 'userInboxMessages', 'userNotifications', 'tickets', 'events', 'sparkTransactions', 'referralCodes', 'referralAttributions', 'referralRewards', 'paymentOrders', 'subscriptions', 'storageDeletionJobs', 'tags', 'tagAssignments'] as const;
 export async function deleteUser(userKey: string): Promise<void> {
   await withTransaction([...USER_DELETE_COLLECTIONS], async (transaction) => {
     await transaction.query('LET tagKeys = (FOR tag IN tags FILTER tag.userKey == @userKey RETURN tag._key) FOR assignment IN tagAssignments FILTER assignment.tagKey IN tagKeys REMOVE assignment IN tagAssignments', { userKey });
@@ -84,8 +84,6 @@ export async function deleteUser(userKey: string): Promise<void> {
     await transaction.query('FOR reward IN referralRewards FILTER reward.referrerUserKey == @userKey || reward.referredUserKey == @userKey REMOVE reward IN referralRewards', { userKey });
     await transaction.query('FOR attribution IN referralAttributions FILTER attribution.referrerUserKey == @userKey || attribution.referredUserKey == @userKey REMOVE attribution IN referralAttributions', { userKey });
     await transaction.query('FOR code IN referralCodes FILTER code.ownerUserKey == @userKey REMOVE code IN referralCodes', { userKey });
-    await transaction.query('FOR handoff IN checkoutHandoffs FILTER handoff.userKey == @userKey REMOVE handoff IN checkoutHandoffs', { userKey });
-    await transaction.query('FOR checkout IN paymentCheckouts FILTER checkout.userKey == @userKey REMOVE checkout IN paymentCheckouts', { userKey });
     await transaction.query('FOR order IN paymentOrders FILTER order.userKey == @userKey REMOVE order IN paymentOrders', { userKey });
     await transaction.query('FOR subscription IN subscriptions FILTER subscription.userKey == @userKey REMOVE subscription IN subscriptions', { userKey });
     await transaction.query('LET user = DOCUMENT(users, @userKey) FILTER user != null && IS_STRING(user.profileStorageKey) UPSERT { storageKey: user.profileStorageKey } INSERT { storageKey: user.profileStorageKey, createdAt: @now } UPDATE {} IN storageDeletionJobs', { userKey, now: new Date().toISOString() });

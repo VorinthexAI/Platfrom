@@ -90,23 +90,8 @@ export async function fetchBillingSummary(query: BillingSummaryQuery = {}, signa
 }
 
 export async function fetchCurrentSubscription(signal?: AbortSignal): Promise<CurrentSubscription | null> {
-  const response = await apiClient.get("/subscriptions/current", { params: { includeScheduled: "true" }, signal });
+  const response = await apiClient.get("/subscriptions/current", { signal });
   return subscriptionEnvelopeSchema.parse(response.data).data;
-}
-
-export async function setSubscriptionCancellation(cancelAtPeriodEnd: boolean): Promise<CurrentSubscription> {
-  const action = cancelAtPeriodEnd ? "cancel" : "restore";
-  const response = await apiClient.post(`/subscriptions/current/${action}`, {});
-  const subscription = subscriptionEnvelopeSchema.parse(response.data).data;
-  if (!subscription) throw new Error("Subscription update returned no subscription.");
-  return subscription;
-}
-
-export async function scheduleSubscriptionProduct(productId: string): Promise<CurrentSubscription> {
-  const response = await apiClient.post('/subscriptions/current/schedule', { productId }, { params: { includeScheduled: 'true' } });
-  const subscription = subscriptionEnvelopeSchema.parse(response.data).data;
-  if (!subscription) throw new Error('Subscription update returned no subscription.');
-  return subscription;
 }
 
 

@@ -85,14 +85,7 @@ export function registerRoutes(app: Hono) {
 
   app.get('/products', commerceHandlers.listProducts);
   app.get('/costs', listCosts);
-  app.post('/payments/checkouts', commerceHandlers.createCheckout);
-  app.post('/payments/checkout-handoffs', commerceHandlers.issueCheckoutHandoff);
-  app.post('/payments/checkout-handoffs/resolve', commerceHandlers.inspectCheckoutHandoff);
-  app.post('/payments/checkout-handoffs/continue', commerceHandlers.continueCheckoutHandoff);
   app.get('/subscriptions/current', commerceHandlers.currentSubscription);
-  app.post('/subscriptions/current/cancel', commerceHandlers.cancelSubscription);
-  app.post('/subscriptions/current/restore', commerceHandlers.restoreSubscription);
-  app.post('/subscriptions/current/schedule', commerceHandlers.scheduleSubscription);
   app.get('/billing/summary', getBillingSummary);
   app.get('/referrals/summary', getReferralSummary);
   app.post('/referrals/redeem', redeemReferral);

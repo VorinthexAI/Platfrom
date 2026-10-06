@@ -118,6 +118,7 @@
       "expo-font",
       "expo-image",
       "./plugins/with-android-build-paths",
+      "./plugins/with-purchase-launch-mode",
       "expo-video"
     ],
     "experiments": {

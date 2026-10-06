@@ -22,6 +22,30 @@ There is no mobile app test suite. Use typecheck; do not add `*.test.ts` files h
 Native projects are generated on demand (`bunx expo prebuild` in this
 folder) — they are not committed.
 
+## In-app purchases
+
+Create weekly (`nova.weekly`) and monthly (`nova.monthly`) auto-renewing
+subscriptions and a consumable top-up (`topup.small`) in App Store Connect and
+Google Play. Put all three products into RevenueCat's current offering, with
+matching product identifiers (Google Play subscription base-plan suffixes are
+supported). The app shows the store's localized prices, not the website's USD
+estimates. Use the authenticated Vorinthex user key as the RevenueCat App User ID.
+Set RevenueCat's restore/transfer behavior to keep purchases with their original
+App User ID so restoring on a different account cannot move paid Sparks.
+
+Set `EXPO_PUBLIC_REVENUECAT_IOS_KEY` and `EXPO_PUBLIC_REVENUECAT_ANDROID_KEY`
+for each mobile build in the encrypted `.github/environments.json`. Native
+purchases require a rebuilt app, not an Expo Go purchase preview. Enable the
+App Store In-App Purchase capability and configure Google Play billing for the
+corresponding bundle/package `app.vorinthex.com`.
+
+Set a RevenueCat webhook for `https://vorinthex.com/api/v1/webhooks/revenuecat`
+with both an Authorization header (`REVENUECAT_WEBHOOK_AUTH`, including its
+scheme) and HMAC signing (`REVENUECAT_WEBHOOK_SECRET`) in the backend encrypted
+environment. Production webhooks must be configured to send production events.
+Purchase credits and subscription status are applied only from authenticated,
+signed provider events; a successful SDK return merely refreshes billing data.
+
 For local Android or iOS builds, run `bun run android` or `bun run ios` from
 this folder. Both apply config plugins before building and installing the app,
 including `expo-audio` background playback (`UIBackgroundModes` audio on iOS,

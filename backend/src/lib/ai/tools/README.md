@@ -20,7 +20,7 @@ expresses domain intent such as `folder.create`, `email.draft.send`, or
   and workspace picker updates. They are registered for transport parity but
   intentionally excluded from every model/provider definition and Core surface.
 - `ticket-tool-definitions.ts`, `notification-tool-definitions.ts`, and
-  `commerce-tool-definitions.ts` adapt support, notification, and purchase
+  `commerce-tool-definitions.ts` adapt support, notification, and catalog/subscription reads
   operations to their canonical services. HTTP and registered tools share
   those service implementations.
 - `referral-summary-read.ts` and `referral-redeem.ts` expose the current user's

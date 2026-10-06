@@ -5,7 +5,7 @@ import { useAuthStore } from "@/state/auth";
 
 const refreshes = new WeakMap<QueryClient, Map<string, Promise<void>>>();
 
-/** Bounded, best-effort convergence after checkout; never a navigation gate. */
+/** Bounded, best-effort convergence after a store purchase; never a navigation gate. */
 export function refreshAuthoritativeBilling(queryClient: QueryClient, userKey: string): Promise<void> {
   let pending = refreshes.get(queryClient);
   if (!pending) { pending = new Map(); refreshes.set(queryClient, pending); }

@@ -84,7 +84,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (status === "bootstrapping" || appsStatus !== "ready" || !localOnboarding) return;
     const root = segments[0] as string | undefined;
-    const isPublic = root === "auth" || root === "intro" || root === "public" || root === "referral" || root === "checkout" || root === undefined;
+    const isPublic = root === "auth" || root === "intro" || root === "public" || root === "referral" || root === undefined;
     if (status === "unauthenticated") {
       if (!localOnboarding.previewComplete && (root === undefined || root === "auth" && segments.length === 1)) router.replace("/intro" as Href);
       else if (localOnboarding.previewComplete && root === "intro") router.replace("/auth" as Href);

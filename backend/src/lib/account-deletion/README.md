@@ -1,13 +1,12 @@
 # Account deletion safety
 
 Deletion uses a durable `users.deletionRequestedAt` fence before external work.
-Presence and checkout creation reject fenced users. Provider subscription
-reconciliation/revocation and Redis tombstoning run only after the short fence
-transaction has committed and while no Arango transaction is open. One final
-exclusive Arango transaction revalidates the fence and deletion invariants and
-atomically removes all owned data. A provider or Redis failure leaves the fence
-in place so an authenticated retry can safely continue without allowing new
-charges or authenticated presence sessions.
+Presence rejects fenced users. Redis session invalidation runs after the short
+fence transaction has committed and while no Arango transaction is open. One
+final exclusive Arango transaction revalidates the fence and atomically removes
+all owned data. A Redis failure leaves the fence in place for an authenticated
+retry. App store subscriptions are managed in the store; the app tells the user
+to cancel a subscription before deleting their account.
 
 The final transaction follows the current `user → scopes → folders → files`
 model. It removes user-owned documents and dependent chat, tag, ticket,

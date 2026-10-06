@@ -157,7 +157,9 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
   const [pendingFolders, setPendingFolders] = useState<ContentFolder[]>([]);
   const [pendingTransfers, setPendingTransfers] = useState<PendingTransfer[]>([]);
   const [sessionFolderOrder, setSessionFolderOrder] = useState<Record<string, { createdAt: string; order: number; uiKey: string }>>({});
-  const [preview, setPreview] = useState<{ title: string; fileKey?: string; pdfUri?: string; imageUri?: string; text?: string; audioUri?: string; videoUri?: string }>();
+  const [preview, setPreview] = useState<{ title: string; fileKey?: string; actionsKey?: string; pdfUri?: string; imageUri?: string; text?: string; audioUri?: string; videoUri?: string }>();
+  const pendingStorageSheet = useRef(false);
+  const previewSelection = useRef(false);
   const [previewFailed, setPreviewFailed] = useState(false);
   const [history, setHistory] = useState<ContentSearchHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -277,10 +279,11 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
     if (contentOffset.y > 24 && contentSize.height - contentOffset.y - layoutMeasurement.height < layoutMeasurement.height * 2) loadMore();
   };
 
-  const openFile = useCallback(async (file: Pick<ContentFile, "key" | "name" | "extension">, localUri?: string) => {
+  const openFile = useCallback(async (file: Pick<ContentFile, "key" | "name" | "extension">, localUri?: string, fromStorageGrid = false) => {
     const request = ++previewRequest.current;
     setPreviewFailed(false);
     const title = displayContentFileName(file);
+    const identity = { title, fileKey: file.key, ...(fromStorageGrid && !fileOnly ? { actionsKey: file.key } : {}) };
     const showPreview = (value: NonNullable<typeof preview>) => {
       if (previewRequest.current !== request) return false;
       discardPreviewPdf();
@@ -292,27 +295,27 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
     try {
       const availableLocalUri = localUri && new File(localUri).exists ? localUri : undefined;
       if (availableLocalUri) {
-        if (IMAGE_EXTENSIONS.has(file.extension)) { showPreview({ title, imageUri: availableLocalUri }); return; }
-        if (file.extension === "pdf") { showPreview({ title, fileKey: file.key, pdfUri: availableLocalUri }); return; }
-        if (file.extension === "mp3") { showPreview({ title, audioUri: availableLocalUri }); return; }
-         if (file.extension === "mp4" || file.extension === "mov") { showPreview({ title, videoUri: availableLocalUri }); return; }
+        if (IMAGE_EXTENSIONS.has(file.extension)) { showPreview({ ...identity, imageUri: availableLocalUri }); return; }
+        if (file.extension === "pdf") { showPreview({ ...identity, pdfUri: availableLocalUri }); return; }
+        if (file.extension === "mp3") { showPreview({ ...identity, audioUri: availableLocalUri }); return; }
+         if (file.extension === "mp4" || file.extension === "mov") { showPreview({ ...identity, videoUri: availableLocalUri }); return; }
       }
       if (availableLocalUri && TEXT_EXTENSIONS.has(file.extension)) {
-        showPreview({ title, text: new TextDecoder().decode(await new File(availableLocalUri).arrayBuffer()) });
+        showPreview({ ...identity, text: new TextDecoder().decode(await new File(availableLocalUri).arrayBuffer()) });
         return;
       }
       if (availableLocalUri && file.extension === "docx") {
         const mammoth = await import("mammoth");
         const extracted = await mammoth.extractRawText({ arrayBuffer: await new File(availableLocalUri).arrayBuffer() });
-        showPreview({ title, text: extracted.value.trim() || "No readable text is available." });
+        showPreview({ ...identity, text: extracted.value.trim() || "No readable text is available." });
         return;
       }
       const download = await downloadContentFile(file.key, contentContext);
-      if (IMAGE_EXTENSIONS.has(file.extension)) { showPreview({ title, imageUri: download.url }); return; }
-      if (file.extension === "pdf") { showPreview({ title, fileKey: file.key, pdfUri: download.url }); return; }
+      if (IMAGE_EXTENSIONS.has(file.extension)) { showPreview({ ...identity, imageUri: download.url }); return; }
+      if (file.extension === "pdf") { showPreview({ ...identity, pdfUri: download.url }); return; }
       if (TEXT_EXTENSIONS.has(file.extension)) {
         const response = await fetch(download.url);
-        showPreview({ title, text: await response.text() });
+        showPreview({ ...identity, text: await response.text() });
         return;
       }
       if (file.extension === "docx") {
@@ -320,15 +323,15 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
         const bytes = await response.arrayBuffer();
         const mammoth = await import("mammoth");
         const extracted = await mammoth.extractRawText({ arrayBuffer: bytes });
-        showPreview({ title, text: extracted.value.trim() || "No readable text is available." });
+        showPreview({ ...identity, text: extracted.value.trim() || "No readable text is available." });
         return;
       }
-      if (file.extension === "mp3") { showPreview({ title, audioUri: download.url }); return; }
-       if (file.extension === "mp4" || file.extension === "mov") { showPreview({ title, videoUri: download.url }); return; }
+      if (file.extension === "mp3") { showPreview({ ...identity, audioUri: download.url }); return; }
+       if (file.extension === "mp4" || file.extension === "mov") { showPreview({ ...identity, videoUri: download.url }); return; }
     } catch {
       if (previewRequest.current === request) { discardPreviewPdf(); activePdfUri.current = undefined; setPreview(undefined); setPreviewFailed(true); showToast({ title: "The file could not be opened.", duration: 2_500 }); }
     }
-  }, [contentContext, discardPreviewPdf, showToast]);
+  }, [contentContext, discardPreviewPdf, fileOnly, showToast]);
 
   const recoverPdfPreview = useCallback(async (sourceUri: string, fileKey?: string) => {
     if (activePdfUri.current !== sourceUri) return;
@@ -351,11 +354,20 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
   const goBack = useCallback(() => {
     if (fileOnly) { onCloseFile?.(); return; }
     previewRequest.current += 1;
-    if (preview) { discardPreviewPdf(); activePdfUri.current = undefined; setPreview(undefined); return; }
+    if (preview) { discardPreviewPdf(); activePdfUri.current = undefined; setPreview(undefined); if (previewSelection.current) { previewSelection.current = false; setSelectedFileKeys([]); setSheet(undefined); } return; }
     if (initialFileView) { onBackFileView?.(); return; }
     if (folderStack.length) { setFolderStack((stack) => stack.slice(0, -1)); return; }
     setCoreRequest((request) => request + 1);
-  }, [discardPreviewPdf, fileOnly, folderStack.length, initialFileView, onBackFileView, onCloseFile, preview]);
+  }, [discardPreviewPdf, fileOnly, folderStack.length, initialFileView, onBackFileView, onCloseFile, preview, setSheet]);
+
+  useEffect(() => { if (!coreOpen && pendingStorageSheet.current) { pendingStorageSheet.current = false; setSheet("create"); } }, [coreOpen]);
+  const openPreviewActions = () => {
+    if (!preview?.actionsKey || !files.some(({ key }) => key === preview.actionsKey)) return;
+    previewSelection.current = true;
+    setSelectedFileKeys([preview.actionsKey]);
+    setSelectedFolderKeys([]);
+    setSheet("bulk");
+  };
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -656,7 +668,7 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
           await Promise.all([...folderKeys.map((key) => updateContentFolder(key, { isHidden })), ...fileKeys.map((key) => updateContentFile(key, { isHidden }))]);
         }
       }
-      if (action === "delete") clearSelection();
+      if (action === "delete") { clearSelection(); if (previewSelection.current && fileKeys.includes(preview?.fileKey ?? "")) { previewSelection.current = false; goBack(); } }
       void queryClient.invalidateQueries({ queryKey: contentQueryKeys.locations(contentContext), refetchType: "none" });
       if (initialFileView) void fileViewQuery.refresh(); else void locationQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["file-search", scopeKey] });
@@ -679,12 +691,13 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
   const loading = false;
   const empty = !initialLoading && !(initialFileView && fileViewQuery.error) && !folders.length && !files.length && !visibleUploads.length && !(initialFileView ? fileViewQuery.hasMore : hasMoreContentLocationPages(locationQuery.data));
   const matchingEmpty = empty && (filtersActive || Boolean(initialFileView));
-  const core = <CoreComposer accessibilityLabel="Ask Core about your files" expandedPrompts={[...CORE_PLACEHOLDER_PROMPTS]} generationMode={generationMode} leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />} onChangeText={() => undefined} onFocusChange={(focused) => { setCoreOpen(focused); if (focused && initialFileView) onExitFileView?.(); }} onSubmit={() => undefined} openOnMount={!initialFileKey && !initialFileView} openRequest={initialFileView ? 0 : coreRequest} pageIdentity={() => <AgentSwitcher />} prompts={CORE_PLACEHOLDER_PROMPTS} sendIcon={<SendIcon size="sm" />} value="" />;
+   const core = <CoreComposer accessibilityLabel="Ask Core about your files" expandedPrompts={[...CORE_PLACEHOLDER_PROMPTS]} generationMode={generationMode} leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />} onChangeText={() => undefined} onFocusChange={(focused) => { setCoreOpen(focused); if (focused && initialFileView) onExitFileView?.(); }} onStorageAction={(action) => { setFolderStack([]); setQuery(""); if (action !== "open") pendingStorageSheet.current = true; }} onSubmit={() => undefined} openOnMount={!initialFileKey && !initialFileView} openRequest={initialFileView ? 0 : coreRequest} pageIdentity={() => <AgentSwitcher />} prompts={CORE_PLACEHOLDER_PROMPTS} sendIcon={<SendIcon size="sm" />} value="" />;
 
   const previewPane = preview ? <View style={[styles.previewPane, { paddingBottom: previewBottomInset }]}>
     <View style={[styles.titleRow, styles.previewTitleRow]}>
       <Button accessibilityLabel={fileOnly ? "Back to Core" : "Back"} contentMode="raw" onPress={goBack} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
-      <Text numberOfLines={1} style={styles.title}>{preview.title}</Text>
+       <Text numberOfLines={1} style={styles.title}>{preview.title}</Text>
+       {preview.actionsKey && files.some(({ key }) => key === preview.actionsKey) ? <Button accessibilityLabel="File actions" contentMode="raw" onPress={openPreviewActions} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : null}
     </View>
     {preview.audioUri ? <AudioIsland onClose={goBack} title={preview.title} uri={preview.audioUri} /> : preview.pdfUri ? <FileViewer error={previewFailed ? "The PDF could not be rendered." : undefined} hideHeader onBack={goBack} onMenu={() => undefined} onRenderError={() => { void recoverPdfPreview(preview.pdfUri!, preview.fileKey); }} pdfUri={preview.pdfUri} title={preview.title} /> : preview.imageUri ? <Image contentFit="contain" source={preview.imageUri} style={styles.previewImage} /> : preview.videoUri ? <VideoPreview uri={preview.videoUri} /> : <ScrollView contentContainerStyle={styles.previewText}><Text selectable style={styles.bodyText}>{preview.text}</Text></ScrollView>}
   </View> : null;
@@ -745,7 +758,7 @@ export function FilesWorkspace({ initialFileKey, initialFileTitle, initialFolder
               localUri={entry.kind === "upload" ? entry.file.uri : copiedSourceKey ? sessionUploads[copiedSourceKey]?.uri : sessionUploads[entry.file.key]?.uri}
               thumbnailUri={entry.kind === "upload" ? entry.file.thumbnailUri : undefined}
               onLongPress={entry.kind === "file" && !copiedSourceKey ? () => { if (bulkActive) setSelectedFileKeys((keys) => keys.includes(file.key) ? keys.filter((key) => key !== file.key) : [...keys, file.key]); else { setSelectedFileKeys([file.key]); setSelectedFolderKeys([]); } } : undefined}
-              onPress={() => { if (entry.kind === "upload") { if (!bulkActive) void openFile(entry.file, entry.file.uri); } else if (copiedSourceKey) { if (!bulkActive) void openFile({ ...entry.file, key: copiedSourceKey }, sessionUploads[copiedSourceKey]?.uri); } else if (bulkActive) setSelectedFileKeys((keys) => keys.includes(entry.file.key) ? keys.filter((key) => key !== entry.file.key) : [...keys, entry.file.key]); else void openFile(entry.file, sessionUploads[entry.file.key]?.uri); }}
+               onPress={() => { if (entry.kind === "upload") { if (!bulkActive) void openFile(entry.file, entry.file.uri); } else if (copiedSourceKey) { if (!bulkActive) void openFile({ ...entry.file, key: copiedSourceKey }, sessionUploads[copiedSourceKey]?.uri); } else if (bulkActive) setSelectedFileKeys((keys) => keys.includes(entry.file.key) ? keys.filter((key) => key !== entry.file.key) : [...keys, entry.file.key]); else void openFile(entry.file, sessionUploads[entry.file.key]?.uri, true); }}
               selected={selected}
               size={cardSize}
             />;

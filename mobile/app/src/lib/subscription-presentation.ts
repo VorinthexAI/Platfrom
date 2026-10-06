@@ -1,7 +1,7 @@
 import type { CurrentSubscription } from "./billing-client";
 import type { MobileProduct } from "./product-client";
 
-export type SubscriptionAction = "cancel" | "restore" | null;
+export type SubscriptionAction = "manage" | null;
 
 export function subscriptionPresentation(subscription: CurrentSubscription, product: MobileProduct | undefined) {
   const title = product?.type === "subscription"
@@ -12,13 +12,13 @@ export function subscriptionPresentation(subscription: CurrentSubscription, prod
 
   if (subscription.status === "active" || subscription.status === "trialing") {
     return scheduled
-      ? { title, copy: `Active until${periodEnd ? ` ${periodEnd}` : " the end of this billing period"}; renewal is canceled.`, action: "restore" as SubscriptionAction }
-      : { title, copy: `Renews automatically${periodEnd ? ` on ${periodEnd}` : " at the end of this billing period"}.`, action: "cancel" as SubscriptionAction };
+       ? { title, copy: `Active until${periodEnd ? ` ${periodEnd}` : " the end of this billing period"}; renewal is canceled.`, action: "manage" as SubscriptionAction }
+       : { title, copy: `Renews automatically${periodEnd ? ` on ${periodEnd}` : " at the end of this billing period"}.`, action: "manage" as SubscriptionAction };
   }
   if (subscription.status === "past_due") {
     return scheduled
-      ? { title, copy: "Payment is past due and renewal is canceled. Access depends on resolving billing before the period ends.", action: "restore" as SubscriptionAction }
-      : { title, copy: "Payment is past due. Renewal and access depend on a successful payment.", action: "cancel" as SubscriptionAction };
+       ? { title, copy: "Payment is past due and renewal is canceled. Access depends on resolving billing before the period ends.", action: "manage" as SubscriptionAction }
+       : { title, copy: "Payment is past due. Renewal and access depend on a successful payment.", action: "manage" as SubscriptionAction };
   }
   const copy = {
     canceled: "This subscription is canceled and will not renew.",

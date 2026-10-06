@@ -7,7 +7,6 @@ const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://vorinthex.
 export const productIdSchema = z.enum([
   "nova.weekly",
   "nova.monthly",
-  "nova.monthly.discounted",
   "topup.small",
 ]);
 
@@ -15,7 +14,6 @@ export const productSchema = z.strictObject({
   key: z.string().cuid(),
   productId: productIdSchema,
   priceCents: z.number().int().safe().positive(),
-  discountedPriceCents: z.number().int().safe().positive().nullable(),
   active: z.boolean(),
   type: z.enum(["subscription", "one_time"]),
   billingPeriod: z.enum(["week", "month"]).nullable(),
@@ -27,7 +25,6 @@ export const productSchema = z.strictObject({
   const topup = product.productId === "topup.small";
   if (topup !== (product.type === "one_time")) context.addIssue({ code: "custom", message: "Product type does not match its identifier." });
   if (topup !== (product.billingPeriod === null)) context.addIssue({ code: "custom", message: "Billing period does not match product type." });
-  if (product.discountedPriceCents !== null && product.discountedPriceCents >= product.priceCents) context.addIssue({ code: "custom", message: "Discounted price must be lower than the reference price." });
 });
 
 export const productsResponseSchema = z.strictObject({
@@ -81,18 +78,14 @@ export async function fetchHealth(): Promise<HealthResponse> {
   return healthResponseSchema.parse(await fetchPublic("health?appUpdate=1"));
 }
 
-export function effectivePriceCents(product: MobileProduct) {
-  return product.discountedPriceCents ?? product.priceCents;
-}
-
 export function formatProductPrice(cents: number, currency: string) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(cents / 100);
 }
 
 export function activeSubscriptionOffers(products: readonly MobileProduct[]) {
   return products
-    .filter((product) => product.active && product.type === "subscription" && product.productId !== "nova.monthly")
-    .sort((left, right) => Number(right.productId === "nova.monthly.discounted") - Number(left.productId === "nova.monthly.discounted"));
+    .filter((product) => product.active && product.type === "subscription")
+    .sort((left, right) => Number(right.productId === "nova.monthly") - Number(left.productId === "nova.monthly"));
 }
 
 export function activeTopup(products: readonly MobileProduct[]) {

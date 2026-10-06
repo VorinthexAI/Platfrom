@@ -1,16 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import nextConfig, { getCheckoutHeaders, getPrivateAuthHeaders } from "./next.config";
-
-describe("checkout response headers", () => {
-  test("prevents storage, referrer leakage, framing, and indexing", () => {
-    const headers = Object.fromEntries(getCheckoutHeaders().map(({ key, value }) => [key, value]));
-    expect(headers["Cache-Control"]).toContain("no-store");
-    expect(headers["Referrer-Policy"]).toBe("no-referrer");
-    expect(headers["X-Robots-Tag"]).toContain("nosnippet");
-    expect(headers["Content-Security-Policy"]).toContain("frame-ancestors 'none'");
-    expect(headers["Content-Security-Policy"]).toContain("connect-src 'self'");
-  });
-});
+import nextConfig, { getPrivateAuthHeaders } from "./next.config";
 
 describe("private authentication response headers", () => {
   test("prevents storage, referrer leakage, framing, and indexing", () => {
@@ -27,7 +16,7 @@ describe("private authentication response headers", () => {
   test("applies the private policy to both page trees", async () => {
     const rules = await nextConfig.headers?.();
     const privateSources = rules
-      ?.filter((rule) => rule.headers.some(({ key }) => key === "X-Robots-Tag" && rule.source !== "/checkout/:path*"))
+      ?.filter((rule) => rule.headers.some(({ key }) => key === "X-Robots-Tag"))
       .map(({ source }) => source);
     expect(privateSources).toContain("/admin/:path*");
     expect(privateSources).toContain("/auth/mfa/:path*");

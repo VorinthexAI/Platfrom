@@ -5,14 +5,12 @@ export interface AccountDeletionPlan {
   scopeKeys: string[];
   visitorKeys: string[];
   presenceSessionKeys: string[];
-  activeCheckout: boolean;
-  recoverableCheckout: boolean;
 }
 
 export type AccountDeletionFenceResult =
   | { status: 'fenced'; presenceSessionKeys: string[]; recipient: { email: string } }
-  | { status: 'not_found' | 'active_checkout' | 'checkout_recovery_required' };
-export type AccountDeletionResult = { status: 'deleted' | 'not_found' | 'active_checkout' };
+  | { status: 'not_found' };
+export type AccountDeletionResult = { status: 'deleted' | 'not_found' };
 
 type Cursor = { next(): Promise<unknown> };
 export interface AccountDeletionDatabase { query(query: string, bindVars?: Record<string, unknown>): Promise<Cursor> }
@@ -30,12 +28,12 @@ export const ACCOUNT_DELETE_WRITE_COLLECTIONS = [
   'userSearches', 'contentIdempotency', 'conversations', 'conversationMessages', 'conversationAttachmentArtifacts', 'conversationArchiveStates',
   'tickets', 'ticketVotes', 'userNotifications', 'events', 'tags', 'tagAssignments', 'pushSubscriptions', 'pushDeliveries',
   'sparkTransactions', 'billingExecutions', 'newcomerGrantClaims', 'referralCodes', 'referralAttributions', 'referralRewards',
-  'checkoutHandoffs', 'paymentCheckouts', 'paymentOrders', 'subscriptions', 'storageObjects', 'storageChargingHours',
+  'paymentOrders', 'subscriptions', 'storageObjects', 'storageChargingHours',
   'storageChargingMeters', 'storageRetentionStates', 'storageDeletionJobs',
 ] as const;
 
 const FENCE_COLLECTIONS = {
-  read: ['scopes', 'visitors', 'visitorSessions', 'userSessions', 'paymentCheckouts'],
+  read: ['scopes', 'visitors', 'visitorSessions', 'userSessions'],
   write: ['users'],
 };
 
@@ -48,9 +46,7 @@ const INSPECT_QUERY = `
     (FOR item IN userSessions FILTER item.userId == @userKey RETURN item.sessionKey),
     (FOR item IN visitorSessions FILTER item.visitorId IN visitorKeys RETURN item.sessionKey)
   ))
-  LET activeCheckout = LENGTH(FOR checkout IN paymentCheckouts FILTER checkout.userKey == @userKey && (checkout.status == "open" || (checkout.status == "pending" && checkout.updatedAt >= @pendingCutoff)) LIMIT 1 RETURN 1) > 0
-  LET recoverableCheckout = LENGTH(FOR checkout IN paymentCheckouts FILTER checkout.userKey == @userKey && checkout.status == "pending" && checkout.updatedAt < @pendingCutoff LIMIT 1 RETURN 1) > 0
-  RETURN { email: user.email, scopeKeys, visitorKeys, presenceSessionKeys, activeCheckout, recoverableCheckout }
+  RETURN { email: user.email, scopeKeys, visitorKeys, presenceSessionKeys }
 `;
 
 // Predicates are fixed by the repository, never supplied by a caller. Keep each
@@ -82,8 +78,6 @@ const DELETE_OWNED = [
   ['referralRewards', 'item.referrerUserKey == @userKey || item.referredUserKey == @userKey'],
   ['referralAttributions', 'item.referrerUserKey == @userKey || item.referredUserKey == @userKey'],
   ['referralCodes', 'item.ownerUserKey == @userKey'],
-  ['checkoutHandoffs', 'item.userKey == @userKey'],
-  ['paymentCheckouts', 'item.userKey == @userKey'],
   ['paymentOrders', 'item.userKey == @userKey'],
   ['subscriptions', 'item.userKey == @userKey'],
   ['authSessions', 'item.userId == @userKey'],
@@ -103,8 +97,6 @@ export function createAccountDeletionRepository(
         const cursor = await transaction.query(INSPECT_QUERY, { userKey, pendingCutoff });
         const plan = (await cursor.next() as AccountDeletionPlan | null) ?? null;
         if (!plan) return { status: 'not_found' as const };
-        if (plan.activeCheckout) return { status: 'active_checkout' as const };
-        if (plan.recoverableCheckout) return { status: 'checkout_recovery_required' as const };
         const fenced = await transaction.query('LET user = DOCUMENT(users, @userKey) FILTER user != null UPDATE user WITH { deletionRequestedAt: user.deletionRequestedAt || @requestedAt, updatedAt: @requestedAt } IN users RETURN NEW._key', { userKey, requestedAt });
         if (await fenced.next() !== userKey) throw new Error('Account deletion fence was not persisted.');
         return { status: 'fenced' as const, presenceSessionKeys: plan.presenceSessionKeys, recipient: { email: plan.email } };
@@ -115,7 +107,6 @@ export function createAccountDeletionRepository(
         const cursor = await transaction.query(INSPECT_QUERY, { userKey, pendingCutoff: new Date().toISOString() });
         const plan = (await cursor.next() as AccountDeletionPlan | null) ?? null;
         if (!plan) return { status: 'not_found' as const };
-        if (plan.activeCheckout || plan.recoverableCheckout) return { status: 'active_checkout' as const };
         const fenceCursor = await transaction.query('LET user = DOCUMENT(users, @userKey) RETURN user != null && IS_STRING(user.deletionRequestedAt)', { userKey });
         if (await fenceCursor.next() !== true) throw new Error('Account deletion requires a durable deletion fence.');
 

@@ -38,6 +38,8 @@ jobs:
           EXPO_PUBLIC_FRONTEND_URL="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_FRONTEND_URL' .github/environments.json)"
           EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID' .github/environments.json)"
           EXPO_PUBLIC_BACKEND_API_KEY="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_BACKEND_API_KEY' .github/environments.json)"
+          EXPO_PUBLIC_REVENUECAT_IOS_KEY="$(jq -r '.secrets.prod.mobile.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY // ""' .github/environments.json)"
+          EXPO_PUBLIC_REVENUECAT_ANDROID_KEY="$(jq -r '.secrets.prod.mobile.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY // ""' .github/environments.json)"
           test -n "$EXPO_TOKEN" && [ "$EXPO_TOKEN" != "null" ] || { echo "::error::secrets.prod.mobile.EXPO_TOKEN is not configured in .github/environments.json."; exit 1; }
           test -n "$EXPO_PUBLIC_API_BASE_URL" && test -n "$EXPO_PUBLIC_BACKEND_API_KEY" || { echo "::error::Mobile API environment is not configured in .github/environments.json."; exit 1; }
           echo "::add-mask::$EXPO_TOKEN"
@@ -48,6 +50,8 @@ jobs:
             echo "EXPO_PUBLIC_FRONTEND_URL=$EXPO_PUBLIC_FRONTEND_URL"
             echo "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=$EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID"
             echo "EXPO_PUBLIC_BACKEND_API_KEY=$EXPO_PUBLIC_BACKEND_API_KEY"
+            echo "EXPO_PUBLIC_REVENUECAT_IOS_KEY=$EXPO_PUBLIC_REVENUECAT_IOS_KEY"
+            echo "EXPO_PUBLIC_REVENUECAT_ANDROID_KEY=$EXPO_PUBLIC_REVENUECAT_ANDROID_KEY"
           } >> "$GITHUB_ENV"
 
       - name: Setup Node.js
@@ -86,4 +90,6 @@ jobs:
           eas env:set --name EXPO_PUBLIC_FRONTEND_URL --value "$EXPO_PUBLIC_FRONTEND_URL" --environment preview --visibility plaintext --non-interactive
           eas env:set --name EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID --value "$EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID" --environment preview --visibility plaintext --non-interactive
           eas env:set --name EXPO_PUBLIC_BACKEND_API_KEY --value "$EXPO_PUBLIC_BACKEND_API_KEY" --environment preview --visibility plaintext --non-interactive
+          if [ -n "$EXPO_PUBLIC_REVENUECAT_IOS_KEY" ]; then eas env:set --name EXPO_PUBLIC_REVENUECAT_IOS_KEY --value "$EXPO_PUBLIC_REVENUECAT_IOS_KEY" --environment preview --visibility plaintext --non-interactive; fi
+          if [ -n "$EXPO_PUBLIC_REVENUECAT_ANDROID_KEY" ]; then eas env:set --name EXPO_PUBLIC_REVENUECAT_ANDROID_KEY --value "$EXPO_PUBLIC_REVENUECAT_ANDROID_KEY" --environment preview --visibility plaintext --non-interactive; fi
           eas build --platform android --profile preview --non-interactive --no-wait
