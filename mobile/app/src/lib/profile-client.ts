@@ -2,6 +2,7 @@ import { File } from "expo-file-system";
 import { z } from "zod";
 
 import { apiClient } from "./api-client";
+import { ensureSparkCapacity } from "./billing-client";
 
 export const profileNameSchema = z.string().trim().min(1).max(200);
 export const avatarUploadSchema = z.strictObject({
@@ -81,6 +82,7 @@ export function uploadProfileAvatar(rawFile: z.input<typeof avatarUploadSchema>)
 }
 
 export async function generateProfileBadge(scopeKey: string, idempotencyKey: string) {
+  await ensureSparkCapacity(15_000_000);
   const response = await apiClient.post("/auth/me/profile/badge-candidates", { scopeKey: z.string().min(1).parse(scopeKey) }, { headers: { "Idempotency-Key": z.string().min(1).max(200).parse(idempotencyKey) }, timeout: 4 * 60_000 });
   return profileBadgeCandidateSchema.parse(responseData(response.data));
 }

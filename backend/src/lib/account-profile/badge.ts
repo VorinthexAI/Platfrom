@@ -3,6 +3,7 @@ import { DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import sharp from 'sharp';
 import { z } from 'zod';
 import { executeAction, ProviderExecutionError, type ExecuteActionOptions } from '@/lib/ai/router';
+import { SparkRepositoryError } from '@/lib/sparks/repository';
 import { currentFixedChargeReceipt } from '@/lib/ai/events/runtime';
 import { imageOutputSchema, type ImageOutput } from '@/lib/ai/providers';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
@@ -85,6 +86,7 @@ export function createProfileBadgeService(dependencies: ProfileBadgeServiceDepen
           { providers: ['image.primary'], retry: { attempts: 2 }, signal: dependencies.signal, timeoutMs: dependencies.timeoutMs },
         );
       } catch (error) {
+        if (error instanceof SparkRepositoryError) throw error;
         console.error('profile badge provider generation failed', {
           teamKey: context.teamKey,
           userKeyHash: createHash('sha256').update(principal.user.key).digest('hex').slice(0, 16),

@@ -14,7 +14,7 @@ export type AccountDeletionResult = { status: 'deleted' | 'not_found' };
 
 type Cursor = { next(): Promise<unknown> };
 export interface AccountDeletionDatabase { query(query: string, bindVars?: Record<string, unknown>): Promise<Cursor> }
-type TransactionRunner = <T>(collections: string[] | { read?: string[]; write: string[] }, operation: (transaction: AccountDeletionDatabase) => Promise<T>) => Promise<T>;
+type TransactionRunner = <T>(collections: string[] | { read?: string[]; write: string[]; exclusive?: string[] }, operation: (transaction: AccountDeletionDatabase) => Promise<T>) => Promise<T>;
 
 export interface AccountDeletionRepository {
   fence(userKey: string, pendingCutoff: string, requestedAt: string): Promise<AccountDeletionFenceResult>;
@@ -35,6 +35,7 @@ export const ACCOUNT_DELETE_WRITE_COLLECTIONS = [
 const FENCE_COLLECTIONS = {
   read: ['scopes', 'visitors', 'visitorSessions', 'userSessions'],
   write: ['users'],
+  exclusive: [] as string[],
 };
 
 const INSPECT_QUERY = `
@@ -103,7 +104,7 @@ export function createAccountDeletionRepository(
       });
     },
     async finalize(userKey) {
-      return transact([...ACCOUNT_DELETE_WRITE_COLLECTIONS], async (transaction) => {
+      return transact({ write: [...ACCOUNT_DELETE_WRITE_COLLECTIONS], exclusive: [] }, async (transaction) => {
         const cursor = await transaction.query(INSPECT_QUERY, { userKey, pendingCutoff: new Date().toISOString() });
         const plan = (await cursor.next() as AccountDeletionPlan | null) ?? null;
         if (!plan) return { status: 'not_found' as const };

@@ -4,13 +4,12 @@ import { useRouter } from "expo-router";
 import { Image } from "expo-image";
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Button } from "@vorinthex/shared/ui/button";
-import { BottomSheet } from "@vorinthex/shared/ui/bottom-sheet";
 import { AttachmentPillStrip } from "@vorinthex/shared/ui/attachment-pill-strip";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
 import { CapabilityTabs, type CapabilityMode } from "@vorinthex/shared/ui/capability-tabs";
 import { FolderTile } from "@vorinthex/shared/ui/folder-tile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
-import { FileIcon, ImageIcon, MinusIcon, PlusIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { FileIcon, ImageIcon, PlusIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { ContentFileTile } from "@/components/ContentFileTile";
 import { FilesPickerSheet } from "@/components/FilesPickerSheet";
 import { ProfileHeaderRight } from "@/components/ProfileAvatarButton";
@@ -56,7 +55,6 @@ export function MediaWorkspaceComposer({ mode, openOnMount, ...props }: Props) {
   const [duration, setDuration] = useState(5);
   const [videoRatio, setVideoRatio] = useState<(typeof videoRatios)[number]>("16:9");
   const [imageRatio, setImageRatio] = useState<(typeof imageRatios)[number]>("1:1");
-  const [selectionSheet, setSelectionSheet] = useState<"duration" | "ratio">();
   const [references, setReferences] = useState<ContentFile[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const charging = useRef<string | undefined>(undefined);
@@ -93,11 +91,8 @@ export function MediaWorkspaceComposer({ mode, openOnMount, ...props }: Props) {
   const readyKeys = new Set(pending.flatMap((job) => job.file ? [job.file.key] : []));
   const files = (locationQuery.data?.files ?? []).filter((file) => !readyKeys.has(file.key) && (mode === "image" ? imageFiles.has(file.extension) : file.extension === (mode === "video" ? "mp4" : "mp3")));
   const price = mode === "image" ? "15 Sparks/image" : mode === "video" ? "15 Sparks/second" : "1 Spark/100 characters";
-  const stepDuration = (step: number) => {
-    setDuration((current) => Math.max(MIN_VIDEO_DURATION, Math.min(MAX_VIDEO_DURATION, current + step)));
-    pendingKey.current = undefined;
-    draftRevision.current += 1;
-  };
+  const cycleSetting = <T,>(items: readonly T[], current: T) => items[(items.indexOf(current) + 1) % items.length]!;
+  const bumpDraft = () => { pendingKey.current = undefined; draftRevision.current += 1; };
 
   const submit = () => {
     const text = input.trim();
@@ -150,9 +145,9 @@ export function MediaWorkspaceComposer({ mode, openOnMount, ...props }: Props) {
   };
 
   const toolbar = <View style={styles.toolbar}>
-    {mode === "speech" ? <Button accessibilityLabel={`Voice: ${voice}`} onPress={() => { setVoice(voices[(voices.indexOf(voice) + 1) % voices.length]!); pendingKey.current = undefined; draftRevision.current += 1; }} size="xs" variant="secondary">{voice}</Button> : null}
-    {mode === "video" ? <Button accessibilityLabel={`Duration: ${duration} seconds`} onPress={() => setSelectionSheet("duration")} size="xs" variant="secondary">{duration}s</Button> : null}
-    {mode === "image" || mode === "video" ? <Button accessibilityLabel={`Aspect ratio: ${mode === "image" ? imageRatio : videoRatio}`} onPress={() => setSelectionSheet("ratio")} size="xs" variant="secondary">{mode === "image" ? imageRatio : videoRatio}</Button> : null}
+    {mode === "speech" ? <Button accessibilityLabel={`Voice: ${voice}`} onPress={() => { setVoice(cycleSetting(voices, voice)); bumpDraft(); }} size="xs" variant="secondary">{voice}</Button> : null}
+    {mode === "video" ? <Button accessibilityLabel={`Duration: ${duration} seconds`} onPress={() => { setDuration((current) => current >= MAX_VIDEO_DURATION ? MIN_VIDEO_DURATION : current + 1); bumpDraft(); }} size="xs" variant="secondary">{duration}s</Button> : null}
+    {mode === "image" || mode === "video" ? <Button accessibilityLabel={`Aspect ratio: ${mode === "image" ? imageRatio : videoRatio}`} onPress={() => { if (mode === "image") setImageRatio(cycleSetting(imageRatios, imageRatio)); else setVideoRatio(cycleSetting(videoRatios, videoRatio)); bumpDraft(); }} size="xs" variant="secondary">{mode === "image" ? imageRatio : videoRatio}</Button> : null}
   </View>;
   const grid = <ScrollView contentContainerStyle={styles.grid} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={styles.scroll}>
     {currentFolder ? <FolderTile accessibilityLabel="Back to parent folder" label="Up" onPress={() => { setFolderStack((stack) => stack.slice(0, -1)); pendingKey.current = undefined; draftRevision.current += 1; }} parent size={cardSize} /> : null}
@@ -168,23 +163,11 @@ export function MediaWorkspaceComposer({ mode, openOnMount, ...props }: Props) {
   return <>
     <CoreComposer {...props} allowEmptySubmit={mode === "speech" && references.length > 0} disabled={!scopeKey} editable expandedAccessory={accessory} expandedFooter={composerKeyboardVisible ? undefined : <CapabilityTabs onValueChange={(next: CapabilityMode) => router.setParams({ mode: next })} value={mode} />} expandedLeading={<PlusIcon size="sm" />} expandedLeadingAccessory={<Text numberOfLines={1} style={styles.price}>{price}</Text>} expandedLeadingAccessibilityLabel={mode === "speech" ? "Select documents to narrate" : "Select reference images"} expandedToolbar={toolbar} expandedPrompts={[mode === "image" ? "Describe an image..." : mode === "speech" ? "Text to speak..." : "Describe a video..."]} focusOnOpenRequest={false} maxLength={mode === "speech" ? 15_000 : 4_000} message={grid} onChangeText={(text) => { setInput(text); pendingKey.current = undefined; draftRevision.current += 1; }} onExpandedKeyboardVisibilityChange={setComposerKeyboardVisible} onExpandedLeadingPress={() => setPickerOpen(true)} onSubmit={submit} openEnabled openRequest={openOnMount ? Math.max(props.openRequest ?? 0, 1) : props.openRequest} pageActions={undefined} pageIdentity={(close) => <View style={styles.identity}><View style={styles.identityMain}>{props.pageIdentity(close)}</View><ProfileHeaderRight /></View>} prompts={[mode === "image" ? "Describe an image..." : mode === "speech" ? "Text to speak..." : "Describe a video..."]} value={input} />
     <FilesPickerSheet acceptFile={(file) => mode === "speech" ? documentExtensions.has(file.extension) && file.hasExtractedText === true : imageReferences.has(file.extension)} allowedExtensions={mode === "speech" ? documentReferences : imageReferenceExtensions} context={context} onClose={() => setPickerOpen(false)} onDone={(selected) => { setReferences(selected); pendingKey.current = undefined; draftRevision.current += 1; }} open={pickerOpen} selectionLimit={mode === "speech" ? 20 : mode === "image" ? 8 : 1} title={mode === "speech" ? "Documents to narrate" : mode === "image" ? "Reference images" : "Starting image"} />
-    <BottomSheet footer={<Button onPress={() => setSelectionSheet(undefined)} size="md" variant="secondary">Close</Button>} height={selectionSheet === "ratio" ? "full" : undefined} onOpenChange={(open) => { if (!open) setSelectionSheet(undefined); }} open={Boolean(selectionSheet)} title={selectionSheet === "duration" ? "Video duration" : "Aspect ratio"}>
-      {selectionSheet === "duration" ? <View style={styles.durationStepper}>
-        <Button accessibilityLabel="Decrease video duration" contentMode="raw" disabled={duration <= MIN_VIDEO_DURATION} onPress={() => stepDuration(-1)} size="md" variant="secondary"><MinusIcon size="md" /></Button>
-        <Text accessibilityLiveRegion="polite" style={styles.durationValue}>{duration} seconds</Text>
-        <Button accessibilityLabel="Increase video duration" contentMode="raw" disabled={duration >= MAX_VIDEO_DURATION} onPress={() => stepDuration(1)} size="md" variant="secondary"><PlusIcon size="md" /></Button>
-      </View> : <ScrollView contentContainerStyle={styles.selectionOptions} showsVerticalScrollIndicator={false}>
-        {(mode === "image" ? imageRatios : videoRatios).map((value) => <Button accessibilityLabel={`Aspect ratio ${value}`} accessibilityState={{ selected: (mode === "image" ? imageRatio : videoRatio) === value }} key={value} onPress={() => { if (mode === "image") setImageRatio(value as (typeof imageRatios)[number]); else setVideoRatio(value as (typeof videoRatios)[number]); pendingKey.current = undefined; draftRevision.current += 1; setSelectionSheet(undefined); }} size="md" variant={(mode === "image" ? imageRatio : videoRatio) === value ? "primary" : "secondary"}>{value}</Button>)}
-      </ScrollView>}
-    </BottomSheet>
   </>;
 }
 
 const styles = StyleSheet.create({
   toolbar: { flexDirection: "row", gap: spacing.xs, alignItems: "center" },
-  selectionOptions: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, paddingVertical: spacing.md },
-  durationStepper: { alignItems: "center", flexDirection: "row", justifyContent: "center", gap: spacing.lg, paddingVertical: spacing.lg },
-  durationValue: { color: palette.text, fontFamily: fonts.medium, fontSize: 16, minWidth: 96, textAlign: "center" },
   price: { color: palette.silver300, fontFamily: fonts.medium, fontSize: 10, flexShrink: 1 },
   scroll: { flex: 1 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, paddingTop: spacing.md, paddingBottom: spacing.lg },

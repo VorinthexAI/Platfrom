@@ -3,6 +3,7 @@ import { withArangoKey } from '@/lib/db/base';
 import { fileSchema, type FileRecord } from '@/lib/db/files.node';
 import { appSearchRetrievalSchema, type AppSearchRetrieval } from '@/lib/app-search/service';
 import { executeAction } from '@/lib/ai/router';
+import { SparkRepositoryError } from '@/lib/sparks/repository';
 import { rerankInputSchema, rerankOutputSchema, type RerankOutput } from '@/lib/ai/actions/rerank';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { contextUserKey } from '@/lib/ai/tools/tool-context';
@@ -167,7 +168,7 @@ async function rerankCandidates(context: ToolContext, query: string, candidates:
     if (results.length !== candidates.length || new Set(results.map(({ index }) => index)).size !== candidates.length || results.some(({ index }) => index >= candidates.length)) throw new Error('Rerank returned incomplete candidate scores.');
     return [...results].sort((left, right) => right.relevanceScore - left.relevanceScore || left.index - right.index).map(({ index }) => candidates[index]!);
   } catch (error) {
-    if (signal?.aborted) throw error;
+    if (signal?.aborted || error instanceof SparkRepositoryError) throw error;
     console.warn('workspace rerank unavailable; using RRF order', { error });
     return candidates;
   }

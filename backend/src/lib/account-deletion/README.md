@@ -3,7 +3,7 @@
 Deletion uses a durable `users.deletionRequestedAt` fence before external work.
 Presence rejects fenced users. Redis session invalidation runs after the short
 fence transaction has committed and while no Arango transaction is open. One
-final exclusive Arango transaction revalidates the fence and atomically removes
+final write-locked Arango transaction revalidates the fence and atomically removes
 all owned data. A Redis failure leaves the fence in place for an authenticated
 retry. App store subscriptions are managed in the store; the app tells the user
 to cancel a subscription before deleting their account.
