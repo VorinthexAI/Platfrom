@@ -4,7 +4,6 @@ import { Badge } from "@vorinthex/shared/ui/badge";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CloseIcon, ReferralIcon, SparksIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Tabs, TabsTrigger } from "@vorinthex/shared/ui/tabs";
-import { useSessionToast as useToast } from "@/hooks/use-session-toast";
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useRef, useState } from "react";
 import { Animated, ScrollView, Share as NativeShare, StyleSheet, Text, useWindowDimensions, View } from "react-native";
@@ -20,7 +19,7 @@ import { useDelayedAction } from "@/hooks/use-delayed-action";
 import { formatWholeSparks } from "@/lib/billing-client";
 import { refreshAuthoritativeBilling } from "@/lib/billing-refresh";
 import { useErrorFeedback } from "@/hooks/use-error-feedback";
-import { availablePackages, packageForProduct, purchasePackage, purchasesAvailable, restorePurchases } from "@/lib/native-purchases";
+import { availablePackages, packageForProduct, purchasePackage, purchasesAvailable } from "@/lib/native-purchases";
 import { activeSubscriptionOffers, activeTopup, formatProductPrice, productSparkAmount, type MobileProduct } from "@/lib/product-client";
 import { fetchReferralSummary, referralSummaryQueryKey } from "@/lib/referral-client";
 import { recordOnboardingEvent } from "@/lib/onboarding-events";
@@ -40,7 +39,7 @@ function PlanCard({ current, onSelect, product, selected, storePrice }: { curren
   const bestValue = product.billingPeriod === "month";
   const status = current ? "Current plan" : undefined;
   return <View style={styles.planWrap}>
-    <Button accessibilityLabel={`${storePrice}${period ? ` per ${period}` : " one time"}, ${sparkAmount} Sparks${status ? `, ${status}` : ""}`} accessibilityState={{ selected }} contentMode="raw" onPress={onSelect} shape="rounded" size="md" style={[styles.plan, selected && styles.planSelected]} variant="outline">
+    <Button accessibilityLabel={`${storePrice}${period ? ` per ${period}` : " one time"}, ${sparkAmount} Sparks${status ? `, ${status}` : ""}`} accessibilityState={{ selected }} contentMode="raw" onPress={onSelect} shape="rounded" size="md" style={[styles.plan, (current || selected) && styles.planSelected]} variant="outline">
       <View style={styles.planValue}><Text style={styles.planGrant}>{sparkAmount.toLocaleString("en-US")} Sparks</Text><Text style={styles.planName}>{product.billingPeriod === "month" ? "Monthly plan" : product.billingPeriod === "week" ? "Weekly plan" : "One-time top-up"}</Text></View>
       <View style={styles.priceRow}><Text style={styles.price}>{storePrice}</Text>{period ? <Text style={styles.period}>/{period}</Text> : null}</View>
     </Button>
@@ -64,7 +63,6 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
   const balance = useWholeSparkBalance(userKey).data;
   const subscriptionQuery = useCurrentSubscription(userKey);
   const queryClient = useQueryClient();
-  const { showToast } = useToast();
   const subscriptions = activeSubscriptionOffers(products);
   const topup = activeTopup(products);
   const [page, setPage] = useState<Page>(initialPage);
@@ -177,7 +175,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
     }
   }
 
-  const footer = page === "plans" ? <><Button disabled={!selectedPackage || checkoutState === "opening" || selectedCurrentPlan} onPress={() => void checkout()} pressFeedback="none" size="md" variant="primary">{selectedCurrentPlan ? "Current plan" : "Purchase in app"}</Button>{mode === "standard" ? <Button disabled={!purchasesAvailable()} onPress={() => { if (userKey) void restorePurchases(userKey).then(() => { void refreshAuthoritativeBilling(queryClient, userKey); showToast({ title: "Purchases restored", duration: 2_500 }); }).catch(() => setMessage("Purchases could not be restored.")); }} size="md" variant="secondary">Restore purchases</Button> : null}{mode === "standard" ? <Button onPress={closeStandard} size="md" variant="secondary">Close</Button> : null}</> : <Button disabled={!referral.data || sharing} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button>;
+  const footer = page === "plans" ? <><Button disabled={!selectedPackage || checkoutState === "opening" || selectedCurrentPlan} onPress={() => void checkout()} pressFeedback="none" size="md" variant="primary">{selectedCurrentPlan ? "Current plan" : "Purchase in app"}</Button>{mode === "standard" ? <Button onPress={closeStandard} size="md" variant="secondary">Close</Button> : null}</> : <Button disabled={!referral.data || sharing} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button>;
 
   if (mode === "onboarding" && page === "referral") return <OnboardingStepLayout
     action={<><Button disabled={!referral.data || sharing || completing} onPress={() => void shareReferral()} size="md" variant="primary">Share</Button><Button disabled={completing} onPress={() => void finish()} size="md" variant="secondary">Skip</Button>{completionError ? <Button loading={completing} onPress={() => void finish()} size="md" variant="secondary">Retry</Button> : null}</>}

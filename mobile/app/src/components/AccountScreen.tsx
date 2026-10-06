@@ -8,7 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Avatar } from "@vorinthex/shared/ui/avatar";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
-import { CheckIcon, DeleteAccountIcon, FeedbackIcon, FolderIcon, HelpIcon, IssueIcon, PlusIcon, PrivacyIcon, ReferralIcon, SettingsIcon, SignOutIcon, SubscriptionCancelIcon, TermsIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { CheckIcon, DeleteAccountIcon, FeedbackIcon, FolderIcon, HelpIcon, IssueIcon, PlusIcon, PrivacyIcon, ReferralIcon, RestorePurchasesIcon, SettingsIcon, SignOutIcon, SubscriptionCancelIcon, TermsIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Skeleton } from "@vorinthex/shared/ui/skeleton";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
@@ -27,7 +27,8 @@ import { fonts, palette, radii, spacing } from "@/theme/tokens";
 import { AccountScreenShell } from "@/components/AccountScreenShell";
 
 import { formatStorageSummary } from "@/lib/billing-client";
-import { manageSubscriptions } from "@/lib/native-purchases";
+import { refreshAuthoritativeBilling } from "@/lib/billing-refresh";
+import { manageSubscriptions, restorePurchases } from "@/lib/native-purchases";
 import { useBillingSummary, useCurrentSubscription } from "@/hooks/use-billing-summary";
 import { fetchReferralSummary, normalizeReferralCode, redeemReferralCode, referralCodeSchema, referralRedemptionErrorMessage, referralSummaryQueryKey, type ReferralRedeemResult } from "@/lib/referral-client";
 import { subscriptionPresentation } from "@/lib/subscription-presentation";
@@ -52,9 +53,9 @@ function ScopeCard({ onLongPress, onPress, scope, size }: { onLongPress?: () => 
   </View>;
 }
 
-function SettingsActionCard({ danger = false, icon, label, onPress, size }: { danger?: boolean; icon: ReactNode; label: string; onPress: () => void; size: number }) {
+function SettingsActionCard({ danger = false, icon, label, loading = false, onPress, size }: { danger?: boolean; icon: ReactNode; label: string; loading?: boolean; onPress: () => void; size: number }) {
   return <View style={[styles.settingsCard, { height: size, width: size }]}>
-    <Button accessibilityLabel={label} contentMode="raw" onPress={onPress} shape="rounded" size="xl" style={styles.settingsCardButton} variant="ghost">
+    <Button accessibilityLabel={label} accessibilityState={{ busy: loading }} contentMode="raw" loading={loading} onPress={onPress} shape="rounded" size="xl" style={styles.settingsCardButton} variant="ghost">
       {icon}
       <Text numberOfLines={2} style={[styles.settingsCardLabel, danger && styles.settingsCardLabelDanger]}>{label}</Text>
     </Button>
@@ -101,6 +102,8 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const [referralRedemption, setReferralRedemption] = useState<ReferralRedeemResult>();
   const [referralRedemptionError, setReferralRedemptionError] = useState("");
   const [redeemingReferral, setRedeemingReferral] = useState(false);
+  const [restoringPurchases, setRestoringPurchases] = useState(false);
+  const restorePurchasesInFlight = useRef(false);
   const referralCodeInputRef = useRef<ComponentRef<typeof TextInput>>(null);
   const longPressedScopeKey = useRef<string | undefined>(undefined);
   const scopeListMutation = useRef(0);
@@ -125,6 +128,21 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
   const subscriptionView = subscription ? subscriptionPresentation(subscription, subscriptionProduct) : undefined;
   const openSubscriptionSettings = () => {
     if (user?.key) void manageSubscriptions(user.key).catch(() => showToast({ title: "Subscription settings could not be opened.", duration: 2_500 }));
+  };
+  const restoreStorePurchases = () => {
+    const userKey = user?.key;
+    if (!userKey || restorePurchasesInFlight.current) return;
+    restorePurchasesInFlight.current = true;
+    setRestoringPurchases(true);
+    void restorePurchases(userKey).then((info) => {
+      void refreshAuthoritativeBilling(queryClient, userKey);
+      showToast({ title: info.activeSubscriptions.length ? "Subscription restored" : "No active subscription to restore", duration: 2_500 });
+    }).catch(() => {
+      showToast({ title: "Purchases could not be restored.", duration: 2_500 });
+    }).finally(() => {
+      restorePurchasesInFlight.current = false;
+      setRestoringPurchases(false);
+    });
   };
   useEffect(() => {
     if (sheet === "scope-create" && !scopeOperationIsPending()) void queryClient.invalidateQueries({ queryKey: scopeListQueryKey(String(user?.key ?? "")) });
@@ -447,6 +465,7 @@ export function AccountScreen({ initialState, onReferralSheetClose, page }: { in
           <SettingsActionCard icon={<TermsIcon size="lg" />} label="Terms" onPress={() => setSheet("terms")} size={settingsCardSize} />
           <SettingsActionCard icon={<PrivacyIcon size="lg" />} label="Privacy" onPress={() => setSheet("privacy")} size={settingsCardSize} />
           <SettingsActionCard icon={<ReferralIcon size="lg" />} label="Referral" onPress={() => { setReferralMode("share"); setSheet("referral"); }} size={settingsCardSize} />
+          <SettingsActionCard icon={<RestorePurchasesIcon size="lg" />} label="Restore purchases" loading={restoringPurchases} onPress={restoreStorePurchases} size={settingsCardSize} />
           {subscriptionView?.action === "manage" ? <SettingsActionCard icon={<SubscriptionCancelIcon size="lg" />} label="Manage subscription" onPress={openSubscriptionSettings} size={settingsCardSize} /> : null}
           <SettingsActionCard danger icon={<DeleteAccountIcon size="lg" variant="danger" />} label="Delete account" onPress={() => setSheet("delete-account")} size={settingsCardSize} />
           <SettingsActionCard danger icon={<SignOutIcon size="lg" variant="danger" />} label="Log out" onPress={() => void logOut()} size={settingsCardSize} />
