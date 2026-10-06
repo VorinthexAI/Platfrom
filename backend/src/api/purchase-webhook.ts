@@ -8,7 +8,7 @@ export const isPurchaseWebhookPath = (path: string) => path.replace(/\/+$/, '') 
 export async function handlePurchaseWebhook(c: Context) {
   const secret = process.env.REVENUECAT_WEBHOOK_SECRET?.trim();
   const bearer = process.env.REVENUECAT_WEBHOOK_AUTH?.trim();
-  if (!secret || !bearer) return c.json({ error: 'webhook unavailable' }, 503);
+  if (!secret || !bearer || secret.includes('REPLACE_WITH') || bearer.includes('REPLACE_WITH')) return c.json({ error: 'webhook unavailable' }, 503);
   const size = c.req.header('content-length');
   if (size && (!/^\d+$/.test(size) || Number(size) > 256 * 1024)) return c.json({ error: 'invalid webhook body' }, 413);
   const raw = await c.req.text();

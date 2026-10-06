@@ -44,6 +44,7 @@ export function createCommerceService({ repository = createArangoCommerceReposit
     return product;
   };
   const subscriptionId = (event: PurchaseEvent) => `rc:${event.store ?? 'store'}:${event.original_transaction_id ?? event.transaction_id}`;
+  const paidOrderId = (event: PurchaseEvent) => `rc:${event.store ?? 'store'}:${event.transaction_id}:${event.purchased_at_ms}`;
   const projectSubscription = async (event: PurchaseEvent, status: 'active' | 'past_due' | 'canceled', cancelAtPeriodEnd: boolean) => {
     const userKey = event.app_user_id;
     if (!userKey || !await repository.userExists(userKey)) return;
@@ -82,7 +83,7 @@ export function createCommerceService({ repository = createArangoCommerceReposit
         const amountCents = event.price == null ? product.priceCents : Math.round(event.price * 100);
         if (amountCents <= 0) throw new CommerceError('INVALID_REFERENCE', 'Purchase has no paid amount.');
         const result = await repository.fulfillPaidOrder({
-          providerOrderId: `rc:${event.store ?? 'store'}:${event.transaction_id}`, userKey: event.app_user_id, productKey: product.key, productId: product.productId,
+          providerOrderId: paidOrderId(event), userKey: event.app_user_id, productKey: product.key, productId: product.productId,
           providerSubscriptionId: product.type === 'subscription' ? subscriptionId(event) : null,
           amountCents, baseAmountCents: amountCents, netAmountCents: amountCents, currency: 'USD',
           grantMicroSparks: resolvePurchaseGrantMicroSparks(product.productId),
@@ -90,7 +91,7 @@ export function createCommerceService({ repository = createArangoCommerceReposit
         });
         if (product.type === 'subscription') {
           await projectSubscription(event, 'active', false);
-          if (result.order.status !== 'refunded') await referralService.applyFirstPaidReward(event.app_user_id, result.order.key);
+          if (result.status === 'applied') await referralService.applyFirstPaidReward(event.app_user_id, result.order.key);
         }
         if (result.status === 'applied') {
           await publishBalance(event.app_user_id, 'spark.balance.changed').catch(() => undefined);
@@ -102,8 +103,8 @@ export function createCommerceService({ repository = createArangoCommerceReposit
         }
         return { processed: true, fulfillment: result.status };
       }
-      if (event.type === 'CANCELLATION' && event.cancel_reason === 'CUSTOMER_SUPPORT' && event.transaction_id) {
-        const orderId = `rc:${event.store ?? 'store'}:${event.transaction_id}`;
+      if (event.type === 'CANCELLATION' && event.cancel_reason === 'CUSTOMER_SUPPORT' && event.transaction_id && event.purchased_at_ms) {
+        const orderId = paidOrderId(event);
         const paid = await repository.getOrderByProviderId(orderId);
         if (!paid) throw new CommerceError('INVALID_REFERENCE', 'Refund arrived before its paid purchase.');
         const refunded = await repository.applyOrderRefund(orderId, paid.netAmountCents, now().toISOString());

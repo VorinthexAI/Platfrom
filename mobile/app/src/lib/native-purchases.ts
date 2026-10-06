@@ -1,7 +1,12 @@
 import { Platform } from "react-native";
 import Purchases, { type PurchasesPackage } from "react-native-purchases";
 
-const apiKey = Platform.OS === "ios" ? process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY : process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY;
+function configuredPublicKey(value?: string) {
+  const key = value?.trim() ?? "";
+  return key && !key.includes("REPLACE_WITH") ? key : undefined;
+}
+
+const apiKey = configuredPublicKey(Platform.OS === "ios" ? process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY : process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY);
 let configured = false;
 let identifiedUser: string | undefined;
 
