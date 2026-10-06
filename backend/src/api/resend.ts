@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { claimWebhookEvent, deleteProcessedWebhookEventByProviderAndEventId, updateProcessedWebhookEventByProviderAndEventId } from '@/lib/db/processed-webhook-events.node';
 import { getUserByEmailHash } from '@/lib/db/users.node';
 import { hashUserEmail } from './users';
+import { logAccountDeletion, serializeDeletionError } from '@/lib/account-deletion/debug-log';
 import { ACCOUNT_DELETE_CONFIRMATION, accountDeletionService, type AccountDeletionService } from '@/lib/account-deletion/service';
 
 export const RESEND_WEBHOOK_V1_PATH = '/api/v1/webhooks/resend';
@@ -69,7 +70,14 @@ export async function processResendEmailEvent(
   // A permanent bounce means the mailbox does not exist, so purge the account.
   // Transient and unclassified bounces leave the account intact.
   if (bounce?.type?.toLowerCase() === 'permanent') {
-    await deps.deleteAccount({ confirmation: ACCOUNT_DELETE_CONFIRMATION }, user.key, { sendConfirmation: false });
+    logAccountDeletion('resend.bounce-delete', { userKey: user.key, bounceType: bounce.type, bounceSubType: bounce.subType ?? null });
+    try {
+      await deps.deleteAccount({ confirmation: ACCOUNT_DELETE_CONFIRMATION }, user.key, { sendConfirmation: false });
+      logAccountDeletion('resend.bounce-delete-done', { userKey: user.key });
+    } catch (error) {
+      logAccountDeletion('resend.bounce-delete-error', { userKey: user.key, error: serializeDeletionError(error) });
+      throw error;
+    }
     return { processed: true, matched: true, deleted: true };
   }
 
