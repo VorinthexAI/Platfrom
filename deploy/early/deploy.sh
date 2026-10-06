@@ -80,8 +80,7 @@ docker network inspect "$NET" >/dev/null 2>&1 || docker network create "$NET"
 
 # App Redis stays private to Docker. BullMQ uses a separate persistent Redis
 # exposed on the host's private VPC address for transient Fargate workers.
-mkdir -p "${ROOT}/redis-data" "${ROOT}/job-redis-data" "${ROOT}/logs"
-chmod 1777 "${ROOT}/logs" || true
+mkdir -p "${ROOT}/redis-data" "${ROOT}/job-redis-data"
 if ! docker ps --format '{{.Names}}' | grep -qx redis; then
 	if docker ps -a --format '{{.Names}}' | grep -qx redis; then
 		docker start redis
@@ -128,7 +127,6 @@ aws ssm get-parameters-by-path --path "$SSM_PREFIX" --recursive --with-decryptio
 	echo "ROLE=api"
 	echo "REDIS_URL=redis://redis:6379"
 	echo "ARANGO_URL=http://${DB_PRIVATE_IP}:8529"
-	echo "ACCOUNT_DELETION_LOG_PATH=/tmp/vorinthex-logs/account-deletion.log"
 } >> "$API_ENV"
 
 WEB_ENV="${ROOT}/web.env"
@@ -169,7 +167,6 @@ docker pull "${ECR}/vorinthex-us-prod-web:${TAG}"
 # --- start the new color ----------------------------------------------------
 log "starting api-${NEW}"
 docker run -d --name "api-${NEW}" --network "$NET" --restart unless-stopped \
-  -v "${ROOT}/logs:/tmp/vorinthex-logs" \
   --env-file "$API_ENV" "${ECR}/vorinthex-us-prod-backend:${API_TAG}"
 log "starting web-${NEW}"
 docker run -d --name "web-${NEW}" --network "$NET" --restart unless-stopped \

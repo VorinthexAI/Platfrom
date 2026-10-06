@@ -12,7 +12,6 @@ import { camelSessionTokenPayload, clearSessionCookies, getSelectedRefreshToken,
 import { parseJson, strictObject } from './validation';
 import { z } from 'zod';
 import { signProfileAvatarUrl, trySignProfileAvatarUrl } from '@/lib/account-profile/avatar-url';
-import { logAccountDeletion, serializeDeletionError } from '@/lib/account-deletion/debug-log';
 import { accountDeleteInputSchema, accountDeletionService, type AccountDeletionService } from '@/lib/account-deletion/service';
 
 export async function buildAuthAccountResponse(
@@ -127,25 +126,12 @@ export async function logoutAuthAccount(c: Context) {
 
 export function createDeleteAuthAccountHandler(dependencies: { service?: AccountDeletionService; getIdentity?: typeof getAuthIdentity } = {}) {
   return async function deleteAuthAccount(c: Context) {
-    const startedAt = Date.now();
-    logAccountDeletion('http.start', { method: c.req.method, path: c.req.path });
-    try {
-      const identity = await (dependencies.getIdentity ?? getAuthIdentity)(c);
-      logAccountDeletion('http.identity', { identityType: identity?.identityType ?? null, userKey: identity?.key ?? null });
-      if (!identity || identity.identityType !== 'user') {
-        logAccountDeletion('http.unauthorized', { durationMs: Date.now() - startedAt });
-        return c.json({ error: 'user authentication required' }, 401);
-      }
-      const body = await parseJson(c, accountDeleteInputSchema);
-      logAccountDeletion('http.parsed', { userKey: identity.key });
-      const result = await (dependencies.service ?? accountDeletionService).delete(body, identity.key);
-      clearSessionCookies(c);
-      logAccountDeletion('http.success', { userKey: identity.key, result, durationMs: Date.now() - startedAt });
-      return c.json(result);
-    } catch (error) {
-      logAccountDeletion('http.error', { durationMs: Date.now() - startedAt, error: serializeDeletionError(error) });
-      throw error;
-    }
+    const identity = await (dependencies.getIdentity ?? getAuthIdentity)(c);
+    if (!identity || identity.identityType !== 'user') return c.json({ error: 'user authentication required' }, 401);
+    const body = await parseJson(c, accountDeleteInputSchema);
+    const result = await (dependencies.service ?? accountDeletionService).delete(body, identity.key);
+    clearSessionCookies(c);
+    return c.json(result);
   };
 }
 
