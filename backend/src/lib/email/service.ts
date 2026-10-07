@@ -108,36 +108,10 @@ export function renderMarketingEmail(input: MarketingEmailInput) {
   });
 }
 
-async function sendViaResend(input: { from: string; to: string; subject: string; html: string }, apiKey: string) {
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: input.from,
-      to: [input.to],
-      subject: input.subject,
-      html: input.html,
-    }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) {
-    throw new Error(`Resend delivery failed (${response.status}): ${await response.text()}`);
-  }
-}
-
 async function sendHtmlEmail(input: { from?: string; to: string; subject: string; html: string; logUrl?: string }) {
   const smtp = resolveSmtpConfiguration(process.env);
   if (!smtp) {
     console.log(`Vorinthex email to ${input.to}${input.logUrl ? `: ${input.logUrl}` : ''}`);
-    return;
-  }
-
-  const from = input.from ?? smtp.from;
-  if (smtp.host === 'smtp.resend.com' || smtp.user === 'resend') {
-    await sendViaResend({ from, to: input.to, subject: input.subject, html: input.html }, smtp.pass);
     return;
   }
 
@@ -149,7 +123,7 @@ async function sendHtmlEmail(input: { from?: string; to: string; subject: string
   });
 
   await transporter.sendMail({
-    from,
+    from: input.from ?? smtp.from,
     to: input.to,
     subject: input.subject,
     html: input.html,

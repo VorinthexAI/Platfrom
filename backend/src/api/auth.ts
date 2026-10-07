@@ -1148,12 +1148,7 @@ export async function requestSignInEmail(email: string, countryCode?: z.infer<ty
 
   const challenge = await createChallenge(user.key, 'email', EMAIL_LINK_TTL_MS, 'user', { withHandoff: true, referralCode });
   const magicLink = buildMagicLink(challenge.tokenHash, 'user');
-  try {
-    await deliverSignInEmail({ email: normalized, magicLink, expiresAt: challenge.expiresAt });
-  } catch (error) {
-    console.error('sign-in email delivery failed', error instanceof Error ? error.message : String(error));
-    throw error;
-  }
+  await deliverSignInEmail({ email: normalized, magicLink, expiresAt: challenge.expiresAt });
   return {
     allowed: true as const,
     expiresAt: challenge.expiresAt,
