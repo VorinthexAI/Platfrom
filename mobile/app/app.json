@@ -21,7 +21,10 @@
       },
       "associatedDomains": [
         "applinks:vorinthex.com"
-      ]
+      ],
+      "entitlements": {
+        "aps-environment": "production"
+      }
     },
     "android": {
       "package": "app.vorinthex.com",

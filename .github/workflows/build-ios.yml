@@ -90,4 +90,4 @@ jobs:
           eas env:set --name EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID --value "$EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID" --environment production --visibility plaintext --non-interactive
           eas env:set --name EXPO_PUBLIC_BACKEND_API_KEY --value "$EXPO_PUBLIC_BACKEND_API_KEY" --environment production --visibility plaintext --non-interactive
           if [ -n "$EXPO_PUBLIC_REVENUECAT_IOS_KEY" ]; then eas env:set --name EXPO_PUBLIC_REVENUECAT_IOS_KEY --value "$EXPO_PUBLIC_REVENUECAT_IOS_KEY" --environment production --visibility plaintext --non-interactive; fi
-          npx --yes eas-cli@21.0.1 build --platform ios --profile production --non-interactive --no-wait
+          npx --yes eas-cli@21.0.1 build --platform ios --profile production --clear-provisioning-profile --non-interactive --no-wait
