@@ -91,6 +91,7 @@ export default function AuthRoute() {
           return;
         }
         if (status.status !== "approved" || claiming) return;
+        if (useAuthStore.getState().status === "authenticated") return;
         claiming = true;
         claimAttempted = true;
         setCompletingSignIn(true);
@@ -102,6 +103,10 @@ export default function AuthRoute() {
         if (claim.status === "authenticated") {
           await hydrate({ newSession: true });
           if (!active || version !== requestVersion.current) return;
+          if (useAuthStore.getState().status !== "authenticated") await useAuthStore.getState().bootstrap();
+          if (useAuthStore.getState().status === "authenticated") {
+            router.replace(useAuthStore.getState().user?.isOnboarded ? "/home" : "/onboarding");
+          }
           claiming = false;
         } else {
           claiming = false;

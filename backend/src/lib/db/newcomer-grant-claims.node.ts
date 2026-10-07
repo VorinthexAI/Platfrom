@@ -17,7 +17,7 @@ export type NewcomerGrantClaim = z.infer<typeof newcomerGrantClaimSchema>;
 const helpers = createNodeHelpers(NEWCOMER_GRANT_CLAIMS_COLLECTION, newcomerGrantClaimSchema, [], { requireEmbedding: false });
 
 export async function newcomerGrantClaimKey(installationIdentifier: string) {
-  return sha256(`${eventIdentifierSchema.parse(installationIdentifier)}:temp-500`);
+  return sha256(eventIdentifierSchema.parse(installationIdentifier));
 }
 
 export async function claimNewcomerGrant(installationIdentifier: string, userKey: string, createdAt = new Date().toISOString()): Promise<'claimed' | 'duplicate'> {

@@ -86,12 +86,12 @@ export default function RootLayout() {
     const root = segments[0] as string | undefined;
     const isPublic = root === "auth" || root === "intro" || root === "public" || root === "referral" || root === undefined;
     if (status === "unauthenticated") {
-      if (!localOnboarding.previewComplete && (root === undefined || root === "auth" && segments.length === 1)) router.replace("/intro" as Href);
+      if (!localOnboarding.previewComplete && root === "auth" && segments.length === 1) router.replace("/intro" as Href);
       else if (localOnboarding.previewComplete && root === "intro") router.replace("/auth" as Href);
-      else if (root === undefined || !isPublic) router.replace((localOnboarding.previewComplete ? "/auth" : "/intro") as Href);
+      else if (root !== undefined && !isPublic) router.replace((localOnboarding.previewComplete ? "/auth" : "/intro") as Href);
       return;
     }
-    if (status === "authenticated" && (root === "auth" || root === "intro" || root === "public")) {
+    if (status === "authenticated" && (root === "auth" || root === "intro" || root === "public" || root === undefined)) {
       if (!isOnboarded) router.replace("/onboarding");
       else router.replace("/home" as Href);
     }

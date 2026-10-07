@@ -14,20 +14,14 @@ import { ACCOUNT_GRANT_MICRO_SPARKS } from '@/lib/costs';
 import { referralService } from '@/lib/referrals/service';
 import { sendWelcomeEmail } from '@/lib/email/lifecycle';
 import { currentEventIdentifier } from '@/lib/ai/events/event-identifier';
+import { currentDevice } from '@/lib/ai/events/device';
 import { claimNewcomerGrant, releaseNewcomerGrantClaim } from '@/lib/db/newcomer-grant-claims.node';
-
-const NEWCOMER_GRANT_IDEMPOTENCY_KEY = 'account-grant:v3-500';
-
-function isNewcomerGrant(transaction: { idempotencyKey: string; deltaMicroSparks: number }) {
-  return transaction.idempotencyKey === NEWCOMER_GRANT_IDEMPOTENCY_KEY
-    || (transaction.idempotencyKey === 'account-grant:v3' && transaction.deltaMicroSparks === ACCOUNT_GRANT_MICRO_SPARKS);
-}
 
 export function newcomerGrantInput(eventKey: string) {
   return {
     deltaMicroSparks: ACCOUNT_GRANT_MICRO_SPARKS,
-    idempotencyKey: NEWCOMER_GRANT_IDEMPOTENCY_KEY,
-    requestHash: 'account-grant:v3:500-sparks',
+    idempotencyKey: 'account-grant:v3',
+    requestHash: 'account-grant:v3:50-sparks',
     eventKey,
     metadata: { category: 'newcomer-grant', grantVersion: 'v3' },
   } as const;
@@ -36,11 +30,7 @@ export function newcomerGrantInput(eventKey: string) {
 async function initializeNewAccount(user: User): Promise<User> {
   const eventKey = newId();
   const grant = await applyNewcomerGrant(user.key, eventKey);
-  try {
-    await recordAccountCreatedEvent(user, grant ?? { key: null, eventKey, deltaMicroSparks: 0 });
-  } catch (error) {
-    console.error('account.created event failed', { userKey: user.key, error });
-  }
+  await recordAccountCreatedEvent(user, grant ?? { key: null, eventKey, deltaMicroSparks: 0 });
   await referralService.ensurePersonalCode(user.key);
   if (!user.email.endsWith('@guest.vorinthex.com')) await sendWelcomeEmail(user.email).catch((error: unknown) => console.error('welcome email delivery failed', { userKey: user.key, error }));
   return await getUserById(user.key) ?? user;
@@ -48,15 +38,15 @@ async function initializeNewAccount(user: User): Promise<User> {
 
 async function applyNewcomerGrant(userKey: string, eventKey: string) {
   const installationIdentifier = currentEventIdentifier();
-  if (installationIdentifier) await claimNewcomerGrant(installationIdentifier, userKey);
+  if (currentDevice() && !installationIdentifier) return null;
+  if (installationIdentifier && await claimNewcomerGrant(installationIdentifier, userKey) === 'duplicate') return null;
   try {
     const grant = await sparkService.adjust(userKey, newcomerGrantInput(eventKey));
-    if (grant.status === 'conflict') return isNewcomerGrant(grant.transaction) ? grant.transaction : null;
+    if (grant.status === 'conflict') throw new Error(`Spark account initialization conflicted for user ${userKey}.`);
     return grant.transaction;
   } catch (error) {
     if (installationIdentifier) await releaseNewcomerGrantClaim(installationIdentifier);
-    console.error('newcomer spark grant failed', { userKey, error });
-    return null;
+    throw error;
   }
 }
 
@@ -76,19 +66,8 @@ async function recordAccountCreatedEvent(user: User, transaction: { key: string 
 }
 
 async function recoverNewcomerGrantEvent(user: User) {
-  const history = await sparkService.listHistory(user.key, { limit: 200 });
-  const existing = history.find(isNewcomerGrant);
-  if (existing) {
-    await recordAccountCreatedEvent(user, existing);
-    return;
-  }
-  const grant = await applyNewcomerGrant(user.key, newId());
-  if (grant) {
-    await recordAccountCreatedEvent(user, grant);
-    return;
-  }
-  const legacy = history.find(({ idempotencyKey }) => idempotencyKey === 'account-grant:v3' || idempotencyKey === 'account-grant:v2');
-  if (legacy) await recordAccountCreatedEvent(user, legacy);
+  const transaction = (await sparkService.listHistory(user.key, { limit: 200 })).find(({ idempotencyKey }) => idempotencyKey === 'account-grant:v3' || idempotencyKey === 'account-grant:v2');
+  if (transaction) await recordAccountCreatedEvent(user, transaction);
 }
 
 export function normalizeEmail(email: string) {
