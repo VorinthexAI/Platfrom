@@ -43,8 +43,6 @@ export function SiteFooter() {
     <footer className={styles.footer}>
       <Brand />
       <nav className={styles.footerLinks} aria-label="Footer navigation">
-        <Link href="/pricing">Pricing</Link>
-        <Link href="/about">About</Link>
         <Link href="/privacy">Privacy</Link>
         <Link href="/terms">Terms</Link>
         <Link href="/contact">Contact</Link>

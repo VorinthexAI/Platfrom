@@ -9,7 +9,11 @@ const appRoot = path.dirname(fileURLToPath(import.meta.url));
 const workspaceRoot = path.resolve(appRoot, "../..");
 
 export function getPermanentRedirects() {
-  return [{ source: "/core", destination: "/", permanent: true }];
+  return [
+    { source: "/core", destination: "/", permanent: true },
+    { source: "/about", destination: "/", permanent: true },
+    { source: "/pricing", destination: "/", permanent: true },
+  ];
 }
 
 export function getSecurityHeaders(blockIndexing = false) {

@@ -19,13 +19,11 @@ const STORAGE_PRICING_FACT = `Storage is charged hourly from prepaid Sparks at $
 
 export type PublicRoutePath =
   | "/"
-  | "/pricing"
-  | "/about"
   | "/contact"
   | "/privacy"
   | "/terms";
 
-export type SchemaPageType = "WebPage" | "AboutPage" | "ContactPage";
+export type SchemaPageType = "WebPage" | "ContactPage";
 
 export interface PublicRouteEntry {
   path: PublicRoutePath;
@@ -114,28 +112,6 @@ export const PUBLIC_DISCOVERABILITY_REGISTRY = {
     status: "current",
     lastModified: CONTENT_LAST_REVIEWED,
     capabilities: [...pillarNames, "Image, speech, and video generation", "HEIC/HEIF photo import and MOV video storage"],
-  },
-  "/pricing": {
-    path: "/pricing",
-    title: "Sparks Pricing | Vorinthex AI",
-    description: PRICING_HERO_BODY,
-    summary: `${PRICING_HERO_HEADING}. ${PRICING_HERO_BODY} ${PRODUCT_FACTS.mediaGeneration} ${PRODUCT_FACTS.storagePricing}`,
-    schemaPageType: "WebPage",
-    status: "current",
-    lastModified: CONTENT_LAST_REVIEWED,
-    capabilities: [],
-  },
-  "/about": {
-    path: "/about",
-    title: "About Vorinthex AI",
-    description:
-      "Learn about Vorinthex AI and Core, a personal AI for iOS and Android that starts from the work you keep.",
-    summary:
-      "Vorinthex AI builds Core, a personal AI that starts from the work you keep in Storage, with Sparks as one balance.",
-    schemaPageType: "AboutPage",
-    status: "current",
-    lastModified: CONTENT_LAST_REVIEWED,
-    capabilities: pillarNames,
   },
   "/contact": {
     path: "/contact",

@@ -37,13 +37,12 @@ Last reviewed: ${CONTENT_LAST_REVIEWED}
 ## Product
 
 - [Vorinthex Core](${CANONICAL_ORIGIN}): ${PUBLIC_DISCOVERABILITY_REGISTRY["/"].summary}
-- [Sparks pricing](${canonicalUrl("/pricing")}): ${PRODUCT_FACTS.sparks}
+- Sparks: ${PRODUCT_FACTS.sparks}
 
 ${buildPricingText()}
 
 ## Company and policies
 
-- [About](${canonicalUrl("/about")}): ${PUBLIC_DISCOVERABILITY_REGISTRY["/about"].summary}
 - [Privacy](${canonicalUrl("/privacy")}): ${PUBLIC_DISCOVERABILITY_REGISTRY["/privacy"].summary}
 - [Terms](${canonicalUrl("/terms")}): ${PUBLIC_DISCOVERABILITY_REGISTRY["/terms"].summary}
 - [Contact](${canonicalUrl("/contact")}): Email ${CONTACT_EMAIL}.
