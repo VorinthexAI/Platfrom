@@ -151,6 +151,8 @@ describe("generated answer-engine content", () => {
       expect(output).toContain("balances never go below zero");
       expect(output).toContain("permanently deleted after 90 consecutive unfunded days");
       expect(output).toContain(canonicalUrl("/terms"));
+      expect(output).not.toContain(canonicalUrl("/about"));
+      expect(output).not.toContain(canonicalUrl("/pricing"));
       expect(output).not.toMatch(/Moon|Comet|On-Demand|unlimited|most popular/i);
       expect(output).toContain(formatSparkCount(NEWCOMER_FREE_SPARKS));
 
@@ -178,8 +180,8 @@ describe("generated answer-engine content", () => {
     expect(PRODUCT_FACTS.pricing.referrals).toEqual({ signup: 50, firstSubscriptionPurchase: 100, recipient: "referrer", frequency: "one-time per referred user at each stage" });
     expect(PRODUCT_FACTS.pricing.webPurchasesAvailable).toBe(false);
 
-    const pricingSchema = JSON.stringify(buildPageGraph("/pricing"));
-    expect(pricingSchema).not.toMatch(/\"@type\":\"(?:Offer|Product)\"/);
+    const homeSchema = JSON.stringify(buildPageGraph("/"));
+    expect(homeSchema).not.toMatch(/\"@type\":\"(?:Offer|Product)\"/);
   });
 });
 
@@ -207,12 +209,12 @@ describe("legal policy copy", () => {
   });
 });
 
-test("retires /core with a permanent redirect to home", () => {
-  expect(getPermanentRedirects()).toContainEqual({
-    source: "/core",
-    destination: "/",
-    permanent: true,
-  });
+test("retires /core, /about, and /pricing with permanent redirects to home", () => {
+  expect(getPermanentRedirects()).toEqual([
+    { source: "/core", destination: "/", permanent: true },
+    { source: "/about", destination: "/", permanent: true },
+    { source: "/pricing", destination: "/", permanent: true },
+  ]);
 });
 
 test("adds a noindex response header only when indexing is blocked", () => {
