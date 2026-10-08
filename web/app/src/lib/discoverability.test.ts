@@ -121,26 +121,15 @@ describe("structured data", () => {
 });
 
 describe("generated answer-engine content", () => {
-  test("describes private, searchable Core chat continuity without immediacy guarantees", () => {
-    const archive = PRODUCT_FACTS.capabilities.find(({ id }) => id === "archive");
-    const copy = JSON.stringify(archive);
+  test("describes Storage, Core, and Sparks without retired product names", () => {
+    expect(PRODUCT_FACTS.capabilities.map(({ id }) => id)).toEqual(["storage", "core", "sparks"]);
 
-    expect(copy).toContain("Vorinthex AI / Core / Chats");
-    expect(copy).toContain("organized automatically");
-    expect(copy).toContain("rolling summaries support continuity");
-    expect(copy).toContain("searched by meaning later");
-    expect(copy).toContain("private authorized scope");
-    expect(copy).not.toMatch(/sole authoritative|immediate(?:ly)? available/i);
-  });
-
-  test("describes Signal as a provider-neutral private communication inbox", () => {
-    const signal = PRODUCT_FACTS.capabilities.find(({ id }) => id === "signal");
-    const copy = JSON.stringify(signal);
-
-    expect(signal?.description).toContain("private inbox");
-    expect(copy).toContain("connected email");
-    expect(copy).toContain("Vorinthex app communication and support");
-    expect(copy).not.toMatch(/Gmail/i);
+    const copy = JSON.stringify(PRODUCT_FACTS.capabilities);
+    expect(copy).toContain("Storage");
+    expect(copy).toContain("Core chats");
+    expect(copy).toContain("One balance");
+    expect(copy).not.toMatch(/\b(?:Archive|Gallery|Compass|Ascend)\b/);
+    expect(copy).not.toMatch(/connected email|audio book|interactive globe/i);
   });
 
   test("states product facts consistently and links canonical evidence", () => {
@@ -151,6 +140,9 @@ describe("generated answer-engine content", () => {
       expect(output).toContain("> ");
       expect(output).toContain(`Last reviewed: ${CONTENT_LAST_REVIEWED}`);
       expect(output).toContain("personal AI");
+      expect(output).toContain("Storage");
+      expect(output).not.toMatch(/\b(?:Archive|Gallery|Compass|Ascend)\b/);
+      expect(output).not.toMatch(/knowledge, memories, communication, discovery, and goals/);
       expect(output).toContain(PRICING_HERO_HEADING);
       expect(output).toContain(PRICING_HERO_BODY);
       expect(output).not.toMatch(/usage-based|pay only for what you use/i);

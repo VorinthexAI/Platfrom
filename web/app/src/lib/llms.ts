@@ -30,7 +30,7 @@ ${subscriptions.map((plan) => `  - ${plan.name}: ${formatUsd(plan.price)} per ${
 export function buildLlmsText(): string {
   return `# Vorinthex AI
 
-> Vorinthex Core is a personal AI for iOS and Android that connects knowledge, memories, communication, discovery, and goals.
+> Vorinthex Core is a personal AI for iOS and Android that starts from the work you keep in Storage.
 
 Last reviewed: ${CONTENT_LAST_REVIEWED}
 
@@ -53,7 +53,7 @@ ${buildPricingText()}
 export function buildLlmsFullText(): string {
   return `# Vorinthex AI
 
-> Vorinthex AI builds Core, a personal AI for iOS and Android that connects the context that matters to you.
+> Vorinthex AI builds Core, a personal AI for iOS and Android that starts from the work you keep.
 
 Last reviewed: ${CONTENT_LAST_REVIEWED}
 
@@ -67,7 +67,7 @@ ${PRODUCT_FACTS.mediaGeneration}
 
 ${PRODUCT_FACTS.fileFormats}
 
-## Core apps
+## Storage, Core, and Sparks
 
 ${PRODUCT_FACTS.capabilities.map(({ name, description, details }) => `- ${name}: ${description} ${details.join(" ")}`).join("\n")}
 

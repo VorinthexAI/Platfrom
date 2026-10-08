@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CorePage } from "@/components/core/CorePage";
 import { PricingPage } from "@/components/pricing/PricingPage";
 import {
-  CORE_CAPABILITIES,
+  PRODUCT_PILLARS,
   PRICING_HERO_BODY,
   PRICING_HERO_HEADING,
 } from "@/lib/discoverability";
@@ -16,15 +16,17 @@ import {
   formatUsd,
 } from "@/lib/spark-pricing";
 
-test("renders the download action and immersive Core app journey", () => {
+test("renders the download action and Storage, Core, and Sparks pillars", () => {
   const html = renderToStaticMarkup(<CorePage />);
 
   expect(html).toContain("Download app");
+  expect(html).toContain("Keep your work. Ask Core.");
   expect(html).not.toMatch(/pre-launch|in development|not purchasable/i);
-  for (const capability of CORE_CAPABILITIES) {
-    expect(html).toContain(`id="${capability.id}"`);
-    expect(html).toContain(capability.promise);
-    for (const paragraph of capability.details) expect(html).toContain(paragraph);
+  expect(html).not.toMatch(/Core Apps|Archive|Gallery|Compass|Ascend/);
+  for (const pillar of PRODUCT_PILLARS) {
+    expect(html).toContain(`id="${pillar.id}"`);
+    expect(html).toContain(pillar.promise);
+    for (const paragraph of pillar.details) expect(html).toContain(paragraph);
   }
 });
 

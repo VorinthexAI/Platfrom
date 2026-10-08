@@ -63,7 +63,7 @@ export default function Image() {
             color: "#aeb7be",
           }}
         >
-          Everything. Intelligently connected.
+            Keep your work. Ask Core.
         </div>
         <div
           style={{

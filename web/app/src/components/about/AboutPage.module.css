@@ -30,10 +30,9 @@
 .foundation h2 { margin-top: 18px; font-family: var(--font-display); font-size: clamp(30px, 3.5vw, 46px); font-weight: 400; letter-spacing: .11em; line-height: 1.4; text-transform: uppercase; }
 .coreCopy > p:last-child,
 .foundation div > p:not(.eyebrow) { margin-top: 22px; color: #959895; font-size: 14px; line-height: 1.85; }
-.capabilityMarks { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
-.capabilityMarks div { display: grid; justify-items: center; gap: 10px; padding: 20px 8px; border: 1px solid rgba(255,255,255,.09); border-radius: 10px; background: rgba(255,255,255,.02); }
-.capabilityMarks img { width: 76px; height: 76px; object-fit: contain; }
-.capabilityMarks span { color: #b5b6b3; font-family: var(--font-display); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
+.capabilityMarks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.capabilityMarks div { display: grid; justify-items: center; gap: 10px; padding: 28px 8px; border: 1px solid rgba(255,255,255,.09); border-radius: 10px; background: rgba(255,255,255,.02); }
+.capabilityMarks span { color: #b5b6b3; font-family: var(--font-display); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; }
 
 .foundation { display: grid; grid-template-columns: 360px 1fr; align-items: center; gap: 72px; padding-block: 120px 40px; }
 .foundation > img { width: 320px; height: 320px; object-fit: contain; filter: drop-shadow(0 0 45px rgba(190,209,219,.13)); }
@@ -61,8 +60,7 @@
   .mission { padding-inline: 0; }
   .principles { padding-block: 64px; }
   .coreStory { gap: 44px; padding: 48px 22px; }
-  .capabilityMarks { grid-template-columns: repeat(2, 1fr); }
-  .capabilityMarks div:last-child { grid-column: 1 / -1; width: calc((100% - 12px) / 2); justify-self: center; }
+  .capabilityMarks { grid-template-columns: 1fr; }
   .foundation { grid-template-columns: 1fr; justify-items: center; padding-top: 78px; text-align: center; }
   .foundation > img { width: 230px; height: 230px; }
 }

@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@vorinthex/shared/ui/components";
-import { CORE_CAPABILITIES } from "@/lib/core";
+import { PRODUCT_PILLARS } from "@/lib/core";
 import { SiteFooter, SiteHeader } from "@/components/site/SiteChrome";
 import { SiteNeuralBackdrop } from "@/components/site/SiteNeuralBackdrop";
 import styles from "./AboutPage.module.css";
@@ -20,7 +20,7 @@ const PRINCIPLES = [
   {
     number: "03",
     title: "Connected by nature",
-    body: "Knowledge becomes more useful when memories, communication, discovery, and goals understand one another.",
+    body: "Files, chats, and Core share one space, so what you keep can become the next answer.",
   },
 ] as const;
 
@@ -37,8 +37,7 @@ export function AboutPage() {
           <h1>Intelligence should know you.</h1>
           <p className={styles.lead}>
             Vorinthex AI is an AI-native software company focused on Core: one
-            personal AI for iOS and Android that connects the context you choose
-            to provide.
+            personal AI for iOS and Android that starts from the work you keep.
           </p>
         </div>
         <div className={styles.heroMark}>
@@ -57,11 +56,11 @@ export function AboutPage() {
         <p className={styles.eyebrow}>Our mission</p>
         <h2>Make personal intelligence practical, private, and deeply useful.</h2>
         <p>
-          Today, meaningful context is scattered across notes, photos,
-          conversations, places, plans, and routines. People are forced to move
-          between disconnected tools that repeatedly forget who they are and
-          what matters. Core is our answer: one intelligence that connects that
-          context and helps turn it into action.
+          Today, meaningful work is scattered across notes, photos, documents,
+          and conversations. People are forced to move between disconnected
+          tools that repeatedly forget who they are and what matters. Core is
+          our answer: one personal AI that starts from the files you choose to
+          keep.
         </p>
       </section>
 
@@ -79,24 +78,17 @@ export function AboutPage() {
       <section className={styles.coreStory}>
         <div className={styles.coreCopy}>
           <p className={styles.eyebrow}>Built as one Core</p>
-          <h2>One foundation. Capabilities that expand with you.</h2>
+          <h2>Storage. Core. Sparks.</h2>
           <p>
-            Core begins with a personal intelligence and expands through focused
-            capabilities. Archive, Gallery, Signal, Compass, and Ascend each do
-            something distinct, while sharing the context that makes the whole
-            system more useful than isolated tools.
+            Keep your work in Storage. Ask Core, and it can search what you have
+            kept, continue a conversation, or create images, speech, and short
+            videos. Sparks are one balance for Storage and Core.
           </p>
         </div>
         <div className={styles.capabilityMarks}>
-          {CORE_CAPABILITIES.map((capability) => (
-            <div key={capability.name}>
-              <Image
-                alt={`${capability.name} emblem`}
-                height={92}
-                src={capability.icon}
-                width={92}
-              />
-              <span>{capability.name}</span>
+          {PRODUCT_PILLARS.map((pillar) => (
+            <div key={pillar.name}>
+              <span>{pillar.name}</span>
             </div>
           ))}
         </div>

@@ -1,4 +1,4 @@
-export { CORE_CAPABILITIES } from "@/lib/discoverability";
+export { PRODUCT_PILLARS } from "@/lib/discoverability";
 
 export const APP_STORE_URL =
   "https://apps.apple.com/us/search?term=Vorinthex%20AI";
