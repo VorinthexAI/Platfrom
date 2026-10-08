@@ -1,7 +1,16 @@
 import { LEGAL_CONTACT_EMAIL, LEGAL_EFFECTIVE_DATE_ISO } from "@vorinthex/shared/lib/legal-copy";
+import {
+  NEWCOMER_FREE_SPARKS,
+  SPARK_PRICING_CURRENCY,
+  SPARK_SUBSCRIPTIONS,
+  SPARK_TOP_UP,
+  REFERRAL_REWARDS,
+  STORAGE_SPARKS_PER_GB_MONTH,
+  formatSparkCount,
+} from "@/lib/spark-pricing";
 
 export const CANONICAL_ORIGIN = "https://vorinthex.com" as const;
-export const CONTENT_LAST_REVIEWED = "2026-10-06" as const;
+export const CONTENT_LAST_REVIEWED = "2026-10-08" as const;
 export const CONTACT_EMAIL = LEGAL_CONTACT_EMAIL;
 export const PRICING_HERO_HEADING = "One balance for everything you create and use" as const;
 export const PRICING_HERO_BODY =
@@ -30,98 +39,37 @@ export interface PublicRouteEntry {
   faq?: readonly { question: string; answer: string }[];
 }
 
-export const CORE_CAPABILITIES = [
+export const PRODUCT_PILLARS = [
   {
-    id: "archive",
-    name: "Archive",
-    icon: "/logos/entities/capability-archive.png",
-    description: "Write, save, organize, search, and understand your knowledge.",
-    promise: "One intelligent home for everything you want to keep.",
+    id: "storage",
+    name: "Storage",
+    description: "Keep your files in your own secure cloud space.",
+    promise: "A home for your work.",
     details: [
-      "Capture quick thoughts, create polished documents, upload existing work, and organize notes, ideas, research, and knowledge in one simple place.",
-      "Powerful search helps you rediscover information, while built-in AI can write, rewrite, summarize, translate, explain, and transform entire documents naturally.",
-      "Core chats appear under Vorinthex AI / Core / Chats. Messages are organized automatically, rolling summaries support continuity, and archived chat content can be searched by meaning later within its private authorized scope.",
-    ],
-    connection:
-      "Archive gives every Core app durable memory, so conversations, plans and coaching can build on saved knowledge.",
-    features: [
-      "Notes, ideas, and research",
-      "Folders, labels, and backlinks",
-      "Semantic search and knowledge connections",
-      "Private, scoped Core chat history",
+      "Keep your files in your own secure cloud Storage space, ready for you and Core when you need them.",
+      "Notes, documents, photos, audio, videos, and Core chats stay together as the story of your work, instead of feeling scattered.",
+      "Arrange your work by project and keep what matters close at hand. Core can still find it across your space.",
     ],
   },
   {
-    id: "gallery",
-    name: "Gallery",
-    icon: "/logos/entities/capability-gallery.png",
-    description: "Organize, understand, and search your visual library.",
-    promise: "An intelligent home for your images and memories.",
+    id: "core",
+    name: "Core",
+    description: "Your personal AI that starts from the work you keep.",
+    promise: "An answer that starts from your context.",
     details: [
-      "Bring photos and images together in beautiful collections, mark favorites, and find what you need without remembering filenames or manually sorting everything.",
-      "Gallery understands what your images contain and makes them naturally searchable, so you can rediscover visual moments without manually sorting everything.",
-      "Saved image highlights, written memories, and named visual identities can provide authorized context for Core answers.",
-    ],
-    connection:
-      "Gallery links visual moments to Archive knowledge, Compass places and people connected through Signal.",
-    features: [
-      "Albums and visual clusters",
-      "Search by people, places, dates, and events",
-      "Favorites and curated collections",
+      "Ask Core about your work in your own words. It can use the content you have chosen to keep in your current scope to find answers and make connections.",
+      "Create images, speech, or short videos with Core. What you make is saved with the rest of your work.",
+      "Core chats live in Storage, with transcripts and summaries you can find again and bring into a new conversation.",
     ],
   },
   {
-    id: "signal",
-    name: "Signal",
-    icon: "/logos/entities/capability-signal.png",
-    description: "A private inbox for connected email and communication from Vorinthex apps and support.",
-    promise: "Keep the communication that matters in one private place.",
+    id: "sparks",
+    name: "Sparks",
+    description: "One unified currency for Storage and Core.",
+    promise: "One balance for it all.",
     details: [
-      "Signal brings connected email together with communication from Vorinthex apps and support in one focused, private inbox.",
-      "For connected email, Signal helps prioritize conversations, understand messages, and prepare replies in your voice while keeping every send action under your control.",
-    ],
-    connection:
-      "Signal keeps private communication connected to authorized Core context without creating another isolated silo.",
-    features: [
-      "Connected email in one private inbox",
-      "Vorinthex app communication and support",
-      "Connected email replies for your approval",
-    ],
-  },
-  {
-    id: "compass",
-    name: "Compass",
-    icon: "/logos/entities/capability-compass.png",
-    description: "Explore the world and view cities on an interactive globe.",
-    promise: "Your available destinations, mapped around you.",
-    details: [
-      "Explore countries on a 3D globe and browse the destination cities available to you.",
-      "Compass provides a simple map of your available cities and the world that remains to be discovered.",
-    ],
-    connection:
-      "Compass connects discoveries to Archive knowledge, Gallery memories and goals developed in Ascend.",
-    features: [
-      "Explore countries on an interactive globe",
-      "Browse available destination cities",
-      "Connect places with your wider context",
-    ],
-  },
-  {
-    id: "ascend",
-    name: "Ascend",
-    icon: "/logos/entities/capability-ascend.png",
-    description: "Personalized audio books researched and created around your goals.",
-    promise: "A learning experience written specifically for you.",
-    details: [
-      "Tell Ascend what you want to learn or improve. It researches the subject, understands your goals, builds a unique structure, writes every chapter, and creates a cover.",
-      "Each new audio book can build on what you have already explored, avoiding repetition and taking your learning deeper over time.",
-    ],
-    connection:
-      "Ascend uses knowledge, communication and discoveries a user chooses to connect, grounding guidance in actual priorities.",
-    features: [
-      "Goals, habits, health, and routines",
-      "Personal learning journeys",
-      "Coaching grounded in the context you provide",
+      PRICING_HERO_BODY,
+      `You start with ${formatSparkCount(NEWCOMER_FREE_SPARKS)} Sparks. One balance covers Storage and Core AI-based usage, across the work you keep and the things you create.`,
     ],
   },
 ] as const;
@@ -134,7 +82,7 @@ export const PRODUCT_FACTS = {
   privacy:
     "Core stores your files and chats in your scopes and may use authorized content to answer questions. AI feature requests may be processed by external model providers; the Privacy Policy explains data use and deletion.",
   workspaceContext:
-    "Core can answer questions using relevant authorized content across saved documents, files, images, highlights, memories, previous chats, communication, travel guides, trips, and audio books, and can explain the signed-in user's Sparks balance and subscription. Answers distinguish incomplete evidence from confirmed absence. Core also offers separate chat, image, speech, and video modes; generated media is saved privately in the user's current scope.",
+    "Core can answer questions using authorized content in the signed-in user's current scope, including saved documents, files, images, audio, video, and previous Core chats, and can explain the signed-in user's Sparks balance and subscription. Answers distinguish incomplete evidence from confirmed absence. Core also offers separate chat, image, speech, and video modes; generated media is saved privately in the user's current scope.",
   mediaGeneration: "Image generation or editing costs 15 Sparks per image, accepts up to eight reference images, and offers a choice of aspect ratios. Speech generation costs 1 Spark per 100 characters with a choice of five voices and can narrate the extracted text of selected documents, up to 15,000 characters combined. Video generation costs 15 Sparks per second, supports 1–15 seconds at 480p with a five-second default and an optional starting image, and does not edit or extend existing video.",
   fileFormats: "Storage converts selected JPG, PNG, WebP, GIF, and iPhone HEIC/HEIF images to PNG before upload, preserving transparency. MP3 audio and MP4 or MOV videos are stored without transcoding; video captions analyze the video itself.",
   storagePricing: STORAGE_PRICING_FACT,
@@ -149,23 +97,23 @@ export const PRODUCT_FACTS = {
     webPurchasesAvailable: false,
     capabilityCosts: { initialEmailSync: 75, createAudioBook: 75, extendAudioBook: 25 },
   },
-  capabilities: CORE_CAPABILITIES,
+  capabilities: PRODUCT_PILLARS,
 } as const;
 
-const capabilityNames = CORE_CAPABILITIES.map(({ name }) => name);
+const pillarNames = PRODUCT_PILLARS.map(({ name }) => name);
 
 export const PUBLIC_DISCOVERABILITY_REGISTRY = {
   "/": {
     path: "/",
     title: "Vorinthex AI | Your Personal AI",
     description:
-      "Meet Vorinthex Core for iOS and Android: chat with your authorized knowledge or create images, speech, and short videos in separate modes.",
+      "Vorinthex AI is your personal AI for iOS and Android. Keep work in Storage, ask Core, and use Sparks as one balance for files and creation.",
     summary:
-      "Vorinthex Core is a personal AI for iOS and Android that answers questions using authorized context and generates private images, speech, and short videos in separate modes.",
+      "Vorinthex Core is a personal AI for iOS and Android that starts from the work you keep in Storage, answers in chat, and can create private images, speech, and short videos. Sparks are one balance for Storage and Core.",
     schemaPageType: "WebPage",
     status: "current",
     lastModified: CONTENT_LAST_REVIEWED,
-    capabilities: [...capabilityNames, "Image, speech, and video generation", "HEIC/HEIF photo import and MOV video storage"],
+    capabilities: [...pillarNames, "Image, speech, and video generation", "HEIC/HEIF photo import and MOV video storage"],
   },
   "/pricing": {
     path: "/pricing",
@@ -181,13 +129,13 @@ export const PUBLIC_DISCOVERABILITY_REGISTRY = {
     path: "/about",
     title: "About Vorinthex AI",
     description:
-      "Learn about Vorinthex AI and Core, a personal AI for iOS and Android.",
+      "Learn about Vorinthex AI and Core, a personal AI for iOS and Android that starts from the work you keep.",
     summary:
-      "Vorinthex AI builds Core around connected personal context, privacy, and user control.",
+      "Vorinthex AI builds Core, a personal AI that starts from the work you keep in Storage, with Sparks as one balance.",
     schemaPageType: "AboutPage",
     status: "current",
     lastModified: CONTENT_LAST_REVIEWED,
-    capabilities: capabilityNames,
+    capabilities: pillarNames,
   },
   "/contact": {
     path: "/contact",
@@ -230,11 +178,3 @@ export const PUBLIC_ROUTES = Object.values(PUBLIC_DISCOVERABILITY_REGISTRY);
 export function canonicalUrl(path: PublicRoutePath | string): string {
   return `${CANONICAL_ORIGIN}${path === "/" ? "" : path}`;
 }
-import {
-  NEWCOMER_FREE_SPARKS,
-  SPARK_PRICING_CURRENCY,
-  SPARK_SUBSCRIPTIONS,
-  SPARK_TOP_UP,
-  REFERRAL_REWARDS,
-  STORAGE_SPARKS_PER_GB_MONTH,
-} from "@/lib/spark-pricing";

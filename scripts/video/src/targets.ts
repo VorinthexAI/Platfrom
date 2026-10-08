@@ -1,4 +1,4 @@
-import { CORE_CAPABILITIES } from "../../../web/app/src/lib/core";
+import { PRODUCT_PILLARS } from "../../../web/app/src/lib/core";
 import type { VideoCategory } from "./types";
 
 type CoreEntity = {
@@ -32,7 +32,7 @@ export function listTargets(): VideoTarget[] {
       entityId: "product.core",
       description: "One private personal AI that grows with you.",
     },
-    ...CORE_CAPABILITIES.map(({ name, description }) => {
+    ...PRODUCT_PILLARS.filter(({ id }) => id !== "core").map(({ name, description }) => {
       const slug = name.toLowerCase();
       return {
         slug,

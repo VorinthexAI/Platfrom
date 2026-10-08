@@ -2,10 +2,9 @@ import Image from "next/image";
 import { BrainIcon, ShieldIcon, StarIcon } from "@vorinthex/shared/ui/icons";
 import { SiteFooter, SiteHeader } from "@/components/site/SiteChrome";
 import { SiteNeuralBackdrop } from "@/components/site/SiteNeuralBackdrop";
-import { CoreAppsDepthScene } from "./CoreAppsDepthScene";
-import { CoreAppsJourney } from "./CoreAppsJourney";
 import { CoreNeuralScene } from "./CoreNeuralScene";
 import { DownloadAppCta } from "./DownloadAppCta";
+import { ProductPillars } from "./ProductPillars";
 import styles from "./CorePage.module.css";
 
 const HERO_TITLE_WORDS = ["Your", "personal", "AI."] as const;
@@ -49,11 +48,10 @@ export function CorePage() {
         <section className={styles.hero} id="overview">
           <div className={styles.heroCopy}>
             <HeroTitle />
-            <p className={styles.heroLead}>Everything. Intelligently connected.</p>
+            <p className={styles.heroLead}>Keep your work. Ask Core.</p>
             <div className={styles.rule} />
             <p className={styles.heroBody}>
-              Vorinthex AI is your personal AI that remembers, understands and
-              connects everything that matters to you.
+              Vorinthex AI is your personal AI that starts from the work you keep.
             </p>
             <DownloadAppCta />
           </div>
@@ -61,46 +59,42 @@ export function CorePage() {
           <div className={styles.coreVisual} aria-hidden="true" />
         </section>
 
-        <section className={styles.capabilities} id="core-apps">
-          <div className={styles.depthStage} aria-hidden="true">
-            <CoreAppsDepthScene />
-          </div>
+        <section className={styles.capabilities} id="product">
           <div className={styles.appsContent}>
             <div className={styles.sectionHeading}>
               <span />
               <div>
-                <p>One intelligence, five connected spaces</p>
-                <h2>Core Apps</h2>
+                <p>One private space. One personal AI.</p>
+                <h2>Storage, Core, Sparks</h2>
               </div>
               <span />
             </div>
             <p className={styles.appsIntroduction}>
-              Move through the parts of your life without losing context. Every app
-              adds understanding to the same personal AI.
+              Keep your work. Ask Core. One balance for Storage and Core.
             </p>
-            <CoreAppsJourney />
+            <ProductPillars />
           </div>
         </section>
 
         <section className={styles.principles} id="principles">
           <div className={styles.principlesCopy}>
-            <h2>One AI. Always with you.</h2>
+            <h2>One private space. One personal AI.</h2>
             <div className={styles.rule} />
             <div className={styles.principleGrid}>
               <article>
                 <BrainIcon aria-hidden size="lg" />
-                <h3>One intelligence</h3>
-                <p>Connect data, conversations, images, and knowledge.</p>
+                <h3>Your context</h3>
+                <p>Core starts from what you choose to keep.</p>
               </article>
               <article>
                 <ShieldIcon aria-hidden size="lg" />
                 <h3>Private by design</h3>
-                <p>Privacy and user control are principles guiding Core&apos;s design.</p>
+                <p>Files and chats stay in your scopes.</p>
               </article>
               <article>
                 <StarIcon aria-hidden size="lg" />
-                <h3>Built for you</h3>
-                <p>Personal context with proactive assistance.</p>
+                <h3>One balance</h3>
+                <p>Sparks for Storage and Core.</p>
               </article>
             </div>
           </div>

@@ -1,4 +1,4 @@
-import { CORE_CAPABILITIES } from "../../../web/app/src/lib/core";
+import { PRODUCT_PILLARS } from "../../../web/app/src/lib/core";
 import { generateVersion, type EngineContext } from "./cli";
 import { loadConfig } from "./config";
 import { ensureRuntime } from "./filesystem";
@@ -66,7 +66,7 @@ export async function refreshBrandAndCapabilities(): Promise<void> {
     notes: "Globe V master logo direction with internal orbit."
   });
 
-  for (const capability of CORE_CAPABILITIES) {
+  for (const capability of PRODUCT_PILLARS) {
     const capabilitySlug = capability.name.toLowerCase();
     const slug = `capability-${capabilitySlug}`;
     const asset = await context.registry.createAsset({

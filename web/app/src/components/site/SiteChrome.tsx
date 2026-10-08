@@ -26,11 +26,12 @@ export function SiteHeader() {
         <Brand />
         <nav className={styles.nav} aria-label="Primary navigation">
           <Link href="/">Overview</Link>
-          <Link href="/#core-apps">Core Apps</Link>
-          <Link href="/#principles">Vision</Link>
+          <Link href="/#storage">Storage</Link>
+          <Link href="/#core">Core</Link>
+          <Link href="/#sparks">Sparks</Link>
         </nav>
         <Button asChild size="sm" variant="outline">
-          <Link href="/">Get the app</Link>
+          <Link href="/#download">Get the app</Link>
         </Button>
       </header>
     </>
