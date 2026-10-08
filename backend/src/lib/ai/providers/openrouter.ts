@@ -237,6 +237,7 @@ async function generateImage<TInput, TOutput>(fetcher: typeof fetch, config: z.o
     model: request.externalModelId, prompt: value.prompt, n: 1,
     resolution: '1K',
     ...((value.aspectRatio ?? (value.size ? ratioBySize[value.size] : undefined)) ? { aspect_ratio: value.aspectRatio ?? ratioBySize[value.size!] } : {}),
+    ...(value.quality ? { quality: value.quality } : {}),
     ...(value.outputFormat ? { output_format: value.outputFormat } : {}),
     ...(value.inputReferences?.length ? { input_references: value.inputReferences.map((url) => ({ type: 'image_url', image_url: { url } })) } : {}),
   }, request, 'image request');

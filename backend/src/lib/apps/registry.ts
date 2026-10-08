@@ -8,6 +8,7 @@ const CATALOG_TIMESTAMP = '2026-09-01T00:00:00.000Z';
 
 export const APP_KEYS = {
   CORE: 'cmtlinos60006w07k04cc0cvr',
+  ORBIT: 'cm6xezbbadaf6fzepp92b7sff',
 } as const;
 
 export const CANONICAL_APPS = [
@@ -17,6 +18,15 @@ export const CANONICAL_APPS = [
     name: 'Core',
     description: 'Your personal AI for conversation and files across your scopes.',
     detailedDescription: 'Core is the personal AI agent at the center of Vorinthex. It searches folders and files in the scope you choose, answers questions, and generates images in conversation.',
+    visibility: 'public' as const,
+  },
+  {
+    key: APP_KEYS.ORBIT,
+    slug: 'orbit',
+    name: 'Orbit',
+    description: 'A private agent surface for growth and publishing.',
+    detailedDescription: 'Orbit is a private agent that shares your scopes with Core.',
+    visibility: 'allowlisted' as const,
   },
 ].map((app) => ({
   ...app,
@@ -34,6 +44,7 @@ export const CANONICAL_APPS = [
   version: string;
   createdAt: string;
   updatedAt: string;
+  visibility: 'public' | 'allowlisted';
 }>;
 
 export const APP_KEYS_BY_SLUG = Object.freeze(Object.fromEntries(CANONICAL_APPS.map(({ slug, key }) => [slug, key])) as Record<(typeof CANONICAL_APPS)[number]['slug'], string>);

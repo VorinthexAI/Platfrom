@@ -19,11 +19,12 @@ export const CONVERSATION_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 export const conversationContextSchema = z.strictObject({
   userKey: z.string().min(1),
   scopeKey: z.string().min(1),
+  agentKey: z.string().min(1).optional(),
 });
 export type ConversationContext = z.infer<typeof conversationContextSchema>;
 
 export function conversationContextIdentity(context: ConversationContext) {
-  return `${context.userKey}:${context.scopeKey}`;
+  return `${context.userKey}:${context.scopeKey}:${context.agentKey ?? "core"}`;
 }
 
 export function isConversationContextCurrent(capturedIdentity: string, currentIdentity: { current: string }) {

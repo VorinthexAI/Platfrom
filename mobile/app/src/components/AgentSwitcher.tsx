@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { useRouter } from "expo-router";
 import { BottomSheet, BottomSheetItem, BottomSheetMenu } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
 import { ChevronRightIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { assistantIconSource } from "@/data/capability-icons";
+import { agentHomeHref } from "@/lib/agent-home";
 import { useAppsStore } from "@/state/apps";
 import { fonts, palette, tracking } from "@/theme/tokens";
 
@@ -14,6 +16,7 @@ function agentIcon(slug: string, logoUrl?: string) {
 }
 
 export function AgentSwitcher() {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const agents = useAppsStore((state) => state.apps);
   const selected = useAppsStore((state) => state.selectedApp);
@@ -43,7 +46,7 @@ export function AgentSwitcher() {
               accessibilityState={{ selected: item.key === agent.key }}
               icon={<ChromeIcon glow={0.45} size={32} source={agentIcon(item.slug, item.logoUrl)} />}
               key={item.key}
-              onPress={() => { setOpen(false); selectAgent(item.slug); }}
+              onPress={() => { setOpen(false); selectAgent(item.slug); router.replace(agentHomeHref(item.slug)); }}
               style={styles.item}
               variant="secondary"
             >

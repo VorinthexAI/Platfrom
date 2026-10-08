@@ -3,7 +3,7 @@ import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query"
 import type { Conversation, ConversationContext, ConversationMessage, ConversationMessagePage, ConversationPage } from "./conversation-client";
 
 export type ConversationListFilter = { query: string; favoriteOnly: boolean; hiddenOnly: boolean };
-const identity = (context: ConversationContext) => [context.userKey, context.scopeKey] as const;
+const identity = (context: ConversationContext) => [context.userKey, context.scopeKey, context.agentKey ?? "core"] as const;
 const normalizedFilter = (filter: ConversationListFilter) => ({ query: filter.query.trim().toLocaleLowerCase(), favoriteOnly: filter.favoriteOnly, hiddenOnly: filter.hiddenOnly });
 
 export const conversationQueryKeys = {

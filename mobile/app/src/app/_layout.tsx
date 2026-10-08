@@ -40,7 +40,9 @@ export default function RootLayout() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthChecked, setHealthChecked] = useState(false);
   const appsStatus = useAppsStore((state) => state.bootstrapStatus);
+  const selectedAgentSlug = useAppsStore((state) => state.selectedApp?.slug);
   const bootstrapApps = useAppsStore((state) => state.bootstrap);
+  const refreshAgents = useAppsStore((state) => state.refreshAgents);
   const router = useRouter();
   const segments = useSegments();
   const { isOffline, isResolved: connectionResolved } = useInternetConnection();
@@ -70,6 +72,10 @@ export default function RootLayout() {
   }, [appsStatus, bootstrap]);
 
   useEffect(() => {
+    if (status === "authenticated" && !isOffline) void refreshAgents();
+  }, [isOffline, refreshAgents, status]);
+
+  useEffect(() => {
     if (appsStatus !== "failed" || isOffline) return;
     const retry = setTimeout(() => void bootstrapApps(), APP_BOOTSTRAP_RETRY_MS);
     return () => clearTimeout(retry);
@@ -96,7 +102,10 @@ export default function RootLayout() {
       else router.replace("/home" as Href);
     }
     if (status === "authenticated" && !isOnboarded && !isPublic && root !== "onboarding") router.replace("/onboarding");
-  }, [appsStatus, isOnboarded, localOnboarding, router, segments, status]);
+    if (status === "authenticated" && isOnboarded && root === "orbit" && selectedAgentSlug && selectedAgentSlug !== "orbit") {
+      router.replace("/home" as Href);
+    }
+  }, [appsStatus, isOnboarded, localOnboarding, router, segments, selectedAgentSlug, status]);
 
   if ((!fontsLoaded && !fontError) || !connectionResolved || !localOnboarding || (!isOffline && (!healthChecked || status === "bootstrapping" || appsStatus !== "ready"))) {
     return null;

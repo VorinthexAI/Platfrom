@@ -15,9 +15,11 @@ import { processStoredMedia } from '@/lib/ai/document-processing/media-caption';
 import { publicContentFile } from '@/lib/ai/tools/content-runtime';
 import { sendGeneratedFilePush } from '@/lib/app-notifications/generated-file';
 import { ContentError } from '@/lib/ai/tools/content-errors';
+import { currentEventAppKey } from '@/lib/ai/events/runtime';
+import { APP_KEYS } from '@/lib/apps/registry';
 
 const imageKey = z.string().cuid();
-export const agentImageInputSchema = z.object({ prompt: z.string().trim().min(1).max(4_000), referenceImageKeys: z.array(imageKey).max(8).refine((keys) => new Set(keys).size === keys.length).default([]), aspectRatio: imageAspectRatioSchema.optional(), folderKey: imageKey.optional() }).strict();
+export const agentImageInputSchema = z.object({ prompt: z.string().trim().min(1).max(4_000), referenceImageKeys: z.array(imageKey).max(8).refine((keys) => new Set(keys).size === keys.length).default([]), aspectRatio: imageAspectRatioSchema.optional(), quality: z.enum(['low', 'medium', 'high']).optional(), folderKey: imageKey.optional() }).strict();
 export const agentSpeechInputSchema = z.object({ text: z.string().trim().max(15_000).default(''), fileKeys: z.array(imageKey).max(20).refine((keys) => new Set(keys).size === keys.length).default([]), voice: z.enum(['eve', 'ara', 'rex', 'sal', 'leo']), folderKey: imageKey.optional() }).strict().refine(({ text, fileKeys }) => Boolean(text || fileKeys.length), 'Provide text or at least one document.');
 export const agentVideoInputSchema = z.object({ prompt: z.string().trim().min(1).max(4_000), startFrameFileKey: imageKey.optional(), durationSeconds: z.number().int().min(5).max(15), aspectRatio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3']), folderKey: imageKey.optional() }).strict();
 
@@ -76,7 +78,10 @@ export async function generateAgentImage(raw: unknown, context: ToolContext, opt
   const existing = await savedMedia(context, options.requestKey, input.folderKey);
   if (existing) { await announceCompletion(existing.key, 'image', context); return { files: [existing] }; }
   const refs = await Promise.all(input.referenceImageKeys.map((key) => imageReference(key, context)));
-  const response = await executeAction<unknown, ImageOutput>({ mode: 'auto', teamKey: context.teamKey, actionSlug: 'image' }, { operation: 'generate', prompt: input.prompt, count: 1, ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}), ...(refs.length ? { inputReferences: refs } : {}) }, { ...options, providers: ['image.primary'] });
+  const secondary = (options.providers?.[0] === 'image.secondary') || currentEventAppKey() === APP_KEYS.ORBIT;
+  const aspectRatio = input.aspectRatio ?? (secondary ? '9:16' : undefined);
+  const quality = input.quality ?? (secondary ? 'low' : undefined);
+  const response = await executeAction<unknown, ImageOutput>({ mode: 'auto', teamKey: context.teamKey, actionSlug: 'image' }, { operation: 'generate', prompt: input.prompt, count: 1, ...(aspectRatio ? { aspectRatio } : {}), ...(quality ? { quality } : {}), ...(refs.length ? { inputReferences: refs } : {}) }, { ...options, providers: options.providers ?? (secondary ? ['image.secondary'] : ['image.primary']) });
   const image = imageOutputSchema.parse(response.output).images[0]!;
   const extension = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp' } as const;
   const file = await saveMedia(context, options.requestKey, Buffer.from(image.base64, 'base64'), extension[image.mimeType], image.mimeType, input.prompt, input.folderKey);

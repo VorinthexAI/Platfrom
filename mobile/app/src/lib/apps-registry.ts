@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { tokenVault } from "./token-vault";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://vorinthex.com";
 const BACKEND_API_KEY = process.env.EXPO_PUBLIC_BACKEND_API_KEY ?? "";
@@ -55,9 +56,15 @@ export function parseAppsRegistry(input: unknown): ServerApp[] {
 }
 
 export async function appsBootstrapHeaders(): Promise<Record<string, string>> {
+  const session = await tokenVault.read();
   return {
     ...await requestIdentityHeaders(),
     ...(BACKEND_API_KEY ? { "X-Vorinthex-API-Key": BACKEND_API_KEY } : {}),
+    ...(session ? {
+      Authorization: `Bearer ${session.accessToken}`,
+      "X-Refresh-Token": session.refreshToken,
+      "X-Vorinthex-Session-Transport": "header",
+    } : {}),
   };
 }
 

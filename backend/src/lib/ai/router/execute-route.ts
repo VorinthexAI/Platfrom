@@ -1,5 +1,5 @@
 import { normalizeProviderError } from '@/lib/ai/providers/errors';
-import { executeQueueAction, type ActionId, type ActionRouteId } from '@/lib/ai/actions';
+import { actionIdSchema, executeQueueAction, type ActionId, type ActionRouteId } from '@/lib/ai/actions';
 import { imageActionInputSchema, imageOutputSchema, type ImageOutput, type ProviderAdapter, type ProviderExecuteResponse, type ProviderExecutionCapabilities, type ProviderId } from '@/lib/ai/providers/types';
 import { createRegisteredProviderAdapter } from '@/lib/ai/providers';
 import { tokenUsage, ZERO_TOKEN_USAGE, type TokenUsage } from '@/lib/ai/shared/usage';
@@ -181,10 +181,17 @@ export async function* streamRoute<TInput>(options: ExecuteRouteOptions<TInput>)
   }
 }
 
-/** Streams the canonical provider-neutral text action over its selected server-owned route. */
+function streamActionSlug(providers?: readonly ActionRouteId[]): ActionId {
+  const route = providers?.[0];
+  if (!route) return 'text';
+  return actionIdSchema.parse(route.slice(0, route.indexOf('.')));
+}
+
+/** Streams a provider-neutral chat action over its selected server-owned route. */
 export async function* streamAsk(teamKey: string, input: CoreChatInput, options: ExecuteActionOptions = {}) {
   const { mode: _mode, ...providerInput } = coreChatInputSchema.parse(input);
-  const decision = (await selectRoutes({ mode: 'auto', teamKey, actionSlug: 'text' }, options, options.providers))[0]!;
+  const actionSlug = streamActionSlug(options.providers);
+  const decision = (await selectRoutes({ mode: 'auto', teamKey, actionSlug }, options, options.providers))[0]!;
   const attempts = options.retry?.attempts ?? 3;
   const intervalMs = options.retry?.intervalMs ?? 2_000;
   for (let attempt = 0; ; attempt += 1) {

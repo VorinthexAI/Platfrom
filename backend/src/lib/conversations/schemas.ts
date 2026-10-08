@@ -3,12 +3,13 @@ import { appSearchRetrievalSchema } from '@/lib/app-search/service';
 import { CORE_CHAT_MAX_DOCUMENT_CONTEXT_BYTES } from '@/lib/ai/actions/core-chat';
 import { roleKeySchema } from '@/lib/ai/roles';
 import { fileExtensionSchema } from '@/lib/db/files.node';
+import { APP_KEYS } from '@/lib/apps/registry';
 
 export const DEFAULT_CONVERSATION_NAME = 'New chat';
 
 export const conversationSchema = z.object({
   key: z.string().cuid(), teamKey: z.string().trim().min(1).max(160), scopeKey: z.string().cuid(),
-  userKey: z.string().cuid(), name: z.string().trim().min(1).max(200), isFavorite: z.boolean(),
+  userKey: z.string().cuid(), agentKey: z.string().cuid().default(APP_KEYS.CORE), name: z.string().trim().min(1).max(200), isFavorite: z.boolean(),
   isHidden: z.boolean().default(false),
   roleKey: roleKeySchema.default('general'),
   createdAt: z.string().datetime(), updatedAt: z.string().datetime(),

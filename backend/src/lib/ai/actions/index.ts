@@ -9,6 +9,7 @@ import { ACTION_SLUGS, actionIdSchema, isValidActionIdFormat, type ActionDefinit
 import { updateActionDefinition } from './update';
 import { upsertAction } from './upsert';
 import { textAction } from './text';
+import { planAction } from './plan';
 import { imageAction } from './image';
 import { speechAction } from './speech';
 import { videoAction } from './video';
@@ -37,7 +38,7 @@ export { coreChatContentSchema, coreChatMessageSchema, coreChatToolDefinitionSch
 
 /** Stable, provider- and domain-neutral runtime primitives. */
 export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
-  textAction, imageAction, speechAction, videoAction, embedAction, rerankAction, decideAction, uploadAction, queueAction,
+  textAction, planAction, imageAction, speechAction, videoAction, embedAction, rerankAction, decideAction, uploadAction, queueAction,
   traverseAction, readAction, insertActionDefinition, upsertAction, updateActionDefinition, deleteActionDefinition,
 ];
 export const getActionDefinition = (id: ActionId): ActionDefinition | undefined => ACTION_DEFINITIONS.find((definition) => definition.id === id);

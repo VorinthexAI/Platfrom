@@ -195,7 +195,7 @@ export function calculateActionCostMicroSparks(actionSlug: string, usage: Readon
   let numerator = 0n;
   let denominator = 1n;
   const operation = typeof input === 'object' && input !== null ? (input as Record<string, unknown>).operation : undefined;
-  if (actionSlug === 'text' || actionSlug === 'image' && operation === 'caption') {
+  if (actionSlug === 'text' || actionSlug === 'plan' || actionSlug === 'image' && operation === 'caption') {
     numerator = inputTokens * 40n * BigInt(MICRO_SPARKS_PER_SPARK) + outputTokens * 400n * BigInt(MICRO_SPARKS_PER_SPARK);
     denominator = 1_000_000n;
   } else if (actionSlug === 'speech') {

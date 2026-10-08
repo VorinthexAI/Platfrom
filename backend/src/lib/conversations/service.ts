@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { newId } from '@/lib/ids';
 import { coreAgent, executeCoreAgent } from '@/lib/ai/agents/core';
+import { orbitAgent, executeOrbitAgent } from '@/lib/ai/agents/orbit';
 import { AgentStreamProtocolError, type AgentRuntimeDependencies } from '@/lib/ai/agents';
+import { currentEventAppKey } from '@/lib/ai/events/runtime';
+import { APP_KEYS } from '@/lib/apps/registry';
 import type { ExecuteActionOptions } from '@/lib/ai/router';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import { contextUserKey } from '@/lib/ai/tools/tool-context';
@@ -84,11 +87,14 @@ export class ConversationError extends Error {
   constructor(readonly code: 'FORBIDDEN' | 'NOT_FOUND' | 'CONFLICT' | 'FAILED', message: string) { super(message); }
 }
 
-type Owner = { teamKey: string; scopeKey: string; userKey: string };
+type Owner = { teamKey: string; scopeKey: string; userKey: string; agentKey: string };
 function owner(context: ToolContext): Owner {
   if (context.principal.kind !== 'member' || context.principal.userTeam.status !== 'active') throw new ConversationError('FORBIDDEN', 'An active user team membership is required.');
   if (context.principal.userTeam.teamKey !== context.teamKey || context.principal.userTeam.userId !== context.principal.user.key) throw new ConversationError('FORBIDDEN', 'Membership does not belong to the selected user and team.');
-  return { teamKey: context.teamKey, scopeKey: context.runtimeScopeKey, userKey: context.principal.user.key };
+  return { teamKey: context.teamKey, scopeKey: context.runtimeScopeKey, userKey: context.principal.user.key, agentKey: currentEventAppKey() || APP_KEYS.CORE };
+}
+function conversationIdentity(ownership: Owner) {
+  return { teamKey: ownership.teamKey, scopeKey: ownership.scopeKey, userKey: ownership.userKey };
 }
 
 export function conversationReferenceContext(retrievals: readonly AppSearchRetrieval[]) {
@@ -131,6 +137,7 @@ export interface ConversationServiceDependencies {
   agent?: AgentRuntimeDependencies;
   router?: ExecuteActionOptions;
   core?: typeof executeCoreAgent;
+  orbit?: typeof executeOrbitAgent;
   userSearches?: UserSearchService;
   attachmentArtifacts?: Pick<ConversationAttachmentArtifactRepository, 'readClaimed'> & Partial<Pick<ConversationAttachmentArtifactRepository, 'releaseClaimed'>>;
   attachmentStorage?: Pick<DocumentObjectStorage, 'download'> & Partial<Pick<DocumentObjectStorage, 'delete'>>;
@@ -148,6 +155,10 @@ export function createConversationService(dependencies: ConversationServiceDepen
   const id = dependencies.id ?? newId;
   const now = dependencies.now ?? (() => new Date().toISOString());
   const core = dependencies.core ?? executeCoreAgent;
+  const orbit = dependencies.orbit ?? executeOrbitAgent;
+  const conversationAgent = (ownership: Owner) => ownership.agentKey === APP_KEYS.ORBIT
+    ? { execute: orbit, definition: orbitAgent }
+    : { execute: core, definition: coreAgent };
   const agentDependencies: AgentRuntimeDependencies = { ...dependencies.agent, router: { ...dependencies.agent?.router, ...dependencies.router } };
   const userSearches = dependencies.userSearches ?? getDefaultUserSearchService();
   const attachmentArtifacts = dependencies.attachmentArtifacts ?? getDefaultConversationAttachmentArtifactRepository();
@@ -187,8 +198,8 @@ export function createConversationService(dependencies: ConversationServiceDepen
       }
       const seed = input.openingContextSeedToken ? await verifyConversationContextSeedToken(input.openingContextSeedToken, new Date(at).getTime()) : null;
       if (input.openingContextSeedToken && (!seed || seed.teamKey !== ownership.teamKey || seed.scopeKey !== ownership.scopeKey || seed.userKey !== ownership.userKey)) throw new ConversationError('FORBIDDEN', 'The context seed is invalid or expired.');
-      const openingMessage = opening ? conversationMessageSchema.parse({ key: opening.key, ...ownership, conversationKey: key, turnKey: `opening:${opening.key}`, requestHash: createHash('sha256').update(input.openingGreetingToken!).digest('hex'), type: 'TEXT', role: 'ASSISTANT', status: 'COMPLETED', content: opening.message, attachments: [], attachmentStatus: 'NONE', retrievals: [], guideTopics: { status: 'NONE' }, createdAt: opening.createdAt, completedAt: opening.createdAt })
-        : seed ? conversationMessageSchema.parse({ key: seed.key, ...ownership, conversationKey: key, turnKey: `opening:${seed.key}`, requestHash: createHash('sha256').update(input.openingContextSeedToken!).digest('hex'), type: 'TEXT', role: 'ASSISTANT', status: 'COMPLETED', content: seed.message, attachments: [], retrievals: [], guideTopics: { status: 'NONE' }, createdAt: seed.createdAt, completedAt: seed.createdAt })
+      const openingMessage = opening ? conversationMessageSchema.parse({ key: opening.key, ...conversationIdentity(ownership), conversationKey: key, turnKey: `opening:${opening.key}`, requestHash: createHash('sha256').update(input.openingGreetingToken!).digest('hex'), type: 'TEXT', role: 'ASSISTANT', status: 'COMPLETED', content: opening.message, attachments: [], attachmentStatus: 'NONE', retrievals: [], guideTopics: { status: 'NONE' }, createdAt: opening.createdAt, completedAt: opening.createdAt })
+        : seed ? conversationMessageSchema.parse({ key: seed.key, ...conversationIdentity(ownership), conversationKey: key, turnKey: `opening:${seed.key}`, requestHash: createHash('sha256').update(input.openingContextSeedToken!).digest('hex'), type: 'TEXT', role: 'ASSISTANT', status: 'COMPLETED', content: seed.message, attachments: [], retrievals: [], guideTopics: { status: 'NONE' }, createdAt: seed.createdAt, completedAt: seed.createdAt })
         : undefined;
       const actorKey = context.principal.kind === 'member' ? context.principal.userTeam.key : '';
       const created = await repository.create({ key, ...ownership, name: input.name ?? DEFAULT_CONVERSATION_NAME, isFavorite: false, isHidden: false, roleKey: input.roleKey, createdAt: at, updatedAt: at }, actorKey, openingMessage);
@@ -220,8 +231,8 @@ export function createConversationService(dependencies: ConversationServiceDepen
        const tagged = await taggedWorkspaceContext(context, input.workspaceFileKeys, input.workspaceFolderKeys, Math.max(0, 20_000 - input.message.length));
       const actorKey = context.principal.kind === 'member' ? context.principal.userTeam.key : '';
       const started = await repository.beginTurn(ownership, input.conversationKey,
-         { key: id(), ...ownership, conversationKey: input.conversationKey, turnKey: input.requestKey, requestHash, type: 'TEXT', role: 'USER', status: 'COMPLETED', content: input.message, workspaceFiles: tagged.files, attachments: [], attachmentStatus: input.attachmentKeys.length ? 'PENDING' : 'NONE', ...(input.attachmentKeys.length ? { pendingAttachmentKeys: input.attachmentKeys } : {}), retrievals: [], guideTopics: { status: 'NONE' }, createdAt: at, completedAt: at },
-        { key: id(), ...ownership, conversationKey: input.conversationKey, turnKey: input.requestKey, requestHash, type: 'TEXT', role: 'ASSISTANT', status: 'PENDING', content: 'Pending', attachments: [], attachmentStatus: 'NONE', retrievals: [], guideTopics: { status: 'NONE' }, createdAt: assistantAt }, actorKey);
+         { key: id(), ...conversationIdentity(ownership), conversationKey: input.conversationKey, turnKey: input.requestKey, requestHash, type: 'TEXT', role: 'USER', status: 'COMPLETED', content: input.message, workspaceFiles: tagged.files, attachments: [], attachmentStatus: input.attachmentKeys.length ? 'PENDING' : 'NONE', ...(input.attachmentKeys.length ? { pendingAttachmentKeys: input.attachmentKeys } : {}), retrievals: [], guideTopics: { status: 'NONE' }, createdAt: at, completedAt: at },
+        { key: id(), ...conversationIdentity(ownership), conversationKey: input.conversationKey, turnKey: input.requestKey, requestHash, type: 'TEXT', role: 'ASSISTANT', status: 'PENDING', content: 'Pending', attachments: [], attachmentStatus: 'NONE', retrievals: [], guideTopics: { status: 'NONE' }, createdAt: assistantAt }, actorKey);
       if (!started) throw new ConversationError('NOT_FOUND', 'Conversation not found.');
       if (started.state === 'idempotency-conflict') throw new ConversationError('CONFLICT', 'The request key was already used for a different message.');
       if (started.state === 'busy') throw new ConversationError('CONFLICT', 'Another turn is already in progress for this conversation.');
@@ -286,8 +297,9 @@ export function createConversationService(dependencies: ConversationServiceDepen
           const deltas: string[] = [];
           let emitted = false;
           try {
-            response = await core({
-              systemPrompt: coreAgent.systemPrompt,
+             const agent = conversationAgent(ownership);
+             response = await agent.execute({
+              systemPrompt: agent.definition.systemPrompt,
               roleKey: conversation.roleKey,
               ...agentContext,
               message: agentMessage, currentDate: at, requestKey: input.requestKey, generateName: firstUserTurn, attachments,
@@ -350,9 +362,10 @@ export function createConversationService(dependencies: ConversationServiceDepen
       let response: Awaited<ReturnType<typeof core>> | undefined;
       let agentError: unknown;
       try {
-        response = await core({
-          systemPrompt: coreAgent.systemPrompt,
-          taskInstructions: 'The user started a new chat using other chats as context. Speak as Core, never as the user. Write a short orientation of what those chats are about so the user can continue. A few compact paragraphs, detailed enough to be useful, not a transcript and not a heading.',
+        const agent = conversationAgent(ownership);
+        response = await agent.execute({
+          systemPrompt: agent.definition.systemPrompt,
+          taskInstructions: 'The user started a new chat using other chats as context. Speak in the first person as this agent, never as the user. Write a short orientation of what those chats are about so the user can continue. A few compact paragraphs, detailed enough to be useful, not a transcript and not a heading.',
           context: [],
           recalledContext: [],
           message: `Orient me on these chats:\n\n${source}`.slice(0, 20_000),
@@ -375,9 +388,9 @@ export function createConversationService(dependencies: ConversationServiceDepen
         agentError = error;
         if (deltas.length) response = { message: deltas.join(''), tools: [] };
       }
-      if (!response?.message.trim()) throw agentError ?? new ConversationError('FAILED', 'Core did not return a response.');
+      if (!response?.message.trim()) throw agentError ?? new ConversationError('FAILED', 'The agent did not return a response.');
       const message = response.message.trim().slice(0, 4_000);
-      const persistenceToken = await issueConversationContextSeedToken({ key: assistantMessageKey, ...ownership, message, conversationKeys: briefs.map((brief) => brief.key), createdAt: at });
+      const persistenceToken = await issueConversationContextSeedToken({ key: assistantMessageKey, ...conversationIdentity(ownership), message, conversationKeys: briefs.map((brief) => brief.key), createdAt: at });
       await onEvent({ type: 'done', correlationKey, assistantMessageKey, message, persistenceToken });
     },
     async incognitoTurn(raw: unknown, context: ToolContext, onEvent: (event: ConversationTurnEvent) => void | Promise<void>) {
@@ -386,8 +399,8 @@ export function createConversationService(dependencies: ConversationServiceDepen
       const conversationKey = id();
       const requestHash = createHash('sha256').update(JSON.stringify({ incognito: true, message: input.message, requestKey: input.requestKey })).digest('hex');
        const tagged = await taggedWorkspaceContext(context, input.workspaceFileKeys, input.workspaceFolderKeys, Math.max(0, 20_000 - input.message.length));
-       const user = conversationMessageSchema.parse({ key: id(), ...ownership, conversationKey, turnKey: input.requestKey, requestHash, type: 'TEXT', role: 'USER', status: 'COMPLETED', content: input.message, workspaceFiles: tagged.files, attachments: [], attachmentStatus: 'NONE', retrievals: [], guideTopics: { status: 'NONE' }, createdAt: at, completedAt: at });
-      const assistant = conversationMessageSchema.parse({ key: id(), ...ownership, conversationKey, turnKey: input.requestKey, requestHash, type: 'TEXT', role: 'ASSISTANT', status: 'PENDING', content: 'Pending', attachments: [], attachmentStatus: 'NONE', retrievals: [], guideTopics: { status: 'NONE' }, createdAt: assistantAt });
+       const user = conversationMessageSchema.parse({ key: id(), ...conversationIdentity(ownership), conversationKey, turnKey: input.requestKey, requestHash, type: 'TEXT', role: 'USER', status: 'COMPLETED', content: input.message, workspaceFiles: tagged.files, attachments: [], attachmentStatus: 'NONE', retrievals: [], guideTopics: { status: 'NONE' }, createdAt: at, completedAt: at });
+      const assistant = conversationMessageSchema.parse({ key: id(), ...conversationIdentity(ownership), conversationKey, turnKey: input.requestKey, requestHash, type: 'TEXT', role: 'ASSISTANT', status: 'PENDING', content: 'Pending', attachments: [], attachmentStatus: 'NONE', retrievals: [], guideTopics: { status: 'NONE' }, createdAt: assistantAt });
       await onEvent({ type: 'start', correlationKey, conversationKey, userMessageKey: user.key, assistantMessageKey: assistant.key, userMessage: projectConversationMessage(user) });
       const agentContext = {
         context: input.history.map((item) => ({ role: item.role.toLowerCase() as 'user' | 'assistant', content: item.content, createdAt: at })),
@@ -399,8 +412,9 @@ export function createConversationService(dependencies: ConversationServiceDepen
       let response: Awaited<ReturnType<typeof core>> | undefined;
       let agentError: unknown;
       try {
-        response = await core({
-          systemPrompt: coreAgent.systemPrompt,
+        const agent = conversationAgent(ownership);
+        response = await agent.execute({
+          systemPrompt: agent.definition.systemPrompt,
           roleKey: input.roleKey,
           ...agentContext,
           message: agentMessage, currentDate: at, requestKey: input.requestKey, generateName: false, attachments: [],

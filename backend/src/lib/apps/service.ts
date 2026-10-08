@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { signedAppLogoUrl } from './logo-url';
+import { emailHasPrivateAgentAccess } from './private-access';
 import { appDetailedDescriptionSchema, appSlugSchema, CANONICAL_APP_BY_ALIAS, CANONICAL_APPS, parseAppAliasKey } from './registry';
 
 export const enrichedAppSchema = z.object({
@@ -18,7 +19,7 @@ export type PublicAppResponse = z.infer<typeof publicAppSchema>;
 
 export interface AppsService {
   list(): Promise<App[]>;
-  listPublic(): Promise<PublicAppResponse[]>;
+  listPublic(email?: string | null): Promise<PublicAppResponse[]>;
   resolveAlias(aliasKey: string): Promise<{ aliasKey: string; scopeKey: string }>;
 }
 
@@ -43,8 +44,13 @@ export function createAppsService(
       const aliasKey = parseAppAliasKey(rawAliasKey);
       return { aliasKey, scopeKey: CANONICAL_APP_BY_ALIAS.get(aliasKey)!.key };
     },
-    async listPublic() {
-      return Promise.all((await list()).map(async (app) => {
+    async listPublic(email) {
+      const allowPrivate = emailHasPrivateAgentAccess(email);
+      const visible = (await list()).filter((app) => {
+        const presentation = CANONICAL_APPS.find(({ slug }) => slug === app.slug);
+        return presentation?.visibility === 'public' || allowPrivate;
+      });
+      return Promise.all(visible.map(async (app) => {
         const presentation = CANONICAL_APPS.find(({ slug }) => slug === app.slug)!;
         return publicAppSchema.parse({ ...app, logoUrl: await signLogoUrl(presentation.logoStorageKey) });
       }));

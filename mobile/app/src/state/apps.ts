@@ -22,6 +22,7 @@ type AppsState = {
   selectedApp: ServerApp | null;
   currentAppKey: string | null;
   bootstrap: () => Promise<void>;
+  refreshAgents: () => Promise<void>;
   refreshProducts: () => Promise<void>;
   enterCore: () => void;
   leaveCore: () => void;
@@ -53,6 +54,12 @@ function appForSlug(apps: ServerApp[], slug: string): ServerApp {
   return app;
 }
 
+function applyAgents(set: (patch: Partial<AppsState>) => void, get: () => AppsState, apps: ServerApp[]) {
+  const current = get().currentAppKey ? apps.find((app) => app.key === get().currentAppKey) : undefined;
+  const selected = current ?? appForSlug(apps, "core");
+  set({ apps, bootstrapStatus: "ready", bootstrapError: null, ...selectedAppState(selected, get().currentAppKey) });
+}
+
 function selectedAppState(app: ServerApp, previousAppKey: string | null) {
   if (previousAppKey !== app.key) useUiStore.getState().clearSelectedTags();
   return { selectedApp: app, currentAppKey: app.key };
@@ -77,11 +84,7 @@ export const useAppsStore = create<AppsState>((set, get) => ({
     set({ bootstrapStatus: "bootstrapping", bootstrapError: null });
     void refreshProducts(set);
     bootstrapPromise = fetchAgentsRegistry()
-      .then((apps) => {
-        const current = get().currentAppKey ? apps.find((app) => app.key === get().currentAppKey) : undefined;
-        const selected = current ?? appForSlug(apps, "core");
-        set({ apps, bootstrapStatus: "ready", bootstrapError: null, ...selectedAppState(selected, get().currentAppKey) });
-      })
+      .then((apps) => applyAgents(set, get, apps))
       .catch((error: unknown) => {
         set({ apps: [], selectedApp: null, currentAppKey: null, bootstrapStatus: "failed", bootstrapError: error instanceof Error ? error.message : "Agent registry bootstrap failed." });
       })
@@ -89,6 +92,11 @@ export const useAppsStore = create<AppsState>((set, get) => ({
         bootstrapPromise = null;
       });
     return bootstrapPromise;
+  },
+  refreshAgents: async () => {
+    try {
+      applyAgents(set, get, await fetchAgentsRegistry());
+    } catch { }
   },
   refreshProducts: () => refreshProducts(set),
   enterCore: () => set((state) => selectedAppState(appForSlug(state.apps, "core"), state.currentAppKey)),

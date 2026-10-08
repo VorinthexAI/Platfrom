@@ -175,7 +175,9 @@ function OlderMessageSkeletons() {
 }
 
 function ConversationWatermark() {
-  return <View pointerEvents="none" style={styles.coreWatermark}><Text style={styles.coreWatermarkText}>Core</Text><View style={styles.coreWatermarkMark}><ChromeIcon glow={0.5} size={104} source={assistantIconSource} /></View><Text style={styles.coreWatermarkText}>Your personal AI for finding answers and natural conversation across Vorinthex AI</Text></View>;
+  const agent = useAppsStore((state) => state.selectedApp);
+  const name = agent?.name ?? "Core";
+  return <View pointerEvents="none" style={styles.coreWatermark}><Text style={styles.coreWatermarkText}>{name}</Text><View style={styles.coreWatermarkMark}><ChromeIcon glow={0.5} size={104} source={agent?.logoUrl ? { uri: agent.logoUrl } : assistantIconSource} /></View><Text style={styles.coreWatermarkText}>{name === "Orbit" ? "Plan slideshows, hooks, and captions from the work you keep." : "Your personal AI for finding answers and natural conversation across Vorinthex AI"}</Text></View>;
 }
 
 const messageKey = ({ key, renderKey, role, turnKey }: OptimisticMessage & { renderKey?: string }) => renderKey ?? (turnKey ? `${turnKey}:${role}` : key);
@@ -205,7 +207,8 @@ function ChatCoreComposer({ openOnMount, onStorageAction, ...props }: CoreCompos
   const userKey = useAuthStore((state) => state.user?.key ?? "");
   const coreFunded = (useWholeSparkBalance(userKey).data ?? 0) > 0;
   const scopeKey = useAuthStore((state) => String(state.scope?.key ?? ""));
-  const context = useMemo(() => ({ userKey, scopeKey }), [scopeKey, userKey]);
+  const agentKey = useAppsStore((state) => state.currentAppKey ?? "");
+  const context = useMemo(() => ({ userKey, scopeKey, ...(agentKey ? { agentKey } : {}) }), [agentKey, scopeKey, userKey]);
   const identity = conversationContextIdentity(context);
   const configured = Boolean(userKey && scopeKey);
   const rolesQuery = useQuery({ queryKey: ["conversation-roles"], queryFn: ({ signal }) => listConversationRoles(signal), enabled: configured, staleTime: 60 * 60_000 });
@@ -585,7 +588,7 @@ function ChatCoreComposer({ openOnMount, onStorageAction, ...props }: CoreCompos
     const frame = requestAnimationFrame(() => {
       const request = useUiStore.getState().consumeAgentGreeting(greetingRequest.id);
       if (!request) return;
-      useAppsStore.getState().enterCore();
+      if (useAppsStore.getState().selectedApp?.slug !== "orbit") useAppsStore.getState().enterCore();
       setCoreOpenRequest((current) => Math.max(current, latestOpenRequest.current) + 1);
       const focusGeneration = coreFocusGeneration.current;
       const capturedIdentity = identity;
@@ -627,8 +630,10 @@ function ChatCoreComposer({ openOnMount, onStorageAction, ...props }: CoreCompos
     coreFocusedRef.current = focused;
     const focusGeneration = ++coreFocusGeneration.current;
     setCoreFocused(focused);
-    if (focused) apps.enterCore();
-    else apps.leaveCore();
+    if (apps.selectedApp?.slug !== "orbit") {
+      if (focused) apps.enterCore();
+      else apps.leaveCore();
+    }
     props.onFocusChange?.(focused);
     if (!focused) {
       if (incognitoRef.current) {
