@@ -26,6 +26,7 @@ import {
   type Conversation, type ConversationMessage,
 } from './schemas';
 import { issueConversationContextSeedToken, verifyConversationContextSeedToken } from './context-seed';
+import { runPlanSession, type SavedPlan } from './plan-session';
 import type { ConversationArchiveState } from './archive-projection';
 import { verifyOpeningGreetingToken, type OpeningGreetingSnapshot } from './opening-greeting';
 
@@ -59,7 +60,7 @@ const MAX_CONTEXT_BYTES = 250_000;
 export type ConversationTurnEvent =
   | { type: 'start'; correlationKey: string; conversationKey: string; userMessageKey: string; assistantMessageKey: string; userMessage: z.infer<typeof conversationSafeMessageSchema> }
   | { type: 'delta'; correlationKey: string; assistantMessageKey: string; text: string }
-  | { type: 'done'; correlationKey: string; conversationKey: string; message: z.infer<typeof conversationSafeMessageSchema>; name?: string; replayed: boolean }
+  | { type: 'done'; correlationKey: string; conversationKey: string; message: z.infer<typeof conversationSafeMessageSchema>; name?: string; plan?: SavedPlan; replayed: boolean }
   | { type: 'error'; correlationKey: string; code: string; message: string };
 
 export type ConversationSeedEvent =
@@ -408,7 +409,23 @@ export function createConversationService(dependencies: ConversationServiceDepen
       };
       const retrievals: AppSearchRetrieval[] = [];
        const agentMessage = `${tagged.preface}${input.message}`;
-      const deltas: string[] = [];
+       if (input.mode === 'plan') {
+         const plan = await runPlanSession({
+           teamKey: ownership.teamKey,
+           context,
+           roleKey: input.roleKey,
+           history: input.history,
+           message: agentMessage,
+           options: agentDependencies.router,
+           onDelta: async (text) => { await onEvent({ type: 'delta', correlationKey, assistantMessageKey: assistant.key, text }); },
+         });
+         if (!plan.message.trim()) throw new ConversationError('FAILED', 'The plan did not return a response.');
+         const completed = conversationMessageSchema.parse({ ...assistant, status: 'COMPLETED', content: plan.message, retrievals, completedAt: now(), guideTopics: { status: 'NONE' } });
+         await onEvent({ type: 'done', correlationKey, conversationKey, message: projectConversationMessage(completed), ...(plan.saved ? { plan: plan.saved } : {}), replayed: false });
+         if (plan.saved) void publishContentChanged(ownership.scopeKey).catch((error) => console.error('plan content publication failed', { fileKey: plan.saved?.fileKey, error }));
+         return;
+       }
+       const deltas: string[] = [];
       let response: Awaited<ReturnType<typeof core>> | undefined;
       let agentError: unknown;
       try {

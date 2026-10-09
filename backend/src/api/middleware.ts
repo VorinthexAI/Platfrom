@@ -209,7 +209,7 @@ function querySchemaForPath(path: string, method: string) {
   if (method === 'GET' && apiPath === '/subscriptions/current') return strictObject({});
   if (method === 'GET' && apiPath === '/billing/summary') return strictObject({ limit: z.string().regex(/^\d+$/).optional(), beforeCreatedAt: z.string().datetime({ offset: true }).optional(), beforeKey: z.string().trim().min(1).max(200).optional(), kind: sparkTransactionKindSchema.optional(), scopeKey: z.string().cuid().optional() });
   if (method === 'POST' && apiPath === '/tags/assignments') return strictObject({ action: z.enum(['tag', 'untag']) });
-  if (method === 'POST' && apiPath === '/conversations/turn/stream') return strictObject({ incognito: z.literal('true'), mode: z.enum(['chat']).optional(), reply: z.enum(['reason']).optional(), role: roleKeySchema.optional() });
+  if (method === 'POST' && apiPath === '/conversations/turn/stream') return strictObject({ incognito: z.literal('true'), mode: z.enum(['chat', 'plan']).optional(), reply: z.enum(['reason']).optional(), role: roleKeySchema.optional() });
   if (method === 'POST' && /^\/conversations\/[^/]+\/turn\/stream$/.test(apiPath)) return strictObject({ mode: z.enum(['chat']).optional(), reply: z.enum(['reason']).optional(), role: roleKeySchema.optional() });
   if (/^\/content\/tools\/[^/]+$/.test(apiPath)) return strictObject({});
   if (apiPath === '/books' || apiPath === '/books/overview' || apiPath === '/books/topic-suggestions' || apiPath === '/books/goal-suggestions' || apiPath === '/books/preview' || /^\/books\/[^/]+(?:\/detail|\/(?:retry|cancel|favorite))?$/.test(apiPath) || /^\/books\/[^/]+\/chapters\/[^/]+\/progress$/.test(apiPath)) return strictObject({});

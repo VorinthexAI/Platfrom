@@ -4,6 +4,6 @@ export const planAction: ActionDefinition = {
   id: 'plan',
   modelPolicy: 'required',
   models: [
-    { slot: 'primary', provider: 'openrouter', model: 'anthropic.claude-sonnet-4.5', priority: 100 },
+    { slot: 'primary', provider: 'openrouter', model: 'google.gemini-3.8-flash', priority: 100 },
   ],
 };
