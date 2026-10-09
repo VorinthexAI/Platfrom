@@ -45,12 +45,25 @@ const appleSchema = z.strictObject({
     localizations: z.record(localeKey, appleVersionLocalizationSchema),
   }),
   screenshots: z.record(z.string(), z.string()),
+  heroes: z.strictObject({
+    header: z.string(),
+    searchResults: z.string(),
+  }),
+  review: z.strictObject({
+    contactFirstName: z.string().min(1).max(64),
+    contactLastName: z.string().min(1).max(64),
+    contactPhone: z.string().min(8).max(32),
+    contactEmail: z.email(),
+    demoAccountRequired: z.boolean(),
+    notes: z.string().min(1).max(4000),
+  }),
 });
 
 const googleSchema = z.strictObject({
   listing: z.strictObject({
     defaultLanguage: localeKey,
     contactEmail: z.email(),
+    contactPhone: z.string().min(8).max(32),
     contactWebsite: z.url(),
     localizations: z.record(
       localeKey,
@@ -83,16 +96,8 @@ const storesSchema = z.strictObject({
     copyright: z.string(),
   }),
   availability: z.strictObject({
+    worldwide: z.literal(true),
     note: z.string().optional(),
-    regions: z.record(z.string(), z.array(z.string().regex(/^[A-Z]{2}$/))),
-    platformOverrides: z.strictObject({
-      apple: z.strictObject({
-        exclude: z.array(z.string().regex(/^[A-Z]{2}$/)),
-      }),
-      google: z.strictObject({
-        exclude: z.array(z.string().regex(/^[A-Z]{2}$/)),
-      }),
-    }),
   }),
   apple: appleSchema,
   google: googleSchema,
@@ -102,51 +107,8 @@ export type StoresConfig = z.infer<typeof storesSchema>;
 
 export function loadStores(): StoresConfig {
   const path = resolve(SCRIPTS_DIR, "stores.json");
-  const parsed = storesSchema.parse(JSON.parse(readFileSync(path, "utf8")));
-  const countries = countriesForPlatform(parsed, "apple");
-  for (const code of countries) {
-    if (!(code in ALPHA2_TO_APPLE_TERRITORY)) {
-      throw new Error(`No Apple territory mapping for country ${code} — extend ALPHA2_TO_APPLE_TERRITORY.`);
-    }
-  }
-  return parsed;
+  return storesSchema.parse(JSON.parse(readFileSync(path, "utf8")));
 }
-
-/** Flat, de-duplicated ISO alpha-2 list of every allowed country. */
-export function allCountries(config: StoresConfig): string[] {
-  return [...new Set(Object.values(config.availability.regions).flat())].sort();
-}
-
-function countriesForPlatform(config: StoresConfig, platform: "apple" | "google"): string[] {
-  const excluded = new Set(config.availability.platformOverrides[platform].exclude);
-  return allCountries(config).filter((code) => !excluded.has(code));
-}
-
-/** Apple's App Store Connect territory ids for the allowed countries. */
-export function appleTerritories(config: StoresConfig): string[] {
-  return countriesForPlatform(config, "apple").map(
-    (code) => ALPHA2_TO_APPLE_TERRITORY[code]!,
-  );
-}
-
-/** Google Play country ids after applying platform-specific exclusions. */
-export function googleCountries(config: StoresConfig): string[] {
-  return countriesForPlatform(config, "google");
-}
-
-/**
- * ISO 3166-1 alpha-2 → Apple territory id (alpha-3). Only the markets we
- * ship to; extend when the availability list grows.
- */
-export const ALPHA2_TO_APPLE_TERRITORY: Record<string, string> = {
-  AT: "AUT", BE: "BEL", BG: "BGR", HR: "HRV", CY: "CYP", CZ: "CZE",
-  DK: "DNK", EE: "EST", FI: "FIN", FR: "FRA", DE: "DEU", GR: "GRC",
-  HU: "HUN", IE: "IRL", IT: "ITA", LV: "LVA", LT: "LTU", LU: "LUX",
-  MT: "MLT", NL: "NLD", PL: "POL", PT: "PRT", RO: "ROU", SK: "SVK",
-  SI: "SVN", ES: "ESP", SE: "SWE",
-  GB: "GBR", IS: "ISL", LI: "LIE", NO: "NOR", CH: "CHE",
-  US: "USA", CA: "CAN", AU: "AUS",
-};
 
 /* ------------------------------------------------------------------ */
 /* Credentials                                                         */

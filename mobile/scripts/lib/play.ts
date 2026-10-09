@@ -114,7 +114,7 @@ export class PlayClient {
   async updateDetails(
     packageName: string,
     editId: string,
-    details: { contactEmail: string; contactWebsite: string; defaultLanguage: string },
+    details: { contactEmail: string; contactPhone: string; contactWebsite: string; defaultLanguage: string },
   ): Promise<void> {
     await this.request("PUT", `${API}/applications/${packageName}/edits/${editId}/details`, details);
   }

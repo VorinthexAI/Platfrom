@@ -44,19 +44,13 @@ images later. See `assets/README.md` for the exact size requirements
 
 ## Country availability policy
 
-The app ships ONLY to: the whole EU (27), the rest of EFTA Europe
-(Iceland, Liechtenstein, Norway, Switzerland), Great Britain, USA,
-Canada, and Australia — 35 countries, defined once in
-`stores.json > availability.regions` as ISO alpha-2 codes.
+The app is available worldwide (`stores.json > availability.worldwide`).
 
-- **Apple**: enforced automatically. The script posts the exact territory
-  list (mapped to Apple's alpha-3 ids) with `availableInNewTerritories:
-  false`, so newly launched App Store countries stay excluded.
-- **Google**: Play offers **no write API** for countries (confirmed:
-  `edits.countryavailability` only supports GET). The script reads the
-  current selection, diffs it against the policy, and prints a
-  copy-pasteable checklist for Play Console → Release → Production →
-  Countries/regions.
+- **Apple**: the script posts every App Store territory with
+  `availableInNewTerritories: true`.
+- **Google**: Play offers **no write API** for countries. The script
+  checks the current selection and tells you to enable rest of world in
+  Play Console → Release → Production → Countries/regions.
 
 ## Credentials
 

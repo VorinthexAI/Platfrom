@@ -8,62 +8,8 @@
     "copyright": "© 2026 Vorinthex AI"
   },
   "availability": {
-    "note": "Whole EU + rest of EFTA Europe + Great Britain, then USA, Canada and Australia. No other countries. Codes are ISO 3166-1 alpha-2; the submit script maps them to Apple's alpha-3 territory ids.",
-    "regions": {
-      "europeanUnion": [
-        "AT",
-        "BE",
-        "BG",
-        "HR",
-        "CY",
-        "CZ",
-        "DK",
-        "EE",
-        "FI",
-        "FR",
-        "DE",
-        "GR",
-        "HU",
-        "IE",
-        "IT",
-        "LV",
-        "LT",
-        "LU",
-        "MT",
-        "NL",
-        "PL",
-        "PT",
-        "RO",
-        "SK",
-        "SI",
-        "ES",
-        "SE"
-      ],
-      "europeExtra": [
-        "GB",
-        "IS",
-        "LI",
-        "NO",
-        "CH"
-      ],
-      "northAmerica": [
-        "US",
-        "CA"
-      ],
-      "oceania": [
-        "AU"
-      ]
-    },
-    "platformOverrides": {
-      "apple": {
-        "exclude": [
-          "LI"
-        ]
-      },
-      "google": {
-        "exclude": []
-      }
-    }
+    "worldwide": true,
+    "note": "Available in every App Store and Play country, including territories Apple or Google add later."
   },
   "apple": {
     "appInfo": {
@@ -72,7 +18,7 @@
       "localizations": {
         "en-US": {
           "name": "Vorinthex AI",
-          "subtitle": "AI That Grows With You",
+          "subtitle": "Your personal AI",
           "privacyPolicyUrl": "https://vorinthex.com/privacy"
         }
       }
@@ -81,9 +27,9 @@
       "releaseType": "AFTER_APPROVAL",
       "localizations": {
         "en-US": {
-          "description": "Meet Vorinthex AI.\n\nYour personal AI Brain.\n\nVorinthex AI is a next-generation AI platform designed to help you think, create, organize, and grow.\n\nInstead of switching between dozens of disconnected apps and AI tools, Vorinthex brings everything together into one intelligent experience that learns, remembers, and evolves with you over time.\n\nBuilt around a modern AI-native architecture, Vorinthex combines memory, productivity, creativity, communication, and personal growth into a single platform. Whether you're capturing ideas, organizing knowledge, managing information, or exploring new possibilities, your AI adapts to the way you work and helps you stay focused on what matters most.\n\nDesigned with a premium obsidian black, chrome, and silver aesthetic, Vorinthex delivers a fast, intuitive, and distraction-free experience built for the next generation of AI.\n\nThis is only the beginning. Vorinthex is continuously evolving with new intelligence, capabilities, and experiences that expand what your personal AI Brain can do over time.\n\nOne Brain.\nInfinite Possibilities.",
-          "keywords": "ai,assistant,second brain,notes,memory,knowledge,productivity,journal,organizer,habits",
-          "promotionalText": "Your personal AI Brain that learns, remembers, and evolves with you.",
+          "description": "Vorinthex AI is your personal AI.\n\nYou know it's somewhere: an idea, a photo, a video, or a document. Finding it again shouldn't be the hard part.\n\nKeep your files in Storage, your own secure cloud space. Notes, documents, photos, audio, videos, and Core chats stay together as the story of your work, instead of feeling scattered.\n\nCore doesn't have to start from zero. Ask in your own words. It can use the content you've chosen to keep in your current scope to find answers and make connections.\n\nCreate images, speech, or short videos with Core. What you make is saved with the rest of your work. Chats live in Storage too, with transcripts you can find again and bring into a new conversation.\n\nOne private space. One personal AI. Sparks are one balance for Storage and Core.",
+          "keywords": "ai,personal ai,files,storage,notes,photos,documents,chat,assistant,productivity",
+          "promotionalText": "Keep your work. Ask Core. Your personal AI that starts from your context.",
           "whatsNew": "Initial release of Vorinthex AI.",
           "supportUrl": "https://vorinthex.com/contact",
           "marketingUrl": "https://vorinthex.com/core"
@@ -92,18 +38,31 @@
     },
     "screenshots": {
       "APP_IPHONE_67": "assets/screenshots/apple/iphone-6-7"
+    },
+    "heroes": {
+      "header": "assets/apple-heroes/header.png",
+      "searchResults": "assets/apple-heroes/search-results.png"
+    },
+    "review": {
+      "contactFirstName": "Oscar",
+      "contactLastName": "Burman",
+      "contactPhone": "+46763132500",
+      "contactEmail": "contact@vorinthex.com",
+      "demoAccountRequired": false,
+      "notes": "Sign in with Apple or Google to create a reviewer account. There is no username or password. Use Sign in with Apple."
     }
   },
   "google": {
     "listing": {
       "defaultLanguage": "en-US",
       "contactEmail": "contact@vorinthex.com",
+      "contactPhone": "+46763132500",
       "contactWebsite": "https://vorinthex.com/contact",
       "localizations": {
         "en-US": {
           "title": "Vorinthex AI",
-          "shortDescription": "Your personal AI Brain that learns, remembers, and evolves with you.",
-          "fullDescription": "Meet Vorinthex AI.\n\nYour personal AI Brain.\n\nVorinthex AI is a next-generation AI platform designed to help you think, create, organize, and grow.\n\nInstead of switching between dozens of disconnected apps and AI tools, Vorinthex brings everything together into one intelligent experience that learns, remembers, and evolves with you over time.\n\nBuilt around a modern AI-native architecture, Vorinthex combines memory, productivity, creativity, communication, and personal growth into a single platform. Whether you're capturing ideas, organizing knowledge, managing information, or exploring new possibilities, your AI adapts to the way you work and helps you stay focused on what matters most.\n\nDesigned with a premium obsidian black, chrome, and silver aesthetic, Vorinthex delivers a fast, intuitive, and distraction-free experience built for the next generation of AI.\n\nThis is only the beginning. Vorinthex is continuously evolving with new intelligence, capabilities, and experiences that expand what your personal AI Brain can do over time.\n\nOne Brain.\nInfinite Possibilities."
+          "shortDescription": "Your personal AI that starts from the work you keep.",
+          "fullDescription": "Vorinthex AI is your personal AI.\n\nYou know it's somewhere: an idea, a photo, a video, or a document. Finding it again shouldn't be the hard part.\n\nKeep your files in Storage, your own secure cloud space. Notes, documents, photos, audio, videos, and Core chats stay together as the story of your work, instead of feeling scattered.\n\nCore doesn't have to start from zero. Ask in your own words. It can use the content you've chosen to keep in your current scope to find answers and make connections.\n\nCreate images, speech, or short videos with Core. What you make is saved with the rest of your work. Chats live in Storage too, with transcripts you can find again and bring into a new conversation.\n\nOne private space. One personal AI. Sparks are one balance for Storage and Core."
         }
       }
     },

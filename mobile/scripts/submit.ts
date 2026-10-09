@@ -6,12 +6,10 @@
  * Automates everything the public store APIs allow:
  *  - App Store Connect: categories, name/subtitle/privacy URL, version
  *    metadata per locale, screenshot upload from the drop-in folders in
- *    assets/, and the exact territory list (EU + EFTA Europe + GB +
- *    US/CA/AU only).
+ *    assets/, worldwide App Store availability, and review contact details.
  *  - Google Play: contact details, listings per locale, icon/feature
- *    graphic/screenshots from assets/, and a country-availability diff
- *    (Play has no write API for countries — the script prints the exact
- *    Console checklist instead).
+ *    graphic/screenshots from assets/, and a country-availability check
+ *    (Play has no write API for countries — the script prints the Console step).
  *
  * Binaries (.ipa / .aab) are uploaded by hand in App Store Connect and
  * Play Console — this script never touches them. Screenshots are NOT
@@ -22,11 +20,8 @@ import { existsSync } from "node:fs";
 
 import { AscClient } from "./lib/asc";
 import {
-  allCountries,
   appleCredentials,
-  appleTerritories,
   googleCredentials,
-  googleCountries,
   loadStores,
   resolveScriptPath,
   type StoresConfig,
@@ -53,10 +48,8 @@ function step(text: string): void {
 function validate(config: StoresConfig): boolean {
   heading("Validate stores.json");
   let ok = true;
-  const countries = allCountries(config);
   console.log(`  app          ${config.app.name} (${config.app.bundleId} / ${config.app.packageName}) v${config.app.versionString}`);
-  console.log(`  countries    ${countries.length}: ${countries.join(" ")}`);
-  console.log(`  apple terr.  ${appleTerritories(config).join(" ")}`);
+  console.log(`  countries    worldwide`);
 
   const assetChecks: Array<{ label: string; path: string }> = [
     ...Object.entries(config.apple.screenshots).map(([displayType, dir]) => ({
@@ -66,6 +59,8 @@ function validate(config: StoresConfig): boolean {
     { label: "play icon", path: config.google.images.icon },
     { label: "play feature graphic", path: config.google.images.featureGraphic },
     { label: "play phone screenshots", path: config.google.images.phoneScreenshots },
+    { label: "apple header hero", path: config.apple.heroes.header },
+    { label: "apple search hero", path: config.apple.heroes.searchResults },
   ];
   for (const check of assetChecks) {
     const path = resolveScriptPath(check.path);
@@ -143,11 +138,28 @@ async function submitApple(config: StoresConfig): Promise<void> {
     }
   }
 
-  step("Territory availability (EU + EFTA + GB + US/CA/AU only)");
-  const territories = appleTerritories(config);
-  await asc.setTerritoryAvailability(app.id, territories);
+  step("Header and search results heroes");
+  for (const [locale, localizationId] of localizationIds) {
+    const header = resolveScriptPath(config.apple.heroes.header);
+    const search = resolveScriptPath(config.apple.heroes.searchResults);
+    if (existsSync(header)) {
+      await asc.replaceCreativePlacement(app.id, localizationId, "PRODUCT_PAGE_HEADER_ASSET", header);
+      console.log(`  ${locale} header uploaded`);
+    }
+    if (existsSync(search)) {
+      await asc.replaceCreativePlacement(app.id, localizationId, "APP_STORE_SEARCH_RESULTS_ASSET", search);
+      console.log(`  ${locale} search results uploaded`);
+    }
+  }
+
+  step("Review contact and sign-in notes");
+  await asc.updateReviewDetails(version.id, config.apple.review);
+  console.log(`  ${config.apple.review.contactFirstName} ${config.apple.review.contactLastName} ${config.apple.review.contactPhone}`);
+
+  step("Worldwide App Store availability");
+  const declared = await asc.setWorldwideAvailability(app.id);
   const current = await asc.getTerritoryAvailability(app.id);
-  console.log(`  declared ${territories.length}, store now reports ${current.length}: ${current.join(" ")}`);
+  console.log(`  declared ${declared.length}, store now reports ${current.length}`);
 
   manualSteps.push(
     "Apple: upload the .ipa build yourself in App Store Connect (Transporter or Xcode Organizer), then attach it to the version.",
@@ -183,6 +195,7 @@ async function submitGoogle(config: StoresConfig): Promise<void> {
   step("Store listing details + localizations");
   await play.updateDetails(pkg, editId, {
     contactEmail: config.google.listing.contactEmail,
+    contactPhone: config.google.listing.contactPhone,
     contactWebsite: config.google.listing.contactWebsite,
     defaultLanguage: config.google.listing.defaultLanguage,
   });
@@ -214,30 +227,19 @@ async function submitGoogle(config: StoresConfig): Promise<void> {
   }
 
   step("Country availability check (Play has no write API for this)");
-  const desired = googleCountries(config);
   const track = config.google.availabilityCheckTrack;
   try {
     const availability = await play.getCountryAvailability(pkg, editId, track);
-    const current = (availability.countries ?? []).map((c) => c.countryCode).sort();
-    const missing = desired.filter((c) => !current.includes(c));
-    const extra = current.filter((c) => !desired.includes(c));
-    console.log(`  current (${track}): ${current.length ? current.join(" ") : "(none / defaults)"}`);
     console.log(`  restOfWorld: ${availability.restOfWorld ?? false}, syncWithProduction: ${availability.syncWithProduction ?? false}`);
-    if (missing.length || extra.length || availability.restOfWorld) {
+    if (!availability.restOfWorld) {
       manualSteps.push(
-        `Google: set country availability by hand — Play Console > Release > Production > Countries/regions. ` +
-          `Select EXACTLY these ${desired.length} countries and disable "rest of world": ${desired.join(", ")}.` +
-          (missing.length ? ` Currently missing: ${missing.join(", ")}.` : "") +
-          (extra.length ? ` Currently extra (remove): ${extra.join(", ")}.` : ""),
+        "Google: set country availability to every country — Play Console > Release > Production > Countries/regions. Enable rest of world.",
       );
-    } else {
-      console.log("  country list already matches the desired availability.");
     }
   } catch (error) {
     console.log(`  could not read availability (${(error as Error).message.slice(0, 120)})`);
     manualSteps.push(
-      `Google: set country availability by hand — Play Console > Release > Production > Countries/regions. ` +
-        `Select EXACTLY these ${desired.length} countries and nothing else: ${desired.join(", ")}.`,
+      "Google: set country availability to every country — Play Console > Release > Production > Countries/regions. Enable rest of world.",
     );
   }
 
@@ -248,7 +250,7 @@ async function submitGoogle(config: StoresConfig): Promise<void> {
 
   manualSteps.push(
     "Google: upload the .aab build yourself in Play Console (Release > Production/Testing > Create release).",
-    "Google: complete the one-time Console questionnaires the API does not cover — content rating (IARC), data safety form, target audience, and app access.",
+    "Google: complete the one-time Console questionnaires the API does not cover — content rating (IARC), data safety form, target audience, and app access (all users can sign in with Google or Apple).",
   );
 }
 

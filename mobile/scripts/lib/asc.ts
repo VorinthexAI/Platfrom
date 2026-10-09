@@ -40,6 +40,7 @@ export function buildAppAvailabilityPayload(
   appId: string,
   configuredTerritoryIds: readonly string[],
   appleTerritoryIds: readonly string[],
+  availableInNewTerritories = false,
 ): Record<string, unknown> {
   const configured = new Set(configuredTerritoryIds);
   const desiredTerritories = [...new Set(appleTerritoryIds)].filter((id) => configured.has(id));
@@ -65,7 +66,7 @@ export function buildAppAvailabilityPayload(
   return {
     data: {
       type: "appAvailabilities",
-      attributes: { availableInNewTerritories: false },
+      attributes: { availableInNewTerritories },
       relationships: {
         app: { data: { type: "apps", id: appId } },
         territoryAvailabilities: {
@@ -384,22 +385,132 @@ export class AscClient {
     return files.length;
   }
 
-  /**
-   * Declare the exact territory list (v2 appAvailabilities). Uses JSON:API
-   * local ids in `included`, as required for inline resource creation.
-   * availableInNewTerritories=false keeps future countries opt-in only.
-   */
-  async setTerritoryAvailability(appId: string, territoryIds: string[]): Promise<void> {
-    const territories = await this.request<{ data: Resource[] }>(
+  async replaceCreativePlacement(
+    appId: string,
+    versionLocalizationId: string,
+    placementType: "PRODUCT_PAGE_HEADER_ASSET" | "APP_STORE_SEARCH_RESULTS_ASSET",
+    file: string,
+  ): Promise<void> {
+    const bytes = readFileSync(file);
+    const reservation = await this.request<{
+      data: Resource & {
+        attributes: {
+          uploadOperations: Array<{
+            method: string;
+            url: string;
+            offset: number;
+            length: number;
+            requestHeaders: Array<{ name: string; value: string }>;
+          }>;
+        };
+      };
+    }>("POST", "/v1/appAssetLibraryImages", {
+      data: {
+        type: "appAssetLibraryImages",
+        attributes: { fileName: basename(file), fileSize: statSync(file).size, category: "CREATIVE_ASSETS" },
+        relationships: { assetLibrary: { data: { type: "appAssetLibraries", id: appId } } },
+      },
+    });
+
+    for (const op of reservation.data.attributes.uploadOperations) {
+      const chunk = bytes.subarray(op.offset, op.offset + op.length);
+      const headers = Object.fromEntries(op.requestHeaders.map((h) => [h.name, h.value]));
+      const upload = await fetch(op.url, { method: op.method, headers, body: chunk });
+      if (!upload.ok) throw new Error(`Creative asset chunk upload failed: ${upload.status} for ${file}`);
+    }
+
+    await this.request("PATCH", `/v1/appAssetLibraryImages/${reservation.data.id}`, {
+      data: {
+        type: "appAssetLibraryImages",
+        id: reservation.data.id,
+        attributes: { uploaded: true },
+      },
+    });
+
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const image = await this.request<{ data: Resource }>("GET", `/v1/appAssetLibraryImages/${reservation.data.id}`);
+      const state = String(image.data.attributes?.state ?? "");
+      if (state === "PREPARE_FOR_SUBMISSION" || state === "COMPLETE" || state === "ACTIVE") break;
+      if (state === "FAILED") throw new Error(`Creative asset failed: ${JSON.stringify(image.data.attributes?.stateDetails)}`);
+      await Bun.sleep(2000);
+    }
+
+    const placements = await this.request<{ data: Resource[] }>(
       "GET",
-      "/v1/territories?limit=200",
+      `/v1/appStoreVersionLocalizations/${versionLocalizationId}/placements?limit=50`,
     );
-    const payload = buildAppAvailabilityPayload(
-      appId,
-      territoryIds,
-      territories.data.map((territory) => territory.id),
+    for (const placement of placements.data) {
+      if (placement.attributes?.placementType === placementType) {
+        await this.request("DELETE", `/v1/appAssetLibraryPlacements/${placement.id}`);
+      }
+    }
+
+    await this.request("POST", "/v1/appAssetLibraryPlacements", {
+      data: {
+        type: "appAssetLibraryPlacements",
+        attributes: { placementType },
+        relationships: {
+          appStoreVersionLocalization: { data: { type: "appStoreVersionLocalizations", id: versionLocalizationId } },
+          image: { data: { type: "appAssetLibraryImages", id: reservation.data.id } },
+        },
+      },
+    });
+  }
+
+  async setWorldwideAvailability(appId: string): Promise<string[]> {
+    const existing = await this.request<{ data: Resource }>("GET", `/v1/apps/${appId}/appAvailabilityV2`).catch(() => null);
+    if (!existing?.data?.id) {
+      const territories = await this.request<{ data: Resource[] }>("GET", "/v1/territories?limit=200");
+      const ids = territories.data.map((territory) => territory.id);
+      await this.request("POST", "/v2/appAvailabilities", buildAppAvailabilityPayload(appId, ids, ids, true));
+      return ids.sort();
+    }
+    const listed = await this.request<{ data: Resource[]; included?: Resource[] }>(
+      "GET",
+      `/v2/appAvailabilities/${existing.data.id}/territoryAvailabilities?include=territory&limit=200`,
     );
-    await this.request("POST", "/v2/appAvailabilities", payload);
+    for (const item of listed.data) {
+      if (item.attributes?.available === true) continue;
+      await this.request("PATCH", `/v1/territoryAvailabilities/${item.id}`, {
+        data: { type: "territoryAvailabilities", id: item.id, attributes: { available: true } },
+      });
+    }
+    return (listed.included ?? []).filter((item) => item.type === "territories").map((item) => item.id).sort();
+  }
+
+  async updateReviewDetails(
+    versionId: string,
+    review: {
+      contactFirstName: string;
+      contactLastName: string;
+      contactPhone: string;
+      contactEmail: string;
+      demoAccountRequired: boolean;
+      notes: string;
+    },
+  ): Promise<void> {
+    const attributes = {
+      contactFirstName: review.contactFirstName,
+      contactLastName: review.contactLastName,
+      contactPhone: review.contactPhone,
+      contactEmail: review.contactEmail,
+      demoAccountRequired: review.demoAccountRequired,
+      notes: review.notes,
+    };
+    try {
+      const existing = await this.request<{ data: Resource }>("GET", `/v1/appStoreVersions/${versionId}/appStoreReviewDetail`);
+      await this.request("PATCH", `/v1/appStoreReviewDetails/${existing.data.id}`, {
+        data: { type: "appStoreReviewDetails", id: existing.data.id, attributes },
+      });
+    } catch {
+      await this.request("POST", "/v1/appStoreReviewDetails", {
+        data: {
+          type: "appStoreReviewDetails",
+          attributes,
+          relationships: { appStoreVersion: { data: { type: "appStoreVersions", id: versionId } } },
+        },
+      });
+    }
   }
 
   /** Current territory ids, for the post-run report. */
@@ -409,11 +520,11 @@ export class AscClient {
       included?: Resource[];
     }>(
       "GET",
-      `/v2/appAvailabilities/${appId}/territoryAvailabilities?include=territory&limit=200&filter[available]=true`,
+      `/v2/appAvailabilities/${appId}/territoryAvailabilities?include=territory&limit=200`,
     );
-    return (result.included ?? [])
-      .filter((r) => r.type === "territories")
-      .map((r) => r.id)
+    return result.data
+      .filter((item) => item.attributes?.available === true)
+      .map((item) => item.id)
       .sort();
   }
 }
