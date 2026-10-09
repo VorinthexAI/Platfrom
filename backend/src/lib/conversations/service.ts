@@ -409,7 +409,7 @@ export function createConversationService(dependencies: ConversationServiceDepen
       };
       const retrievals: AppSearchRetrieval[] = [];
        const agentMessage = `${tagged.preface}${input.message}`;
-       if (input.mode === 'plan') {
+        if (input.mode === 'plan' && ownership.agentKey === APP_KEYS.ORBIT) {
          const plan = await runPlanSession({
            teamKey: ownership.teamKey,
            context,

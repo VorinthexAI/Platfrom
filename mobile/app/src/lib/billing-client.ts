@@ -29,13 +29,14 @@ export const billingSummarySchema = z.object({
   microSparkBalance: z.number().int().safe().nonnegative(),
   microSparkDebt: z.number().int().safe().nonnegative().default(0),
   spendingBlocked: z.boolean().default(false),
+  unlimited: z.boolean().default(false),
   aiUsageMicroSparks: z.number().int().safe().nonnegative(),
   storage: z.object({
     bytes: canonicalIntegerSchema,
     estimatedMonthlyMicroSparks: rolloutIntegerSchema,
   }).default({ bytes: "0", estimatedMonthlyMicroSparks: "0" }),
   transactions: z.array(sparkTransactionSchema).max(200),
-}).refine((summary) => summary.spendingBlocked === (summary.microSparkDebt > 0), {
+}).refine((summary) => summary.unlimited || summary.spendingBlocked === (summary.microSparkDebt > 0), {
   message: "Spending block must match the outstanding Spark debt.",
   path: ["spendingBlocked"],
 });
@@ -98,6 +99,7 @@ export async function fetchCurrentSubscription(signal?: AbortSignal): Promise<Cu
 export async function ensureSparkCapacity(requiredMicroSparks = 1) {
   try {
     const billing = await fetchBillingSummary();
+    if (billing.unlimited) return;
     if (billing.spendingBlocked) throw observeDomainError(Object.assign(new Error("billing.outstandingDebt"), { code: OUTSTANDING_DEBT_CODE }));
     if (billing.microSparkBalance < Math.max(1, requiredMicroSparks)) throw observeDomainError(Object.assign(new Error("billing.insufficientBalance"), { code: INSUFFICIENT_BALANCE_CODE }));
   } catch (error) {

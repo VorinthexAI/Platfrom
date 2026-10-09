@@ -11,3 +11,7 @@ export function emailHasPrivateAgentAccess(email: string | null | undefined) {
   if (!email) return false;
   return parsePrivateAgentAccessEmails().has(email.trim().toLowerCase());
 }
+
+export function activePrivateAgentHasUnlimitedSparks(user: { email?: string | null; deletionRequestedAt?: string | null } | null | undefined) {
+  return Boolean(user && !user.deletionRequestedAt && emailHasPrivateAgentAccess(user.email));
+}

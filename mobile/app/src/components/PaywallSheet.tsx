@@ -60,7 +60,9 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
   const refreshProducts = useAppsStore((state) => state.refreshProducts);
   const userKey = useAuthStore((state) => state.user?.key);
   const authReferralSummary = useAuthStore((state) => state.referralSummary);
-  const balance = useWholeSparkBalance(userKey).data;
+  const sparkAccess = useWholeSparkBalance(userKey).data;
+  const unlimited = sparkAccess?.unlimited === true;
+  const balance = sparkAccess?.balance;
   const subscriptionQuery = useCurrentSubscription(userKey);
   const queryClient = useQueryClient();
   const subscriptions = activeSubscriptionOffers(products);
@@ -192,7 +194,7 @@ export function PaywallSheet({ initialPage = "plans", mode = "standard", onCompl
 
   const renderPlanCard = (product: MobileProduct) => <PlanCard current={currentSubscriptionProductKey === product.key} key={product.key} onSelect={() => setSelectedKey(product.key)} product={product} selected={effectiveSelectedKey === product.key} storePrice={packageForProduct(offerings.data ?? [], product.productId)?.product.priceString ?? formatProductPrice(product.priceCents, product.currency)} />;
   const content = page === "plans" ? <ScrollView contentContainerStyle={[styles.content, mode === "onboarding" && styles.onboardingContent]} showsVerticalScrollIndicator={false}>
-    {mode === "onboarding" ? <View style={styles.hero}><View style={styles.heroTitleRow}><Text style={styles.heroTitle}>One balance for everything you create and use</Text></View><Text style={styles.heroCopy}>Sparks give you a simple way to use AI capabilities, store your work, and keep services connected across Vorinthex.</Text></View> : <View style={styles.balanceHero}><View style={styles.balanceHeading}><SparksIcon size="lg" /><Text accessibilityLabel={balance === undefined ? "Sparks balance unavailable. Showing 0 Sparks" : `${balance} Sparks`} style={styles.balance}>{formatWholeSparks(balance ?? 0)} <Text style={styles.balanceUnit}>Sparks</Text></Text></View></View>}
+    {mode === "onboarding" ? <View style={styles.hero}><View style={styles.heroTitleRow}><Text style={styles.heroTitle}>One balance for everything you create and use</Text></View><Text style={styles.heroCopy}>Sparks give you a simple way to use AI capabilities, store your work, and keep services connected across Vorinthex.</Text></View> : <View style={styles.balanceHero}><View style={styles.balanceHeading}><SparksIcon size="lg" /><Text accessibilityLabel={sparkAccess === undefined ? "Sparks balance unavailable. Showing 0 Sparks" : unlimited ? "Unlimited Sparks" : `${balance} Sparks`} style={styles.balance}>{unlimited ? "∞" : formatWholeSparks(balance ?? 0)}{unlimited ? null : <Text style={styles.balanceUnit}> Sparks</Text>}</Text></View></View>}
     {mode === "standard" ? <><Tabs accessibilityLabel="Spark offers" accessibilityRole="tablist" onValueChange={(value) => setOfferTab(value as OfferTab)} style={styles.offerTabs} value={offerTab}><TabsTrigger style={styles.offerTab} value="plans">Plans</TabsTrigger><TabsTrigger style={styles.offerTab} value="topup">Top-up</TabsTrigger></Tabs><View style={styles.plans}>{offers.map(renderPlanCard)}</View></> : <View style={styles.plans}>{subscriptions.map(renderPlanCard)}</View>}
     {!offers.length ? <View style={styles.state}><Text style={styles.heroCopy}>{productsStatus === "loading" ? "Loading offers..." : "Offers are temporarily unavailable."}</Text>{productsStatus !== "loading" ? <Button onPress={() => { void refreshProducts(); if (purchasesAvailable()) void offerings.refetch(); }} size="md" variant="secondary">Retry</Button> : null}</View> : null}
   </ScrollView> : <ScrollView contentContainerStyle={styles.referralContent} showsVerticalScrollIndicator={false}>

@@ -13,6 +13,7 @@ export const billingSummaryReadOutputSchema = z.object({
   microSparkBalance: z.number().int().safe().nonnegative(),
   microSparkDebt: z.number().int().safe().nonnegative(),
   spendingBlocked: z.boolean(),
+  unlimited: z.boolean(),
   aiUsageMicroSparks: z.number().int().safe().nonnegative(),
   storage: z.object({
     bytes: z.string().regex(/^(0|[1-9]\d*)$/),

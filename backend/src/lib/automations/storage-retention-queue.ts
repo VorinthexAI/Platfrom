@@ -3,6 +3,8 @@ import { Queue, Worker, type JobsOptions } from 'bullmq';
 import { z } from 'zod';
 import { createRedisConnection } from '@/lib/redis';
 import { appNotificationService, type AppNotificationService } from '@/lib/app-notifications/service';
+import { activePrivateAgentHasUnlimitedSparks } from '@/lib/apps/private-access';
+import { getUserById } from '@/lib/db/users.node';
 import { getDefaultStorageRetentionRepository, STORAGE_RETENTION_SCAN_BATCH_SIZE, type StorageRetentionRepository, type StorageRetentionState } from './storage-retention-repository';
 
 export const STORAGE_RETENTION_QUEUE_NAME = 'daily-storage-retention';
@@ -67,6 +69,10 @@ export async function scanStorageRetention(dependencies: StorageRetentionDepende
     let failure: unknown;
     for (const state of states) {
       try {
+        if (activePrivateAgentHasUnlimitedSparks(await getUserById(state.userKey))) {
+          if (await repository.markFunded(state.userKey, now)) funded += 1;
+          continue;
+        }
         const action = storageRetentionAction(state, new Date(now));
         if (action === 'fund') {
           if (await repository.markFunded(state.userKey, now)) funded += 1;

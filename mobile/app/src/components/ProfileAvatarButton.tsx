@@ -31,10 +31,11 @@ export function ProfileAvatar({ avatarSize = 32 }: { avatarSize?: number }) {
 
 export function SparksBalanceButton() {
   const userKey = useAuthStore((state) => state.user?.key);
-  const balance = useWholeSparkBalance(userKey).data;
+  const access = useWholeSparkBalance(userKey).data;
   const openPaywall = useUiStore((state) => state.openPaywall);
-  const displayBalance = formatWholeSparks(balance ?? 0);
-  return <Button accessibilityLabel={balance === undefined ? "Sparks balance unavailable. Showing 0 Sparks. Open Sparks" : `Sparks balance: ${balance} Sparks. Open Sparks`} hitSlop={8} icon={<SparksIcon size="sm" />} onPress={openPaywall} size="xs" textStyle={styles.balanceText} variant="secondary">{displayBalance} Sparks</Button>;
+  const unlimited = access?.unlimited === true;
+  const displayBalance = unlimited ? "∞" : formatWholeSparks(access?.balance ?? 0);
+  return <Button accessibilityLabel={access === undefined ? "Sparks balance unavailable. Showing 0 Sparks. Open Sparks" : unlimited ? "Unlimited Sparks. Open Sparks" : `Sparks balance: ${access.balance} Sparks. Open Sparks`} hitSlop={8} icon={<SparksIcon size="sm" />} onPress={openPaywall} size="xs" textStyle={styles.balanceText} variant="secondary">{unlimited ? displayBalance : `${displayBalance} Sparks`}</Button>;
 }
 
 export function ProfileHeaderRight() {

@@ -498,7 +498,7 @@ export async function launchEmailConnection(connection: z.input<typeof emailConn
   if (inboxCost?.kind === "static") {
     const billing = await fetchBillingSummary();
     const requiredMicroSparks = Number(inboxCost.sparkCost) * 1_000_000;
-    if (billing.spendingBlocked || billing.microSparkBalance < requiredMicroSparks) {
+    if (!billing.unlimited && (billing.spendingBlocked || billing.microSparkBalance < requiredMicroSparks)) {
       throw observeDomainError(Object.assign(new Error("You need more Sparks to connect an inbox."), { code: INSUFFICIENT_BALANCE_CODE }));
     }
   }

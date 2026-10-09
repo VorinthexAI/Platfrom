@@ -13,7 +13,7 @@ export function useWholeSparkBalance(userKey: string | undefined) {
     refetchIntervalInBackground: false,
     refetchOnMount: "always",
     refetchOnReconnect: "always",
-    select: (summary) => wholeSparks(summary.microSparkBalance),
+    select: (summary) => ({ balance: wholeSparks(summary.microSparkBalance), unlimited: summary.unlimited }),
   });
 }
 

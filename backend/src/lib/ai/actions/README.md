@@ -29,8 +29,8 @@ provider-reported total token usage costs 20 Sparks per million tokens.
 
 The `plan` action binds Google Gemini 3.8 Flash through OpenRouter as
 `plan.primary`. Trusted callers such as Orbit stream chat over that slot.
-Plan mode in the composer interviews on that slot without saving the chat,
-then writes the finished plan as a markdown file in the Plans folder.
+Orbit plan mode interviews on that slot without saving the chat, then writes
+the finished plan as a markdown file in the Plans folder. Core does not use it.
 Its user price matches the `text` action: 40 Sparks per million input tokens
 and 400 Sparks per million output tokens.
 

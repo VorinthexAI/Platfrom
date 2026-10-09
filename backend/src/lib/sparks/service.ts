@@ -1,7 +1,9 @@
 import { calculateByteHours, calculateFixedCost, HOURS_PER_BILLING_MONTH, lookupCostRule, storageCostMicroSparks, storageCostMicroSparksExact } from '@/lib/costs';
 import { z } from 'zod';
 import { getDefaultStorageChargingRepository } from '@/lib/automations/storage-charger-repository';
-import { sparkHistoryInputSchema, sparkMetadataSchema, type SparkHistoryInput, type SparkMetadata, type SparkTransaction, type SparkTransactionKind } from './contracts';
+import { activePrivateAgentHasUnlimitedSparks } from '@/lib/apps/private-access';
+import { getUserById } from '@/lib/db/users.node';
+import { sparkHistoryInputSchema, sparkMetadataSchema, sparkTransactionSchema, type SparkHistoryInput, type SparkMetadata, type SparkTransaction, type SparkTransactionKind } from './contracts';
 import type { ApplySparkResult, SparkRepository } from './repository';
 import { createArangoSparkRepository, SparkRepositoryError } from './repository';
 import { newId } from '@/lib/ids';
@@ -19,6 +21,7 @@ export interface SparkServiceDependencies {
   getActiveStoredBytes?: (userKey: string) => Promise<string>;
   getActiveStoredBytesForScope?: (userKey: string, scopeKey: string) => Promise<string>;
   publishBalance?: typeof publishUserEvent;
+  isUnlimited?: (userKey: string) => Promise<boolean>;
 }
 
 function positiveSafeInteger(value: number): number {
@@ -26,7 +29,32 @@ function positiveSafeInteger(value: number): number {
   return value;
 }
 
-export function createSparkService({ repository, createKey = newId, now = () => new Date(), getActiveStoredBytes = async () => '0', getActiveStoredBytesForScope, publishBalance = async () => {} }: SparkServiceDependencies) {
+async function privateAgentUnlimited(userKey: string) {
+  const user = await getUserById(userKey);
+  return activePrivateAgentHasUnlimitedSparks(user);
+}
+
+function waivedCharge(userKey: string, kind: SparkTransactionKind, input: OperationIdentity & Readonly<{ toolSlug?: string; actionSlug?: string }>, at: string): ApplySparkResult {
+  return {
+    status: 'replayed',
+    transaction: sparkTransactionSchema.parse({
+      key: input.idempotencyKey,
+      userKey,
+      kind,
+      deltaMicroSparks: -1,
+      idempotencyKey: input.idempotencyKey,
+      requestHash: input.requestHash,
+      ...(input.eventKey ? { eventKey: input.eventKey } : {}),
+      ...(input.toolSlug ? { toolSlug: input.toolSlug } : {}),
+      ...(input.actionSlug ? { actionSlug: input.actionSlug } : {}),
+      metadata: { unlimited: true },
+      balanceAfterMicroSparks: 0,
+      createdAt: at,
+    }),
+  };
+}
+
+export function createSparkService({ repository, createKey = newId, now = () => new Date(), getActiveStoredBytes = async () => '0', getActiveStoredBytesForScope, publishBalance = async () => {}, isUnlimited = privateAgentUnlimited }: SparkServiceDependencies) {
   const publish = (userKey: string) => { void publishBalance(userKey, 'spark.balance.changed').catch(() => undefined); };
   const apply = async (
     trustedUserKey: string,
@@ -52,10 +80,12 @@ export function createSparkService({ repository, createKey = newId, now = () => 
   };
 
   return Object.freeze({
-    charge(trustedUserKey: string, input: ChargeInput & Readonly<{ kind: 'tool' | 'action' | 'storage'; toolSlug?: string; actionSlug?: string }>) {
+    async charge(trustedUserKey: string, input: ChargeInput & Readonly<{ kind: 'tool' | 'action' | 'storage'; toolSlug?: string; actionSlug?: string }>) {
+      if (await isUnlimited(trustedUserKey)) return waivedCharge(trustedUserKey, input.kind, input, now().toISOString());
       return apply(trustedUserKey, input.kind, -positiveSafeInteger(input.microSparks), input);
     },
     async chargeExecution(trustedUserKey: string, input: ChargeInput & Readonly<{ kind: 'tool' | 'action'; toolSlug?: string; actionSlug?: string; executionIdentity: string }>) {
+      if (await isUnlimited(trustedUserKey)) return waivedCharge(trustedUserKey, input.kind, input, now().toISOString());
       const { executionIdentity, ...charge } = input;
       const record = {
         key: createKey(), userKey: trustedUserKey, kind: charge.kind, deltaMicroSparks: -positiveSafeInteger(charge.microSparks),
@@ -89,23 +119,25 @@ export function createSparkService({ repository, createKey = newId, now = () => 
       if (!Number.isSafeInteger(input.deltaMicroSparks) || input.deltaMicroSparks === 0) throw new RangeError('deltaMicroSparks must be a nonzero safe integer.');
       return apply(trustedUserKey, 'adjustment', input.deltaMicroSparks, input);
     },
-    chargeInvocation(trustedUserKey: string, input: InvocationInput): Promise<ApplySparkResult | null> {
+    async chargeInvocation(trustedUserKey: string, input: InvocationInput): Promise<ApplySparkResult | null> {
       const resolved = lookupCostRule(input);
-      if (!resolved) return Promise.resolve(null);
+      if (!resolved || await isUnlimited(trustedUserKey)) return null;
       return apply(trustedUserKey, resolved.source, -calculateFixedCost(resolved.rule), {
         ...input,
         ...(resolved.source === 'tool' ? { toolSlug: resolved.slug } : { actionSlug: resolved.slug }),
       });
     },
-    chargeStorage(trustedUserKey: string, input: OperationIdentity & Readonly<{ byteHours: number | bigint }>): Promise<ApplySparkResult | null> {
+    async chargeStorage(trustedUserKey: string, input: OperationIdentity & Readonly<{ byteHours: number | bigint }>): Promise<ApplySparkResult | null> {
       const microSparks = storageCostMicroSparks(input.byteHours);
-      if (microSparks === 0) return Promise.resolve(null);
+      if (microSparks === 0 || await isUnlimited(trustedUserKey)) return null;
       return apply(trustedUserKey, 'storage', -microSparks, input);
     },
-    getBalance(trustedUserKey: string) {
+    async getBalance(trustedUserKey: string) {
+      if (await isUnlimited(trustedUserKey)) return Number.MAX_SAFE_INTEGER;
       return repository.getBalance(trustedUserKey);
     },
-    getDebt(trustedUserKey: string) {
+    async getDebt(trustedUserKey: string) {
+      if (await isUnlimited(trustedUserKey)) return 0;
       return repository.getDebt?.(trustedUserKey) ?? Promise.resolve(0);
     },
     listHistory(trustedUserKey: string, input?: SparkHistoryInput): Promise<SparkTransaction[]> {
@@ -114,18 +146,20 @@ export function createSparkService({ repository, createKey = newId, now = () => 
     async getSummary(trustedUserKey: string, input?: SparkHistoryInput, scopeKey?: string) {
       const valid = sparkHistoryInputSchema.parse(input ?? {});
       const requestedScopeKey = scopeKey === undefined ? undefined : z.string().cuid().parse(scopeKey);
-      const [microSparkBalance, microSparkDebt, transactions, storageBytes, aiUsageMicroSparks] = await Promise.all([
+      const [microSparkBalance, microSparkDebt, transactions, storageBytes, aiUsageMicroSparks, unlimited] = await Promise.all([
         repository.getBalance(trustedUserKey),
         repository.getDebt?.(trustedUserKey) ?? Promise.resolve(0),
         repository.listHistory(trustedUserKey, valid),
         requestedScopeKey ? getActiveStoredBytesForScope?.(trustedUserKey, requestedScopeKey) ?? Promise.reject(new Error('Scoped storage summaries are unavailable.')) : getActiveStoredBytes(trustedUserKey),
         repository.sumDebits?.(trustedUserKey, 'action') ?? Promise.resolve(0),
+        isUnlimited(trustedUserKey),
       ]);
       if (microSparkBalance === null) throw new SparkRepositoryError('USER_NOT_FOUND', 'Spark account user was not found.');
       return {
         microSparkBalance,
         microSparkDebt: microSparkDebt ?? 0,
-        spendingBlocked: (microSparkDebt ?? 0) > 0,
+        spendingBlocked: !unlimited && (microSparkDebt ?? 0) > 0,
+        unlimited,
         aiUsageMicroSparks,
         storage: {
           bytes: storageBytes,
