@@ -5,7 +5,7 @@ import { db, withTransaction } from './client';
 import { currentEmbeddingSchema } from '@/lib/embeddings';
 
 export const FILES_COLLECTION = 'files';
-export const fileExtensionSchema = z.enum(['txt', 'md', 'docx', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'gif', 'mp3', 'mp4', 'mov']);
+export const fileExtensionSchema = z.enum(['txt', 'md', 'html', 'docx', 'pdf', 'jpg', 'jpeg', 'png', 'webp', 'gif', 'mp3', 'mp4', 'mov']);
 export const fileProcessingSchema = z.enum(['pending', 'ready', 'failed']);
 
 export const fileSchema = z.object({

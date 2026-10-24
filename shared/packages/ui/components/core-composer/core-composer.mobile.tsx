@@ -64,6 +64,7 @@ export type CoreComposerProps = {
   pageActions?: ReactNode;
   pageBackdrop?: ReactNode;
   pageIdentity: (closePage: () => void) => ReactNode;
+  title?: string;
   prompts: readonly string[];
   sendIcon: ReactNode;
   style?: StyleProp<ViewStyle>;
@@ -187,10 +188,11 @@ type CorePageProps = {
   pageIdentity: (closePage: () => void) => ReactNode;
   rightInset: number;
   style?: StyleProp<ViewStyle>;
+  title?: string;
   topInset: number;
 };
 
-function CorePage({ bottomInset, closePage, composer, focusInput, focusInputOnMount, leftInset, message, pageActions, pageBackdrop, pageIdentity, rightInset, style, topInset }: CorePageProps) {
+function CorePage({ bottomInset, closePage, composer, focusInput, focusInputOnMount, leftInset, message, pageActions, pageBackdrop, pageIdentity, rightInset, style, title = "Core", topInset }: CorePageProps) {
   const keyboard = useAnimatedKeyboard();
   const keyboardLift = useDerivedValue(() => {
     const keyboardMoving = [KeyboardState.OPENING, KeyboardState.OPEN, KeyboardState.CLOSING].includes(keyboard.state.value);
@@ -217,7 +219,7 @@ function CorePage({ bottomInset, closePage, composer, focusInput, focusInputOnMo
     return true;
   }).remove, [closePage]);
 
-  return <View accessibilityLabel="Core" accessibilityViewIsModal onAccessibilityEscape={closePage} style={styles.page}>
+  return <View accessibilityLabel={title} accessibilityViewIsModal onAccessibilityEscape={closePage} style={styles.page}>
     <View style={[styles.pageIdentityHeader, {
       paddingTop: topInset + 6,
       paddingLeft: Math.max(leftInset, spacing.md),
@@ -231,8 +233,8 @@ function CorePage({ bottomInset, closePage, composer, focusInput, focusInputOnMo
         paddingRight: Math.max(rightInset, spacing.md),
       }]}>
         <View style={styles.pageTitleRow}>
-          <Button accessibilityLabel="Back from Core" contentMode="raw" onPress={closePage} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
-          <Text numberOfLines={1} style={styles.pageTitle}>Core</Text>
+          <Button accessibilityLabel={`Back from ${title}`} contentMode="raw" onPress={closePage} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
+          <Text numberOfLines={1} style={styles.pageTitle}>{title}</Text>
           {pageActions ?? <View style={styles.pageTitleSpacer} />}
         </View>
         <Reanimated.View style={[styles.pageConversation, keyboardConversationStyle]}>{message}</Reanimated.View>
@@ -276,6 +278,7 @@ export function CoreComposer({
   pageActions,
   pageBackdrop,
   pageIdentity,
+  title = "Core",
   prompts,
   sendIcon,
   style,
@@ -522,7 +525,7 @@ export function CoreComposer({
       }]}>
         {accessory}{composer(false)}
       </View> : null}
-      {pageOpen ? <CorePage bottomInset={insets.bottom} closePage={closePage} composer={composer(true)} focusInput={focusInput} focusInputOnMount={focusInputOnPageMount} leftInset={insets.left} message={message} pageActions={pageActions} pageBackdrop={pageBackdrop} pageIdentity={pageIdentity} rightInset={insets.right} style={style} topInset={insets.top} /> : null}
+      {pageOpen ? <CorePage bottomInset={insets.bottom} closePage={closePage} composer={composer(true)} focusInput={focusInput} focusInputOnMount={focusInputOnPageMount} leftInset={insets.left} message={message} pageActions={pageActions} pageBackdrop={pageBackdrop} pageIdentity={pageIdentity} rightInset={insets.right} style={style} title={title} topInset={insets.top} /> : null}
     </>
   );
 }

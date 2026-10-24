@@ -17,7 +17,6 @@ const CORE_PROMPTS = ["Ask anything", "Find a file", "Help me plan my next step"
 export function AccountScreenShell({ children, rightAction, title }: { children: ReactNode; rightAction?: ReactNode; title: string }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-
   return <View style={styles.root}>
     <View style={[styles.globalHeader, { paddingLeft: Math.max(insets.left, spacing.md), paddingRight: Math.max(insets.right, spacing.md), paddingTop: insets.top + 6 }]}>
       <ProfileAvatar avatarSize={36} />
@@ -39,6 +38,10 @@ export function AccountScreenShell({ children, rightAction, title }: { children:
        pageIdentity={(closeCore) => <View style={styles.coreHeader}><AgentSwitcher /><Button accessibilityLabel="Close Core" contentMode="raw" onPress={closeCore} size="xs" variant="icon"><CloseIcon size="sm" /></Button></View>}
       prompts={CORE_PROMPTS}
       sendIcon={<SendIcon size="sm" />}
+      showCapabilities
+      showIncognito
+      showReplyMode
+      showRole
       value=""
     />
   </View>;

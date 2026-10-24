@@ -35,6 +35,7 @@ export type CoreComposerProps = {
   openEnabled?: boolean;
   pageActions?: ReactNode;
   pageBackdrop?: ReactNode;
+  title?: string;
   prompts: readonly string[];
   sendIcon: ReactNode;
   style?: React.CSSProperties;

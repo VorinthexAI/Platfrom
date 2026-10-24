@@ -17,7 +17,7 @@ import {
 
 export type { ContentSelection } from "./content-selection-plans";
 
-export const FILE_EXTENSIONS = ["txt", "md", "docx", "pdf", "jpg", "jpeg", "png", "webp", "gif", "mp3", "mp4", "mov"] as const;
+export const FILE_EXTENSIONS = ["txt", "md", "html", "docx", "pdf", "jpg", "jpeg", "png", "webp", "gif", "mp3", "mp4", "mov"] as const;
 export type FileExtension = (typeof FILE_EXTENSIONS)[number];
 export const FILE_LOCATION_PAGE_SIZE = 50;
 
@@ -164,6 +164,7 @@ async function executeContentSelectionPlan(plan: ContentSelectionPlan): Promise<
 const FILE_MIME: Record<FileExtension, string> = {
   txt: "text/plain",
   md: "text/markdown",
+  html: "text/html",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   pdf: "application/pdf",
   jpg: "image/jpeg",
@@ -200,7 +201,7 @@ export async function listContentFolderPage(folderKey?: string, signal?: AbortSi
   }, signal, contentContext);
 }
 
-export async function listContentFilePage(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext(), cursor?: string, limit = FILE_LOCATION_PAGE_SIZE, extensions?: readonly string[], filters?: { favoritesOnly?: boolean; includeHidden?: boolean }) {
+export async function listContentFilePage(folderKey?: string, signal?: AbortSignal, contentContext = getContentContext(), cursor?: string, limit = FILE_LOCATION_PAGE_SIZE, extensions?: readonly string[], filters?: { favoritesOnly?: boolean; includeHidden?: boolean; includeDescendants?: boolean }) {
   return callContentTool<{ files: ContentFile[]; cursor?: string }>("file.list", {
     scopeKey: contentContext.scopeKey,
     ...(folderKey ? { folderKey } : {}),
@@ -209,6 +210,7 @@ export async function listContentFilePage(folderKey?: string, signal?: AbortSign
     ...(extensions?.length ? { extensions: [...extensions] } : {}),
     ...(filters?.favoritesOnly ? { favoritesOnly: true } : {}),
     ...(filters?.includeHidden ? { includeHidden: true } : {}),
+    ...(filters?.includeDescendants ? { includeDescendants: true } : {}),
   }, signal, contentContext);
 }
 
@@ -316,7 +318,7 @@ export async function setContentFileFavorite(fileKey: string, isFavorite: boolea
 type DirectFile = { name: string; type: string; size: number; uri: string };
 
 async function extractLocalText(uri: string, extension: FileExtension) {
-  if (extension === "txt" || extension === "md") {
+  if (extension === "txt" || extension === "md" || extension === "html") {
     const bytes = await new File(uri).arrayBuffer();
     return new TextDecoder().decode(bytes);
   }

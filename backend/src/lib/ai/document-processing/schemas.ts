@@ -1,5 +1,5 @@
 import { z } from 'zod';
-export const documentExtensionSchema = z.enum(['txt', 'md', 'doc', 'docx', 'pdf']);
+export const documentExtensionSchema = z.enum(['txt', 'md', 'html', 'doc', 'docx', 'pdf']);
 
 export const DOCUMENT_ACTION_NAMES = [
   'document-validate',

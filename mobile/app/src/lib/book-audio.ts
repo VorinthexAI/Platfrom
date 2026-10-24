@@ -2,7 +2,7 @@ import type { Book, BookChapter } from "@/lib/books-client";
 
 export const BOOK_AUDIO_MODE = {
   playsInSilentMode: true,
-  shouldPlayInBackground: true,
+  shouldPlayInBackground: false,
   interruptionMode: "doNotMix",
   allowsRecording: false,
   shouldRouteThroughEarpiece: false,

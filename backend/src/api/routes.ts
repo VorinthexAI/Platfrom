@@ -53,7 +53,6 @@ import { feedbackHandlers, ticketHandler, ticketHandlers } from './tickets';
 import { listAgents, listApps } from './apps';
 import { recordAnalyticsEvent } from './event-ingestion';
 import { getBillingSummary } from './billing';
-import { reviewContentPipelineCard, streamContentPipeline } from './pipelines';
 import { getReferralSummary, redeemReferral } from './referrals';
 import { referralCodeTransportSchema } from './auth-referral-code';
 import { commerceHandlers } from './commerce';
@@ -61,6 +60,7 @@ import { scopeHandlers } from './scopes';
 import { appNotificationHandlers } from './app-notifications';
 import { listCosts } from './costs';
 import { generateAgentGreeting } from './agent-greeting';
+
 
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -433,8 +433,6 @@ export function registerRoutes(app: Hono) {
   app.post('/conversations/:conversationKey/messages/list', conversationHandlers.messages);
   app.delete('/conversations/:conversationKey/messages/:messageKey', conversationHandlers.deleteMessage);
   app.post('/conversations/turn/stream', conversationHandlers.incognitoTurn);
-  app.post('/pipelines/content/run/stream', streamContentPipeline);
-  app.post('/pipelines/content/review', reviewContentPipelineCard);
   app.post('/conversations/:conversationKey/turn/stream', conversationHandlers.turn);
   app.post('/agent/generate/:mode', generateMedia);
   app.post('/agent/greeting', generateAgentGreeting);

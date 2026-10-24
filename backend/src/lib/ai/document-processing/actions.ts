@@ -96,6 +96,7 @@ function maxExtractedCharacters(): number {
 const MIME_TYPES: Record<DocumentExtension, readonly string[]> = {
   txt: ['text/plain'],
   md: ['text/markdown', 'text/x-markdown', 'text/plain'],
+  html: ['text/html'],
   doc: ['application/msword'],
   docx: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
   pdf: ['application/pdf'],
@@ -271,7 +272,7 @@ export async function documentExtract(input: NormalizedDocument & { storageKey: 
         if (!result.extractedText.trim()) throw new DocumentInputError('DOCUMENT_EMPTY_CONTENT', 'The document contains no extractable text.', 'document-extract');
         return result;
       }
-      if (input.extension === 'txt') {
+      if (input.extension === 'txt' || input.extension === 'html') {
         let text: string;
         try { text = new TextDecoder('utf-8', { fatal: true }).decode(input.fileInput); }
         catch (error) { throw new DocumentInputError('DOCUMENT_INVALID_UTF8', 'The text document is not valid UTF-8.', 'document-extract', { cause: error }); }

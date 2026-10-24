@@ -93,43 +93,6 @@ services:
       localstack:
         condition: service_healthy
 
-  render:
-    profiles: ['services']
-    build:
-      context: ..
-      dockerfile: backend/deploy/Dockerfile
-      target: dev
-    command: ['--watch', 'src/render-worker/index.ts']
-    environment:
-      ROLE: render
-      NODE_ENV: development
-      SHARED_DIR: /shared
-      ARANGO_URL: http://arangodb:8529
-      ARANGO_DATABASE: vorinthex
-      ARANGO_USERNAME: root
-      ARANGO_ROOT_PASSWORD: vorinthex
-      REDIS_URL: redis://redis:6379
-      AWS_REGION: eu-north-1
-      AWS_ENDPOINT_URL: http://localstack:4566
-      AWS_ACCESS_KEY_ID: test
-      AWS_SECRET_ACCESS_KEY: test
-      S3_BUCKET: vorinthex-dev
-      SQS_QUEUE_URL: http://sqs.eu-north-1.localhost.localstack.cloud:4566/000000000000/vorinthex-file-events
-    env_file: .env.local
-    volumes:
-      - ./src:/app/src
-      - ./tsconfig.json:/app/tsconfig.json
-      - ../shared:/shared:ro
-      - ../mobile/app/src/data:/mobile/app/src/data:ro
-      - ${HOME}/.aws:/root/.aws:ro
-    depends_on:
-      arangodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      localstack:
-        condition: service_healthy
-
 volumes:
   arangodata:
   redisdata:

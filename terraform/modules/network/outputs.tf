@@ -6,6 +6,10 @@ output "public_subnet_ids" {
   value = local.public_subnet_ids
 }
 
+output "public_route_table_ids" {
+  value = aws_route_table.public[*].id
+}
+
 output "private_subnet_ids" {
   value = local.private_subnet_ids
 }

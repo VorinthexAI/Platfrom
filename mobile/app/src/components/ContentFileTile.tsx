@@ -79,7 +79,7 @@ function VideoCover({ cacheKey, uri, onError, onReady }: { cacheKey: string; uri
   </View>;
 }
 
-export function ContentFileTile({ file, size, selected = false, busy = false, accessibilityLabel, coverFileKey, coverKey, localUri, thumbnailUri, onLongPress, onPress, revealWhenReady = false }: {
+export function ContentFileTile({ file, size, selected = false, busy = false, accessibilityLabel, coverFileKey, coverKey, label, localUri, thumbnailUri, onLongPress, onPress, revealWhenReady = false }: {
   file: Pick<ContentFile, "key" | "name" | "extension" | "hasThumbnail">;
   size: number;
   selected?: boolean;
@@ -87,6 +87,7 @@ export function ContentFileTile({ file, size, selected = false, busy = false, ac
   accessibilityLabel: string;
   coverFileKey?: string;
   coverKey?: string;
+  label?: string;
   localUri?: string;
   thumbnailUri?: string;
   onLongPress?: () => void;
@@ -104,7 +105,7 @@ export function ContentFileTile({ file, size, selected = false, busy = false, ac
   return <View style={[styles.card, selected && styles.cardSelected, { width: size, height: size }]}>
     <Button accessibilityLabel={accessibilityLabel} accessibilityState={{ selected, busy: busy || !coverReady }} contentMode="raw" onLongPress={coverReady ? onLongPress : undefined} onPress={() => { if (coverReady) onPress(); }} shape="rounded" size="xl" style={[styles.cardMain, media && styles.mediaCardMain]} variant="ghost">
       <ContentFileCover coverKey={coverKey} file={coverFileKey ? { key: coverFileKey, extension: file.extension, hasThumbnail: file.hasThumbnail } : file} localUri={localUri} onReady={revealWhenReady ? markCoverReady : undefined} thumbnailUri={thumbnailUri} />
-      <ContentFileCardLabel extension={file.extension} name={displayContentFileName(file)} />
+      {label ? <Text ellipsizeMode="tail" numberOfLines={2} style={styles.overlayLabel}>{label}</Text> : <ContentFileCardLabel extension={file.extension} name={displayContentFileName(file)} />}
     </Button>
     {!coverReady ? <Skeleton accessibilityLabel={`Loading ${file.name}`} pointerEvents="none" style={StyleSheet.absoluteFill} /> : null}
     {selected ? <View pointerEvents="none" style={styles.selectionBadge}><CheckIcon size="sm" variant="inverse" /></View> : null}
@@ -121,4 +122,5 @@ const styles = StyleSheet.create({
   mediaFill: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0 },
   videoPlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", justifyContent: "center" },
   cardLabel: { width: "100%", color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "center" },
+  overlayLabel: { position: "absolute", left: 8, right: 8, bottom: 8, color: palette.silver50, fontFamily: fonts.medium, fontSize: 12, textAlign: "center" },
 });

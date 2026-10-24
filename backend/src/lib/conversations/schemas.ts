@@ -164,7 +164,6 @@ export const conversationIncognitoSendInputSchema = z.object({
   workspaceFileKeys: z.array(z.string().cuid()).max(50).default([]),
   workspaceFolderKeys: z.array(z.string().cuid()).max(50).default([]),
   history: conversationIncognitoHistorySchema,
-  mode: z.enum(['chat', 'plan']).default('chat'),
 }).strict().refine(({ workspaceFileKeys }) => new Set(workspaceFileKeys).size === workspaceFileKeys.length, { path: ['workspaceFileKeys'], message: 'Workspace file keys must be unique.' })
   .refine(({ workspaceFolderKeys }) => new Set(workspaceFolderKeys).size === workspaceFolderKeys.length, { path: ['workspaceFolderKeys'], message: 'Workspace folder keys must be unique.' });
 const conversationSafeMessageBaseSchema = conversationMessageBaseSchema.omit({ embedding: true, embeddingProvider: true, embeddingModel: true, embeddingDimensions: true, pendingAttachmentKeys: true, attachmentContext: true, imageReferenceArtifactKeys: true, imageStatusText: true, teamKey: true, scopeKey: true, userKey: true, requestHash: true, fundingRequiredCode: true, fundingRequiredAcknowledgedAt: true, guideMode: true, guideContext: true, selectedGuideMode: true, guideTopicMode: true, guideTopicGeneration: true, guideTopicFailureCode: true, guideTopicFundingRequiredCode: true });

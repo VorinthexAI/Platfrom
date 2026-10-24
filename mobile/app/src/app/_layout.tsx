@@ -40,7 +40,6 @@ export default function RootLayout() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthChecked, setHealthChecked] = useState(false);
   const appsStatus = useAppsStore((state) => state.bootstrapStatus);
-  const selectedAgentSlug = useAppsStore((state) => state.selectedApp?.slug);
   const bootstrapApps = useAppsStore((state) => state.bootstrap);
   const refreshAgents = useAppsStore((state) => state.refreshAgents);
   const router = useRouter();
@@ -102,10 +101,7 @@ export default function RootLayout() {
       else router.replace("/home" as Href);
     }
     if (status === "authenticated" && !isOnboarded && !isPublic && root !== "onboarding") router.replace("/onboarding");
-    if (status === "authenticated" && isOnboarded && root === "orbit" && selectedAgentSlug && selectedAgentSlug !== "orbit") {
-      router.replace("/home" as Href);
-    }
-  }, [appsStatus, isOnboarded, localOnboarding, router, segments, selectedAgentSlug, status]);
+  }, [appsStatus, isOnboarded, localOnboarding, router, segments, status]);
 
   if ((!fontsLoaded && !fontError) || !connectionResolved || !localOnboarding || (!isOffline && (!healthChecked || status === "bootstrapping" || appsStatus !== "ready"))) {
     return null;

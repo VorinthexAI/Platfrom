@@ -3,7 +3,6 @@
 #
 # Primary production deploy uses:
 #   - deploy/docker-compose.app.yml    (app role, blue-green behind Caddy)
-#   - ECS/Fargate render service updated by .github/workflows/deploy.yml
 #
 # Keep this file only for emergency/manual single-host operation. The GitHub Actions
 # deploy pipeline does not copy or run it.

@@ -90,3 +90,8 @@ export * from "./icons/sign-out/sign-out.mobile";
 export * from "./icons/wallet/wallet.mobile";
 export * from "./icons/subscription-cancel/subscription-cancel.mobile";
 export * from "./icons/restore-purchases/restore-purchases.mobile";
+export * from "./icons/tag/tag.mobile";
+export * from "./icons/cloud-upload/cloud-upload.mobile";
+export * from "./icons/megaphone/megaphone.mobile";
+export * from "./icons/chart/chart.mobile";
+export * from "./icons/video/video.mobile";

@@ -29,7 +29,7 @@ import { AttachmentPillStrip } from "@vorinthex/shared/ui/attachment-pill-strip"
 import { MediaWorkspaceComposer } from "@/components/MediaWorkspaceComposer";
 import { SearchHistorySheet } from "@/components/SearchHistorySheet";
 import { CORE_PLACEHOLDER_PROMPTS } from "@/data/core-prompts";
-import type { ContentFile } from "@/lib/content-client";
+import { type ContentFile } from "@/lib/content-client";
 import { ProfileHeaderRight } from "@/components/ProfileAvatarButton";
 
 import {
@@ -177,7 +177,7 @@ function OlderMessageSkeletons() {
 function ConversationWatermark() {
   const agent = useAppsStore((state) => state.selectedApp);
   const name = agent?.name ?? "Core";
-  return <View pointerEvents="none" style={styles.coreWatermark}><Text style={styles.coreWatermarkText}>{name}</Text><View style={styles.coreWatermarkMark}><ChromeIcon glow={0.5} size={104} source={agent?.logoUrl ? { uri: agent.logoUrl } : assistantIconSource} /></View><Text style={styles.coreWatermarkText}>{name === "Orbit" ? "Plan slideshows, hooks, and captions from the work you keep." : "Your personal AI for finding answers and natural conversation across Vorinthex AI"}</Text></View>;
+  return <View pointerEvents="none" style={styles.coreWatermark}><Text style={styles.coreWatermarkText}>{name}</Text><View style={styles.coreWatermarkMark}><ChromeIcon glow={0.5} size={104} source={agent?.logoUrl ? { uri: agent.logoUrl } : assistantIconSource} /></View><Text style={styles.coreWatermarkText}>Your personal AI for finding answers and natural conversation across Vorinthex AI</Text></View>;
 }
 
 const messageKey = ({ key, renderKey, role, turnKey }: OptimisticMessage & { renderKey?: string }) => renderKey ?? (turnKey ? `${turnKey}:${role}` : key);
@@ -185,9 +185,10 @@ const conversationKey = ({ key }: Conversation) => key;
 const MessageSeparator = () => <View style={styles.messageSeparator} />;
 
 type StorageAction = "open" | "create" | "upload";
+type ComposerControls = { showRole?: boolean; showReplyMode?: boolean; showIncognito?: boolean; showCapabilities?: boolean };
 
-export function PersistentCoreComposer({ generationMode = "chat", onStorageAction, ...props }: CoreComposerProps & { openOnMount?: boolean; generationMode?: "chat" | "image" | "speech" | "video"; onStorageAction?: (action: StorageAction) => void }) {
-  return generationMode === "chat" ? <ChatCoreComposer {...props} onStorageAction={onStorageAction} /> : <MediaWorkspaceComposer {...props} mode={generationMode} />;
+export function PersistentCoreComposer({ generationMode = "chat", onStorageAction, showRole = true, showReplyMode = true, showIncognito = true, showCapabilities = true, ...props }: CoreComposerProps & ComposerControls & { openOnMount?: boolean; generationMode?: "chat" | "image" | "speech" | "video"; onStorageAction?: (action: StorageAction) => void }) {
+  return generationMode === "chat" ? <ChatCoreComposer {...props} onStorageAction={onStorageAction} showCapabilities={showCapabilities} showIncognito={showIncognito} showReplyMode={showReplyMode} showRole={showRole} /> : <MediaWorkspaceComposer {...props} mode={generationMode} />;
 }
 
 function WelcomeChoices({ onAction }: { onAction: (action: StorageAction) => void }) {
@@ -200,7 +201,7 @@ function WelcomeChoices({ onAction }: { onAction: (action: StorageAction) => voi
   </View>;
 }
 
-function ChatCoreComposer({ openOnMount, onStorageAction, ...props }: CoreComposerProps & { openOnMount?: boolean; onStorageAction?: (action: StorageAction) => void }) {
+function ChatCoreComposer({ openOnMount, onStorageAction, showRole = true, showReplyMode = true, showIncognito = true, showCapabilities = true, ...props }: CoreComposerProps & ComposerControls & { openOnMount?: boolean; onStorageAction?: (action: StorageAction) => void }) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const { showToast } = useToast();
@@ -218,8 +219,6 @@ function ChatCoreComposer({ openOnMount, onStorageAction, ...props }: CoreCompos
   const [selected, setSelected] = useState<Conversation>();
   const [input, setInput] = useState("");
   const [composerKeyboardVisible, setComposerKeyboardVisible] = useState(false);
-  const orbit = useAppsStore((state) => state.selectedApp?.slug === "orbit");
-  const [composerMode, setComposerMode] = useState<"chat" | "plan">("chat");
   const [replyMode, setReplyMode] = useState<"fast" | "reason">("fast");
   const [roleKey, setRoleKey] = useState("general");
   const [roleDraft, setRoleDraft] = useState("general");
@@ -266,9 +265,7 @@ function ChatCoreComposer({ openOnMount, onStorageAction, ...props }: CoreCompos
   const selectedRef = useRef<Conversation | undefined>(undefined);
   const incognitoRef = useRef(false);
   const incognitoHasSent = useRef(false);
-  const composerModeRef = useRef<"chat" | "plan">("chat");
   const replyModeRef = useRef<"fast" | "reason">("fast");
-  const orbitRef = useRef(false);
   const roleKeyRef = useRef("general");
   const roleUpdateBusy = useRef(false);
   const contextConversationKeysRef = useRef<string[]>([]);
@@ -305,9 +302,7 @@ function ChatCoreComposer({ openOnMount, onStorageAction, ...props }: CoreCompos
   const olderFetchBusy = useRef(false);
   composerValueRef.current = input;
   incognitoRef.current = incognito;
-  composerModeRef.current = composerMode;
   replyModeRef.current = replyMode;
-  orbitRef.current = orbit;
   roleKeyRef.current = roleKey;
 
   const openMessageRetrievals = useCallback((message: OptimisticMessage) => {
@@ -345,10 +340,9 @@ function ChatCoreComposer({ openOnMount, onStorageAction, ...props }: CoreCompos
   const dismissedFailedKeys = useRef(new Set<string>());
   const messages = useMemo(() => {
     const visible = (items: readonly OptimisticMessage[]) => items.filter(({ key, status }) => !(status === "FAILED" && dismissedFailedKeys.current.has(key)));
-    const planning = orbit && composerMode === "plan";
-    const current = visible(mergeConversationMessages(planning ? [] : persistedMessages, pendingMessages));
-    return planning || !greetingMessage ? current : [greetingMessage, ...current];
-  }, [composerMode, greetingMessage, orbit, pendingMessages, persistedMessages]);
+    const current = visible(mergeConversationMessages(persistedMessages, pendingMessages));
+    return greetingMessage ? [greetingMessage, ...current] : current;
+  }, [greetingMessage, pendingMessages, persistedMessages]);
   const timelineMessages = useMemo(() => [...messages].reverse(), [messages]);
   useEffect(() => { greetingMessageRef.current = greetingMessage; }, [greetingMessage]);
   useEffect(() => {
@@ -423,7 +417,7 @@ function ChatCoreComposer({ openOnMount, onStorageAction, ...props }: CoreCompos
         setSearchPending(false); setPendingMessages([]); setGreetingMessage(undefined); setCoreOpenRequest(0); setTurning(false); setCreating(false);
         setHistory([]); setHistoryLoading(false); setHistoryError(undefined); setRemovingHistoryQuery(undefined);
         setSelectedMessage(undefined);
-        setDraftAttachments([]); setIncognito(false); incognitoRef.current = false; incognitoHasSent.current = false; setComposerMode("chat"); composerModeRef.current = "chat"; setReplyMode("fast"); replyModeRef.current = "fast"; setRoleKey("general"); roleKeyRef.current = "general"; setRoleDraft("general"); setRoleChanging(false); roleUpdateBusy.current = false;
+        setDraftAttachments([]); setIncognito(false); incognitoRef.current = false; incognitoHasSent.current = false; setReplyMode("fast"); replyModeRef.current = "fast"; setRoleKey("general"); roleKeyRef.current = "general"; setRoleDraft("general"); setRoleChanging(false); roleUpdateBusy.current = false;
         selectedRef.current = undefined; nearBottom.current = true; ephemeralDraft.current = false;
       });
     }
@@ -596,7 +590,7 @@ function ChatCoreComposer({ openOnMount, onStorageAction, ...props }: CoreCompos
     const frame = requestAnimationFrame(() => {
       const request = useUiStore.getState().consumeAgentGreeting(greetingRequest.id);
       if (!request) return;
-      if (useAppsStore.getState().selectedApp?.slug !== "orbit") useAppsStore.getState().enterCore();
+      useAppsStore.getState().enterCore();
       setCoreOpenRequest((current) => Math.max(current, latestOpenRequest.current) + 1);
       const focusGeneration = coreFocusGeneration.current;
       const capturedIdentity = identity;
@@ -638,21 +632,10 @@ function ChatCoreComposer({ openOnMount, onStorageAction, ...props }: CoreCompos
     coreFocusedRef.current = focused;
     const focusGeneration = ++coreFocusGeneration.current;
     setCoreFocused(focused);
-    if (apps.selectedApp?.slug !== "orbit") {
-      if (focused) apps.enterCore();
-      else apps.leaveCore();
-    }
+    if (focused) apps.enterCore();
+    else apps.leaveCore();
     props.onFocusChange?.(focused);
     if (!focused) {
-      if (orbitRef.current && composerModeRef.current === "plan") {
-        turnGeneration.current += 1;
-        turnController.current?.abort(); turnController.current = undefined;
-        turnBusy.current = false; setTurning(false);
-        clearConversationState();
-        setComposerMode("chat"); composerModeRef.current = "chat";
-        setInput("");
-        return;
-      }
       if (incognitoRef.current) {
         turnGeneration.current += 1;
         turnController.current?.abort(); turnController.current = undefined;
@@ -905,8 +888,7 @@ function ChatCoreComposer({ openOnMount, onStorageAction, ...props }: CoreCompos
      draftAttachmentsRef.current = [];
      setDraftAttachments([]);
      setTaggedFiles([]);
-    const planTurn = orbitRef.current && composerModeRef.current === "plan";
-    const incognitoTurn = incognitoRef.current || planTurn;
+      const incognitoTurn = showIncognito && incognitoRef.current;
     if (incognitoRef.current) incognitoHasSent.current = true;
     const existing = incognitoTurn ? undefined : selectedRef.current;
     const operation = incognitoTurn || !existing || existing.key.startsWith("optimistic-") ? (incognitoTurn ? undefined : beginConversationCreation(openingGreeting)) : undefined;
@@ -928,11 +910,11 @@ function ChatCoreComposer({ openOnMount, onStorageAction, ...props }: CoreCompos
       const uploaded = incognitoTurn || !submittedAttachments.length ? undefined : await uploadConversationAttachments(capturedContext, active.key, requestKey, submittedAttachments, controller.signal);
       const attachmentKeys = uploaded?.attachmentKeys ?? [];
       let authoritativeUser: ConversationMessage | undefined;
-      const incognitoHistory = incognitoTurn ? [
-        ...(!planTurn && greetingMessageRef.current?.status === "COMPLETED" && greetingMessageRef.current.content.trim() ? [{ role: "ASSISTANT" as const, content: greetingMessageRef.current.content }] : []),
-        ...pendingMessages.filter((message) => message.status === "COMPLETED" && message.content.trim()).slice(planTurn ? -39 : -19).map((message) => ({ role: message.role === "user" ? "USER" as const : "ASSISTANT" as const, content: message.content })),
-      ].slice(planTurn ? -40 : -20) : undefined;
-       await streamConversationTurn(capturedContext, { ...(incognitoTurn ? { incognito: true, history: incognitoHistory } : { conversationKey: active.key }), roleKey: active.roleKey, composerMode: planTurn ? "plan" : "chat", replyMode: planTurn ? "fast" : replyModeRef.current, contextConversationKeys: incognitoTurn ? [] : contextConversationKeysRef.current, message: content, requestKey, attachmentKeys: incognitoTurn ? [] : attachmentKeys, workspaceFileKeys: submittedTaggedFileKeys }, (event) => {
+       const incognitoHistory = incognitoTurn ? [
+         ...(greetingMessageRef.current?.status === "COMPLETED" && greetingMessageRef.current.content.trim() ? [{ role: "ASSISTANT" as const, content: greetingMessageRef.current.content }] : []),
+         ...pendingMessages.filter((message) => message.status === "COMPLETED" && message.content.trim()).slice(-19).map((message) => ({ role: message.role === "user" ? "USER" as const : "ASSISTANT" as const, content: message.content })),
+       ].slice(-20) : undefined;
+         await streamConversationTurn(capturedContext, { ...(incognitoTurn ? { incognito: true, history: incognitoHistory } : { conversationKey: active.key }), ...(showRole ? { roleKey: active.roleKey } : {}), ...(showReplyMode ? { replyMode: replyModeRef.current } : {}), contextConversationKeys: incognitoTurn ? [] : contextConversationKeysRef.current, message: content, requestKey, attachmentKeys: incognitoTurn ? [] : attachmentKeys, workspaceFileKeys: submittedTaggedFileKeys }, (event) => {
         if (generation !== turnGeneration.current || controller.signal.aborted || !isConversationContextCurrent(capturedIdentity, identityRef)) return;
         if (event.type === "start") {
           userMessageKey = event.userMessageKey; assistantMessageKey = event.assistantMessageKey;
@@ -949,13 +931,7 @@ function ChatCoreComposer({ openOnMount, onStorageAction, ...props }: CoreCompos
           const currentConversation = selectedRef.current?.key === active.key ? selectedRef.current : active;
           const updated = { ...currentConversation, ...(event.name ? { name: event.name } : {}), updatedAt: event.message.completedAt ?? event.message.createdAt };
            const completedUser: OptimisticMessage = authoritativeUser ?? { key: userMessageKey, conversationKey: event.conversationKey, turnKey: requestKey, kind: "text", role: "user", status: "COMPLETED", attachmentStatus: submittedAttachments.length ? "PENDING" : "NONE", content, workspaceFiles, attachments: [], retrievals: [], guideTopics: { status: "NONE" }, createdAt: now(), completedAt: now() };
-          if (event.plan) {
-            clearConversationState();
-            showToast({ title: `Saved ${event.plan.name} to Plans`, duration: 2_500 });
-            turnBusy.current = false; setTurning(false);
-            return;
-          }
-          if (incognitoTurn) {
+           if (incognitoTurn) {
             setPendingMessages((current) => current.map((message) => message.turnKey !== requestKey ? message : message.role === "user" ? { ...completedUser, optimistic: true } : { ...event.message, optimistic: true }));
             turnBusy.current = false; setTurning(false);
             return;
@@ -1103,12 +1079,11 @@ function ChatCoreComposer({ openOnMount, onStorageAction, ...props }: CoreCompos
   const chatsMoreError = chatsQuery.isError && Boolean(chatsQuery.data);
   const chatsLoading = searchPending || (configured && chatsQuery.isPending && chatsQuery.isFetching);
   const persistedSelection = Boolean(selected && !selected.key.startsWith("optimistic-"));
-  const planning = orbit && composerMode === "plan";
-  const messagesLoading = !planning && persistedSelection && messagesQuery.isPending && messagesQuery.isFetching;
+  const messagesLoading = persistedSelection && messagesQuery.isPending && messagesQuery.isFetching;
   const messagesInitialError = persistedSelection && messagesQuery.isError && !messagesQuery.data;
   const messageEmpty = !messagesLoading && !messagesInitialError && messages.length === 0;
-  const showIncognito = incognito || (!selected && !messages.some((message) => message.role === "user"));
-  const pageActions = <View style={styles.headerActions}><Button accessibilityLabel={incognito ? "Incognito on" : "Turn on incognito"} accessibilityHint={incognito && incognitoHasSent.current ? "Incognito cannot be turned off after sending a message" : undefined} accessibilityState={{ selected: incognito }} contentMode="raw" disabled={!showIncognito || turning || incognito && incognitoHasSent.current} onPress={() => { if (incognitoRef.current) { if (incognitoHasSent.current) return; setIncognito(false); incognitoRef.current = false; return; } if (!selectedRef.current && !turnBusy.current) { setIncognito(true); incognitoRef.current = true; } }} size="xs" style={incognito ? styles.incognitoActive : undefined} variant="icon"><IncognitoIcon size="sm" /></Button><Button accessibilityLabel="Open chats" contentMode="raw" onPress={() => openSheet("chats")} size="xs" variant="icon"><ChatBubbleIcon size="sm" /></Button>{selected && !selected.key.startsWith("optimistic-") && !incognito ? <Button accessibilityLabel="Current chat menu" contentMode="raw" disabled={turning || mutationKeys.current.has(selected.key)} onPress={() => openConversationActions(selected)} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : null}</View>;
+  const incognitoAvailable = showIncognito && (incognito || (!selected && !messages.some((message) => message.role === "user")));
+  const pageActions = <View style={styles.headerActions}>{showIncognito ? <Button accessibilityLabel={incognito ? "Incognito on" : "Turn on incognito"} accessibilityHint={incognito && incognitoHasSent.current ? "Incognito cannot be turned off after sending a message" : undefined} accessibilityState={{ selected: incognito }} contentMode="raw" disabled={!incognitoAvailable || turning || incognito && incognitoHasSent.current} onPress={() => { if (incognitoRef.current) { if (incognitoHasSent.current) return; setIncognito(false); incognitoRef.current = false; return; } if (!selectedRef.current && !turnBusy.current) { setIncognito(true); incognitoRef.current = true; } }} size="xs" style={incognito ? styles.incognitoActive : undefined} variant="icon"><IncognitoIcon size="sm" /></Button> : null}<Button accessibilityLabel="Open chats" contentMode="raw" onPress={() => openSheet("chats")} size="xs" variant="icon"><ChatBubbleIcon size="sm" /></Button>{selected && !selected.key.startsWith("optimistic-") && !incognito ? <Button accessibilityLabel="Current chat menu" contentMode="raw" disabled={turning || mutationKeys.current.has(selected.key)} onPress={() => openConversationActions(selected)} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : null}</View>;
   const attachmentsPreparing = draftAttachments.some(({ preparing }) => preparing);
   const composerBusy = turning || creating || roleChanging || attachmentsPreparing || messagesLoading || greetingMessage?.status === "PENDING";
   const olderMessagesHeader = useMemo(() => isFetchingOlderMessages ? <OlderMessageSkeletons /> : isFetchNextPageError ? <Button onPress={fetchOlderMessages} size="sm" variant="secondary">Retry older messages</Button> : null, [fetchOlderMessages, isFetchNextPageError, isFetchingOlderMessages]);
@@ -1117,17 +1092,15 @@ function ChatCoreComposer({ openOnMount, onStorageAction, ...props }: CoreCompos
   </View>;
   const attachmentPills = draftAttachments.length || taggedFiles.length ? <AttachmentPillStrip disabled={turning} items={[...taggedFiles.map((file) => ({ key: file.key, name: file.name, icon: <TaggedFileIcon file={file} />, onOpen: () => openTaggedFile(file), onRemove: () => setTaggedFiles((current) => current.filter((item) => item.key !== file.key)) })), ...draftAttachments.map((attachment) => ({ key: attachment.clientKey, name: displayAttachmentFilename(attachment.filename), icon: attachment.kind === "image" ? <ImageIcon size="sm" variant="muted" /> : <FileIcon size="sm" variant="muted" />, onRemove: () => removeDraftAttachment(attachment.clientKey) }))]} /> : undefined;
   const roleLabel = rolesQuery.data?.find((role) => role.key === roleKey)?.label ?? roleKey[0]!.toUpperCase() + roleKey.slice(1);
-  const modeButton = orbit
-    ? <Button accessibilityLabel={planning ? "Plan mode" : "Chat mode"} accessibilityState={{ selected: planning }} disabled={composerBusy} onPress={() => { const next = composerMode === "chat" ? "plan" : "chat"; setPendingMessages([]); clearGreetingState(); setComposerMode(next); composerModeRef.current = next; }} size="xs" variant="secondary">{planning ? "Plan" : "Chat"}</Button>
-    : <Button accessibilityLabel={replyMode === "reason" ? "Reason mode" : "Fast mode"} accessibilityState={{ selected: replyMode === "reason" }} disabled={composerBusy} onPress={() => { const next = replyMode === "fast" ? "reason" : "fast"; setReplyMode(next); replyModeRef.current = next; }} size="xs" variant="secondary">{replyMode === "reason" ? "Reason" : "Fast"}</Button>;
-  const roleToolbar = <View style={styles.roleControls}><Button accessibilityLabel={`Role: ${roleLabel}`} disabled={!configured || composerBusy} onPress={() => { setRoleDraft(roleKey); openSheet("role"); }} size="xs" variant="secondary">{roleLabel}</Button>{modeButton}</View>;
-  const modeTabs = !composerKeyboardVisible ? <CapabilityTabs disabled={composerBusy || incognito} onValueChange={(mode: CapabilityMode) => router.setParams({ mode })} value="chat" /> : undefined;
+  const modeButton = showReplyMode ? <Button accessibilityLabel={replyMode === "reason" ? "Reason mode" : "Fast mode"} accessibilityState={{ selected: replyMode === "reason" }} disabled={composerBusy} onPress={() => { const next = replyMode === "fast" ? "reason" : "fast"; setReplyMode(next); replyModeRef.current = next; }} size="xs" variant="secondary">{replyMode === "reason" ? "Reason" : "Fast"}</Button> : null;
+  const roleToolbar = showRole || showReplyMode ? <View style={styles.roleControls}>{showRole ? <Button accessibilityLabel={`Role: ${roleLabel}`} disabled={!configured || composerBusy} onPress={() => { setRoleDraft(roleKey); openSheet("role"); }} size="xs" variant="secondary">{roleLabel}</Button> : null}{modeButton}</View> : undefined;
+  const modeTabs = showCapabilities && !composerKeyboardVisible ? <CapabilityTabs disabled={composerBusy || incognito} onValueChange={(mode: CapabilityMode) => router.setParams({ mode })} value="chat" /> : undefined;
   const roleCardWidth = roleGridWidth ? Math.floor((roleGridWidth - 24) / 4) : 0;
   const chatList = (picking: boolean) => chatsLoading ? <View accessibilityLabel={query ? "Searching chats" : "Loading chats"} accessibilityRole="progressbar" style={styles.chatList}>{Array.from({ length: 3 }, (_, index) => <Skeleton key={index} style={[styles.chatSkeleton, styles.skeletonCard]} />)}</View> : chatsInitialError ? <View style={styles.centerError}><Text accessibilityRole="alert" style={styles.error}>Chats could not be loaded.</Text><Button onPress={() => void chatsQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : <FlatList contentContainerStyle={[styles.chatList, conversations.length === 0 && styles.emptyChatList]} data={conversations} keyExtractor={conversationKey} ListEmptyComponent={<Text style={styles.emptyText}>{committedQuery || favoriteOnly || hiddenOnly ? "No matching chats." : "No chats yet."}</Text>} ListFooterComponent={chatsMoreError ? <Button onPress={() => void chatsQuery.fetchNextPage()} size="md" variant="secondary">Retry more chats</Button> : null} onEndReached={() => { if (chatsQuery.hasNextPage && !chatsQuery.isFetchingNextPage) void chatsQuery.fetchNextPage(); }} onEndReachedThreshold={0.4} renderItem={({ item }) => { const selectedChat = picking && selectedConversationKeys.includes(item.key); return <ActionPill compact onPress={() => handleConversationPress(item)} pressLabel={picking ? `${selectedChat ? "Deselect" : "Select"} ${item.name}` : `Open ${item.name}`} style={selectedChat ? styles.chatPillSelected : undefined}><View style={styles.chatPillContent}><Text numberOfLines={1} style={styles.chatName}>{item.name}</Text></View></ActionPill>; }} />;
   const chatSearch = (picking: boolean) => <View style={styles.searchActions}><View style={styles.search}><SearchIcon size="sm" variant="muted" /><TextInput accessibilityLabel="Search chats" autoFocusInBottomSheet={false} maxLength={500} onChangeText={changeQuery} placeholder="Search..." style={styles.searchInput} value={query} />{query ? <ButtonSizeProvider overrideParent size="xs"><Button accessibilityLabel="Clear chat search" contentMode="raw" iconOnly onPress={() => changeQuery("")} size="xs" variant="secondary"><CloseIcon size="sm" /></Button></ButtonSizeProvider> : null}</View><Button accessibilityLabel="Filter chats" contentMode="raw" onPress={() => openSheet("filter")} size="md" variant="icon"><FilterIcon size="sm" variant={favoriteOnly || hiddenOnly ? "accent" : "default"} /></Button></View>;
 
   return <>
-    <CoreComposer {...props} accessibilityHint={coreFunded ? props.accessibilityHint : "Add Sparks to use Core"} disabled={!configured || composerBusy || !coreFunded} editable={configured && !turning && !sheet && coreFunded} expandedAccessory={attachmentPills} expandedFooter={modeTabs} expandedLeading={<PlusIcon size="sm" />} expandedLeadingAccessibilityLabel="Tag files" expandedLeadingDisabled={!configured || composerBusy || !coreFunded} expandedToolbar={roleToolbar} expandedPrompts={planning ? ["Describe what you want to plan..."] : props.expandedPrompts ?? CORE_PLACEHOLDER_PROMPTS} focusOnOpenRequest={false} focusRequest={composerFocusRequest} loading={composerBusy} maxLength={CONVERSATION_MESSAGE_MAX_LENGTH} message={conversation} onChangeText={(value) => { draftRevision.current += 1; composerValueRef.current = value; setInput(value); }} onExpandedKeyboardVisibilityChange={setComposerKeyboardVisible} onExpandedLeadingPress={() => setPickerOpen(true)} onFocusChange={handleCoreFocusChange} onSubmit={() => void submit()} openEnabled={coreFunded} openRequest={coreFunded ? Math.max(coreOpenRequest, greetingRequest?.occasion === "onboarding" ? greetingRequest.id : 0) : 0} pageActions={pageActions} pageBackdrop={<ConversationWatermark />} pageIdentity={(closePage) => { closeCorePage.current = closePage; return <View style={styles.coreIdentity}><View style={styles.coreIdentityApp}>{props.pageIdentity(closePage)}</View><ProfileHeaderRight /></View>; }} value={input} />
+    <CoreComposer {...props} title="Core" accessibilityHint={coreFunded ? props.accessibilityHint : "Add Sparks to use Core"} disabled={!configured || composerBusy || !coreFunded} editable={configured && !turning && !sheet && coreFunded} expandedAccessory={attachmentPills} expandedFooter={modeTabs} expandedLeading={<PlusIcon size="sm" />} expandedLeadingAccessibilityLabel="Tag files" expandedLeadingDisabled={!configured || composerBusy || !coreFunded} expandedToolbar={roleToolbar} expandedPrompts={props.expandedPrompts ?? CORE_PLACEHOLDER_PROMPTS} focusOnOpenRequest={false} focusRequest={composerFocusRequest} loading={composerBusy} maxLength={CONVERSATION_MESSAGE_MAX_LENGTH} message={conversation} onChangeText={(value) => { draftRevision.current += 1; composerValueRef.current = value; setInput(value); }} onExpandedKeyboardVisibilityChange={setComposerKeyboardVisible} onExpandedLeadingPress={() => setPickerOpen(true)} onFocusChange={handleCoreFocusChange} onSubmit={() => void submit()} openEnabled={coreFunded} openRequest={coreFunded ? Math.max(coreOpenRequest, greetingRequest?.occasion === "onboarding" ? greetingRequest.id : 0) : 0} pageActions={pageActions} pageBackdrop={<ConversationWatermark />} pageIdentity={(closePage) => { closeCorePage.current = closePage; return <View style={styles.coreIdentity}><View style={styles.coreIdentityApp}>{props.pageIdentity(closePage)}</View><ProfileHeaderRight /></View>; }} value={input} />
     <BottomSheet description="Choose how Core approaches this chat." footer={<><Button disabled={!rolesQuery.data?.some((role) => role.key === roleDraft)} onPress={applyRole} size="md" variant="primary">Done</Button><Button onPress={() => openSheet(undefined)} size="md" variant="secondary">Close</Button></>} height="full" onOpenChange={(open) => { if (!open && sheet === "role") openSheet(undefined); }} open={sheet === "role"} title="Choose a role">
       {rolesQuery.isError ? <View style={styles.centerError}><Text style={styles.error}>Roles could not be loaded.</Text><Button onPress={() => void rolesQuery.refetch()} size="md" variant="secondary">Retry</Button></View> : <ScrollView showsVerticalScrollIndicator={false}><View accessibilityLabel={rolesQuery.isPending ? "Loading roles" : undefined} accessibilityRole={rolesQuery.isPending ? "progressbar" : undefined} onLayout={({ nativeEvent }) => setRoleGridWidth(nativeEvent.layout.width)} style={styles.roleGrid}>{roleCardWidth ? rolesQuery.isPending ? Array.from({ length: 12 }, (_, index) => <Skeleton key={index} style={{ width: roleCardWidth, height: 94 }} />) : rolesQuery.data?.map((role) => <RoleOptionCard description={role.description} icon={<RoleIcon role={role.key as RoleIconRole} size="md" />} key={role.key} label={role.label} onPress={() => setRoleDraft(role.key)} selected={roleDraft === role.key} width={roleCardWidth} />) : null}</View></ScrollView>}
     </BottomSheet>

@@ -19,8 +19,9 @@ export function LinkIcon({ variant = "default", size = "md", strokeWidth = 1.4 }
   const color = colors[variant];
   return (
     <Svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none">
-      <Path d="M5 12h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-      <Path d="M12 5v14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Path d="M9.5 14.5 8 16a3.2 3.2 0 0 1-4.5-4.5l2.2-2.2a3.2 3.2 0 0 1 4.5 0" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M14.5 9.5 16 8a3.2 3.2 0 0 1 4.5 4.5l-2.2 2.2a3.2 3.2 0 0 1-4.5 0" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M9.2 14.8 14.8 9.2" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
     </Svg>
   );
 }

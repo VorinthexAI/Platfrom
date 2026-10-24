@@ -59,6 +59,10 @@ output "job_redis_url" {
   value = "redis://${aws_instance.early_app.private_ip}:6379"
 }
 
+output "render_worker_function_name" {
+  value = aws_lambda_function.render.function_name
+}
+
 
 output "ssm_parameter_prefix" {
   value = local.normalized_ssm_prefix

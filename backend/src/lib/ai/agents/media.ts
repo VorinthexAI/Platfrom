@@ -15,8 +15,6 @@ import { processStoredMedia } from '@/lib/ai/document-processing/media-caption';
 import { publicContentFile } from '@/lib/ai/tools/content-runtime';
 import { sendGeneratedFilePush } from '@/lib/app-notifications/generated-file';
 import { ContentError } from '@/lib/ai/tools/content-errors';
-import { currentEventAppKey } from '@/lib/ai/events/runtime';
-import { APP_KEYS } from '@/lib/apps/registry';
 
 const imageKey = z.string().cuid();
 export const agentImageInputSchema = z.object({ prompt: z.string().trim().min(1).max(4_000), referenceImageKeys: z.array(imageKey).max(8).refine((keys) => new Set(keys).size === keys.length).default([]), aspectRatio: imageAspectRatioSchema.optional(), quality: z.enum(['low', 'medium', 'high']).optional(), folderKey: imageKey.optional() }).strict();
@@ -78,7 +76,7 @@ export async function generateAgentImage(raw: unknown, context: ToolContext, opt
   const existing = await savedMedia(context, options.requestKey, input.folderKey);
   if (existing) { await announceCompletion(existing.key, 'image', context); return { files: [existing] }; }
   const refs = await Promise.all(input.referenceImageKeys.map((key) => imageReference(key, context)));
-  const secondary = (options.providers?.[0] === 'image.secondary') || currentEventAppKey() === APP_KEYS.ORBIT;
+  const secondary = options.providers?.[0] === 'image.secondary';
   const aspectRatio = input.aspectRatio ?? (secondary ? '9:16' : undefined);
   const quality = input.quality ?? (secondary ? 'low' : undefined);
   const response = await executeAction<unknown, ImageOutput>({ mode: 'auto', teamKey: context.teamKey, actionSlug: 'image' }, { operation: 'generate', prompt: input.prompt, count: 1, ...(aspectRatio ? { aspectRatio } : {}), ...(quality ? { quality } : {}), ...(refs.length ? { inputReferences: refs } : {}) }, { ...options, providers: options.providers ?? (secondary ? ['image.secondary'] : ['image.primary']) });

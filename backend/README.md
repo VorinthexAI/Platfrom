@@ -22,12 +22,12 @@ Mailpit is included in the dev infra at `localhost:8025` with SMTP on `localhost
 
 ### Infra in Docker, backend native
 
-This is the supported dev layout: everything in `backend/docker-compose.yml` except `app` and `render` runs as containers, and the backend runs natively via Bun so `bun --watch` restarts the process on edits. A process restart is required because the API owns long-lived queue workers and timers.
+This is the supported dev layout: everything in `backend/docker-compose.yml` except `app` runs as containers, and the backend runs natively via Bun so `bun --watch` restarts the process on edits. A process restart is required because the API owns long-lived queue workers and timers.
 
-Do not develop against the `app` and `render` Compose services (`bun run dev:services`). They exist to exercise the container image, not for day-to-day development: on Windows and macOS, file-change events do not cross the Docker mount into the container, so `bun --watch` silently never sees edits — changes appear to have no effect until the container is restarted. If you do use them, restart `app` (and `render`) after every edit:
+Do not develop against the `app` Compose service (`bun run dev:services`). It exists to exercise the container image, not for day-to-day development: on Windows and macOS, file-change events do not cross the Docker mount into the container, so `bun --watch` silently never sees edits — changes appear to have no effect until the container is restarted. If you do use it, restart `app` after every edit:
 
 ```bash
-docker compose --profile services restart app render
+docker compose --profile services restart app
 ```
 
 Run the live content release gate with `bun run test:e2e:content`. It starts the required Compose services without stopping existing containers, waits on their host HTTP/TCP endpoints, recreates only the default isolated `content_e2e` database, migrates it, and runs the gated test. Environment variables supplied by CI override all isolated defaults; no env file is written.

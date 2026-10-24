@@ -9,6 +9,7 @@ import { documentStorage } from '@/lib/ai/document-processing/storage';
 import { createRedisConnection } from '@/lib/redis';
 import {
   createConversationArchiveProjectionRepository,
+  conversationArchiveKind,
   prepareConversationArchiveProjection,
   summarizeConversationArchive,
   type ConversationArchiveAsk,
@@ -59,14 +60,19 @@ export async function enqueueConversationArchiveProjection(raw: unknown, targetQ
   return { jobId: queued.id! };
 }
 
-const ask: ConversationArchiveAsk = async (request, { teamKey, signal }) => {
-  const response = await executeAsk<ChatOutput>(teamKey, {
-    systemPrompt: request.instruction,
-    messages: [{ role: 'user', content: [{ type: 'text', text: request.source }] }],
-    options: { temperature: 0, maxTokens: 1_200 },
-  }, { providers: ['text.primary'], signal, timeoutMs: 45_000 });
-  return chatOutputSchema.parse(response.output).text;
-};
+function askWith(providers: Array<'text.primary' | 'text.tertiary'>, maxTokens: number): ConversationArchiveAsk {
+  return async (request, { teamKey, signal }) => {
+    const response = await executeAsk<ChatOutput>(teamKey, {
+      systemPrompt: request.instruction,
+      messages: [{ role: 'user', content: [{ type: 'text', text: request.source }] }],
+      options: { temperature: 0, maxTokens },
+    }, { providers, signal, timeoutMs: 90_000 });
+    return chatOutputSchema.parse(response.output).text;
+  };
+}
+
+const ask = askWith(['text.primary'], 1_200);
+const memoryAsk = askWith(['text.tertiary'], 4_000);
 
 export interface ConversationArchiveProjectionWorkerDependencies {
   repository?: ConversationArchiveProjectionRepository;
@@ -88,8 +94,9 @@ export async function processConversationArchiveProjection(raw: unknown, depende
     return { status: deleted === 'deleted' ? 'deleted' : 'stale' };
   }
   const completed = snapshot.snapshot.messages.filter((message) => message.status === 'COMPLETED');
+  const kind = conversationArchiveKind(snapshot.snapshot.conversation.agentKey);
   const summary = completed.some((message) => message.role === 'USER')
-    ? await summarizeConversationArchive(completed, job.teamKey, dependencies.ask ?? ask)
+    ? await summarizeConversationArchive(completed, job.teamKey, dependencies.ask ?? (kind === 'memory' ? memoryAsk : ask), undefined, kind)
     : null;
   const projection = await prepareConversationArchiveProjection(snapshot.snapshot, summary, {
     embedTexts: dependencies.embedTexts ?? ((texts, signal) => embedTexts({ texts, purpose: 'document', signal })),

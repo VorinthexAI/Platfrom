@@ -69,9 +69,21 @@ function greetingMessages(context: AgentGreetingContext, instruction: string) {
   ];
 }
 
-function prompt(state: AgentGreetingState, structured = true) {
+function greetingSystemPrompt(state: AgentGreetingState, structured = true) {
   const format = structured ? ` Set guideMode to ${state === 'returning' ? 'explain' : 'recommend'}. Return only strict JSON matching the requested schema.` : ' Return only the greeting message as plain text, without JSON, quotes, or commentary.';
-  return `${GREETING_CONTEXT_POLICY} You are Core speaking directly to the person opening the app. Write a calm, understated opening for ${state === 'returning' ? 'someone opening the app again' : 'someone opening the app for the first time'}. In two or three short sentences, use first person and say they can ask me anything or create an image, video, or speech from text. Tell them they can build their AI memory by uploading files, which I can search and find for them later. Do not claim to remember files outside their storage. Do not tell them to ask Vorinthex AI or any other named assistant: they are already talking to you. Do not say you can help them chat or describe Chat as an output. Do not list the tile labels in the greeting, offer guide topics, suggest questions, or imply you already generated anything. Use userName only if it sounds natural; omit it when null. Mention the time of day only if it fits naturally and matches timeOfDay. Do not mention internal context or the clock. Keep the tone plain, never excited or promotional.${format} ${USER_VISIBLE_AI_PROSE_POLICY}`;
+  return `${GREETING_CONTEXT_POLICY} Do not tell them to ask Vorinthex AI or any other named assistant: they are already talking to you. Do not list the tile labels in the greeting, offer guide topics, suggest questions, or imply you already generated anything. Use userName only if it sounds natural; omit it when null. Mention the time of day only if it fits naturally and matches timeOfDay. Do not mention internal context or the clock. Keep the tone plain, never excited or promotional. Do not narrate checks, drafts, or revisions.${format} ${USER_VISIBLE_AI_PROSE_POLICY}`;
+}
+
+function greetingPrompt(state: AgentGreetingState) {
+  return `You are Core speaking directly to the person opening the app. Write a calm, understated opening for ${state === 'returning' ? 'someone opening the app again' : 'someone opening the app for the first time'}. In two or three short sentences, use first person and say they can ask me anything or create an image, video, or speech from text. Tell them they can build their AI memory by uploading files, which I can search and find for them later. Do not claim to remember files outside their storage. Do not say you can help them chat or describe Chat as an output.`;
+}
+
+function greetingInstruction(state: AgentGreetingState, retry = false) {
+  return `${greetingPrompt(state)}\n\n${retry ? 'The previous response was invalid. Follow every greeting rule and return the required JSON.' : 'Generate the opening greeting now.'}`;
+}
+
+function greetingProviders(options: ExecuteActionOptions): ExecuteActionOptions['providers'] {
+  return options.providers ?? ['text.primary'];
 }
 
 export type AgentGreetingExecutor = typeof executeAsk;
@@ -79,7 +91,7 @@ export type AgentGreetingStreamExecutor = typeof streamAsk;
 
 function completedGreeting(state: AgentGreetingState, message: string) {
   const trimmed = message.trim().slice(0, 500);
-  if (!trimmed) return null;
+  if (!trimmed || /short sentences|first person|guideMode|greetingContext|hyphens?|dashes?|lets check/i.test(trimmed)) return null;
   return { message: trimmed, guideMode: state === 'returning' ? 'explain' as const : 'recommend' as const };
 }
 
@@ -97,14 +109,15 @@ function greetingTemperature(state: AgentGreetingState, attempt = 0) {
 export async function streamAgentGreeting(teamKey: string, state: AgentGreetingState, context: AgentGreetingContext, onDelta: (text: string) => void | Promise<void>, options: ExecuteActionOptions = {}, stream: AgentGreetingStreamExecutor = streamAsk) {
   const parsedState = agentGreetingStateSchema.parse(state);
   const parsedContext = agentGreetingContextSchema.parse(context);
+  const execution = options;
   let message = '';
   let done = false;
   for await (const chunk of stream(teamKey, {
     mode: 'default',
-    systemPrompt: prompt(parsedState, false),
-    messages: greetingMessages(parsedContext, 'Generate the opening greeting now.'),
+    systemPrompt: greetingSystemPrompt(parsedState, false),
+    messages: greetingMessages(parsedContext, greetingInstruction(parsedState, false)),
     options: { maxTokens: 500, temperature: greetingTemperature(parsedState) },
-  }, { providers: ['text.primary'], retry: { attempts: 2 }, timeoutMs: 45_000, ...options })) {
+  }, { providers: greetingProviders(execution), retry: { attempts: 2 }, timeoutMs: 45_000, ...execution })) {
     if (done) throw new Error('The greeting stream emitted data after completion.');
     if (chunk.type === 'done') { done = true; continue; }
     if (chunk.type === 'tool-call') throw new Error('The greeting stream returned a tool call.');
@@ -119,14 +132,15 @@ export async function streamAgentGreeting(teamKey: string, state: AgentGreetingS
 export async function generateAgentGreeting(teamKey: string, state: AgentGreetingState, context: AgentGreetingContext, options: ExecuteActionOptions = {}, execute: AgentGreetingExecutor = executeAsk) {
   const parsedState = agentGreetingStateSchema.parse(state);
   const parsedContext = agentGreetingContextSchema.parse(context);
+  const execution = options;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const response = await execute(teamKey, {
       mode: 'default',
-      systemPrompt: prompt(parsedState),
-      messages: greetingMessages(parsedContext, attempt ? 'The previous response was invalid. Follow every greeting rule and return the required JSON.' : 'Generate the opening greeting now.'),
+      systemPrompt: greetingSystemPrompt(parsedState),
+      messages: greetingMessages(parsedContext, greetingInstruction(parsedState, attempt > 0)),
       responseFormat: greetingResponseFormat,
       options: { maxTokens: 1_000, temperature: greetingTemperature(parsedState, attempt) },
-    }, { providers: ['text.primary'], retry: { attempts: 2 }, timeoutMs: 45_000, ...options });
+    }, { providers: greetingProviders(execution), retry: { attempts: 2 }, timeoutMs: 45_000, ...execution });
     try {
       const output = greetingOutputSchema.parse(response.output);
       const generated = generatedGreetingSchema.parse(JSON.parse(output.text));

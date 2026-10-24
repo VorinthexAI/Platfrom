@@ -6,13 +6,17 @@ import { toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { FILES_COLLECTION, fileStorageKey, type FileRecord } from '@/lib/db/files.node';
 import { FOLDERS_COLLECTION, type Folder } from '@/lib/db/folders.node';
 import { STORAGE_DELETION_JOBS_COLLECTION } from '@/lib/db/storage-deletion-jobs.node';
+import { APP_KEYS, CANONICAL_APP_BY_ALIAS } from '@/lib/apps/registry';
 import { conversationMessageSchema, conversationSchema, type Conversation, type ConversationMessage } from './schemas';
 
 export const CONVERSATION_ARCHIVE_STATES_COLLECTION = 'conversationArchiveStates';
 export const CONVERSATION_ARCHIVE_NAMESPACE = 'conversation-archive-v1';
 export const CONVERSATION_ARCHIVE_SUMMARY_MAX_CHARACTERS = 4_000;
 export const CONVERSATION_ARCHIVE_SUMMARY_MAX_WORDS = 500;
+export const CONVERSATION_MEMORY_MAX_CHARACTERS = 12_000;
+export const CONVERSATION_MEMORY_MAX_WORDS = 1_500;
 export const CONVERSATION_ARCHIVE_SUMMARY_INPUT_CHARACTERS = 12_000;
+export type ConversationArchiveKind = 'chat' | 'memory';
 
 export type ConversationArchiveFolderPurpose = 'conversation-root' | 'conversation' | 'conversation-summaries';
 export type ConversationArchiveFilePurpose = 'conversation-transcript' | 'conversation-summary';
@@ -72,8 +76,12 @@ export function conversationArchiveKey(...parts: Array<string | number>): string
   return `c${createHash('sha256').update([CONVERSATION_ARCHIVE_NAMESPACE, ...parts.map(String)].join('\0')).digest('hex').slice(0, 24)}`;
 }
 
-export function conversationArchiveKeys(owner: Pick<ConversationArchiveOwner, 'scopeKey' | 'userKey' | 'conversationKey'>) {
-  const rootFolderKey = conversationArchiveKey('folder', owner.scopeKey, owner.userKey, 'chats');
+export function conversationArchiveKind(_agentKey: string | undefined): ConversationArchiveKind {
+  return 'chat';
+}
+
+export function conversationArchiveKeys(owner: Pick<ConversationArchiveOwner, 'scopeKey' | 'userKey' | 'conversationKey'>, kind: ConversationArchiveKind = 'chat') {
+  const rootFolderKey = conversationArchiveKey('folder', owner.scopeKey, owner.userKey, kind === 'memory' ? 'memory' : 'chats');
   const conversationFolderKey = conversationArchiveKey('folder', owner.scopeKey, owner.userKey, owner.conversationKey);
   return {
     rootFolderKey,
@@ -82,11 +90,20 @@ export function conversationArchiveKeys(owner: Pick<ConversationArchiveOwner, 's
     transcriptFileKey: conversationArchiveKey('file', owner.scopeKey, owner.userKey, owner.conversationKey, 'transcript'),
     summaryFileKey: conversationArchiveKey('file', owner.scopeKey, owner.userKey, owner.conversationKey, 'current-summary'),
     summaryDocumentKey: conversationArchiveKey('file', owner.scopeKey, owner.userKey, owner.conversationKey, 'current-summary'),
+    memoryFileKey: conversationArchiveKey('file', owner.scopeKey, owner.userKey, owner.conversationKey, 'memory'),
   };
 }
 
 export function conversationArchiveTranscriptName(name: string): string {
   return `${name.trim().slice(0, 10)}...`;
+}
+
+export function conversationArchiveMessageFileKey(owner: Pick<ConversationArchiveOwner, 'scopeKey' | 'userKey' | 'conversationKey'>, messageKey: string) {
+  return conversationArchiveKey('file', owner.scopeKey, owner.userKey, owner.conversationKey, 'message', messageKey);
+}
+
+export function conversationArchiveSpeaker(agentKey: string | undefined) {
+  return CANONICAL_APP_BY_ALIAS.get(agentKey ?? APP_KEYS.CORE)?.name ?? 'Core';
 }
 
 export function formatConversationArchiveTimestamp(value: string): string {
@@ -103,25 +120,32 @@ export function conversationArchiveMessageContent(message: ConversationMessage):
 }
 
 export const conversationArchiveSummaryRequestSchema = z.object({
-  instruction: z.string().trim().min(1).max(1_200),
+  instruction: z.string().trim().min(1).max(2_500),
   source: z.string().trim().min(1).max(CONVERSATION_ARCHIVE_SUMMARY_INPUT_CHARACTERS),
-  maxOutputCharacters: z.literal(CONVERSATION_ARCHIVE_SUMMARY_MAX_CHARACTERS),
+  maxOutputCharacters: z.union([z.literal(CONVERSATION_ARCHIVE_SUMMARY_MAX_CHARACTERS), z.literal(CONVERSATION_MEMORY_MAX_CHARACTERS)]),
 }).strict();
 export type ConversationArchiveSummaryRequest = z.infer<typeof conversationArchiveSummaryRequestSchema>;
 export type ConversationArchiveAsk = (request: ConversationArchiveSummaryRequest, context: { teamKey: string; signal?: AbortSignal }) => Promise<string>;
 
-function boundedSummary(value: string): string {
-  const plain = z.string().trim().min(1).max(20_000).parse(value)
+function summaryBounds(maxOutputCharacters: number) {
+  return maxOutputCharacters === CONVERSATION_MEMORY_MAX_CHARACTERS
+    ? { characters: CONVERSATION_MEMORY_MAX_CHARACTERS, words: CONVERSATION_MEMORY_MAX_WORDS }
+    : { characters: CONVERSATION_ARCHIVE_SUMMARY_MAX_CHARACTERS, words: CONVERSATION_ARCHIVE_SUMMARY_MAX_WORDS };
+}
+
+function boundedSummary(value: string, maxOutputCharacters = CONVERSATION_ARCHIVE_SUMMARY_MAX_CHARACTERS): string {
+  const bounds = summaryBounds(maxOutputCharacters);
+  const plain = z.string().trim().min(1).max(40_000).parse(value)
     .replace(/^```(?:text|markdown)?\s*/i, '').replace(/\s*```$/, '').trim();
   const words = plain.split(/\s+/);
-  if (plain.length <= CONVERSATION_ARCHIVE_SUMMARY_MAX_CHARACTERS && words.length <= CONVERSATION_ARCHIVE_SUMMARY_MAX_WORDS) return plain;
-  let bounded = words.slice(0, CONVERSATION_ARCHIVE_SUMMARY_MAX_WORDS).join(' ');
-  if (bounded.length > CONVERSATION_ARCHIVE_SUMMARY_MAX_CHARACTERS) bounded = bounded.slice(0, CONVERSATION_ARCHIVE_SUMMARY_MAX_CHARACTERS).replace(/\s+\S*$/, '').trim();
+  if (plain.length <= bounds.characters && words.length <= bounds.words) return plain;
+  let bounded = words.slice(0, bounds.words).join(' ');
+  if (bounded.length > bounds.characters) bounded = bounded.slice(0, bounds.characters).replace(/\s+\S*$/, '').trim();
   return bounded.replace(/[,:;\-]+$/, '').trim();
 }
 
-function transcriptEntries(messages: readonly ConversationMessage[]): string[] {
-  return messages.map((message) => `${formatConversationArchiveTimestamp(message.completedAt ?? message.createdAt)} | ${message.role === 'USER' ? 'User' : 'Core'}\n${conversationArchiveMessageContent(message)}`);
+function transcriptEntries(messages: readonly ConversationMessage[], speaker: string): string[] {
+  return messages.map((message) => `${formatConversationArchiveTimestamp(message.completedAt ?? message.createdAt)} | ${message.role === 'USER' ? 'User' : speaker}\n${conversationArchiveMessageContent(message)}`);
 }
 
 function packSummaryInputs(values: readonly string[]): string[] {
@@ -140,23 +164,28 @@ function packSummaryInputs(values: readonly string[]): string[] {
 }
 
 /** Summarizes only the supplied authoritative messages, recursively bounding every provider call. */
-export async function summarizeConversationArchive(messages: readonly ConversationMessage[], teamKey: string, ask: ConversationArchiveAsk, signal?: AbortSignal): Promise<string> {
+export async function summarizeConversationArchive(messages: readonly ConversationMessage[], teamKey: string, ask: ConversationArchiveAsk, signal?: AbortSignal, kind: ConversationArchiveKind = 'chat'): Promise<string> {
   const completed = messages.filter((message) => message.status === 'COMPLETED');
   if (!completed.length) throw new Error('A conversation summary requires at least one completed message.');
   const latestUser = [...completed].reverse().find((message) => message.role === 'USER');
   if (!latestUser) throw new Error('A conversation summary requires a completed user message.');
   const languageAnchor = conversationArchiveMessageContent(latestUser).slice(0, 1_000);
-  let sources = packSummaryInputs(transcriptEntries(completed));
+  const maxOutputCharacters = kind === 'memory' ? CONVERSATION_MEMORY_MAX_CHARACTERS : CONVERSATION_ARCHIVE_SUMMARY_MAX_CHARACTERS;
+  let sources = packSummaryInputs(transcriptEntries(completed, 'Assistant'));
   let round = 0;
   while (true) {
     const summaries: string[] = [];
     for (const source of sources) {
+      const combining = sources.length > 1 || round > 0;
+      const instruction = kind === 'memory'
+        ? `Write a detailed memory of this conversation in plain prose. Keep brand, app, audience, offer, proof, voice, decisions, contradictions, and open questions. No headings, bullets, markdown, filler, or anything absent from the source. Do not call this a summary. Write in the same language as this latest User excerpt: ${JSON.stringify(languageAnchor)}. ${combining ? 'This is one segment; preserve details needed for a later combined memory.' : 'Return the memory document for this chat.'}`
+        : `Write a detailed rolling recap in plain prose: facts, decisions, open requests, outcomes, and important names or numbers. Stay compact — no headings, bullets, markdown, filler, or anything absent from the source. Write in the same language as this latest User excerpt: ${JSON.stringify(languageAnchor)}. ${combining ? 'This is one segment; preserve details needed for a later combined summary.' : 'Return the final rolling conversation summary.'}`;
       const request = conversationArchiveSummaryRequestSchema.parse({
-        instruction: `Write a detailed rolling recap in plain prose: facts, decisions, open requests, outcomes, and important names or numbers. Stay compact — no headings, bullets, markdown, filler, or anything absent from the source. Write in the same language as this latest User excerpt: ${JSON.stringify(languageAnchor)}. ${sources.length > 1 || round > 0 ? 'This is one segment; preserve details needed for a later combined summary.' : 'Return the final rolling conversation summary.'}`,
+        instruction,
         source,
-        maxOutputCharacters: CONVERSATION_ARCHIVE_SUMMARY_MAX_CHARACTERS,
+        maxOutputCharacters,
       });
-      summaries.push(boundedSummary(await ask(request, { teamKey, signal })));
+      summaries.push(boundedSummary(await ask(request, { teamKey, signal }), maxOutputCharacters));
     }
     if (summaries.length === 1) return summaries[0]!;
     const next = packSummaryInputs(summaries);
@@ -182,15 +211,18 @@ export async function prepareConversationArchiveProjection(snapshot: Conversatio
   signal?: AbortSignal;
 }): Promise<PreparedConversationArchiveProjection> {
   const { conversation, state } = snapshot;
-  const keys = conversationArchiveKeys(state);
+  const kind = conversationArchiveKind(conversation.agentKey);
+  const keys = conversationArchiveKeys(state, kind);
   const now = (dependencies.now ?? (() => new Date().toISOString()))();
   const existingFolders = new Map(snapshot.existing.folders.map((folder) => [folder.key, folder]));
   const existingFiles = new Map(snapshot.existing.files.map((file) => [file.key, file]));
-  const folderSpecs: Array<{ key: string; parentFolderKey?: string; name: string; managedPurpose: ConversationArchiveFolderPurpose; managedOwnerKey: string }> = [
-    { key: keys.rootFolderKey, name: 'Chats', managedPurpose: 'conversation-root', managedOwnerKey: state.userKey },
-    { key: keys.conversationFolderKey, parentFolderKey: keys.rootFolderKey, name: conversation.name, managedPurpose: 'conversation', managedOwnerKey: conversation.key },
-    { key: keys.summariesFolderKey, parentFolderKey: keys.conversationFolderKey, name: 'Summaries', managedPurpose: 'conversation-summaries', managedOwnerKey: conversation.key },
-  ];
+  const folderSpecs: Array<{ key: string; parentFolderKey?: string; name: string; managedPurpose: ConversationArchiveFolderPurpose; managedOwnerKey: string }> = kind === 'memory'
+    ? (summary === null ? [] : [{ key: keys.rootFolderKey, name: 'Memory', managedPurpose: 'conversation-root', managedOwnerKey: state.userKey }])
+    : [
+      { key: keys.rootFolderKey, name: 'Chats', managedPurpose: 'conversation-root', managedOwnerKey: state.userKey },
+      { key: keys.conversationFolderKey, parentFolderKey: keys.rootFolderKey, name: conversation.name, managedPurpose: 'conversation', managedOwnerKey: conversation.key },
+      { key: keys.summariesFolderKey, parentFolderKey: keys.conversationFolderKey, name: 'Summaries', managedPurpose: 'conversation-summaries', managedOwnerKey: conversation.key },
+    ];
   const folders: ConversationArchiveFolder[] = [];
   const pendingFolderSpecs: Array<(typeof folderSpecs)[number] & { previous?: ConversationArchiveFolder }> = [];
   for (const spec of folderSpecs) {
@@ -200,10 +232,19 @@ export async function prepareConversationArchiveProjection(snapshot: Conversatio
   }
 
   const completed = snapshot.messages.filter((message) => message.status === 'COMPLETED');
-  const transcript = completed.length ? transcriptEntries(completed).join('\n\n') : '';
-  const fileSpecs: Array<{ key: string; folderKey: string; name: string; content: string; managedPurpose: ConversationArchiveFilePurpose; managedOwnerKey: string }> = [];
-  if (transcript) fileSpecs.push({ key: keys.transcriptFileKey, folderKey: keys.conversationFolderKey, name: conversationArchiveTranscriptName(conversation.name), content: transcript, managedPurpose: 'conversation-transcript', managedOwnerKey: conversation.key });
-  if (summary !== null) fileSpecs.push({ key: keys.summaryFileKey, folderKey: keys.summariesFolderKey, name: 'Current summary', content: boundedSummary(summary), managedPurpose: 'conversation-summary', managedOwnerKey: conversation.key });
+  const speaker = conversationArchiveSpeaker(conversation.agentKey);
+  const fileSpecs: Array<{ key: string; folderKey: string; name: string; content: string; managedPurpose: ConversationArchiveFilePurpose; managedOwnerKey: string }> = kind === 'memory'
+    ? []
+    : completed.map((message, index) => ({
+      key: conversationArchiveMessageFileKey(state, message.key),
+      folderKey: keys.conversationFolderKey,
+      name: `${String(index + 1).padStart(2, '0')} ${message.role === 'USER' ? 'User' : speaker}`,
+      content: conversationArchiveMessageContent(message),
+      managedPurpose: 'conversation-transcript' as const,
+      managedOwnerKey: conversation.key,
+    }));
+  if (summary !== null && kind === 'memory') fileSpecs.push({ key: keys.memoryFileKey, folderKey: keys.rootFolderKey, name: conversation.name, content: boundedSummary(summary, CONVERSATION_MEMORY_MAX_CHARACTERS), managedPurpose: 'conversation-summary', managedOwnerKey: conversation.key });
+  if (summary !== null && kind === 'chat') fileSpecs.push({ key: keys.summaryFileKey, folderKey: keys.summariesFolderKey, name: 'Current summary', content: boundedSummary(summary), managedPurpose: 'conversation-summary', managedOwnerKey: conversation.key });
 
   const files: ConversationArchiveFile[] = [];
   const pendingFiles: Array<(typeof fileSpecs)[number] & { chunks: string[]; previous?: ConversationArchiveFile }> = [];
@@ -259,16 +300,18 @@ type ArchiveTransaction = <T>(operation: (database: ArchiveDatabase) => Promise<
 const parseState = (value: unknown) => conversationArchiveStateSchema.parse(withArangoKey(value as Record<string, unknown>));
 
 async function removeProjectedFiles(database: ArchiveDatabase, owner: Pick<ConversationArchiveOwner, 'scopeKey' | 'userKey' | 'conversationKey'>, now: string) {
-  const keys = conversationArchiveKeys(owner);
-  const folderKeys = [keys.conversationFolderKey, keys.summariesFolderKey];
+  const chat = conversationArchiveKeys(owner, 'chat');
+  const memory = conversationArchiveKeys(owner, 'memory');
+  const folderKeys = [chat.conversationFolderKey, chat.summariesFolderKey];
   await database.query(`
     LET files = (FOR file IN @@files FILTER file.scopeKey == @scopeKey && file.userKey == @userKey && (file._key IN @fileKeys || file.folderKey IN @folderKeys) RETURN file)
     LET queued = (FOR file IN files FILTER IS_STRING(file.storageKey) && LENGTH(file.storageKey) > 0 UPSERT { storageKey: file.storageKey } INSERT { storageKey: file.storageKey, createdAt: @now, status: "pending" } UPDATE {} IN @@storageJobs RETURN 1)
     LET removed = (FOR file IN files REMOVE file IN @@files RETURN 1)
     RETURN true
-  `, { '@files': FILES_COLLECTION, '@storageJobs': STORAGE_DELETION_JOBS_COLLECTION, scopeKey: owner.scopeKey, userKey: owner.userKey, fileKeys: [keys.transcriptFileKey, keys.summaryFileKey], folderKeys, now });
-  await database.query('FOR folderKey IN @keys LET folder = DOCUMENT(@@folders, folderKey) FILTER folder != null && folder.userKey == @userKey && folder.managedPurpose IN ["conversation", "conversation-summaries"] REMOVE folder IN @@folders', { '@folders': FOLDERS_COLLECTION, keys: [keys.summariesFolderKey, keys.conversationFolderKey], userKey: owner.userKey });
-  await database.query('LET root = DOCUMENT(@@folders, @rootFolderKey) FILTER root != null && root.scopeKey == @scopeKey && root.userKey == @userKey && root.managedPurpose == "conversation-root" && root.managedOwnerKey == @userKey LET remaining = FIRST(FOR folder IN @@folders FILTER folder.parentFolderKey == root._key && folder.scopeKey == @scopeKey && folder.userKey == @userKey && folder.managedPurpose == "conversation" LIMIT 1 RETURN 1) FILTER remaining == null REMOVE root IN @@folders', { '@folders': FOLDERS_COLLECTION, rootFolderKey: keys.rootFolderKey, scopeKey: owner.scopeKey, userKey: owner.userKey });
+  `, { '@files': FILES_COLLECTION, '@storageJobs': STORAGE_DELETION_JOBS_COLLECTION, scopeKey: owner.scopeKey, userKey: owner.userKey, fileKeys: [chat.transcriptFileKey, chat.summaryFileKey, memory.memoryFileKey], folderKeys, now });
+  await database.query('FOR folderKey IN @keys LET folder = DOCUMENT(@@folders, folderKey) FILTER folder != null && folder.userKey == @userKey && folder.managedPurpose IN ["conversation", "conversation-summaries"] REMOVE folder IN @@folders', { '@folders': FOLDERS_COLLECTION, keys: [chat.summariesFolderKey, chat.conversationFolderKey], userKey: owner.userKey });
+  await database.query('LET root = DOCUMENT(@@folders, @rootFolderKey) FILTER root != null && root.scopeKey == @scopeKey && root.userKey == @userKey && root.managedPurpose == "conversation-root" && root.managedOwnerKey == @userKey LET remaining = FIRST(FOR folder IN @@folders FILTER folder.parentFolderKey == root._key && folder.scopeKey == @scopeKey && folder.userKey == @userKey && folder.managedPurpose == "conversation" LIMIT 1 RETURN 1) FILTER remaining == null REMOVE root IN @@folders', { '@folders': FOLDERS_COLLECTION, rootFolderKey: chat.rootFolderKey, scopeKey: owner.scopeKey, userKey: owner.userKey });
+  await database.query('LET root = DOCUMENT(@@folders, @rootFolderKey) FILTER root != null && root.scopeKey == @scopeKey && root.userKey == @userKey && root.managedPurpose == "conversation-root" && root.managedOwnerKey == @userKey LET remaining = FIRST(FOR file IN @@files FILTER file.folderKey == root._key && file.scopeKey == @scopeKey && file.userKey == @userKey LIMIT 1 RETURN 1) FILTER remaining == null REMOVE root IN @@folders', { '@folders': FOLDERS_COLLECTION, '@files': FILES_COLLECTION, rootFolderKey: memory.rootFolderKey, scopeKey: owner.scopeKey, userKey: owner.userKey });
 }
 
 export function createConversationArchiveProjectionRepository(database: ArchiveDatabase = db as unknown as ArchiveDatabase, transaction?: ArchiveTransaction): ConversationArchiveProjectionRepository {
@@ -287,8 +330,9 @@ export function createConversationArchiveProjectionRepository(database: ArchiveD
       const state = parseState(row.state);
       if (!row.conversation) return { status: 'missing-source', state };
       const conversation = conversationSchema.parse(withArangoKey(row.conversation));
-      const keys = conversationArchiveKeys(input);
-      const existingCursor = await database.query('LET folders = (FOR value IN @@folders FILTER value._key IN @folderKeys RETURN value) LET files = (FOR value IN @@files FILTER value._key IN @fileKeys RETURN value) RETURN { folders, files }', { '@folders': FOLDERS_COLLECTION, '@files': FILES_COLLECTION, folderKeys: [keys.rootFolderKey, keys.conversationFolderKey, keys.summariesFolderKey], fileKeys: [keys.transcriptFileKey, keys.summaryFileKey] });
+      const chat = conversationArchiveKeys(input, 'chat');
+      const memory = conversationArchiveKeys(input, 'memory');
+      const existingCursor = await database.query('LET folders = (FOR value IN @@folders FILTER value._key IN @folderKeys RETURN value) LET files = (FOR value IN @@files FILTER value.userKey == @userKey && value.scopeKey == @scopeKey && value.managedOwnerKey == @conversationKey && value.managedPurpose IN ["conversation-transcript", "conversation-summary"] RETURN value) RETURN { folders, files }', { '@folders': FOLDERS_COLLECTION, '@files': FILES_COLLECTION, folderKeys: [chat.rootFolderKey, chat.conversationFolderKey, chat.summariesFolderKey, memory.rootFolderKey], userKey: input.userKey, scopeKey: input.scopeKey, conversationKey: input.conversationKey });
       const existing = await existingCursor.next() as { folders: Record<string, unknown>[]; files: Record<string, unknown>[] } | undefined;
       return { status: 'ready', snapshot: { state, conversation, messages: row.messages.map((message) => conversationMessageSchema.parse(withArangoKey(message))), existing: { folders: (existing?.folders ?? []).map((value) => asArchiveFolder(withArangoKey(value))), files: (existing?.files ?? []).map((value) => asArchiveFile(withArangoKey(value))) } } };
     },
@@ -306,6 +350,13 @@ export function createConversationArchiveProjectionRepository(database: ArchiveD
         await executor.query('FOR value IN @values UPSERT { _key: value._key } INSERT value REPLACE value IN @@files', { '@files': FILES_COLLECTION, values: projection.files.map((value) => toArangoDoc(value as unknown as Record<string, unknown> & { key: string })) });
         const desiredFileKeys = projection.files.map(({ key }) => key);
         await executor.query('FOR file IN @@files FILTER file.userKey == @userKey && file.managedPurpose IN ["conversation-transcript", "conversation-summary"] && file.managedOwnerKey == @conversationKey && file._key NOT IN @desiredKeys LET queued = (UPSERT { storageKey: file.storageKey } INSERT { storageKey: file.storageKey, createdAt: @now, status: "pending" } UPDATE {} IN @@storageJobs RETURN 1) REMOVE file IN @@files', { '@files': FILES_COLLECTION, '@storageJobs': STORAGE_DELETION_JOBS_COLLECTION, userKey: state.userKey, conversationKey: state.conversationKey, desiredKeys: desiredFileKeys, now });
+        const chat = conversationArchiveKeys(state, 'chat');
+        if (!projection.folders.some((folder) => folder.key === chat.conversationFolderKey)) {
+          await executor.query('FOR folderKey IN @keys LET folder = DOCUMENT(@@folders, folderKey) FILTER folder != null && folder.userKey == @userKey && folder.managedPurpose IN ["conversation", "conversation-summaries"] && folder.managedOwnerKey == @conversationKey REMOVE folder IN @@folders', { '@folders': FOLDERS_COLLECTION, keys: [chat.summariesFolderKey, chat.conversationFolderKey], userKey: state.userKey, conversationKey: state.conversationKey });
+          await executor.query('LET root = DOCUMENT(@@folders, @rootFolderKey) FILTER root != null && root.scopeKey == @scopeKey && root.userKey == @userKey && root.managedPurpose == "conversation-root" && root.managedOwnerKey == @userKey LET remaining = FIRST(FOR folder IN @@folders FILTER folder.parentFolderKey == root._key && folder.scopeKey == @scopeKey && folder.userKey == @userKey && folder.managedPurpose == "conversation" LIMIT 1 RETURN 1) FILTER remaining == null REMOVE root IN @@folders', { '@folders': FOLDERS_COLLECTION, rootFolderKey: chat.rootFolderKey, scopeKey: state.scopeKey, userKey: state.userKey });
+        }
+        const memory = conversationArchiveKeys(state, 'memory');
+        await executor.query('LET root = DOCUMENT(@@folders, @rootFolderKey) FILTER root != null && root.scopeKey == @scopeKey && root.userKey == @userKey && root.managedPurpose == "conversation-root" && root.managedOwnerKey == @userKey LET remaining = FIRST(FOR file IN @@files FILTER file.folderKey == root._key && file.scopeKey == @scopeKey && file.userKey == @userKey LIMIT 1 RETURN 1) FILTER remaining == null REMOVE root IN @@folders', { '@folders': FOLDERS_COLLECTION, '@files': FILES_COLLECTION, rootFolderKey: memory.rootFolderKey, scopeKey: state.scopeKey, userKey: state.userKey });
         const advanced = await (await executor.query(`FOR value IN @@states FILTER value._key == @key && value.desiredRevision == @revision && ${binding('value')} UPDATE value WITH { projectedRevision: @revision, lastProjectedAt: @now, updatedAt: @now } IN @@states RETURN true`, { '@states': CONVERSATION_ARCHIVE_STATES_COLLECTION, ...ownerBindings(state), key: state.key, revision: state.desiredRevision, now })).next();
         if (!advanced) throw new Error('Chat file projection revision fence was lost during commit.');
         return { status: 'committed' as const, projectedRevision: state.desiredRevision };

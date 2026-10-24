@@ -20,5 +20,6 @@ export const textAction: ActionDefinition = {
   models: [
     { slot: 'primary', provider: 'openrouter', model: 'google.gemini-3.1-flash-lite', priority: 100 },
     { slot: 'secondary', provider: 'openrouter', model: 'openai.gpt-6-luna', priority: 90 },
+    { slot: 'tertiary', provider: 'openrouter', model: 'google.gemini-3.8-flash', priority: 80 },
   ],
 };

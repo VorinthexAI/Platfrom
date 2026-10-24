@@ -15,7 +15,7 @@ import { isCaptionableMedia, processStoredMedia } from './media-caption';
 import { documentStorage } from './storage';
 
 const key = z.string().cuid();
-const TEXT_EXTENSIONS = new Set(['txt', 'md', 'docx', 'pdf']);
+const TEXT_EXTENSIONS = new Set(['txt', 'md', 'html', 'docx', 'pdf']);
 const thumbnail = z.object({ mimeType: z.enum(['image/jpeg', 'image/png']), sizeBytes: z.number().int().positive().max(2 * 1024 * 1024) }).strict();
 const file = z.object({ filename: z.string().trim().min(1).max(255), mimeType: z.string().trim().min(1).max(255), sizeBytes: z.number().int().positive(), extension: fileExtensionSchema, thumbnail: thumbnail.optional() }).strict()
   .refine((value) => value.extension !== 'mov' || value.mimeType === 'video/quicktime', 'MOV files require the QuickTime video MIME type.')

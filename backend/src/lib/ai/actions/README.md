@@ -27,12 +27,11 @@ RRF fusion, authorization, and its fused order if reranking fails. Its route is
 `rerank.primary` bound to VoyageAI rerank-3-lite through OpenRouter. The
 provider-reported total token usage costs 20 Sparks per million tokens.
 
-The `plan` action binds Google Gemini 3.8 Flash through OpenRouter as
-`plan.primary`. Trusted callers such as Orbit stream chat over that slot.
-Orbit plan mode interviews on that slot without saving the chat, then writes
-the finished plan as a markdown file in the Plans folder. Core does not use it.
-Its user price matches the `text` action: 40 Sparks per million input tokens
-and 400 Sparks per million output tokens.
+The `text` action's `text.tertiary` slot binds Google Gemini 3.8 Flash through
+OpenRouter. Orbit streams chat over that slot. Core uses `text.primary` and
+`text.secondary`.
+Its user price is 40 Sparks per million input tokens and 400 Sparks per million
+output tokens.
 
 The `image` action's `image.secondary` slot binds OpenAI GPT Image 2.5 Sunburst.
 When that slot is selected and aspect ratio or quality are omitted, generation

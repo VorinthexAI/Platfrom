@@ -18,7 +18,7 @@ const selector = { scopeKey: z.string().cuid() };
 const selected = <T extends z.ZodRawShape>(shape: T) => z.object({ ...selector, ...shape }).strict();
 export const conversationStartEventSchema = z.object({ type: z.literal('start'), correlationKey: z.string().min(1), conversationKey: z.string().cuid(), userMessageKey: z.string().cuid(), assistantMessageKey: z.string().cuid(), userMessage: conversationSafeMessageSchema }).strict();
 export const conversationDeltaEventSchema = z.object({ type: z.literal('delta'), correlationKey: z.string().min(1), assistantMessageKey: z.string().cuid(), text: z.string().min(1) }).strict();
-export const conversationDoneEventSchema = z.object({ type: z.literal('done'), correlationKey: z.string().min(1), conversationKey: z.string().cuid(), message: conversationSafeMessageSchema, name: z.string().trim().min(1).max(200).optional(), plan: z.object({ fileKey: z.string().cuid(), name: z.string().trim().min(1).max(255), folderName: z.literal('Plans') }).strict().optional(), replayed: z.boolean() }).strict();
+export const conversationDoneEventSchema = z.object({ type: z.literal('done'), correlationKey: z.string().min(1), conversationKey: z.string().cuid(), message: conversationSafeMessageSchema, name: z.string().trim().min(1).max(200).optional(), replayed: z.boolean() }).strict();
 export const conversationErrorEventSchema = z.object({ type: z.literal('error'), correlationKey: z.string().min(1), code: z.string().min(1), message: z.string().min(1) }).strict();
 
 export function bindConversationStreamAbort(stream: { onAbort(callback: () => void): void }, requestSignal: AbortSignal) {
@@ -50,7 +50,7 @@ function failure(c: Context, error: unknown) {
   if (error instanceof ContentError) return c.json({ success: false, error: error.toJSON() }, error.code === 'CONTENT_FORBIDDEN' ? 403 : 400);
   if (error instanceof ConversationError) return c.json({ success: false, error: { code: error.code, message: error.message } }, error.code === 'FORBIDDEN' ? 403 : error.code === 'NOT_FOUND' ? 404 : error.code === 'CONFLICT' ? 409 : 500);
   if (error instanceof ZodError || error instanceof SyntaxError) return c.json({ success: false, error: 'invalid conversation request' }, 400);
-  console.error('conversation request failed', { error }); return c.json({ success: false, error: 'conversation request failed' }, 500);
+  console.error('conversation request failed', error); return c.json({ success: false, error: error instanceof Error ? error.message : 'conversation request failed' }, 500);
 }
 async function invoke(c: Context, schema: z.ZodTypeAny, run: (service: ConversationService, input: any, context: ToolContext) => Promise<unknown>, changed: boolean, dependencies: ConversationHandlerDependencies) {
   try {
@@ -103,7 +103,7 @@ export function createConversationHandlers(dependencies: ConversationHandlerDepe
       if (c.req.query('incognito') !== 'true') return c.json({ success: false, error: 'incognito query is required' }, 400);
         const body = await parseJson(c, selected({ message: z.string().trim().min(1).max(20_000), requestKey: z.string().trim().min(1).max(180), attachmentKeys: z.array(z.string().cuid()).max(0).default([]), referenceImageKeys: z.array(z.string().cuid()).max(0).default([]), workspaceFileKeys: z.array(z.string().cuid()).max(50).default([]), workspaceFolderKeys: z.array(z.string().cuid()).max(50).default([]), history: z.array(z.object({ role: z.enum(['USER', 'ASSISTANT']), content: z.string().trim().min(1).max(20_000) }).strict()).max(40).default([]) }));
       const context = await authenticated(c, body.scopeKey, dependencies); if (context instanceof Response) return context;
-      const input = conversationIncognitoSendInputSchema.parse({ message: body.message, requestKey: body.requestKey, roleKey: c.req.query('role') ?? 'general', attachmentKeys: body.attachmentKeys, referenceImageKeys: body.referenceImageKeys, workspaceFileKeys: body.workspaceFileKeys, workspaceFolderKeys: body.workspaceFolderKeys, history: body.history, mode: c.req.query('mode') === 'plan' ? 'plan' : 'chat' });
+      const input = conversationIncognitoSendInputSchema.parse({ message: body.message, requestKey: body.requestKey, roleKey: c.req.query('role') ?? 'general', attachmentKeys: body.attachmentKeys, referenceImageKeys: body.referenceImageKeys, workspaceFileKeys: body.workspaceFileKeys, workspaceFolderKeys: body.workspaceFolderKeys, history: body.history });
        return streamSSE(c, async (stream) => {
          const abort = bindConversationStreamAbort(stream, c.req.raw.signal);
          const service = dependencies.createTurnService?.(abort.signal) ?? createConversationService({ router: { signal: abort.signal, providers: c.req.query('reply') === 'reason' ? ['text.secondary'] : ['text.primary'] } });

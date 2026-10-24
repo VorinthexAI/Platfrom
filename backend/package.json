@@ -11,7 +11,6 @@
     "start": "bun run scripts/dev-start.ts",
     "start:server": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-app-logo-assets.ts --local && bun --env-file=.env.local run src/db/migration-runner.ts && bun --env-file=.env.local run src/api/index.ts",
     "start:app": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-app-logo-assets.ts --local && bun --env-file=.env.local run src/db/migration-runner.ts && bun --env-file=.env.local run src/api/index.ts",
-    "start:render": "bun run load-local-env && bun --env-file=.env.local run src/render-worker/index.ts",
     "reset": "bun run scripts/reset.ts",
     "create:super-admin": "bun run scripts/create-super-admin.ts",
     "delete:account": "bun run scripts/delete-account.ts",

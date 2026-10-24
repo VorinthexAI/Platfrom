@@ -49,27 +49,32 @@ export interface AgentToolDependencies {
   signal?: AbortSignal;
 }
 
-export async function executeCoreAgent(rawRequest: unknown, context: AgentExecutionContext, dependencies?: AgentRuntimeDependencies): Promise<AgentResponse> {
+export async function executeChatAgent(agent: AgentDefinition, systemPrompt: string, rawRequest: unknown, context: AgentExecutionContext, dependencies?: AgentRuntimeDependencies): Promise<AgentResponse> {
   const { runAgent } = await import('./runtime');
   const request = internalAgentRequestSchema.parse(rawRequest);
   if (requestsPlatformInternals(request.message)) {
     return runAgent(
-      { ...coreAgent, excludedTools: [...coreAgent.excludedTools, 'agent.query'], capabilities: undefined },
-      { ...request, systemPrompt: composeCoreSystemPrompt('general'), context: [], recalledContext: [], currentConversationSummary: undefined, attachments: [], generateName: false },
+      { ...agent, excludedTools: [...agent.excludedTools, 'agent.query'], capabilities: undefined },
+      { ...request, systemPrompt, context: [], recalledContext: [], currentConversationSummary: undefined, attachments: [], generateName: false },
       context,
       dependencies,
     );
   }
-  const executionAgent = { ...coreAgent, ...(request.attachments.length ? { capabilities: undefined } : {}) };
+  const executionAgent = { ...agent, ...(request.attachments.length ? { capabilities: undefined } : {}) };
   const history = (request.context ?? []).map(({ content }) => content);
   const requireFileRead = !request.attachments.length && await (dependencies?.fileReadIntent ?? (dependencies?.stream ? async () => false : requiresFileContentRead))(request.message, history, context.toolContext, dependencies?.router?.signal);
   const requireWorkspaceRead = requireFileRead || !request.attachments.length && await (dependencies?.freshReadRequired ?? (dependencies?.stream ? async () => false : (await import('./fresh-read')).requiresFreshWorkspaceRead))(request.message, context.toolContext, history);
-  return runAgent(executionAgent, { ...request, systemPrompt: composeCoreSystemPrompt(request.roleKey, request.taskInstructions) }, {
+  return runAgent(executionAgent, { ...request, systemPrompt }, {
     ...context, currentUserMessageContent: request.message, requireWorkspaceRead,
     normalizeToolArguments: (name, arguments_) => name === 'agent.query'
       ? normalizeAgentQueryArguments(arguments_, request.message, requireFileRead)
       : context.normalizeToolArguments?.(name, arguments_) ?? arguments_,
   }, dependencies);
+}
+
+export async function executeCoreAgent(rawRequest: unknown, context: AgentExecutionContext, dependencies?: AgentRuntimeDependencies): Promise<AgentResponse> {
+  const request = internalAgentRequestSchema.parse(rawRequest);
+  return executeChatAgent(coreAgent, requestsPlatformInternals(request.message) ? composeCoreSystemPrompt('general') : composeCoreSystemPrompt(request.roleKey, request.taskInstructions), rawRequest, context, dependencies);
 }
 
 export const CORE_TOOL_DEFINITIONS = Object.freeze([{

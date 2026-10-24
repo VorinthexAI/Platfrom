@@ -14,10 +14,7 @@
       "usesAppleSignIn": true,
       "infoPlist": {
         "UIFileSharingEnabled": true,
-        "LSSupportsOpeningDocumentsInPlace": true,
-        "UIBackgroundModes": [
-          "audio"
-        ]
+        "LSSupportsOpeningDocumentsInPlace": true
       },
       "associatedDomains": [
         "applinks:vorinthex.com"
@@ -109,7 +106,7 @@
       [
         "expo-audio",
         {
-          "enableBackgroundPlayback": true,
+          "enableBackgroundPlayback": false,
           "enableBackgroundRecording": false,
           "microphonePermission": false,
           "recordAudioAndroid": false

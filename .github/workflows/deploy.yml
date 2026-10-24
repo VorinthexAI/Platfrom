@@ -918,76 +918,6 @@ jobs:
         if: env.APP_HEALTH_URL != ''
         run: bash backend/deploy/health-check.sh "${{ env.APP_HEALTH_URL }}"
 
-  # Optional render worker (desired count is 0 by default). Registers a new task
-  # definition revision with the freshly built image and rolls the service only
-  # when the RENDER_TASK_FAMILY variable is configured.
-  backend-render:
-    # LATER ECS render deploy. Disabled while the single early-infra box serves production.
-    name: LATER / deploy backend render role
-    runs-on: ubuntu-latest
-    needs: [changes, backend-image, backend-migrate, backend-deploy]
-    if: false # LATER: enable with the ECS API service.
-    environment: production
-    env:
-      IMAGE: ${{ needs.backend-image.outputs.image }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.COMMIT_SHA }}
-      - uses: ./.github/actions/load-environments-json
-        with:
-          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
-      - name: Extract config
-        run: |
-          {
-            echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)"
-            echo "FAMILY=$(jq -r '.vars.RENDER_TASK_FAMILY' .github/environments.json)"
-            echo "RENDER_ECS_CLUSTER=$(jq -r '.vars.RENDER_ECS_CLUSTER' .github/environments.json)"
-            echo "RENDER_ECS_SERVICE=$(jq -r '.vars.RENDER_ECS_SERVICE' .github/environments.json)"
-          } >> "$GITHUB_ENV"
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Register revision and optionally roll service
-        if: env.FAMILY != '' && env.FAMILY != 'null'
-        run: |
-          set -e
-          FAMILY="$(python3 -c 'import os; print(os.environ["FAMILY"].lstrip("﻿").strip())')"
-          RENDER_ECS_CLUSTER="$(python3 -c 'import os; print(os.environ["RENDER_ECS_CLUSTER"].lstrip("﻿").strip())')"
-          RENDER_ECS_SERVICE="$(python3 -c 'import os; print(os.environ["RENDER_ECS_SERVICE"].lstrip("﻿").strip())')"
-          export FAMILY RENDER_ECS_CLUSTER RENDER_ECS_SERVICE
-          aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition' --output json > taskdef.json
-          jq --arg IMAGE "$IMAGE" --arg AWS_REGION "$AWS_REGION" '
-            .containerDefinitions |= map(
-              if .name == "render" then
-                .image = $IMAGE
-                | .environment = (((.environment // []) | map(select(.name != "AWS_REGION"))) + [{name: "AWS_REGION", value: $AWS_REGION}])
-              else
-                .image = $IMAGE
-              end
-            )
-            | .ephemeralStorage = {sizeInGiB: 30}
-            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
-          ' taskdef.json > new-taskdef.json
-          REV=$(aws ecs register-task-definition --cli-input-json file://new-taskdef.json --query 'taskDefinition.revision' --output text)
-          echo "::notice::Registered $FAMILY:$REV with image $IMAGE"
-          if [ -n "$RENDER_ECS_CLUSTER" ] && [ -n "$RENDER_ECS_SERVICE" ]; then
-            # The render service is provisioned by infra.yml and may not exist
-            # yet — registering the revision is the deploy's real job here.
-            # ClusterNotFoundException also covers an INACTIVE cluster during
-            # the early-infra era; production runs on the early box then.
-            if ! out=$(aws ecs update-service --cluster "$RENDER_ECS_CLUSTER" --service "$RENDER_ECS_SERVICE" --task-definition "$FAMILY:$REV" --query 'service.serviceName' --output text 2>&1); then
-              if echo "$out" | grep -Eq "ServiceNotFoundException|ClusterNotFoundException"; then
-                echo "::warning::Render service $RENDER_ECS_SERVICE is not rollable yet (service or cluster missing/inactive); revision $FAMILY:$REV registered, service roll skipped."
-              else
-                echo "::error::Failed to roll render service: $out"
-                exit 1
-              fi
-            fi
-          fi
-
   # ---------------------------------------------------------------------------
   # EARLY-INFRA: the active production deployment. It performs one SSM
   # blue-green swap on the single app box after graph setup and catalog sync
@@ -1225,7 +1155,7 @@ jobs:
     name: Deployment summary
     runs-on: ubuntu-latest
     if: always() && (github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true)
-    needs: [changes, deploy-web, cloudflare-cache, backend-deploy, backend-render, early-deploy, early-infra-standalone-build, early-infra-standalone-deploy]
+    needs: [changes, deploy-web, cloudflare-cache, backend-deploy, early-deploy, early-infra-standalone-build, early-infra-standalone-deploy]
     steps:
       - name: Write deploy audit
         run: |
@@ -1237,7 +1167,6 @@ jobs:
             echo "| web (ECS vorinthex-prod-web) | ${{ needs.changes.outputs.web }} | ${{ needs.deploy-web.result }} |"
             echo "| cloudflare cache | ${{ needs.changes.outputs.web }} | ${{ needs.cloudflare-cache.result }} |"
             echo "| api (ECS vorinthex-prod-api) | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-deploy.result }} |"
-            echo "| render | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-render.result }} |"
             echo "| early-infra box (SSM blue-green) | ${{ needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true' }} | ${{ needs.early-deploy.result }} |"
             echo "| early-infra box (standalone build+deploy) | ${{ needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true' }} | ${{ needs.early-infra-standalone-deploy.result }} |"
             echo ""

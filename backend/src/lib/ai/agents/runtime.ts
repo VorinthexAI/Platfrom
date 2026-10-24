@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { coreChatInputSchema, coreChatToolDefinitionSchema, type CoreChatMessage, type CoreChatToolDefinition } from '@/lib/ai/actions';
-import { streamAsk, type ExecuteActionOptions } from '@/lib/ai/router';
-import type { ProviderStreamChunk } from '@/lib/ai/providers';
+import { executeAsk, streamAsk, type ExecuteActionOptions } from '@/lib/ai/router';
+import { chatOutputSchema, type ProviderStreamChunk } from '@/lib/ai/providers';
 import { isToolReadOnly, MODEL_TOOL_NAMES, TOOL_DEFINITIONS, runTool, toolInputSchemas, type ToolDependencies } from '@/lib/ai/tools';
 import type { ToolContext } from '@/lib/ai/tools/tool-context';
 import type { gatherWorkspaceContext } from './workspace-context';
@@ -99,26 +99,30 @@ const generatedConversationNameSchema = z.object({
   name: z.string().trim().min(1).max(80).refine((value) => value.split(/\s+/).length <= 5, 'Conversation names may contain at most five words.'),
 }).strict();
 
-async function generateConversationName(teamKey: string, message: string, stream: typeof streamAsk, router?: ExecuteActionOptions) {
-  const input = coreChatInputSchema.parse({
-    systemPrompt: 'Create a specific, concise English chat name that captures the primary intent of the user message, regardless of the language used in that message. Use 1 to 5 words, never a sentence, and do not end with punctuation. Return only the requested JSON.',
-    messages: [{ role: 'user', content: [{ type: 'text', text: JSON.stringify({ message }) }] }],
-    responseFormat: {
-      name: 'conversation_name',
-      schema: { type: 'object', additionalProperties: false, required: ['name'], properties: { name: { type: 'string', minLength: 1, maxLength: 80 } } },
-    },
-    options: { maxTokens: 32, temperature: 0.1 },
-  });
-  let output = '';
-  let done = false;
-  for await (const chunk of stream(teamKey, input, { ...router, providers: ['text.primary'], capabilities: {}, timeoutMs: Math.min(router?.timeoutMs ?? 15_000, 15_000) })) {
-    if (done) throw new Error('The conversation-name stream emitted data after completion.');
-    if (chunk.type === 'done') { done = true; continue; }
-    if (chunk.type === 'tool-call') throw new Error('The conversation-name stream returned a tool call.');
-    if (chunk.type === 'text-delta') output += chunk.text;
+function fallbackConversationName(message: string) {
+  const words = message.replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean).slice(0, 5);
+  return words.join(' ').slice(0, 80) || 'Chat';
+}
+
+async function generateConversationName(teamKey: string, message: string, _stream: typeof streamAsk, router?: ExecuteActionOptions) {
+  try {
+    const response = await executeAsk(teamKey, {
+      systemPrompt: 'Create a specific, concise English chat name that captures the primary intent of the user message, regardless of the language used in that message. Use 1 to 5 words, never a sentence, and do not use emojis or hyphens. Do not end with punctuation. Return only the requested JSON.',
+      messages: [{ role: 'user', content: [{ type: 'text', text: JSON.stringify({ message }) }] }],
+      responseFormat: {
+        name: 'conversation_name',
+        schema: { type: 'object', additionalProperties: false, required: ['name'], properties: { name: { type: 'string', minLength: 1, maxLength: 80 } } },
+      },
+      options: { maxTokens: 80, temperature: 0.1 },
+    }, { ...router, providers: router?.providers ?? ['text.primary'], capabilities: {}, timeoutMs: 30_000 });
+    const text = chatOutputSchema.parse(response.output).text;
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    return generatedConversationNameSchema.parse(JSON.parse(start >= 0 && end > start ? text.slice(start, end + 1) : text)).name.replace(/-/g, ' ');
+  } catch (error) {
+    console.error('conversation name generation failed', { error });
+    return fallbackConversationName(message);
   }
-  if (!done) throw new Error('The conversation-name stream ended before completion.');
-  return generatedConversationNameSchema.parse(JSON.parse(output)).name;
 }
 
 function canonicalJson(value: unknown): string {
@@ -178,7 +182,7 @@ export async function runAgent(
   const singleShotExecutions = new Map<string, Promise<ExecutionOutcome>>();
   const observe = (metric: AgentRoutingMetric) => { try { dependencies.onRoutingMetric?.(metric); } catch { /* Metrics never affect execution. */ } };
   const namePromise = request.generateName
-    ? generateConversationName(context.toolContext.teamKey, request.message, stream, dependencies.router).catch(() => undefined)
+    ? generateConversationName(context.toolContext.teamKey, request.message, stream, dependencies.router)
     : undefined;
   let emittedCalls = 0;
   let contextRead = false;
@@ -201,7 +205,7 @@ export async function runAgent(
     let done = false;
     let outputMode: 'text' | 'tools' | undefined;
     const initialResponseController = new AbortController();
-    const initialResponseTimer = setTimeout(() => initialResponseController.abort(new DOMException('The agent did not begin responding in time.', 'TimeoutError')), dependencies.initialResponseTimeoutMs ?? (request.attachments.length ? 30_000 : 15_000));
+    const initialResponseTimer = setTimeout(() => initialResponseController.abort(new DOMException('The agent did not begin responding in time.', 'TimeoutError')), dependencies.initialResponseTimeoutMs ?? (request.attachments.length ? 45_000 : 30_000));
     const signal = dependencies.router?.signal ? AbortSignal.any([dependencies.router.signal, initialResponseController.signal]) : initialResponseController.signal;
     let receivedChunk = false;
     try {
@@ -218,7 +222,7 @@ export async function runAgent(
           continue;
         }
         if (chunk.type === 'tool-call') {
-          if (outputMode === 'text') throw new AgentStreamProtocolError('The agent selected a tool after emitting visible text.');
+          if (outputMode === 'text') continue;
           outputMode = 'tools';
           calls.push(chunk);
           continue;

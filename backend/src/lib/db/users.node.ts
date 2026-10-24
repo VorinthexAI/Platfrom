@@ -62,7 +62,7 @@ const helpers = createNodeHelpers(USERS_COLLECTION, userSchema, usersEmbedKeys.o
 export const insertUser = helpers.insert;
 export const getUserById = helpers.getById;
 export const updateUser = helpers.updateById;
-  const USER_DELETE_COLLECTIONS = ['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages', 'conversationArchiveStates', 'folders', 'files', 'inventoryEdges', 'inventoryNodes', 'userInboxThreads', 'userInboxMessages', 'userNotifications', 'tickets', 'events', 'sparkTransactions', 'referralCodes', 'referralAttributions', 'referralRewards', 'paymentOrders', 'subscriptions', 'storageDeletionJobs', 'tags', 'tagAssignments'] as const;
+  const USER_DELETE_COLLECTIONS = ['users', 'userHiddens', 'userGenerations', 'conversations', 'conversationMessages', 'conversationArchiveStates', 'folders', 'files', 'userInboxThreads', 'userInboxMessages', 'userNotifications', 'tickets', 'events', 'sparkTransactions', 'referralCodes', 'referralAttributions', 'referralRewards', 'paymentOrders', 'subscriptions', 'storageDeletionJobs', 'tags', 'tagAssignments'] as const;
 export async function deleteUser(userKey: string): Promise<void> {
   await withTransaction([...USER_DELETE_COLLECTIONS], async (transaction) => {
     await transaction.query('LET tagKeys = (FOR tag IN tags FILTER tag.userKey == @userKey RETURN tag._key) FOR assignment IN tagAssignments FILTER assignment.tagKey IN tagKeys REMOVE assignment IN tagAssignments', { userKey });
@@ -74,8 +74,6 @@ export async function deleteUser(userKey: string): Promise<void> {
     await transaction.query('FOR state IN conversationArchiveStates FILTER state.userKey == @userKey REMOVE state IN conversationArchiveStates', { userKey });
     await transaction.query('FOR file IN files FILTER file.userKey == @userKey && file.managedPurpose IN ["conversation-transcript", "conversation-summary"] REMOVE file IN files', { userKey });
     await transaction.query('FOR folder IN folders FILTER folder.userKey == @userKey && folder.managedPurpose IN ["conversation-root", "conversation", "conversation-summaries"] REMOVE folder IN folders', { userKey });
-    await transaction.query('FOR edge IN inventoryEdges FILTER edge.userKey == @userKey REMOVE edge IN inventoryEdges', { userKey });
-    await transaction.query('FOR node IN inventoryNodes FILTER node.userKey == @userKey REMOVE node IN inventoryNodes', { userKey });
     await transaction.query('FOR conversation IN conversations FILTER conversation.userKey == @userKey REMOVE conversation IN conversations', { userKey });
     await transaction.query('FOR message IN userInboxMessages FILTER message.userKey == @userKey REMOVE message IN userInboxMessages', { userKey });
     await transaction.query('FOR thread IN userInboxThreads FILTER thread.userKey == @userKey REMOVE thread IN userInboxThreads', { userKey });

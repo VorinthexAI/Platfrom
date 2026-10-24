@@ -86,3 +86,8 @@ export * from './icons/sign-out';
 export * from './icons/wallet';
 export * from './icons/subscription-cancel';
 export * from './icons/restore-purchases';
+export * from './icons/tag';
+export * from './icons/cloud-upload';
+export * from './icons/megaphone';
+export * from './icons/chart';
+export * from './icons/video';

@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { newId } from '@/lib/ids';
 import { coreAgent, executeCoreAgent } from '@/lib/ai/agents/core';
-import { orbitAgent, executeOrbitAgent } from '@/lib/ai/agents/orbit';
 import { AgentStreamProtocolError, type AgentRuntimeDependencies } from '@/lib/ai/agents';
 import { currentEventAppKey } from '@/lib/ai/events/runtime';
 import { APP_KEYS } from '@/lib/apps/registry';
@@ -26,7 +25,6 @@ import {
   type Conversation, type ConversationMessage,
 } from './schemas';
 import { issueConversationContextSeedToken, verifyConversationContextSeedToken } from './context-seed';
-import { runPlanSession, type SavedPlan } from './plan-session';
 import type { ConversationArchiveState } from './archive-projection';
 import { verifyOpeningGreetingToken, type OpeningGreetingSnapshot } from './opening-greeting';
 
@@ -60,7 +58,7 @@ const MAX_CONTEXT_BYTES = 250_000;
 export type ConversationTurnEvent =
   | { type: 'start'; correlationKey: string; conversationKey: string; userMessageKey: string; assistantMessageKey: string; userMessage: z.infer<typeof conversationSafeMessageSchema> }
   | { type: 'delta'; correlationKey: string; assistantMessageKey: string; text: string }
-  | { type: 'done'; correlationKey: string; conversationKey: string; message: z.infer<typeof conversationSafeMessageSchema>; name?: string; plan?: SavedPlan; replayed: boolean }
+  | { type: 'done'; correlationKey: string; conversationKey: string; message: z.infer<typeof conversationSafeMessageSchema>; name?: string; replayed: boolean }
   | { type: 'error'; correlationKey: string; code: string; message: string };
 
 export type ConversationSeedEvent =
@@ -138,7 +136,6 @@ export interface ConversationServiceDependencies {
   agent?: AgentRuntimeDependencies;
   router?: ExecuteActionOptions;
   core?: typeof executeCoreAgent;
-  orbit?: typeof executeOrbitAgent;
   userSearches?: UserSearchService;
   attachmentArtifacts?: Pick<ConversationAttachmentArtifactRepository, 'readClaimed'> & Partial<Pick<ConversationAttachmentArtifactRepository, 'releaseClaimed'>>;
   attachmentStorage?: Pick<DocumentObjectStorage, 'download'> & Partial<Pick<DocumentObjectStorage, 'delete'>>;
@@ -156,10 +153,7 @@ export function createConversationService(dependencies: ConversationServiceDepen
   const id = dependencies.id ?? newId;
   const now = dependencies.now ?? (() => new Date().toISOString());
   const core = dependencies.core ?? executeCoreAgent;
-  const orbit = dependencies.orbit ?? executeOrbitAgent;
-  const conversationAgent = (ownership: Owner) => ownership.agentKey === APP_KEYS.ORBIT
-    ? { execute: orbit, definition: orbitAgent }
-    : { execute: core, definition: coreAgent };
+  const conversationAgent = { execute: core, definition: coreAgent };
   const agentDependencies: AgentRuntimeDependencies = { ...dependencies.agent, router: { ...dependencies.agent?.router, ...dependencies.router } };
   const userSearches = dependencies.userSearches ?? getDefaultUserSearchService();
   const attachmentArtifacts = dependencies.attachmentArtifacts ?? getDefaultConversationAttachmentArtifactRepository();
@@ -298,7 +292,7 @@ export function createConversationService(dependencies: ConversationServiceDepen
           const deltas: string[] = [];
           let emitted = false;
           try {
-             const agent = conversationAgent(ownership);
+              const agent = conversationAgent;
              response = await agent.execute({
               systemPrompt: agent.definition.systemPrompt,
               roleKey: conversation.roleKey,
@@ -363,7 +357,7 @@ export function createConversationService(dependencies: ConversationServiceDepen
       let response: Awaited<ReturnType<typeof core>> | undefined;
       let agentError: unknown;
       try {
-        const agent = conversationAgent(ownership);
+        const agent = conversationAgent;
         response = await agent.execute({
           systemPrompt: agent.definition.systemPrompt,
           taskInstructions: 'The user started a new chat using other chats as context. Speak in the first person as this agent, never as the user. Write a short orientation of what those chats are about so the user can continue. A few compact paragraphs, detailed enough to be useful, not a transcript and not a heading.',
@@ -408,28 +402,12 @@ export function createConversationService(dependencies: ConversationServiceDepen
         recalledContext: [] as Array<{ role: 'user' | 'assistant'; content: string; createdAt: string }>,
       };
       const retrievals: AppSearchRetrieval[] = [];
-       const agentMessage = `${tagged.preface}${input.message}`;
-        if (input.mode === 'plan' && ownership.agentKey === APP_KEYS.ORBIT) {
-         const plan = await runPlanSession({
-           teamKey: ownership.teamKey,
-           context,
-           roleKey: input.roleKey,
-           history: input.history,
-           message: agentMessage,
-           options: agentDependencies.router,
-           onDelta: async (text) => { await onEvent({ type: 'delta', correlationKey, assistantMessageKey: assistant.key, text }); },
-         });
-         if (!plan.message.trim()) throw new ConversationError('FAILED', 'The plan did not return a response.');
-         const completed = conversationMessageSchema.parse({ ...assistant, status: 'COMPLETED', content: plan.message, retrievals, completedAt: now(), guideTopics: { status: 'NONE' } });
-         await onEvent({ type: 'done', correlationKey, conversationKey, message: projectConversationMessage(completed), ...(plan.saved ? { plan: plan.saved } : {}), replayed: false });
-         if (plan.saved) void publishContentChanged(ownership.scopeKey).catch((error) => console.error('plan content publication failed', { fileKey: plan.saved?.fileKey, error }));
-         return;
-       }
-       const deltas: string[] = [];
+        const agentMessage = `${tagged.preface}${input.message}`;
+        const deltas: string[] = [];
       let response: Awaited<ReturnType<typeof core>> | undefined;
       let agentError: unknown;
       try {
-        const agent = conversationAgent(ownership);
+        const agent = conversationAgent;
         response = await agent.execute({
           systemPrompt: agent.definition.systemPrompt,
           roleKey: input.roleKey,

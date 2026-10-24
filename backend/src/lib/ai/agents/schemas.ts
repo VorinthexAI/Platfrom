@@ -22,7 +22,7 @@ export const internalAgentRequestSchema = z.object({
   systemPrompt: z.string().trim().min(1).max(20_000),
   roleKey: roleKeySchema.default('general'),
   taskInstructions: z.string().trim().min(1).max(1_200).optional(),
-  currentConversationSummary: z.string().trim().min(1).max(4_000).optional(),
+  currentConversationSummary: z.string().trim().min(1).max(12_000).optional(),
   context: z.array(agentContextMessageSchema).max(50).optional(),
   recalledContext: z.array(agentContextMessageSchema).max(20).optional(),
   message: z.string().trim().min(1).max(20_000),

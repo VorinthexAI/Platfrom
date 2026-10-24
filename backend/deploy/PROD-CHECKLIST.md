@@ -1,9 +1,9 @@
 # Vorinthex Production Deploy Checklist
 
-Production follows the Lensoflow deployment pattern, adapted to Vorinthex's two roles:
+Production follows the Lensoflow deployment pattern, adapted to Vorinthex's app role:
 
 - `app`: public API/orchestration role on EC2, deployed blue-green with Caddy.
-- `render`: always-on ECS/Fargate service that drains the render queue.
+
 
 ## Required GitHub Secrets
 
@@ -18,9 +18,6 @@ Production follows the Lensoflow deployment pattern, adapted to Vorinthex's two 
 ## GitHub Variables
 
 - `APP_HEALTH_URL`, for example `https://vorinthex.com/api/v1/health`
-- `RENDER_TASK_FAMILY`, required for render deploys
-- `RENDER_ECS_CLUSTER`, required to roll the running render service
-- `RENDER_ECS_SERVICE`, required to roll the running render service
 
 ## AWS SSM Parameter Path
 
@@ -36,7 +33,7 @@ Expected parameters include:
 - `ARANGO_DATABASE`
 - `ARANGO_USERNAME`
 - `ARANGO_ROOT_PASSWORD`
-- `REDIS_URL` for the app and render service to reach the production Redis endpoint
+- `REDIS_URL` for the app to reach the production Redis endpoint
 - `OPENROUTER_API_KEY`
 - S3/AWS variables used by the runtime
 
@@ -49,5 +46,4 @@ Expected parameters include:
 - The graph-db host receives `deploy/docker-compose.db.yml` and is brought up with `docker compose up -d` before migrations run.
 - The app host receives `deploy/docker-compose.app.yml` and `deploy/deploy-app.sh`.
 - App deploy starts the idle color, waits for health, flips Caddy, then stops the old color.
-- Render deploy registers a new ECS task-definition revision and rolls `RENDER_ECS_SERVICE`.
-- Shared changes under `src/core`, `src/db`, `src/lib`, `deploy`, or `.github` deploy both roles.
+- Shared changes under `src/core`, `src/db`, `src/lib`, `deploy`, or `.github` deploy the app role.
