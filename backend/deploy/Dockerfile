@@ -24,6 +24,8 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 		if [ "$i" = 3 ]; then exit 1; fi; \
 		sleep 5; \
 	done
+# Workspace-isolated packages (zod 3) live under backend/node_modules. The runtime flattens backend/src to /app/src, so they must be hoisted before that copy.
+RUN if [ -d /app/backend/node_modules ]; then cp -aL /app/backend/node_modules/. /app/node_modules/; fi
 
 FROM base AS dev
 WORKDIR /app
